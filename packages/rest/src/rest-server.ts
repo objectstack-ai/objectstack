@@ -157,7 +157,7 @@ import {
     isApiOperationAllowed,
     API_PRIMITIVES,
     DATA_ACTION_TO_API_OPERATION,
-    referenceCarrierOf,
+    referenceTargetOf,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
 // longer exists to dodge a NAME collision — the local responder this used to
@@ -305,7 +305,7 @@ import { runImport } from './import-runner.js';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
-// [#17058] The `POST …/analytics/dataset/query` door parse — the half of the
+// [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
 // analytics family this route never had. See the module header for the
 // measurement that decides its shape.
 import { datasetSelectionRefusal } from './analytics-selection-door.js';
@@ -10902,16 +10902,37 @@ export class RestServer {
                             // `catch`, through the one arbiter — see there for why it moved.
                             fieldDef = obj?.fields?.[fieldName];
                         } catch {/* ignore */}
-                        // ABSENCE stays silent and unchanged: `undefined` /
-                        // `null` / `''` all answer `undefined`, so the route
-                        // falls to the `LOOKUP_TARGET_MISSING` refusal below
-                        // exactly as before. UNREADABILITY throws past this
-                        // handler's outer `catch`, which classifies and LOGS it
-                        // (`mapDataError` + `logError`) rather than reporting a
-                        // missing target — and it also stops an object-valued
-                        // carrier from being forwarded as `query.object` into
-                        // `findData`, which is what it did before this change.
-                        referenceObject = referenceCarrierOf(fieldDef, 'REST public-form lookup picker');
+                        // [#19289] The arbiter is `referenceTargetOf`, ⛔ not
+                        // `referenceCarrierOf`. This read has NO type gate — it
+                        // resolves whatever field the picker names — so a
+                        // `{ type: 'user' }` field reaches it, and for that type
+                        // the carrier is not the target:
+                        // `IMPLICIT_REFERENCE_TARGETS` declares it a CONSTANT OF
+                        // THE TYPE (`sys_user`) and metadata authored without
+                        // `reference` "fully specified, not under-specified".
+                        // Reading the carrier answered a spec-complete field
+                        // `500 LOOKUP_TARGET_MISSING`, so opening the picker on
+                        // a "responsible person" column returned an error page.
+                        // ⛔ This is NOT a re-widening of the #12920 narrowing
+                        // below: no alias is re-admitted and no `??` chain
+                        // returns. `referenceTargetOf` reads the canonical key
+                        // through `referenceCarrierOf` and supplies the type's
+                        // own constant only where the spec declares one — a
+                        // stored def spelling the target `referenceTo` /
+                        // `target` / `options.objectName` still resolves NOTHING
+                        // here and still answers `500`.
+                        //
+                        // ABSENCE stays silent and unchanged for the types that
+                        // have no constant: a `lookup` / `master_detail` with
+                        // `undefined` / `null` / `''` still answers `undefined`,
+                        // so the route falls to the `LOOKUP_TARGET_MISSING`
+                        // refusal below exactly as before. UNREADABILITY throws
+                        // past this handler's outer `catch`, which classifies and
+                        // LOGS it (`mapDataError` + `logError`) rather than
+                        // reporting a missing target — and it also stops an
+                        // object-valued carrier from being forwarded as
+                        // `query.object` into `findData`.
+                        referenceObject = referenceTargetOf(fieldDef);
                     }
                     if (!referenceObject) {
                         res.status(500).json({
@@ -11110,7 +11131,7 @@ export class RestServer {
                         });
                     }
 
-                    // [#17058] …and every OTHER member of `selection` had no
+                    // [PR #17548] …and every OTHER member of `selection` had no
                     // door at all, so a malformed one travelled into
                     // `dataset-executor` and was answered by whatever the face
                     // behind it happened to do with it — while the sibling
@@ -11118,13 +11139,18 @@ export class RestServer {
                     // identical failure to a 400 at the entry. One family, two
                     // postures, decided by which door the client knocked on.
                     //
-                    // The parse is a PROJECTION, never the siblings' schema:
-                    // `selection` is a `DatasetSelection`, which is NOT the
-                    // `AnalyticsQuery` the siblings parse — it carries no
-                    // `cube` and has four members of its own, so the sibling
-                    // schema would 400 every real dashboard widget.
-                    // {@link datasetSelectionRefusal} carries that measurement
-                    // and the reason those four are deliberately left out.
+                    // [#17551, ruled] The parse is the WHOLE selection, against
+                    // `DatasetSelectionSchema` — the one declaration of this
+                    // wire shape, authored in `packages/spec` beside the
+                    // sibling routes' own request body. ⛔ Never the siblings'
+                    // schema: `selection` is a `DatasetSelection`, which
+                    // carries no `cube` and has four members of its own, so
+                    // `AnalyticsQueryRequestSchema` would 400 every real
+                    // dashboard widget. PR #17548 could only door the seven
+                    // members whose declarations coincided; the four that were
+                    // left — `runtimeFilter`, `dateGranularity`, `compareTo`,
+                    // `totals` — are what this closes. {@link datasetSelectionRefusal}
+                    // carries both measurements.
                     //
                     // Validation-only: the caller's `selection` is what reaches
                     // `queryDataset` below, never a parse output.

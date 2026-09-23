@@ -5,6 +5,10 @@
 ([#14487](https://github.com/objectstack-ai/objectstack/issues/14487)): the permission matrix
 §1.3(a) measures is **not** part of this boundary's payoff — permission sets stay whole in the
 `type: app` package.
+**D4's emitted shape amended by the 2026-09-22 addendum**
+([#14512](https://github.com/objectstack-ai/objectstack/issues/14512)): a multi-package artifact
+carries its metadata **once**, in `packages[]` — the flattened copy is no longer emitted beside
+it. D4's read-both rule and D7 are unchanged, so every artifact already on disk still loads.
 **Deciders**: ObjectStack maintainer, 2026-09-01, live PM chat, verbatim and untranslated:
 「立 ADR 起草卡派发」and 「14122 作为epic 任务集中跟踪」— approving the proposal in
 [#14122](https://github.com/objectstack-ai/objectstack/issues/14122) into the ADR-drafting lane
@@ -246,6 +250,11 @@ legibly.
 
 ### D4 — Artifact schema: `packages: [...]` is additive, and both shapes are read
 
+⚠️ **Amended 2026-09-22 (#14512) — see the addendum at the foot of this record.** "Additive" below
+describes the SCHEMA (the key is optional and `manifest` is retained) and the LOAD path (both
+shapes are read), and both still hold. What no longer holds is the EMITTED shape: a multi-package
+`composeStacks(…, { manifest: 'preserve' })` output carries its collections in `packages[]` only.
+
 `ObjectStackDefinitionSchema` gains an **optional** `packages` key carrying an array of
 manifests. `manifest` (singular, `packages/spec/src/stack.zod.ts`) is **retained**, and the load path reads
 both:
@@ -273,6 +282,44 @@ manifest body flattened into the array, so a future `{ ref, integrity }` externa
 is an additive key on an existing object rather than a shape change. The reservation is a
 structural commitment only; the segmented form itself needs its own decision and is a Non-goal
 here.
+
+**The entry door refuses an unusable `manifest.id` before the id-or-name fallback is consulted**
+(2026-09-16, [#17534](https://github.com/objectstack-ai/objectstack/issues/17534) — an addition
+to this record; D4's two branches above read exactly as accepted). `ManifestSchema.id` now
+carries `MANIFEST_ID_PATTERN` (`packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN`) —
+the reverse-domain rule the registry face (`PackageSchema.manifestId`,
+`packages/spec/src/marketplace/package.zod.ts`) has always enforced, declared once and referenced
+from both sites — and `AssembledPackageBodySchema` inherits it through `.extend()`. The order an
+entry meets the two doors in is therefore:
+
+- **DOOR 1 — the schema.** `ArtifactPackageSchema.safeParse(entry)`
+  (`packages/core/src/artifact-packages.ts#resolveArtifactPackageOrder`) refuses an `id` of `''`
+  here, as `INVALID_ARTIFACT_PACKAGE_ENTRY` / `422`, naming `manifest.id` and echoing the value it
+  refused. `''` is no longer a valid manifest id to the schema at all.
+- **DOOR 2 — the id.** `artifactPackageId`
+  (`packages/core/src/artifact-packages.ts#artifactPackageId`) is still `id || name` — ⛔
+  deliberately untouched, because `ObjectQL.registerApp` still keys the installed package that way
+  — but for `''` it never runs: DOOR 1 refuses the entry first, so `{ id: '', name: 'x' }` can no
+  longer be carried under its sibling `name`. An entry that survives DOOR 1 carries an id matching
+  the pattern, non-empty by construction, so DOOR 2's `no usable package id` refusal is
+  unreachable from the `packages` branch. It is kept rather than deleted: it is the one
+  declaration of that requirement, and `artifactPackageId` is read by seams outside this path.
+
+**The direction is fail-OPEN → fail-CLOSED, on a consent path**, and it is recorded here rather
+than left to the pins. Before: an artifact whose `grantedPermissions` record was keyed by `''`
+was carried under its `name`, the consent record bound to nothing, it was reported `unbound`, and
+the package registered with no consent record — nothing was denied. Now: the entry is refused at
+materialize time and no package inside that artifact registers. The affected population is
+artifacts that were already half-broken — their consent record never applied and the registry
+face refused to publish them — so what changes is that a silent failure becomes an explicit one.
+⛔ Read the refusal's provenance precisely: it is the artifact package door refusing a malformed
+manifest id, **not** the permission seam acquiring teeth —
+`packages/core/src/security/granted-permissions-not-enforced.pin.test.ts` still measures that
+nothing on this tree enforces `grantedPermissions`.
+
+The order is pinned behaviourally, each case asserting its own door's message **and** the absence
+of the other door's, in `packages/runtime/src/security/artifact-granted-permissions.test.ts` (the
+`#13457 / #17534` block) — an alternation over both messages would survive deleting a whole door.
 
 ### D5 — Topological ordering is an acceptance criterion, and reuses the one sorter
 
@@ -598,3 +645,101 @@ rediscovered:
   all-objects matrix at the environment-admin door. After a split the app package owns the sets
   but no objects, so where a *packaged* cross-module set's grants are authored is a UI question
   this record does not answer and #14488 inherits.
+
+---
+
+## Addendum (2026-09-22, #14512) — a multi-package artifact carries its metadata ONCE, in `packages[]`
+
+**Provenance.** Maintainer ruling, 2026-09-03, live PM chat with the director seat (decision batch
+#23), recorded on
+[#14512](https://github.com/objectstack-ai/objectstack/issues/14512#issuecomment-5528589044).
+Verbatim reply: 「同意」. It re-scopes the 2026-09-02 ruling of the same direction
+([#14512 comment 5518059994](https://github.com/objectstack-ai/objectstack/issues/14512#issuecomment-5518059994),
+also 「同意」) whose cost estimate — "an iteration change, not a shape adaptation" — a reader
+enumeration falsified: the reader surface was at least fourteen sites across three packages, and
+the one-fold option was measured dead. The ruling's own words for what stands:「B stands,
+re-scoped as a program: readers first, emitter last; the release is not held」.
+
+### What D4 said, and what this changes
+
+D4 above declares `packages` **additive**: the load path reads both shapes, and
+`composeStacks(…, { manifest: 'preserve' })` emitted the flattened collections **and** a package
+list carrying the same definitions a second time. That second half is what changes. A
+multi-package artifact now carries each object, view, flow, permission set and every other
+package-owned collection **once**, in the body of the package that owns it.
+
+**⛔ D4's read-both rule is untouched.** `packages` present → iterate it; `packages` absent →
+`manifest` as a single-element list. An artifact built before this change carries both halves and
+loads exactly as it did — which is why this is a producer change and not a format migration, and
+why no artifact on disk anywhere is invalidated by it.
+
+**D7 is untouched and is stated as a condition rather than trusted.** A single-package artifact
+keeps today's shape byte for byte: the emitter strips nothing unless the artifact carries **two or
+more** package entries.
+
+### Why the copy goes, rather than being compressed
+
+- **Size.** The reserved `{ ref, integrity }` external-segment position exists in D4 because
+  artifact size is a real constraint at 2.6 MB for a single package. Emitting every definition
+  twice moves in the opposite direction, and it did so in the same format that reserved the
+  position. Measured on `examples/app-multi-package` (two packages, three definitions):
+  8,223 → 5,328 bytes, −35%.
+- **One source of truth.** Two copies of one definition, and nothing that keeps them equal once
+  they are written. They are measured to differ whenever composition merges or overrides an object,
+  and which copy a consumer sees is decided by the reader it goes through rather than by the
+  artifact.
+
+  ⚠️ **Stated precisely, because the imprecise version is load-bearing in the wrong direction**
+  (PR #19666 review, 2026-09-22): where the two halves differ today, the flattened copy is the
+  RECONCILED one and the platform's own reader deterministically prefers it —
+  `resolveArtifactCollections` claims by name from the top level first, so a merged object is
+  answered once, merged, and its two unmerged halves are dropped. The divergence this record
+  objects to is therefore not "the reader picks arbitrarily"; it is that **one definition is
+  serialized twice with nothing reconciling the copies**, which is a standing invitation for a
+  producer, a hand-edit or a future reader to disagree with that preference. It also bounds what
+  the emitter may do: dropping the flattened half is only ever legitimate where it is a COPY, and
+  where composition reconciled something it is not.
+
+### The order this landed in, which is the decision's substance
+
+**Readers first, emitter last.** Every reader of a top-level collection gained a `packages[]` path
+while the artifact stayed additive (#15004's acceptance probe, #15005 `@objectstack/runtime`,
+#15006 `@objectstack/cli`, #15007 `@objectstack/plugin-security`, #15229 `@objectstack/verify`,
+#15232 `@objectstack/plugin-dev`, and the `plugins` / `devPlugins` contract ruling #15219). The
+emitter is the last step, and the acceptance probe — which boots a two-package collection zoo
+through every load boundary in **both** shapes and fails if any subsystem sees an empty collection
+— is the mechanical criterion for calling the program done, ⛔ never a card-state reading of the
+blocker list.
+
+The failure mode that order exists to contain is a reader nobody enumerated, and it is SILENT:
+nothing throws, the collection is simply absent. ⛔ A missed reader is a new reader card, never a
+fallback bolted onto the emitter.
+
+### What is NOT decided here
+
+- ⛔ **Not a partly flattened artifact.** The emitter flips whole-artifact. A shape carrying some
+  collections flattened and others only in bodies is a new permanent shape and was refused by name
+  in the same ruling (option D).
+- ⛔ **Not the four envelope keys.** `packages`, `plugins`, `devPlugins` and `devLogins` are not
+  package-owned collections (#15219, #17556): they stay at the artifact's top level, where
+  `composeStacks` still concatenates them and the host reads them.
+- **Three conditions hold the emitter to a copy-removal, and a composition failing any one of them
+  keeps the additive shape** — by construction rather than by choice, since stripping there would
+  delete metadata rather than a copy of it:
+
+  1. **two or more package entries** (D7 above);
+  2. **every input's collections attributed to a body** — an input declaring no `manifest` has no
+     package that could own its collections (`manifest` is optional on the stack schema), and an
+     input that already carries `packages` contributes those entries untouched, so its own
+     collections are attributed to no body either;
+  3. **the bodies reproduce the flattened collections, item for item.** Composition is not always a
+     concatenation: `objectConflict: 'merge'` / `'override'` RECONCILE two packages' same-named
+     objects into one, and `mergeActionsIntoObjects` binds a standalone action onto an object a
+     SIBLING package owns. In both cases the flattened half carries a definition no body carries,
+     so it is not a copy. Condition 2 cannot see this — it reads the INPUT stacks, while what the
+     strip deletes is the COMPOSED result. Measured on a two-package `merge` composition: the
+     registration-path reader answers one reconciled object with the flattened half present, and
+     two conflicting partial objects with it gone (PR #19666 review, 2026-09-22).
+
+  Every one of those shapes stays readable by D4's read-both rule, and none is refused: a
+  composition that was legal before this change stays legal.

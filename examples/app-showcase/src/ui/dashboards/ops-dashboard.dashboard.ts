@@ -1,17 +1,18 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { ChartConfig, ChartType, Dashboard } from '@objectstack/spec/ui';
+import type { Dashboard } from '@objectstack/spec/ui';
 
 const taskDs = 'showcase_task_metrics';
 const projectDs = 'showcase_project_metrics';
 
-const cfg = (type: ChartType, dimension: string, measure: string): ChartConfig => ({
-  type,
-  xAxis: { field: dimension, showGridLines: true, logarithmic: false },
-  yAxis: [{ field: measure, showGridLines: true, logarithmic: false }],
-  showLegend: true,
-  showDataLabels: false,
-});
+/**
+ * A dataset-bound widget's `chartConfig` is APPEARANCE only (ADR-0021;
+ * maintainer ruling 2026-09-12): the dataset decides which series exist and
+ * which column each one reads. The `cfg()` helper this file carried wrote the
+ * axis bindings a second time — the widget's own `dimensions` / `values`
+ * already name them — and its other two keys were the schema defaults, so it
+ * goes rather than being trimmed to nothing.
+ */
 
 /**
  * Delivery Operations — a *believable business* dashboard (vs the Chart Gallery,
@@ -88,12 +89,12 @@ export const OpsDashboard: Dashboard = {
     { id: 'kpi_total_budget', type: 'metric', title: 'Total Budget', dataset: projectDs, values: ['budget_sum'], filterBindings: { task_status: false }, colorVariant: 'success', layout: { x: 9, y: 0, w: 3, h: 2 } },
 
     // ── Health + throughput ──────────────────────────────────────────────
-    { id: 'col_health', type: 'column', title: 'Projects by Health', dataset: projectDs, dimensions: ['health'], values: ['project_count'], chartConfig: cfg('column', 'health', 'project_count'), filterBindings: { task_status: false }, layout: { x: 0, y: 2, w: 4, h: 4 } },
-    { id: 'bar_status', type: 'bar', title: 'Tasks by Status', dataset: taskDs, dimensions: ['status'], values: ['task_count'], chartConfig: cfg('bar', 'status', 'task_count'), layout: { x: 4, y: 2, w: 4, h: 4 } },
-    { id: 'donut_priority', type: 'donut', title: 'Priority Mix', dataset: taskDs, dimensions: ['priority'], values: ['task_count'], chartConfig: cfg('donut', 'priority', 'task_count'), layout: { x: 8, y: 2, w: 4, h: 4 } },
+    { id: 'col_health', type: 'column', title: 'Projects by Health', dataset: projectDs, dimensions: ['health'], values: ['project_count'], filterBindings: { task_status: false }, layout: { x: 0, y: 2, w: 4, h: 4 } },
+    { id: 'bar_status', type: 'bar', title: 'Tasks by Status', dataset: taskDs, dimensions: ['status'], values: ['task_count'], layout: { x: 4, y: 2, w: 4, h: 4 } },
+    { id: 'donut_priority', type: 'donut', title: 'Priority Mix', dataset: taskDs, dimensions: ['priority'], values: ['task_count'], layout: { x: 8, y: 2, w: 4, h: 4 } },
 
     // ── Trend + account spend ────────────────────────────────────────────
-    { id: 'line_created', type: 'line', title: 'Task Throughput (monthly)', dataset: taskDs, dimensions: ['created_at'], values: ['task_count'], chartConfig: cfg('line', 'created_at', 'task_count'), layout: { x: 0, y: 6, w: 6, h: 4 } },
+    { id: 'line_created', type: 'line', title: 'Task Throughput (monthly)', dataset: taskDs, dimensions: ['created_at'], values: ['task_count'], layout: { x: 0, y: 6, w: 6, h: 4 } },
     // The fifth project-bound widget — same opt-out. #7568's body names four
     // (the tiles a reader watches drop to 0); this table zeroed with them,
     // silently, because an empty table reads as "no data" rather than as a

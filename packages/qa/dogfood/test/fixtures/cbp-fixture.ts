@@ -45,7 +45,7 @@ export const CbpNote = ObjectSchema.create({
 
 export const cbpStack = defineStack({
   manifest: {
-    id: 'com.dogfood.cbp_fixture',
+    id: 'com.dogfood.cbp-fixture',
     namespace: 'cbp',
     version: '0.0.0',
     type: 'app',

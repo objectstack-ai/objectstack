@@ -196,7 +196,7 @@ describe('#14397 — `os dev` over a HOST config composes ONE registrar for stac
     });
 
     it('behavioural: the option the source passes is the one AppPlugin reads', () => {
-        const bundle = { manifest: { id: 'com.test.14397', name: 'pin', version: '1.0.0' } };
+        const bundle = { manifest: { id: 'com.test.card-14397', name: 'pin', version: '1.0.0' } };
         // The exact two literals the composition above can pass.
         expect(new AppPlugin(bundle, undefined, {}).securityMetadataRegistrar).toBe('app-plugin');
         expect(

@@ -13,7 +13,7 @@
  * | security-external-wider       (error)   | ADR-0090 D11 external ≤ internal|
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
  * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; a `guest`-bound set is outside a package-time linter's sight and is the bind-time gate's alone (#16110) |
- * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310 |
+ * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310; CLI + runtime publish gate since #19370 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
  * | security-master-detail-ungranted(warn)  | framework#2700 os-tianshun-mtc#43|
@@ -814,13 +814,16 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // [#8310] Extracted into its own registry entry when the rest of this block
   // crossed onto the runtime publish surface. The rule judges six collections
   // (objects — names, fields, actions —, permission sets, positions, apps,
-  // books), and the per-write snapshot neither carries nor maps `positions` /
-  // `apps` — so it crosses that wall WHOLE or stays behind (#7220), and it
-  // stays behind. Keeping it inside this function would have wired it for a
-  // strict subset of its collections the moment this block's `runtimeTypes`
-  // widened: a door that refuses a permission set named `role_manager` while
-  // a position named `sales_role` walks through — the exact split the
-  // registry's #7220 pin refuses to build.
+  // books), and at that moment the per-write snapshot neither carried nor
+  // mapped `positions` / `apps` — so it crossed that wall WHOLE or stayed
+  // behind (#7220), and it stayed behind. Keeping it inside this function
+  // would have wired it for a strict subset of its collections the moment this
+  // block's `runtimeTypes` widened: a door that refuses a permission set named
+  // `role_manager` while a position named `sales_role` walks through — the
+  // exact split the registry's #7220 pin refuses to build.
+  // [#19370] It has since crossed, whole, on its own entry — the two write
+  // types are mapped and all five are declared there. The two entries remain
+  // separate: that is what let each cross on its own evidence.
 
   // ── Book audience → permission-set reference must resolve ────────────
   // A `{ permissionSet }` book audience names a set the reader must hold
@@ -1087,16 +1090,21 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
  * crossed onto the runtime publish surface (`runtimeTypes: ['seed',
  * 'permission', 'book']` — `object` measured dirty and is escalated, see the
  * registry comment), this rule could not go with it: the per-write snapshot
- * (`runtime-gate.ts`) neither carries nor maps `positions` / `apps`, both of
+ * (`runtime-gate.ts`) neither carried nor mapped `positions` / `apps`, both of
  * which are `allowRuntimeCreate: true` — so wiring it through the shared
  * entry would have enforced ONE rule id for a strict subset of its six
  * collections. That is the #7220 failure shape (a door that refuses a
  * permission set named `role_manager` while a position named `sales_role`
  * walks through), and
  * the registry refuses to build it in either direction. The rule therefore
- * stays behind WHOLE, on its own CLI-only registry entry, until the snapshot
- * carries `positions`/`apps` and both types are gated — at which point it
- * crosses whole, in one edit, as its own entry.
+ * stayed behind WHOLE, on its own CLI-only registry entry.
+ *
+ * [#19370] It is now ACROSS, still whole and still its own entry: mapping
+ * `position` / `app` in `TYPE_TO_STACK_KEY` gives the gate a snapshot to build
+ * for those two write types, and the entry declares all five write types the
+ * six collections belong to. The split earned its keep exactly here — each
+ * half crossed on its own evidence, in its own edit, and neither had to wait
+ * for the other.
  */
 export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
   const findings: SecurityFinding[] = [];

@@ -47,7 +47,7 @@ const HefBase = ObjectSchema.create({
 
 const hefStack = defineStack({
   manifest: {
-    id: 'com.dogfood.hook_error_format',
+    id: 'com.dogfood.hook-error-format',
     namespace: 'hef',
     version: '0.0.0',
     type: 'app',

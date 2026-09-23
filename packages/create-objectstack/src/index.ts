@@ -66,6 +66,7 @@ import { fileURLToPath } from 'node:url';
 import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir } from './template-copy.js';
 import {
+  deriveManifestId,
   readTemplateNamespace,
   rewriteObjectNamePrefix,
   findStaleNamespacePrefixes,
@@ -220,7 +221,9 @@ function rewriteProjectIdentity(
   const configPath = path.join(targetDir, 'objectstack.config.ts');
   if (fs.existsSync(configPath)) {
     let cfg = fs.readFileSync(configPath, 'utf8');
-    cfg = cfg.replace(/(\bid:\s*)(['"`])[^'"`]*\2/, `$1$2${projectName}$2`);
+    // `manifest.id` is a reverse-domain identifier, not a bare word — see
+    // deriveManifestId() for why the namespace cannot be reused for it.
+    cfg = cfg.replace(/(\bid:\s*)(['"`])[^'"`]*\2/, `$1$2${deriveManifestId(projectName)}$2`);
     cfg = cfg.replace(/(\bnamespace:\s*)(['"`])[^'"`]*\2/, `$1$2${namespace}$2`);
     cfg = cfg.replace(/(\bname:\s*)(['"`])[^'"`]*\2/, `$1$2${title}$2`);
     cfg = cfg.replace(/^[ \t]*description:\s*(['"`])[^'"`]*\1,?\r?\n/m, '');

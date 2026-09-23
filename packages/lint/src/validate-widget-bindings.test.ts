@@ -212,7 +212,12 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(findings[0].message).toContain('matches an authored entry BY NAME');
     expect(findings[0].message).toContain('lands on nothing');
     expect(findings[0].message).not.toContain('will not contain');
-    expect(findings[0].hint).toContain('`series[].name` selects WHICH derived series');
+    // The shape sentence now says DELETE rather than describing what the key
+    // carried: `chartConfig.series` is refused on a dataset-bound widget
+    // (ADR-0021; ruling 2026-09-12), so advice about how to use it correctly
+    // would be advice about a document the parse refuses.
+    expect(findings[0].hint).toContain('`chartConfig.series` is refused on a dataset-bound widget');
+    expect(findings[0].hint).toContain('Delete the key.');
   });
 
   it('(d) a declared-but-unselected measure gets the targeted message', () => {
@@ -253,28 +258,26 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(quiet).toEqual([]);
   });
 
-  it('(d) warns when a `combo` widget has no chartConfig at all', () => {
-    const findings = validateWidgetBindings(chartStack({ type: 'combo', chartConfig: undefined }));
-    expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
-    expect(findings[0].rule).toBe(CHART_CONFIG_MISSING);
-    expect(findings[0].message).toContain("'combo'");
-    // The message names the REAL consequence — the mark, not the binding. The
-    // old wording ("cannot determine which measure to plot, so the series
-    // renders empty") was false against the pinned renderer (#14436), so it is
-    // pinned here as absent rather than merely replaced.
-    expect(findings[0].message).toContain('per-series mark');
-    expect(findings[0].message).not.toContain('renders empty');
-    expect(findings[0].hint).toContain('chartConfig: { series: [{ name:');
-    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_CONFIG_MISSING}']`);
+  it('(d) `chart-config-missing` is WITHDRAWN — a `combo` widget with no chartConfig is silent', () => {
+    // It warned, and its hint said "Give each measure its mark — chartConfig:
+    // { series: [{ name, type }] }". `chartConfig.series` is now refused on a
+    // dataset-bound widget (ADR-0021; maintainer ruling 2026-09-12), so the
+    // hint taught metadata the schema rejects. There is no authoring channel
+    // for a per-series mark on this face at all, so the advice is withdrawn
+    // rather than reworded: a warning nobody can act on is noise.
+    expect(validateWidgetBindings(chartStack({ type: 'combo', chartConfig: undefined }))).toEqual([]);
   });
 
-  it('(d) missing chartConfig is suppressible per widget', () => {
+  it('(d) the withdrawn rule ID still exists, so an author\'s suppressWarnings keeps parsing', () => {
+    // Compatibility, deliberately pinned: the id is exported and may be named
+    // in a stack that predates the withdrawal. Naming it must stay a no-op
+    // rather than becoming an unknown-rule error.
+    expect(CHART_CONFIG_MISSING).toBe('chart-config-missing');
     expect(validateWidgetBindings(chartStack({
       type: 'combo',
       chartConfig: undefined,
       suppressWarnings: [CHART_CONFIG_MISSING],
-    }))).toHaveLength(0);
+    }))).toEqual([]);
   });
 
   it('(d) non-chart types do not warn on missing chartConfig', () => {

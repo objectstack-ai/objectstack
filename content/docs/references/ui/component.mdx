@@ -413,7 +413,7 @@ Sort field and direction pair
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
-| **navigation** | `any` | optional | Task-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| none }`); renderer default `drawer` |
+| **navigation** | `any` | optional | Task-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema; renderer default `drawer` |
 | **label** | `string \| Record<string, string>` | optional | Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label |
 | **skipWeekends** | `boolean` | optional | Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays |
 | **holidays** | `string[]` | optional | Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math |
@@ -542,7 +542,7 @@ Sort field and direction pair
 | **bulkActions** | `any[]` | optional | Bulk action names shown on selection |
 | **batchActions** | `any[]` | optional | Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`) |
 | **bulkActionDefs** | `any[]` | optional | Inline bulk-action definitions (full defs, not names) |
-| **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| none }`) |
+| **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema |
 | **editable** | `boolean` | optional | Enable inline cell editing |
 | **singleClickEdit** | `boolean` | optional | Enter cell edit on single click (default true when editable) |
 | **resizable** | `boolean` | optional | Allow column resize (read before `resizableColumns`) |
@@ -617,7 +617,7 @@ Sort field and direction pair
 | **groupBy** | `string` | optional | Field whose values become the board columns |
 | **columns** | `any[]` | optional | Swimlane definitions (`{ id, title }` per `groupBy` value, or bare value strings) — NOT a field projection |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
-| **limit** | `integer` | optional | Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills it only when unset |
+| **limit** | `integer` | optional | Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills this key only when it is unset — and on this face unset is the whole rule, because every cap this key accepts is one the binding gate already treats as authored |
 | **data** | `any[]` | optional | Static inline cards — bypasses the object query |
 | **cardTitle** | `string` | optional | Field rendered as each card title |
 | **titleField** | `string` | optional | Legacy fallback for `cardTitle` (the board reads `cardTitle \|\| titleField`). Prefer `cardTitle` |
@@ -666,7 +666,7 @@ View filter rule
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
 | **mapStyle** | `string` | optional | MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record |
-| **navigation** | `any` | optional | Marker-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| none }`) |
+| **navigation** | `any` | optional | Marker-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema |
 | **enableClustering** | `boolean` | optional | Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers |
 
 ### Nested Shape: `ObjectMapProps.data[provider='object']`
@@ -803,7 +803,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node |
-| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: `{ startDateField, endDateField, titleField, groupByField, colorField, scale }`. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling |
+| **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: `{ startDateField, endDateField, titleField, groupByField, colorField, scale, limit }`. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling. ⚠️ `limit` is the one member of this block NO renderer reads on any route: the rail is capped by the FLAT `limit` beside this key, which is also the only one a bound `dataSource` lowers into. A `limit` written inside this block is accepted, defaulted to 100, and never read |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order for the fetched entries — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **limit** | `integer` | optional | Maximum number of records loaded onto the rail (row cap); lowered to the query's top-level `$top` (renderer default 100). A timeline renders one rail with no pagination control, so this is the author's window rather than a page size |
@@ -828,7 +828,7 @@ View filter rule
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail, sent as the query `$top`; default 100 when the key is absent. When the ceiling APPLIES (the filtered set is larger than it), the renderer must show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. |
+| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 ### Nested Shape: `ObjectTimelineProps.filter[number]`
 
@@ -874,7 +874,7 @@ Sort field and direction pair
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: `{ parentField?, labelField?, fields?, defaultExpandedDepth? }`. `parentField` auto-detects from the object schema when omitted |
-| **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| none }`) |
+| **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema |
 
 ### Nested Shape: `ObjectTreeProps.data[provider='object']`
 

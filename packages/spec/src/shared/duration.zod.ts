@@ -57,7 +57,9 @@ import { z } from 'zod';
  * - `system/metrics.zod.ts` `slideInterval` — `z.number().int().positive().optional()`
  * - `system/auth-config.zod.ts` `session.updateAge` — `z.number().default(60 * 60 * 24)`
  * - `api/contract.zod.ts` `meta.duration` — `z.number().optional()`
- * - `data/field-value.zod.ts` `FileValue.duration` — `z.number().optional()`
+ * - `data/field-value.zod.ts` `FileValue.durationSeconds` — `z.number().optional()`
+ *   (spelled `FileValue.duration` when this census was taken; renamed by #18669,
+ *   ruling A, with the value type left exactly as measured here)
  *
  * `.int()`: three of the six already declare it, and both rows that carry a
  * default default to an integer (`30000`, `60 * 60 * 24`). The three bare

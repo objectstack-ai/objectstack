@@ -167,7 +167,7 @@ describe('normalizeMetadataCollection', () => {
 describe('normalizeStackInput', () => {
   it('should normalize map-formatted metadata fields to arrays', () => {
     const input = {
-      manifest: { id: 'test', name: 'test', version: '1.0.0', type: 'app' },
+      manifest: { id: 'com.example.test', name: 'test', version: '1.0.0', type: 'app' },
       objects: {
         task: { fields: { title: { type: 'text' } } },
       },
@@ -213,7 +213,7 @@ describe('normalizeStackInput', () => {
 
   it('should not modify fields not in MAP_SUPPORTED_FIELDS', () => {
     const input = {
-      manifest: { id: 'test' },
+      manifest: { id: 'com.example.test' },
       i18n: { defaultLocale: 'en' },
       plugins: ['@objectstack/plugin-dev'],
       views: [{ list: { type: 'grid' } }],

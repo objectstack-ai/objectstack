@@ -30,6 +30,10 @@ export * from './connector.zod';
 export * from './connector-provider';
 export * from './connector-provider-errors';
 
+// The one mapping from a connector's declared `retryConfig` / `requestTimeoutMs`
+// onto the platform's outbound-HTTP wrapper (`shared/resilientFetch`)
+export * from './connector-fetch-policy';
+
 // Connector registry vocabulary — origin/state and the descriptor
 // `GET /automation/connectors` serves (ADR-0022, ADR-0097 §4, #3017)
 export * from './connector-descriptor';

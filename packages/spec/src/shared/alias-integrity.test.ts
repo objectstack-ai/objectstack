@@ -123,6 +123,7 @@ import ts from 'typescript';
 
 import { aliasProbe } from './alias-probe';
 import { acceptsNothing, strictObjectDeclarations, type StrictObjectDeclaration } from './strict-object';
+import { POLARITY_AXES } from './polarity-axes';
 import { keySetMatches } from './suggestions.zod';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -997,7 +998,12 @@ describe('alias integrity — every table is a true claim about its schema', () 
 
     const tenancy = bySurface.get('`tenancy`');
     expect(tenancy, 'TenancyConfigSchema no longer declares through strictObject').toBeDefined();
-    expect(Object.keys(tenancy!.options.guidance ?? {}).sort()).toEqual(['crossTenantAccess', 'strategy']);
+    // `organizationField` joined the table at protocol 18 (#19054, ADR-0049):
+    // the strict-deletion route removes the key from the shape and serves its
+    // prescription from this very map, so the retirement is only audible
+    // through the folded channel this assertion holds open.
+    expect(Object.keys(tenancy!.options.guidance ?? {}).sort())
+      .toEqual(['crossTenantAccess', 'organizationField', 'strategy']);
   });
 
   it('no live surface still reports the shared view/page FAMILY name (#8202)', () => {
@@ -1162,6 +1168,47 @@ describe('alias integrity — every table is a true claim about its schema', () 
     expect(fieldSource, 'uniqueScopeError no longer branches on invalid_union — re-read the class')
       .toContain("issue.code !== 'invalid_union'");
     expect(handwrittenMapSites(field)).toEqual([]);
+  });
+
+  it('every declared POLARITY axis is attested by a real sibling pair', () => {
+    // `polarity-axes.ts` is a table of claims about these shapes, so it earns
+    // the same judgement as `aliases` and `guidance`: an axis no shape declares
+    // both ends of can never match, and a row nothing can match is a row
+    // nothing judges. It would read as coverage of a trap that, on this
+    // protocol, does not exist.
+    //
+    // ⛔ This is NOT a general antonym dictionary and must not grow into one.
+    // A row arrives with the shape that needs it; when the last shape
+    // declaring both ends of an axis loses one, this fails and the row goes.
+    const attested = new Map(POLARITY_AXES.map((axis) => [axis.join('/'), [] as string[]]));
+    const tokens = (key: string) => key
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+    for (const s of SURFACES) {
+      const keys = Object.keys(s.shape).filter((k) => !acceptsNothing(s.shape[k]));
+      const spelled = new Map(keys.map((k) => [k, tokens(k)]));
+      for (const key of keys) {
+        const t = spelled.get(key)!;
+        for (let i = 0; i < t.length; i++) {
+          for (const axis of POLARITY_AXES) {
+            if (t[i] !== axis[0] && t[i] !== axis[1]) continue;
+            const other = t[i] === axis[0] ? axis[1] : axis[0];
+            const wanted = t.slice(); wanted[i] = other;
+            const sibling = keys.find(
+              (o) => o !== key && spelled.get(o)!.join('|') === wanted.join('|'),
+            );
+            if (sibling) attested.get(axis.join('/'))!.push(`${s.options.surface}: ${key} / ${sibling}`);
+          }
+        }
+      }
+    }
+    const dead = [...attested.entries()].filter(([, hits]) => hits.length === 0).map(([axis]) => axis);
+    expect(dead, 'axis rows nothing in this package declares both ends of').toEqual([]);
+    // The control: the search DOES find pairs, so an empty `dead` is a reading
+    // rather than a walk that matched nothing at all.
+    expect([...attested.values()].flat().length).toBeGreaterThan(POLARITY_AXES.length);
   });
 
   it('no guidance key is itself a declared key (the same dead entry, other channel)', () => {

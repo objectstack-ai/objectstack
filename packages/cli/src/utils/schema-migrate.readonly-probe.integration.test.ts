@@ -37,7 +37,7 @@ import { bootSchemaStack, type PendingSchemaWork } from './schema-migrate.js';
 
 const ARTIFACT = {
   // #8687: manifest fields under `manifest:` — the flat spelling is refused.
-  manifest: { id: 'probe_smoke', name: 'Probe Smoke', version: '0.0.0', type: 'app' },
+  manifest: { id: 'com.example.probe-smoke', name: 'Probe Smoke', version: '0.0.0', type: 'app' },
   objects: [
     { name: 'probe_widget', fields: { name: { type: 'text', required: true }, colour: { type: 'text' } } },
     { name: 'probe_gadget', fields: { label: { type: 'text' } } },

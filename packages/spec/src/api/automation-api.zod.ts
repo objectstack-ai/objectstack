@@ -35,6 +35,7 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * Path parameters for flow-level operations.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const AutomationFlowPathParamsSchema = lazySchema(() => z.object({
   name: z.string().describe('Flow machine name (snake_case)'),
 }));
@@ -508,7 +509,50 @@ export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
 // ==========================================
 
 /**
+ * `cursor` retires alone — `limit` is NOT part of this retirement (#19543).
+ *
+ * Tombstoned rather than deleted for the ADR-0104 reason these request schemas
+ * keep paying for: this object is not `.strict()`, so a bare deletion makes Zod
+ * SILENTLY STRIP whatever a generated client keeps sending — a clean parse and
+ * a parameter that never takes effect, which is this card's own defect moved
+ * one layer down. `retiredKey()` types the key as `never` (so `tsc` refuses it
+ * at the authoring site) and raises this text at parse time.
+ */
+const RUNS_LIST_CURSOR_REMOVED =
+  '`cursor` was removed from GET /api/automation/:name/runs in @objectstack/spec 17.5.0 '
+  + '(ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: '
+  + 'the option reached the service and the engine never looked at it, no emit site has ever '
+  + 'written the response half `nextCursor`, and the only ordering this door has is a required '
+  + 'but non-unique `startedAt` timestamp that nothing ever minted a resume point from — so a '
+  + 'caller looping "until the cursor runs out" re-read the first and only window forever, with '
+  + 'no error. Delete the key. `limit` is the real window '
+  + 'and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so '
+  + 'ask for a wider window instead of a next page. Read the response `hasMore` to learn whether '
+  + 'the window was short — it is now COMPUTED from the engine rather than the constant `false` '
+  + 'it used to be.';
+
+/**
  * Query parameters for listing execution runs.
+ *
+ * ⭐ The contract this declaration is being held to: every key here is one the
+ * serving door — `handleAutomationRequest`'s `parts[1] === 'runs'` GET branch
+ * in `packages/runtime/src/domains/automation.ts` — actually reads, and every
+ * key that door reads is here. `status` (#7359) and `limit` (#7300 / #8054)
+ * are both read end to end; `cursor` was the one that never was, and #19543
+ * retires it (maintainer ruling, decision batch #204 item 2, letter C).
+ *
+ * ⛔ `limit` is NOT a retirement candidate on this door and its `.default(20)`
+ * stays with it. It is read at the boundary (`parseIntegerParam`, bounds taken
+ * off this very declaration), forwarded to `IAutomationService`, and spent by
+ * the engine as the store's history window — the opposite of the `/packages`
+ * door, whose `limit` was decorative and retired with its `cursor` (#17667).
+ * The two doors looked identical and measured differently; ⛔ do not transfer
+ * that ruling here.
+ *
+ * ⛔ Never add a key here that the door does not read. A declared-and-ignored
+ * query parameter fails undetectably: the caller is answered `200` with the
+ * unfiltered set and nothing in the status, headers or body distinguishes that
+ * from a request served as asked.
  *
  * @example GET /api/automation/approval_flow/runs?status=completed&limit=10
  */
@@ -524,8 +568,7 @@ export const ListRunsRequestSchema = lazySchema(() => AutomationFlowPathParamsSc
     .describe('Filter by execution status'),
   limit: z.number().int().min(1).max(100).default(20)
     .describe('Maximum number of runs to return'),
-  cursor: z.string().optional()
-    .describe('Cursor for pagination'),
+  cursor: retiredKey(RUNS_LIST_CURSOR_REMOVED),
 }));
 export type ListRunsRequest = z.input<typeof ListRunsRequestSchema>;
 /** Post-parse shape of {@link ListRunsRequest} — defaults applied, transforms run (ADR-0122). */
@@ -538,8 +581,23 @@ export const ListRunsResponseSchema = lazySchema(() => BaseResponseSchema.extend
   data: z.object({
     runs: z.array(ExecutionLogSchema).describe('Execution run logs'),
     total: z.number().int().optional().describe('Total matching runs'),
+    // Never emitted, and since #19543 retired the request half that is true by
+    // construction rather than merely unimplemented: with no `cursor` to send,
+    // nothing can ask for a page, so there is no next one to name. The key
+    // stays declared and OPTIONAL, which is honest — an absent optional key
+    // promises nothing. ⛔ Do not start minting one without a request-side way
+    // to spend it; that is letter A of the #19543 ruling, explicitly not taken.
     nextCursor: z.string().optional().describe('Cursor for the next page'),
-    hasMore: z.boolean().describe('Whether more runs are available'),
+    // [#19543] COMPUTED, never hard-coded. The door asks the engine for the
+    // page rather than the rows, and the engine answers whether its merged
+    // candidate set overflowed the caller's `limit`. It used to be a literal
+    // `false` shipped beside a list that had been truncated — a caller asking
+    // for one row was handed one row and told that was all of them.
+    hasMore: z.boolean().describe(
+      'Whether more runs matched than this response carries — widen `limit` to see them. '
+      + 'Under `status`, `false` means no further match within the scanned window rather than '
+      + 'none at all: the window is taken before the filter is applied.',
+    ),
   }),
 }));
 export type ListRunsResponse = z.input<typeof ListRunsResponseSchema>;

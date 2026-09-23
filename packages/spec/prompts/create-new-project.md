@@ -79,7 +79,7 @@ my-app/
 
     export default defineStack({
       manifest: {
-        id: 'com.example.my_erp',
+        id: 'com.example.my-erp',
         version: '1.0.0',
         type: 'app',
         name: 'My ERP App',

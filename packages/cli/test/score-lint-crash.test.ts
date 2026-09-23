@@ -58,7 +58,7 @@ const STACK = {
 
 /** Schema-INVALID (`namespace` fails its pattern), so the parse half has a verdict. */
 const SCHEMA_INVALID_STACK = {
-  manifest: { id: 'bad', namespace: 'X', version: '1.0.0', name: 'Bad', type: 'app' as const },
+  manifest: { id: 'com.example.bad', namespace: 'X', version: '1.0.0', name: 'Bad', type: 'app' as const },
 };
 
 function withLinterThrowing<T>(thrown: unknown, fn: () => T): T {

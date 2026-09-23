@@ -27,7 +27,7 @@ const result = ManifestSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
 | **version** | `string` | ✅ | Package version (semantic versioning) |
@@ -88,7 +88,7 @@ Structured plugin permission grants (ADR-0025 §3.2)
 | **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"upsert"`) | Conflict resolution strategy |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
-| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale |
+| **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn |
 | **records** | `Record<string, any>[]` | ✅ | Data records |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |

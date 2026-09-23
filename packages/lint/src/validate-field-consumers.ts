@@ -121,7 +121,7 @@
 
 import { deriveFieldGroupLayout, resolveDisplayField } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
-import { referenceCarrierOf } from '@objectstack/spec/data';
+import { referenceTargetOf } from '@objectstack/spec/data';
 import { collectionEntries } from './collection-entries.js';
 import { recordsOf } from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
@@ -550,14 +550,26 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
     walk(ledger, value, objectName, 'objects', `${objPath}.${key}`, [key], key);
   }
   for (const { rec: field, path: fieldPath } of collectionEntries(obj.fields, fieldsPath)) {
-    // [#18550] The carrier through the ONE arbiter: `strName` answered
+    // [#18550] The target through the ONE arbiter: `strName` answered
     // `undefined` for an unreadable one exactly as it does for an absent one,
     // so the `displayField` consumer edge below was never recorded and the
     // ledger under-reported — a field a lookup DOES display read as unused.
-    // Absence still answers `undefined` and records nothing.
-    // Same form as the sibling lint readers: the literal `.reference` read
-    // stays at the site, only the shape judgment moves to the arbiter.
-    const reference = referenceCarrierOf({ reference: field.reference }, 'validate-field-consumers walkObject');
+    // Absence still answers `undefined` and records nothing, and an unreadable
+    // carrier still REFUSES (`referenceTargetOf` reads it through
+    // `referenceCarrierOf` before it judges anything).
+    //
+    // [#19289] The whole FIELD is passed through and the arbiter is
+    // `referenceTargetOf`, ⛔ not `referenceCarrierOf`. There is no type gate
+    // here, so a `{ type: 'user', displayField: … }` field reaches this line —
+    // and for `user` the carrier is not the target
+    // (`IMPLICIT_REFERENCE_TARGETS`: a CONSTANT OF THE TYPE, such metadata
+    // "fully specified, not under-specified"). Reading the carrier dropped the
+    // edge to `sys_user.<displayField>` wherever `sys_user` is compiled into
+    // the linted stack, so a field that column DOES display was reported unused
+    // — the same silent under-record #19198 and #19264 repaired elsewhere.
+    // The synthesized `{ reference: field.reference }` literal is what made the
+    // target question unaskable: it threw `type` away before the arbiter saw it.
+    const reference = referenceTargetOf(field);
     const displayField = strName(field.displayField);
     if (reference && displayField && ledger.declares(reference, displayField)) {
       ledger.record(reference, displayField, { root: 'objects', path: `${fieldPath}.displayField`, kind: 'display' });

@@ -18,6 +18,7 @@ import type {
 } from './types.js';
 import { inputTypeArms } from './input-type.js';
 import { checkDashboardWidgetOptions } from './dashboard-widget-options.js';
+import { checkKanbanQuickAdd } from './kanban-quick-add.js';
 
 /** Base props every node may carry (mirrors BaseSchema) — never "unknown prop". */
 const BASE_PROPS = new Set([
@@ -69,6 +70,26 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
       // each provided prop
       for (const [key, value] of Object.entries(node)) {
         if (BASE_PROPS.has(key)) continue;
+        // The `object-kanban` Quick Add pair (objectui#8285): a key
+        // `@objectstack/spec` still publishes and the renderer cannot honour,
+        // because the control is gated on a RUNTIME SLOT no parsed page can
+        // write. It REPLACES whatever the rules below would say about the key —
+        // `unknown-prop` today, and a coarse type check if the key were ever
+        // declared — because two diagnostics for one mistake is what
+        // `checkMemberTypes` already refuses (objectui#8067), and because
+        // "has no prop quickAdd" is FALSE against the published contract. Asked
+        // AHEAD of the declaration lookup on purpose: the claim is about the
+        // render path, so declaring the key must not silently disarm it.
+        // Interim, by the ruling — the spec's refusal by name replaces it.
+        //
+        // LOCKSTEP: this call site and the module behind it are the port of
+        // objectui's copy. The two copies must agree on the accepted grammar
+        // AND on diagnostic codes — change this only together with objectui.
+        const quickAdd = checkKanbanQuickAdd(node.type, key, value);
+        if (quickAdd) {
+          diagnostics.push(quickAdd);
+          continue;
+        }
         const input = byName.get(key);
         if (!input) {
           diagnostics.push({
@@ -130,7 +151,16 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
           });
         } else {
           const typeDiag = checkType(node.type, input, value);
-          if (typeDiag) diagnostics.push(typeDiag);
+          if (typeDiag) {
+            diagnostics.push(typeDiag);
+          } else {
+            // Members only once the CONTAINER kind was accepted. Reporting a
+            // member of a value that is not even the declared container is two
+            // diagnostics for one mistake, and the second one names positions
+            // of a shape the author did not write (objectui#8067).
+            const memberDiag = checkMemberTypes(node.type, input, value);
+            if (memberDiag) diagnostics.push(memberDiag);
+          }
         }
       }
 
@@ -168,7 +198,8 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
 
 /* LOCKSTEP: everything below this line is the byte-equal port of objectui's
  * `packages/sdui-parser` coarse type check (objectui#3832 — union-typed inputs
- * are checked over their arms). The two copies must agree on the accepted
+ * are checked over their arms — and objectui#8067, the same check one level
+ * down over the member kind `of` declares). The two copies must agree on the accepted
  * grammar AND on diagnostic codes/severities — if they drift, the save gate
  * and the renderer speak different dialects. Change these functions only
  * together with the objectui copy. */
@@ -224,6 +255,62 @@ function armExpectation(arm: ManifestInputType, input: ManifestInput): string {
     default:
       return 'a string';
   }
+}
+
+/**
+ * The member positions of a container value, as `[position, member]` pairs, or
+ * `null` when the value has no member position to speak of.
+ *
+ * Arrays index by position and objects by key, which is exactly the pair
+ * `ManifestInput.of` describes: array ELEMENTS, and the VALUES of an object
+ * used as a map. A scalar returns `null` rather than an empty list, so a value
+ * that only satisfied a non-container arm of a union declaration
+ * (`type: ['string', 'array'], of: 'string'`) is not reported as an empty
+ * container that trivially conforms — it is simply not the arm `of` describes.
+ */
+function memberEntries(value: unknown): Array<[string, unknown]> | null {
+  if (Array.isArray(value)) return value.map((member, index) => [String(index), member]);
+  if (typeof value === 'object' && value !== null) return Object.entries(value);
+  return null;
+}
+
+/**
+ * Coarse MEMBER check, over the arms `of` declares (objectui#8067).
+ *
+ * The same question `checkType` asks, one level down and with the same answer
+ * shape: ANY declared arm accepting a member clears it, a member no arm accepts
+ * is reported, and an input that declares no `of` is checked exactly as it was
+ * before the key existed — this function returns immediately on an empty arm
+ * list, so nothing published today changes severity or gains a diagnostic.
+ *
+ * ONE diagnostic per prop, naming every offending position, rather than one per
+ * member: a page that passes an array of the wrong member kind is one mistake
+ * made once, and N copies of it is the noise this repo treats as the thing that
+ * trains authors to dismiss real reports.
+ *
+ * Severity mirrors `checkType`'s rule for the same reason — `error` when an
+ * `enum` arm is present, because a closed list is the one fact this layer can
+ * be certain about; `warning` otherwise, since the coarse kind is a KIND claim
+ * and `os validate` / `os build` remain the judge of values.
+ */
+function checkMemberTypes(tag: string, input: ManifestInput, value: unknown): Diagnostic | null {
+  const arms = inputTypeArms(input.of);
+  if (arms.length === 0) return null;
+  const entries = memberEntries(value);
+  if (entries === null) return null;
+  const offenders = entries.filter(
+    ([, member]) => !arms.some((arm) => armAccepts(arm, input, member)),
+  );
+  if (offenders.length === 0) return null;
+  const expectation = arms.map((arm) => armExpectation(arm, input)).join(' or ');
+  return {
+    severity: arms.includes('enum') ? 'error' : 'warning',
+    code: 'member-type-mismatch',
+    message: `<${tag}> prop "${input.name}" expected every member to be ${expectation}` +
+      ` — ${offenders.map(([position]) => `[${position}]`).join(', ')} ` +
+      `${offenders.length === 1 ? 'is' : 'are'} not`,
+    tag,
+  };
 }
 
 /**

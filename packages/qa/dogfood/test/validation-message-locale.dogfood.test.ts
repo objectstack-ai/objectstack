@@ -39,7 +39,7 @@ const VmlSettlement = ObjectSchema.create({
 
 const vmlStack = defineStack({
   manifest: {
-    id: 'com.dogfood.validation_message_locale',
+    id: 'com.dogfood.validation-message-locale',
     namespace: 'vml',
     version: '0.0.0',
     type: 'app',

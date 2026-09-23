@@ -103,7 +103,7 @@ describe('#15006 — the auto-registration gates answer the same on BOTH shapes'
   });
 
   it('says no when nothing anywhere declares an object', () => {
-    expect(shouldAutoRegisterObjectQL({ manifest: { id: 'x', name: 'x' } }, [])).toBe(false);
+    expect(shouldAutoRegisterObjectQL({ manifest: { id: 'com.example.x', name: 'x' } }, [])).toBe(false);
     expect(shouldAutoRegisterStorageDriver({}, [])).toBe(false);
     expect(shouldAutoRegisterObjectQL(undefined, [])).toBe(false);
   });
@@ -156,7 +156,7 @@ describe('#15006 — the wrap gate and the i18n gate', () => {
   it('auto-registers i18n on both shapes — this one DID lose', () => {
     expect(bundleDeclaresTranslations(additive())).toBe(true);
     expect(bundleDeclaresTranslations(optionB())).toBe(true);
-    expect(bundleDeclaresTranslations({ manifest: { id: 'a' } })).toBe(false);
+    expect(bundleDeclaresTranslations({ manifest: { id: 'com.example.a' } })).toBe(false);
     // The nested-bundle shape a host/aggregator config composes.
     expect(bundleDeclaresTranslations({ manifest: { translations: [{ en: {} }] } })).toBe(true);
     expect(bundleDeclaresTranslations({ i18n: { defaultLocale: 'en' } })).toBe(true);

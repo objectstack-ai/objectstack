@@ -202,7 +202,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         dependencies: ['com.objectstack.engine.objectql'],
         init: async (ctx) => {
           ctx.getService<{ register(m: any): void }>('manifest').register({
-            id: 'test-app',
+            id: 'com.example.test-app',
             name: 'test_app',
             version: '1.0.0',
             type: 'app',
@@ -256,7 +256,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       // Arrange — legacy pattern for backward compatibility
       const mockApp = {
         manifest: {
-          id: 'test-app',
+          id: 'com.example.test-app',
           name: 'test_app',
           version: '1.0.0',
           type: 'app'

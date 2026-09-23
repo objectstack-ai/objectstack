@@ -3,53 +3,99 @@
 import { z } from 'zod';
 
 /**
- * `refuseRecordProtoKey` — a pre-parse guard that refuses a `__proto__` own
- * key on the RAW input, before `z.record()` ever gets to run its key schema.
+ * The `__proto__` pre-parse guard family — two wrappers, one mechanism.
  *
- * ## Why this exists (objectstack#17852)
+ * ## The shared defect (#17852, #19151)
  *
- * `$ZodRecord`'s open-key branch (zod v4 core, the record parser) reads:
+ * Zod v4 has TWO open-key branches — the ones that accept keys no shape
+ * declares — and BOTH skip a `__proto__` own key before anything author-facing
+ * can see it. Measured on the version this package resolves, zod 4.4.3
+ * (`node_modules/zod/v4/core/schemas.js`):
  *
  * ```js
+ * // $ZodRecord's open-key branch (the record parser, ~line 1494):
  * for (const key of Reflect.ownKeys(input)) {
  *   if (key === "__proto__") continue;   // <-- runs BEFORE the key schema
  *   if (!Object.prototype.propertyIsEnumerable.call(input, key)) continue;
  *   let keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
  *   ...
  * }
+ *
+ * // handleCatchall — z.object().catchall()'s branch (~line 767):
+ * for (const key in input) {
+ *   // skip __proto__ so it can't replace the result prototype via the
+ *   // assignment setter on the plain {} we build into
+ *   if (key === "__proto__") continue;   // <-- runs BEFORE the catchall schema
+ *   if (keySet.has(key)) continue;
+ *   const r = _catchall.run({ value: input[key], issues: [] }, ctx);
+ *   ...
+ * }
  * ```
  *
- * The `continue` sits above `def.keyType._zod.run`, so **no key schema can
- * ever see a `__proto__` key** — not a regex, not `.refine()`, not
- * `.superRefine()`, not even a key schema that rejects every string. A
- * document whose record carries `__proto__` as an own key (which
- * `JSON.parse` produces routinely) parses as SUCCESS and the key is
- * silently missing from the output — the record accepted a document and
- * handed back a different one. Tightening the key schema does nothing for
- * this one name; the only place left to refuse it is the raw input, ahead
- * of the record entirely. That is what this wrapper does.
+ * In both, the `continue` sits above the schema that would judge the key, so
+ * **no schema can ever see a `__proto__` key** — not a regex, not `.refine()`,
+ * not `.superRefine()`, not even a key schema that rejects every string, and
+ * not a catchall of `z.never()` (whose `unrecognized_keys` list is populated
+ * inside the loop the `continue` already left). A document carrying `__proto__`
+ * as an own key — which `JSON.parse` produces routinely, while an object
+ * literal's `{ __proto__: … }` sets the prototype instead and never reaches
+ * either loop — parses as SUCCESS and the key is silently missing from the
+ * output: the schema accepted a document and handed back a different one.
+ * Tightening the key schema, or closing the shape, does nothing for this one
+ * name; the only place left to refuse it is the raw input, ahead of the parse.
+ * That is what these wrappers do.
  *
- * `constructor` and `prototype` are deliberately NOT handled here: unlike
- * `__proto__`, both reach the key schema unskipped, so a slot that wants to
- * refuse them too does it in its own key grammar instead (see
- * `ObjectSchema.fields` in `data/object.zod.ts`) — adding them to this guard
- * would refuse a name for one slot (`assignments`) whose accept set no
- * ruling has narrowed.
+ * ## Which names each wrapper refuses, and why it is only this one
  *
- * @param schema - the `z.record(...)` (or any schema) to guard. The return
- *   type is cast back to `Schema` itself, matching the precedent at
- *   `ObjectSchema.apiMethods` (this file's `data/object.zod.ts` neighbour):
- *   a raw `z.preprocess(fn, schema)` would widen the AUTHORING (input) type
- *   to `unknown`, losing autocomplete/type-checking for every author who
- *   writes this slot as an object literal. The runtime guard is real; only
- *   the declared TS shape is preserved.
- * @param slotLabel - the authored surface name, echoed in the refusal so a
- *   reader learns which slot rejected the document (e.g. `'fields'`).
+ * `constructor` and `prototype` are deliberately NOT handled here, in either
+ * position: unlike `__proto__`, both reach the judging schema unskipped and
+ * round-trip intact (measured at both sites), so a slot that wants to refuse
+ * them too declares that refusal itself — adding them to this guard would
+ * refuse a name for slots whose accept set no ruling has narrowed.
+ *
+ * `ObjectSchema.fields` (`data/object.zod.ts`) is the slot that does, and since
+ * #19346 it refuses them with a RECORD-level `bannedKeys(['constructor',
+ * 'prototype'])` rather than in its key grammar. The reason is the PUBLISHED
+ * file and not the runtime: a `.refine()` on the key schema is a `custom`
+ * check, which `z.toJSONSchema()` has no arm for, so such a rule reaches the
+ * runtime and never `packages/spec/json-schema/**` — it held nine
+ * `fields.out.keyType` rows in `dropped-refinements.baseline.json` saying
+ * exactly that. Declared through the closed projection list's `banned-keys`
+ * arm, the same rule is published as `propertyNames` plus `not`.
+ *
+ * ⛔ That route is not open to `__proto__`, here or anywhere: this wrapper's
+ * guard is a pre-parse `z.preprocess` node, which the projection cannot see
+ * either — which is why the two names and the third are refused by two
+ * mechanisms rather than one.
+ *
+ * ## Why a `z.preprocess` and not a declared key
+ *
+ * Declaring `__proto__` in the object's own shape was measured and does not
+ * work: zod reads a declared key as `input["__proto__"]` and tests presence as
+ * `"__proto__" in input`, and on an ordinary object BOTH answer through the
+ * inherited accessor — the value is `Object.prototype` and the key is always
+ * "present" — so such a declaration refuses every config, including the ones
+ * that authored nothing. (It is also unwritable as an object literal at all:
+ * `{ __proto__: schema }` sets the shape object's prototype rather than adding
+ * a key.) A pre-parse guard on the raw input is the only mechanism that can
+ * tell an authored `__proto__` apart from the prototype every object has.
  */
-export function refuseRecordProtoKey<Schema extends z.ZodType>(
-  schema: Schema,
-  slotLabel: string,
-): Schema {
+
+/**
+ * The shared body: refuse a `__proto__` OWN enumerable key on the raw input,
+ * ahead of `schema`.
+ *
+ * @param schema - the schema to guard. The return type is cast back to
+ *   `Schema` itself, matching the precedent at `ObjectSchema.apiMethods` (the
+ *   `data/object.zod.ts` neighbour): a raw `z.preprocess(fn, schema)` would
+ *   widen the AUTHORING (input) type to `unknown`, losing autocomplete/type-
+ *   checking for every author who writes this slot as an object literal. The
+ *   runtime guard is real; only the declared TS shape is preserved.
+ * @param message - the refusal an author meets. It names the parser that would
+ *   otherwise drop the key, because the two positions drop it for different
+ *   reasons and an author reading the wrong one goes looking in the wrong place.
+ */
+function refuseProtoOwnKey<Schema extends z.ZodType>(schema: Schema, message: string): Schema {
   const guarded = z.preprocess((value, ctx) => {
     if (
       value !== null &&
@@ -58,16 +104,7 @@ export function refuseRecordProtoKey<Schema extends z.ZodType>(
         (key) => key === '__proto__' && Object.prototype.propertyIsEnumerable.call(value, key),
       )
     ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['__proto__'],
-        message:
-          `\`${slotLabel}\` cannot contain a key named "__proto__". zod's z.record() ` +
-          'silently drops this key from its parse output while reporting success ' +
-          '(the document is accepted and a DIFFERENT document, missing this key, is ' +
-          'returned) — so it is refused here instead of being silently corrupted. ' +
-          'Rename the key.',
-      });
+      ctx.addIssue({ code: 'custom', path: ['__proto__'], message });
     }
     return value;
   }, schema);
@@ -102,4 +139,59 @@ export function refuseRecordProtoKey<Schema extends z.ZodType>(
   guarded._zod.def.in._zod.optout = schema._zod.optout;
 
   return guarded as unknown as Schema;
+}
+
+/**
+ * `refuseRecordProtoKey` — a pre-parse guard that refuses a `__proto__` own
+ * key on the RAW input, before `z.record()` ever gets to run its key schema
+ * (#17852; the module docblock above is the authority on why).
+ *
+ * @param schema - the `z.record(...)` (or any schema) to guard.
+ * @param slotLabel - the authored surface name, echoed in the refusal so a
+ *   reader learns which slot rejected the document (e.g. `'fields'`).
+ */
+export function refuseRecordProtoKey<Schema extends z.ZodType>(
+  schema: Schema,
+  slotLabel: string,
+): Schema {
+  return refuseProtoOwnKey(
+    schema,
+    `\`${slotLabel}\` cannot contain a key named "__proto__". zod's z.record() ` +
+      'silently drops this key from its parse output while reporting success ' +
+      '(the document is accepted and a DIFFERENT document, missing this key, is ' +
+      'returned) — so it is refused here instead of being silently corrupted. ' +
+      'Rename the key.',
+  );
+}
+
+/**
+ * `refuseCatchallProtoKey` — the same pre-parse guard for the OTHER open-key
+ * branch: an object whose own top-level keys are author-named and admitted by
+ * `.catchall(...)` (#19151).
+ *
+ * A sibling of {@link refuseRecordProtoKey} rather than a reuse of it, for one
+ * reason: the refusal text names the parser that would otherwise drop the key,
+ * and here that is `handleCatchall`, not `z.record()`. An author told their
+ * top-level flow variable was dropped by "z.record()" would go looking at the
+ * `assignments` map, which is a different slot with a different guard. The
+ * mechanism, the refused name and the issue shape are identical by
+ * construction — both call {@link refuseProtoOwnKey}.
+ *
+ * @param schema - the `z.object(...).catchall(...)` (or any schema) to guard.
+ * @param slotLabel - what the guarded surface IS, echoed in the refusal as the
+ *   subject of a sentence (e.g. `'an \`assignment\` node config'`) — not a key
+ *   path, because at this position the refused key sits at the document root.
+ */
+export function refuseCatchallProtoKey<Schema extends z.ZodType>(
+  schema: Schema,
+  slotLabel: string,
+): Schema {
+  return refuseProtoOwnKey(
+    schema,
+    `${slotLabel} cannot carry a top-level key named "__proto__". zod's ` +
+      '`.catchall()` branch silently drops this key from its parse output while ' +
+      'reporting success (the document is accepted and a DIFFERENT document, ' +
+      'missing this key, is returned) — so it is refused here instead of being ' +
+      'silently corrupted. Rename the key.',
+  );
 }

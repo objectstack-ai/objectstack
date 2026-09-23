@@ -119,8 +119,8 @@ describe('SqlDriver scalar type fidelity (rating/slider/toggle/progress)', () =>
         id: 'z4',
         name: 'D',
         f_record: { home: '+1', work: '+2' },
-        f_video: { url: 'https://cdn/v.mp4', duration: 12 },
-        f_audio: { url: 'https://cdn/a.mp3', duration: 30 },
+        f_video: { url: 'https://cdn/v.mp4', durationSeconds: 12 },
+        f_audio: { url: 'https://cdn/a.mp3', durationSeconds: 30 },
       },
       { bypassTenantAudit: true },
     );
@@ -128,8 +128,8 @@ describe('SqlDriver scalar type fidelity (rating/slider/toggle/progress)', () =>
     assert(row !== null, 'findOne answered the not-found arm for a seeded id');
 
     expect(row.f_record).toEqual({ home: '+1', work: '+2' });
-    expect(row.f_video).toEqual({ url: 'https://cdn/v.mp4', duration: 12 });
-    expect(row.f_audio).toEqual({ url: 'https://cdn/a.mp3', duration: 30 });
+    expect(row.f_video).toEqual({ url: 'https://cdn/v.mp4', durationSeconds: 12 });
+    expect(row.f_audio).toEqual({ url: 'https://cdn/a.mp3', durationSeconds: 30 });
   });
 });
 

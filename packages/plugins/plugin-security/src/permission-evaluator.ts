@@ -1,6 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { PermissionSet, ObjectPermission, FieldPermissionParsed } from '@objectstack/spec/security';
+import type {
+  PermissionSet,
+  ObjectPermission,
+  EffectiveObjectPermission,
+  ObjectPermissionVerbTarget,
+  FieldPermissionParsed,
+} from '@objectstack/spec/security';
+import { objectPermissionGrants } from '@objectstack/spec/security';
 
 /**
  * Operation type mapping to permission checks.
@@ -20,7 +27,7 @@ import type { PermissionSet, ObjectPermission, FieldPermissionParsed } from '@ob
  * ops could ship ungated. The rows return with the M2 lifecycle initiative
  * (feature + RBAC in one batch), together with the bits they read.
  */
-const OPERATION_TO_PERMISSION: Record<string, keyof ObjectPermission> = {
+const OPERATION_TO_PERMISSION: Record<string, ObjectPermissionVerbTarget> = {
   find: 'allowRead',
   findOne: 'allowRead',
   count: 'allowRead',
@@ -56,8 +63,17 @@ const DESTRUCTIVE_OPERATIONS = new Set<string>(['transfer', 'restore', 'purge'])
  * organization_admin / admin_full_access defaults) cover `transfer` (and will
  * cover restore/purge again when the M2 batch re-adds their rows — Salesforce
  * semantics, confirmed in the #1883 disposition; revisit per-op when M2 lands).
+ *
+ * [#18785] ⛔ This set no longer DECIDES anything — the bypass is folded by the
+ * spec's `objectPermissionGrants`, the one definition of the rule. What it
+ * still does is state, on this side and derived from this file's own operation
+ * map, WHICH bits the class contains, so `permission-evaluator.test.ts` can
+ * hold the spec's fold to it. Kept as an assertion rather than deleted for the
+ * #1883 reason: the class is derived from the dispatch vocabulary, and a future
+ * destructive op added to the map+set must make the spec go red rather than
+ * silently lose its bypass.
  */
-const MODIFY_ALL_WRITE_KEYS = new Set<keyof ObjectPermission>([
+export const MODIFY_ALL_WRITE_KEYS = new Set<ObjectPermissionVerbTarget>([
   'allowEdit',
   'allowDelete',
   ...[...DESTRUCTIVE_OPERATIONS].flatMap((op) => {
@@ -200,6 +216,16 @@ export class PermissionEvaluator {
     // egress. Kept out of OPERATION_TO_PERMISSION because that map checks one
     // bit and would miss the read half — granting export to a caller who cannot
     // even list the object.
+    //
+    // [#18785] The read half is the spec fold, reached through the recursive
+    // `find` call below. The CONJUNCTION deliberately stays here rather than
+    // collapsing into `objectPermissionGrants(entry, 'allowExport')` per set:
+    // this door asks it across the whole resolved set list — `(∃ set granting
+    // export) ∧ (∃ set granting read)` — which is what the `/me/permissions`
+    // most-permissive per-object merge hands the client, and what the spec cell
+    // answers once that merge has happened. Folding it per set instead would
+    // NARROW the door to `∃ set (export ∧ read)`, denying a caller whose read
+    // and export grants arrive from two different sets.
     if (operation === 'export') {
       if (!resolveUserExportAllowed(objectName, permissionSets, opts)) return false;
       return this.checkObjectPermission('find', objectName, permissionSets, opts);
@@ -218,20 +244,18 @@ export class PermissionEvaluator {
       // sets grant blanket access via a single `objects: { '*': … }` entry —
       // but a `private` object is excluded from a non-super-user wildcard.
       const objPerm = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
-      if (objPerm) {
-        // Super-user WRITE bypass ("Modify All Data") — covers edit/delete and
-        // the destructive lifecycle class (see MODIFY_ALL_WRITE_KEYS).
-        if (MODIFY_ALL_WRITE_KEYS.has(permKey) && objPerm.modifyAllRecords) {
-          return true;
-        }
-        // Check if viewAllRecords is set (super-user bypass for read ops)
-        if (permKey === 'allowRead' && (objPerm.viewAllRecords || objPerm.modifyAllRecords)) {
-          return true;
-        }
-        // Check the specific permission
-        if (objPerm[permKey]) {
-          return true;
-        }
+      // [#18785] ONE fold, asked — the spec's `objectPermissionGrants` is the
+      // single definition of "does this effective object permission grant this
+      // verb?", and it carries every cell this branch used to restate: the read
+      // bypass on `viewAllRecords || modifyAllRecords`, the write bypass on
+      // `modifyAllRecords` alone (edit/delete/transfer — the
+      // MODIFY_ALL_WRITE_KEYS class), and `allowCreate` deliberately WITHOUT a
+      // bypass. Restating it here is how the enforcement door and every
+      // predicate that advertises the door's answer drift apart: they would
+      // still compile, still pass their own pins, and disagree only for the one
+      // administrator who holds the super-user bit.
+      if (objPerm && objectPermissionGrants(objPerm as EffectiveObjectPermission, permKey)) {
+        return true;
       }
     }
 

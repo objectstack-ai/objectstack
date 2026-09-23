@@ -26,8 +26,15 @@
  *                   spec's shared `isValueDomainMember` — the WRITTEN value
  *                   only (#14168, maintainer ruling 2026-09-02 option A)
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
- *  - `scale`        more decimal places than declared → `max_scale` (#7501;
- *                   rejection, NEVER rounding — maintainer ruling 2026-08-11)
+ *  - `scale`        more decimal places than the field's STORED allowance →
+ *                   `max_scale` (#7501; rejection, NEVER rounding —
+ *                   maintainer ruling 2026-08-11). The allowance is the
+ *                   declared `scale` on every numeric type but ONE: on a
+ *                   fraction-stored `percent` it is `scale + 2`, because
+ *                   there `scale` counts DISPLAYED percentage-point decimals
+ *                   and the stored fraction carries the same quantity two
+ *                   places further right (ruling batch #161 item 3 letter B,
+ *                   2026-09-18).
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
@@ -55,6 +62,7 @@ import {
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
+  percentScaleOf,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
@@ -782,9 +790,35 @@ function validateOne(
       Number.isInteger(def.scale) &&
       def.scale >= 0
     ) {
+      // ── the ONE type whose declared `scale` is not its stored allowance ──
+      // Maintainer ruling batch #161 item 3 letter B (2026-09-18): on a
+      // `percent` field `scale` is the number of decimal places of the
+      // PERCENTAGE-POINT value as displayed and entered — the objectui#9295
+      // convention — and the storage side DERIVES from the field's storage
+      // scale rather than being declared a second time. A fraction-stored
+      // percent (`percentScaleOf` = `fraction`, i.e. no `max` above 1) holds
+      // the same quantity two places further right: the widget offers
+      // `12.34`, the write is `0.1234`. So its stored value is allowed
+      // `scale + 2` places. A whole-percent field (`max > 1`) stores the
+      // displayed number itself and is unchanged, as is every OTHER numeric
+      // type — `number` / `currency` / `rating` / `slider` carry no percent
+      // semantics and nothing derives for them.
+      // ⛔ The derivation is read from `percentScaleOf`, the spec's single
+      // source of truth for "what magnitude is this percentage stored at" —
+      // not re-decided here from `max`, which would be a second copy of the
+      // rule the edit widget and the analytics wire already read.
+      const allowed = t === 'percent' && percentScaleOf(def) === 'fraction'
+        ? def.scale + 2
+        : def.scale;
       const actual = decimalPlacesOf(n);
-      if (actual > def.scale) {
-        return fail('max_scale', { scale: def.scale, actual });
+      if (actual > allowed) {
+        // The envelope names the allowance that was APPLIED, not the raw
+        // declaration. `actual` counts places in the number as WRITTEN, so a
+        // constraint naming `def.scale` beside a stored fraction's count
+        // would render "at most 2 decimal places (got 5)" on a field that
+        // accepts 4 — a true refusal described by a false constraint, and the
+        // `max_scale` message template renders both numbers verbatim.
+        return fail('max_scale', { scale: allowed, actual });
       }
     }
     return null;

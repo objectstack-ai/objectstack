@@ -1602,15 +1602,31 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
         // across every customer's data model to refuse it — one platform, one
         // query shape. The spec member (`ActionEngineFacade.find`,
         // `packages/spec/src/ui/action-params.zod.ts`) now declares
-        // `EngineQueryOptions` by identity, so the handler writes what the
+        // `EngineQueryOptions` minus `context`, so the handler writes what the
         // engine reads and this arm only adds the identity.
         //
         // `context` is spread LAST on purpose: the facade is trusted and
         // context-less by design (#3914, ADR-0096), so the elevated context it
-        // built wins over any `context` a caller put in the envelope. The
-        // envelope admits the key because every engine option bag does; it is
-        // not an authorization the caller gets to choose. Pinned in
+        // built wins over any `context` a caller put in the envelope. It is not
+        // an authorization the caller gets to choose. Pinned in
         // `action-engine-facade-find-envelope.test.ts`.
+        //
+        // ⚠️ [#19237] The TYPE no longer admits the key — the spec member
+        // subtracts it with `Omit`, ADR-0049's remove arm — but THIS ARM IS
+        // UNCHANGED and still accepts it. Two halves, deliberately asymmetric:
+        //
+        //   - a TYPED caller now gets a compile error at the call site, which
+        //     is the whole of the #19237 remedy;
+        //   - an UNTYPED one (a JS config handler, a local copy of the context
+        //     type, `(ctx: any)`) still passes a `context` and still has it
+        //     overridden here, silently, exactly as before.
+        //
+        // Closing the second half means making this arm THROW on an identity
+        // key, which is a runtime permission behaviour change and not a thing a
+        // type narrowing gets to smuggle in. `findEnvelopeKeys()` therefore
+        // still reads `context` off `EngineQueryOptionsSchema` as legal, and
+        // the override — not a refusal — is what the untyped channel gets.
+        // ⛔ Do not "finish the job" here without a ruling that covers it.
         async find(object: string, query?: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
             // …and the withdrawn shape is refused HERE, before the engine, so
             // the untyped channel gets the same answer the type gives

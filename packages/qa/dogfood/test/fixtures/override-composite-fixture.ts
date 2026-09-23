@@ -81,7 +81,7 @@ export const OverrideCompositeFlow = defineFlow({
 
 export const overrideCompositeStack = defineStack({
   manifest: {
-    id: 'com.dogfood.override_composite',
+    id: 'com.dogfood.override-composite',
     namespace: 'override_composite',
     version: '0.0.0',
     type: 'app',

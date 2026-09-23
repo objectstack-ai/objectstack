@@ -68,7 +68,7 @@
  * second question about it is still unanswered — truthfully, and only there.
  */
 
-import { referenceCarrierOf } from '@objectstack/spec/data';
+import { referenceTargetOf } from '@objectstack/spec/data';
 
 import { injectedColumnDefsFor, injectedColumnsFor } from './system-fields.js';
 
@@ -239,7 +239,26 @@ function graphFieldOf(def: AnyRec): GraphField {
     // ⛔ NOT `strName` here. A carrier in a shape no reader can read is refused
     // rather than narrowed to `undefined` (#13053): every rule downstream reads
     // this slice, so a silent narrowing here is that blindness wholesaled.
-    reference: referenceCarrierOf({ reference: def.reference }, 'object-graph graphFieldOf'),
+    // `referenceTargetOf` reads the carrier through `referenceCarrierOf` before
+    // it judges anything, so that refusal is unchanged.
+    //
+    // [#19289] The whole DEFINITION is passed through, and the arbiter is
+    // `referenceTargetOf` — the question this slice answers is "what does this
+    // field point at", ⛔ not "what does its carrier say", and for `user` the
+    // two differ. `RELATIONSHIP_FIELD_TYPES` above admits `user`, so
+    // {@link resolveFieldPath} traverses one — and a spec-complete
+    // `{ type: 'user' }` field (`IMPLICIT_REFERENCE_TARGETS` declares its target
+    // a CONSTANT OF THE TYPE, such metadata "fully specified, not
+    // under-specified") read as `hop-untargeted`, which
+    // {@link isUnjudgeable} treats as "the graph could not answer". Every rule
+    // that resolves a path through an author's "responsible person" column
+    // therefore STOPPED JUDGING IT, silently, across this package — the failure
+    // mode the verdict union's own docblock says this family exists to end.
+    //
+    // Reading `def` whole rather than `{ reference: def.reference }` is what
+    // makes the target question askable at all: the synthesized literal threw
+    // `type` away before the arbiter could see it.
+    reference: referenceTargetOf(def),
     multiple: def.multiple === true ? true : undefined,
   };
 }

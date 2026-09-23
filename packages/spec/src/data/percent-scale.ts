@@ -46,6 +46,15 @@ export interface PercentScaleFieldMeta {
  * writes by (it divides typed input by 100 unless `max > 1`), so reading it back
  * this way is what makes a value round-trip. Declaring `min: 0, max: 100` is
  * therefore a load-bearing statement about storage, not just validation.
+ *
+ * ⚠️ This answer also decides how many decimal places a WRITE may carry. On a
+ * `percent` field `FieldSchema.scale` counts the decimal places of the
+ * displayed percentage-point value, so the stored allowance derives from the
+ * scale this function returns: `fraction` ⇒ `scale + 2` places in the stored
+ * number, `whole` ⇒ exactly `scale`. The rule is stated once on
+ * `FieldSchema.scale`'s describe and enforced once in `packages/objectql`'s
+ * record validator; this note is a pointer, ⛔ not a second copy to keep in
+ * step.
  */
 export function percentScaleOf(field: PercentScaleFieldMeta | undefined): PercentScale | undefined {
   if (field?.type !== 'percent') return undefined;

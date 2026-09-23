@@ -1107,3 +1107,163 @@ describe('validateRecord — signature/qrcode maxLength binds at the write seam 
     expect(() => validateRecord(s, { sec: 'longer-than-four', col: '#aabbcc' }, 'insert')).not.toThrow();
   });
 });
+
+/**
+ * #19320 — a `percent` field's STORED scale allowance DERIVES from its
+ * declared `scale`; it is not the same number.
+ *
+ * Maintainer ruling batch #161 item 3 letter B (objectui#9810, 2026-09-18,
+ * 「其他同意」). Quoted, not translated:
+ *
+ * > `packages/spec` `FieldSchema.scale` docblock (and the field reference
+ * > page): for `percent`, `scale` is the number of decimal places of the
+ * > percentage-point value as displayed and entered; stored precision follows
+ * > the storage scale (`fraction` ⇒ `scale + 2` places; `whole` ⇒ `scale`).
+ * > `record-validator.ts` `max_scale` branch: when `def.type === 'percent'`
+ * > and `percentScaleOf(def) === 'fraction'`, compare against `def.scale + 2`;
+ * > a pin per storage scale (fraction `scale: 2` accepts `0.1234`, refuses
+ * > `0.12345`; whole `scale: 2` unchanged).
+ *
+ * The defect it closes, in the ruling's own worked example: a fraction-stored
+ * percent declaring `scale: 2` is offered `12.34` by the edit widget, the
+ * write is `0.1234` — four places — and the pre-#19320 branch compared four
+ * against two and refused it. The author had declared two DISPLAYED decimals
+ * and could not write two displayed decimals.
+ *
+ * ⚠️ These pins are written to be UNSATISFIABLE by simply weakening the
+ * `max_scale` branch: every acceptance below is paired with a refusal one
+ * place further out, and the non-percent / whole-percent controls hold the
+ * old allowance exactly. A branch that stopped enforcing `scale` on percent
+ * fails this block as loudly as the pre-ruling branch does.
+ */
+describe('validateRecord — a fraction-stored percent derives `scale + 2` (#19320)', () => {
+  // Typed off `validateRecord` itself rather than re-spelled: the declaration
+  // shape is the validator's, so a field key this block gets wrong is a type
+  // error here instead of a runtime no-op that quietly validates nothing.
+  const fieldsOf = (
+    schema: Parameters<typeof validateRecord>[0],
+    data: Record<string, unknown>,
+    mode: 'insert' | 'update' = 'insert',
+    options = {},
+  ) => {
+    try {
+      validateRecord(schema, data, mode, options);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    return null;
+  };
+
+  // `percentScaleOf` = 'fraction': no `max`, or a `max` at or below 1.
+  const fraction = { fields: { rate: { type: 'percent', label: 'Rate', scale: 2 } } };
+  // `percentScaleOf` = 'whole': a declared `max` above 1.
+  const whole = { fields: { rate: { type: 'percent', label: 'Rate', scale: 2, min: 0, max: 100 } } };
+
+  it("accepts the ruling's worked example: scale: 2 offers 12.34%, the write is 0.1234", () => {
+    expect(fieldsOf(fraction, { rate: 0.1234 })).toBeNull();
+    // and on update, which runs the same branch
+    expect(fieldsOf(fraction, { rate: 0.1234 }, 'update')).toBeNull();
+  });
+
+  it('accepts scale + 1 places too — the derivation is a ceiling, not an exact width', () => {
+    expect(fieldsOf(fraction, { rate: 0.123 })).toBeNull();
+    expect(fieldsOf(fraction, { rate: 0.12 })).toBeNull();
+    expect(fieldsOf(fraction, { rate: 0.5 })).toBeNull();
+    expect(fieldsOf(fraction, { rate: 1 })).toBeNull();
+  });
+
+  it('refuses scale + 3 places — the ceiling MOVED, it did not disappear', () => {
+    const errs = fieldsOf(fraction, { rate: 0.12345 });
+    expect(errs?.[0]).toMatchObject({ field: 'rate', code: 'max_scale' });
+  });
+
+  it('the refusal envelope names the allowance that was APPLIED, beside the count it was applied to', () => {
+    // Both numbers describe one axis — decimal places in the number as
+    // written. Naming the raw declaration here would render "at most 2
+    // decimal places (got 5)" on a field that accepts 4.
+    const errs = fieldsOf(fraction, { rate: 0.12345 });
+    expect(errs?.[0]).toMatchObject({ field: 'rate', code: 'max_scale', constraint: { scale: 4, actual: 5 } });
+    expect(errs?.[0].message).toBe('Rate must have at most 4 decimal places (got 5)');
+  });
+
+  it('a whole-percent field (`max` above 1) is UNCHANGED — it stores the displayed number itself', () => {
+    expect(fieldsOf(whole, { rate: 12.34 })).toBeNull();
+    const errs = fieldsOf(whole, { rate: 12.345 });
+    expect(errs?.[0]).toMatchObject({ code: 'max_scale', constraint: { scale: 2, actual: 3 } });
+  });
+
+  it('the fraction/whole split is READ from `percentScaleOf`, not re-decided here', () => {
+    // `max: 1` is still fraction (the predicate is `max > 1`), `max: 2` is
+    // already whole. The boundary is the spec function's, so a field sitting
+    // exactly on it answers the same way at both seams.
+    const maxOne = { fields: { rate: { type: 'percent', label: 'Rate', scale: 2, max: 1 } } };
+    const maxTwo = { fields: { rate: { type: 'percent', label: 'Rate', scale: 2, max: 2 } } };
+    expect(fieldsOf(maxOne, { rate: 0.1234 })).toBeNull();
+    expect(fieldsOf(maxTwo, { rate: 0.1234 })?.[0]).toMatchObject({
+      code: 'max_scale',
+      constraint: { scale: 2, actual: 4 },
+    });
+  });
+
+  it('scale: 0 on a fraction field means whole displayed percents — 0.33 writes, 0.333 does not', () => {
+    const s = { fields: { rate: { type: 'percent', label: 'Rate', scale: 0 } } };
+    expect(fieldsOf(s, { rate: 0.33 })).toBeNull();
+    expect(fieldsOf(s, { rate: 1 })).toBeNull();
+    expect(fieldsOf(s, { rate: 0.333 })?.[0]).toMatchObject({
+      code: 'max_scale',
+      constraint: { scale: 2, actual: 3 },
+    });
+  });
+
+  it("the ruling's named legitimate value round-trips: 33.333% at scale: 3 stores as 0.33333", () => {
+    const s = { fields: { rate: { type: 'percent', label: 'Rate', scale: 3 } } };
+    expect(fieldsOf(s, { rate: 0.33333 })).toBeNull();
+    expect(fieldsOf(s, { rate: 0.333333 })?.[0]).toMatchObject({ code: 'max_scale' });
+  });
+
+  it('CONTROLS — every other numeric type keeps the declared scale exactly', () => {
+    // Nothing derives for a type that carries no percent semantics. Each of
+    // these is refused at scale + 1, which is precisely what a fraction-stored
+    // percent now accepts — so this block discriminates the percent arm from
+    // a blanket loosening of the branch.
+    for (const type of ['number', 'currency', 'slider', 'rating'] as const) {
+      const s = { fields: { n: { type, label: 'N', scale: 2 } } };
+      expect(fieldsOf(s, { n: 1.23 })).toBeNull();
+      expect(fieldsOf(s, { n: 1.234 })?.[0]).toMatchObject({
+        field: 'n',
+        code: 'max_scale',
+        constraint: { scale: 2, actual: 3 },
+      });
+    }
+  });
+
+  it('CONTROL — the branch still refuses for its OTHER reasons on the same field', () => {
+    // A lit instrument: the percent arm did not swallow min/max or coercion.
+    const bounded = { fields: { rate: { type: 'percent', label: 'Rate', scale: 2, min: 0, max: 1 } } };
+    expect(fieldsOf(bounded, { rate: 5 })?.[0]).toMatchObject({ code: 'max_value', constraint: { max: 1 } });
+    expect(fieldsOf(bounded, { rate: -0.5 })?.[0]).toMatchObject({ code: 'min_value', constraint: { min: 0 } });
+    expect(fieldsOf(fraction, { rate: 'abc' })?.[0]).toMatchObject({ code: 'invalid_number' });
+  });
+
+  it('CONTROL — a percent with NO declared scale is still unconstrained (no new default)', () => {
+    const s = { fields: { rate: { type: 'percent', label: 'Rate' } } };
+    expect(fieldsOf(s, { rate: 0.123456789 })).toBeNull();
+  });
+
+  it('string-carried and exponent forms travel with the derivation', () => {
+    // A CSV cell reaches the branch as a string and is judged after coercion;
+    // `1e-6` is six places, one past a scale: 2 fraction field's four.
+    expect(fieldsOf(fraction, { rate: '0.1234' })).toBeNull();
+    expect(fieldsOf(fraction, { rate: 1e-6 })?.[0]).toMatchObject({
+      code: 'max_scale',
+      constraint: { scale: 4, actual: 6 },
+    });
+  });
+
+  it('renders the derived allowance localized, same as every other max_scale refusal', () => {
+    const errs = fieldsOf(fraction, { rate: 0.12345 }, 'insert', {
+      messages: { locale: 'zh-CN', objectName: 'deal' },
+    });
+    expect(errs?.[0].message).toBe('Rate的小数位数不能超过 4 位(当前 5 位)');
+  });
+});

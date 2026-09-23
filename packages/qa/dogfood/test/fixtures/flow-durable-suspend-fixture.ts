@@ -93,7 +93,7 @@ export const flowDurableSuspend: Flow = {
 /** A minimal, self-contained app config the dogfood harness can boot twice. */
 export const durableSuspendStack = defineStack({
   manifest: {
-    id: 'com.dogfood.durable_suspend',
+    id: 'com.dogfood.durable-suspend',
     namespace: 'suspend',
     version: '0.0.0',
     type: 'app',

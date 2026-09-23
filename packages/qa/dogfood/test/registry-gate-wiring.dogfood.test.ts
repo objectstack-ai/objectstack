@@ -70,7 +70,7 @@ const GateNote = ObjectSchema.create({
 
 const gateStack = defineStack({
   manifest: {
-    id: 'com.dogfood.registry_gate',
+    id: 'com.dogfood.registry-gate',
     namespace: 'gate',
     version: '0.0.0',
     type: 'app',

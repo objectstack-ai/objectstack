@@ -120,7 +120,8 @@ Type: `string`
 | **size** | `number` | optional |  |
 | **mimeType** | `string` | optional |  |
 | **alt** | `string` | optional |  |
-| **duration** | `number` | optional |  |
+| **durationSeconds** | `number` | optional | Media duration in seconds |
+| **duration** | `never` | optional | [REMOVED] `FileValue.duration` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationSeconds`; the value (seconds) is unchanged, and a fractional second is still legal. |
 
 ---
 
@@ -145,7 +146,8 @@ Type: `string`
 | **size** | `number` | optional |  |
 | **mimeType** | `string` | optional |  |
 | **alt** | `string` | optional |  |
-| **duration** | `number` | optional |  |
+| **durationSeconds** | `number` | optional | Media duration in seconds |
+| **duration** | `never` | optional | [REMOVED] `FileValue.duration` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationSeconds`; the value (seconds) is unchanged, and a fractional second is still legal. |
 
 
 ---

@@ -127,7 +127,7 @@ describe('InstalledPackageSchema', () => {
 
   it('should reject invalid manifest', () => {
     expect(() => InstalledPackageSchema.parse({
-      manifest: { id: 'test' },
+      manifest: { id: 'com.example.test' },
     })).toThrow();
   });
 });
@@ -190,9 +190,21 @@ describe('InstallPackageRequestSchema', () => {
     expect(() => InstallPackageRequestSchema.parse(request)).not.toThrow();
   });
 
-  it('should apply default enableOnInstall', () => {
+  it('should leave an absent enableOnInstall UNDEFINED — it declares no default', () => {
+    // ⭐ [#19273] Was `should apply default enableOnInstall` ⇒ `true`. This
+    // declaration restates the install door's key, which was ruled onto
+    // 「缺省 = 保持，有旗 = 设置」: absence is a state the door acts on, so no
+    // default may resolve it away. The matrix that holds this copy equal to
+    // its authority is `src/api/package-install-one-authority.test.ts`.
     const parsed = InstallPackageRequestSchema.parse({ manifest: validManifest });
-    expect(parsed.enableOnInstall).toBe(true);
+    expect(parsed.enableOnInstall).toBeUndefined();
+  });
+
+  it('should still carry a spelled enableOnInstall through — both arms', () => {
+    // The control in the other direction: absence became visible without the
+    // key ceasing to mean anything.
+    expect(InstallPackageRequestSchema.parse({ manifest: validManifest, enableOnInstall: true }).enableOnInstall).toBe(true);
+    expect(InstallPackageRequestSchema.parse({ manifest: validManifest, enableOnInstall: false }).enableOnInstall).toBe(false);
   });
 
   it('should accept install request with settings', () => {

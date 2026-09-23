@@ -111,6 +111,12 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
     const before = await findSet('showcase_contributor');
     const res = await stack.apiAs(adminToken, 'DELETE', `/data/sys_permission_set/${before.id}`);
     expect(res.status).toBeLessThan(300);
+    // [#19306] The status cannot tell this reset apart from a real deletion —
+    // the whole envelope used to be byte-identical to one, so every assertion
+    // below stayed green while the door told the caller the set was gone.
+    // `success: false` is the one field that says the record is still here,
+    // and this is the end-to-end pin on it.
+    expect((await res.json())?.success, 'a reset does not report a deletion').toBe(false);
 
     const after = await findSet('showcase_contributor');
     expect(after, 'a packaged definition is never removed by the env door').toBeTruthy();

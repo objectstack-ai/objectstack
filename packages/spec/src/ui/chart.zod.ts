@@ -22,8 +22,30 @@ import { strictObject } from '../shared/strict-object';
 //      `ChartConfigSchema.extend(...)`). `dashboard` and `report` are both
 //      registered metadata types.
 //   2. GRAPH — a BFS from all 24 metadata-type roots plus `ObjectStackSchema`
-//      (the `build-schemas.ts` / #4650 closure) reaches all five as
-//      `root-graph`. Controls in the same run: `PageSchema` /
+//      (the `build-schemas.ts` / #4650 closure) reached all five as
+//      `root-graph`.
+//
+//      ⚠️ RE-MEASURED 2026-09-20, and two of the five verdicts MOVED when the
+//      chart-structure ownership ruling landed (ADR-0021; maintainer ruling
+//      2026-09-12). Amended rather than left standing, because "all five" is
+//      now false and a later sweep would read the stale sentence as a
+//      measurement. `ChartConfigSchema` is `derived-clone`: no root reaches
+//      this base shape itself any more, because the dashboard widget reaches
+//      `DashboardWidgetChartConfigSchema` and the report reaches
+//      `ReportChartSchema`, both `.extend()` clones that carry this shape's
+//      strictness and error map. `ChartAxisSchema` is `unreachable`, which is a
+//      change of fact rather than of route: the dashboard clone tombstones
+//      `xAxis`/`yAxis` and `ReportChartSchema` re-declares both as dataset-name
+//      STRINGS, so no authoring path from a metadata root parses an axis object
+//      at all. The axis shape's remaining carrier is the react tier's published
+//      `<ObjectChart>` dataProps — a DECLARATION, not a parse — so whether its
+//      `.strict()` still gates anything is the #4583 question, genuinely open
+//      for this one shape and recorded on #17385. `ChartSeriesSchema`,
+//      `ChartAnnotationSchema` and `ChartInteractionSchema` are still `direct`.
+//      Every verdict here is pinned in `chart.test.ts`, so none of this can go
+//      stale silently a second time.
+//
+//      Controls in the same run: `PageSchema` /
 //      `DashboardSchema` / `ReportSchema` / `WebhookSchema` /
 //      `StateMachineSchema` resolve; 批 13's measured no-door shapes
 //      (`TouchTargetConfigSchema`, `GestureConfigSchema`) did not. (Those two
@@ -534,8 +556,45 @@ export const ChartDrillDownSchema = lazySchema(() => strictObject(
 ));
 
 /**
+ * The sentence every STRUCTURE key on {@link ChartConfigSchema} carries, so the
+ * three carriers' different answers are readable from the key itself and not
+ * only from the schema docblock above it.
+ */
+const STRUCTURE_KEY_NOTE =
+  ' Structure, not appearance — authorable where the chart has inline data; refused by name on a'
+  + ' dataset-bound dashboard widget, where the dataset decides it (ADR-0021).';
+
+/**
  * Chart Configuration Base
  * Common configuration for all chart types
+ *
+ * ## Who owns STRUCTURE and who owns APPEARANCE (ADR-0021; maintainer ruling
+ * 2026-09-12, decision batch #121 item 1)
+ *
+ * This shape has two kinds of key and the protocol answers them separately,
+ * because the answer depends on how the chart gets its rows:
+ *
+ *  - **Appearance — always the author's.** `title`, `subtitle`, `description`,
+ *    `colors`, `height`, `showLegend`, `showDataLabels`, `annotations` and
+ *    `interaction` say how the chart LOOKS. Nothing derives them, on any
+ *    carrier.
+ *  - **Structure — the DATA SOURCE's, wherever there is one.** `type`,
+ *    `xAxis`, `yAxis` and `series` say which series exist and which column
+ *    each one reads. On a DATASET-BOUND widget the dataset already decides
+ *    that (ADR-0021: the widget selects the dataset's `dimensions` and
+ *    `values` by name, and the widget's own `type` is the chart family), so
+ *    those four keys are refused by name there —
+ *    {@link DashboardWidgetChartConfigSchema} in `dashboard.zod.ts` is the
+ *    per-carrier shape that tombstones them, and each refusal points at the
+ *    dataset selection the intent belongs in. On an INLINE-DATA chart — the
+ *    react `<ObjectChart data={…}>` tier, whose `dataProps` publish all four —
+ *    there is no dataset to derive anything from and the author's axes apply
+ *    as they always have. `ReportChartSchema` narrows `xAxis`/`yAxis` to its
+ *    own bound dataset's dimension/measure names, the third answer.
+ *
+ * ⛔ This base shape is deliberately NOT the place the refusal lives: it is
+ * shared by all three carriers, and a tombstone here would take the keys from
+ * the inline tier the ruling leaves untouched.
  */
 export const ChartConfigSchema = lazySchema(() => strictObject(
   {
@@ -604,7 +663,15 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
     },
   },
   {
-  /** Chart Type */
+  /**
+    * Chart family.
+    *
+    * Structure, not appearance. On a dataset-bound dashboard widget the
+    * WIDGET's own `type` is the family and this key is refused by name
+    * ({@link DashboardWidgetChartConfigSchema}); on an inline-data react
+    * `<ObjectChart>` it is the author's, and it is that tier's SDUI
+    * component discriminator.
+    */
   type: ChartTypeSchema,
 
   /** Titles */
@@ -613,11 +680,14 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
   description: I18nLabelSchema.optional().describe('Accessibility description — announced to screen readers as the chart’s label'),
   
   /** Axes Mapping */
-  xAxis: ChartAxisSchema.optional().describe('X-Axis configuration'),
-  yAxis: z.array(ChartAxisSchema).optional().describe('Y-Axis configuration (support dual axis)'),
+  xAxis: ChartAxisSchema.optional()
+    .describe('X-Axis configuration.' + STRUCTURE_KEY_NOTE),
+  yAxis: z.array(ChartAxisSchema).optional()
+    .describe('Y-Axis configuration (support dual axis).' + STRUCTURE_KEY_NOTE),
   
   /** Series Configuration */
-  series: z.array(ChartSeriesSchema).optional().describe('Defined series configuration'),
+  series: z.array(ChartSeriesSchema).optional()
+    .describe('Defined series configuration.' + STRUCTURE_KEY_NOTE),
   
   /** Appearance. Either a positional palette (string[]) applied per category in
    *  order, or a value→color map ({ value: color }, kanban-style). A value→color

@@ -50,8 +50,6 @@
     "kernel/InstalledPackage",
     "kernel/KernelContext",
     "kernel/KernelSecurityPolicy",
-    "kernel/KernelSecurityScanResult",
-    "kernel/KernelSecurityVulnerability",
     "kernel/ListPackagesRequest",
     "kernel/ListPackagesResponse",
     "kernel/Manifest",

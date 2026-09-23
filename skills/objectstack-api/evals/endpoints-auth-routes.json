@@ -1,0 +1,55 @@
+{
+  "skill_name": "objectstack-api",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add `src/api/lead-feed.endpoint.ts`: a GET endpoint that returns our `acme_lead` records for a partner integration, cached for 30 seconds. The stack's manifest namespace is `acme`.",
+      "expected_output": "Emits a declarative `ApiEndpoint` (registered under `defineStack({ apis })`): `path: '/api/v1/apps/acme/leads'` (the ADR-0121 carve-out — only the subpath is free), `method: 'GET'`, `type: 'object_operation'`, `objectParams: { object: 'acme_lead', operation: 'find' }`, `cacheTtlSeconds: 30`. `authRequired` is omitted (defaults to true). No handler code, no `transform` in a mapping, and `manifest.namespace` is declared explicitly.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["/api/v1/apps/", "object_operation", "objectParams", "cacheTtlSeconds"],
+        "must_not_contain": ["transform:", "'/api/v1/leads'"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "The partner can't send a session token — make the lead feed callable without login.",
+      "expected_output": "Sets `authRequired: false` and, because ADR-0121 D6 pairs an anonymous entry point with an armed budget, adds `rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 100 }`. Points out that the gate's predicate is `rateLimit.enabled === true`, so writing only `windowMs` / `maxRequests` declares a budget that meters nothing, and that the endpoint budget is independent of `server.security.rateLimit`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["authRequired", "rateLimit", "enabled: true", "maxRequests"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "We receive Stripe webhooks and must verify the signature with real code before writing anything. Mount POST /api/v1/apps/acme/stripe in our plugin.",
+      "expected_output": "Uses the code-route pattern, not `apis:` (`script` / `proxy` targets do not execute in 17.x): in the plugin's `start(ctx)`, inside `ctx.hook('kernel:ready', ...)`, read `http.server` canonical-first with one `try` per name (`getService` is synchronous and throws on an empty slot), then `http.post('/api/v1/apps/acme/stripe', handler)`. Notes that `listen()` is deferred to `kernel:listening` so the route lands before Hono seals its matcher.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["http.server", "kernel:ready", "getService"],
+        "must_not_contain": ["type: 'script'", "type: 'proxy'"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Enable Google and GitHub sign-in next to the existing email/password login.",
+      "expected_output": "Reads `node_modules/@objectstack/spec/src/api/auth.zod.ts` before wiring anything: `AuthProvider` is `'local' | 'google' | 'github' | 'microsoft' | 'ldap' | 'saml'`, and `LoginRequestSchema` carries `type` plus optional `email` / `username` / `password` / `provider` / `redirectTo`. Does not invent a nested `auth` block on an endpoint — endpoint auth is `authRequired` (declarative) or the flat `public` + `permissions` pair.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["AuthProvider", "auth.zod.ts", "google", "github", "LoginRequestSchema"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Lock the `invoice` object's API down to read, list, search and export; add a `/bulk` route for imports and a `restore` operation so deleted invoices can be undeleted.",
+      "expected_output": "Authors only the primitives: `apiMethods: ['get', 'list']` — `search` and `export` derive from `list` automatically and are never declared (a declared derived verb is stripped with a warning). Explains there is no `/bulk` route (batch writes go through `POST /api/v1/data/{object}/batch`) and that `restore` / `purge` never derive because DELETE is a hard delete; recoverability is per-field `trackHistory` or a `lifecycle` archive policy.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["apiMethods", "/batch", "trackHistory", "lifecycle"],
+        "must_not_contain": ["'search'", "'restore'"]
+      }
+    }
+  ]
+}

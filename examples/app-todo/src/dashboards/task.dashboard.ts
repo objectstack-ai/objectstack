@@ -60,8 +60,12 @@ export const TaskDashboard: Dashboard = {
     },
 
     // Row 2: Task Distribution
-    // chartConfig axis fields name the dataset's dimension/measure — query
-    // rows are keyed by measure NAME post-cutover (issue #1721).
+    // The widget's `dimensions` / `values` ARE the axis binding: on a
+    // dataset-bound widget the dataset decides which series exist and which
+    // column each one reads (ADR-0021), so `chartConfig.xAxis` / `.yAxis` /
+    // `.series` / `.type` are refused there and the `chartConfig` these
+    // widgets carried — which restated those two names and then the schema
+    // defaults — is gone.
     {
       id: 'tasks_by_status',
       title: 'Tasks by Status',
@@ -70,7 +74,6 @@ export const TaskDashboard: Dashboard = {
       dataset: 'task_metrics',
       dimensions: ['status'],
       values: ['task_count'],
-      chartConfig: { type: 'pie', xAxis: { field: 'status', showGridLines: true, logarithmic: false }, yAxis: [{ field: 'task_count', showGridLines: true, logarithmic: false }], showLegend: true, showDataLabels: false },
       layout: { x: 0, y: 2, w: 6, h: 4 },
       options: { showLegend: true }
     },
@@ -82,7 +85,6 @@ export const TaskDashboard: Dashboard = {
       dataset: 'task_metrics',
       dimensions: ['priority'],
       values: ['task_count'],
-      chartConfig: { type: 'bar', xAxis: { field: 'priority', showGridLines: true, logarithmic: false }, yAxis: [{ field: 'task_count', showGridLines: true, logarithmic: false }], showLegend: true, showDataLabels: false },
       layout: { x: 6, y: 2, w: 6, h: 4 },
       options: { horizontal: true }
     },
@@ -96,7 +98,6 @@ export const TaskDashboard: Dashboard = {
       dataset: 'task_metrics',
       dimensions: ['completed_date'],
       values: ['task_count'],
-      chartConfig: { type: 'line', xAxis: { field: 'completed_date', showGridLines: true, logarithmic: false }, yAxis: [{ field: 'task_count', showGridLines: true, logarithmic: false }], showLegend: true, showDataLabels: false },
       layout: { x: 0, y: 6, w: 8, h: 4 },
       options: { showDataLabels: true }
     },
@@ -108,7 +109,6 @@ export const TaskDashboard: Dashboard = {
       dataset: 'task_metrics',
       dimensions: ['category'],
       values: ['task_count'],
-      chartConfig: { type: 'donut', xAxis: { field: 'category', showGridLines: true, logarithmic: false }, yAxis: [{ field: 'task_count', showGridLines: true, logarithmic: false }], showLegend: true, showDataLabels: false },
       layout: { x: 8, y: 6, w: 4, h: 4 },
       options: { showLegend: true }
     },

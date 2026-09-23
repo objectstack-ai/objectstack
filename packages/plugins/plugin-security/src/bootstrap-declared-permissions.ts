@@ -229,18 +229,23 @@ export async function upsertPackagePermissionSet(
     collisions?: PermissionSetNameCollisionDiagnostic[];
   },
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0, skippedUnowned: 0 };
   if (!ps?.name) return out;
   // A `managed_by:'package'` row without a `package_id` would make uninstall
   // undefined again — the exact ambiguity ADR-0086 D3 exists to remove — so a
   // set with no resolvable owner is skipped rather than materialized unowned.
   if (!packageId) {
+    out.skippedUnowned += 1;
     // [#18091] ⛔ The refusal is unchanged — an unowned row would re-create the
     // ADR-0086 D3 ambiguity. What changed is that it arrives. Measured on the
     // pre-fix tree with no logger, through BOTH doors that reach this branch
     // (the boot loop and the ADR-0086 P2 publish materializer, which passes no
-    // collector): author-visible console lines = 0, and this branch moves no
-    // counter either, so the outcome said nothing about it.
+    // collector): author-visible console lines = 0.
+    //
+    // [#18571] And a counter, because the LINE is not the programmatic half: a
+    // caller that reads no log at all — a boot report, a test — asked the
+    // outcome and got six zeros back, indistinguishable from a pass with
+    // nothing to do. Both doors above increment it; the boot loop forwards it.
     //
     // Its own wording, because the consequence is not the capability axis':
     // the declared set stays runtime-enforced and only the RECORD is missing.
@@ -374,7 +379,7 @@ export async function bootstrapDeclaredPermissions(
   metadataService: any,
   options: SeedOptions = {},
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0, skippedUnowned: 0 };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
 
   let sets: any[] = readDeclared(ql, 'permission');
@@ -419,6 +424,7 @@ export async function bootstrapDeclaredPermissions(
     out.unreadable += r.unreadable;
     out.skippedEnvAuthored += r.skippedEnvAuthored;
     out.skippedForeign += r.skippedForeign;
+    out.skippedUnowned += r.skippedUnowned;
   }
 
   if (organizationId) {

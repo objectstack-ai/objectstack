@@ -118,10 +118,17 @@ describe('checkFieldCompleteness — the verified inert shapes go red', () => {
 });
 
 describe('checkViewCompleteness — layout bindings', () => {
-  // Six of the view `type` members carry a binding block. The renderer's
-  // fallback for every one is a literal field name (measured in objectui's
-  // ListView adapter — see the table's docblock), so the missing block is the
-  // same defect on all six, not a lesser one on the last three.
+  // Six of the view `type` members carry a binding block, and the missing
+  // block is the same defect on all six: the surface the author asked for is
+  // not the one that renders, while authoring reports success.
+  //
+  // ⛔ What it is NOT is one shared mechanism. This comment used to say the
+  // renderer's fallback for every one is a literal field name; objectui has
+  // been deleting those floors one view type at a time, and for `calendar`
+  // (#17445), `gantt`, `timeline` and `map` (#19630) the renderer now REFUSES
+  // by name instead. The rule fires on all six either way — that is what this
+  // pin holds — and the per-type mechanism belongs to the table's docblock,
+  // which states each row's own measurement.
   it.each(['kanban', 'calendar', 'gantt', 'timeline', 'map', 'tree'])('flags a %s view missing its block as a WARNING', (type) => {
     const f = only(checkViewCompleteness({ type }) as never);
     expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
@@ -151,6 +158,78 @@ describe('checkViewCompleteness — layout bindings', () => {
     expect(checkViewCompleteness({ type: 'tree', tree: { parentField: 'parent' } })).toEqual([]);
   });
 
+  it('the calendar body describes the REFUSAL, not a deleted literal fallback (#17445)', () => {
+    // Re-measured on objectui `main` at `0cf2d6644` (2026-09-21), both halves
+    // of the path: `ListView.tsx`'s `case 'calendar'` restates only declared
+    // bindings — objectui#7029 deleted the `startDateField || 'start_date'` /
+    // `endDateField || 'end_date'` floors — and `ObjectCalendar`'s
+    // `getCalendarConfig` resolves `null`, so the component renders its
+    // "Calendar configuration required" refusal screen. The body asserted
+    // those floors as the reason for the warning, which is what this pin
+    // stops from coming back.
+    const f = only(checkViewCompleteness({ type: 'calendar' }) as never);
+    expect(f.message).not.toContain('falls back to literal default field names');
+    expect(f.message).toContain('Calendar configuration required');
+    expect(f.message).toContain('ObjectCalendar.tsx');
+    // ⛔ The half the correction had to PRESERVE: a warning an author meets at
+    // authoring time earns its place by naming the key to declare, not by
+    // reporting that something is missing.
+    expect(f.message).toContain('calendar.startDateField');
+    expect(f.fix).toContain('startDateField');
+    // Severity is untouched because it is already RULED, not because the
+    // question is open: #16577 ruled B (comment `5634033966`, card closed
+    // `completed` 2026-09-11) — a `calendar` route that refuses BY NAME
+    // stays warning-class under ADR-0078 §1, on the reasoning that BOTH
+    // doors are loud, `os validate` and render. That is the reading the
+    // assertions above re-measure, so this pin carries the ruling's
+    // evidence rather than standing in for a pending one.
+    expect(f.severity).toBe('warning');
+  });
+
+  it.each([
+    // [#19630] Re-derived at the pin this repo builds against, both halves of
+    // each path: `ListView.tsx` restates only DECLARED bindings (objectui#7070
+    // for the gantt / timeline date axes, objectui#7499 for gantt progress /
+    // dependencies, objectui#8169 for map), and the component then renders a
+    // named refusal screen. The generic body asserted literal floors as the
+    // reason for the warning; this pin stops that from coming back.
+    { type: 'gantt', component: 'ObjectGantt.tsx', screen: 'Gantt configuration required',
+      keys: ['gantt.startDateField', 'gantt.endDateField', 'gantt.titleField'] },
+    { type: 'timeline', component: 'ObjectTimeline.tsx', screen: 'Timeline date axis required',
+      keys: ['timeline.startDateField', 'timeline.titleField'] },
+    { type: 'map', component: 'ObjectMap.tsx', screen: 'Map configuration required',
+      keys: ['map.locationField', 'map.latitudeField', 'map.longitudeField'] },
+  ])('the $type body describes the REFUSAL, not a deleted literal fallback (#19630)', ({ type, component, screen, keys }) => {
+    const f = only(checkViewCompleteness({ type }) as never);
+    expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
+    expect(f.message).not.toContain('falls back to literal default field names');
+    expect(f.message).toContain(screen);
+    expect(f.message).toContain(component);
+    // ⛔ The half the correction had to PRESERVE: the prescription. Each key
+    // the renderer's refusal screen names is the key the body tells the
+    // author to declare.
+    for (const key of keys) expect(f.message).toContain(key);
+    // Severity is untouched and CONSISTENT with #16577's ruling B (comment
+    // `5634033966`): a route that refuses BY NAME stays warning-class under
+    // ADR-0078 §1 because both doors are loud. These rows now measure that
+    // shape; they do not extend or reopen the ruling.
+    expect(f.severity).toBe('warning');
+  });
+
+  it('the two types with no per-type body keep the generic one — an override, not a rewrite', () => {
+    // ⚠️ An honest pin: it records WHICH body each type receives. `kanban`
+    // and `tree` are the two rows re-read at the pin that still floor (or
+    // infer) a binding, so the generic sentence is still true of them. A type
+    // that stops flooring gets an entry beside `calendar`'s and moves out of
+    // this list — a deliberate edit, which is the point.
+    for (const type of ['kanban', 'tree']) {
+      const f = only(checkViewCompleteness({ type }) as never);
+      expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
+      expect(f.message).toContain('falls back to literal default field names');
+      expect(f.message).toContain(`A \`${type}\` view with no \`${type}\` block`);
+    }
+  });
+
   it('names the schema-required keys in the timeline prescription', () => {
     // `TimelineConfigSchema` requires exactly these two; the hint must not
     // send an author to declare a block the parser then refuses.
@@ -161,13 +240,21 @@ describe('checkViewCompleteness — layout bindings', () => {
 
   it('flags a `map` block that declares neither coordinate form — `map: {}` is the unbound view with braces', () => {
     // `ListMapConfigSchema` requires no key, so block presence alone would
-    // bless `map: { titleField }` on its way to `locationField || 'location'`.
+    // bless `map: { titleField }` — which objectui's `ObjectMap` refuses by
+    // its `hasCoordinateBinding` gate exactly as it refuses an absent block.
     for (const map of [{}, { titleField: 'title' }, { latitudeField: 'lat' }, { longitudeField: 'lng' }]) {
       const f = only(checkViewCompleteness({ type: 'map', map }) as never);
       expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
       expect(f.severity).toBe('warning');
       expect(f.path).toBe('map.locationField');
-      expect(f.message).toContain("locationField || 'location'");
+      // [#19630] The literal `locationField || 'location'` floor this message
+      // used to quote is gone on both faces (objectui#8169); the body names
+      // the refusal the renderer shows instead, and the keys that clear it.
+      expect(f.message).not.toContain("|| 'location'");
+      expect(f.message).toContain('Map configuration required');
+      expect(f.message).toContain('hasCoordinateBinding');
+      expect(f.message).toContain('map.locationField');
+      expect(f.message).toContain('map.latitudeField');
       expect(f.fix).toContain('locationField');
       expect(f.fix).toContain('latitudeField');
     }

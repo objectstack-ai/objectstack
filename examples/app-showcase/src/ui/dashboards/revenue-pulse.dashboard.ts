@@ -1,17 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { ChartConfig, ChartType, Dashboard } from '@objectstack/spec/ui';
+import type { Dashboard } from '@objectstack/spec/ui';
 
 const invoiceDs = 'showcase_invoice_metrics';
 const accountDs = 'showcase_account_metrics';
 
-const cfg = (type: ChartType, dimension: string, measure: string): ChartConfig => ({
-  type,
-  xAxis: { field: dimension, showGridLines: true, logarithmic: false },
-  yAxis: [{ field: measure, showGridLines: true, logarithmic: false }],
-  showLegend: true,
-  showDataLabels: false,
-});
+/**
+ * A dataset-bound widget's `chartConfig` is APPEARANCE only (ADR-0021;
+ * maintainer ruling 2026-09-12): the dataset decides which series exist and
+ * which column each one reads. The `cfg()` helper this file carried wrote the
+ * axis bindings a second time — the widget's own `dimensions` / `values`
+ * already name them — and its other two keys were the schema defaults, so it
+ * goes rather than being trimmed to nothing.
+ */
 
 /**
  * Revenue Pulse — the dashboard-level filters demo (framework#2501,
@@ -60,10 +61,10 @@ export const RevenuePulseDashboard: Dashboard = {
     { id: 'kpi_accounts_alltime', type: 'metric', title: 'Accounts (all time)', dataset: accountDs, values: ['account_count'], colorVariant: 'purple', filterBindings: { dateRange: false, region: false }, layout: { x: 9, y: 0, w: 3, h: 2 } },
 
     // ── Trends + distribution ────────────────────────────────────────────
-    { id: 'line_invoices_by_month', type: 'line', title: 'Invoices by Month', dataset: invoiceDs, dimensions: ['issued_on'], values: ['invoice_count'], chartConfig: cfg('line', 'issued_on', 'invoice_count'), layout: { x: 0, y: 2, w: 6, h: 4 } },
-    { id: 'col_accounts_by_month', type: 'column', title: 'Accounts Signed by Month', dataset: accountDs, dimensions: ['signed_on'], values: ['account_count'], chartConfig: cfg('column', 'signed_on', 'account_count'), filterBindings: { dateRange: 'signed_on', region: 'sales_region' }, layout: { x: 6, y: 2, w: 6, h: 4 } },
-    { id: 'donut_invoices_by_status', type: 'donut', title: 'Invoices by Status', dataset: invoiceDs, dimensions: ['status'], values: ['invoice_count'], chartConfig: cfg('donut', 'status', 'invoice_count'), layout: { x: 0, y: 6, w: 6, h: 4 } },
-    { id: 'bar_accounts_by_industry', type: 'bar', title: 'Accounts by Industry', dataset: accountDs, dimensions: ['industry'], values: ['account_count'], chartConfig: cfg('bar', 'industry', 'account_count'), filterBindings: { dateRange: 'signed_on', region: 'sales_region' }, layout: { x: 6, y: 6, w: 6, h: 4 } },
+    { id: 'line_invoices_by_month', type: 'line', title: 'Invoices by Month', dataset: invoiceDs, dimensions: ['issued_on'], values: ['invoice_count'], layout: { x: 0, y: 2, w: 6, h: 4 } },
+    { id: 'col_accounts_by_month', type: 'column', title: 'Accounts Signed by Month', dataset: accountDs, dimensions: ['signed_on'], values: ['account_count'], filterBindings: { dateRange: 'signed_on', region: 'sales_region' }, layout: { x: 6, y: 2, w: 6, h: 4 } },
+    { id: 'donut_invoices_by_status', type: 'donut', title: 'Invoices by Status', dataset: invoiceDs, dimensions: ['status'], values: ['invoice_count'], layout: { x: 0, y: 6, w: 6, h: 4 } },
+    { id: 'bar_accounts_by_industry', type: 'bar', title: 'Accounts by Industry', dataset: accountDs, dimensions: ['industry'], values: ['account_count'], filterBindings: { dateRange: 'signed_on', region: 'sales_region' }, layout: { x: 6, y: 6, w: 6, h: 4 } },
 
     // ── Percent scale (objectui#3136) ────────────────────────────────────
     // A ratio measure rendered on the two surfaces that disagreed: a KPI card

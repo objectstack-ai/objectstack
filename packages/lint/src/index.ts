@@ -850,6 +850,18 @@ export {
   // HERE by measurement but genuinely enforced in a sibling repo, so it must
   // never share the `dead` id: the two ask the author for opposite actions.
   LIVENESS_LIVE_ELSEWHERE_PROPERTY,
+  // #19276 — not a verdict: the rule reporting that a per-type ledger could not
+  // be read at all, so every author warning for that type is switched off.
+  // Published for the same reason as the four above — `f.rule` is what `--json`
+  // consumers compare against — and load-bearing here, because this is the one
+  // finding whose presence means the OTHER four cannot be trusted for that
+  // type. ⛔ Not suppressible per finding, and the hint says so rather than
+  // naming a key that does not exist: the CLI has no per-rule suppression, and
+  // `suppressWarnings` is declared on the dashboard WIDGET only
+  // (`spec/src/ui/dashboard.zod.ts`) while this finding's subject is a ledger
+  // — the same shape `validate-chart-bindings.ts` states for its three
+  // surfaces.
+  LIVENESS_LEDGER_UNREADABLE,
 } from './lint-liveness-properties.js';
 
 export { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';

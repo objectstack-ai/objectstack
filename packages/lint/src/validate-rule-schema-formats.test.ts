@@ -34,7 +34,7 @@ import { registeredFormatNames, validateRuleCompilability } from './validate-rul
 import { AUTHORING_COMMANDS, AUTHORING_RULES, authoringRulesFor, runAuthoringRules } from './authoring-rules.js';
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
-const MANIFEST = { id: 'schema_format_probe', name: 'schema_format_probe', version: '1.0.0', type: 'app' } as const;
+const MANIFEST = { id: 'com.example.schema-format-probe', name: 'schema_format_probe', version: '1.0.0', type: 'app' } as const;
 
 /** One object carrying the given validation rules. */
 const objectWith = (...validations: unknown[]) => ({

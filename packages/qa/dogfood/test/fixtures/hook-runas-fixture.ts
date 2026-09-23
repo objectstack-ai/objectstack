@@ -84,7 +84,7 @@ const STAMP_SOURCE = `
 
 export const hookRunAsFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.hookrunas_fixture',
+    id: 'com.dogfood.hookrunas-fixture',
     namespace: 'hookrunas',
     version: '0.0.0',
     type: 'app',

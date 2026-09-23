@@ -816,6 +816,33 @@ describe('#15072 authoring seams', () => {
       const help = String((SysSharingRule as any).fields.recipient_id.description);
       expect(help).toMatch(/field/i);
     });
+
+    /**
+     * [#19258] `dependsOn` is the declaration of WHICH siblings the widget
+     * reads, and `recipient-picker` reads two: `recipient_type` picks the mode,
+     * and the `field` mode reads `object_name` to offer that object's
+     * user-valued columns. Nothing breaks today only because the form renderer
+     * hands widgets the whole watched record rather than a `dependsOn`-scoped
+     * slice — so a scoped renderer would degrade `field` mode to a plain text
+     * input with no error anywhere. These pin the declaration, which is the
+     * only thing that would survive that change.
+     */
+    describe('[#19258] `recipient_id.dependsOn` names every sibling the picker reads', () => {
+      const dependsOn = (field: string): string[] =>
+        ((SysSharingRule as any).fields[field].dependsOn as string[]) ?? [];
+
+      it('names `recipient_type` — the sibling that picks the picker mode', () => {
+        expect(dependsOn('recipient_id')).toContain('recipient_type');
+      });
+
+      it('names `object_name` — the sibling the `field` mode reads for its candidate columns', () => {
+        expect(dependsOn('recipient_id')).toContain('object_name');
+      });
+
+      it('control: `criteria_json` declares the same `object_name` dependency for its own widget', () => {
+        expect(dependsOn('criteria_json')).toContain('object_name');
+      });
+    });
   });
 });
 

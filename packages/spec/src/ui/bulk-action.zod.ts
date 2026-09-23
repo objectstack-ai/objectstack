@@ -48,13 +48,28 @@ import { FieldType } from '../data/field.zod';
 //     error for a blank screen. Localizing means declaring a real action and
 //     naming it in `bulkActions`: THAT path runs through the i18n resolver
 //     (`toBulkActionDef`'s `localize`).
-//   - `params[]` is `.passthrough()`. objectui's `BulkActionParam` declares an
-//     explicit `[key: string]: unknown` catch-all — widget config forwarded to
-//     the field renderer as-is (min/max/step/format). Locking it down would
-//     reject valid config, so declared keys are typed and the rest rides
-//     through, the same call `dashboard.zod.ts` makes for a widget's `config`.
-//   - `params[].options[]` is `.passthrough()` TOO — measured, not inherited
-//     from its parent by symmetry. objectui's option TYPE is closed
+//   - `params[]` is STRICT (#18177, maintainer ruling batch #146 item 4,
+//     letter A). It used to be `.passthrough()`, mirroring the
+//     `[key: string]: unknown` catch-all on objectui's `BulkActionParam` — and
+//     that made its accept a NULL READING: measured against installed spec
+//     17.4.0 it took `zzz_nonsense_key_that_no_producer_emits_8755` in the same
+//     run that it took `dependsOn`, while `ActionParamSchema` one surface over
+//     refused both with `unrecognized_keys`. A shape that examines nothing can
+//     license nothing, so the twins now carry the same strictness.
+//     ⚠️ What that CHANGED, stated rather than buried: the widget-config keys
+//     the catch-all forwarded (`min`/`max`/`step`/…) are keys of a FIELD, not
+//     of a bulk param, and this shape declares none of them — they are refused
+//     now, with the `BULK_PARAM_WIDGET_CONFIG_KEYS` prescription below naming
+//     where the vocabulary IS real. A census of authored bulk params over the
+//     two repos reachable from the landing session found ZERO carrying an
+//     undeclared key, so no in-corpus configuration stops working; hotcrm was
+//     NOT REACHABLE for that census and is recorded unmeasured, never clean.
+//     The one key measured LIVE on this surface is DECLARED rather than
+//     refused — `dependsOn`, below. Retiring it would delete a capability that
+//     ships.
+//   - `params[].options[]` is `.passthrough()` — and since the parent closed it
+//     is the ONE open level left here. Still measured, never inherited from a
+//     neighbour by symmetry. objectui's option TYPE is closed
 //     (`Array<{ label; value }>`, `packages/types/src/objectql.ts:271`), but the
 //     type is not what an authored option meets: `bulkParamToField` SPREADS each
 //     entry — `options?.map(o => ({ ...o, value: String(o.value) }))`,
@@ -73,7 +88,11 @@ import { FieldType } from '../data/field.zod';
 // KNOWN DIVERGENCE, DELIBERATELY NOT FIXED HERE. A bulk param and an action
 // param are the same idea under different spellings (`help`/`helpText`,
 // `default`/`defaultValue`, `object`/`reference`, plus `labelField`, which
-// `ActionParamSchema` has no counterpart for). objectui already owns a converter
+// `ActionParamSchema` has no counterpart for — `displayField` is the FIELD
+// spelling of the same idea). Closing this shape turned those from keys that
+// rode through and did nothing into RENAMES: each is an `aliases` row below, so
+// an author who reaches for the neighbouring surface's word is told the one
+// this surface takes. objectui already owns a converter
 // for the PROMOTED direction (`toBulkParam` in `resolveBulkActions.ts`);
 // converging the AUTHORED direction means teaching the renderer to run authored
 // params through it and giving `ActionParamSchema` a `labelField` — a cross-repo
@@ -105,17 +124,124 @@ export const BulkActionExecutionSchema = z.enum(['perRecord', 'aggregate']);
 export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
 
 /**
+ * Keys a widget on this path really reads off the field bag — and which this
+ * shape nevertheless does NOT declare, so their rejection has to carry the
+ * reason rather than a bare "unknown key".
+ *
+ * Measured, not listed from memory: `bulkParamToField` destructures the eleven
+ * declared keys out and spreads the REST onto the field metadata it hands
+ * `getLazyFieldWidget`, so any of these reaches a widget that reads it —
+ * `min`/`max`/`step` (NumberField / SliderField / CurrencyField / PercentField
+ * / RatingField), `accept`/`maxSize`/`crop`/`capture` (FileField / ImageField),
+ * `rows` (TextAreaField / RichTextField), `precision`/`scale`, `dimensions`
+ * (VectorField), `defaultName` (AvatarField), and the picker family
+ * `descriptionField` / `idField` / `allowCreate` / `lookupColumns` /
+ * `lookupPageSize` / `lookupFilters` / `picker` / `subtitle` / `avatarField`
+ * (LookupField, and UserField through it).
+ *
+ * ⛔ Reading that as "so declare them" is the move this file does not make. A
+ * declared key is published contract whose removal costs a full retirement, and
+ * the census that accompanied the close found NO authored bulk param writing
+ * any of them — the evidence licenses a loud rejection, not twenty new members.
+ * `format` earns its absence from the list the same way: the module header used
+ * to name it beside min/max/step, and the sweep found no FORM widget reading it
+ * at all.
+ *
+ * ⚠️ The prescription deliberately refuses the obvious-sounding remedy. There
+ * is no field-backed param route on the bulk surface — `toBulkParam` never
+ * consults the object's field definitions — so "declare it on the field and let
+ * the dialog inherit" would be a confidently wrong answer, the shape this
+ * campaign has already shipped more than once.
+ */
+const BULK_PARAM_WIDGET_CONFIG_KEYS = [
+  'min', 'max', 'step', 'precision', 'scale', 'rows',
+  'accept', 'maxSize', 'crop', 'capture', 'dimensions', 'defaultName',
+  'descriptionField', 'idField', 'allowCreate',
+  'lookupColumns', 'lookupPageSize', 'lookupFilters', 'picker', 'subtitle', 'avatarField',
+] as const;
+
+/**
  * One input collected ONCE by the bulk dialog before the run (never re-prompted
  * per record). For `operation: 'update'` the collected values ARE the patch
  * (merged over the def's static `patch`); for an aggregate `custom` def they
  * ride along as the action's params.
  *
- * `.passthrough()` — see the module header: the renderer's own type declares a
- * catch-all for widget config, so the declared keys are typed and extras are
- * forwarded. That means a typo'd key here still ships silently; the def LEVEL
- * is where strictness buys something, and this level is where it would lie.
+ * STRICT since #18177 — see the module header. An unknown key is refused by
+ * name, carrying either the rename or the prescription that fixes it, exactly
+ * as on `ActionParamSchema`. The sentence this replaced said strictness "would
+ * lie" at this level; the measurement said the opposite — the OPEN shape was
+ * the lie, because it accepted a nonsense key and `dependsOn` in one breath and
+ * could therefore license neither.
  */
-export const BulkActionParamSchema = lazySchema(() => z.object({
+export const BulkActionParamSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this bulk action param',
+    aliases: {
+      // The KNOWN DIVERGENCE pairs from the module header, in the direction an
+      // author actually slips: they are writing an ACTION param (or a FIELD)
+      // and reaching for its word. `toBulkParam` maps the same three when it
+      // promotes an action param, so the two directions now agree.
+      helpText: 'help',
+      description: 'help',
+      defaultValue: 'default',
+      reference: 'object',
+      referenceTo: 'object',
+      // `labelField` is this surface's name for the picker's option label;
+      // `FieldSchema` and objectui's picker both spell it `displayField`.
+      displayField: 'labelField',
+      title: 'label',
+    },
+    guidance: {
+      field:
+        '`field` declares a FIELD-BACKED param, and the bulk surface has no such route: '
+        + '`resolveActionParams` consults the object\'s field definitions for the single-record '
+        + 'dialog, `resolveBulkActions`\'s `toBulkParam` never does. Declare the param inline '
+        + 'instead — `name` + `type`, plus `object` (and optionally `labelField`) for a picker.',
+      objectOverride:
+        '`objectOverride` belongs to a field-backed ACTION param, which names the object owning '
+        + 'the referenced field. A bulk param is always inline; the object a picker searches is '
+        + '`object`.',
+      visible:
+        '`visible` on a bulk param has no reader — the dialog renders every param it is given. '
+        + 'The per-record eligibility predicate belongs on the DEF (`bulkActionDefs[].visible`), '
+        + 'where it gates the button and narrows the run; a per-OPTION rule goes on '
+        + '`options[].visibleWhen`.',
+      visibleWhen:
+        '`visibleWhen` is a per-OPTION key, not a param one: write it inside `options[]`, where '
+        + 'the select/multiselect/radio/checkbox widgets narrow the offered set against the '
+        + 'dialog\'s own in-progress values. To gate the whole button, use the def\'s `visible`.',
+      carryOver:
+        '`carryOver` is an ACTION-param contract (seed from the current row, render read-only, '
+        + 'submit verbatim). A bulk dialog runs over a SELECTION and holds no single row to seed '
+        + 'from, so there is nothing for it to carry over. Put a fixed value in the def\'s '
+        + '`patch` instead, which is merged under the collected params.',
+      defaultFromRow:
+        '`defaultFromRow` prefills an ACTION param from the current row. A bulk dialog has a '
+        + 'selection, not a row — use `default` for a fixed prefill, or the def\'s `patch` for a '
+        + 'value the user should not see.',
+      requiresFeature:
+        '`requiresFeature` is the ACTION param\'s capability sugar, lowered into `visible` at '
+        + 'parse time. This shape has no `visible` to lower into; gate the whole button with the '
+        + 'def\'s `visible` (`features.x`) or its `requiredPermissions`.',
+    },
+    guidanceSets: [{
+      name: 'BULK_PARAM_WIDGET_CONFIG_KEYS',
+      keys: BULK_PARAM_WIDGET_CONFIG_KEYS,
+      prescription:
+        'widget-config keys like `min` / `max` / `step` / `accept` / `lookupFilters` are keys of a '
+        + 'FIELD (`FieldSchema`, `data/field.zod.ts`), not of a bulk action param — this shape '
+        + 'declares none of them. Until it was closed they rode through onto the renderer\'s field '
+        + 'bag and whichever widget read one honoured it; that door is shut, so the value is '
+        + 'refused rather than silently forwarded. ⛔ Declaring the key on the object\'s FIELD does '
+        + 'not reach this dialog either: the bulk surface has no field-backed param route. Remove '
+        + 'the key, and open an issue if a bulk param genuinely needs it declared here.',
+    }],
+    history:
+      'Until this shape was closed, `params[]` was `.passthrough()` — every unknown key rode through '
+      + 'onto the renderer\'s field bag, so a mis-spelled widget config shipped as a control that '
+      + 'quietly ignored it, and a nonsense key parsed exactly as cleanly as a real one.',
+  },
+  {
   name: z.string().min(1).describe('Param key — becomes params[name] in the patch / action params bag.'),
   label: z.string().optional().describe('Field label in the dialog. Plain string: an authored def is not i18n-resolved (see module header).'),
   help: z.string().optional().describe('Help text under the field. (An ActionParam spells this `helpText` — known divergence, module header.)'),
@@ -130,7 +256,45 @@ export const BulkActionParamSchema = lazySchema(() => z.object({
   labelField: z.string().optional().describe('Related-object field used as the option label for a `lookup` widget (defaults to name/full_name/email/id).'),
   multiple: z.boolean().optional().describe('Allow picking multiple values — the param value becomes an array and is written to the patch as-is.'),
   placeholder: z.string().optional().describe('Placeholder text.'),
-}).passthrough());
+
+  /**
+   * Cascade binding — the ONE key this close DECLARES rather than refuses
+   * (#18177, ruling batch #146 item 4 letter A).
+   *
+   * Shape and description mirror the single-record twin. ⚠️ That twin is
+   * `FieldSchema.dependsOn` (`data/field.zod.ts`), NOT `ActionParamSchema`,
+   * which declares no `dependsOn` at all: the single-record dialog reaches the
+   * key through the FIELD-BACKED route (`resolveActionParams` resolves the
+   * object's field definitions), which is the very route the bulk surface does
+   * not have. So one vocabulary, two doors — and on this door the key has to be
+   * written on the param itself.
+   *
+   * Live on BOTH widget families reachable from the bulk dialog, measured on
+   * the renderer rather than inferred from this schema:
+   *  - the OPTION family reads `field?.dependsOn` and gates/refreshes the
+   *    offered set through `useCascadingOptions` (`SelectField`,
+   *    `MultiSelectField`, `RadioField`, `CheckboxesField`);
+   *  - the reference-bearing PICKER family reads the same key off the same bag
+   *    as `cascadeMeta?.dependsOn` and lowers it into a hard candidate filter
+   *    (`LookupField`, and `UserField` through it).
+   *
+   * It reaches them because `bulkParamToField` does not destructure it out — it
+   * rides the `...extra` spread onto the field metadata. That was already true
+   * while this shape was open, which is why the accept could not be read as a
+   * licence and the key could not be retired either: an ablation removing it
+   * from the spread reddened 7 of 12 cases in objectui.
+   */
+  dependsOn: z.array(z.union([z.string(), strictObject({
+    surface: 'this dependsOn entry',
+    history:
+      'Until this shape was closed these were dropped silently — the entry still parsed, so a '
+      + 'mis-spelled binding left the picker ungated and unscoped.',
+    aliases: { name: 'field', fieldName: 'field', local: 'field', remote: 'param', remoteField: 'param', key: 'param' },
+  }, {
+    field: z.string(),
+    param: z.string().optional(),
+  })])).optional().describe("Declares that this param's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; {field,param} when the remote filter key differs — the {field,param} form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent. On a BULK param the record is the dialog's own in-progress param values — a bulk run holds a selection, not a row — so a binding names a SIBLING PARAM of the same def."),
+}));
 export type BulkActionParam = z.input<typeof BulkActionParamSchema>;
 
 /**

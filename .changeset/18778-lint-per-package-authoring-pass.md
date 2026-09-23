@@ -8,9 +8,12 @@
 `packages[]` entry with that package's body as the stack and the artifact's own
 `packages[]` as resolution context, since #16611; `os validate` joined it in
 #18677. `os lint` ran the union fold and stopped, so every finding that pass
-produces — "exactly the set the union could not see", in the build command's own
-words — was reported by the command that ships and invisible on the fastest of
-the three doors. All three now call the one shared pass.
+produces — in the build command's own words, the per-package findings no union
+finding already carried under the same rule, `where`, message and non-top-level
+position — was reported by the command that ships and invisible on the fastest
+of the three doors. That bound is deliberately narrower than everything the
+union run missed: two entries rendering the same `where` still collapse. All
+three now call the one shared pass.
 
 Measured on a two-package project whose union run is clean and whose per-package
 run is not (one package owns an object, a sibling package owns the view that

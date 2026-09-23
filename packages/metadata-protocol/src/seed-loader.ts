@@ -13,7 +13,7 @@ import type {
   SeedLoadResultParsed,
   Seed,
 } from '@objectstack/spec/data';
-import { SeedLoaderConfigSchema, isMultiValueField, referenceCarrierOf } from '@objectstack/spec/data';
+import { SeedLoaderConfigSchema, isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup } from '@objectstack/core';
@@ -697,19 +697,33 @@ export class SeedLoaderService implements ISeedLoaderService {
         const fields = objDef.fields as Record<string, any>;
         for (const [fieldName, fieldDef] of Object.entries(fields)) {
           if (fieldDef.type === 'lookup' || fieldDef.type === 'master_detail' || fieldDef.type === 'user') {
-            // [#18550] The carrier goes through the ONE arbiter, which also
+            // [#18550] The read goes through the ONE arbiter, which also
             // retires the `as string` cast this read used to carry — the cast
             // asserted exactly what the truthiness test had not checked, so an
             // object-valued carrier became a `targetObject` that matched no
             // name in `objectSet`, contributed no `dependsOn` edge, and was
             // then pushed onto `references` for resolution to make of what it
-            // could. ABSENCE is unchanged: `undefined` / `null` / `''` answer
-            // `undefined` and the field is skipped, which is what a relational
-            // field naming no target means. The type gate stays FIRST so the
-            // set of fields whose carrier is read here is byte-identical to
-            // before — a `text` field carrying a stray `reference` is still
-            // never read, and so still never refused.
-            const targetObject = referenceCarrierOf(fieldDef, 'SeedLoader.buildDependencyGraph');
+            // could. An unreadable carrier still REFUSES here: `referenceTargetOf`
+            // reads the carrier through `referenceCarrierOf` before it judges
+            // anything, so that throw is unchanged.
+            //
+            // [#19289] The arbiter is `referenceTargetOf`, ⛔ not
+            // `referenceCarrierOf`. This gate admits `user`, and for a `user`
+            // field the carrier is NOT the target: `IMPLICIT_REFERENCE_TARGETS`
+            // declares the target a CONSTANT OF THE TYPE (`sys_user`) and such
+            // metadata "fully specified, not under-specified". Reading the
+            // carrier made a spec-complete `{ type: 'user' }` field contribute no
+            // `dependsOn` edge and never reach `references`, so its natural key
+            // was written VERBATIM instead of resolved to a record id — the
+            // dangling reference this function's own docblock below names as the
+            // cause of broken parent joins, arrived at silently.
+            //
+            // ABSENCE keeps its meaning for the types that have no constant:
+            // a `lookup` / `master_detail` with no carrier still answers
+            // `undefined` and is still skipped, which is what a relational field
+            // naming no target means. The type gate stays FIRST, so a `text`
+            // field carrying a stray `reference` is still never read.
+            const targetObject = referenceTargetOf(fieldDef);
             if (!targetObject) continue;
 
             // Track dependency ordering only for objects within the graph

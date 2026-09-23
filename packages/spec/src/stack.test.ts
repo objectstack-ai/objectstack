@@ -1370,7 +1370,7 @@ describe('defineStack - Namespace Prefix Validation', () => {
 
   it('aggregates errors across multiple offending objects', () => {
     const config = {
-      manifest: { id: 'p', version: '1.0.0', type: 'app' as const, name: 'P', namespace: 'todo' },
+      manifest: { id: 'com.example.p', version: '1.0.0', type: 'app' as const, name: 'P', namespace: 'todo' },
       objects: [
         { name: 'task', label: 'T', fields: { t: { type: 'text' as const } } },
         { name: 'project', label: 'P', fields: { t: { type: 'text' as const } } },
@@ -1399,7 +1399,7 @@ describe('defineStack — at most one App per package (ADR-0019 D1/D3)', () => {
     label,
     navigation: [{ id: 'nav_tasks', type: 'object' as const, label: 'Tasks', objectName: 'demo_task' }],
   });
-  const manifest = { id: 'p', version: '1.0.0', type: 'app' as const, name: 'P', namespace: 'demo' };
+  const manifest = { id: 'com.example.p', version: '1.0.0', type: 'app' as const, name: 'P', namespace: 'demo' };
 
   it('accepts an app package with exactly one app', () => {
     expect(() =>
@@ -1424,7 +1424,7 @@ describe('defineStack — at most one App per package (ADR-0019 D1/D3)', () => {
   it('does not constrain non-app package types', () => {
     expect(() =>
       defineStack({
-        manifest: { id: 'p', version: '1.0.0', type: 'driver' as const, name: 'Driver', namespace: 'demo' },
+        manifest: { id: 'com.example.p', version: '1.0.0', type: 'driver' as const, name: 'Driver', namespace: 'demo' },
         objects: [obj],
         apps: [appNav('app_a', 'A'), appNav('app_b', 'B')],
       }),
@@ -1441,7 +1441,7 @@ describe('defineStack — at most one App per package (ADR-0019 D1/D3)', () => {
 // shape heard nothing unless they happened to run `os validate` (`os build`
 // was deaf too). Five conversions are live today, so this was a real gap.
 describe('defineStack — ADR-0087 D2 conversion notices', () => {
-  const manifest = { id: 'p', version: '1.0.0', type: 'app' as const, name: 'P', namespace: 'demo' };
+  const manifest = { id: 'com.example.p', version: '1.0.0', type: 'app' as const, name: 'P', namespace: 'demo' };
   const obj = { name: 'demo_task', label: 'Task', fields: { title: { type: 'text' as const } } };
 
   // A protocol-11 flow callout node type — `webhook` converts to `http`.

@@ -329,7 +329,7 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
  * schema fact that makes it unreachable, so "put the fallback back, just in
  * case" fails a test with the evidence attached rather than passing quietly.
  */
-const MANIFEST = { id: 'org_axis_probe', name: 'org_axis_probe', version: '1.0.0', type: 'app' } as const;
+const MANIFEST = { id: 'com.example.org-axis-probe', name: 'org_axis_probe', version: '1.0.0', type: 'app' } as const;
 
 /** The violating RLS policy shape, spelled for the object-level key that does not exist. */
 const ORG_WALKING_POLICY = { name: 'rollup', using: 'parent_organization_id = current_user.organization_id' };

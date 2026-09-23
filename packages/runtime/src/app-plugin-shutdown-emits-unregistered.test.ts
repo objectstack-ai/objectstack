@@ -48,7 +48,7 @@ const PROJECT: AppPluginProjectContext = {
     projectName: 'catalog-teardown',
 };
 
-const BUNDLE = { manifest: { id: 'demo_app', name: 'demo_app', label: 'Demo' } };
+const BUNDLE = { manifest: { id: 'com.example.demo-app', name: 'demo_app', label: 'Demo' } };
 
 /** Captures the catalog events AppPlugin puts on the kernel bus. */
 class CatalogRecorderPlugin implements Plugin {

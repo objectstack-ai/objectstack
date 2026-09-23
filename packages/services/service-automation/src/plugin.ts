@@ -10,7 +10,7 @@ import type {
     ResolvedConnectorAuth,
     ConnectorProviderContext,
 } from '@objectstack/spec/integration';
-import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
+import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
 import type { RunSummaryLogLevel } from './engine.js';
@@ -287,6 +287,9 @@ function connectorInstanceSignature(entry: {
     description?: unknown;
     icon?: unknown;
     type?: unknown;
+    retryConfig?: unknown;
+    connectionTimeoutMs?: unknown;
+    requestTimeoutMs?: unknown;
 }): string {
     return stableStringify({
         provider: entry.provider ?? null,
@@ -296,6 +299,13 @@ function connectorInstanceSignature(entry: {
         description: entry.description ?? null,
         icon: entry.icon ?? null,
         type: entry.type ?? null,
+        // The resilience policy is a materialization INPUT — the built-in HTTP
+        // providers bake it into the transport the bundle closes over — so an
+        // edit to it must re-materialize, exactly like a `providerConfig` edit.
+        // Omitting it here would leave the old policy serving until restart.
+        retryConfig: entry.retryConfig ?? null,
+        connectionTimeoutMs: entry.connectionTimeoutMs ?? null,
+        requestTimeoutMs: entry.requestTimeoutMs ?? null,
     });
 }
 
@@ -319,6 +329,15 @@ interface DeclaredConnectorItem {
     provider?: string;
     providerConfig?: Record<string, unknown>;
     auth?: ConnectorInstanceAuth;
+    /**
+     * The entry's declared resilience policy, raw as authored — defaults are
+     * NOT applied here (see the note above), so `retryConfig` is parsed on the
+     * way onto `ConnectorProviderContext` and the two timeouts are carried
+     * verbatim, `undefined` standing for "the author stated nothing".
+     */
+    retryConfig?: unknown;
+    connectionTimeoutMs?: number;
+    requestTimeoutMs?: number;
 }
 
 /**
@@ -1532,6 +1551,28 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
 
+            // The registry hands back RAW authored values (see
+            // `DeclaredConnectorItem`), so the schema's defaults are applied
+            // HERE — `ConnectorProviderContext.retryConfig` is documented as
+            // resolved, and a factory reading `maxAttempts` must not have to
+            // know what the default was. An entry that cannot parse fails the
+            // same named way an unresolvable credential does, rather than
+            // materializing a connector whose declared policy silently does
+            // nothing — the exact failure this key's implementation removes.
+            let retryConfig: ConnectorProviderContext['retryConfig'];
+            if (entry.retryConfig !== undefined) {
+                const parsed = RetryConfigSchema.safeParse(entry.retryConfig);
+                if (!parsed.success) {
+                    fail(
+                        `[Automation] connector instance '${name}' (provider '${provider}'): retryConfig is not a valid ` +
+                            `connector retry policy (integration/connector.zod.ts RetryConfigSchema).`,
+                        parsed.error,
+                    );
+                    continue;
+                }
+                retryConfig = parsed.data;
+            }
+
             const providerCtx: ConnectorProviderContext = {
                 name,
                 label: entry.label ?? name,
@@ -1540,6 +1581,13 @@ export class AutomationServicePlugin implements Plugin {
                 type: typeof entry.type === 'string' ? entry.type : 'api',
                 providerConfig: entry.providerConfig ?? {},
                 auth,
+                // ADR-0049 · #18975 — the declared resilience policy reaches the
+                // factory. The built-in HTTP providers hand it to
+                // `connectorFetchOptions()` → `resilientFetch()`; a custom
+                // provider doing its own I/O reads it here.
+                retryConfig,
+                connectionTimeoutMs: entry.connectionTimeoutMs,
+                requestTimeoutMs: entry.requestTimeoutMs,
                 // #3016 — lets a factory dereference relative file refs (e.g.
                 // openapi's `providerConfig.spec: './billing-openapi.json'`),
                 // confined to the stack/package root.

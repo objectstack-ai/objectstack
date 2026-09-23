@@ -41,6 +41,16 @@ export const LIVENESS_EXPERIMENTAL_PROPERTY = 'liveness-experimental-property';
 export const LIVENESS_PLANNED_PROPERTY = 'liveness-planned-property';
 export const LIVENESS_LIVE_ELSEWHERE_PROPERTY = 'liveness-live-elsewhere-property';
 
+/**
+ * `#19276`. The one finding this rule emits about ITSELF rather than about an
+ * authored property: a per-type ledger could not be READ, so every author
+ * warning for that metadata type is switched off and no other finding about
+ * that type means anything. It is deliberately not a fifth verdict — the four
+ * above grade a property the ledger DID classify; this one says the
+ * classification never arrived.
+ */
+export const LIVENESS_LEDGER_UNREADABLE = 'liveness-ledger-unreadable';
+
 type AnyRec = Record<string, unknown>;
 
 export interface LedgerEntry {
@@ -58,8 +68,16 @@ function isRecord(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Locate `@objectstack/spec`'s shipped `liveness/` dir (workspace src or published files). */
-function resolveLivenessDir(): string | null {
+/**
+ * Locate `@objectstack/spec`'s shipped `liveness/` dir (workspace src or
+ * published files).
+ *
+ * Exported as part of the package-internal walk seam (`#19268`, see the block
+ * below `walkStack`): a test that drives the rule against a MODIFIED copy of
+ * the shipped ledgers has to start from the same directory the rule itself
+ * reads, resolved the same way, or it is testing a directory nothing uses.
+ */
+export function resolveLivenessDir(): string | null {
   try {
     const require = createRequire(import.meta.url);
     const pkgJson = require.resolve('@objectstack/spec/package.json');
@@ -70,18 +88,60 @@ function resolveLivenessDir(): string | null {
   }
 }
 
+/**
+ * Why a type's warn map came back empty, when the reason is NOT the ordinary
+ * one ("this type's ledger warns on nothing") — `#19276`.
+ *
+ * - `missing` — no `<type>.json` under the resolved liveness directory at all.
+ * - `unreadable` — the file is there but does not parse as a ledger: broken
+ *   JSON, or a document whose top level is not a record carrying a `props`
+ *   record.
+ */
+export type LedgerFault = 'missing' | 'unreadable';
+
+/**
+ * One type's warn map, plus the reason it is empty when that reason is a
+ * FAILED READ rather than a reading (`#19276`).
+ *
+ * The distinction is the whole point. An empty map is the most consequential
+ * value in this module — it silences every author warning for that metadata
+ * type — and it used to be returned identically for "the ledger classifies
+ * nothing as warn-worthy" and for "there was no ledger to classify from". So
+ * losing or corrupting ONE file under the shipped `liveness/` directory
+ * switched a whole type's author-side enforcement off with nothing anywhere
+ * saying so, indistinguishable from that type simply having no warnings.
+ *
+ * The contrast that makes it a defect rather than a design is one frame up:
+ * the DIRECTORY-level failure (`resolveLivenessDir()` returning `null`) is
+ * loud by construction — the whole rule returns `[]` and every test that
+ * depends on it goes red. Loud by directory, silent by file. `fault` is what
+ * closes that asymmetry; {@link lintLivenessProperties} reports it once.
+ */
+interface WarnMapLoad {
+  map: WarnMap;
+  /** Absent means the map is a READING; present means the ledger never arrived. */
+  fault?: LedgerFault;
+}
+
 /** Build the warn-only lookup for one type, flattening one level of `children`. */
-function loadWarnMap(dir: string, type: string): WarnMap {
+function loadWarnMap(dir: string, type: string): WarnMapLoad {
   const map: WarnMap = new Map();
   const file = join(dir, `${type}.json`);
-  if (!existsSync(file)) return map;
-  let ledger: { props?: Record<string, LedgerEntry> };
+  if (!existsSync(file)) return { map, fault: 'missing' };
+  let ledger: unknown;
   try {
     ledger = JSON.parse(readFileSync(file, 'utf8'));
   } catch {
-    return map;
+    return { map, fault: 'unreadable' };
   }
-  const props = ledger.props || {};
+  // A document that PARSES but is not a ledger is the same failed read, and
+  // reading `.props` off a parsed `null` would throw — breaking this rule's
+  // "never throws" contract through the one input an author cannot influence:
+  // our own shipped data. Measured across all 39 shipped ledgers, every one
+  // carries a `props` record, so this branch describes a corrupt file and
+  // never a legitimately empty one (`{"props": {}}` is a reading, not a fault).
+  if (!isRecord(ledger) || !isRecord(ledger.props)) return { map, fault: 'unreadable' };
+  const props = ledger.props as Record<string, LedgerEntry>;
   for (const [key, entry] of Object.entries(props)) {
     if (entry?.children) {
       for (const [ck, centry] of Object.entries(entry.children)) {
@@ -90,7 +150,7 @@ function loadWarnMap(dir: string, type: string): WarnMap {
     }
     if (shouldWarn(entry)) map.set(key, entry);
   }
-  return map;
+  return { map };
 }
 
 /** An entry warns when explicitly opted in, OR when it's experimental (a declared-but-unenforced guarantee). */
@@ -290,9 +350,16 @@ export function shippedLedgerStatuses(): ReadonlySet<string> {
  *
  * Keys are the ledger's own property paths, `children` flattened one level as
  * `parent.child` — the shape `checkItem` resolves. Unreadable or absent ledger
- * ⇒ the empty set, which is also the state in which `lintLivenessProperties`
- * warns on nothing: the two sides go quiet together rather than one of them
- * going quiet alone.
+ * ⇒ the empty set, which is also the map `lintLivenessProperties` walks with:
+ * the two sides still go quiet TOGETHER rather than one of them going quiet
+ * alone, which is the invariant this export exists for.
+ *
+ * What changed with `#19276` is that the quiet is no longer unannounced. A
+ * decision procedure returning a set cannot report a failed read, so this one
+ * still answers "nothing warns" — but `lintLivenessProperties` now raises a
+ * `liveness-ledger-unreadable` finding for the same ledger, and `os lint` runs
+ * both in one pass, so the run says once that the ledger never arrived instead
+ * of both halves agreeing in silence.
  *
  * Deliberately NOT memoized, for the same reason `lintLivenessProperties`
  * re-reads on every call: a cached verdict outlives the ledger edit that
@@ -302,7 +369,7 @@ export function shippedLedgerStatuses(): ReadonlySet<string> {
 export function authorWarnedProperties(type: string): ReadonlySet<string> {
   const dir = resolveLivenessDir();
   if (!dir) return new Set<string>();
-  return new Set<string>(loadWarnMap(dir, type).keys());
+  return new Set<string>(loadWarnMap(dir, type).map.keys());
 }
 
 /** Check one metadata item's set properties against its type's warn-map. */
@@ -467,23 +534,20 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
 ];
 
 /**
- * Lint the compiled stack for authored properties the liveness ledger flags as
- * misleading. Advisory only — returns findings, never throws. Covers every
- * governed metadata type: objects (incl. `enable.*`) and their fields walk
- * bespoke nesting, and translation bundles walk their locale entries (#11288);
- * the remaining types are flat stack collections. Container properties fan out
- * over arrays (each flow node, each dataset measure). The
- * mechanism stays ledger-driven — coverage grows by marking more entries
- * `authorWarn` rather than touching this code.
+ * The walk itself: every governed metadata type checked against whatever warn
+ * map `warnMapOf` answers with, findings appended in walk order.
+ *
+ * Split out from ledger RESOLUTION so the walk can be driven from ledgers the
+ * caller controls (`#19268` — see the seam block below). Every governed type is
+ * asked for exactly once per call whatever the stack holds, which is also what
+ * lets the seam report a fault for a type whose collection the stack never
+ * carries.
  */
-export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
-  const dir = resolveLivenessDir();
-  if (!dir) return [];
-
+function walkStack(stack: AnyRec, warnMapOf: (type: string) => WarnMap): LivenessLintFinding[] {
   const findings: LivenessLintFinding[] = [];
 
-  const objectWarn = loadWarnMap(dir, 'object');
-  const fieldWarn = loadWarnMap(dir, 'field');
+  const objectWarn = warnMapOf('object');
+  const fieldWarn = warnMapOf('field');
   for (const obj of recordsOf(stack.objects)) {
     // Malformed collection item — same "never throws" contract as the flat
     // TYPE_COLLECTIONS loop and the translation bundle walk below (#11385).
@@ -516,7 +580,7 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   // this rule is `surfaces: CLI_ONLY` (`authoring-rules.ts`), so it never runs
   // at the runtime publish gate either. The two doors share the group
   // vocabulary, not the container; only the file-authored one is lintable.
-  const translationWarn = loadWarnMap(dir, 'translation');
+  const translationWarn = warnMapOf('translation');
   if (translationWarn.size > 0) {
     const bundles = recordsOf(stack.translations);
     for (let i = 0; i < bundles.length; i++) {
@@ -533,7 +597,7 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   }
 
   for (const { type, key } of TYPE_COLLECTIONS) {
-    const warnMap = loadWarnMap(dir, type);
+    const warnMap = warnMapOf(type);
     if (warnMap.size === 0) continue;
     for (const item of recordsOf(stack[key])) {
       // Malformed collection item — "never throws" contract (#11385).
@@ -547,4 +611,107 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   }
 
   return findings;
+}
+
+/** The cause half of a ledger-fault message, per {@link LedgerFault}. */
+const LEDGER_FAULT_CAUSE: Record<LedgerFault, string> = {
+  missing: 'no ledger file was found for it',
+  unreadable: 'its ledger file does not parse as a ledger',
+};
+
+/**
+ * One finding per type whose ledger never arrived (`#19276`) — reported ONCE
+ * per run, not once per authored item: the subject is the ledger, and an
+ * unreadable ledger is one fact however many objects the stack carries.
+ */
+function ledgerFaultFindings(faults: ReadonlyMap<string, LedgerFault>): LivenessLintFinding[] {
+  return [...faults].map(([type, fault]) => ({
+    where: `liveness ledger '${type}'`,
+    message:
+      `every author warning for \`${type}\` metadata is switched off: ${LEDGER_FAULT_CAUSE[fault]} ` +
+      `(expected \`${type}.json\` beside the other liveness ledgers \`@objectstack/spec\` ships).`,
+    hint:
+      'This is a packaging fault in the platform, not an authoring error: nothing in the metadata ' +
+      'being linted caused it, and this rule’s silence about this type means nothing until it is ' +
+      'fixed. Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+    rule: LIVENESS_LEDGER_UNREADABLE,
+  }));
+}
+
+/**
+ * ── Walk seam (#19268 / #19276). Package-internal: NOT part of the published
+ *    surface, the same posture as the test seam below `getNested` — exported
+ *    from the MODULE only. `src/index.ts` re-exports neither this nor
+ *    `resolveLivenessDir`, and this package's `exports` map publishes exactly
+ *    two subpaths (`.` → `dist/index.js`, `./runtime` → `dist/runtime.js`, both
+ *    bundled by tsup from those two entries), so no consumer can reach either
+ *    symbol and neither appears in the built `.d.ts`. That is scoped to these
+ *    two symbols on purpose: this change DOES add one published name, the
+ *    `LIVENESS_LEDGER_UNREADABLE` rule id, which the barrel re-exports
+ *    deliberately (#5648 — a rule id no barrel carries is unreachable).
+ *
+ * The whole rule, against a ledger directory the CALLER supplies.
+ *
+ * WHY THE SEAM IS A DIRECTORY AND NOT A READY-MADE WARN MAP. Two defects in
+ * this file share one shape — an empty warn map silently kills a walk — and
+ * they need fixtures a warn-map seam cannot both give:
+ *
+ *   - `#19268`: the field walk sits behind `if (fieldWarn.size > 0)`, so when
+ *     `field.json`'s last `authorWarn` row correctly flipped `live` (#19187)
+ *     the loop stopped executing altogether and the `if (!isRecord(field))
+ *     continue` guard #11385 was filed for became unreachable THROUGH THE
+ *     PUBLIC FUNCTION — with nothing to re-subject it to, because the field
+ *     walk reads `field.json` and nothing else. That is the third time a
+ *     correct ledger flip deleted this file's coverage (#7079, the array
+ *     fan-out seam above, now this), so the cure is that seam's: give the walk a
+ *     subject no verdict can move. `checkItemAgainstWarnMap` cannot be that
+ *     subject here — it takes one ITEM, and what #11385 guards is the walk
+ *     that finds the items.
+ *   - `#19276`: a missing or corrupt per-type ledger must produce one loud
+ *     report. That fault is born inside `loadWarnMap`, so a seam accepting
+ *     ready-made warn maps would bypass the code under test. A directory is
+ *     what a ledger file can be missing FROM.
+ *
+ * Both are driven the same way: copy the shipped ledger directory, change ONE
+ * file in the copy, run the real rule against it. The cost is honest and
+ * bounded, exactly as for the array fan-out seam above: assertions made through it
+ * say nothing about what the SHIPPED ledgers classify — that stays the job of
+ * every ledger-driven assertion in the test file.
+ */
+export function lintLivenessPropertiesFromLedgerDir(dir: string, stack: AnyRec): LivenessLintFinding[] {
+  const maps = new Map<string, WarnMap>();
+  const faults = new Map<string, LedgerFault>();
+  const warnMapOf = (type: string): WarnMap => {
+    const cached = maps.get(type);
+    if (cached) return cached;
+    const { map, fault } = loadWarnMap(dir, type);
+    maps.set(type, map);
+    if (fault) faults.set(type, fault);
+    return map;
+  };
+  const findings = walkStack(stack, warnMapOf);
+  // Faults first. They state why the rest of the list may be short, so a reader
+  // who stops after one line has read the load-bearing one.
+  return [...ledgerFaultFindings(faults), ...findings];
+}
+
+/**
+ * Lint the compiled stack for authored properties the liveness ledger flags as
+ * misleading. Advisory only — returns findings, never throws. Covers every
+ * governed metadata type: objects (incl. `enable.*`) and their fields walk
+ * bespoke nesting, and translation bundles walk their locale entries (#11288);
+ * the remaining types are flat stack collections. Container properties fan out
+ * over arrays (each flow node, each dataset measure). The
+ * mechanism stays ledger-driven — coverage grows by marking more entries
+ * `authorWarn` rather than touching this code.
+ *
+ * One finding it raises is not about the metadata at all: if a per-type ledger
+ * is missing or unparseable, that type's warnings are all switched off, and
+ * `liveness-ledger-unreadable` says so once (`#19276`) instead of leaving the
+ * silence to look like a clean bill of health.
+ */
+export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
+  const dir = resolveLivenessDir();
+  if (!dir) return [];
+  return lintLivenessPropertiesFromLedgerDir(dir, stack);
 }

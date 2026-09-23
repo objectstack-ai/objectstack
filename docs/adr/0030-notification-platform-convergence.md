@@ -1,6 +1,6 @@
 # ADR-0030 — Notification Platform Convergence (single ingress, layered pipeline)
 
-**Status**: Accepted (2026-06-01) — **P0–P3b2 shipped** (P3b-2 digest collapse landed); cross-repo objectui cut-over remains. See [§ Implementation status & remaining work](#implementation-status--remaining-work).
+**Status**: Accepted (2026-06-01) — **P0–P3b2 shipped** (P3b-2 digest collapse landed); cross-repo objectui cut-over remains. See [§ Implementation status & remaining work](#implementation-status--remaining-work). · **Amended** (2026-09-20, #16194 — P0's idempotent data migration `migrateSysNotificationToEvent` is **retired**: it had zero production callers and no way to be run, and both ways of giving it one — an `os migrate` sub-command and a boot-time invoker — were refused. Pre-ADR-0030 `sys_notification` rows are therefore **not** carried by the platform on this line. ⛔ Nothing else moves: single ingress, the layered object model and the remaining objectui cut-over read exactly as accepted.)
 **Supersedes / refines**: [ADR-0012 — Notification Platform](./0012-notification-platform.md) (Draft)
 **Related**: [ADR-0019 — Approval as a Flow Node](./0019-approval-as-flow-node.md), [ADR-0022 — Connectors vs Messaging Channels](./0022-connectors-vs-messaging-channels.md)
 **Build spec**: [docs/design/notification-platform-convergence.md](../design/notification-platform-convergence.md)
@@ -102,9 +102,14 @@ configurable daily send-hour (windows flush at local midnight / Monday 00:00).
   `(notification_id, user_id, channel)` (the framework has the receipt object +
   `delivered` writes, but nothing flips it to `read` yet). Repoint the SDK
   `client.notifications.*` helpers to the receipt.
-- Run `migrateSysNotificationToEvent` during the cut-over so historical bell rows
-  carry over. **Sequence:** ship back-end → run migration → flip UI (runbook in the
-  handoff doc).
+- ~~Run `migrateSysNotificationToEvent` during the cut-over so historical bell rows
+  carry over.~~ **Withdrawn (#16194)** — that runner is retired, so pre-ADR-0030
+  `sys_notification` rows are **not** carried by the platform on this line: after the
+  cut-over the bell shows rows emitted from the new pipeline onward, and older
+  per-user inbox rows stay where they are, unread by the new UI. The reasoning, the
+  unmeasured-deployment caveat and the reversal path are in the handoff doc's
+  [Data migration — RETIRED](../handoff/adr-0030-notification-convergence.md#-data-migration--retired-there-is-none)
+  tombstone. **Sequence:** ship back-end → flip UI (runbook in the handoff doc).
 
 **3. Incremental channels & low-code surface (same `MessagingChannel` seam — each gets retry/outbox for free).**
 - **push** (`sys_user_device` + APNs/FCM), **webhook** (reuse the `plugin-webhooks`

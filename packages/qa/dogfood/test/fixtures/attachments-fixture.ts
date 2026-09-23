@@ -131,7 +131,7 @@ export function attachmentsFixtureSecurity(): SecurityPlugin {
 
 export const attachmentsFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.attachments_fixture',
+    id: 'com.dogfood.attachments-fixture',
     namespace: 'att',
     version: '0.0.0',
     type: 'app',

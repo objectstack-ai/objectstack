@@ -1489,7 +1489,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
  * the fallback back, just in case" fails a test with the evidence attached
  * rather than passing quietly.
  */
-const MANIFEST = { id: 'security_probe', name: 'security_probe', version: '1.0.0', type: 'app' } as const;
+const MANIFEST = { id: 'com.example.security-probe', name: 'security_probe', version: '1.0.0', type: 'app' } as const;
 
 /** Does the schema refuse any KEY in this stack (as opposed to any VALUE)? */
 function unrecognizedKeysIn(stack: unknown): string[] {

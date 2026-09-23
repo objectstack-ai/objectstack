@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN } from '../kernel/version-grammar';
 
 /**
  * Package Version Protocol
@@ -143,7 +144,7 @@ export const PackageVersionSchema = lazySchema(() => z.object({
   /** Semantic version string (e.g. `1.2.3`, `2.0.0-beta.1`). */
   version: z
     .string()
-    .regex(/^\d+\.\d+\.\d+(-[a-z0-9.-]+)?(\+[a-z0-9.-]+)?$/)
+    .regex(SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN)
     .describe('Semantic version string'),
 
   /** Lifecycle status. Immutable fields freeze on transition to "published". */

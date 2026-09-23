@@ -53,8 +53,10 @@
  * parse-time one the same author sees through the other door, so the hint is
  * resolved from `ObjectPermissionSchema`'s own shape at call time. An
  * unresolvable prescription yields NO finding rather than a hint this module
- * invented — the same posture `lintLivenessProperties` takes to an unreadable
- * ledger, and the reason this module's test carries an anti-vacuity guard.
+ * invented — the same refusal to invent that `lintLivenessProperties` applies
+ * to an unreadable ledger (which since #19276 it also REPORTS once, rather than
+ * warning from a map it never read), and the reason this module's test carries
+ * an anti-vacuity guard.
  */
 
 import { ObjectPermissionSchema } from '@objectstack/spec/security';

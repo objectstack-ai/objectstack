@@ -1,6 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "cli",
+  "axis": "devpath",
   "title": "CLI — os dev/build/migrate/verify/test boot, load, execution & exit-code contracts, scaffold first-run, flag/command error UX",
   "items": [
     {

@@ -5,6 +5,7 @@ import type { Logger } from '@objectstack/spec/contracts';
 import { parseSignature } from './security/plugin-artifact-signature.js';
 import { serviceNotRegisteredError } from './service-not-registered.js';
 import { assertPluginContract } from './plugin-contract.js';
+import { SEMVER_SHAPED_VERSION_PATTERN } from '@objectstack/spec/kernel';
 
 /**
  * Service Lifecycle Types
@@ -484,7 +485,7 @@ export class PluginLoader {
      * `/^\d+\.\d+\.\d+$/` admitted it too, because `\d+` always has — and
      * #16365's ruling (widen, never narrow: nothing that loads today stops
      * loading) froze the accept set. So #17070 moved the CLAIM instead of the
-     * grammar: the regex below is byte-for-byte what it has been, and this
+     * grammar: the grammar below is byte-for-byte what it has been, and this
      * method's name and this docblock are what changed.
      *
      * ⚠️ Need real SemVer 2.0.0 conformance — ordering, precedence, or a
@@ -492,14 +493,16 @@ export class PluginLoader {
      * it. `dependency-resolver.ts` parses and COMPARES versions and is the
      * module to extend.
      *
-     * ⭐ This regex is `PluginSchema.version`'s spelling character for character
-     * (`@objectstack/spec`, `kernel/plugin.zod.ts`) — the convergence #16365
-     * created, and a property `plugin-loader.test.ts` asserts rather than
-     * narrates. Change one spelling and you must change both.
+     * ⭐ This predicate and `PluginSchema.version` (`@objectstack/spec`,
+     * `kernel/plugin.zod.ts`) reference ONE declaration — the exported
+     * `SEMVER_SHAPED_VERSION_PATTERN` (`@objectstack/spec/kernel`) — so the
+     * convergence #16365 created can no longer be undone by editing one side.
+     * Each used to spell the grammar out and the two were held equal character
+     * for character by hand; `plugin-loader.test.ts` asserts the resulting
+     * accept set rather than narrating it.
      */
     private isSemverShapedVersion(version: string): boolean {
-        const semverRegex = /^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/;
-        return semverRegex.test(version);
+        return SEMVER_SHAPED_VERSION_PATTERN.test(version);
     }
 
     private async verifyPluginSignature(plugin: PluginMetadata): Promise<void> {

@@ -1,21 +1,20 @@
 # 车道岗位说明:domain:skills
 
-见 SKILL.md 〈座位贴协议〉;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
+见 seat-lifecycle.md;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
 
 ## 范围
 
 - 两个技能根:`.claude/skills/**`(含 pm-dispatch 本体)与 `skills/**`(发布目录,恒英文)。
 - PM 循环工具与指令架构文件的归属见 SKILL.md 域车道表 `domain:skills` 行,⛔ 不另抄。
 - 受管面治理执行文件:`.github/CODEOWNERS` 路由半边 + SUBJECT 是受管面本身的门禁/审计脚本。
-- 全量判据在 SKILL.md 域车道表;受管面定义与两层分档见 SKILL.md 〈复核〉,⛔ 不另抄。
+- 全量判据在 SKILL.md 域车道表;受管面定义与两层分档见 SKILL.md 〈路径分叉〉,⛔ 不另抄。
 - QA 管理循环执行归本席;qa-run 记录是协议载体不是工作。
 - 契约复核归派发席席内、决裁勤务归项目总监席(`director.md`);本席保留 skill 与治理文本。
 
 ## 常设承诺
 
 - 四维分析先于派发与复核。
-- 规则层受管 PR 恒 draft 等维护者的字;flip 或 arm 前跑 `check-governed-merges --test` 带路径。
-- 轮报的受管合并审计清单带 `--since` 四仓实跑,⛔ 不凭记忆汇总。
+- Tier H 受管 PR 恒 draft 等维护者的字;flip 或 arm 前跑 `check-governed-merges --test` 带路径。
 - 档位从 `--tier` 推导引用;pm-dispatch 根恒契约复审档;条款②闸门照现行。
 - 额度耗尽豁免的地板是默认判断档,⛔ 不再往下。
 - 棘轮逐行付账,⛔ re-wrap 筹行;砍点逐条核幸存,被砍内容若在别处无家,砍掉就是丢规则。

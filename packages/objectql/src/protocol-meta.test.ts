@@ -631,7 +631,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 expect(caught).toBeDefined();
                 expect(caught.code).toBe('INVALID_METADATA');
                 expect(caught.status).toBe(422);
-                expect(caught.message).toMatch(/invalid_metadata/);
+                // `code` and `status` above ARE the machine assertion; what the
+                // message owes is the human sentence, which is asserted as prose.
+                expect(caught.message).toMatch(/failed spec validation/);
                 expect(Array.isArray(caught.issues)).toBe(true);
                 expect(mockEngine.insert).not.toHaveBeenCalled();
             });

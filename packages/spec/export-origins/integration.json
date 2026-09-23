@@ -15,6 +15,7 @@
     "ConnectorConflictResolution": "src/integration/connector.zod.ts#ConnectorConflictResolution (type)",
     "ConnectorConflictResolutionSchema": "src/integration/connector.zod.ts#ConnectorConflictResolutionSchema (const)",
     "ConnectorDescriptor": "src/integration/connector-descriptor.ts#ConnectorDescriptor (interface)",
+    "ConnectorFetchPolicy": "src/integration/connector-fetch-policy.ts#ConnectorFetchPolicy (interface)",
     "ConnectorFieldMapping": "src/integration/connector.zod.ts#ConnectorFieldMapping (type)",
     "ConnectorFieldMappingParsed": "src/integration/connector.zod.ts#ConnectorFieldMappingParsed (type)",
     "ConnectorFieldMappingSchema": "src/integration/connector.zod.ts#ConnectorFieldMappingSchema (const)",
@@ -57,6 +58,7 @@
     "HealthCheckConfig": "src/integration/connector.zod.ts#HealthCheckConfig (type)",
     "HealthCheckConfigParsed": "src/integration/connector.zod.ts#HealthCheckConfigParsed (type)",
     "HealthCheckConfigSchema": "src/integration/connector.zod.ts#HealthCheckConfigSchema (const)",
+    "ResilientFetchOptions": "src/shared/resilient-fetch.ts#ResilientFetchOptions (interface)",
     "ResolvedConnectorAuth": "src/shared/connector-auth.zod.ts#ResolvedConnectorAuth (type)",
     "RetryConfig": "src/integration/connector.zod.ts#RetryConfig (type)",
     "RetryConfigParsed": "src/integration/connector.zod.ts#RetryConfigParsed (type)",
@@ -70,6 +72,7 @@
     "WebhookEventSchema": "src/integration/connector.zod.ts#WebhookEventSchema (const)",
     "WebhookSignatureAlgorithm": "src/integration/connector.zod.ts#WebhookSignatureAlgorithm (type)",
     "WebhookSignatureAlgorithmSchema": "src/integration/connector.zod.ts#WebhookSignatureAlgorithmSchema (const)",
+    "connectorFetchOptions": "src/integration/connector-fetch-policy.ts#connectorFetchOptions (function)",
     "defineConnector": "src/integration/connector.zod.ts#defineConnector (function)",
     "isConnectorUpstreamUnavailable": "src/integration/connector-provider-errors.ts#isConnectorUpstreamUnavailable (function)"
   }

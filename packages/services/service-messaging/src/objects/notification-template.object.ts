@@ -62,7 +62,13 @@ export const NotificationTemplate = ObjectSchema.create({
             defaultValue: 'en',
             // [#12978] Sibling-declaration bound (#11374 route A): the same
             // BCP-47 tag family `sys_email_template.locale` stores, bounded 16
-            // there; both resolve a template by best-matching locale.
+            // there. The BOUND is shared; the RESOLUTION is not, and neither
+            // side picks a "best-matching" locale. This object is loaded by
+            // `NotificationTemplateStore` on `(topic, channel, locale)` and
+            // walks a fixed candidate list — the named tag, then its primary
+            // subtag (`zh-CN` -> `zh`), then `DEFAULT_LOCALE` ('en').
+            // `sys_email_template` matches `(name, locale)` EXACTLY, folds no
+            // subtag at all, and retries the single literal rung `en-US`.
             maxLength: 16,
             description: "BCP-47 locale, e.g. 'en' / 'en-US' / 'zh-CN'.",
         }),

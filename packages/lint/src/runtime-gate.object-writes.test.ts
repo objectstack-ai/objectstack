@@ -130,6 +130,16 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateReferenceIntegrity',
       'lintAutonumberFormats',
       'validateSecurityPosture', // #8310 — at this door before #4716
+      // [#19370] `security-role-word` joins this door, and NOT silently —
+      // which is the distinction this pin exists to draw. The maintainer
+      // ruling (batch #203 item 3, letter B) moved the vocabulary freeze from
+      // `CLI_ONLY` to `CLI_AND_RUNTIME` declaring the write type of all six
+      // collections it judges, `object` among them, so an object whose name,
+      // a field, an action or a field-group header carries the reserved word
+      // `role` is refused at the write door and not only by `os lint`.
+      // Written in here the same way #15254 wrote `validateReferenceIntegrity`
+      // in: a ruled join is a line in this list, a drift is a red test.
+      'validateSecurityRoleWord',
       'validateRuleCompilability',
       'validateRuleSchemaFormats',
     ]);
@@ -145,8 +155,39 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       expect(entry, `${name} left AUTHORING_RULES — re-point this fence or retire it`).toBeDefined();
       expect(entry!.tier, `${name} changed tier — this fence pins the ADVISORY six; a severity `
         + `change needs its own PR and re-opens the crossing question for the rule`).toBe('advisory');
-      expect((entry!.surfaceReason ?? '').length, `${name} sits off the runtime surface with no `
-        + `substantive reason`).toBeGreaterThanOrEqual(40);
+      // [#19542] The fence is about the OBJECT door, and until this card every
+      // fenced rule happened to be off the runtime surface ENTIRELY, so "is
+      // there a substantive `surfaceReason`?" was a faithful proxy for it.
+      // `lintLivenessProperties` crossed for `email_template` / `mapping` and
+      // broke the proxy without touching the thing it stood for — it owes no
+      // `surfaceReason` once it is on the surface, and the registry's own
+      // guard is what asks for one on a rule that is off it.
+      //
+      // So the fence now asks the NARROWER question, directly. ⚠️ Read that as
+      // what it is, because an earlier draft of this comment called it «the
+      // stronger arm» and that was false: `runtimeAuthoringRulesFor` IS
+      // `surfaces ∋ 'runtime-publish' ∧ runtimeTypes ∋ 'object'`, so the
+      // crossed arm is IMPLIED by the `atDoor.has(name) === false` assertion
+      // above and adds no discriminating power of its own. Against the clause
+      // it replaces it is strictly WEAKER: `surfaceReason ≥ 40`, with the
+      // wiring guard behind it, meant a fenced advisory rule could not sit on
+      // the runtime surface at all without prose; now one may cross to `view`,
+      // `permission` or `page` with no second pin.
+      //
+      // That relaxation is deliberate and is faithful to #4716's remit, which
+      // is the OBJECT door and nothing else — an object crossing is still
+      // refused here, pinned by ablation. What is NOT claimed is that the new
+      // arm guards anything the old one did beyond that door. A fenced rule
+      // crossing to some other door is a decision for whoever makes it; this
+      // fence no longer asks about it, and says so rather than implying it.
+      if (entry!.surfaces.includes('runtime-publish')) {
+        expect(entry!.runtimeTypes ?? [], `${name} is on the runtime surface AND declares `
+          + `'object' — the #4716 adjudication fenced the advisory tier out of THIS door; `
+          + `crossing it is a UX/volume decision with its own card`).not.toContain('object');
+      } else {
+        expect((entry!.surfaceReason ?? '').length, `${name} sits off the runtime surface with no `
+          + `substantive reason`).toBeGreaterThanOrEqual(40);
+      }
     }
     // And the five crossed rules really are gating tier — the exemption's
     // arithmetic (refusal risk lives only in `error`-capable rules) holds
@@ -356,6 +397,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateReferenceIntegrity', // [#15254]
       'lintAutonumberFormats',
       'validateSecurityPosture',
+      'validateSecurityRoleWord', // [#19370] — see the roster pin above
       'validateRuleCompilability',
       'validateRuleSchemaFormats',
     ]);

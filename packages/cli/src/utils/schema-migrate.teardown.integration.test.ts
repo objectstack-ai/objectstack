@@ -53,7 +53,7 @@ describe('[#4747] bootSchemaStack teardown disarms the ADR-0057 sweep', () => {
       join(dir, 'dist', 'objectstack.json'),
       JSON.stringify({
         // #8687: manifest fields under `manifest:` — the flat spelling is refused.
-        manifest: { id: 'teardown_smoke', name: 'Teardown Smoke', version: '0.0.0', type: 'app' },
+        manifest: { id: 'com.example.teardown-smoke', name: 'Teardown Smoke', version: '0.0.0', type: 'app' },
         objects: [
           {
             name: 'td_note',

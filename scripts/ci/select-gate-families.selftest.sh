@@ -13,6 +13,13 @@
 # branches around them: empty diff, unresolvable base, structural change,
 # unspellable path, an event that is not scoped.
 #
+# Since #19498 the same section covers the four families that ruling added --
+# entry_guard, declared_population_live, bare_root_worklist and
+# self_test_workflow_commands -- and the cases below pin the NARROWED
+# pm_dispatch_gates read-set: the tree shape PR #19314 landed (a spec source
+# edit, an added test, an added changeset) must skip every tooling self-test,
+# while the tool's own inputs must still run them.
+#
 # The last section reads the REAL lint.yml and pins the YAML half of the
 # contract: the selector step exists under the id the `if:` lines name, every
 # scoped step spells `!= 'skip'` (an absent output runs the step), and the set
@@ -50,7 +57,7 @@ git_q() {
   git -c user.name=selftest -c user.email=selftest@example.invalid -c commit.gpgsign=false "$@"
 }
 
-ALL='pm_dispatch_gates query_options_erasure slot_lookup verify_lock comment_mask_corpus'
+ALL='slot_lookup query_options_erasure entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock'
 
 # ── Fixture repositories ────────────────────────────────────────────────────
 # C0 carries one representative file of every class the classifier names, so
@@ -247,7 +254,7 @@ cases=$((cases + 1)); RT="$FIX/rt-$cases"; mkdir -p "$RT"
 rc=$?
 echo "case: --families prints the family ids in job order"
 expect_rc 0
-expect_file_is 'the five ids' "$RT/out.txt" "$(printf '%s\n' $ALL)"
+expect_file_is 'the nine ids' "$RT/out.txt" "$(printf '%s\n' $ALL)"
 
 # ── events that are not scoped ──────────────────────────────────────────────
 S=$(scenario M:docs/guide.md)
@@ -256,7 +263,9 @@ expect_rc 0
 expect_warnings '' ''
 expect_all_run
 expect_reason pm_dispatch_gates "event 'push' is not scoped"
-expect_line 'Gate families: 5 run, 0 skipped'
+expect_reason entry_guard "event 'push' is not scoped"
+expect_reason bare_root_worklist "event 'push' is not scoped"
+expect_line 'Gate families: 9 run, 0 skipped'
 
 run_case 'schedule: every family runs (the hourly full run keeps the battery)' "$REPO" schedule '' ''
 expect_rc 0
@@ -274,21 +283,29 @@ expect_all_run
 
 # ── merge_group: the card's four cases ──────────────────────────────────────
 S=$(scenario M:scripts/pm/tool.mjs)
-run_case 'merge_group: a scripts/pm change runs the PM dispatch-gates self-test (and, for a .mjs, the corpus walk)' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a scripts/pm change runs every tooling self-test (and, for a .mjs, the corpus walk)' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_warnings '' ''
-expect_verdicts pm_dispatch_gates comment_mask_corpus
+expect_verdicts entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 expect_reason pm_dispatch_gates 'scripts/pm/tool.mjs (M, scripts)'
+expect_reason self_test_workflow_commands 'scripts/pm/tool.mjs (M, scripts)'
 expect_changed 'one M' "M scripts/pm/tool.mjs"
 expect_line "Gate-family diff base: $C0  (the merge group's base_sha)"
-expect_line 'Gate families: 2 run, 3 skipped'
+expect_line 'Gate families: 6 run, 3 skipped'
 
-S=$(scenario M:scripts/pm/README.md)
-run_case 'merge_group: a scripts/pm prose change runs the PM dispatch-gates self-test alone' "$REPO" merge_group '' "$C0"
+S=$(scenario A:scripts/pm/new-tool.mjs)
+run_case 'merge_group: an ADDED file inside the read-set still runs it -- the narrowing is about the class, never the status' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_warnings '' ''
-expect_verdicts pm_dispatch_gates
-expect_line 'Gate families: 1 run, 4 skipped'
+expect_verdicts entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason pm_dispatch_gates 'scripts/pm/new-tool.mjs (A, scripts)'
+
+S=$(scenario M:scripts/pm/README.md)
+run_case 'merge_group: a scripts/pm prose change runs the tooling self-tests, and no ratchet' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_line 'Gate families: 5 run, 4 skipped'
 
 S=$(scenario M:docs/guide.md M:content/docs/page.mdx M:.changeset/first.md M:README.md)
 run_case 'merge_group: a docs-only group skips every family, and prints it' "$REPO" merge_group '' "$C0"
@@ -296,21 +313,31 @@ expect_rc 0
 expect_warnings '' ''
 expect_verdicts
 expect_reason pm_dispatch_gates 'no changed path is in its read-set'
-expect_line 'Gate families: 0 run, 5 skipped'
+expect_reason entry_guard 'no changed path is in its read-set'
+expect_line 'Gate families: 0 run, 9 skipped'
 expect_line 'skip  pm_dispatch_gates'
 expect_line 'skip  comment_mask_corpus'
-if grep -q '^| `pm_dispatch_gates` | skip |' "$RT/step-summary" && grep -q '^## Gate families: 0 run, 5 skipped' "$RT/step-summary"; then
+expect_line 'skip  self_test_workflow_commands'
+if grep -q '^| `pm_dispatch_gates` | skip |' "$RT/step-summary" && grep -q '^## Gate families: 0 run, 9 skipped' "$RT/step-summary"; then
   ok 'the step summary lists the skipped families'
 else
   bad 'the step summary lists the skipped families' "$(tr '\n' ' ' < "$RT/step-summary")"
 fi
 
 S=$(scenario M:.github/workflows/lint.yml)
-run_case 'merge_group: a workflow change runs the PM dispatch-gates self-test' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a workflow change runs every family built on the dispatch derivation, and not the scripts-only sweep' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_warnings '' ''
-expect_verdicts pm_dispatch_gates
+expect_verdicts pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 expect_reason pm_dispatch_gates '(M, workflow)'
+expect_reason declared_population_live '(M, workflow)'
+
+S=$(scenario A:.github/actions/setup/action.yml)
+run_case 'merge_group: a composite action is part of the workflow tree the derivation discovers' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_reason self_test_workflow_commands '.github/actions/setup/action.yml (A, workflow)'
 
 S=$(scenario M:docs/guide.md A:brand-new-dir/thing.txt)
 run_case 'merge_group: an UNKNOWN path runs every family' "$REPO" merge_group '' "$C0"
@@ -342,11 +369,11 @@ expect_changed 'D then A, no R record' "A docs/guide-renamed.md
 D docs/guide.md"
 
 S=$(scenario A:docs/new-page.md)
-run_case 'merge_group: an ADDED docs file runs the name-sweeping family only' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: an ADDED docs file runs nothing -- the tracked-NAME sweep left the PR path with #19498' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_warnings '' ''
-expect_verdicts pm_dispatch_gates
-expect_reason pm_dispatch_gates 'docs/new-page.md (A, docs)'
+expect_verdicts
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
 
 git_q -C "$REPO" checkout -q --detach "$C0"
 run_case 'merge_group: an EMPTY diff runs every family rather than selecting nothing' "$REPO" merge_group '' "$C0"
@@ -397,31 +424,43 @@ expect_all_run
 
 # ── merge_group: the per-family read-sets ──────────────────────────────────
 S=$(scenario M:packages/a/src/index.ts)
-run_case 'merge_group: a packages TS edit runs both ratchets, the corpus AND the PM self-test (it reads every source), not the lock self-test' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a packages TS edit runs both ratchets and the corpus -- and, since #19498, no tooling self-test' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_warnings '' ''
-expect_verdicts pm_dispatch_gates query_options_erasure slot_lookup comment_mask_corpus
+expect_verdicts query_options_erasure slot_lookup comment_mask_corpus
 expect_reason query_options_erasure '(M, workspace)'
 expect_reason comment_mask_corpus packages/a/src/index.ts
-expect_reason pm_dispatch_gates packages/a/src/index.ts
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+
+S=$(scenario M:packages/a/src/index.ts A:packages/a/src/arm.test.ts A:.changeset/second.md)
+run_case 'merge_group: the PR #19314 shape (a spec source edit, an added test, an added changeset) pays the ratchets and the corpus, and no tooling self-test' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts query_options_erasure slot_lookup comment_mask_corpus
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+expect_reason declared_population_live 'no changed path is in its read-set'
+expect_reason bare_root_worklist 'no changed path is in its read-set'
+expect_reason self_test_workflow_commands 'no changed path is in its read-set'
+expect_reason entry_guard 'no changed path is in its read-set'
+expect_line 'Gate families: 3 run, 6 skipped'
 
 S=$(scenario M:apps/site/src/page.tsx)
-run_case 'merge_group: an apps TSX edit is outside the ratchets (packages/** only) but inside the corpus and the PM census' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: an apps TSX edit is outside the ratchets (packages/** only) and inside the corpus alone' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates comment_mask_corpus
+expect_verdicts comment_mask_corpus
 
 S=$(scenario M:packages/a/package.json)
-run_case 'merge_group: a package manifest runs the PM self-test and the lock self-test (workspace enumeration), no ratchet' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a package manifest is how the derivation resolves a check:* script, so it runs the derivation families and the lock self-test, no ratchet' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates verify_lock
+expect_verdicts pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock
 expect_reason pm_dispatch_gates packages/a/package.json
 expect_reason verify_lock packages/a/package.json
 
 S=$(scenario M:packages/a/.gitignore)
-run_case 'merge_group: a nested .gitignore runs the PM self-test (exposed-scratch-dir sweep) alone' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a nested .gitignore is read by the exposed-scratch-dir sweep, which #19498 took off the PR path' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates
-expect_reason pm_dispatch_gates packages/a/.gitignore
+expect_verdicts
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
 
 S=$(scenario M:packages/a/src/data.json)
 run_case 'merge_group: a non-source, non-manifest workspace file skips every family' "$REPO" merge_group '' "$C0"
@@ -430,21 +469,21 @@ expect_warnings '' ''
 expect_verdicts
 
 S=$(scenario M:packages/a/foo.sh)
-run_case 'merge_group: a workspace shell script outside scripts/ is still gate source, not a skipped non-source workspace file (#16769)' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a workspace shell script outside scripts/ was gate source for the whole-tree census (#16769) and is outside the narrowed read-set (#19498)' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_warnings '' ''
-expect_verdicts pm_dispatch_gates
-expect_reason pm_dispatch_gates packages/a/foo.sh
+expect_verdicts
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
 
 S=$(scenario M:packages/a/scripts/build.mjs)
-run_case 'merge_group: a package-local script is a gate source (PM) and a masked source (corpus)' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a package-local script is a gate source (the derivation families) and a masked source (corpus)' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates comment_mask_corpus
+expect_verdicts comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 
 S=$(scenario M:scripts/pm/os-verify-lock.sh)
-run_case 'merge_group: the lock script runs its own self-test and the PM self-test' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: the lock script runs its own self-test and every family that reads scripts/' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates verify_lock
+expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock
 expect_reason verify_lock '(M, verify-lock)'
 
 S=$(scenario M:scripts/helper.mjs)
@@ -454,17 +493,17 @@ expect_all_run
 expect_reason verify_lock scripts/helper.mjs
 
 S=$(scenario M:scripts/slot-lookup-baseline.json)
-run_case 'merge_group: a ratchet baseline runs the ratchets and the PM self-test' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a ratchet baseline runs the ratchets and every family that reads scripts/' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates query_options_erasure slot_lookup
+expect_verdicts slot_lookup query_options_erasure entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 
 S=$(scenario M:scripts/ci/tool.sh)
 run_case 'merge_group: a scripts/ subdirectory script is a gate source only' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates
+expect_verdicts entry_guard pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
 
 S=$(scenario M:.claude/agents/os-dev.md M:skills/x/SKILL.md M:AGENTS.md)
-run_case 'merge_group: agent configuration runs the PM self-test only' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: agent configuration runs the PM self-test alone -- it is the only battery here that reads it' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_verdicts pm_dispatch_gates
 
@@ -483,8 +522,8 @@ expect_all_run
 S=$(scenario M:docs/guide.md M:packages/a/src/index.test.ts M:.github/workflows/lint.yml)
 run_case 'merge_group: a mixed group runs the union of what its paths reach' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates query_options_erasure slot_lookup comment_mask_corpus
-expect_line 'Gate families: 4 run, 1 skipped'
+expect_verdicts slot_lookup query_options_erasure comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands
+expect_line 'Gate families: 7 run, 2 skipped'
 
 # ── pull_request ────────────────────────────────────────────────────────────
 git_q -C "$REPO" checkout -q -B feature "$C0"
@@ -497,6 +536,21 @@ expect_warnings '' ''
 expect_verdicts
 expect_line "Gate-family diff base: $C0  (merge-base of origin/main and HEAD)"
 expect_changed 'the feature edit only, not C1' "M docs/guide.md"
+
+git_q -C "$REPO" checkout -q -B feature-19314 "$C0"
+printf 'export const a = 2;\n' > "$REPO/packages/a/src/index.ts"
+mkdir -p "$REPO/packages/a/src"
+printf 'export const t = 2;\n' > "$REPO/packages/a/src/arm.test.ts"
+printf -- '---\n"a": patch\n---\nthe arm\n' > "$REPO/.changeset/arm.md"
+git_q -C "$REPO" add -A
+git_q -C "$REPO" commit -q -m 'F2: the PR #19314 shape on a feature branch'
+run_case 'pull_request: the PR #19314 shape pays the two ratchets and the corpus, and no tooling self-test (the measurement this narrowing was ruled from)' "$REPO" pull_request main ''
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts slot_lookup query_options_erasure comment_mask_corpus
+expect_reason pm_dispatch_gates 'no changed path is in its read-set'
+expect_line 'Gate families: 3 run, 6 skipped'
+git_q -C "$REPO" checkout -q -B feature "$F1"
 
 run_case 'pull_request: no base branch in the payload' "$REPO" pull_request '' ''
 expect_rc 0
@@ -575,6 +629,12 @@ pin_step() {
 pin_step pm_dispatch_gates 'pnpm check:pm-dispatch-gates'
 pin_step query_options_erasure 'pnpm check:query-options-erasure'
 pin_step slot_lookup 'pnpm check:slot-lookup'
+pin_step entry_guard 'pnpm check:entry-guard'
+pin_step declared_population_live 'pnpm check:declared-population-live'
+# The two below are pinned by the script path alone, for the reason spelled at
+# verify_lock: this file must not carry another script's self-test flag.
+pin_step bare_root_worklist 'node scripts/pm/bare-root-worklist.mjs'
+pin_step self_test_workflow_commands 'node scripts/check-self-test-workflow-commands.mjs'
 # Pinned by the script name alone: spelling the flag that step passes in code
 # here would read, to check-self-test-wired, as a self-test flag of THIS file
 # that no workflow passes.
@@ -583,7 +643,7 @@ pin_step comment_mask_corpus 'node scripts/check-comment-mask-corpus.mjs'
 
 # ── Verdict ─────────────────────────────────────────────────────────────────
 # #4690: a battery that ran nothing is a failure, never a pass.
-if [ "$cases" -lt 30 ] || [ "$checks" -lt 120 ]; then
+if [ "$cases" -lt 42 ] || [ "$checks" -lt 220 ]; then
   echo "SELFTEST FAILED: only $cases case(s) / $checks check(s) ran -- the battery is short"
   exit 1
 fi

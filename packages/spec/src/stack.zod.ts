@@ -13,7 +13,12 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
-import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
+import {
+  normalizeStackInput,
+  MAP_SUPPORTED_FIELDS,
+  type MetadataCollectionInput,
+  type MapSupportedField,
+} from './shared/metadata-collection.zod';
 import type { ConversionNotice } from './conversions/types.js';
 import { formatUnknownAuthoringKey } from './data/authoring-key-lint';
 import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadata-authoring-lint';
@@ -34,7 +39,7 @@ import { ActionSchema, InlineActionSchema } from './ui/action.zod';
 // Automation Protocol
 import { FlowSchema } from './automation/flow.zod';
 import { resolveFlowTriggerKind } from './automation/flow-trigger-kind';
-import { FlowFunctionEntrySchema, FlowFunctionEffectSchema } from './automation/flow-function.zod';
+import { FlowFunctionEntrySchema, FlowFunctionEffectSchema, FlowFunctionLoweredDeclarationSchema } from './automation/flow-function.zod';
 import { JobSchema } from './system/job.zod';
 
 // Security Protocol
@@ -1294,6 +1299,148 @@ export type AssembledPackageBody = z.input<typeof AssembledPackageBodySchema>;
 export type AssembledPackageBodyParsed = z.infer<typeof AssembledPackageBodySchema>;
 
 /**
+ * `hooks`, as a JSON document can hold it: the assembled declaration with its
+ * `handler` narrowed to the lowered string ref.
+ *
+ * The narrowing is written HERE rather than on `HookSchema`, because the
+ * authoring door must keep accepting the inline callable — `objectstack build`
+ * is what lowers it, and `data/hook.zod.ts` says so in its own words: 「The
+ * JSON artifact therefore only ever contains the string form.」 `handler` keeps
+ * the base's `.optional()`: a hook that carries a `body` instead declares no
+ * handler at all, and the registry record of a hook whose handler was an inline
+ * callable has none either (the projection drops it).
+ */
+function jsonStageHooksKey() {
+  return z.array(HookSchema.extend({
+    handler: z.string().optional()
+      .describe('Handler function name — the lowered string ref the JSON artifact carries'),
+  })).optional().describe('Object Lifecycle Hooks, as a JSON document carries them');
+}
+
+/**
+ * `functions`, as a JSON document can hold it: the two LOWERED members of
+ * {@link FlowFunctionEntrySchema} for the map form, and the array member with
+ * its callable branch dropped.
+ *
+ * Both lowered spellings are kept, not just the record one: `objectstack build`
+ * emits `{ myFn: 'myFn' }` for a bare entry and
+ * `{ myFn: { handler: 'myFn', effect: 'writes' } }` for a declared one, so a
+ * stage that admitted only the second would refuse artifacts this repo really
+ * writes.
+ *
+ * @param handlerOptional the RECORD stage's one difference from the artifact
+ * stage. A registry row is `toRecordManifest`'s structural JSON projection of
+ * the live assembled body, and that projection drops the callable it finds
+ * under `handler` — so the record of a declared function is the declaration
+ * MINUS its handler. Nothing replaces it, and nothing should: a ref minted
+ * anywhere but `objectstack build` is not guaranteed to be the ref `build`
+ * mints, so an absent `handler` is the honest statement 「declared here, not
+ * serialisable」. `effect` carries whatever optionality each form already gives
+ * it — `.default('pure')` on the map declaration, `.optional()` on the array
+ * entry — and neither is restated here.
+ */
+function jsonStageFunctionsKey(handlerOptional: boolean) {
+  const handlerRef = z.string().min(1)
+    .describe('The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module');
+  return z.union([
+    z.record(z.string(), z.union([
+      handlerRef,
+      handlerOptional
+        ? FlowFunctionLoweredDeclarationSchema.extend({ handler: handlerRef.optional() })
+        : FlowFunctionLoweredDeclarationSchema,
+    ])),
+    // Transcribed rather than derived from the authoring array member above:
+    // that member is declared INLINE inside the assembled body's own shape, and
+    // narrowing it in place is the one thing this pair may not do. The key sets
+    // are held equal by a pin in `stack-json-stage-package-body.test.ts`, so a
+    // key added there and not here reddens by name.
+    z.array(z.object({
+      name: z.string(),
+      handler: handlerOptional ? handlerRef.optional() : handlerRef,
+      packageId: z.string().optional(),
+      effect: FlowFunctionEffectSchema.optional(),
+    })),
+  ]).optional().describe('Named handler functions, lowered to the refs a JSON document carries');
+}
+
+/**
+ * One package as an INERT JSON release artifact carries it — the third of the
+ * four stages a package body passes through, and the first one that is really
+ * JSON.
+ *
+ * ## Why this is a separate declaration and not a narrowing of the assembled body
+ *
+ * {@link AssembledPackageBodySchema} spans the IN-MEMORY composed stage, where
+ * `functions` and `hooks` legitimately hold live callables:
+ * `composeStacks(stacks, { manifest: 'preserve' })` builds exactly such a body
+ * and the load path registers it, which is the invariant this file states
+ * further down. Narrowing the assembled body would refuse a published
+ * composition function's own output — so the artifact stage gets its own name
+ * instead, and the assembled one is ⛔ untouched.
+ *
+ * ## What it buys, measured
+ *
+ * Exactly two of the assembled body's members have no JSON Schema form —
+ * `functions` (a `z.function()` branch) and `hooks` (a `z.custom()` branch) —
+ * and one unrepresentable member costs every embedder its whole JSON Schema.
+ * With both narrowed to their lowered spellings this body converts under
+ * `z.toJSONSchema`, so a JSON surface that wants the assembled stage can
+ * declare it instead of writing `z.unknown()` and accepting anything.
+ *
+ * ADR-0130 D4 is what says an artifact is inert JSON: 「a plugin written inside
+ * `packages[i].manifest` could never be constructed by a loader, so a reader
+ * that resolved it there would register garbage where it used to skip in
+ * silence.」 A callable in an artifact is the same case.
+ */
+/*
+ * ANNOTATED with the same STRUCTURAL type as the assembled body above, for the
+ * same two measured reasons recorded there (TS7056 on the inferred type; a
+ * named alias turning `stack.zod` into a shared chunk). ⛔ Do not replace either
+ * annotation with an inferred or named type without re-reading that note.
+ */
+export const ArtifactStagePackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>> =
+  lazySchema(() =>
+    ManifestSchema.extend({
+      ...assembledPackageBodyShape(),
+      functions: jsonStageFunctionsKey(false),
+      hooks: jsonStageHooksKey(),
+    }).describe('One package as an inert-JSON release artifact carries it (ADR-0130 D4)'));
+
+/** The artifact-stage package body as authored. */
+export type ArtifactStagePackageBody = z.input<typeof ArtifactStagePackageBodySchema>;
+/** Post-parse shape of {@link ArtifactStagePackageBody} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactStagePackageBodyParsed = z.infer<typeof ArtifactStagePackageBodySchema>;
+
+/**
+ * One package as the package REGISTRY records it — the fourth stage, and the
+ * one that had no declaration until now.
+ *
+ * It is {@link ArtifactStagePackageBodySchema} with `functions[].handler`
+ * OPTIONAL, in both the map-record form and the array form, and nothing else.
+ * That single difference is the whole distance between an artifact and a
+ * record: an artifact is written by `objectstack build`, which lowers every
+ * callable to a ref, while a record is `toRecordManifest`'s structural JSON
+ * projection of a LIVE body, which drops the callable and mints nothing in its
+ * place. A record therefore reports what each function is named and what it
+ * declared, with `handler` absent where the callable was.
+ *
+ * ⛔ Never widen this to `z.unknown()` to make a row fit. A row that parses
+ * through neither this stage nor the authoring one is a producer defect, and
+ * this is the declaration that has to keep saying so.
+ */
+/* ANNOTATED structurally — see the note on the artifact stage above. */
+export const RecordStagePackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>> =
+  lazySchema(() =>
+    (ArtifactStagePackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
+      functions: jsonStageFunctionsKey(true),
+    }).describe('One package as the package registry records it — the artifact stage with `functions[].handler` optional'));
+
+/** The record-stage package body as authored. */
+export type RecordStagePackageBody = z.input<typeof RecordStagePackageBodySchema>;
+/** Post-parse shape of {@link RecordStagePackageBody} — defaults applied, transforms run (ADR-0122). */
+export type RecordStagePackageBodyParsed = z.infer<typeof RecordStagePackageBodySchema>;
+
+/**
  * One package carried by a release artifact, in its ASSEMBLED form — the
  * element type of `packages` on {@link ObjectStackDefinitionSchema}.
  *
@@ -1408,7 +1555,8 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   manifest: ManifestSchema.optional().describe('Project Package Configuration'),
 
   /**
-   * The artifact's package list (ADR-0130 D4) — **optional, and additive**.
+   * The artifact's package list (ADR-0130 D4) — **optional**, and read beside
+   * `manifest` rather than instead of it.
    *
    * A release artifact MAY carry N package manifests so a product can be split
    * into modules **without renaming a single object** (which is what separate
@@ -1655,6 +1803,10 @@ function collectObjectNames(config: ObjectStackDefinition): Set<string> {
   const names = new Set<string>();
   if (config.objects) {
     for (const obj of config.objects) {
+      // [#18239] `composeStacks`' artifact pass reads its unparsed inputs through
+      // here, and `mergeObjects` skips a non-object entry rather than refusing
+      // it — so skip it here too instead of dereferencing it.
+      if (!isRecord(obj)) continue;
       names.add(obj.name);
     }
   }
@@ -2146,6 +2298,147 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
 }
 
 /**
+ * [ADR-0112 · #16348] The COMPOSITION half of the refusal family above. `composeStacks`
+ * refuses six authored-entity conflicts, every one of them carrying the
+ * literal `composeStacks conflict:` message prefix, and until this change
+ * every one threw `new Error(message)` with `code` and `status` both
+ * `undefined` — the silent shape the `defineStack` family shed one screen up,
+ * in this same file. Two refusal families that are the same thing to an author
+ * and two different things to a consumer is the asymmetry these six close.
+ *
+ * The envelope is the SAME one — {@link StackRefusalError}: `status: 422`, an
+ * unprocessable authored entity rather than a server fault, and the findings
+ * the site collected on `issues`, one entry per finding. The granularity is
+ * the one the per-stack family landed with and the triage reading that set it:
+ * ONE code per refusal site, never a shared `STACK_COMPOSE_CONFLICT`
+ * catch-all. The `boot-refusal` class in the dispatcher vocabulary was already
+ * at one-row-per-refusal granularity when that reading was taken, and
+ * {@link StackCrossReferenceError} is an instance of that granularity rather
+ * than an exception to it.
+ *
+ * ⭐ Why every member spells `STACK_COMPOSE_*` instead of continuing the
+ * per-stack family's `STACK_<subject>_<condition>`: what these six refuse is a
+ * disagreement BETWEEN stacks, a condition `defineStack` cannot raise at all —
+ * each input is legal on its own, and the fix is always in the composition or
+ * in one of the two authors' packages, never in a single malformed stack. A
+ * bare `STACK_OBJECT_CONFLICT` would read as "this stack's object is
+ * malformed" and send a consumer to the wrong half of the artifact.
+ * {@link StackCrossReferenceError} is the deliberate exception in the other
+ * direction: its two raise sites (the per-stack pass and the ARTIFACT pass
+ * inside {@link composeStacks}) share one code because they are one rule
+ * family evaluated over two scopes, so the code names the rule and the message
+ * header names the pass.
+ *
+ * ⛔ The seventh bare `Error` in this file stays bare, and that is a reading
+ * rather than an omission: `composeStacks internal error: no source stack
+ * recorded for composed object …` inside
+ * {@link collectComposedActionKeyCollisions} is the code discovering its own
+ * bookkeeping is inconsistent, not an authored entity being refused. A 422
+ * would tell an author their stack is unprocessable when the defect is ours.
+ * Whether it takes a 500-class envelope of its own is a separate decision.
+ *
+ * Every member is registered in the ADR-0112 ledger under `@objectstack/spec`
+ * (the #16404 ruling: a `code` that ships in `dist` is the published face,
+ * door or no door — a consumer's `catch (e) { switch (e.code) }` pins the
+ * spelling the moment it ships). `door: 'none'`, re-measured on the tree this
+ * landed against: `composeStacks` occurs 7 times in non-test
+ * `packages/runtime/src` + `packages/rest/src` source, all of them doc
+ * comments or message prose in one file and NONE of them a call site, with
+ * `defineStack` lighting the same probe 31 times across 8 files as the
+ * positive control. The only non-test caller on the tree is an example's
+ * `objectstack.config.ts`, which is authoring time by construction.
+ *
+ * ⛔ Module-local like every member above, and for the same reason:
+ * `packages/spec/src/index.ts` re-exports this module with `export *`, so an
+ * exported class would widen the published api-surface, while the ADR-0112
+ * contract is the `code` / `status` pair every reader takes structurally.
+ *
+ * Message text is byte-for-byte what each bare `Error` carried. This adds the
+ * machine-readable half; it rewords no sentence, and the message-substring
+ * pins across this repo read the prose they always did.
+ */
+class StackComposeKeyConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_KEY_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeKeyConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] `functions` is authored in the map form by one stack and the
+ * array form by another — {@link composeFunctions}. The two shapes are merged
+ * in kind and never converted, so the refusal is about the SHAPE, which is
+ * what the code says; a same-shape duplicate name is its sibling below.
+ */
+class StackComposeFunctionsShapeConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeFunctionsShapeConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] Two stacks define a handler under the same name —
+ * {@link composeFunctions}. Handlers resolve by name at boot, so composing
+ * them would let one silently shadow the other.
+ */
+class StackComposeFunctionConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_FUNCTION_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeFunctionConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] Under `objectConflict: 'merge'`, a later stack declares an
+ * object-level collection the composed object already carries with a
+ * DIFFERENT value — {@link refuseUnmergeableCollections}. Only `fields` is
+ * shallow-merged; every other collection would be replaced wholesale.
+ * Spelled for the collection, not the object: the object itself composes fine,
+ * one of its collections does not.
+ */
+class StackComposeCollectionConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_COLLECTION_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeCollectionConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] The same object name is defined by more than one stack under the
+ * DEFAULT `objectConflict: 'error'` strategy — {@link mergeObjects}. The
+ * message names the two options that resolve it; the refusal is the strategy
+ * doing its job, which is why it carries the same envelope as the rest rather
+ * than a distinct class of its own.
+ */
+class StackComposeObjectConflictError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_OBJECT_CONFLICT';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeObjectConflictError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #16348] Two stacks declare the same action key — the collision
+ * `defineStack` refuses within one stack, arriving one composition step later
+ * ({@link collectComposedActionKeyCollisions}). `issues` carries exactly what
+ * that walk collected: one entry per colliding key, naming every declaring
+ * stack and site, the same list the message renders as `✗` lines.
+ */
+class StackComposeActionKeyCollisionError extends StackRefusalError {
+  readonly code = 'STACK_COMPOSE_ACTION_KEY_COLLISION';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackComposeActionKeyCollisionError', message, issues);
+  }
+}
+
+/**
  * Seed data → object references (#18202, ARTIFACT-SCOPED — see
  * {@link DefineStackOptions.artifactObjects}).
  *
@@ -2166,11 +2459,14 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
  * or a scalar. Those shapes are SKIPPED, never dereferenced: a rule whose job
  * is to resolve object references must not turn a malformed collection into a
  * bare `TypeError` with no `code` and no `status` — the refusal discipline of
- * this file is the ADR-0112 envelope. A non-array `data` gets the same word
- * {@link composeStacks}'s concat pass gives it ({@link warnMalformedCollectionKey},
- * #5005, deduplicated per key so the two passes speak once); an entry that is
- * not an object, or whose `object` is not a string, carries no object
- * reference for this rule to resolve and is simply not this rule's finding.
+ * this file is the ADR-0112 envelope. A non-array `data` no longer reaches
+ * here from either caller — the strict parse rejects it before
+ * {@link validateCrossReferences}, and {@link composeStacks}'s step 3 refuses it
+ * (#19784) before the artifact pass — so the `Array.isArray` guard below is the
+ * rule's own type guard, kept so it never depends on its caller's ordering, and
+ * says nothing because no caller can reach it. An entry that is not an object,
+ * or whose `object` is not a string, carries no object reference for this rule
+ * to resolve and is simply not this rule's finding.
  */
 function collectSeedDataObjectErrors(
   config: ObjectStackDefinition,
@@ -2179,10 +2475,7 @@ function collectSeedDataObjectErrors(
   const errors: string[] = [];
   const datasets: unknown = (config as { data?: unknown }).data;
   if (datasets === undefined || datasets === null) return errors;
-  if (!Array.isArray(datasets)) {
-    warnMalformedCollectionKey('data');
-    return errors;
-  }
+  if (!Array.isArray(datasets)) return errors;
   for (const dataset of datasets) {
     if (!dataset || typeof dataset !== 'object') continue;
     const objectName: unknown = (dataset as { object?: unknown }).object;
@@ -2210,9 +2503,10 @@ function collectSeedDataObjectErrors(
  * carrying CRUD on the RBAC link tables, ADR-0090 D12) — skip them here.
  *
  * `resolvable` carries the same two readings as its seed-data sibling above,
- * and so does its shape guard: a non-array `permissions` is announced through
- * {@link warnMalformedCollectionKey} and skipped, and a `permissions` entry
- * that is not an object is skipped, because this rule reads
+ * and so does its shape guard: a non-array `permissions` is refused before
+ * either caller reaches this rule (the strict parse; {@link composeStacks}'s
+ * step 3, #19784), so its guard is a silent type guard like the sibling's, and
+ * a `permissions` entry that is not an object is skipped, because this rule reads
  * `permissions[].objects` and an unparsed input may carry neither. Same reason
  * as the sibling — a malformed collection must not become a bare `TypeError`
  * in the pass whose refusals are ADR-0112 envelopes.
@@ -2224,10 +2518,7 @@ function collectPermissionGrantObjectErrors(
   const errors: string[] = [];
   const permissions: unknown = (config as { permissions?: unknown }).permissions;
   if (permissions === undefined || permissions === null) return errors;
-  if (!Array.isArray(permissions)) {
-    warnMalformedCollectionKey('permissions');
-    return errors;
-  }
+  if (!Array.isArray(permissions)) return errors;
   for (const perm of permissions) {
     if (!perm || typeof perm !== 'object') continue;
     const grants = (perm as { objects?: Record<string, unknown> }).objects;
@@ -2657,6 +2948,111 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * @internal
  */
 function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefinition {
+  // [ADR-0112 · #19785] Shape guard, because `defineStack(config, { strict:
+  // false })` hands this merge the normalized input with no parse in between.
+  // A non-array `objects` is REFUSED with the strict parse's own envelope
+  // (`STACK_SCHEMA_INVALID`, 422, the zod issue at `['objects']`) — never a bare
+  // `TypeError` from `.map`, and never a pass-through: bound actions cannot be
+  // merged into objects that are not a list, and a stack handed on in that
+  // shape is one `composeStacks` refuses with this same code anyway. `strict:
+  // false` skips VALIDATION (cross-references, schema detail); it never
+  // promised to accept a shape this merge cannot read. `undefined` is the one
+  // non-array that is not malformed — the key is simply absent — the same line
+  // `mergeObjects` draws for the same key.
+  const declaredObjects: unknown = (config as { objects?: unknown }).objects;
+  if (declaredObjects !== undefined && !Array.isArray(declaredObjects)) {
+    const { kind, issues } = describeNonArrayCollection('objects', declaredObjects);
+    throw new StackSchemaInvalidError(
+      `defineStack validation failed: 'objects' is ${kind}, not an array. Bound actions cannot be ` +
+        `merged into it, and \`strict: false\` skips validation, not this shape — \`composeStacks\` ` +
+        `refuses the same stack with the same code. Author 'objects' as an array or in the map form ` +
+        `(\`{ name: { … } }\`), or drop \`strict: false\` to have every schema check run.`,
+      issues,
+    );
+  }
+
+  // [#19785] A non-object ENTRY is refused with the same envelope, one zod
+  // issue per entry at `['objects', index]` (`expected: 'object'`) — the
+  // strict parse's own answer for it. Never handed on: the merge cannot read
+  // it, and a stack returned with it is a success whose objects are not all
+  // objects — the next consumer (plugin-object registration) then drops every
+  // object after it inside one warn-level catch, which is concealment, not
+  // leniency.
+  if (Array.isArray(declaredObjects) && declaredObjects.some((entry) => !isRecord(entry))) {
+    const parsed = z.array(z.looseObject({})).safeParse(declaredObjects);
+    const issues = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => ({ ...issue, path: ['objects', ...issue.path] }));
+    const positions = declaredObjects
+      .map((entry, index) => (isRecord(entry) ? null : `#${index} (${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : `a ${typeof entry}`})`))
+      .filter((position): position is string => position !== null);
+    throw new StackSchemaInvalidError(
+      `defineStack validation failed: 'objects' holds ${positions.length === 1 ? 'an entry' : 'entries'} ` +
+        `that ${positions.length === 1 ? 'is' : 'are'} not an object — ${positions.join(', ')}. Bound actions ` +
+        `cannot be merged into such an entry, and \`strict: false\` skips validation, not this shape. Author ` +
+        `every entry of 'objects' as an object definition, or drop \`strict: false\` to have every schema ` +
+        `check run.`,
+      issues as z.core.$ZodIssue[],
+    );
+  }
+
+  // [ADR-0112 · #19799] The same guard for every `actions` array this merge
+  // reads — the top-level one and each object's own — because
+  // `sortActionsByOrder` calls `.some` on it and reads `order` off each entry:
+  // a non-array raised a bare `TypeError` (`actions.some is not a function`),
+  // a `null` entry one reading `order`, and any other non-object entry was
+  // handed on inside a success. Each is refused with the strict parse's own
+  // envelope at the strict parse's own path — `['actions']` /
+  // `['actions', index]`, `['objects', i, 'actions']` /
+  // `['objects', i, 'actions', index]` — all findings in one refusal, as the
+  // parse reports them. `undefined` is the one non-array that is not
+  // malformed: the key is absent. This merge also ends `composeStacks`
+  // (step 7), which refuses a non-array top-level `actions` in its own step 3
+  // with this same code, so the message names both doors.
+  const actionsProblems: string[] = [];
+  const actionsIssues: z.core.$ZodIssue[] = [];
+  const guardActions = (prefix: readonly (string | number)[], label: string, declared: unknown): void => {
+    if (declared === undefined) return;
+    const reroot = (issue: z.core.$ZodIssue): z.core.$ZodIssue =>
+      ({ ...issue, path: [...prefix, ...issue.path] }) as z.core.$ZodIssue;
+    if (!Array.isArray(declared)) {
+      const { kind, issues } = describeNonArrayCollection('actions', declared);
+      actionsProblems.push(`${label} is ${kind}, not an array`);
+      actionsIssues.push(...issues.map(reroot));
+      return;
+    }
+    const positions = declared
+      .map((entry, index) =>
+        isRecord(entry) ? null : `#${index} (${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : `a ${typeof entry}`})`,
+      )
+      .filter((position): position is string => position !== null);
+    if (positions.length === 0) return;
+    const parsed = z.array(z.looseObject({})).safeParse(declared);
+    if (!parsed.success) {
+      actionsIssues.push(
+        ...parsed.error.issues.map((issue) => reroot({ ...issue, path: ['actions', ...issue.path] } as z.core.$ZodIssue)),
+      );
+    }
+    actionsProblems.push(
+      `${label} holds ${positions.length === 1 ? 'an entry' : 'entries'} that ` +
+        `${positions.length === 1 ? 'is' : 'are'} not an object — ${positions.join(', ')}`,
+    );
+  };
+  guardActions([], "'actions'", (config as { actions?: unknown }).actions);
+  for (const [index, obj] of ((declaredObjects as Record<string, unknown>[] | undefined) ?? []).entries()) {
+    const label = typeof obj.name === 'string' ? `object '${obj.name}'` : `object #${index}`;
+    guardActions(['objects', index], `${label}'s 'actions'`, obj.actions);
+  }
+  if (actionsProblems.length > 0) {
+    throw new StackSchemaInvalidError(
+      `Stack validation failed (the bound-action merge that ends \`defineStack\` and \`composeStacks\`): ` +
+        `${actionsProblems.join('; ')}. Actions cannot be merged or ordered by \`order\` in that shape, and ` +
+        `\`strict: false\` skips validation, not this shape. Author every 'actions' as an array of action ` +
+        `definitions, or drop \`strict: false\` to have every schema check run.`,
+      actionsIssues,
+    );
+  }
+
   // Honour `order` on the preserved top-level actions regardless of objects.
   const sortedTop = config.actions ? sortActionsByOrder(config.actions) : config.actions;
   const topChanged = sortedTop !== config.actions;
@@ -2916,15 +3312,24 @@ const warnedEmailTemplateFloors = new Set<string>();
  *
  * ## What goes wrong without this
  *
- * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and retries
- * exactly one rung — the literal `en-US`. There is no language-subtag folding,
- * so a bundle whose English row is tagged `en` is unreachable from `en-US` and
- * from every other tag it does not itself carry: each such delivery raises
- * `TEMPLATE_NOT_FOUND`, which classifies **permanent**, so it dead-letters with
- * no retry. `sys_user.locale` is user-editable free-text BCP-47 and is NOT
- * constrained to `supportedLocales`, so the locales that can reach the lookup
- * are not the ones the author enumerated — a recipient can break their own mail
- * by setting a legal tag.
+ * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and, for a call
+ * that NAMES a locale, retries exactly one rung — the literal `en-US` — and
+ * stops. There is no language-subtag folding, so a bundle whose English row is
+ * tagged `en` is unreachable from `en-US` and from every other tag it does not
+ * itself carry: each such delivery raises `TEMPLATE_NOT_FOUND`, which
+ * classifies **permanent**, so it dead-letters with no retry. `sys_user.locale`
+ * is user-editable free-text BCP-47 and is NOT constrained to
+ * `supportedLocales`, so the locales that can reach the lookup are not the ones
+ * the author enumerated — a recipient can break their own mail by setting a
+ * legal tag.
+ *
+ * ⛔ A call that names NO locale is the other case, and it does not fail: it
+ * starts at `en-US` by name and, when the bundle carries no `en-US` row, drops
+ * to that bundle's lowest locale tag and renders it silently. So one floorless
+ * bundle dead-letters the recipients whose locale was named and quietly fills
+ * for the ones whose was not. The full three-rung ladder is on
+ * `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts`
+ * and is not restated here.
  *
  * ⭐ The trap is that the author does the CONSISTENT thing: a stack declaring
  * `defaultLocale: 'en'` whose English row says `locale: 'en'` agrees with
@@ -2947,6 +3352,37 @@ const warnedEmailTemplateFloors = new Set<string>();
  * not be reported — the reader below mirrors that default rather than relying
  * on the call site for it, so the two agree wherever this is called from.
  * Warn-once per bundle, keyed by name plus the tags it actually carries.
+ *
+ * ## What this deliberately does NOT examine
+ *
+ * Two shapes leave here silently and both can still ship a floorless bundle.
+ * They are written down because the summary line above is the only place the
+ * scope was ever stated, while the hazard section reads as a promise to catch
+ * every floorless bundle — which this does not do:
+ *
+ *  1. **A stack whose `i18n.supportedLocales` is absent or empty.** Measured:
+ *     `i18n` is optional but `supportedLocales` is REQUIRED inside it, so the
+ *     absent arm is reached only by a stack carrying no `i18n` block at all,
+ *     and the empty arm only by a literal `supportedLocales: []`. Either way
+ *     there is nothing to measure "carries rows for this stack's own supported
+ *     locales" against, so the function returns before building anything.
+ *     ⚠️ This early return is not a second scope decision: with no supported
+ *     set every bundle's `declared` list below is empty and shape 2 would skip
+ *     it anyway, so what the return actually buys is not reading `.map` off
+ *     `undefined`.
+ *  2. **A bundle whose tags are ALL outside `supportedLocales`.** `declared` is
+ *     empty, so the bundle is skipped one line after the floor check
+ *     established that it carries no floor row. A stack supporting `en-US`
+ *     whose bundle is tagged `en` alone is exactly that case: floorless, and
+ *     silent here.
+ *
+ * ⚠️ Whether either shape SHOULD warn is the ADR-0049 enforce-or-remove
+ * question, and it is deliberately not answered here: widening a `defineStack`
+ * diagnostic is a behaviour change on an authoring surface, which the posture
+ * note above puts on a scheduled migration rather than behind a lint. What is
+ * closed is the silence being UNDECLARED — both shapes are pinned in
+ * `stack-email-template-locale-floor.test.ts` against a warning control, so
+ * neither can start or stop returning without a test saying so.
  */
 function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
   const supported = data.i18n?.supportedLocales;
@@ -2977,11 +3413,13 @@ function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
     warnedEmailTemplateFloors.add(key);
     console.warn(
       `defineStack: emailTemplates '${name}' carries rows for ${declared.map((t) => `'${t}'`).join(', ')} ` +
-      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor. ` +
-      `sendTemplate matches (name, locale) exactly and retries only the literal ` +
-      `'${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every recipient ` +
-      `locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent ` +
-      `(dead-letter, no retry). Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
+      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor for a ` +
+      `send that names a locale. sendTemplate matches (name, locale) exactly and retries only the ` +
+      `literal '${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every ` +
+      `recipient locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is ` +
+      `permanent (dead-letter, no retry). A send naming NO locale does not fail: it drops to this ` +
+      `bundle's lowest tag and renders that silently, so one gap is loud for some recipients and ` +
+      `invisible for others. Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
       `it is spelled '${EMAIL_TEMPLATE_FLOOR_LOCALE}': tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' ` +
       `and keep the other tags beside it.`,
     );
@@ -3171,14 +3609,40 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
    * plain single-`manifest` stack — every stack written before ADR-0130 — folds
    * in as exactly one package.
    *
-   * ⚠️ `'preserve'` is **additive, not a replacement**: the singular `manifest`
-   * is still selected, by the same `'last'` rule as the default, so the output
-   * is the default's output **plus** the package list. The artifact keeps an
+   * ⚠️ The singular `manifest` is **retained, not replaced**: it is still
+   * selected by the same `'last'` rule as the default, so the artifact keeps an
    * artifact-level identity (ADR-0130 D6 — one artifact, one version) and no
-   * consumer reading `composed.manifest` sees a key disappear. Nothing is
-   * registered twice: D4's read-both rule says a `packages`-carrying artifact
-   * is read through `packages`, and `manifest` is the fallback branch for
-   * artifacts that have none.
+   * consumer reading `composed.manifest` sees a key disappear.
+   *
+   * ## The COLLECTIONS are carried once, under their package (#14512)
+   *
+   * A multi-package `'preserve'` output does **not** also carry the flattened
+   * collections: `objects`, `views`, `flows`, `permissions` and every other
+   * package-owned key live in `packages[i].manifest` and nowhere else, so one
+   * definition is serialized once. Until 2026-09-22 the output was both halves,
+   * every definition twice — which doubled the payload the marketplace
+   * transfers and startup parses, and left two copies of one definition that
+   * nothing reconciled: they are measured to differ in content whenever the
+   * composition merges or overrides an object, and a consumer saw whichever
+   * copy its own reader happened to read. The maintainer ruled the copy out
+   * (ADR-0130 D4's 2026-09-22 addendum, batch #23), READERS FIRST: every reader
+   * resolves `packages[]` before this emitter stopped feeding the flat copy.
+   *
+   * THREE conditions hold it to a copy-removal, and a composition failing any
+   * one of them keeps today's additive shape — which every reader still reads:
+   *
+   * 1. at least TWO package entries (ADR-0130 D7 — a single-package artifact is
+   *    byte-identical to before);
+   * 2. every input's collections attributed to a body
+   *    ({@link packagesCarryEveryInputCollection}) — an input with no
+   *    `manifest` has no package that could own its collections;
+   * 3. the bodies REPRODUCE the flattened collections, item for item
+   *    ({@link packagesReproduceComposedCollections}) — composition sometimes
+   *    RECONCILES (`objectConflict: 'merge'` / `'override'` fold two packages'
+   *    same-named objects into one; a standalone action binds onto a sibling
+   *    package's object), and the reconciled copy lives in the flattened half
+   *    alone. Condition 2 cannot see that: it reads the INPUT stacks, and what
+   *    the strip deletes is the COMPOSED result.
    *
    * @default 'last'
    */
@@ -3240,9 +3704,11 @@ function composeSingleValue(
     const held = (stacks[holder] as Record<string, unknown>)[key];
     if (deepEqualAuthored(held, value)) continue;
 
-    throw new Error(
-      `composeStacks conflict: top-level key '${key}' is declared with different values by ` +
-        `${stackLabel(stacks[holder], holder)} and ${stackLabel(stacks[i], i)}.\n` +
+    const finding =
+      `top-level key '${key}' is declared with different values by ` +
+      `${stackLabel(stacks[holder], holder)} and ${stackLabel(stacks[i], i)}.`;
+    throw new StackComposeKeyConflictError(
+      `composeStacks conflict: ${finding}\n` +
         `composeStacks does not pick a winner for single-valued top-level configuration: ` +
         `overriding would silently drop whichever declaration lost — a stricter setting ` +
         `(an 'api.enforceProjectMembership' 403 gate, a 'server.security.rateLimit' budget), ` +
@@ -3250,6 +3716,7 @@ function composeSingleValue(
         `against — and deep-merging would produce a value neither stack declared.\n` +
         `Fix: make the two '${key}' declarations identical, or remove it from every stack ` +
         `except the one that should own it.`,
+      [finding],
     );
   }
 
@@ -3289,14 +3756,17 @@ function composeFunctions(
   const arrayForm = declaring.filter((d) => Array.isArray(d.value));
   if (arrayForm.length !== 0 && arrayForm.length !== declaring.length) {
     const mapSide = declaring.find((d) => !Array.isArray(d.value))!;
-    throw new Error(
-      `composeStacks conflict: top-level key 'functions' is declared in the map form by ` +
-        `${stackLabel(stacks[mapSide.index], mapSide.index)} and in the array form by ` +
-        `${stackLabel(stacks[arrayForm[0].index], arrayForm[0].index)}.\n` +
+    const finding =
+      `top-level key 'functions' is declared in the map form by ` +
+      `${stackLabel(stacks[mapSide.index], mapSide.index)} and in the array form by ` +
+      `${stackLabel(stacks[arrayForm[0].index], arrayForm[0].index)}.`;
+    throw new StackComposeFunctionsShapeConflictError(
+      `composeStacks conflict: ${finding}\n` +
         `The two shapes cannot be merged without losing information (an array entry carries ` +
         `'packageId', the map entry does not).\n` +
         `Fix: author 'functions' in the same shape in both stacks — the map form ` +
         `({ my_handler: fn }) is preferred.`,
+      [finding],
     );
   }
 
@@ -3304,12 +3774,15 @@ function composeFunctions(
   const claim = (name: string, index: number): void => {
     const first = seen.get(name);
     if (first !== undefined) {
-      throw new Error(
-        `composeStacks conflict: function '${name}' is defined by both ` +
-          `${stackLabel(stacks[first], first)} and ${stackLabel(stacks[index], index)}.\n` +
+      const finding =
+        `function '${name}' is defined by both ` +
+        `${stackLabel(stacks[first], first)} and ${stackLabel(stacks[index], index)}.`;
+      throw new StackComposeFunctionConflictError(
+        `composeStacks conflict: ${finding}\n` +
           `Handlers are resolved by name at boot, so one would silently shadow the other.\n` +
           `Fix: rename one of them (prefix it with its package, e.g. 'crm_${name}'), or ` +
           `declare it in exactly one stack.`,
+        [finding],
       );
     }
     seen.set(name, index);
@@ -3336,25 +3809,56 @@ function composeFunctions(
   return { declared: true, value: merged };
 }
 
-const warnedMalformedCollectionKeys = new Set<string>();
-
 /**
- * Report a collection key that carried a non-array value (#5005).
- *
- * The concat rule can only concatenate arrays, so such a value is skipped —
- * and skipping it silently is the same defect in miniature. Only reachable
- * with an unparsed stack (`strict: false`, hand-built object); the strict
- * `defineStack` path rejects the shape outright.
+ * The shared half of every non-array collection refusal in {@link composeStacks}
+ * (#18239 for `objects`, #19784 for the concatenated collections): what the
+ * value IS, in words the message can name, and the zod issue the strict parse
+ * would raise for it, re-rooted at the key's path — so a refusal raised here
+ * carries the same `issues` shape {@link StackSchemaInvalidError} carries from
+ * `defineStack`'s own door.
  * @internal
  */
-function warnMalformedCollectionKey(key: string): void {
-  if (warnedMalformedCollectionKeys.has(key)) return;
-  warnedMalformedCollectionKeys.add(key);
+function describeNonArrayCollection(
+  key: string,
+  declared: unknown,
+): { kind: string; issues: z.core.$ZodIssue[] } {
+  const parsed = z.array(z.unknown()).safeParse(declared);
+  const issues = parsed.success
+    ? []
+    : parsed.error.issues.map((issue) => ({ ...issue, path: [key, ...issue.path] }));
+  const kind =
+    declared === null
+      ? 'null'
+      : typeof declared !== 'object'
+        ? `a ${typeof declared}`
+        : Object.getPrototypeOf(declared) === Object.prototype
+          ? 'an object'
+          : `a ${(declared as object).constructor?.name ?? 'non-plain'} object`;
+  return { kind, issues: issues as z.core.$ZodIssue[] };
+}
+
+const warnedMalformedCollectionEntries = new Set<string>();
+
+/**
+ * Report a collection whose array carries an entry that is not an object
+ * (#18239 — `mergeObjects`).
+ *
+ * The collection itself is well-formed, so composition goes on; the entry
+ * carries nothing to merge and is skipped, and skipping it silently would be
+ * the #5005 defect in miniature. Deduplicated per key. A non-array VALUE is no
+ * longer this helper's case at all: {@link composeStacks} refuses it (steps 2
+ * and 3), because skipping a whole collection composes an artifact that
+ * silently lacks a stack's content (#19784).
+ * @internal
+ */
+function warnMalformedCollectionEntry(key: string): void {
+  if (warnedMalformedCollectionEntries.has(key)) return;
+  warnedMalformedCollectionEntries.add(key);
   console.warn(
-    `composeStacks: top-level key '${key}' is a collection (concatenated across stacks) but at ` +
-      `least one stack carries a non-array value for it — that value cannot be composed and was ` +
-      `skipped. Author it as an array, or run the stack through strict \`defineStack\` to have ` +
-      `the shape rejected where it is written.`,
+    `composeStacks: top-level key '${key}' is a collection but at least one stack carries an ` +
+      `entry in it that is not an object — that entry cannot be composed and was skipped. Author ` +
+      `every entry as an object, or run the stack through strict \`defineStack\` to have the ` +
+      `shape rejected where it is written.`,
   );
 }
 
@@ -3384,6 +3888,92 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
   );
 }
 
+/** As much of a zod node's `def` as the collection walk below reads. */
+interface CollectionWalkDef {
+  type?: string;
+  innerType?: unknown;
+  in?: unknown;
+  out?: unknown;
+  options?: unknown[];
+  getter?: () => unknown;
+}
+
+/**
+ * The `def` of a zod node, or `undefined` when the value is not one.
+ *
+ * `typeof === 'function'` is load-bearing, not padding: the canonical schemas
+ * on this shape arrive as the `lazySchema` proxy, which is CALLABLE, and an
+ * object-only guard answers "not a schema" for every one of them.
+ * @internal
+ */
+function collectionWalkDef(schema: unknown): CollectionWalkDef | undefined {
+  if (schema === null || (typeof schema !== 'object' && typeof schema !== 'function')) return undefined;
+  return (schema as { _zod?: { def?: CollectionWalkDef } })._zod?.def;
+}
+
+/**
+ * The wrappers the collection walk peels, as a set — the same labels the
+ * `switch` in {@link declaresCollection} peels by `case`. Used to look THROUGH
+ * a pipe's IN side before asking whether it is a transform stage: a transform
+ * one level down is still a transform.
+ * @internal
+ */
+const COLLECTION_WALK_WRAPPERS: ReadonlySet<string> = new Set([
+  'optional',
+  'nullable',
+  'default',
+  'prefault',
+  'readonly',
+  'nonoptional',
+  'catch',
+]);
+
+/**
+ * The side of a `pipe` node an author actually writes.
+ *
+ * Two constructs compile to the same `pipe` node and their authorable sides
+ * are OPPOSITE: `a.transform(fn)` keeps the accepted input shape in `in` and
+ * puts the transform stage in `out`, while `z.preprocess(fn, schema)` puts the
+ * TRANSFORM in `in` and the real, validated schema in `out`. Reading `in`
+ * unconditionally therefore hands back a transform node for every preprocess
+ * node, and a transform declares no shape at all — so {@link declaresCollection}
+ * falls through to `false` and a preprocess-wrapped collection key silently
+ * leaves the refusal set {@link objectCollectionKeys} derives. Silently is the
+ * whole point: that derivation exists precisely so a collection key added to
+ * the object shape tomorrow cannot fall back to the wholesale replacement
+ * `objectConflict: 'merge'` refuses.
+ *
+ * ⛔ Deliberately NOT `in || out`. For a genuine `a.transform(fn).pipe(b)` the
+ * author writes `a`; taking either side would pull a key whose AUTHORED value
+ * is a scalar into a refusal set that then names it a collection — a refusal
+ * nobody earned, printed in the vocabulary of entries that were never written.
+ * Reading OUT only when IN is a transform stage is the rule four sibling
+ * walkers already run — `pipeAuthorableSide` in `scripts/lib/zod-graph.ts`,
+ * `kernel/metadata-authoring-lint.ts`,
+ * `system/metadata-form-zod-reconciliation.test.ts` and `packages/lint`'s
+ * `validate-predicate-path-refs.ts` — so this is one rule with a fifth site,
+ * not a fifth dialect.
+ * @internal
+ */
+function pipeAuthorableSide(def: CollectionWalkDef): unknown {
+  let node = def.in;
+  for (let hops = 0; hops < 8; hops++) {
+    const inner = collectionWalkDef(node);
+    if (!inner?.type) break;
+    if (inner.type === 'transform') return def.out;
+    if (COLLECTION_WALK_WRAPPERS.has(inner.type)) {
+      node = inner.innerType;
+      continue;
+    }
+    if (inner.type === 'lazy') {
+      node = inner.getter?.();
+      continue;
+    }
+    break;
+  }
+  return def.in;
+}
+
 /**
  * Does this schema declare a COLLECTION — an array, or a record of named
  * members — once the optional/default/nullable wrappers are stripped, reading
@@ -3396,13 +3986,15 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
  * the same. A fixed-shape config object (`enable`, `access`, `protection`, …)
  * is not a collection — its members are declared keys, not authored entries —
  * and stays on the scalar rule.
+ *
+ * A `pipe` is read on the side the AUTHOR writes, never on `in` alone — see
+ * {@link pipeAuthorableSide} for the two opposite conventions that compile to
+ * that one node.
  * @internal
  */
 function declaresCollection(schema: unknown, depth = 0): boolean {
   if (depth > 8) return false;
-  const def = (schema as {
-    _zod?: { def?: { type?: string; innerType?: unknown; in?: unknown; options?: unknown[]; getter?: () => unknown } };
-  })._zod?.def;
+  const def = collectionWalkDef(schema);
   if (!def?.type) return false;
   switch (def.type) {
     case 'array':
@@ -3419,7 +4011,7 @@ function declaresCollection(schema: unknown, depth = 0): boolean {
     case 'lazy':
       return declaresCollection(def.getter?.(), depth + 1);
     case 'pipe':
-      return declaresCollection(def.in, depth + 1);
+      return declaresCollection(pipeAuthorableSide(def), depth + 1);
     case 'union':
       return (def.options ?? []).some((option) => declaresCollection(option, depth + 1));
     default:
@@ -3503,10 +4095,12 @@ function refuseUnmergeableCollections(
     }
     if (deepEqualAuthored(held[key], value)) continue;
 
-    throw new Error(
-      `composeStacks conflict: object '${name}' is defined in multiple stacks and its '${key}' ` +
-        `is declared with different values by ${stackLabel(stacks[holder], holder)} and ` +
-        `${stackLabel(stacks[index], index)}.\n` +
+    const finding =
+      `object '${name}' is defined in multiple stacks and its '${key}' ` +
+      `is declared with different values by ${stackLabel(stacks[holder], holder)} and ` +
+      `${stackLabel(stacks[index], index)}.`;
+    throw new StackComposeCollectionConflictError(
+      `composeStacks conflict: ${finding}\n` +
         `objectConflict: 'merge' shallow-merges 'fields' only. Any other object-level collection ` +
         `(${[...objectCollectionKeys()].join(', ')}) is not merged: the later declaration would ` +
         `replace the earlier one wholesale, silently dropping every entry ` +
@@ -3514,6 +4108,7 @@ function refuseUnmergeableCollections(
         `Fix: declare '${key}' on '${name}' in exactly one of the two stacks, make the two ` +
         `declarations identical, or use { objectConflict: 'override' } to hand the whole object ` +
         `to the later stack.`,
+      [finding],
     );
   }
 }
@@ -3569,8 +4164,35 @@ function mergeObjects(
   const collectionOwner = new Map<string, Map<string, number>>();
 
   for (const [i, stack] of stacks.entries()) {
-    if (!stack.objects) continue;
-    for (const obj of stack.objects) {
+    // [ADR-0112 · #18239] Shape guard, because composition accepts inputs the
+    // strict parse never saw (a hand-built stack, `strict: false`). A non-array
+    // `objects` is REFUSED, never skipped: skipping it composes an artifact that
+    // silently lacks this stack's objects — a composed artifact is complete or
+    // it is refused. `undefined` is the one non-array that is not malformed: the
+    // key is simply absent. The code is the strict parse's own
+    // (`STACK_SCHEMA_INVALID`) because the defect is the same authored mistake
+    // that door refuses; the header names this pass, the split
+    // {@link StackCrossReferenceError} makes across its two raise sites.
+    const declared: unknown = (stack as { objects?: unknown }).objects;
+    if (declared === undefined) continue;
+    if (!Array.isArray(declared)) {
+      const { kind, issues } = describeNonArrayCollection('objects', declared);
+      throw new StackSchemaInvalidError(
+        `composeStacks validation failed: ${stackLabel(stack, i)} declares 'objects' as ${kind}, ` +
+          `not an array. Its objects cannot be composed, and skipping them would compose an artifact ` +
+          `that silently lacks them. Author 'objects' as an array (\`defineStack\` normalizes the map ` +
+          `form into one), or run the stack through strict \`defineStack\` to have the shape rejected ` +
+          `where it is written.`,
+        issues,
+      );
+    }
+    for (const obj of declared as Obj[]) {
+      // A non-object ENTRY carries no object to merge — step 3's shape: skip it
+      // and say so once, never dereference it into a bare `TypeError`.
+      if (!isRecord(obj)) {
+        warnMalformedCollectionEntry('objects');
+        continue;
+      }
       const existing = map.get(obj.name);
       if (!existing) {
         map.set(obj.name, obj);
@@ -3581,11 +4203,14 @@ function mergeObjects(
       }
 
       switch (strategy) {
-        case 'error':
-          throw new Error(
-            `composeStacks conflict: object '${obj.name}' is defined in multiple stacks. ` +
+        case 'error': {
+          const finding = `object '${obj.name}' is defined in multiple stacks.`;
+          throw new StackComposeObjectConflictError(
+            `composeStacks conflict: ${finding} ` +
               `Use { objectConflict: 'override' } or { objectConflict: 'merge' } to resolve.`,
+            [finding],
           );
+        }
         case 'override': {
           // Replace in-place in the result array
           const idx = result.indexOf(existing);
@@ -3808,6 +4433,200 @@ function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackag
 }
 
 /**
+ * The package-owned collection keys — every key an assembled package body
+ * carries beyond its manifest fields, which is exactly the set option B moves
+ * off the artifact's top level.
+ *
+ * DERIVED from {@link assembledPackageBodyShape}, never transcribed, so a
+ * metadata family added to the stack schema is carried by a package body and
+ * dropped from the flattened copy in the same change. Memoized because the
+ * emitter reads it on every preserve composition, and computed lazily because
+ * the shape it reads is built from the lazily-declared collection schemas.
+ * @internal
+ */
+let cachedPackageOwnedKeys: readonly string[] | undefined;
+function packageOwnedCollectionKeys(): readonly string[] {
+  return (cachedPackageOwnedKeys ??= Object.freeze(Object.keys(assembledPackageBodyShape())));
+}
+
+/**
+ * Does `packages` carry EVERY input's collections, so the flattened top level
+ * can be dropped without losing one? (ADR-0130 D4 option B, #14512.)
+ *
+ * The emitter half of option B removes a COPY. It is only ever a copy when the
+ * package list already carries what it removes, and two legal preserve inputs
+ * make it something else:
+ *
+ * - **An input with no `manifest`.** {@link preservePackageEntries} contributes
+ *   a body only for a stack that HAS a manifest, because a body is a manifest
+ *   with collections written over it — there is no package to own a
+ *   manifest-less stack's objects. Its collections reach the composed top level
+ *   and nowhere else, so stripping would delete them outright. `manifest` is
+ *   optional on {@link ObjectStackDefinitionSchema}, so this is not a
+ *   hypothetical shape.
+ * - **An input that already carries `packages` AND its own collections.** Such
+ *   a stack contributes its entries untouched (re-assembling one would fold the
+ *   composition's collections onto a package that does not own them), so its
+ *   OWN top-level collections are attributed to no body either.
+ *
+ * Both cases keep today's additive output, which every reader still reads
+ * (D4's read-both rule is unchanged, and `resolveArtifactCollections` in
+ * `@objectstack/runtime` merges the two halves). ⛔ They are NOT refused here:
+ * a composition that was legal before this change stays legal, and narrowing
+ * the accept set is not what the ruling asked the emitter to do.
+ *
+ * The `< 2` floor is ADR-0130 D7 stated as a condition rather than trusted: a
+ * single-package artifact keeps today's shape byte for byte, so an artifact
+ * that reaches one package entry by any route — including a second input that
+ * carried an empty `packages` array — is left flattened.
+ * @internal
+ */
+function packagesCarryEveryInputCollection(
+  stacks: readonly ObjectStackDefinition[],
+  entries: readonly ArtifactPackage[],
+): boolean {
+  if (entries.length < 2) return false;
+  const owned = packageOwnedCollectionKeys();
+  for (const stack of stacks) {
+    const source = stack as Record<string, unknown>;
+    if (Array.isArray(source.packages)) {
+      // Its entries are carried; its own collections are assembled into none.
+      if (owned.some((key) => source[key] !== undefined)) return false;
+      continue;
+    }
+    if (!stack.manifest) return false;
+  }
+  return true;
+}
+
+/**
+ * A deterministic serialization with object keys sorted, so two copies of one
+ * definition that differ only in key order compare equal.
+ *
+ * Mirrors `stableIdentity` in `@objectstack/runtime`'s `artifact-collections.ts`
+ * — the reader that resolves these same collections back out of an artifact —
+ * for the reason the two must not disagree: this function decides whether a
+ * copy may be dropped, and that one decides what the dropped copy would have
+ * contributed. ⛔ Never throws: a cycle encodes as `[circular]` and a callable
+ * as `[function]`, because composition runs on the boot path of an `os dev`
+ * config as well as over parsed JSON, and the alternative to a wrong answer
+ * here is a build that dies inside a de-duplication helper. A callable
+ * collapses to one token, so two DIFFERENT handlers compare equal — that is
+ * safe in this direction only: `functions` is compared as a whole record and a
+ * disagreement there is answered by KEEPING the flattened copy.
+ * @internal
+ */
+function stableCollectionIdentity(value: unknown): string {
+  const seen = new WeakSet<object>();
+  const encode = (v: unknown): unknown => {
+    if (typeof v === 'function') return '[function]';
+    if (typeof v === 'bigint') return `${v}n`;
+    if (v === null || typeof v !== 'object') return v;
+    if (seen.has(v as object)) return '[circular]';
+    seen.add(v as object);
+    if (Array.isArray(v)) return v.map(encode);
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(v as Record<string, unknown>).sort()) {
+      out[key] = encode((v as Record<string, unknown>)[key]);
+    }
+    return out;
+  };
+  try {
+    return JSON.stringify(encode(value)) ?? 'undefined';
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+/**
+ * Does `packages` REPRODUCE the flattened collections this composition would
+ * otherwise carry — every item, unaltered? (ADR-0130 D4 option B, #14512.)
+ *
+ * ## Why attribution is not enough, measured
+ *
+ * {@link packagesCarryEveryInputCollection} proves every INPUT's collections
+ * reached a body. That is a different claim from the one the strip needs,
+ * because {@link assemblePackageBody} folds the **input** stack while the
+ * flattened top level holds the **composed** result, and composition is not
+ * always a concatenation:
+ *
+ * - `objectConflict: 'merge'` / `'override'` RECONCILE two packages'
+ *   same-named objects into one. The copy this strip would delete is the
+ *   reconciled one; the bodies hold the two unreconciled halves. Measured on a
+ *   two-package `merge` composition: the artifact's registration-path reader
+ *   answers ONE object carrying both packages' fields with the flattened copy
+ *   present, and TWO conflicting partial objects with it gone.
+ * - {@link mergeActionsIntoObjects} binds a standalone action onto the object
+ *   it names, INCLUDING an object a sibling package owns. The composed object
+ *   carries that echo; the owning package's body does not.
+ *
+ * Neither is a shape difference — the collections' declarations are identical
+ * on both sides — and neither is refused: both compose legally today. So the
+ * emitter asks the question it actually depends on, per collection, and keeps
+ * the additive shape whenever the answer is no.
+ *
+ * ## The comparison, and its granularity
+ *
+ * Multiset equality over {@link stableCollectionIdentity}, per key: every item
+ * the flattened half carries must be carried by exactly one body, and no body
+ * may carry an item the flattened half does not. ⛔ Not array-ORDER equality:
+ * a `packages`-carrying artifact registers in dependency-topological order
+ * (ADR-0130 D5), and a resolved collection's order is package order rather
+ * than the flattened array's, so requiring order here would keep the copy in
+ * cases where nothing at all is lost. What it does refuse is content: an item
+ * altered, added or reconciled in the flattened half fails the test.
+ *
+ * A collection key carried as a RECORD (`functions`, `datasources` in its
+ * record spelling) is compared whole, against the bodies merged in package
+ * order with the first declaration winning. A key the bodies carry and the
+ * flattened half does not fails too — the conservative direction, since the
+ * strip may only ever remove a copy of something.
+ * @internal
+ */
+function packagesReproduceComposedCollections(
+  artifact: Record<string, unknown>,
+  entries: readonly ArtifactPackage[],
+): boolean {
+  const bodies = entries.map((entry) => (entry as { manifest?: unknown }).manifest)
+    .filter((body): body is Record<string, unknown> => body !== null && typeof body === 'object');
+  if (bodies.length !== entries.length) return false;
+
+  for (const key of packageOwnedCollectionKeys()) {
+    const top = artifact[key];
+    const declared = bodies.map((body) => body[key]).filter((value) => value !== undefined);
+    if (top === undefined && declared.length === 0) continue;
+    if (top === undefined) return false;
+
+    if (Array.isArray(top) || declared.some((value) => Array.isArray(value))) {
+      if (!Array.isArray(top)) return false;
+      const fromBodies = declared.flatMap((value) => (Array.isArray(value) ? value : [value]));
+      if (fromBodies.length !== top.length) return false;
+      const left = top.map(stableCollectionIdentity).sort();
+      const right = fromBodies.map(stableCollectionIdentity).sort();
+      for (let i = 0; i < left.length; i += 1) if (left[i] !== right[i]) return false;
+      continue;
+    }
+
+    if (top !== null && typeof top === 'object') {
+      const merged: Record<string, unknown> = {};
+      for (const value of declared) {
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+        for (const [entryKey, entryValue] of Object.entries(value as Record<string, unknown>)) {
+          if (!(entryKey in merged)) merged[entryKey] = entryValue;
+        }
+      }
+      if (stableCollectionIdentity(merged) !== stableCollectionIdentity(top)) return false;
+      continue;
+    }
+
+    // A scalar is not a shape any collection key declares; nothing here can
+    // establish that a body reproduces it, so the copy stays.
+    return false;
+  }
+  return true;
+}
+
+/**
  * Fold ONE input stack into the assembled package body the artifact carries
  * (ADR-0130 D4; #14242 B).
  *
@@ -3831,12 +4650,19 @@ function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackag
  * {@link ObjectStackDefinitionSchema}'s `packages` key parses against it, so a
  * body this function builds and a body the load path accepts cannot drift.
  *
- * ⚠️ ADDITIVE, like `'preserve'` itself: the composed stack keeps its flattened
- * collections, so every consumer that reads the artifact's top level — the
- * metadata service's artifact door among them — sees exactly what it saw
- * before. What `packages` adds is per-package OWNERSHIP at registration, which
- * is the whole of ADR-0130 D1: without it, a composed multi-package artifact
- * registers N package records owning nothing at all.
+ * ⚠️ This body is the artifact's ONLY copy of the collections it carries,
+ * whenever the bodies reproduce what the flattened half would have held
+ * (#14512, ADR-0130 D4 addendum 2026-09-22): the flattened top level is then
+ * not emitted beside it, and a consumer reads the definitions here or not at
+ * all. Where composition RECONCILED something the bodies do not carry — a
+ * merged or overridden object, an action bound onto a sibling package's object
+ * — the flattened half stays and this body is one of two copies, exactly as
+ * before {@link composeStacks} learned to drop it. Every reader in the platform resolves
+ * `packages[]` — the reader half of the same ruling — and D4's read-both rule
+ * still reads an artifact already on disk that carries both halves. What
+ * `packages` gives is per-package OWNERSHIP at registration, which is the whole
+ * of ADR-0130 D1: without it, a composed multi-package artifact registers N
+ * package records owning nothing at all.
  *
  * @internal
  */
@@ -3947,7 +4773,9 @@ function collectArtifactCrossReferenceErrors(
  * **Objects** are merged according to the `objectConflict` strategy.
  * **Manifest** is selected based on the `manifest` option — or, with
  * `manifest: 'preserve'`, every input's package identity is additionally folded
- * into `packages` (ADR-0130 D4) instead of N−1 of them being discarded.
+ * into `packages` (ADR-0130 D4) instead of N−1 of them being discarded, and a
+ * multi-package artifact then carries its collections in those package bodies
+ * ONLY, never also flattened at the top level (#14512).
  * **Single-valued configuration** (`i18n`, `api`, `server`, `runtimeModule`) is
  * neither overridden nor merged: identical declarations pass through, and two
  * stacks declaring *different* values throw an error naming both stacks
@@ -3995,6 +4823,8 @@ function collectArtifactCrossReferenceErrors(
  * // Preserve — one artifact carrying BOTH packages, each assembled (ADR-0130 D4)
  * const artifact = composeStacks([crm, cpq], { manifest: 'preserve' });
  * artifact.packages; // [{ manifest: { ...crmManifest, objects: [...] } }, …]
+ * artifact.objects;  // undefined — each definition is carried ONCE, in its
+ *                    // package body (#14512); `artifact.manifest` is retained
  * ```
  */
 export function composeStacks(
@@ -4010,11 +4840,12 @@ export function composeStacks(
 
   // 1. Manifest — pick based on strategy.
   //
-  //    `'preserve'` is additive over the default rather than a fourth pick: the
-  //    singular `manifest` is still selected by `'last'`, so a preserve
-  //    composition's output is the default's output PLUS the package list built
-  //    in step 3a. The artifact keeps an artifact-level identity (ADR-0130 D6)
-  //    and no consumer reading `composed.manifest` loses a key.
+  //    `'preserve'` is not a fourth pick: the singular `manifest` is still
+  //    selected by `'last'`, so the artifact keeps an artifact-level identity
+  //    (ADR-0130 D6) and no consumer reading `composed.manifest` loses a key.
+  //    What preserve adds is the package list built in step 3a; what step 7
+  //    then removes, for a multi-package artifact, is the flattened copy of the
+  //    collections those bodies carry (#14512).
   composed.manifest = selectManifest(stacks, opts.manifest === 'preserve' ? 'last' : opts.manifest);
 
   // 2. Objects — use conflict strategy (and remember, per composed object,
@@ -4025,20 +4856,44 @@ export function composeStacks(
   }
 
   // 3. Array collections — simple concatenation, in stack order.
+  //
+  //    [ADR-0112 · #19784] A collection key holding something that is not an
+  //    array cannot be concatenated, and it is REFUSED, never skipped — step 2's
+  //    rule for `objects`, applied to every concatenated key: skipping the value
+  //    composes an artifact that silently lacks that stack's grants, seed rows,
+  //    views, … (measured per key for every `CONCAT_ARRAY_FIELDS` entry: the
+  //    skipped value's content was absent from the composed top level, and under
+  //    `manifest: 'preserve'` survived only inside that stack's package body, so
+  //    the artifact disagreed with itself). A composed artifact is complete or it
+  //    is refused. `defineStack` rejects the shape at its own door, so this is
+  //    reachable only via `strict: false` or a hand-built stack object; the code
+  //    is the strict parse's own (`STACK_SCHEMA_INVALID`), as in step 2.
+  //    `undefined` is the one non-array that is not malformed: the key is absent.
+  //    A non-object ENTRY inside an array is concatenated as-is — the entry is
+  //    carried, not lost, so the composed content is unchanged.
   for (const field of CONCAT_ARRAY_FIELDS) {
-    const declared = stacks
-      .map((s) => (s as Record<string, unknown>)[field])
-      .filter((v) => v !== undefined);
-    const arrays = declared.filter((v): v is unknown[] => Array.isArray(v));
+    const arrays: unknown[][] = [];
+    for (const [i, stack] of stacks.entries()) {
+      const declared: unknown = (stack as Record<string, unknown>)[field];
+      if (declared === undefined) continue;
+      if (!Array.isArray(declared)) {
+        const { kind, issues } = describeNonArrayCollection(field, declared);
+        throw new StackSchemaInvalidError(
+          `composeStacks validation failed: ${stackLabel(stack, i)} declares '${field}' as ${kind}, ` +
+            `not an array. Its '${field}' entries cannot be concatenated, and skipping them would ` +
+            `compose an artifact that silently lacks them. Author '${field}' as an array` +
+            ((MAP_SUPPORTED_FIELDS as readonly string[]).includes(field)
+              ? ` (\`defineStack\` normalizes the map form into one)`
+              : '') +
+            `, or run the stack through strict \`defineStack\` to have the shape rejected where it ` +
+            `is written.`,
+          issues,
+        );
+      }
+      arrays.push(declared);
+    }
     if (arrays.length > 0) {
       composed[field] = arrays.flat();
-    }
-    // A collection key holding something that is not an array cannot be
-    // concatenated. `defineStack` rejects that shape, so this is only
-    // reachable via `strict: false` or a hand-built stack object — but
-    // dropping it without a word is the exact defect #5005 closes.
-    if (declared.length !== arrays.length) {
-      warnMalformedCollectionKey(field);
     }
   }
 
@@ -4046,7 +4901,7 @@ export function composeStacks(
   //     artifact package list (ADR-0130 D4, follow-up row 3).
   //
   //     Deliberately AFTER the concat pass, which owns `packages`' declared
-  //     disposition and its malformed-value warning. For stacks that already
+  //     disposition and its malformed-value refusal. For stacks that already
   //     carry `packages`, preserve emits the same concatenation the pass just
   //     computed; what it adds is the single-`manifest` stacks the pass has
   //     nothing to concatenate for. Left undefined when there is nothing to
@@ -4132,7 +4987,10 @@ export function composeStacks(
   //    would make every bound action collide with itself.
   const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner);
   if (actionCollisions.length > 0) {
-    throw new Error(formatComposedActionKeyCollisions(actionCollisions));
+    throw new StackComposeActionKeyCollisionError(
+      formatComposedActionKeyCollisions(actionCollisions),
+      actionCollisions,
+    );
   }
 
   // 7. Bind every standalone action to its object — ONCE. Each input built by
@@ -4140,5 +4998,25 @@ export function composeStacks(
   //    echo step 6 steps around), and the surviving objects reach here as-is,
   //    so the merge appends only what an object does not already carry by
   //    identity (#14847): the other inputs' actions bound to it.
-  return mergeActionsIntoObjects(composed as ObjectStackDefinition);
+  const artifact = mergeActionsIntoObjects(composed as ObjectStackDefinition) as Record<string, unknown>;
+
+  // 8. `manifest: 'preserve'` — a MULTI-package artifact carries each
+  //    definition ONCE, under the package that owns it, so the flattened copy
+  //    is not emitted at all (ADR-0130 D4 addendum 2026-09-22, maintainer
+  //    ruling batch #23).
+  //
+  //    LAST, and that position is load-bearing: what may be deleted is what
+  //    step 7 actually produced, so the reproduction test below reads the
+  //    FINAL composed collections rather than an earlier draft of them. Steps
+  //    3b and 6 keep reading the flattened collections before this point —
+  //    the emitted shape narrows, the refusals do not.
+  if (opts.manifest === 'preserve') {
+    const entries = Array.isArray(artifact.packages) ? (artifact.packages as ArtifactPackage[]) : [];
+    if (packagesCarryEveryInputCollection(stacks, entries)
+      && packagesReproduceComposedCollections(artifact, entries)) {
+      for (const key of packageOwnedCollectionKeys()) delete artifact[key];
+    }
+  }
+
+  return artifact as ObjectStackDefinition;
 }

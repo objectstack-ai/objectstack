@@ -77,7 +77,8 @@ Compatibility level between versions
 | **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| …>; description: string; migrationGuide?: string; … }[]` | optional |  |
 | **migrationRequired** | `boolean` | optional (default: `false`) |  |
 | **migrationComplexity** | `Enum<'trivial' \| 'simple' \| 'moderate' \| 'complex' \| 'major'>` | optional |  |
-| **estimatedMigrationTime** | `number` | optional |  |
+| **estimatedMigrationTimeHours** | `number` | optional | Estimated migration time in hours |
+| **estimatedMigrationTime** | `never` | optional | [REMOVED] `CompatibilityMatrixEntry.estimatedMigrationTime` was renamed to `estimatedMigrationTimeHours` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in prose. Rename the key to `estimatedMigrationTimeHours`; the value (hours) is unchanged. |
 | **migrationScript** | `string` | optional | Path to migration script |
 | **testCoverage** | `number` | optional | Percentage of migration covered by tests |
 
@@ -191,7 +192,8 @@ Compatibility level between versions
 | **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| …>; description: string; migrationGuide?: string; … }[]` | optional |  |
 | **migrationRequired** | `boolean` | optional (default: `false`) |  |
 | **migrationComplexity** | `Enum<'trivial' \| 'simple' \| 'moderate' \| 'complex' \| 'major'>` | optional |  |
-| **estimatedMigrationTime** | `number` | optional |  |
+| **estimatedMigrationTimeHours** | `number` | optional | Estimated migration time in hours |
+| **estimatedMigrationTime** | `never` | optional | [REMOVED] `CompatibilityMatrixEntry.estimatedMigrationTime` was renamed to `estimatedMigrationTimeHours` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in prose. Rename the key to `estimatedMigrationTimeHours`; the value (hours) is unchanged. |
 | **migrationScript** | `string` | optional | Path to migration script |
 | **testCoverage** | `number` | optional | Percentage of migration covered by tests |
 
@@ -285,7 +287,8 @@ Compatibility level between versions
 | **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| …>; description: string; migrationGuide?: string; … }[]` | optional |  |
 | **migrationRequired** | `boolean` | optional (default: `false`) |  |
 | **migrationComplexity** | `Enum<'trivial' \| 'simple' \| 'moderate' \| 'complex' \| 'major'>` | optional |  |
-| **estimatedMigrationTime** | `number` | optional |  |
+| **estimatedMigrationTimeHours** | `number` | optional | Estimated migration time in hours |
+| **estimatedMigrationTime** | `never` | optional | [REMOVED] `CompatibilityMatrixEntry.estimatedMigrationTime` was renamed to `estimatedMigrationTimeHours` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in prose. Rename the key to `estimatedMigrationTimeHours`; the value (hours) is unchanged. |
 | **migrationScript** | `string` | optional | Path to migration script |
 | **testCoverage** | `number` | optional | Percentage of migration covered by tests |
 

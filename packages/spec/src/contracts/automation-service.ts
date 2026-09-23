@@ -544,6 +544,37 @@ export interface FlowRuntimeState {
     reason?: string;
 }
 
+/**
+ * One window of execution runs, plus the truncation fact the window alone
+ * cannot carry (#19543).
+ *
+ * The sibling shape is `ExportJobListResult` (`contracts/export-service.ts`),
+ * and the difference from it is deliberate: there is ⛔ NO `nextCursor` here.
+ * Nothing on this door has ever minted a continuation token, the request half
+ * that would have spent one is a retired key, and a `nextCursor` no caller can
+ * send back is the same declared-and-unusable shape #19543 exists to close.
+ * `hasMore` is actionable without one — the caller widens `limit`, which this
+ * door does read, up to its declared maximum of 100.
+ */
+export interface RunListResult {
+    /** The runs this response carries — at most the requested `limit`. */
+    runs: ExecutionLog[];
+    /**
+     * Whether more runs matched the request than {@link RunListResult.runs}
+     * carries. ⛔ Never a hard-coded constant: an implementation establishes
+     * it by over-reading its sources, because `runs.length === limit` cannot
+     * tell a flow with exactly `limit` runs from one with far more.
+     *
+     * ⚠️ **Qualified under a status filter.** An implementation may take its
+     * window BEFORE narrowing by `status` — the reference one does, because
+     * its durable history source has no status slot — in which case `false`
+     * means "no further match inside the window that was scanned", ⛔ not "no
+     * further match exists". Unfiltered, it is exact. Read it as a floor on
+     * what a wider `limit` would reveal, never as a count of the whole set.
+     */
+    hasMore: boolean;
+}
+
 export interface IAutomationService {
     /**
      * Execute a named flow or script
@@ -637,14 +668,68 @@ export interface IAutomationService {
      * store it merges; a filter that sees only half the rows is the same class
      * of confident wrong answer as not filtering at all.
      *
+     * ⛔ `cursor` is GONE from these options (#19543, maintainer ruling,
+     * decision batch #204 item 2, letter C). It was declared here, forwarded
+     * from the HTTP boundary, and read by no implementation; the wire half is
+     * a `retiredKey()` tombstone on `ListRunsRequestSchema`. ⛔ Do not add it
+     * back without a response-side way to mint one — that is letter A of the
+     * same ruling, explicitly not taken. `limit` is untouched and is the real
+     * window: it is read end to end and every implementation must honour it.
+     *
+     * ⭐ Prefer {@link IAutomationService.listRunsPage} at a door that has to
+     * answer `hasMore`. This member reports the window's CONTENTS and cannot
+     * report whether anything was left outside it, so a door built on it alone
+     * has nothing honest to put in that field — which is exactly the defect
+     * #19543 closed, where the run-list door shipped a literal `hasMore: false`
+     * beside a list the engine had already truncated.
+     *
      * @param flowName - Flow name (snake_case)
-     * @param options - Filter and pagination options
+     * @param options - Filter and window options
      * @returns Array of execution logs
      */
     listRuns?(
         flowName: string,
-        options?: { limit?: number; cursor?: string; status?: ExecutionStatus },
+        options?: { limit?: number; status?: ExecutionStatus },
     ): Promise<ExecutionLog[]>;
+
+    /**
+     * List one WINDOW of execution runs, and say whether more were left
+     * outside it (#19543).
+     *
+     * The truncation half is the reason this member exists and is not a
+     * convenience wrapper over {@link IAutomationService.listRuns}: only the
+     * implementation knows whether its own window bit. `listRuns` answers with
+     * at most `limit` rows and a caller cannot tell a flow with exactly
+     * `limit` runs from one with ten thousand — the two are byte-identical on
+     * the wire. An implementation MUST therefore establish `hasMore` by
+     * over-reading its sources rather than by comparing `runs.length` to
+     * `limit`, which cannot distinguish those two cases.
+     *
+     * `hasMore` means: **more runs matched this request than this response
+     * carries**, so a caller that widens `limit` will see rows it has not seen.
+     * It is ⛔ NOT a promise of a next page — this door mints no cursor and
+     * there is nothing to send back — and it is ⛔ NOT a statement about runs
+     * the deployment's retention policy has already discarded; those do not
+     * exist any more and are not "more".
+     *
+     * ⚠️ And it is qualified under `status`: an implementation whose window is
+     * taken before the filter is applied can only answer about the rows it
+     * scanned, so a status-filtered `false` does not promise that no older run
+     * of that status exists. {@link RunListResult.hasMore} carries the full
+     * statement; ⛔ do not restate it more strongly at a call site.
+     *
+     * OPTIONAL, and its absence is a DECLARED degradation rather than a silent
+     * one: a door that needs `hasMore` answers `501` naming this member, and
+     * ⛔ never a `200` carrying a guess.
+     *
+     * @param flowName - Flow name (snake_case)
+     * @param options - Filter and window options
+     * @returns The window, plus whether more runs matched than it carries
+     */
+    listRunsPage?(
+        flowName: string,
+        options?: { limit?: number; status?: ExecutionStatus },
+    ): Promise<RunListResult>;
 
     /**
      * Get a single execution run by ID

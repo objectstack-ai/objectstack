@@ -156,7 +156,7 @@ function undeclaredKeyRejections(result: { success: boolean; error?: any }): str
 }
 
 const MANIFEST = {
-  id: 'gate_probe',
+  id: 'com.example.gate-probe',
   name: 'Gate Probe',
   namespace: 'gate_probe',
   version: '1.0.0',

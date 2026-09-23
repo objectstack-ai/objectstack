@@ -61,25 +61,30 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `53ded82bf`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-08 — previously measured at `a472b0716`, `00d3f09c5`,
-  // `67dadd602`, before that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`,
-  // `9a3daf8d3`, originally at `6314e87f2`. `ObjectGrid.tsx` DID change again
-  // across the move off `a472b0716` (24 insertions, 30 deletions), so the
-  // selection block this record means was re-READ rather than carried: it is
-  // `ObjectGrid.tsx:3538-3553` here, was `3544-3559` at `a472b0716`, and the
-  // sixteen lines are BYTE-IDENTICAL across the hop — `git hash-object` on both
-  // spans returns `6133933199230670e29d8c7f51c558d86a0af1d2`, so the block only
-  // shifted six lines UP and none of its substance moved. The earlier hop off
+  // (`.objectui-sha` = `87af769e9`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-20 — previously measured at `53ded82bf`, `a472b0716`,
+  // `00d3f09c5`, `67dadd602`, before that at `d8ec8d6d4`, `9602dc820`,
+  // `190fbd01d`, `9a3daf8d3`, originally at `6314e87f2`. `ObjectGrid.tsx` DID
+  // change again across the move off `53ded82bf` (721 insertions, 159
+  // deletions), so the selection block this record means was re-READ rather
+  // than carried: it is `ObjectGrid.tsx:3940-3955` here, was `3538-3553` at
+  // `53ded82bf` and `3544-3559` at `a472b0716`, and the sixteen lines are
+  // BYTE-IDENTICAL across the hop — `git hash-object` on both spans returns
+  // `6133933199230670e29d8c7f51c558d86a0af1d2`, the same id the previous two
+  // hops recorded, so the block only shifted 402 lines DOWN and none of its
+  // substance moved. The earlier hop off
   // `00d3f09c5` is the one that caught the previous record's OWN grid anchor as
   // wrong rather than merely shifted: `3790-3805` there is
   // `runBulkActionAggregate` and says nothing about selection. That is the
   // #10274 class, and the reason a citation refresh re-READS instead of moving
   // numbers — arithmetic on a wrong anchor produces a fresh-looking span still
   // describing the wrong function. The second claim,
-  // `hooks/useBulkExecutor.ts:284-289`, is in a file byte-identical at both
-  // pins and re-READ there rather than carried on that identity — it still
-  // ends on `label = 'bulk delete'`, the line the `284-288` span cited five
+  // `hooks/useBulkExecutor.ts:298-303`, sits in a file that is NO LONGER
+  // byte-identical across this hop (36 insertions, 22 deletions), so it was
+  // re-READ rather than carried on file identity: the six lines are themselves
+  // byte-identical (`git hash-object` on both spans returns
+  // `01083348330f10a201cdf1078b4c21c236402b6a`) and still end on
+  // `label = 'bulk delete'`, the line the `284-288` span cited six
   // pins ago stopped short of, truncating the second of the two branches it
   // names (byte-identity is never taken as proof an anchor is right):
   //

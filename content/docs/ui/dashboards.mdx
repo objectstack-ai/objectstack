@@ -100,10 +100,37 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `description` | `string` | optional | Text shown below the title |
 | `filter` | `FilterCondition` | optional | Presentation-scope filter (`runtimeFilter`) |
 | `layout` | `object` | optional | Grid position and size (auto-flowed into the grid when omitted) |
-| `chartConfig` | `object` | optional | Advanced chart configuration |
+| `chartConfig` | `object` | optional | Chart **appearance**: `title`, `subtitle`, `description`, `colors`, `height`, `showLegend`, `showDataLabels`, `annotations`, `interaction`. The bound dataset decides which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and `series` are refused here — see below |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
 | `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. |
 | `options` | `object` | optional | Renderer extras **plus** the query keys below |
+
+### What `chartConfig` does **not** carry
+
+A dashboard widget is always bound to a dataset (`dataset` is required), and the
+dataset owns the chart's **structure**: which series exist, and which column
+each one reads. `chartConfig` carries **appearance**. So four keys that the
+shared chart config declares are refused on a dashboard widget by name, each
+refusal naming where the intent belongs:
+
+| you wrote inside `chartConfig` | write this on the widget instead |
+| :--- | :--- |
+| `type: 'line'` | `type: 'line'` — the widget's own `type` is the chart family, and it always won |
+| `xAxis: { field: 'stage' }` | `dimensions: ['stage']` — the dataset dimension the category axis plots |
+| `yAxis: [{ field: 'amount' }]` | `values: ['amount']` — the dataset measures, one entry per mark |
+| `series: [{ name: 'amount' }]` | `values` (+ a second `dimensions` entry to split) — series membership follows the selection |
+
+Axis titles, number formats, axis bounds and per-series labels, colours and mark
+types went with those keys: a dataset-bound chart takes them from the dataset's
+own dimension and measure declarations. `colors` on the chart config is the
+palette channel that remains.
+
+The keys are **not** gone from the chart config everywhere. A react-tier
+`<ObjectChart data={…} />` binds inline rows with no dataset behind them, so its
+axes are the author's and are unchanged; a report chart names its bound
+dataset's dimension and measure directly in `xAxis` / `yAxis`.
+
+Existing sources: `os migrate meta --from 17` lists the mechanical edits.
 
 ### Widget `options`
 

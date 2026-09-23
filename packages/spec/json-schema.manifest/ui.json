@@ -40,6 +40,7 @@
     "ui/DashboardHeaderAction",
     "ui/DashboardNavItem",
     "ui/DashboardWidget",
+    "ui/DashboardWidgetChartConfig",
     "ui/DashboardWidgetOptions",
     "ui/Dataset",
     "ui/DatasetDimension",

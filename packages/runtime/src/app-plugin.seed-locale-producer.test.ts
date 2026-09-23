@@ -162,7 +162,7 @@ describe('AppPlugin supplies SeedLoaderConfig.locale (#16595)', () => {
     const seededObjects = () => Object.keys(store).sort();
 
     const bundle = (i18n?: unknown, datasets = ALL_DATASETS) => ({
-        id: 'locale-producer-app',
+        id: 'com.example.locale-producer-app',
         ...(i18n ? { i18n } : {}),
         data: datasets,
     });
@@ -244,7 +244,7 @@ describe('AppPlugin supplies SeedLoaderConfig.locale (#16595)', () => {
         /** The legacy nested-manifest bundle shape resolves the same key. */
         it('reads `i18n.defaultLocale` off a nested `manifest` bundle too', async () => {
             const plugin = new AppPlugin({
-                manifest: { id: 'locale-producer-app', i18n: { defaultLocale: 'zh-CN' } },
+                manifest: { id: 'com.example.locale-producer-app', i18n: { defaultLocale: 'zh-CN' } },
                 data: ALL_DATASETS,
             });
 

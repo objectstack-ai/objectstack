@@ -369,7 +369,7 @@ const viewBody = (name: string, label: string, extra: Record<string, unknown> = 
 });
 
 const ORG = 'org_alpha';
-const PKG = 'pkg_helpdesk';
+const PKG = 'com.example.helpdesk';
 
 /** Audit rows for one operation, in write order. */
 const opRows = (h: Harness, operation: string) =>

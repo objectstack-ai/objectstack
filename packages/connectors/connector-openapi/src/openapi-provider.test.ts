@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { ConnectorProviderContext } from '@objectstack/spec/integration';
-import { isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
+import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { createOpenApiProviderFactory, OPENAPI_PROVIDER_KEY } from './openapi-provider.js';
 
 const petstore = {
@@ -22,6 +22,82 @@ const petstore = {
 function ctx(partial: Partial<ConnectorProviderContext> & Pick<ConnectorProviderContext, 'providerConfig'>): ConnectorProviderContext {
     return { name: 'pets', label: 'Pets', type: 'api', ...partial };
 }
+
+/**
+ * A RESOLVED policy, built the way the materializer builds it — through the
+ * schema, so the defaults under each override are the declared ones.
+ */
+function policy(over: Parameters<typeof RetryConfigSchema.parse>[0] = {}): ConnectorProviderContext['retryConfig'] {
+    return RetryConfigSchema.parse(over);
+}
+
+// ── The openapi transport goes through the shared wrapper (#18975) ──────────
+//
+// ⚠️ THIS FILE IS THE PIN FOR THAT ROUTING, and it exists because a sibling's
+// pin is NOT one: `openapi-connector.ts` used a naked `fetch`, and restoring it
+// left all 34 openapi tests green — a silent behaviour change on every shipped
+// openapi connector with nothing that failed on revert. What is asserted here
+// is the number of calls the upstream actually received, which is the only
+// thing a naked fetch cannot produce.
+describe('openapi provider factory — declared retry policy is executed (#18975)', () => {
+    /** A fetch that answers the scripted statuses in order (last repeats). */
+    function scriptedFetch(statuses: number[]) {
+        const calls: string[] = [];
+        const impl = (async (url: string) => {
+            const status = statuses[Math.min(calls.length, statuses.length - 1)];
+            calls.push(url);
+            return {
+                status,
+                ok: status < 400,
+                headers: { get: () => 'application/json' },
+                json: async () => ({ status }),
+                text: async () => '{}',
+            };
+        }) as unknown as typeof fetch;
+        return { impl, calls };
+    }
+
+    it('retries a listed status through resilientFetch and returns the success', async () => {
+        const { impl, calls } = scriptedFetch([503, 200]);
+        const factory = createOpenApiProviderFactory({ fetchImpl: impl });
+        const { handlers } = await factory(
+            ctx({
+                providerConfig: { spec: petstore },
+                retryConfig: policy({
+                    strategy: 'fixed_delay',
+                    maxAttempts: 2,
+                    initialDelayMs: 100,
+                    retryableStatusCodes: [503],
+                    jitter: false,
+                }),
+            }),
+        );
+
+        const out = await handlers.listPets({}, {});
+        expect(out).toMatchObject({ status: 200, ok: true });
+        expect(calls).toHaveLength(2);
+    });
+
+    it('an authored retryableStatusCodes narrows what the openapi transport retries', async () => {
+        // 500 is retryable under the wrapper's own default AND the schema
+        // default, so answering it once can only mean the AUTHORED list ran.
+        const { impl, calls } = scriptedFetch([500, 200]);
+        const factory = createOpenApiProviderFactory({ fetchImpl: impl });
+        const { handlers } = await factory(
+            ctx({
+                providerConfig: { spec: petstore },
+                retryConfig: policy({
+                    strategy: 'fixed_delay', maxAttempts: 3, initialDelayMs: 100,
+                    retryableStatusCodes: [503], jitter: false,
+                }),
+            }),
+        );
+
+        const out = await handlers.listPets({}, {});
+        expect(out).toMatchObject({ status: 500 });
+        expect(calls).toHaveLength(1);
+    });
+});
 
 describe('openapi provider factory (ADR-0097)', () => {
     it('advertises the openapi provider key', () => {

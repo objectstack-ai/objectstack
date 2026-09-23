@@ -12,7 +12,7 @@ const protocolIssues = (config: any) => lintConfig(config).filter((i) => i.rule 
 describe('lint protocol/missing-engines-range', () => {
   it('warns when a manifest declares no compatibility range', () => {
     const issues = protocolIssues({
-      manifest: { id: 'demo', namespace: 'demo', version: '1.0.0', name: 'Demo', type: 'app' },
+      manifest: { id: 'com.example.demo', namespace: 'demo', version: '1.0.0', name: 'Demo', type: 'app' },
     });
     expect(issues).toHaveLength(1);
     expect(issues[0]!.severity).toBe('warning');
@@ -22,14 +22,14 @@ describe('lint protocol/missing-engines-range', () => {
   it('accepts engines.protocol', () => {
     expect(
       protocolIssues({
-        manifest: { id: 'demo', engines: { protocol: `^${PROTOCOL_MAJOR}` } },
+        manifest: { id: 'com.example.demo', engines: { protocol: `^${PROTOCOL_MAJOR}` } },
       }),
     ).toEqual([]);
   });
 
   it('accepts the engines.platform and legacy engine.objectstack fallbacks', () => {
-    expect(protocolIssues({ manifest: { id: 'a', engines: { platform: '>=15' } } })).toEqual([]);
-    expect(protocolIssues({ manifest: { id: 'b', engine: { objectstack: '^15.0.0' } } })).toEqual([]);
+    expect(protocolIssues({ manifest: { id: 'com.example.a', engines: { platform: '>=15' } } })).toEqual([]);
+    expect(protocolIssues({ manifest: { id: 'com.example.b', engine: { objectstack: '^15.0.0' } } })).toEqual([]);
   });
 
   it('stays silent for a bare metadata fragment with no manifest', () => {

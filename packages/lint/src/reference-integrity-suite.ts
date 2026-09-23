@@ -380,7 +380,23 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // every page-door binding as unresolvable. Its page-typed sibling above
   // takes the default for the same reason.
   { name: 'validatePageVisualizationBindings', run: validatePageVisualizationBindings },
-  { name: 'validateChartBindings', run: validateChartBindings },
+  // [#19542] `runtimeTypes` gains `report` under the ADR-0049 ruling, and ONLY
+  // `report`. On a report write this member is the subject-reader: it opens
+  // with `recordsOf(stack.reports)` and resolves that report's own `dataset` /
+  // `rows` / `columns` / `values` and its chart's axes against `stack.datasets`
+  // — the one collection this resolution needs and the one the per-write
+  // snapshot already carries (#7529), so it has no missing-collection
+  // false-positive channel. ⛔ NOT `dashboard` or `view`: on those writes the
+  // report/board surfaces the rule walks are the collections the snapshot does
+  // NOT carry, which is the `dataset` door's own DARK pin one file over.
+  //
+  // ⚠️ A REFUSAL widening, like #15254's and #19143's: a report republished
+  // with a dangling dataset binding or a dimension the dataset does not
+  // declare is now refused (422) rather than stored silently. MEASURED over
+  // the shipped report corpus at the door's own snapshot shape before
+  // crossing: 9 reports (showcase 4, todo 5), 8 of them binding a real dataset
+  // with `rows`/`values` — 0 findings, with a lit synthetic probe refused.
+  { name: 'validateChartBindings', runtimeTypes: ['flow', 'report'], run: validateChartBindings },
   // [#14105] One level BELOW the two members above it. `validateChartBindings`
   // and `validateWidgetBindings` resolve a presentation's binding against the
   // dataset (#7529/#8902); this one resolves the DATASET's own references —
@@ -444,6 +460,45 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateTranslatableSections', run: validateTranslatableSections },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },
+  // [#19542] NO `runtimeTypes`, i.e. the frozen `flow` default — and `skill` is
+  // HELD OUT of the ADR-0049 wiring deliberately, on a measurement, not
+  // forgotten. This member is the measurement's named bridge for the type and
+  // it does read the written skill as its subject (`recordsOf(stack.skills)`,
+  // findings pathed `skills[si].tools[ti]`), so on paper it crosses. What
+  // stops it is the UNIVERSE it resolves into.
+  //
+  // `collectToolUniverse` unions `PLATFORM_PROVIDED_TOOL_NAMES` ∪
+  // `stack.tools` ∪ the materialised action family from `stack.actions` and
+  // every object's `actions`. A per-write snapshot carries `objects` — so an
+  // object-level `action_<name>` resolves — but NEITHER `tools` NOR `actions`.
+  // Two of the three limbs are missing, so at this door the rule has no
+  // truthful `unresolved` verdict at all: only its CLEAN answers are reliable.
+  //
+  // ⚠️ Measured on the SHIPPED corpus, not synthetically. `app-showcase`
+  // declares exactly one AI-exposed action, `showcase_portfolio_snapshot`, and
+  // it exists at stack level only (todo's six are mirrored under
+  // `objects[].actions`, so those resolve; crm has none). A skill naming
+  // `action_showcase_portfolio_snapshot` is advised `ai-skill-tool-unresolved`
+  // at the door while the same member over the whole showcase stack answers
+  // `[]`. The advisory's own hint tells the author to declare the action and
+  // opt it in with `ai.exposed: true` — which is exactly what the author did —
+  // and it reaches `SaveMetaItemResponseSchema.advisories`, which Studio
+  // renders. A user would see a warning that is not true.
+  //
+  // ⛔ ADR-0109 does NOT bound this. Its 「the default path declares no tool
+  // records」 covers tool RECORDS; the `action_<name>` family IS that default
+  // path, so the bound argues the opposite way.
+  //
+  // So the type takes the ruling's OWN group B treatment of `tool` — 「the
+  // `tools` universe rule … can only remove findings ⇒ a reading, not a
+  // ruling」 — which is this same rule read from the other side. Crossing it
+  // needs `actions` / `tools` carried in `RuntimeStackContext` +
+  // `CONTEXT_STACK_KEYS`, a `CLOSURE_CONTEXT_KEY_BY_TYPE` row and two more
+  // door gathers in `@objectstack/metadata-protocol` — a second package, a
+  // snapshot widening on EVERY gated write, and its own card. `skill` has no
+  // `TYPE_TO_STACK_KEY` row either, so the two absences are CONSISTENT and the
+  // gate dispatches nothing for it; `runtime-gate.inert-type-writes.test.ts`
+  // holds both absent and records the measurement that put them there.
   { name: 'validateAiToolReferences', run: validateAiToolReferences },
   { name: 'validateAiAgentAuthoring', run: validateAiAgentAuthoring },
   // Field names WRITTEN by an L2 hook body (`ctx.input.x = …`,

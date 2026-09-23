@@ -1,0 +1,14 @@
+---
+"@objectstack/sdui-parser": minor
+---
+
+The save gate now stamps `inert-quick-add` and `member-type-mismatch`, the two diagnostics that existed only in objectui's copy of this parser — so a page no longer saves clean here and renders with a different verdict there (#17645).
+
+The two copies of this parser owe each other one thing: byte agreement on the accepted grammar and on diagnostic codes. This copy runs the **save gate** and objectui's runs the **renderer**, so a code on one side only is a dialect — the author gets one reading when they save and another when the page draws, which is surface-dependent and therefore reaches them as intermittent. Measured at the ported revision: objectui stamped 26 codes, this copy stamped 24, and the missing two were exactly these.
+
+- **`inert-quick-add`** (warning) — `quickAdd` on `<object-kanban>` reaches no control. The Quick Add button is gated on **both** `quickAdd` and an `onQuickAdd` handler, and `onQuickAdd` takes a function, which no page on this tier can write (this tier parses, it never executes) and which the board substitutes none of its own for. It **replaces** the `unknown-prop` this copy used to emit for the key, which was false against the contract: `ComponentPropsMap['object-kanban']` publishes `quickAdd`, so an author who checked the spec found the warning contradicted and kept a key that will never do anything. Asked ahead of the declaration lookup on purpose — the claim is about the render path, so declaring the key must not silently disarm it. A falsy value and an unevaluated braced expression are deliberately untouched.
+- **`member-type-mismatch`** (warning; `error` when an `enum` arm is present) — the coarse type check one level down, over the member kind an input declares. This brings the `ManifestInput.of` key and its three readers with it: the validator, the serializer's canonicalization, and the codegen's element type. `of: 'string'` on an array input now types the members `string[]` in the generated `.d.ts` instead of `unknown[]`, and a member no declared arm accepts draws **one** diagnostic naming every offending position rather than one per member.
+
+**Nothing published changes shape for an input that declares no `of`.** The key is absent-means-undeclared: the validator checks no member, the codegen emits the unnarrowed element type, and `manifestFromConfigs` publishes no `of` at all, so an entry written before the key existed serializes byte-identically. Measured on the tracked `sdui.manifest.json`: 0 of 339 inputs declare `of`, and the artefact regenerates to the same sha256 across this change.
+
+⚠️ **Both new codes are diagnostics, not a new red gate.** Each is a warning, so `compile().ok` — the save gate's pass/fail — is unchanged, and a page that saves today still saves. Escalating an inert authored key to `error` is a separate question and belongs at the save gate, not here.

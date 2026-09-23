@@ -42,7 +42,7 @@ const PRE17_CONFIG = `
 export default {
   // #8687: top-level name/label were never stack keys (silently stripped
   // before the strict close, refused now) — the identity lives in manifest.
-  manifest: { id: 'migrate_meta_e2e', name: 'Migrate Meta E2E', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.migrate-meta-e2e', name: 'Migrate Meta E2E', version: '1.0.0', type: 'app' },
   objects: [{
     name: 'e2e_ticket',
     label: 'Ticket',
@@ -382,7 +382,7 @@ import { defineStack } from '@objectstack/spec';
 import { defineAgent, defineSkill } from '@objectstack/spec/ai';
 
 export default defineStack({
-  manifest: { id: 'retired_key_e2e', name: 'Retired Key E2E', version: '1.0.0', type: 'app', namespace: 'rk' },
+  manifest: { id: 'com.example.retired-key-e2e', name: 'Retired Key E2E', version: '1.0.0', type: 'app', namespace: 'rk' },
   objects: [{
     name: 'rk_ticket',
     label: 'Ticket',
@@ -494,7 +494,7 @@ export default defineStack({
 describe('os migrate meta — the chain line names the protocol, not a package version', () => {
   const LABEL_CONFIG = `
 export default {
-  manifest: { id: 'chain_label_e2e', name: 'Chain Label E2E', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.chain-label-e2e', name: 'Chain Label E2E', version: '1.0.0', type: 'app' },
   objects: [{ name: 'label_ticket', label: 'Ticket', fields: { title: { type: 'text', label: 'Title' } } }],
 };
 `;

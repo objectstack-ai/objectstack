@@ -258,6 +258,154 @@ describe('the #18170 warning stays for a directory neither convention reads', ()
   });
 });
 
+// ── #18965: the docs directory resolves PER REGISTERED PACKAGE, at no depth ─
+/**
+ * The maintainer's ruling (batch #204 item 5, letter B): `os build` derives
+ * each package's docs directory from the packages the artifact REGISTERS, not
+ * from a fixed depth under `src/`. A (declare `src/<pkg>/docs/` the convention
+ * and rename the reference fixture) and C (scan two levels) were rejected.
+ *
+ * ## Why the two-level layout is built HERE and not in the reference fixture
+ *
+ * The ruling names "one test per layout … and `examples/app-multi-package`'s".
+ * Measured at `32b5831c4e`, that fixture holds exactly 7 files and no `docs/`
+ * directory anywhere, and `git log --diff-filter=AD` over
+ * `examples/app-multi-package/**\/docs/**` returns nothing — it never had one.
+ * ⭐ Lit control on the same probe: `examples/` holds 256 files, 11 of them
+ * under a `/docs/` path, so the probe can see docs directories there.
+ *
+ * So "one test per layout" needed a choice, and the layout — not the fixture
+ * file — is what this collector resolves against:
+ *
+ *   - ⛔ NOT by adding a docs directory to `examples/app-multi-package`. It is
+ *     the ADR-0130 D4 reference fixture and several measurements quote its
+ *     contents exactly (`artifact-packages.ts` sizes the per-package
+ *     de-duplication residue on it; `build-json-advisory-parity.e2e.test.ts`
+ *     reads its artifact), so giving it docs changes what all of them read to
+ *     buy what the cases below already prove.
+ *   - ⛔ NOR by pinning that fixture's on-disk SHAPE from here. Such a pin
+ *     fails the day someone flattens the fixture to `src/<pkg>/` — a change
+ *     that, after this card, is harmless in both directions. Pinning a
+ *     property this fix deliberately stops being load-bearing would be a pin
+ *     that only ever produces false red.
+ *
+ * ⇒ the layout is reproduced here, where a marker string proves the pedigree
+ * of every collected doc, and the reading above is the record that it is the
+ * reference fixture's layout being reproduced.
+ */
+describe('the docs directory is derived from the packages the artifact registers', () => {
+  it('collects the ADR-0130 D4 two-level layout and attributes it to the right package', () => {
+    const marker = writePackageDoc(path.join('packages', 'orders'), 'sales_playbook', 'MARKER-two-level');
+    const { docs, issues, packageDocs } = collectDocsFromSrc(configPath, stack().packages);
+
+    expect(issues).toEqual([]);
+    expect(docs).toEqual([]); // ⛔ still not the top level — the #18431 ruling's clause 1
+    expect(packageDocs).toHaveLength(1);
+    expect(packageDocs[0].index).toBe(1);
+    expect(packageDocs[0].id).toBe('com.example.multi.orders');
+    expect(packageDocs[0].namespace).toBe('sales');
+    expect(packageDocs[0].dir).toBe('src/packages/orders/docs');
+    expect(packageDocs[0].docs.map((d) => d.name)).toEqual(['sales_playbook']);
+    expect(packageDocs[0].docs[0].content).toContain(marker);
+  });
+
+  it('⭐ lit control: the flat layout is collected exactly as before, beside a two-level one', () => {
+    const flat = writePackageDoc('core', 'crm_core_guide', 'MARKER-flat-control');
+    const nested = writePackageDoc(path.join('packages', 'orders'), 'sales_playbook', 'MARKER-nested');
+    const { packageDocs, issues } = collectDocsFromSrc(configPath, stack().packages);
+
+    expect(issues).toEqual([]);
+    expect(packageDocs.map((set) => [set.id, set.dir, set.docs.map((d) => d.name)])).toEqual([
+      ['com.example.multi.core', 'src/core/docs', ['crm_core_guide']],
+      ['com.example.multi.orders', 'src/packages/orders/docs', ['sales_playbook']],
+    ]);
+    // ⚠️ Pedigree, not count: without these the pair above is satisfied by a
+    // collector that read one directory twice.
+    expect(packageDocs[0].docs[0].content).toContain(flat);
+    expect(packageDocs[1].docs[0].content).toContain(nested);
+  });
+
+  it('lints each two-level package against its OWN namespace, end to end', () => {
+    writePackageDoc(path.join('packages', 'core'), 'crm_core_guide', 'MARKER-core');
+    writePackageDoc(path.join('packages', 'orders'), 'sales_playbook', 'MARKER-orders');
+    const { issues, packageDocs } = collectAndLintDocs(configPath, stack());
+
+    expect(issues).toEqual([]);
+    expect(packageDocs.map((set) => [set.index, set.dir])).toEqual([
+      [0, 'src/packages/core/docs'],
+      [1, 'src/packages/orders/docs'],
+    ]);
+  });
+
+  it('⛔ stops at the package root — a `docs/` deeper inside a resolved package is not a second one', () => {
+    writePackageDoc(path.join('packages', 'orders'), 'sales_playbook', 'MARKER-root');
+    const inside = path.join(tmp, 'src', 'packages', 'orders', 'components', 'docs');
+    fs.mkdirSync(inside, { recursive: true });
+    fs.writeFileSync(path.join(inside, 'sales_widget.md'), '# widget');
+
+    const { packageDocs, issues } = collectDocsFromSrc(configPath, stack().packages);
+    expect(packageDocs).toHaveLength(1);
+    expect(packageDocs[0].dir).toBe('src/packages/orders/docs');
+    expect(packageDocs[0].docs.map((d) => d.name)).toEqual(['sales_playbook']);
+    // A package's subtree is that package's SOURCE, not more packages — the
+    // walk stops at a package root, so this is unchanged from before #18965
+    // (the one-level sweep never reached it either).
+    expect(issues).toEqual([]);
+  });
+
+  it('a directory naming NO package keeps its own answer at the new depth', () => {
+    writePackageDoc(path.join('packages', 'billing'), 'crm_index', 'MARKER-unmatched-deep');
+    const { packageDocs, issues } = collectDocsFromSrc(configPath, stack().packages);
+
+    expect(packageDocs).toEqual([]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].rule).toBe('docs/uncollected-directory');
+    expect(issues[0].path).toBe('src/packages/billing/docs');
+    expect(issues[0].message).toContain('"billing" names none of this artifact\'s packages');
+  });
+
+  it('an AMBIGUOUS directory name keeps its own answer at the new depth', () => {
+    writePackageDoc(path.join('packages', 'core'), 'crm_index', 'MARKER-ambiguous-deep');
+    const twins = [pkg({ ...CORE }), pkg({ ...CORE, id: 'com.other.core', name: 'Other Core' })];
+
+    const { packageDocs, issues } = collectDocsFromSrc(configPath, twins);
+    expect(packageDocs).toEqual([]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].path).toBe('src/packages/core/docs');
+    expect(issues[0].message).toContain('names 2 of this artifact\'s packages');
+  });
+
+  it('⛔ ONE package answering to TWO docs directories is refused — never merged, never silently dropped', () => {
+    writePackageDoc('orders', 'sales_flat', 'MARKER-loc-flat');
+    writePackageDoc(path.join('packages', 'orders'), 'sales_nested', 'MARKER-loc-nested');
+
+    const { packageDocs, issues } = collectDocsFromSrc(configPath, stack().packages);
+    // ⛔ Neither is collected: `attachPackageDocs` keys its sets by package
+    // index through a Map, so collecting both would drop one without a word.
+    expect(packageDocs).toEqual([]);
+    expect(issues.map((i) => [i.rule, i.path])).toEqual([
+      ['docs/uncollected-directory', 'src/orders/docs'],
+      ['docs/uncollected-directory', 'src/packages/orders/docs'],
+    ]);
+    // Each side names the OTHER, so the author can see both halves from either.
+    expect(issues[0].message).toContain('answers to 2 docs directories');
+    expect(issues[0].message).toContain('src/packages/orders/docs/');
+    expect(issues[1].message).toContain('src/orders/docs/');
+  });
+
+  it('⛔ single-package regression: a stack with no packages[] is walked ONE level and reports nothing deeper', () => {
+    writePackageDoc(path.join('packages', 'orders'), 'sales_playbook', 'MARKER-invisible');
+    const { docs, packageDocs, issues } = collectDocsFromSrc(configPath);
+
+    expect(docs).toEqual([]);
+    expect(packageDocs).toEqual([]);
+    // With no registered package there is nothing to search FOR, so there is
+    // no recursion at all: `src/packages/docs` does not exist, so the sweep
+    // finds nothing and says nothing — byte-for-byte the pre-#18965 answer.
+    expect(issues).toEqual([]);
+  });
+});
+
 // ── Clause 2: one prefix rule per package ──────────────────────────────────
 describe('the doc lint reads the OWNING package namespace', () => {
   it('accepts a package doc carrying its OWN package prefix, not the artifact manifest one', () => {

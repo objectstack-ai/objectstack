@@ -62,7 +62,7 @@ vi.mock('@objectstack/core', async (orig) => ({
     createLogger: () => logger,
 }));
 
-const MANIFEST = { id: 'crm', name: 'CRM', version: '1.0.0', type: 'app' };
+const MANIFEST = { id: 'com.example.crm', name: 'CRM', version: '1.0.0', type: 'app' };
 
 /**
  * The card's shape: the binding lives ONLY in the container's own top-level

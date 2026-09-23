@@ -187,6 +187,11 @@ export function createOpenApiProviderFactory(deps: OpenApiProviderDeps = {}): Co
       document,
       baseUrl: typeof cfg.baseUrl === 'string' ? cfg.baseUrl : undefined,
       auth,
+      // ADR-0049 · #18975 — the authored resilience policy, already resolved by
+      // the materializer, reaches the transport this bundle closes over.
+      retryConfig: ctx.retryConfig,
+      connectionTimeoutMs: ctx.connectionTimeoutMs,
+      requestTimeoutMs: ctx.requestTimeoutMs,
       fetchImpl: deps.fetchImpl,
     });
   };

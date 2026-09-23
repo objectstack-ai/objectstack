@@ -47,7 +47,7 @@ export const wmTaskChanged = defineWebhook({
 
 export const webhookFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.webhook_fixture',
+    id: 'com.dogfood.webhook-fixture',
     namespace: 'wm',
     version: '0.0.0',
     type: 'app',

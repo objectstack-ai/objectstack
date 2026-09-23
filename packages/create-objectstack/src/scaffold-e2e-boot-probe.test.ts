@@ -366,45 +366,196 @@ function runBlock(h: Harness, script: string): Ran {
  * the block's `curl` — which carries no `--max-time`, exactly as the workflow
  * spells it — would hang until the harness timeout. Measured while writing this
  * file: every case sat at its 240s ceiling.
+ *
+ * ## Why this waits on the child's own word instead of on a clock (#19424)
+ *
+ * The wait this replaces was 80 `curl` probes 0.25s apart — exactly 20s — run
+ * through `execFileSync('bash', …, { stdio: 'ignore' })` against a child
+ * spawned with `stdio: 'ignore'`, and it threw naming only the port. Every
+ * piece of evidence about WHY was discarded by construction: the child's exit
+ * code, its stderr, whether it ever spawned at all. A CI failure at 20,999ms
+ * and a healthy 299ms pass of the SAME assertion in the same run were therefore
+ * indistinguishable to the reader, and the only remedy such a reading can
+ * suggest is a bigger number.
+ *
+ * Two things were measured here while rewriting it (this repo, `576d5df660`),
+ * and each one is a reason raising the budget could not have repaired it:
+ *
+ *   * The failure reproduces with a perfectly healthy child on a port
+ *     `pickFreePort` had just approved. `node` refused the bind with
+ *     `listen EADDRINUSE 0.0.0.0:39510` while `ss -ltn` showed NO listener on
+ *     39510 — the port was the local ephemeral port of an unrelated outbound
+ *     ESTABLISHED connection belonging to another process in the container.
+ *     `pickFreePort` proves a port is bindable at the instant it asks; its own
+ *     docblock says "advisory only", and this is what that costs. Reproduced
+ *     3/3 against the pre-fix helper: 20761ms, 20930ms, 20886ms, every one of
+ *     them reporting `the neighbour never came up on port 39510` and nothing
+ *     else.
+ *   * `process.kill(pid, 0)` is NOT a liveness check in this harness, so the
+ *     obvious repair is a trap. With the event loop blocked inside
+ *     `execFileSync` the exited child is an unreaped ZOMBIE, and `kill(pid, 0)`
+ *     on a zombie SUCCEEDS — measured: it answered "alive" about a child that
+ *     had died 20 seconds earlier.
+ *
+ * So the child announces its own listener on stdout and the parent AWAITS that
+ * line, with the `exit` event, the `spawn` error and the child's captured
+ * output wired to the same promise. Each way this can fail now reports itself
+ * the moment it happens and names itself: never spawned · exited before
+ * announcing (with code, signal and its own last words) · refused the bind
+ * (with the errno) · alive but never announced · announced and then went mute.
+ * `timeoutMs` is a backstop for the last of those, ⛔ never the thing that
+ * decides the others — which is why this file still names no budget.
+ *
+ * The child also asks the KERNEL for the port (`listen(0)`) and reports back
+ * what it was given, so the window `pickFreePort` leaves open is not merely
+ * reported on, it is closed: the neighbour holds the binding continuously from
+ * before its caller learns the number. `port` is for the controls, which need
+ * to aim a second neighbour at a port that is genuinely taken.
  */
-function neighbour(port: number): { stop: () => void } {
-  const child = spawn(process.execPath, ['-e', NEIGHBOUR_STUB], {
-    env: { ...process.env, NEIGHBOUR_PORT: String(port) },
+interface NeighbourOptions {
+  /** Bind this port instead of asking the kernel. Controls only. */
+  port?: number;
+  /** Replace the child's program text — the controls hand in broken ones. */
+  stub?: string;
+  /** Replace the executable — the "it never spawned" control. */
+  exec?: string;
+  /** The backstop, ⛔ not a budget: every other failure mode reports at once. */
+  timeoutMs?: number;
+}
+
+interface Neighbour {
+  /** The port the child really bound, read back from the child. */
+  port: number;
+  stop: () => void;
+}
+
+async function neighbour(options: NeighbourOptions = {}): Promise<Neighbour> {
+  const {
+    port: requested = 0,
+    stub = NEIGHBOUR_STUB,
+    exec = process.execPath,
+    timeoutMs = 30_000,
+  } = options;
+  const started = Date.now();
+  const child = spawn(exec, ['-e', stub], {
+    env: { ...process.env, NEIGHBOUR_PORT: String(requested) },
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.unref();
+
+  // `state` rather than plain `let`s: these are written from callbacks, and a
+  // narrowed `null` read back in the polling loop below would silently make
+  // the "and then exited" branch unreachable.
+  const state = { output: '', exited: null as { code: number | null; signal: string | null } | null };
+
   const stop = () => {
     try {
       if (child.pid) process.kill(child.pid, 'SIGKILL');
     } catch {
       /* already gone */
     }
+    child.stdout?.destroy();
+    child.stderr?.destroy();
   };
-  try {
-    execFileSync(
-      'bash',
-      [
-        '-c',
-        `for _ in $(seq 1 80); do curl -fsS "http://localhost:${port}/api/v1/health" > /dev/null 2>&1 && exit 0; sleep 0.25; done; exit 1`,
-      ],
-      { stdio: 'ignore' },
+
+  const where = requested === 0 ? 'on a kernel-assigned port' : `on port ${requested}`;
+  const diagnosis = (headline: string) =>
+    new Error(
+      `the neighbour never came up ${where} after ${Date.now() - started}ms: ${headline}\n` +
+        `--- neighbour output ---\n${
+          state.output.trim() || '(nothing: the child wrote neither stdout nor stderr)'
+        }`,
     );
-  } catch {
+
+  let announce: (port: number) => void = () => {};
+  let giveUp: (err: Error) => void = () => {};
+  const announced = new Promise<number>((resolve, reject) => {
+    announce = resolve;
+    giveUp = reject;
+  });
+
+  const read = (chunk: string) => {
+    state.output += chunk;
+    const up = /NEIGHBOUR-LISTENING (\d+)/.exec(state.output);
+    if (up) announce(Number(up[1]));
+    const refused = /NEIGHBOUR-LISTEN-ERROR (\S+)/.exec(state.output);
+    if (refused) giveUp(diagnosis(`its listener refused to bind: ${refused[1]}`));
+  };
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', read);
+  child.stderr?.on('data', read);
+  child.on('error', (err) => giveUp(diagnosis(`it never spawned: ${err.message}`)));
+  child.on('exit', (code, signal) => {
+    state.exited = { code, signal };
+    giveUp(diagnosis(`it exited before announcing a listener (code ${code}, signal ${signal})`));
+  });
+  const backstop = setTimeout(
+    () => giveUp(diagnosis('it stayed alive and never announced a listener')),
+    timeoutMs,
+  );
+
+  let bound: number;
+  try {
+    bound = await announced;
+  } catch (err) {
     stop();
-    throw new Error(`the neighbour never came up on port ${port}`);
+    throw err;
+  } finally {
+    clearTimeout(backstop);
   }
-  return { stop };
+
+  // Announced is not answered. This is the one window the backstop really
+  // guards, and the only one where waiting longer is not obviously wrong.
+  const url = `http://localhost:${bound}/api/v1/health`;
+  let last = 'no probe completed';
+  for (;;) {
+    if (state.exited) {
+      const { code, signal } = state.exited;
+      stop();
+      throw diagnosis(
+        `it announced a listener on port ${bound} and then exited (code ${code}, signal ${signal})`,
+      );
+    }
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(1_000) });
+      await res.arrayBuffer();
+      if (res.ok) return { port: bound, stop };
+      last = `HTTP ${res.status}`;
+    } catch (err) {
+      last = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    }
+    if (Date.now() - started > timeoutMs) {
+      stop();
+      throw diagnosis(
+        `it announced a listener on port ${bound} but never answered ${url} (last probe: ${last})`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
+/**
+ * `process.stdout.write(…, cb)` and not `console.log`: stdout is a PIPE here,
+ * writes to a pipe are asynchronous, and `process.exit()` on the next line
+ * truncates them. Exiting from the write callback is what makes the errno
+ * survive the exit that reports it.
+ */
 const NEIGHBOUR_STUB = `
 const http = require('node:http');
-http
-  .createServer((_req, res) => {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ iam: 'NEIGHBOUR' }));
-  })
-  .listen(Number(process.env.NEIGHBOUR_PORT));
+const server = http.createServer((_req, res) => {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ iam: 'NEIGHBOUR' }));
+});
+server.once('error', (err) => {
+  process.stdout.write('NEIGHBOUR-LISTEN-ERROR ' + ((err && err.code) || err) + '\\n', () => {
+    process.exit(1);
+  });
+});
+server.listen(Number(process.env.NEIGHBOUR_PORT || '0'), () => {
+  process.stdout.write('NEIGHBOUR-LISTENING ' + server.address().port + '\\n');
+});
 `;
 
 function curlBody(url: string): string {
@@ -424,9 +575,12 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
   for (const [job, step] of OS_START_STEPS) {
     describe(`${job} / ${step}`, () => {
       it('refuses a neighbour already answering the URL its loop accepts as proof', async () => {
-        const port = await pickFreePort(38700);
+        // The neighbour goes up FIRST and reports the port the kernel gave it,
+        // so the script is rewritten around a port that is already held rather
+        // than around one that merely tested free a moment ago (#19424).
+        const n = await neighbour();
+        const port = n.port;
         const script = stepScript(step).replaceAll('8080', String(port));
-        const n = neighbour(port);
         try {
           // Vacuity guard: the neighbour must really be reachable at the exact
           // spelling the loop probes, or "refused" below proves nothing.
@@ -492,4 +646,114 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
       expect(r.status).toBe(0);
     }, 120_000);
   });
+});
+
+/**
+ * Runs `neighbour()` expecting it NOT to come up, and hands back what it said.
+ *
+ * The "it came up after all" branch throws its own message rather than falling
+ * into the catch: a control that reports the harness's success as if it were
+ * the harness's diagnosis is a control that can never fail.
+ */
+async function failedNeighbour(
+  options: NeighbourOptions,
+): Promise<{ message: string; seconds: number }> {
+  const started = Date.now();
+  let came: Neighbour | null = null;
+  let error: unknown = null;
+  try {
+    came = await neighbour(options);
+  } catch (err) {
+    error = err;
+  }
+  if (came) {
+    came.stop();
+    throw new Error(
+      `this control is vacuous: the neighbour was supposed to fail and it came up on port ${came.port}`,
+    );
+  }
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    seconds: (Date.now() - started) / 1000,
+  };
+}
+
+/**
+ * The controls for the instrument above (#19424).
+ *
+ * ⛔ A green suite is not evidence that a diagnostic works — only a
+ * deliberately broken child is. Each case here breaks the neighbour a
+ * DIFFERENT way and pins that the harness names THAT way and not another, so a
+ * diagnosis that collapses back into one undifferentiated "never came up"
+ * cannot pass. The healthy path is pinned in the same block, because a
+ * diagnosis that fires on a working neighbour is its own defect.
+ *
+ * Gated on `RUNNABLE` with the suite above rather than on its own terms: the
+ * harness these pin is reached only where that suite runs, so pinning it
+ * elsewhere would pin an instrument nothing uses.
+ */
+describe.skipIf(!RUNNABLE)('[#19424] the neighbour harness says WHY it did not come up', () => {
+  it('reports the port it really bound, and answers there', async () => {
+    const n = await neighbour();
+    try {
+      expect(n.port).toBeGreaterThan(0);
+      // Read back through the same spelling the block's loop uses, so "the
+      // port it reports" and "the port that answers" are pinned as one fact.
+      expect(curlBody(`http://localhost:${n.port}/api/v1/health`)).toContain('NEIGHBOUR');
+    } finally {
+      n.stop();
+    }
+  }, 60_000);
+
+  it('names the errno when the child cannot bind the port it was given', async () => {
+    // The measured failure this card was filed against: a port that tested
+    // free and was refused anyway. Here it is made deterministic by aiming the
+    // second child at a port the first one is holding.
+    const held = await neighbour();
+    try {
+      const { message, seconds } = await failedNeighbour({ port: held.port });
+      expect(message).toContain('the neighbour never came up');
+      expect(message).toContain(`on port ${held.port}`);
+      expect(message).toContain('its listener refused to bind: EADDRINUSE');
+      // The point of the whole change: this arrives at once instead of after a
+      // budget nobody can defend.
+      expect(seconds).toBeLessThan(10);
+    } finally {
+      held.stop();
+    }
+  }, 60_000);
+
+  it('names the exit code and the child last words when the child dies at once', async () => {
+    const { message, seconds } = await failedNeighbour({
+      stub: `process.stderr.write('boot log: the artifact could not be read\\n');\nprocess.exit(3);`,
+    });
+    expect(message).toContain('it exited before announcing a listener (code 3');
+    // The child's own output is carried out with the verdict — the half the
+    // pre-fix harness discarded by spawning with `stdio: 'ignore'`.
+    expect(message).toContain('boot log: the artifact could not be read');
+    expect(seconds).toBeLessThan(10);
+  }, 60_000);
+
+  it('says the child stayed alive when it never announces a listener', async () => {
+    const { message, seconds } = await failedNeighbour({
+      stub: 'setTimeout(() => {}, 60_000);',
+      timeoutMs: 2_000,
+    });
+    expect(message).toContain('it stayed alive and never announced a listener');
+    // ⛔ Not collapsed into the death case: alive-and-mute and dead are the two
+    // the old instrument could not tell apart, so they must not read alike.
+    expect(message).not.toContain('it exited before announcing');
+    expect(message).toContain('(nothing: the child wrote neither stdout nor stderr)');
+    expect(seconds).toBeLessThan(20);
+  }, 60_000);
+
+  it('says it never spawned when the child cannot be executed at all', async () => {
+    const { message, seconds } = await failedNeighbour({
+      exec: path.join(os.tmpdir(), 'objectstack-no-such-node-19424'),
+      timeoutMs: 5_000,
+    });
+    expect(message).toContain('it never spawned');
+    expect(message).toContain('ENOENT');
+    expect(seconds).toBeLessThan(10);
+  }, 60_000);
 });

@@ -166,14 +166,53 @@ describe('Plugin Versioning Schemas', () => {
         ],
         migrationRequired: true,
         migrationComplexity: 'moderate' as const,
-        estimatedMigrationTime: 8,
+        estimatedMigrationTimeHours: 8,
         migrationScript: './scripts/migrate-v1-to-v2.ts',
         testCoverage: 95,
       };
       const result = CompatibilityMatrixEntrySchema.parse(entry);
       expect(result.compatibility).toBe('breaking-changes');
       expect(result.migrationRequired).toBe(true);
-      expect(result.estimatedMigrationTime).toBe(8);
+      expect(result.estimatedMigrationTimeHours).toBe(8);
+    });
+
+    // #18669 ruling A. The rename above is only half the contract; this is the
+    // other half. Without it the retirement is pinned by nothing: this shape is
+    // a plain `z.object`, so deleting the key rather than tombstoning it would
+    // strip the old spelling in SILENCE and every assertion above would stay
+    // green. The pin is on the PRESCRIPTION, not on "it throws" — a bare
+    // unrecognized-key error would also throw, and would carry no rename.
+    // Asserted the way `rollout.duration`'s pin below already asserts it: the
+    // issue is looked up BY PATH and its `code` is read, so a refusal that
+    // arrived as a bare `unrecognized_keys` cannot satisfy this by happening to
+    // mention the key name somewhere in the envelope.
+    it('REFUSES the retired `estimatedMigrationTime` with the rename in the message', () => {
+      const result = CompatibilityMatrixEntrySchema.safeParse({
+        from: '1.0.0',
+        to: '2.0.0',
+        compatibility: 'breaking-changes',
+        estimatedMigrationTime: 8,
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'estimatedMigrationTime');
+      expect(issue).toBeDefined();
+      expect(issue!.code).not.toBe('unrecognized_keys');
+      expect(issue!.message).toContain(
+        '`CompatibilityMatrixEntry.estimatedMigrationTime` was renamed to `estimatedMigrationTimeHours`',
+      );
+    });
+
+    // The no-narrowing half of the same ruling: the value type did not move, so
+    // a fractional estimate that parsed before still parses. A sweep that added
+    // `.int()` or adopted a closed duration type turns this red.
+    it('keeps the value type: a fractional hours estimate still parses', () => {
+      const parsed = CompatibilityMatrixEntrySchema.parse({
+        from: '1.0.0',
+        to: '2.0.0',
+        compatibility: 'breaking-changes',
+        estimatedMigrationTimeHours: 8.5,
+      });
+      expect(parsed.estimatedMigrationTimeHours).toBe(8.5);
     });
   });
 
@@ -421,7 +460,7 @@ describe('Plugin Versioning Schemas', () => {
         ],
         migrationRequired: true,
         migrationComplexity: 'major',
-        estimatedMigrationTime: 40,
+        estimatedMigrationTimeHours: 40,
       });
       expect(matrixEntry.migrationRequired).toBe(true);
       expect(matrixEntry.migrationComplexity).toBe('major');

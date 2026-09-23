@@ -6,7 +6,7 @@ import * as objects from './src/objects/index.js';
 
 export default defineStack({
   manifest: {
-    id: 'blank',
+    id: 'com.example.blank',
     namespace: 'blank',
     version: '0.1.0',
     type: 'app',

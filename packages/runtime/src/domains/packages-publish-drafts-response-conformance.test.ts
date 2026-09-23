@@ -234,8 +234,9 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         expect(strippedKeys(data)).toEqual([]);
         const parsed = PublishPackageDraftsResponseSchema.parse(data);
         expect(parsed.seedApplied?.success).toBe(false);
-        // The headline names the refusal class and the offending key…
-        expect(parsed.seedApplied?.error).toContain('[invalid_metadata]');
+        // The headline names the refusal class and the offending key. The
+        // class rides `code`, not a bracketed restatement inside the prose —
+        // `error` is human language, `code` is the machine token.
         expect(parsed.seedApplied?.error).toContain('failed spec validation');
         expect(parsed.seedApplied?.error).toContain('seeds.0.mode');
         // …and the prose lives ONCE, on the declared structured channel.

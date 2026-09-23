@@ -22,7 +22,7 @@
  * import { DevPlugin } from '@objectstack/plugin-dev';
  *
  * export default defineStack({
- *   manifest: { id: 'my-app', name: 'My App', version: '0.1.0', type: 'app' },
+ *   manifest: { id: 'com.example.my-app', name: 'My App', version: '0.1.0', type: 'app' },
  *   plugins: [new DevPlugin()],
  * });
  * ```

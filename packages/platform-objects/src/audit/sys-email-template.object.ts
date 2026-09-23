@@ -7,8 +7,15 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Backing persistence for the `email_template` metadata type. Each
  * row is the runtime representation of an `EmailTemplate` Zod
- * envelope. Resolved by `(name, locale)`; the EmailService picks the
- * best-matching locale for the recipient, falling back to `en-US`.
+ * envelope. Resolved by an EXACT `(name, locale)` match — the
+ * EmailService does NO language-subtag folding, so `en-US` never
+ * reaches an `en` row and there is no "best match". A call that NAMES
+ * a locale retries exactly one rung, the literal `en-US`, and then
+ * raises `TEMPLATE_NOT_FOUND`; a call that names none starts AT
+ * `en-US` and, only when the bundle carries no `en-US` row at all,
+ * takes the bundle's lowest locale tag. See
+ * `@objectstack/plugin-email`'s `createSysEmailTemplateLoader` and
+ * `SendTemplateInput.locale` for the ladder of record.
  *
  * Authoring: built-in templates are seeded by `EmailServicePlugin`
  * on `kernel:ready`; administrators may edit subject/body in Studio

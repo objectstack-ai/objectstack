@@ -813,3 +813,88 @@ describe('#3017 — upstream-unavailable degrade + retry', () => {
         );
     });
 });
+
+// ── ADR-0049 · #18975 — the declared resilience policy reaches the factory ────
+//
+// The three keys were parsed and then reached nothing: `ConnectorProviderContext`
+// carried none of them, so a provider factory had no way to honour what the
+// author wrote. These pins are on the MATERIALIZER's half of that — the values
+// arriving on the context, resolved — while the executing half is pinned in
+// `packages/connectors/connector-rest/src/rest-provider.test.ts`.
+describe('ADR-0097 — the entry\'s resilience policy on ConnectorProviderContext (#18975)', () => {
+    it('hands the factory a RESOLVED retryConfig — schema defaults applied', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [{ ...providerConnector('billing'), retryConfig: { maxAttempts: 5, retryableStatusCodes: [429] } }],
+            { providerFactory: factory },
+        );
+
+        // Authored values survive…
+        expect(calls[0]?.retryConfig?.maxAttempts).toBe(5);
+        expect(calls[0]?.retryConfig?.retryableStatusCodes).toEqual([429]);
+        // …and the keys the author left unstated arrive with the schema's
+        // defaults already applied, which is what "resolved" buys a factory:
+        // it reads real values instead of re-deriving the defaults itself.
+        expect(calls[0]?.retryConfig?.strategy).toBe('exponential_backoff');
+        expect(calls[0]?.retryConfig?.initialDelayMs).toBe(1000);
+        expect(calls[0]?.retryConfig?.jitter).toBe(true);
+
+        await kernel.shutdown();
+    });
+
+    it('carries both declared timeouts verbatim', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [{ ...providerConnector('billing'), connectionTimeoutMs: 5000, requestTimeoutMs: 12000 }],
+            { providerFactory: factory },
+        );
+
+        expect(calls[0]?.connectionTimeoutMs).toBe(5000);
+        expect(calls[0]?.requestTimeoutMs).toBe(12000);
+
+        await kernel.shutdown();
+    });
+
+    it('leaves all three undefined when the entry declares none — absence stays absence', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('billing')], { providerFactory: factory });
+
+        expect(calls[0]?.retryConfig).toBeUndefined();
+        expect(calls[0]?.connectionTimeoutMs).toBeUndefined();
+        expect(calls[0]?.requestTimeoutMs).toBeUndefined();
+
+        await kernel.shutdown();
+    });
+
+    it('fails boot by name on an unparseable retryConfig rather than materializing an inert policy', async () => {
+        const { factory } = makeFakeProvider();
+        // `maxAttempts` is bounded max(10) on the schema.
+        await expect(
+            boot([{ ...providerConnector('billing'), retryConfig: { maxAttempts: 99 } }], {
+                providerFactory: factory,
+            }),
+        ).rejects.toThrow(/retryConfig is not a valid connector retry policy/);
+    });
+
+    it('an edit to the policy re-materializes the instance', async () => {
+        // The policy is baked into the transport the bundle closes over, so it
+        // is a materialization input: without it in the signature the old
+        // policy keeps serving until the process restarts.
+        const { factory, calls } = makeClosableProvider();
+        const { kernel, reload } = await bootReloadable(
+            [{ ...providerConnector('billing'), retryConfig: { maxAttempts: 2 } }],
+            { providerFactory: factory },
+        );
+        expect(calls).toHaveLength(1);
+
+        await reload([{ ...providerConnector('billing'), retryConfig: { maxAttempts: 4 } }]);
+        expect(calls).toHaveLength(2);
+        expect(calls[1]?.retryConfig?.maxAttempts).toBe(4);
+
+        // An unchanged policy is NOT a change — the control for the assertion above.
+        await reload([{ ...providerConnector('billing'), retryConfig: { maxAttempts: 4 } }]);
+        expect(calls).toHaveLength(2);
+
+        await kernel.shutdown();
+    });
+});

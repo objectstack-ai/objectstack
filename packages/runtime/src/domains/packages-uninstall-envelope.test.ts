@@ -75,7 +75,7 @@ const authed = (caps: string[] = ['manage_metadata']): any => ({
 function make(deletePackageResult: any, opts: { registryRemoved?: boolean } = {}) {
     const registry = {
         getAllPackages: vi.fn().mockReturnValue([]),
-        getPackage: vi.fn().mockReturnValue({ id: 'pkg-a', manifest: { id: 'pkg-a', name: 'A' } }),
+        getPackage: vi.fn().mockReturnValue({ id: 'com.example.pkg-a', manifest: { id: 'com.example.pkg-a', name: 'A' } }),
         uninstallPackage: vi.fn().mockReturnValue(opts.registryRemoved ?? true),
     };
     const protocol = {

@@ -233,9 +233,10 @@ export function validateActionParams(
  *
  * Two members carry an argument contract the signature alone does not settle,
  * and both state it on the member: `find` takes the engine's own query
- * ENVELOPE — {@link EngineQueryOptions}, by identity, the same type
- * `IDataEngine.find` takes — and the bare-filter parameter shape #14175 chose
- * is withdrawn (#15124); `delete` accepts a single id OR an array of them,
+ * ENVELOPE — {@link EngineQueryOptions} minus its `context` key, the same type
+ * `IDataEngine.find` takes with the one key this facade will not honour
+ * subtracted (#15124, #19237) — and the bare-filter parameter shape #14175
+ * chose is withdrawn (#15124); `delete` accepts a single id OR an array of them,
  * both as declared contract, served one row at a time (#15117). Read those doc
  * comments before writing a handler or a test double against either.
  */
@@ -282,7 +283,9 @@ export interface ActionEngineFacade {
    *
    * `query` is the ENGINE's query envelope — {@link EngineQueryOptions}, the
    * very type `IDataEngine.find` and ObjectQL's own `engine.find` take, named
-   * here by identity rather than restated. The filter goes under `where`, and
+   * here by reference rather than restated, with exactly ONE key subtracted:
+   * `context`, which this facade does not honour (the section at the bottom of
+   * this comment). The filter goes under `where`, and
    * the rest of the envelope (`fields`, `orderBy`, `limit`, `offset`,
    * `expand`, `search`, …) means exactly what it means on the engine:
    *
@@ -347,19 +350,40 @@ export interface ActionEngineFacade {
    * straight through would be dropped unexecuted and the read would widen to
    * EVERY row, silently, to a caller whose next line is often a delete.
    *
-   * ## `context` is the caller's to pass and NOT the caller's to choose
+   * ## `context` is not on this parameter — ADR-0049 enforce-or-remove (#19237)
    *
-   * The envelope carries `context` because every engine option bag does. This
-   * facade is TRUSTED and context-less by design (#2849, ADR-0096): the
-   * runtime stamps its own elevated `ExecutionContext` last, so a
-   * caller-supplied `context` is overridden rather than honoured. Do not write
-   * one — it reads as authorization and is none.
+   * The engine's envelope carries `context` because every engine option bag
+   * does, and on the engine it is honoured: it is where identity and tenant
+   * live. On THIS facade it is not. The facade is TRUSTED and context-less by
+   * design (#2849, ADR-0096) — the runtime stamps its own elevated
+   * `ExecutionContext` last (`buildActionEngineFacade`,
+   * `packages/runtime/src/action-execution.ts`), so a caller-supplied
+   * `context` is overridden, never honoured.
+   *
+   * Between #15124 and #19237 the key was therefore DECLARED here and
+   * unenforced: a handler could write `context: { tenantId: … }`, type-check
+   * clean, and get the facade's context instead — a read the author believes
+   * is tenant-scoped, silently broader than intended. ADR-0049 admits two
+   * exits for a declared-but-unenforced key, enforce or remove, and removal is
+   * the one that changes no runtime behaviour: the key is subtracted from this
+   * parameter with `Omit`, so writing one is a compile error at the call site
+   * instead of a no-op at runtime.
+   *
+   * ⚠️ The RUNTIME still tolerates the key, deliberately and unchanged. The
+   * facade's arm reads its legal key set off `EngineQueryOptionsSchema`, which
+   * still declares `context`, so an UNTYPED caller (a handler in an
+   * `objectstack.config.js` / `.mjs`, a local copy of the context type, a
+   * `(ctx: any)` handler) still passes one and still has it overridden rather
+   * than refused. Refusing it there would be a new runtime refusal on an
+   * identity key — a behaviour change, out of this card's scope by ruling, and
+   * the asymmetry is recorded rather than silently closed.
    *
    * Every clause above is pinned in `action-params.test.ts`, and the
-   * pass-through is pinned against the runtime in
+   * pass-through — including the untyped channel's surviving tolerance — is
+   * pinned against the runtime in
    * `packages/runtime/src/action-engine-facade-find-envelope.test.ts`.
    */
-  find(object: string, query: EngineQueryOptions): Promise<Array<Record<string, unknown>>>;
+  find(object: string, query: Omit<EngineQueryOptions, 'context'>): Promise<Array<Record<string, unknown>>>;
 }
 
 /**

@@ -197,9 +197,13 @@ const flowNodeFilterAlias: MetadataConversion = {
  *
  * A pure key rename — the value (ordered field-name list) is unchanged.
  * **Retired from the load path**: the schema tombstones `compactLayout` with a
- * fix-it error, so the loader must NOT quietly accept it; the entry exists so
- * `migrate meta --from 10|11` rewrites old *sources* (backfilled per the
- * ADR-0087 true-up — the rename shipped before the conversion layer existed).
+ * fix-it error, so the loader must NOT quietly accept it. Protocol 11 is below
+ * `MIGRATION_SUPPORT_FLOOR`, so no migration step carries this conversion any
+ * more and `migrate meta --from 10|11` refuses before it would ever reach it
+ * (backfilled per the ADR-0087 true-up — the rename shipped before the
+ * conversion layer existed). Its one remaining reader is the stored-row replay
+ * (`applyConversionsToStoredItem`, `conversions/stored.ts`), which is not
+ * floor-scoped and still walks it for rows at rest.
  */
 const objectCompactLayoutRename: MetadataConversion = {
   id: 'object-compactLayout-to-highlightFields',
@@ -232,9 +236,12 @@ const objectCompactLayoutRename: MetadataConversion = {
  * The distribution concept was renamed Role → Position across the platform;
  * the stack-definition collection key renamed with it. A pure key move — the
  * item shapes migrate separately (`position.parent` removal is semantic, see
- * the step-13 TODOs). **Retired from the load path**: ADR-0090 shipped this as
- * a pre-launch one-step rename with no alias window; the entry preserves it as
- * replayable chain history.
+ * the step-13 TODOs, historically). **Retired from the load path**: ADR-0090
+ * shipped this as a pre-launch one-step rename with no alias window. Protocol
+ * 13 is below `MIGRATION_SUPPORT_FLOOR`, so no migration step carries this
+ * conversion any more; the entry now survives only as the stored-row replay
+ * (`applyConversionsToStoredItem`, `conversions/stored.ts`), which is not
+ * floor-scoped.
  */
 const stackRolesToPositions: MetadataConversion = {
   id: 'stack-roles-to-positions',
@@ -381,8 +388,11 @@ const sharingRecipientRoleToPosition: MetadataConversion = {
  *
  * Packages own permission sets but never positions (ADR-0090 D9), so the
  * gate is a capability reference. Value carried over 1:1. **Retired from the
- * load path** — the zod union rejects `{ profile }` at parse; this entry is
- * the replayable chain history the one-step ship skipped.
+ * load path** — the zod union rejects `{ profile }` at parse. Protocol 14 is
+ * below `MIGRATION_SUPPORT_FLOOR`, so no migration step carries this
+ * conversion any more; this entry now survives only as the stored-row replay
+ * (`applyConversionsToStoredItem`, `conversions/stored.ts`) the one-step ship
+ * skipped, which is not floor-scoped.
  */
 const bookAudienceProfileToPermissionSet: MetadataConversion = {
   id: 'book-audience-profile-to-permission-set',
@@ -7104,6 +7114,105 @@ const elementFormRemoved: MetadataConversion = {
 };
 
 /**
+ * `translation.<locale>.settings` on a PER-APP bundle — the platform-only
+ * group leaving `stack.translations` with the type split (protocol 18,
+ * #15178, ruling batch #132 item 2 letter ②).
+ *
+ * ⛔ NOT a lossless delete, and this entry says so rather than claiming the
+ * house phrase. `settings` is keyed by `SettingsManifest.namespace`, and only
+ * platform code declares a manifest — so the only namespaces an application
+ * could address were the PLATFORM's own. Both bundles are loaded into ONE
+ * served tree (`AppPlugin.loadTranslations` and each platform plugin's
+ * `kernel:ready` contribution both call `II18nService.loadTranslations`, which
+ * deep-merges), and `resolveSettingsTitle` / the console's `useSettingsLabel`
+ * read that merged tree, so an app-authored entry DID resolve.
+ *
+ * What it did NOT do is override the platform. `AppPlugin` loads the app's
+ * bundles in its own `start()` (kernel Phase 2); `SettingsServicePlugin`
+ * contributes the platform's settings translations from a `kernel:ready` hook
+ * (Phase 3); `deepMerge` gives the LATER source the leaf. So the platform won
+ * every key both bundles defined, and a per-app entry rendered only where the
+ * platform bundle carried no string for that key and locale — a gap filler on
+ * a namespace the application does not own. Dropping it therefore takes those
+ * gaps back to the manifest's own literal (the `?? fallback` every
+ * `resolveSettings*` helper ends in), which is a VISIBLE change and not a
+ * no-op. The semantic entry
+ * `18.translation-per-app-settings-platform-only.ts` is where an author is
+ * told that, because a notice reading "(removed)" does not say it.
+ *
+ * ⚠️ The BUNDLE shape only. `TranslationItemSchema` still declares `settings`
+ * (the registered `translation` metadata type is out of this ruling's scope),
+ * so a bare item entry replaying through this seam is left exactly as it is —
+ * the opposite of the `translation-component-submit-label-removed` neighbour,
+ * which retires its key at both doors and therefore walks both shapes. Getting
+ * this backwards would strip a key its own schema still accepts.
+ *
+ * The bundle is told from an item structurally rather than by key spelling:
+ * `locale` is REQUIRED on an item and never present on a bundle entry (the
+ * bundle's keys ARE the locales), and the candidate value must be a dict whose
+ * every key is a declared translation group — which an `objects` record, the
+ * one other dict-of-dicts at that depth, is not.
+ */
+const translationPerAppSettingsRemoved: MetadataConversion = {
+  id: 'translation-per-app-settings-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'stack.translations[].<locale>.settings',
+  summary:
+    "per-app translation group 'settings' removed (#15178 — it is keyed by SettingsManifest.namespace "
+    + 'and only platform code declares a manifest, so an app-authored entry could only fill gaps the '
+    + "platform's own bundle left in the one merged served tree, and was overwritten wherever both "
+    + 'defined the key; those gaps now fall back to the manifest literal, and the group stays on the '
+    + 'PLATFORM bundle, PlatformTranslationData)',
+  apply(stack, emit) {
+    /** The top-level groups a translation bundle entry may carry (either face). */
+    const GROUPS = new Set([
+      'objects', 'apps', 'messages', 'globalActions', 'dashboards', 'datasets',
+      'pages', 'flows', 'settings', 'metadataForms', 'settingsCommon',
+    ]);
+    return mapCollection(stack, 'translations', (entry, path) => {
+      // A `translation` ITEM, not a bundle — `settings` is still declared
+      // there. Leave it whole.
+      if ('locale' in entry) return entry;
+      let next = entry;
+      for (const [locale, data] of Object.entries(entry)) {
+        if (!isDict(data) || !isDict(data.settings)) continue;
+        if (!Object.keys(data).every((k) => GROUPS.has(k))) continue;
+        const stripped = stripKeys(data, ['settings'], emit, `${path}.${locale}`);
+        if (stripped === data) continue;
+        next = next === entry ? { ...entry } : next;
+        next[locale] = stripped;
+      }
+      return next;
+    });
+  },
+  fixture: {
+    before: {
+      translations: [
+        {
+          'zh-CN': {
+            settings: { mail: { title: '邮件投递', keys: { host: { label: '主机' } } } },
+            // A neighbouring group on the same entry rides through untouched.
+            apps: { crm: { label: '客户关系管理' } },
+          },
+        },
+      ],
+    },
+    after: {
+      translations: [
+        {
+          'zh-CN': {
+            apps: { crm: { label: '客户关系管理' } },
+          },
+        },
+      ],
+    },
+    // One per stripped group: the single `zh-CN` entry.
+    expectedNotices: 1,
+  },
+};
+
+/**
  * `translation.pages.<name>.components.<id>.submitLabel` — the component-copy
  * key retired with its only declarer (protocol 18, #10926, ADR-0049).
  *
@@ -9812,7 +9921,11 @@ const chartConfigAriaRemoved: MetadataConversion = {
           type: 'chart',
           dataset: 'orders',
           values: ['total'],
-          chartConfig: { type: 'bar', description: 'Orders by month', aria: { ariaLabel: 'Orders by month' } },
+          // ⚠️ No `type` here: it was tombstoned on this carrier by
+          // `dashboard-widget-chart-config-structure-removed`, and a fixture that
+          // still wrote it would be stripped by THAT entry too — the fixture
+          // disjointness contract. The report charts below keep theirs.
+          chartConfig: { description: 'Orders by month', aria: { ariaLabel: 'Orders by month' } },
         }],
       }],
       reports: [{
@@ -9832,7 +9945,7 @@ const chartConfigAriaRemoved: MetadataConversion = {
           type: 'chart',
           dataset: 'orders',
           values: ['total'],
-          chartConfig: { type: 'bar', description: 'Orders by month' },
+          chartConfig: { description: 'Orders by month' },
         }],
       }],
       reports: [{
@@ -9847,6 +9960,196 @@ const chartConfigAriaRemoved: MetadataConversion = {
     // One notice per stripped SITE — the widget's chart config, the report's own
     // chart and the block's chart — not one per key name.
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `dashboard.widgets[].chartConfig` loses its four STRUCTURE keys (ADR-0021;
+ * maintainer ruling 2026-09-12, decision batch #121 item 1, verbatim 「同意」).
+ *
+ * The mechanical half only. On a dataset-bound widget the dataset decides which
+ * series exist and which column each reads, so the stored `type`/`xAxis`/
+ * `yAxis`/`series` cannot be carried forward into the selection by a walker —
+ * `xAxis.field` names a dataset dimension the widget may not have selected, and
+ * a `series[]` entry may name a measure outside `values` entirely. So this
+ * strips them and the paired D3 semantic entry
+ * `dashboard-widget-chart-config-structure-refused` carries the judgement.
+ *
+ * ⚠️ Scoped to DASHBOARD widgets. `report.chart` / `report.blocks[].chart` keep
+ * their own `xAxis`/`yAxis` (narrowed to dataset dimension/measure NAMES by
+ * `ReportChartSchema`), and the react `<ObjectChart>` tier keeps all four — the
+ * ruling leaves the inline-data face alone. A conversion that walked `reports`
+ * as well would strip keys that are still authorable there.
+ */
+const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
+  id: 'dashboard-widget-chart-config-structure-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface:
+    'dashboard.widgets[].chartConfig.type / dashboard.widgets[].chartConfig.xAxis / '
+    + 'dashboard.widgets[].chartConfig.yAxis / dashboard.widgets[].chartConfig.series',
+  summary:
+    "dataset-bound dashboard widget chart-config keys 'type'/'xAxis'/'yAxis'/'series' removed "
+    + '(ADR-0021 — the dataset decides which series exist and which column each one reads; the '
+    + "widget's own 'type' is the chart family, and 'dimensions'/'values' are the selection, so "
+    + 'an authored axis could only agree with the dataset or silently re-point a series at '
+    + 'another column)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'dashboards', (d, path) => {
+      const widgets = d.widgets;
+      if (!Array.isArray(widgets)) return d;
+      let touched = false;
+      const rebuilt = widgets.map((w, i) => {
+        if (!w || typeof w !== 'object' || Array.isArray(w)) return w;
+        const config = (w as Record<string, unknown>).chartConfig;
+        if (!config || typeof config !== 'object' || Array.isArray(config)) return w;
+        const cleaned = stripKeys(
+          config as Record<string, unknown>,
+          ['type', 'xAxis', 'yAxis', 'series'],
+          emit,
+          `${path}.widgets[${i}].chartConfig`,
+        );
+        if (cleaned === config) return w;
+        touched = true;
+        return { ...(w as Record<string, unknown>), chartConfig: cleaned };
+      });
+      if (!touched) return d;
+      return { ...d, widgets: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      dashboards: [{
+        name: 'pipeline',
+        widgets: [{
+          id: 'rev_by_stage',
+          type: 'bar',
+          dataset: 'opportunity_metrics',
+          dimensions: ['stage'],
+          values: ['amount'],
+          chartConfig: {
+            type: 'bar',
+            xAxis: { field: 'stage' },
+            yAxis: [{ field: 'amount' }],
+            series: [{ name: 'amount' }],
+            title: 'Revenue by stage',
+          },
+        }],
+      }],
+    },
+    after: {
+      dashboards: [{
+        name: 'pipeline',
+        widgets: [{
+          id: 'rev_by_stage',
+          type: 'bar',
+          dataset: 'opportunity_metrics',
+          dimensions: ['stage'],
+          values: ['amount'],
+          chartConfig: { title: 'Revenue by stage' },
+        }],
+      }],
+    },
+    // `stripKeys` emits one notice per KEY it removed, and all four sit on one
+    // chart config — so four, not one per site.
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * `object.tenancy.organizationField` leaves the authorable surface (protocol
+ * 18, #19054 — ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18,
+ * verbatim and untranslated: 「organizationField 撤出可授权面 同意你的建议」).
+ *
+ * The key named the column a platform row is STAMPED from, as opposed to the
+ * column the object is WALLED by (`tenantField`). On an ordinary object those
+ * are the same column — the spec's own docblock said "for ordinary objects the
+ * two coincide and `organizationField` is never needed" — and the whole
+ * repository declared it exactly once, on `sys_api_key`, a table this platform
+ * ships. An authorable key whose only real declaration is ours makes every
+ * future piece of organization logic ask "what if somebody set this?" for a
+ * divergence no sanctioned consumer would honour: the cloud#1395 scope-pin
+ * allows exactly three readers, all of them platform-row writers.
+ *
+ * The divergence itself is NOT retired — only its authorability. It moves to
+ * `@objectstack/metadata-core`'s `PLATFORM_STAMP_ORGANIZATION_COLUMNS`
+ * (`sys_api_key` → `active_organization_id`, read by the stamp face alone), so
+ * the three writers keep their behaviour unchanged with no authorable input.
+ *
+ * **Retired from the load path** — the `tenancy` block is `.strict()` and
+ * rejects the key with its prescription (`TENANCY_RETIRED_KEY_GUIDANCE`), so a
+ * live author is taught at parse. This entry exists so stored 17.x rows replay
+ * clean (`applyConversionsToStoredItem` — without it a pre-removal row flags
+ * `metadata_spec_invalid` forever, mislabelling chain-owned history as a
+ * current-contract violation) and so `os migrate meta --from 17` lists the
+ * mechanical edits for existing sources.
+ *
+ * Deletion is the whole conversion, and it is behaviour-preserving in both
+ * directions for everything outside this repository: an application that
+ * declared the key was never read by anything (the three sanctioned consumers
+ * are platform writers over platform tables), so dropping it changes no
+ * stamp. A row on a platform object is unreachable from an authored stack —
+ * `sys_api_key` is `managedBy: 'better-auth'` and protection-locked.
+ */
+const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
+  id: 'object-tenancy-organization-field-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'object.tenancy.organizationField',
+  summary:
+    'object `tenancy.organizationField` removed (#19054, ADR-0049 — the stamp-only column '
+    + 'declaration was authorable by every application and declared exactly once in the whole '
+    + 'protocol, on the platform\'s own credential table; the divergence moves to a '
+    + 'platform-internal table in @objectstack/metadata-core and stops being a knob)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      // `tenancy.*` sits one level down, so the top-level-only `stripKeys`
+      // cannot reach it — drill in and copy-on-write, so an untouched object
+      // keeps its identity (pattern of `object-enable-trash-mru-removed`).
+      const tenancy = obj.tenancy;
+      if (!tenancy || typeof tenancy !== 'object' || Array.isArray(tenancy)) return obj;
+      const stripped = stripKeys(
+        tenancy as Record<string, unknown>,
+        ['organizationField'],
+        emit,
+        `${path}.tenancy`,
+      );
+      if (stripped === tenancy) return obj;
+      return { ...obj, tenancy: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          name: 'billing_api_credential',
+          label: 'Billing API Credential',
+          tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        },
+        // The walled neighbour passes through untouched: `tenantField` is the
+        // key that survives, and it answers the other question.
+        {
+          name: 'billing_invoice',
+          label: 'Invoice',
+          tenancy: { enabled: true, tenantField: 'workspace_id' },
+        },
+      ],
+    },
+    after: {
+      objects: [
+        {
+          name: 'billing_api_credential',
+          label: 'Billing API Credential',
+          tenancy: { enabled: false },
+        },
+        {
+          name: 'billing_invoice',
+          label: 'Invoice',
+          tenancy: { enabled: true, tenantField: 'workspace_id' },
+        },
+      ],
+    },
+    expectedNotices: 1,
   },
 };
 
@@ -9952,6 +10255,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     listViewSortStringClauseToArray,
     pageAssignedProfilesRemoved,
     chartConfigAriaRemoved,
+    dashboardWidgetChartConfigStructureRemoved,
+    translationPerAppSettingsRemoved,
+    objectTenancyOrganizationFieldRemoved,
   ],
 };
 

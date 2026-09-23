@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
 
 /**
  * Plugin Validator Protocol
@@ -141,7 +142,7 @@ export const PluginMetadataSchema = lazySchema(() => z.object({
   /**
    * Plugin version (semver)
    */
-  version: z.string().regex(/^\d+\.\d+\.\d+$/).optional().describe('Semantic version (e.g., 1.0.0)'),
+  version: z.string().regex(MAJOR_MINOR_PATCH_VERSION_PATTERN).optional().describe('Semantic version (e.g., 1.0.0)'),
   
   /**
    * Plugin dependencies (array of plugin names)

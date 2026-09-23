@@ -123,12 +123,19 @@ export interface DoorMeasurement {
  * shared structure, measured 0.105; the schema itself was retired by #5055 and
  * the test rebuilds the same 2-of-19 shape to keep the number pinned).
  *
- * Note the chart family this bridge was originally written for measures
- * `direct`, not `derived-clone`: `ChartConfigSchema` is in the graph outright.
- * So `chart.test.ts` does not exercise this limb at all, and neither does any
- * other consumer — which is why the testkit's own test file owns the positive
- * control for it. Without that, narrowing the bridge to "never fires" would
- * leave every consumer green.
+ * ⚠️ AMENDED. This paragraph used to read "the chart family this bridge was
+ * originally written for measures `direct`, not `derived-clone`:
+ * `ChartConfigSchema` is in the graph outright. So `chart.test.ts` does not
+ * exercise this limb at all". That was true until the chart-structure ownership
+ * ruling (2026-09-12) gave the dashboard widget its own
+ * `DashboardWidgetChartConfigSchema`: no root reaches the base shape directly
+ * any more — `dashboard.widgets[].chartConfig` and `report.chart` both reach
+ * `.extend()` clones of it — so `ChartConfigSchema` now measures
+ * `derived-clone` and `chart.test.ts` DOES exercise this limb. The testkit's
+ * own test file still owns the positive control for it, because a consumer's
+ * incidental exercise is not a control: without that file, narrowing the bridge
+ * to "never fires" would still leave every consumer green (`ChartConfigSchema`
+ * would simply read `unreachable`, and nothing would say that is wrong).
  */
 const DERIVED_CLONE_MIN_OVERLAP = 0.5;
 

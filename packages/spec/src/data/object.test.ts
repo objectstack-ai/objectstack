@@ -8,6 +8,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // (#5286).
 import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, isPublicSharingEnabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
 import { resolveInjectedSystemColumns } from './injected-system-columns';
+import { projectPublishedJsonSchema } from '../../scripts/lib/refinement-projection';
+import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements';
 import { Field } from './field.zod';
 import type { StateMachineValidation } from './validation.zod';
 
@@ -1930,21 +1932,37 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
       .toEqual({ enabled: false, tenantField: 'workspace_id' });
   });
 
-  it('accepts the stamp-only `organizationField`, with no default materialized (#8778)', () => {
-    // The shipped shape: sys_api_key stays unwalled (`enabled: false`) while
-    // audit rows stamp the organization of the key they describe. The key is
-    // consulted by the sanctioned platform-row writers only — audit stamping
-    // today, plus `plugin-approvals` and the automation-run recorder once
-    // #10101 lands under the cloud#1395 widening of the #8778 scope pin. No
-    // read path reads it either way: read-neutrality is pinned beside each
-    // read path (driver tenant scope, Layer 0, injection plan), not here.
-    expect(
-      TenancyConfigSchema.parse({ enabled: false, organizationField: 'active_organization_id' }),
-    ).toEqual({ enabled: false, organizationField: 'active_organization_id' });
+  it('rejects the retired stamp-only `organizationField` with its prescription (#19054)', () => {
+    // The shape this used to accept, verbatim — the one declaration the whole
+    // protocol ever carried (`sys_api_key`, #8778). The block is `.strict()`,
+    // so the key is REFUSED with the guidance row rather than stripped: a
+    // silent strip would swap one no-op for another, which is the class
+    // ADR-0049 exists to end.
+    const result = TenancyConfigSchema.safeParse({
+      enabled: false,
+      organizationField: 'active_organization_id',
+    });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues.map((i) => i.message).join('\n');
+    expect(message).toContain('`tenancy.organizationField` was removed in @objectstack/spec 17');
+    expect(message).toContain('ADR-0049');
+    // The prescription must say what to do INSTEAD, not only that the key is
+    // gone: delete it, and reach for `tenancy.tenantField` when the object's
+    // tenant column genuinely is not `organization_id`.
+    expect(message).toContain('Delete the key.');
+    expect(message).toContain('`tenancy.tenantField`');
+    expect(message).toContain('os migrate meta --from 17');
+  });
 
-    // Undeclared stays undeclared — same #5315 doctrine as `tenantField`.
-    const result = TenancyConfigSchema.parse({ enabled: true });
+  it('the surviving shape is exactly `enabled` + `tenantField` (#19054)', () => {
+    // The positive half of the retirement: what the credential table declares
+    // now parses, and carries no residue of the removed key.
+    const result = TenancyConfigSchema.parse({ enabled: false });
+    expect(result).toEqual({ enabled: false });
     expect('organizationField' in result).toBe(false);
+
+    expect(TenancyConfigSchema.parse({ enabled: true, tenantField: 'workspace_id' }))
+      .toEqual({ enabled: true, tenantField: 'workspace_id' });
   });
 
   it('rejects the retired `strategy` with a tombstone pointing at the two real modes', () => {
@@ -2654,8 +2672,16 @@ describe('managedBy: retiring the overloaded `system` bucket (#3355)', () => {
  * whose `fields` carries `__proto__` used to parse as SUCCESS with the key
  * silently missing from the output. `refuseRecordProtoKey` closes that by
  * inspecting the RAW input before the record ever runs. `constructor` and
- * `prototype` DO reach the key schema (they are ordinary lowercase words the
- * snake_case regex already admitted) and are refused there instead.
+ * `prototype` DO reach the parse (they are ordinary lowercase words the
+ * snake_case regex already admitted) and are refused on the RECORD, through
+ * the closed projection list's `banned-keys` arm (#19346).
+ *
+ * That second mechanism is what puts the refusal in the PUBLISHED file as well
+ * as in the runtime: a key-schema `.refine()` is a `custom` check, which
+ * `z.toJSONSchema()` has no arm for, so the rule used to reach the runtime
+ * alone and `packages/spec/json-schema/**` went on accepting both names. The
+ * last three cases below pin the published half, because a ledger row that
+ * reads `projected` while the file carries nothing is the failure this closes.
  *
  * These pin BEHAVIOUR, not a version string (the ruling's own instruction):
  * a zod bump that silently changed the `__proto__` skip, or that started
@@ -2704,7 +2730,7 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
   });
 
   it.each(['constructor', 'prototype'])(
-    'refuses `%s` as a fields key via the key grammar (reaches def.keyType._zod.run, unlike `__proto__`)',
+    'refuses `%s` as a fields key (it reaches the parse, unlike `__proto__`)',
     (reserved) => {
       const result = ObjectSchema.safeParse({
         name: 'lead',
@@ -2716,14 +2742,17 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
       });
       expect(result.success).toBe(false);
       if (result.success) return;
-      const issue = result.error.issues.find((i) => i.path.join('.') === `fields.${reserved}`);
+      // ⚠️ The refusal is located at the SLOT and no longer at the offending
+      // key. The `banned-keys` arm is a RECORD-level predicate — the only shape
+      // the closed projection list can publish — and `.refine()` carries no
+      // per-key path, so before #19346 this read `fields.<the key>` with code
+      // `invalid_key` and the reason nested one level under zod's fixed
+      // "Invalid key in record". The ban list is closed and two names long, so
+      // the slot is still named and the message names both keys in full.
+      const issue = result.error.issues.find((i) => i.path.join('.') === 'fields');
       expect(issue).toBeDefined();
-      expect(issue?.code).toBe('invalid_key');
-      // The key-grammar refusal's own message is nested under `.issues` —
-      // the top-level `invalid_key` issue's own `.message` is zod's fixed
-      // "Invalid key in record", so the reason lives one level down.
-      const nested = issue?.code === 'invalid_key' ? issue.issues : undefined;
-      expect(nested?.[0]?.message).toMatch(/constructor.*prototype|prototype.*constructor/s);
+      expect(issue?.code).toBe('custom');
+      expect(issue?.message).toMatch(/constructor.*prototype|prototype.*constructor/s);
     },
   );
 
@@ -2734,5 +2763,108 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
       fields: { title: { type: 'text', label: 'Title' } },
     });
     expect(result.success).toBe(true);
+  });
+
+  /**
+   * The PUBLISHED half (#19346, one piece of #18670).
+   *
+   * Projected through `projectPublishedJsonSchema` — the one call
+   * `build-schemas.ts` writes `json-schema/data/Object.json` with — and ⛔ not
+   * a local `z.toJSONSchema()`: a re-spelling would go on passing through the
+   * one edit that matters, the refinement override dropped from the shared
+   * helper, while the published file silently went wide again.
+   */
+  const publishedFieldsNode = (): Record<string, unknown> => {
+    // The generator's own io ladder: the output (post-parse) shape first, the
+    // INPUT shape when a `.transform` anywhere under the export makes the
+    // output side unrepresentable. `data/Object` lands on the second rung today
+    // — `build-schemas.ts` logs it as `(input shape)` — so a pin that projected
+    // only the default direction would throw rather than read the file that
+    // actually ships.
+    //
+    // ⛔ The fallback is GUARDED, and the guard is the pin rather than a
+    // nicety: a bare `catch {}` would swallow an output projection that failed
+    // for some unrelated reason, fall through to the input shape and stay
+    // GREEN while the same failure turned the build RED — a pin passing on the
+    // one failure mode it exists to watch. `build-schemas.ts` spells the same
+    // test as `isKnownUnsupported`, over a `KNOWN_UNSUPPORTED_PATTERNS` list
+    // that is module-local to a script which RUNS the whole generator on
+    // import, so it cannot be imported here; the one pattern that list carries
+    // is spelled out below, and anything else is re-thrown.
+    //
+    // ⚠️ The generator has a THIRD rung — the union-branch-dropping projection
+    // — which this pin deliberately does not model: `data/Object` does not
+    // reach it, and modelling an unused rung would mean asserting against a
+    // projection this export never publishes through. If it ever did need that
+    // rung, the re-throw below turns this pin RED rather than silently reading
+    // a different projection than the one that ships.
+    const KNOWN_UNSUPPORTED = 'cannot be represented in JSON Schema';
+    let published: { properties: Record<string, Record<string, unknown>> };
+    try {
+      published = projectPublishedJsonSchema(ObjectSchema) as typeof published;
+    } catch (outputError) {
+      const message = outputError instanceof Error ? outputError.message : String(outputError);
+      if (!message.includes(KNOWN_UNSUPPORTED)) throw outputError;
+      published = projectPublishedJsonSchema(ObjectSchema, { io: 'input' }) as typeof published;
+    }
+    return published.properties.fields;
+  };
+
+  /**
+   * The published node's banned-key rule — `propertyNames.not.enum`, wherever
+   * the emitter put it — evaluated the way a validator would, and THROWING when
+   * the node states no such rule, so a projection that stopped emitting fails
+   * here rather than passing vacuously.
+   */
+  const publishedFileAccepts = (fields: Record<string, unknown>): boolean => {
+    const node = publishedFieldsNode();
+    const clauses = [node, ...((node.allOf as Record<string, unknown>[] | undefined) ?? [])];
+    const banned = clauses
+      .map((clause) => (clause.propertyNames as { not?: { enum?: string[] } } | undefined)?.not?.enum)
+      .filter((list): list is string[] => Array.isArray(list));
+    if (banned.length === 0) {
+      throw new Error('the published `fields` node states no propertyNames.not.enum — nothing to evaluate');
+    }
+    return banned.every((list) => Object.keys(fields).every((name) => !list.includes(name)));
+  };
+
+  it('the PUBLISHED schema states the refusal itself, beside the key-type rule it already stated', () => {
+    const node = publishedFieldsNode();
+    // The record's own key-TYPE rule survives — the ban is CONJOINED, never
+    // substituted, so the reference tables keep the shape they always printed.
+    expect(node.propertyNames).toEqual({ type: 'string', pattern: '^[a-z_][a-z0-9_]*$' });
+    expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['constructor', 'prototype'] } } }]);
+  });
+
+  it('the runtime and the published keywords agree on every document in the corpus', () => {
+    const runtimeAccepts = (fields: Record<string, unknown>): boolean =>
+      ObjectSchema.safeParse({ name: 'lead', label: 'Lead', fields }).success;
+    const corpus: Array<Record<string, unknown>> = [
+      { title: { type: 'text', label: 'Title' } },
+      JSON.parse('{"constructor":{"type":"text","label":"R"}}'),
+      JSON.parse('{"prototype":{"type":"text","label":"R"}}'),
+      JSON.parse('{"title":{"type":"text","label":"T"},"constructor":{"type":"text","label":"R"}}'),
+      // LIT CONTROLS — names the ban does NOT cover. A rule that banned by
+      // prefix, or that asked `in` instead of own-property equality, fails
+      // here: `to_string` is not `toString`, and `constructors` is not
+      // `constructor`.
+      JSON.parse('{"constructors":{"type":"text","label":"R"}}'),
+      JSON.parse('{"to_string":{"type":"text","label":"R"}}'),
+    ];
+    for (const fields of corpus) {
+      // Equality, not implication: the arm is exact, so a one-sided pin would
+      // pass a projection that had stopped narrowing at all.
+      expect(
+        publishedFileAccepts(fields),
+        `disagreement on ${JSON.stringify(fields)}`,
+      ).toBe(runtimeAccepts(fields));
+    }
+  });
+
+  it('the site now reads `projected` naming the arm, which is why its ledger row is gone', () => {
+    const census = collectDroppedRefinements('data/Object', ObjectSchema);
+    expect(census.dropped.map((site) => site.path)).not.toContain('fields.out.keyType');
+    const site = census.projected.find((s) => s.path === 'fields.out');
+    expect(site?.declaredPatterns).toEqual(['banned-keys']);
   });
 });

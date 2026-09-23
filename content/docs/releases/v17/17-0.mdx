@@ -1731,9 +1731,15 @@ This section covers the window bundled at **`rc.0`**: `cf2d56e32a11 →
 - **Raw-`fetch` readers** of the settings / datasource-admin /
   external-datasource / package / share-link routes: read the payload under
   `data` and errors as `error.code` / `error.message` (#3843, #3983).
-- **Bulk callers:** stay under `batch.maxBatchSize` (default 200, raisable to
-  1000) or chunk; stop sending `object` / `context` in bulk bodies (ignored);
+- **Bulk callers:** stay under `batch.maxBatchSize` (200 unless the host
+  embedding the server passed another value — no shipped boot path does) or
+  chunk; stop sending `object` / `context` in bulk bodies (ignored);
   read `deleteMany`'s new structured `BatchUpdateResponse` (#3939, #3897).
+  *Erratum, 2026-09-18 — this bullet said the cap was "raisable to 1000". The
+  cap is embedder policy (`RestServerConfig.batch.maxBatchSize`, 1..1000,
+  default 200), written only by a host that constructs the server; `os serve`
+  and the dev plugins pass none, so a CLI-started deployment is at 200 and no
+  published surface raises it (ruling 2026-09-07; #18854).*
 - **Analytics clients:** send the bare `AnalyticsQuery` shape (`where`, not
   `filters`; no `{cube, query, format}` envelope) (#3878). Embedded /
   programmatic hosts must install `@objectstack/service-analytics` — the

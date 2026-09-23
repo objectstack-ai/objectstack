@@ -31,7 +31,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { inspectDistFreshness, packageDirLabel } from './lib/dist-freshness';
+import {
+  EXIT_FINDINGS,
+  EXIT_PREREQUISITE_NOT_MET,
+  inspectDistFreshness,
+  packageDirLabel,
+  prerequisiteNotMetText,
+} from './lib/dist-freshness';
 import { declarationStamp } from '../../../scripts/check-regen-pending.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -470,7 +476,7 @@ describe('build-api-surface.ts refuses a stale dist end to end (#7122)', () => {
     seed(tree.spec, { distMtime: OLD, srcMtime: NEW });
 
     const run = runGenerator(tree.spec, []);
-    expect(run.status).toBe(1);
+    expect(run.status).toBe(EXIT_PREREQUISITE_NOT_MET);
     expect(run.stderr).toContain('OLDER than packages/spec/src');
     expect(run.stderr).toContain('pnpm --filter @objectstack/spec build');
     expect(baseline(tree.spec)).toBe(SENTINEL);
@@ -484,7 +490,7 @@ describe('build-api-surface.ts refuses a stale dist end to end (#7122)', () => {
     seed(tree.spec, { distMtime: OLD, srcMtime: NEW });
 
     const run = runGenerator(tree.spec, ['--check']);
-    expect(run.status).toBe(1);
+    expect(run.status).toBe(EXIT_PREREQUISITE_NOT_MET);
     expect(run.stderr).toContain('FALSE GREEN');
     expect(run.stdout).not.toContain('unchanged');
   });
@@ -495,9 +501,92 @@ describe('build-api-surface.ts refuses a stale dist end to end (#7122)', () => {
 
     for (const args of [[], ['--check']]) {
       const run = runGenerator(tree.spec, args);
-      expect(run.status).toBe(1);
+      expect(run.status).toBe(EXIT_PREREQUISITE_NOT_MET);
       expect(run.stderr).toContain('no .d.ts declarations');
     }
     expect(baseline(tree.spec)).toBe(SENTINEL);
+  });
+});
+
+// ── The exit code the refusal answers with (#19227) ──────────────────────────
+//
+// Until this card the five dist-reading gates refused with `process.exit(1)` —
+// a real finding's code — while `scripts/import-prerequisite.mjs:250` declared
+// `EXIT_PREREQUISITE_NOT_MET = 3` for these exact two words. The consumer that
+// makes the difference concrete is `scripts/pm/dispatch-gates.mjs --ran`: it
+// derives its NOT-MEASURED class from the recorded code and counts every other
+// non-kill code as a family that RAN.
+//
+// These pins are the spec-side half of keeping one vocabulary. The root-side
+// half is that module's own `--self-test`, which asserts the same 3 there; the
+// value is hand-carried between the two (the reason is in the constant's
+// docblock), so BOTH pins have to exist or the two declarations can fork in
+// silence.
+describe('the prerequisite exit code, and the refusal text that explains it (#19227)', () => {
+  it('is 3, the number this repo already means by PREREQUISITE NOT MET', () => {
+    expect(EXIT_PREREQUISITE_NOT_MET).toBe(3);
+  });
+
+  it("is distinct from a finding's — the whole point, and the half a machine reads", () => {
+    expect(EXIT_FINDINGS).toBe(1);
+    expect(EXIT_PREREQUISITE_NOT_MET).not.toBe(EXIT_FINDINGS);
+    expect(EXIT_PREREQUISITE_NOT_MET).not.toBe(0);
+  });
+
+  it('agrees with the root frame that declares it, read from that module', async () => {
+    // The drift check, against the authority rather than against a copy of it.
+    // `packages/spec` already declares `scripts/**` in CROSS_PACKAGE_TEST_INPUTS,
+    // so this read is inside a declared radius.
+    //
+    // ⚠️ The cast goes through `unknown` because `scripts/import-prerequisite.d.mts`
+    // is PARTIAL BY DESIGN — its own header says the exit-code constants are
+    // deliberately omitted from the mirror — so tsc sees a namespace without
+    // them. That is exactly why the two `typeof` assertions are here rather
+    // than implied: without them the cast would make a vanished export read as
+    // `undefined` on both sides of a comparison nobody would notice.
+    const frame = (await import('../../../scripts/import-prerequisite.mjs')) as unknown as {
+      EXIT_PREREQUISITE_NOT_MET?: number;
+      EXIT_FINDINGS?: number;
+    };
+    expect(typeof frame.EXIT_PREREQUISITE_NOT_MET).toBe('number');
+    expect(typeof frame.EXIT_FINDINGS).toBe('number');
+    expect(EXIT_PREREQUISITE_NOT_MET).toBe(frame.EXIT_PREREQUISITE_NOT_MET);
+    expect(EXIT_FINDINGS).toBe(frame.EXIT_FINDINGS);
+  });
+
+  it('carries the fleet phrase, so it greps beside its siblings', () => {
+    // `check-dts-closure`, `check-dual-build-cjs-loads`, `check-i18n-bundles`,
+    // `check-i18n-coverage` and `check-closing-target-claim` all print
+    // `<gate>: PREREQUISITE NOT MET — …`. A reader who learned the phrase from
+    // one of those must find this one with the same grep.
+    write('dist/contracts/index.d.ts', 'export {};', OLD);
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
+
+    const verdict = inspectDistFreshness(sandbox, 'check', 'pnpm run check:example');
+    expect(verdict.fresh).toBe(false);
+    if (verdict.fresh) throw new Error('unreachable: the sandbox dist is stale');
+
+    const text = prerequisiteNotMetText('check:example', verdict);
+    expect(text).toContain('check:example: PREREQUISITE NOT MET');
+    // The verdict's own words are passed through, not paraphrased.
+    expect(text).toContain(verdict.message);
+    // And the sentence a number alone cannot carry.
+    expect(text).toContain('Nothing was measured');
+    expect(text).toContain(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`);
+    expect(text).toContain(`distinct from a finding's ${EXIT_FINDINGS}`);
+  });
+
+  it('wraps a caller-composed refusal the same way — the partial-dist arm', () => {
+    // `check:skill-examples` refuses a self-package whose `.d.ts` was never
+    // emitted, which the mtime rule reads as fresh, so that refusal is not an
+    // `inspectDistFreshness` verdict at all. Same trailer, one source.
+    const text = prerequisiteNotMetText('check:skill-examples [spec]', {
+      headline: 'a self-package on this surface has no declarations',
+      detail: '\n  - packages/client-react/dist/index.d.ts (missing)',
+    });
+    expect(text).toContain('check:skill-examples [spec]: PREREQUISITE NOT MET');
+    expect(text).toContain('a self-package on this surface has no declarations');
+    expect(text).toContain('packages/client-react/dist/index.d.ts (missing)');
+    expect(text).toContain('Nothing was measured');
   });
 });

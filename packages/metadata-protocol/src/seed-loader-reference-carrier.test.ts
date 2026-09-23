@@ -77,7 +77,13 @@ describe('[#18550] seed dependency graph — an unreadable `reference` carrier i
     // other input would satisfy that.
     const attempt = () => graphOver({ author, book: bookWith({ reference: { object: 'author' } }) });
     await expect(attempt()).rejects.toThrow(TypeError);
-    await expect(attempt()).rejects.toThrow(/SeedLoader\.buildDependencyGraph/);
+    // [#19289] The reader named in the refusal is now `referenceTargetOf`, the
+    // arbiter this site asks (the carrier read happens INSIDE it, so the throw
+    // and its prescription are unchanged). The assertions that carry this
+    // case's weight are the three below: the error CLASS, the offending SHAPE
+    // and the prescription. What is deliberately NOT weakened is the input —
+    // this call reaches the arbiter only through `buildDependencyGraph`.
+    await expect(attempt()).rejects.toThrow(/referenceTargetOf/);
     await expect(attempt()).rejects.toThrow(/`reference` is an object/);
     await expect(attempt()).rejects.toThrow(/FieldSchema declares it as an optional STRING/);
   });

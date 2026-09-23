@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Connector } from '@objectstack/spec/integration';
+import type { Connector, RetryConfig } from '@objectstack/spec/integration';
+import { connectorFetchOptions } from '@objectstack/spec/integration';
+import { resilientFetch } from '@objectstack/spec/shared';
 
 /**
  * OpenAPI connector generator — turns a declarative OpenAPI 3.x document into a
@@ -120,6 +122,19 @@ export interface OpenApiConnectorConfig {
     defaultHeaders?: Record<string, string>;
     /** Only include operations for which this predicate returns true (allowlist). */
     include?: (op: OperationInfo) => boolean;
+    /**
+     * Retry policy for every generated action, executed by `resilientFetch`
+     * (ADR-0049 · #18975). Omitted ⇒ the wrapper's own defaults.
+     */
+    retryConfig?: RetryConfig;
+    /**
+     * Declared connect deadline (ms). Carried onto the def so `GET /connectors`
+     * reports what the author declared; ⚠️ not enforced — one `fetch` signal
+     * cannot bound the connection phase alone (`connector-fetch-policy.ts`).
+     */
+    connectionTimeoutMs?: number;
+    /** Per-request deadline (ms) — `resilientFetch`'s per-attempt timeout. */
+    requestTimeoutMs?: number;
     /** Injected fetch implementation (defaults to global `fetch`). */
     fetchImpl?: typeof fetch;
 }
@@ -145,7 +160,14 @@ interface RequestInput {
 export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiConnectorBundle {
     const { document, include } = config;
     const auth: RestAuth = config.auth ?? { type: 'none' };
-    const doFetch = config.fetchImpl ?? fetch;
+    // Through the shared wrapper, like the sibling connectors — a naked `fetch`
+    // here was both unbounded (no timeout, no retry) and the one built-in HTTP
+    // path an authored `retryConfig` could never reach. Resolved once per
+    // connector; the policy is fixed for the bundle's lifetime.
+    const fetchOptions = connectorFetchOptions(
+        { retryConfig: config.retryConfig, requestTimeoutMs: config.requestTimeoutMs },
+        { fetchImpl: config.fetchImpl },
+    );
     const name = config.name ?? slug(document.info?.title ?? 'openapi_connector');
     const label = config.label ?? document.info?.title ?? titleize(name);
     const description = config.description ?? document.info?.description;
@@ -167,11 +189,11 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
             headers['Content-Type'] = 'application/json';
         }
 
-        const response = await doFetch(url, {
+        const response = await resilientFetch(url, {
             method,
             headers,
             body: hasBody ? JSON.stringify(input.body) : undefined,
-        });
+        }, fetchOptions);
 
         const contentType = response.headers.get('content-type') ?? '';
         const parsed = contentType.includes('application/json') ? await response.json() : await response.text();
@@ -217,8 +239,9 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
         // the (post-parse) Connector output type (mirrors connector-rest/mcp).
         status: 'active',
         enabled: true,
-        connectionTimeoutMs: 30000,
-        requestTimeoutMs: 30000,
+        connectionTimeoutMs: config.connectionTimeoutMs ?? 30000,
+        requestTimeoutMs: config.requestTimeoutMs ?? 30000,
+        ...(config.retryConfig === undefined ? {} : { retryConfig: config.retryConfig }),
         actions,
     };
 

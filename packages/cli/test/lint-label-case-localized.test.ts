@@ -58,7 +58,7 @@ import { lintConfig } from '../src/commands/lint';
 import { scoreMetadata } from '../src/lint/score';
 
 const MANIFEST = {
-  id: 'todo',
+  id: 'com.example.todo',
   namespace: 'todo',
   version: '1.0.0',
   name: 'Todo',

@@ -46,7 +46,7 @@ const result = BulkActionDefSchema.parse(data);
 | **operation** | `Enum<'update' \| 'delete' \| 'custom'>` | ✅ | What the executor does: 'update'/'delete' are data-plane mass mutations; 'custom' dispatches an object action (see `execution`). |
 | **execution** | `Enum<'perRecord' \| 'aggregate'>` | optional | For `operation: 'custom'` — 'aggregate' dispatches the named action ONCE for the whole selection, carrying every id in `params._selectedIds`. Required on a custom def: the per-record form is declared as `bulkActions: ['<name>']` instead. |
 | **patch** | `Record<string, any>` | optional | For `operation: 'update'` — static field values applied to every selected record, merged UNDER the user-supplied params so a fixed value can be declared without exposing it in the dialog. |
-| **params** | `({ name: string; label?: string; help?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; … } & Record<string, any>)[]` | optional | Inputs collected once before the run. Omit to skip the params step and go straight to confirm. |
+| **params** | `{ name: string; label?: string; help?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; … }[]` | optional | Inputs collected once before the run. Omit to skip the params step and go straight to confirm. |
 | **confirmText** | `string` | optional | Confirmation text shown above the affected-record summary. |
 | **confirmLabel** | `string` | optional | Custom Confirm button label (default: "Run"). |
 | **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm: a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record. |
@@ -69,6 +69,7 @@ const result = BulkActionDefSchema.parse(data);
 | **labelField** | `string` | optional | Related-object field used as the option label for a `lookup` widget (defaults to name/full_name/email/id). |
 | **multiple** | `boolean` | optional | Allow picking multiple values — the param value becomes an array and is written to the patch as-is. |
 | **placeholder** | `string` | optional | Placeholder text. |
+| **dependsOn** | `(string \| { field: string; param?: string })[]` | optional | Declares that this param's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; `{field,param}` when the remote filter key differs — the `{field,param}` form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent. On a BULK param the record is the dialog's own in-progress param values — a bulk run holds a selection, not a row — so a binding names a SIBLING PARAM of the same def. |
 
 
 ---
@@ -111,6 +112,7 @@ const result = BulkActionDefSchema.parse(data);
 | **labelField** | `string` | optional | Related-object field used as the option label for a `lookup` widget (defaults to name/full_name/email/id). |
 | **multiple** | `boolean` | optional | Allow picking multiple values — the param value becomes an array and is written to the patch as-is. |
 | **placeholder** | `string` | optional | Placeholder text. |
+| **dependsOn** | `(string \| { field: string; param?: string })[]` | optional | Declares that this param's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; `{field,param}` when the remote filter key differs — the `{field,param}` form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent. On a BULK param the record is the dialog's own in-progress param values — a bulk run holds a selection, not a row — so a binding names a SIBLING PARAM of the same def. |
 
 ### Allowed Values: `BulkActionParam.type`
 

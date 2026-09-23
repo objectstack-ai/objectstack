@@ -51,7 +51,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATION_MAJORS } from '@objectstack/spec';
+import { MIGRATIONS_BY_MAJOR, MIGRATION_MAJORS, MIGRATION_SUPPORT_FLOOR } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { childEnv } from './helpers/serve-process.js';
 
@@ -71,7 +71,7 @@ const INSTALLED = String(PROTOCOL_MAJOR);
  */
 const RETIRED_KEY_CONFIG = `
 export default {
-  manifest: { id: 'default_range_repro', name: 'Default Range Repro', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.default-range-repro', name: 'Default Range Repro', version: '1.0.0', type: 'app' },
   objects: [{ name: 'dr_ticket', label: 'Ticket', fields: { title: { type: 'text', label: 'Title' } } }],
   dashboards: [
     { name: 'kpi_a', label: 'KPI A', widgets: [], refreshInterval: 300 },
@@ -86,7 +86,7 @@ export default {
 /** The same shape already canonical — the control every "it fired" line needs. */
 const CANONICAL_CONFIG = `
 export default {
-  manifest: { id: 'default_range_canon', name: 'Default Range Canon', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.default-range-canon', name: 'Default Range Canon', version: '1.0.0', type: 'app' },
   objects: [{ name: 'dr_thing', label: 'Thing', fields: { title: { type: 'text', label: 'Title' } } }],
   dashboards: [{ name: 'kpi_a', label: 'KPI A', widgets: [], refreshIntervalSeconds: 300 }],
 };
@@ -215,15 +215,91 @@ describe('os migrate meta — an empty range answers as an empty range (#17134)'
     expect(stdout).toContain('replayed no conversion');
   }, 120_000);
 
-  it('still says `Nothing to migrate` for a range that HAS steps and rewrote nothing', async () => {
-    // ⛔ The success sentence is not collateral damage: a range holding real
-    // steps that matched nothing is a finding about the metadata, and it keeps
-    // the answer published acceptance checks grep for. `13 → 14` is chosen
-    // because step 14 carries no semantic entries, so a canonical stack comes
-    // back with both lists empty for a NON-empty chain.
-    const { stdout, code } = await runMeta(['--from', '13', '--to', '14'], canonicalDir);
+  /**
+   * ⚠️ #19056 did not change this behaviour — it removed every INPUT that can
+   * reach it, and the honest pin is that reason rather than a re-pointed number.
+   *
+   * The success sentence needs `applied` AND `todos` empty over a NON-empty
+   * chain. `applyMetaMigrations` surfaces a step's whole `semantic` list as
+   * todos on every hop it replays, whatever the stack holds, so an empty
+   * `todos` needs a hop whose own `semantic` list is empty. `13 → 14` was that
+   * hop: step 14 carried none. Raising `MIGRATION_SUPPORT_FLOOR` to 16 retired
+   * steps 11–16, and both hops the chain still reaches carry semantic entries —
+   * so on this build no `--from` / `--to` reaches the sentence at all. Measured:
+   * `--from 16 --to 17` on the canonical stack prints 77 manual changes and
+   * `Migrated stack is schema-valid` at exit 0.
+   *
+   * ⛔ Re-pointing `13` to `16` would NOT have pinned this behaviour — it would
+   * have pinned the OTHER branch of the same `if` under this branch's name,
+   * which is the failure this whole describe block exists to stop. So the
+   * spawned case is selected by the registry instead: it revives by itself the
+   * day a reachable hop ships with no semantic residue, and the case below it
+   * pins what IS reachable today.
+   *
+   * WHAT WAS LOST, named: while no reachable hop is semantic-free, nothing
+   * spawns the CLI over the success sentence. The branch is still covered
+   * in-process (`printSuccess` is chosen by `applied.length === 0 &&
+   * todos.length === 0 && hops.length > 0`), but not end to end from a real
+   * terminal.
+   */
+  const SEMANTIC_FREE_HOP = MIGRATION_MAJORS.find(
+    (m) => m - 1 >= MIGRATION_SUPPORT_FLOOR && MIGRATIONS_BY_MAJOR[m]!.semantic.length === 0,
+  );
+
+  it('states which world we are in — whether any reachable hop is semantic-free', () => {
+    // Anti-vacuity for the two cases below: both are selected by
+    // SEMANTIC_FREE_HOP, so a registry that could not answer the question would
+    // silently turn the spawned case off and leave nothing in its place.
+    expect(MIGRATION_MAJORS.length).toBeGreaterThan(0);
+    const reachable = MIGRATION_MAJORS.filter((m) => m - 1 >= MIGRATION_SUPPORT_FLOOR);
+    expect(reachable.length).toBeGreaterThan(0);
+    for (const m of reachable) expect(MIGRATIONS_BY_MAJOR[m]).toBeDefined();
+
+    if (SEMANTIC_FREE_HOP === undefined) {
+      // The #19056 world: every hop the floor still reaches carries semantic
+      // entries, so the success sentence has no input. This is the assertion
+      // that makes the skip below a measurement instead of a hole.
+      expect(reachable.map((m) => MIGRATIONS_BY_MAJOR[m]!.semantic.length)).not.toContain(0);
+    } else {
+      expect(MIGRATIONS_BY_MAJOR[SEMANTIC_FREE_HOP]!.semantic).toHaveLength(0);
+      expect(SEMANTIC_FREE_HOP - 1).toBeGreaterThanOrEqual(MIGRATION_SUPPORT_FLOOR);
+    }
+  });
+
+  it.skipIf(SEMANTIC_FREE_HOP === undefined)(
+    'still says `Nothing to migrate` for a range that HAS steps and rewrote nothing',
+    async () => {
+      // ⛔ The success sentence is not collateral damage: a range holding real
+      // steps that matched nothing is a finding about the metadata, and it keeps
+      // the answer published acceptance checks grep for.
+      const hop = SEMANTIC_FREE_HOP!;
+      const { stdout, code } = await runMeta(['--from', String(hop - 1), '--to', String(hop)], canonicalDir);
+      expect(code).toBe(0);
+      expect(stdout).toContain('Nothing to migrate');
+      expect(stdout).toContain('Migrated stack is schema-valid');
+    },
+    120_000,
+  );
+
+  it('a canonical stack over the oldest SUPPORTED range is not answered as an empty range', async () => {
+    // What is reachable now, and the half #17134 is actually about: the oldest
+    // range the floor still admits HAS a step, so the empty-range warning must
+    // not appear, the run must still reach its schema verdict, and it must not
+    // claim canonicality it did not check. Derived from the registry, so the
+    // next floor move re-points this instead of inviting another delete.
+    const from = String(MIGRATION_SUPPORT_FLOOR);
+    const to = String(MIGRATION_MAJORS.find((m) => m > MIGRATION_SUPPORT_FLOOR)!);
+    const { stdout, code } = await runMeta(['--from', from, '--to', to], canonicalDir);
+
     expect(code).toBe(0);
-    expect(stdout).toContain('Nothing to migrate');
+    // The chain really ran — without this the three negatives below all hold
+    // on a run that did nothing at all.
+    expect(stdout).toContain('manual change(s) require your judgment');
     expect(stdout).toContain('Migrated stack is schema-valid');
+    expect(stdout).not.toContain(`No migration step exists for protocol ${from} → ${to}`);
+    // ⛔ The whole sentence, never the phrase — step-18 semantic entries open a
+    // `replacement` with "Nothing to migrate to, because …" (see the sibling
+    // case above), so the bare phrase collides with prose this command prints.
+    expect(stdout).not.toContain('Nothing to migrate — the metadata is already canonical for this range');
   }, 120_000);
 });

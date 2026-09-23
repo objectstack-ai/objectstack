@@ -183,7 +183,38 @@ function emitDependentRequired(
  */
 function emitBannedKeys(jsonSchema: JsonObject, keys: readonly string[]): void {
   if (keys.length === 0) return;
-  const rule = { not: { enum: [...keys] } };
+  conjoinPropertyNames(jsonSchema, { not: { enum: [...keys] } });
+}
+
+/**
+ * `propertyNames` with a `not` over a `pattern` — the same keyword
+ * {@link emitBannedKeys} writes, carrying a rule about the SHAPE of a name
+ * where that one carries a list of names.
+ *
+ * No empty-value guard is owed here, and the reason is worth stating beside the
+ * one that IS owed above: `ProjectableRefinement`'s `keyPattern` is a closed
+ * union of literal pattern strings, so there is no empty pattern to emit and no
+ * caller that could supply one. `{ not: { pattern: '' } }` would be the
+ * hazard's analogue — a valid schema matching every string, i.e. a ban on every
+ * key — and it is unreachable rather than guarded.
+ */
+function emitBannedKeyPattern(jsonSchema: JsonObject, keyPattern: string): void {
+  conjoinPropertyNames(jsonSchema, { not: { pattern: keyPattern } });
+}
+
+/**
+ * Add one `propertyNames` rule to a node without taking away the one it has.
+ *
+ * Shared by both banned-key arms because the conjunction question is the same
+ * for both and has one right answer: a record emits `propertyNames: { type:
+ * 'string' }` of its own, so writing over it would trade the key-NAME rule
+ * being added for the key-TYPE rule already stated — a narrowing bought with a
+ * widening. An identical rule already present is left alone rather than
+ * duplicated, so each arm is idempotent, and two DIFFERENT rules both land:
+ * a node banning a finite list and a pattern states both bans, not the last
+ * one written.
+ */
+function conjoinPropertyNames(jsonSchema: JsonObject, rule: JsonObject): void {
   if (!('propertyNames' in jsonSchema)) {
     jsonSchema.propertyNames = rule;
     return;
@@ -208,6 +239,9 @@ export function emitProjectableRefinement(jsonSchema: JsonObject, declared: Proj
       return;
     case 'banned-keys':
       emitBannedKeys(jsonSchema, declared.keys);
+      return;
+    case 'banned-key-pattern':
+      emitBannedKeyPattern(jsonSchema, declared.keyPattern);
       return;
   }
 }

@@ -71,15 +71,25 @@ import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
 // that already call it — the dataset query in `rest-server.ts`, the cold-boot
 // flow bind in `service-automation`, and `saveMetaItem`'s verbatim persist.
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-// [#19120] The DECLARED grammar of one manifest key, asked BY REFERENCE at the
-// install door below. `ManifestSchema.shape.version` is the very field schema
+// [#19120 / #19417] The DECLARED grammar of TWO manifest keys, asked BY
+// REFERENCE at the install door below. `ManifestSchema.shape.version` and
+// `ManifestSchema.shape.id` are the very field schemas
 // `PackageInstallRequestSchema` binds through `manifest: ManifestSchema` — not
-// a copy of it. ⛔ A hand-written semver regex here would be the THIRD judgment
-// of this one key on this one surface (the `PATCH /packages/:id` door further
-// down already keeps its own copy), and the version-grammar canon is an open
-// question on its own card: asking the declaration means whatever that canon
-// decides reaches this door with no edit to this file.
-import { ManifestSchema } from '@objectstack/spec/kernel';
+// copies of them. ⛔ A hand-written semver regex here would be a SECOND grammar
+// for the version key on this one surface: the `PATCH /packages/:id` door
+// further down judges the same key and keeps no copy of its own either — it
+// references `MAJOR_MINOR_PATCH_VERSION_PATTERN`, the same constant
+// `ManifestSchema`'s own `version` field references (`@objectstack/spec`
+// `kernel/version-grammar.ts`). Both doors therefore read ONE declaration, and
+// a change to that declaration reaches both of them with no edit to this file.
+// The same holds for the id — `MANIFEST_ID_PATTERN` is declared ONCE in
+// `kernel/manifest.zod.ts` and shared with `PackageSchema.manifestId`, so ⛔ no
+// reverse-domain regex is spelled here either.
+//
+// `manifestIdRefusal` is imported for exactly one limb: the fallback when a
+// failed parse somehow carries no issue. Even that limb then prints the
+// DECLARATION's own sentence rather than a second one invented here.
+import { ManifestSchema, MAJOR_MINOR_PATCH_VERSION_PATTERN, manifestIdRefusal } from '@objectstack/spec/kernel';
 // [#17672] The repo's ONE message for a single-valued query parameter supplied
 // more than once, from the module whose header is the authority on the rule
 // (`packages/rest/src/query-multiplicity.ts`). Imported, never restated: this
@@ -91,6 +101,15 @@ import { ManifestSchema } from '@objectstack/spec/kernel';
 // `res`, and every error body on this surface is `deps.error`'s. See the
 // `@objectstack/rest` barrel entry that publishes the pair.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
+// [#19394] The repo's ONE coercion for a query parameter its schema declares
+// `z.boolean()`, from the module whose header is the authority on the rule
+// (`packages/runtime/src/query-param.ts`). Imported, never restated: the list
+// door's `enabled` is declared `z.boolean().optional()` — character for
+// character the shape `ListNotificationsRequestSchema.read` carries — and that
+// door reads it with this same parser. A hand-written `=== 'true'` here would
+// be a second dialect for one declared type, which is precisely the `?read=1`
+// defect (#6928) this module exists to stop anyone writing again.
+import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -664,6 +683,90 @@ function installedVersionOf(pkg: unknown): string | undefined {
     return typeof mirror === 'string' && mirror !== '' ? mirror : undefined;
 }
 
+/**
+ * The `?enabled=` filter of `GET /api/v1/packages`, read the way the schema
+ * that publishes it declares it (#19394 — ruling item 2 of #17667).
+ *
+ * ⭐ THE DECLARATION IS THE AUTHORITY, and it is quoted here so the next reader
+ * does not have to reconstruct it from this function's behaviour.
+ * `ListInstalledPackagesRequestSchema` (`packages/spec/src/api/package-api.zod.ts`)
+ * declares, since #19364:
+ *
+ * ```ts
+ *   enabled: z.boolean().optional()
+ *     .describe('Filter by enabled state'),
+ * ```
+ *
+ * Four properties are read off that one line, and every one of them is a
+ * decision this door would otherwise have had to invent:
+ *
+ * - **the name** — `enabled`, not `disabled` and not `status`;
+ * - **the type** — `z.boolean()`: TWO spellings on the wire and no third. That
+ *   is why the coercion is {@link parseBooleanParam} rather than a local
+ *   `=== 'true'`: the same declared type on `ListNotificationsRequestSchema.read`
+ *   is read by that parser one domain over;
+ * - **the default when absent** — there is NONE. `.optional()` with no
+ *   `.default()` means an absent key is an absent key, so it has to stay
+ *   reachable as `undefined` and must never collapse into `false`;
+ * - **absent ≠ an explicit value** — and the difference is load-bearing in the
+ *   direction that is easy to get backwards. Absent means NO FILTER (every
+ *   row, enabled and disabled alike, which is what this door served before
+ *   this card). `enabled=false` is a FILTER and selects the disabled rows
+ *   only. The first-party SDK already spells exactly that distinction —
+ *   `if (filters?.enabled !== undefined) params.set('enabled', String(filters.enabled))`
+ *   in `packages/client/src/index.ts` — so `?enabled=false` is a request this
+ *   door receives from a shipped producer, ⛔ not a hypothetical.
+ *
+ * ⛔ The ruling's own words for this item are 「one filter line, same shape as
+ * `status`」. The shape is NOT transferable and this is the one place to say
+ * so: `status` is declared `z.enum([…])` and read as `if (query?.status)` plus
+ * a string comparison. Applied to a declared BOOLEAN, that truthiness guard
+ * and that comparison are wrong twice — the string `'false'` is truthy so the
+ * guard admits it, and `p.enabled === 'false'` matches no row at all, so the
+ * caller who asked for the disabled half would be handed an empty list with a
+ * `200`. The filter is one line; its READ cannot be a copy of `status`'s.
+ *
+ * ## Multiplicity is answered before the type, by this door's own rule
+ *
+ * `?enabled=true&enabled=false` is a well-formed request carrying two
+ * conflicting intents, and `IHttpRequest.query` declares that array arm. This
+ * door already answers that condition for `?version=` with
+ * {@link repeatedQueryParamMessage} (#17672), so `enabled` answers it with the
+ * same sentence rather than a second one. A ONE-element array is one
+ * occurrence encoded differently by an adapter and is unwrapped, and an empty
+ * array is no occurrence — both per that rule's own header, which is why this
+ * cannot simply hand the raw value to {@link parseBooleanParam} (it refuses
+ * every array, `['true']` included).
+ *
+ * @returns `repeated` for the refusal the caller renders, or `value` carrying
+ *          the tri-state filter: `undefined` (no filter), `true`, `false`.
+ *          Throws {@link parseBooleanParam}'s declared validation failure —
+ *          `400` / `VALIDATION_FAILED` with a `details.fields[]` entry naming
+ *          `enabled` — for a spelling the declared type does not admit.
+ */
+function readEnabledFilter(raw: unknown): { kind: 'repeated'; count: number } | { kind: 'value'; value: boolean | undefined } {
+    if (Array.isArray(raw) && raw.length > 1) return { kind: 'repeated', count: raw.length };
+    return { kind: 'value', value: parseBooleanParam('enabled', Array.isArray(raw) ? raw[0] : raw) };
+}
+
+/**
+ * Whether a registry row counts as enabled, for {@link readEnabledFilter}'s
+ * comparison (#19394).
+ *
+ * `InstalledPackageSchema` (`packages/spec/src/kernel/package-registry.zod.ts`)
+ * declares the record's own key `enabled: z.boolean().default(true)`, so a row
+ * that carries no `enabled` at all IS enabled by declaration — which is the
+ * same read this file already makes at the install door's post-enable
+ * reconciliation (`pkg?.enabled === false`). Spelled as that one-sided
+ * comparison rather than `p.enabled === want` so the two halves PARTITION the
+ * registry: every row answers exactly one of `?enabled=true` / `?enabled=false`
+ * and the two results sum to the unfiltered list. `=== want` would drop a row
+ * whose `enabled` is absent out of BOTH halves — silently, on a 200.
+ */
+function packageCountsAsEnabled(pkg: unknown): boolean {
+    return (pkg as { enabled?: unknown } | null)?.enabled !== false;
+}
+
 export async function handlePackagesRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     const m = method.toUpperCase();
 
@@ -705,6 +808,30 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages → list packages
         if (parts.length === 0 && m === 'GET') {
             const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // [#19394] ⭐ THE DOOR READS `enabled` — ruling item 2 of #17667.
+            //
+            // Read BEFORE the registry, deliberately: a request-shape refusal
+            // must not depend on server state (the same ordering argument the
+            // `version` gate at the install door records). Placed after the
+            // capability gate so an unauthorized caller still cannot use a
+            // 400-vs-403 difference to learn anything.
+            //
+            // `ListInstalledPackagesRequestSchema` has declared this key all
+            // along and this door never read it, so a caller filtering an
+            // installed-package list by `enabled` was handed the UNFILTERED
+            // list with no refusal and no warning — «declared ≠ enforced» in
+            // the silent direction (Prime Directive #10), which is the one
+            // shape no status, header or field on the answer distinguishes
+            // from a request served as asked. {@link readEnabledFilter} is
+            // where the declaration is quoted and every semantic read off it
+            // is argued; ⛔ do not re-derive them here.
+            const enabled = readEnabledFilter(query?.enabled);
+            if (enabled.kind === 'repeated') {
+                return {
+                    handled: true,
+                    response: deps.error(repeatedQueryParamMessage('enabled', enabled.count), 400),
+                };
+            }
             let packages = registry.getAllPackages();
             // Apply optional filters
             if (query?.status) {
@@ -712,6 +839,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             if (query?.type) {
                 packages = packages.filter((p: any) => p.manifest?.type === query.type);
+            }
+            // Absent is absent: `undefined` means NO filter and every row
+            // stays, which is what this door served before this card and what
+            // `.optional()` with no `.default()` declares.
+            if (enabled.value !== undefined) {
+                packages = packages.filter((p: any) => packageCountsAsEnabled(p) === enabled.value);
             }
             // [#14375] Every row carries the server's own writability verdict
             // (see `withWritableVerdict`) — copies, so the registry records the
@@ -736,8 +869,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // baseline), additively — nothing that was on this wire left it.
             //
             // The value is a constant `false` because it is TRUE, not because
-            // it is convenient: this door applies the `status` / `type`
-            // filters and then returns every remaining row. It reads no
+            // it is convenient: this door applies the `status` / `type` /
+            // `enabled` filters and then returns every remaining row. It reads no
             // `limit` and no `cursor`, so there is never a next page to
             // announce and `nextCursor` (optional) stays absent. If this route
             // ever starts paginating, `hasMore` is the key that has to start
@@ -757,6 +890,86 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // A package id is mandatory — without one the install cannot be keyed.
             if (!pkgId) {
                 return { handled: true, response: deps.error('Package id is required', 400) };
+            }
+            // [#19417] ⭐ THE DOOR PARSES THE `id` LEG — the declaration, by
+            // reference, exactly as the `version` leg below is parsed.
+            //
+            // `MANIFEST_ID_PATTERN` (`packages/spec/src/kernel/manifest.zod.ts`)
+            // is the reverse-domain rule declared ONCE and referenced by BOTH
+            // faces of this identity — `ManifestSchema.id`, what an author
+            // writes, and `PackageSchema.manifestId`, what the registry stores
+            // and publishes by. This door read `manifest.id` POSITIONALLY and
+            // parsed nothing, so `id: 'pkg-a'` installed and answered `201`
+            // while `defineStack()`, `os build`, `os validate` and the publish
+            // face all refused the same id. The author got a package that could
+            // never be rebuilt or published — «declared ≠ enforced» on a
+            // PUBLISHED API contract, the shape Prime Directive #10 refuses
+            // outright, and the failure 北极星 clause 4 names in as many words:
+            // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            //
+            // The authorising ruling is 基本裁决原则 —「声明而未兑现是实现缺口,
+            // 补实现或退役,⛔ 不在消费端收窄」— and by the mechanical boundary
+            // test, making a door parse what its schema ALREADY declares is
+            // 拉回已声明契约, ⛔ not 扩大接受集. Nothing in `packages/spec` moves
+            // for this; the declaration was already right.
+            //
+            // ⭐ THE SENTENCE IS THE DECLARATION'S, NOT THIS FILE'S. The issue
+            // message is SURFACED rather than reworded: `manifestIdRefusal`
+            // names the key, echoes the value the author wrote, lists the
+            // examples, and carries a suggestion arm that VERIFIES its candidate
+            // against the pattern before offering it. Rewording it here would
+            // have produced a fourth sentence for one rule and dropped the
+            // repair.
+            //
+            // ⛔ SCOPE — THE `id` LEG ALONE. The declaration's residual docblock
+            // records the classes this door still answers `201` to; a missing
+            // `type`, unknown keys on either body form, a string-typed
+            // `enableOnInstall`/`overwrite` and install options spelled on the
+            // bare form are each their own narrowing of a published wire
+            // contract and are deliberately LEFT STANDING. Closing them is the
+            // ONE call this code still pointedly does not make,
+            // `PackageInstallBodySchema.safeParse(body)`.
+            //
+            // ⭐ ORDERED AFTER THE `!pkgId` GATE, DELIBERATELY — and that is a
+            // decision, because `''` fails the pattern too. Left of this gate,
+            // an absent id would stop printing `Package id is required` and
+            // start printing `Invalid package id ''`, which is the ONE input
+            // where the refusal's suggestion arm has nothing to offer: a
+            // PUBLISHED message replaced by a weaker one, for a body this door
+            // already refused. The gate below therefore narrows the ACCEPT SET
+            // only. `packages-install-manifest-version.test.ts` pins the same
+            // precedence for the version leg («no id means no sentence this gate
+            // could print»), and the artifact path's DOOR-1 precedent is not
+            // this door: there the schema parse is the FIRST door, with no
+            // published `required` sentence ahead of it to displace.
+            //
+            // ⭐ ORDERED BEFORE THE `version` GATE, for that same reason read
+            // one key over: the version refusal's sentence NAMES the id
+            // («add it to the manifest for '<id>'»). Prescribing a repair for a
+            // package id that can never be legal sends the author round twice.
+            //
+            // ⛔ THE RAW VALUE IS PARSED, not `pkgId`. The trim above keys the
+            // package; it must not also launder the id past its own rule, or
+            // `'  com.acme.crm  '` would keep installing a manifest whose stored
+            // `id` the declaration refuses. Downstream this makes the trim a
+            // no-op by construction — the pattern admits no whitespace — so
+            // every accepted path now has `pkgId === manifest.id`.
+            //
+            // ⛔ HTTP-DOOR-ONLY BY CONSTRUCTION, as the version leg is:
+            // boot-time and in-process installs reach
+            // `SchemaRegistry.installPackage` / `registerApp` directly and never
+            // pass through this branch.
+            const rawId = (manifest as any)?.id;
+            const declaredId = ManifestSchema.shape.id.safeParse(rawId);
+            if (!declaredId.success) {
+                const [issue] = declaredId.error.issues;
+                return {
+                    handled: true,
+                    response: deps.error(
+                        issue?.message || manifestIdRefusal('manifest.id', rawId),
+                        400,
+                    ),
+                };
             }
             // [#19120] ⭐ THE DOOR PARSES THE `version` LEG — the declaration,
             // by reference.
@@ -1554,7 +1767,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (patch.name !== undefined && patch.name === '') {
                 return { handled: true, response: deps.error('name must not be empty', 400) };
             }
-            if (patch.version !== undefined && !/^\d+\.\d+\.\d+$/.test(patch.version)) {
+            if (patch.version !== undefined && !MAJOR_MINOR_PATCH_VERSION_PATTERN.test(patch.version)) {
                 return { handled: true, response: deps.error('version must be semantic (e.g. 1.0.0)', 400) };
             }
             if (patch.name === undefined && patch.description === undefined && patch.version === undefined) {

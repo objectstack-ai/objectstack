@@ -30,6 +30,8 @@
     "ui/DashboardHeader:showDescription = true",
     "ui/DashboardHeader:showTitle = true",
     "ui/DashboardWidget:type = \"metric\"",
+    "ui/DashboardWidgetChartConfig:showDataLabels = false",
+    "ui/DashboardWidgetChartConfig:showLegend = true",
     "ui/ElementButtonProps:disabled = false",
     "ui/ElementButtonProps:iconPosition = \"left\"",
     "ui/ElementButtonProps:size = \"medium\"",

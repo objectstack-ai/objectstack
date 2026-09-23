@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { StandardErrorCode } from '../api/errors.zod';
-import { parseFilterAST, VALID_AST_OPERATORS } from './filter.zod';
+import { parseFilterAST, RangeOperatorSchema, VALID_AST_OPERATORS } from './filter.zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 
 type Refusal = Error & { code?: string; status?: number };
@@ -151,14 +151,253 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       .toContain('where.$or[0].stage.$nin[0]');
   });
 
-  it('refuses ONLY null — falsy and empty-ish members are values, not absence', () => {
+  it('refuses ONLY null among the MEMBERS — falsy and empty-ish members are values', () => {
     // The carve-out is null-shaped and nothing wider: #5041's and #5234's
     // member questions stand untouched, and every falsy VALUE keeps working.
     expect(parseFilterAST({ n: { $in: [0, false, ''] } })).toEqual({ n: { $in: [0, false, ''] } });
     expect(parseFilterAST({ n: { $nin: [0, false, ''] } })).toEqual({ n: { $nin: [0, false, ''] } });
-    expect(parseFilterAST({ at: { $between: ['', ''] } })).toEqual({ at: { $between: ['', ''] } });
+    // A falsy ENDPOINT is still an endpoint — `0` is a bound like any other.
     expect(parseFilterAST({ n: { $between: [0, 0] } })).toEqual({ n: { $between: [0, 0] } });
+    // ⚠️ `{ at: { $between: ['', ''] } }` was pinned HERE as a value that
+    // passes. That row — and only that row — is INVERTED by the 2026-09-20
+    // ruling (#19071); it now lives in the blank-endpoint section below. The
+    // `$in` / `$nin` rows above are untouched, because falsy VALUES are values
+    // and a range ENDPOINT is a different question.
   });
+
+  // ── the BLANK endpoint carve-out, ruled 2026-09-20 (#19071) ────────────
+
+  it.each([
+    ['both sides blank', { at: { $between: ['', ''] } }],
+    ['a blank MAX', { at: { $between: ['2026-07-01', ''] } }],
+    ['a blank MIN', { at: { $between: ['', '2026-07-31'] } }],
+    ['an absent MAX', { at: { $between: ['2026-07-01', undefined] } }],
+    ['an absent MIN', { at: { $between: [undefined, '2026-07-31'] } }],
+    ['the lowered array form', [['at', 'between', ['', '2026-07-31']]]],
+  ])('refuses a BLANK $between ENDPOINT — %s', (_label, where) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+  });
+
+  it('the blank-bound refusal names the SIDE and prescribes both remedies', () => {
+    // 2026-09-20: the refusal 「naming the blank side and carrying the same
+    // guidance as the schema door」 — with a padded pair both bounds are
+    // present, and the author is the one person who cannot see which is empty.
+    const err = refusalOf(() => parseFilterAST({ close_date: { $between: ['2026-07-01', ''] } }));
+    expect(err.message)
+      .toMatch(/^Operator "\$between" on field "close_date" requires two non-blank bounds/);
+    expect(err.message).toContain('an empty string at where.close_date.$between[1] (the MAX bound)');
+    expect(err.message).toContain('{"$gte": min} / {"$lte": max}');
+    expect(err.message).toMatch(/Authoring spellings: between\./);
+    expect(err.message).toMatch(/UNFILTERED result set/);
+    expect(refusalOf(() => parseFilterAST({ close_date: { $between: ['', '2026-07-31'] } })).message)
+      .toContain('where.close_date.$between[0] (the MIN bound)');
+    // An ABSENT bound says so in words: `undefined` inside an array renders as
+    // `null` through JSON.stringify, and null is the one blank spelling this
+    // message is NOT about.
+    expect(refusalOf(() => parseFilterAST({ close_date: { $between: [5, undefined] } })).message)
+      .toContain('Received undefined at where.close_date.$between[1] (the MAX bound)');
+  });
+
+  it('a blank bound is refused at its own path inside $and / $or / $not too', () => {
+    expect(refusalOf(() => parseFilterAST({ $not: { at: { $between: ['', 'M'] } } })).message)
+      .toContain('where.$not.at.$between[0]');
+    expect(refusalOf(() => parseFilterAST({ $or: [{ at: { $between: ['A', ''] } }] })).message)
+      .toContain('where.$or[0].at.$between[1]');
+  });
+
+  it('the null bound keeps the 2026-08-31 ruling\'s own message — two spellings, two remedies', () => {
+    // An author who wrote `null` was reaching for absence; an author who left
+    // a bound empty was reaching for a bound. If this went red the null author
+    // would be sent to a scalar comparison instead of the null predicate.
+    const err = refusalOf(() => parseFilterAST({ at: { $between: ['2026-07-01', null] } }));
+    expect(err.message).toContain('requires two non-null bounds');
+    expect(err.message).toContain('{"at": {"$null": true}}');
+    expect(err.message).not.toContain('non-blank');
+    // null is checked FIRST, so a pair that is blank on one side and null on
+    // the other keeps the message it has had since 2026-08-31.
+    expect(refusalOf(() => parseFilterAST({ at: { $between: ['', null] } })).message)
+      .toContain('requires two non-null bounds');
+  });
+
+  it('answers every endpoint spelling exactly as the SCHEMA door does', () => {
+    // The defect this ruling closes was one published sentence
+    // (`RANGE_ENDPOINT_DESCRIPTION`) with two truth values, so the pin is the
+    // AGREEMENT itself rather than a second hand-written list that can drift
+    // from the door it is supposed to match.
+    const endpointPairs: Array<[string, unknown[]]> = [
+      ["['', '']", ['', '']],
+      ["['2026-01-01', '']", ['2026-01-01', '']],
+      ["['', '2026-12-31']", ['', '2026-12-31']],
+      ['[5, undefined]', [5, undefined]],
+      ['[undefined, 5]', [undefined, 5]],
+      ['[null, 1]', [null, 1]],
+      ['[1, null]', [1, null]],
+      // Controls that must stay LEGAL at BOTH doors — a red here would mean a
+      // door started reading falsiness, or shortness, instead of blankness.
+      ['[0, 0]', [0, 0]],
+      ["['0', '9']", ['0', '9']],
+      ["['A', 'M']", ['A', 'M']],
+      ["['08:00:00', '18:00:00']", ['08:00:00', '18:00:00']],
+      ["['2026-01-01', '2026-12-31']", ['2026-01-01', '2026-12-31']],
+      // ⛔ Whitespace-only is NOT judged, at EITHER door: the 2026-09-17 ruling
+      // is the empty string, `filter.test.ts` pins the schema side of this very
+      // row, and a trim here would re-open the split in the other direction.
+      ["['   ', 'M']", ['   ', 'M']],
+      // The 2026-08-11 `{ $field }` carve-out (#7596), reaching this door
+      // under #19377 — the same two-door question, one endpoint spelling over.
+      ["[{ $field }, 'M']", [{ $field: 'a' }, 'M']],
+      ["['A', { $field }]", ['A', { $field: 'b' }]],
+      ['[{ $field }, { $field }]', [{ $field: 'a' }, { $field: 'b' }]],
+      // A non-string referent is still the SHAPE the author wrote, at both
+      // doors: the schema door reads `'$field' in value` and so does this one.
+      ['[{ $field: 42 }, M]', [{ $field: 42 }, 'M']],
+      // A plain object that is NOT a reference was already refused at both
+      // doors, each with its own wording — the row is here so the loop cannot
+      // be read as "every object endpoint is the #7596 refusal now".
+      ["[{ nope: 1 }, 'M']", [{ nope: 1 }, 'M']],
+    ];
+    const refused: string[] = [];
+    for (const [label, pair] of endpointPairs) {
+      const schemaRefuses = !RangeOperatorSchema.safeParse({ $between: pair }).success;
+      let runtimeRefuses = false;
+      try {
+        parseFilterAST({ close_date: { $between: pair } });
+      } catch {
+        runtimeRefuses = true;
+      }
+      expect(runtimeRefuses, `${label}: schema refuses=${schemaRefuses}`).toBe(schemaRefuses);
+      if (schemaRefuses) refused.push(label);
+    }
+    // Guards the loop from passing vacuously in either direction.
+    expect(refused).toHaveLength(12);
+  });
+
+  // ── the `{ $field }` endpoint carve-out, ruled 2026-08-11 (#7596) ──────
+  //
+  // The ruling is the oldest of the four and the last to reach this door: it
+  // removed `FieldReferenceSchema` from both endpoint unions and published the
+  // sentence "A { $field } reference is NOT an endpoint shape", while this door
+  // went on lowering such a range unchanged (#19377).
+
+  it.each([
+    ['a reference as the MIN bound', { at: { $between: [{ $field: 'a' }, 'M'] } }],
+    ['a reference as the MAX bound', { at: { $between: ['A', { $field: 'b' }] } }],
+    ['both bounds references', { at: { $between: [{ $field: 'a' }, { $field: 'b' }] } }],
+    ['a reference with a non-string referent', { at: { $between: [{ $field: 42 }, 'M'] } }],
+    ['the lowered array form', [['at', 'between', [{ $field: 'a' }, 'M']]]],
+  ])('refuses a { $field } $between ENDPOINT — %s', (_label, where) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+  });
+
+  it('the reference refusal names the SIDE and prescribes the two-bound spelling', () => {
+    // The author who wrote a reference was reaching for a column-to-column
+    // comparison, which the platform HAS one operator over — so the remedy is
+    // a different filter, not a different literal, and the message says so.
+    const err = refusalOf(() => parseFilterAST({ close_date: { $between: [{ $field: 'a' }, 'M'] } }));
+    expect(err.message).toMatch(
+      /^Operator "\$between" on field "close_date" does not accept a \{ "\$field": … \} reference/,
+    );
+    expect(err.message).toContain('at where.close_date.$between[0], the MIN bound');
+    expect(err.message).toContain('{"$gte": {"$field": "a"}, "$lte": {"$field": "b"}}');
+    expect(err.message).toMatch(/Authoring spellings: between\./);
+    expect(err.message).toMatch(/UNFILTERED result set/);
+    expect(refusalOf(() => parseFilterAST({ close_date: { $between: ['A', { $field: 'b' }] } })).message)
+      .toContain('at where.close_date.$between[1], the MAX bound');
+    // ⛔ The in-memory evaluator is NOT offered as an escape: it does not
+    // resolve a list member either, it fails silently instead of loudly, so
+    // naming it would send an author to the one path that answers a wrong row
+    // set rather than an error. The schema door's twin holds the same line.
+    expect(err.message).not.toContain('matchesFilter');
+  });
+
+  it('a reference bound is refused at its own path inside $and / $or / $not too', () => {
+    expect(refusalOf(() => parseFilterAST({ $not: { at: { $between: [{ $field: 'a' }, 'M'] } } })).message)
+      .toContain('where.$not.at.$between[0]');
+    expect(refusalOf(() => parseFilterAST({ $or: [{ at: { $between: ['A', { $field: 'b' }] } }] })).message)
+      .toContain('where.$or[0].at.$between[1]');
+  });
+
+  it('the three older endpoint carve-outs keep their own messages', () => {
+    // This check is LAST inside the arm, so every pair that already carried a
+    // refusal keeps the one it had. A red here means a pair was re-routed and
+    // an author who wrote `null` is now being sent to a scalar comparison.
+    expect(refusalOf(() => parseFilterAST({ at: { $between: [{ $field: 'a' }, null] } })).message)
+      .toContain('requires two non-null bounds');
+    expect(refusalOf(() => parseFilterAST({ at: { $between: [{ $field: 'a' }, ''] } })).message)
+      .toContain('requires two non-blank bounds');
+    expect(refusalOf(() => parseFilterAST({ at: { $between: [{ $field: 'a' }] } })).message)
+      .toContain('requires a [min, max] value array');
+    // And a plain object that is not a reference keeps the comparand-TYPE
+    // door's own sentence, one step further on.
+    expect(refusalOf(() => parseFilterAST({ at: { $between: [{ nope: 1 }, 'M'] } })).message)
+      .toContain('plain object');
+  });
+
+  it('LIT CONTROL — legal ranges and the reference\'s own ORDERING slots still pass', () => {
+    // Without these the refusal could be a blanket rejection of `$between`, or
+    // of the reference itself, and every assertion above would still be green.
+    expect(parseFilterAST({ at: { $between: ['A', 'M'] } }))
+      .toEqual({ at: { $between: ['A', 'M'] } });
+    expect(parseFilterAST({ n: { $between: [0, 100] } })).toEqual({ n: { $between: [0, 100] } });
+    expect(parseFilterAST({ at: { $between: ['2026-01-01', '2026-12-31'] } }))
+      .toEqual({ at: { $between: ['2026-01-01', '2026-12-31'] } });
+    // #5222's shipped capability: the reference IS a whole comparand of the
+    // four ordering operators, which is what this refusal prescribes. Refusing
+    // it there would delete the escape the message names.
+    for (const op of ['$gt', '$gte', '$lt', '$lte']) {
+      expect(parseFilterAST({ a: { [op]: { $field: 'b' } } }))
+        .toEqual({ a: { [op]: { $field: 'b' } } });
+    }
+    // The two-bound spelling the message prescribes must itself lower.
+    expect(parseFilterAST({ a: { $gte: { $field: 'b' }, $lte: { $field: 'c' } } }))
+      .toEqual({ a: { $gte: { $field: 'b' }, $lte: { $field: 'c' } } });
+  });
+
+  it('re-routes the pairs the comparand-TYPE door used to answer — convergence, pinned', () => {
+    // ⚠️ This is the one part of the delta that is NOT "was accepted, is now
+    // refused". A pair whose OTHER element the comparand-TYPE door would have
+    // refused now meets this door first, so it answers with the reference
+    // sentence instead of the type one: same code, same status, and the schema
+    // door already answered every one of these with the reference message, so
+    // the two doors CONVERGE rather than diverge. Pinned rather than left to
+    // the reader, because "nothing else changed" is not true of these rows.
+    const mixed = refusalOf(() => parseFilterAST({ at: { $between: [{ $field: 'a' }, { nope: 1 }] } }));
+    expect(mixed.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(mixed.status).toBe(400);
+    expect(mixed.message).toContain('does not accept a { "$field": … } reference');
+    // …and it names the REFERENCE's index, not the other element's.
+    expect(mixed.message).toContain('where.at.$between[0]');
+    // A non-string referent, and a reference reached through the PROTOTYPE, are
+    // the shape the author wrote — at both doors. The TYPE door would have
+    // called each of them a plain object and prescribed a literal, which is the
+    // wrong remedy for someone who was reaching for a column.
+    for (const bound of [{ $field: 42 }, Object.create({ $field: 'a' }) as object]) {
+      expect(refusalOf(() => parseFilterAST({ at: { $between: [bound, 'M'] } })).message)
+        .toContain('does not accept a { "$field": … } reference');
+    }
+    // A pair carrying NO reference is untouched: it still reaches the TYPE door
+    // and still answers with the TYPE door's own sentence.
+    expect(refusalOf(() => parseFilterAST({ at: { $between: [{ nope: 1 }, 'M'] } })).message)
+      .toContain('plain object');
+  });
+
+  it.todo(
+    'the $in / $nin MEMBER positions of the same 2026-08-11 ruling still DISAGREE across the two '
+    + 'doors — FieldOperatorsSchema refuses a { $field } member, parseFilterAST lowers it '
+    + 'unchanged (measured on this branch). Filed separately; ⛔ not pinned green here, because a '
+    + 'green pin would read as a ruling nobody made',
+  );
+
+  // ⚠️ `$in` / `$nin` MEMBERS carrying a `{ $field }` reference are the SAME
+  // #7596 ruling one position over, published by `SET_MEMBER_DESCRIPTION`, and
+  // this door still lowers them unchanged — measured under #19377 and filed
+  // separately. ⛔ Deliberately NOT pinned here in either direction: pinning a
+  // measured defect green reads as a ruling nobody made, and refusing it would
+  // be a narrowing of a published face this card was never given.
 
   // ── the ordering carve-out, ruled 2026-09-01 (#14080) ──────────────────
 
@@ -266,6 +505,15 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       { stage: { $nin: [null] } },
       { close_date: { $between: [null, null] } },
       { close_date: { $between: ['2026-07-01', null] } },
+      // The 2026-09-20 blank carve-out (#19071): the named side and both
+      // prescriptions ride the same unrelaxed bound.
+      { close_date: { $between: ['2026-07-01', ''] } },
+      { close_date: { $between: ['', '2026-07-31'] } },
+      { close_date: { $between: [5, undefined] } },
+      // The 2026-08-11 reference carve-out (#7596): the two-bound prescription
+      // is the longest thing this arm assembles, inside the same bound.
+      { close_date: { $between: [{ $field: 'a' }, 'M'] } },
+      { close_date: { $between: ['A', { $field: 'b' }] } },
       // The 2026-09-01 ordering carve-out (#14080): `$gte` / `$lte` carry the
       // longest spelling lists, so they are the tallest of the four.
       { close_date: { $gte: null } },

@@ -49,7 +49,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
 | **xAxis** | `string` | ✅ | Dataset dimension name for the X-axis (bound-dataset dimension, not a raw field) |
 | **yAxis** | `string` | ✅ | Dataset measure name for the Y-axis (bound-dataset measure, not a raw field) |
-| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
+| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration. Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, where the dataset decides it (ADR-0021). |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |
@@ -113,7 +113,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
 | **xAxis** | `string` | ✅ | Dataset dimension name for the X-axis (bound-dataset dimension, not a raw field) |
 | **yAxis** | `string` | ✅ | Dataset measure name for the Y-axis (bound-dataset measure, not a raw field) |
-| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
+| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration. Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, where the dataset decides it (ADR-0021). |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |
@@ -161,7 +161,7 @@ const result = JoinedReportBlockSchema.parse(data);
 | **description** | `string \| Record<string, string>` | optional | Accessibility description — announced to screen readers as the chart’s label |
 | **xAxis** | `string` | ✅ | Dataset dimension name for the X-axis (bound-dataset dimension, not a raw field) |
 | **yAxis** | `string` | ✅ | Dataset measure name for the Y-axis (bound-dataset measure, not a raw field) |
-| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration |
+| **series** | `{ name: string; label?: string \| Record<string, string>; type?: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; color?: string; … }[]` | optional | Defined series configuration. Structure, not appearance — authorable where the chart has inline data; refused by name on a dataset-bound dashboard widget, where the dataset decides it (ADR-0021). |
 | **colors** | `string[] \| Record<string, string>` | optional | Color palette (string[]) or value→color map (`{ value: color }`) |
 | **height** | `number` | optional | Fixed plot height in pixels (overrides the container default) |
 | **showLegend** | `boolean` | optional (default: `true`) | Display legend |

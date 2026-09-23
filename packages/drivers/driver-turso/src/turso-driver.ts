@@ -1675,9 +1675,10 @@ export class TursoDriver extends SqlDriver {
    * ```
    *
    * Never throws and never marks on anything but measured evidence. A column
-   * that errors, or that a batch budget stopped short, stays unmarked and keeps
-   * its read-side repair — correct answers, just unindexed. Nothing in any read
-   * or write path may depend on this having run (ADR-0053 D-B3 / cloud#1003).
+   * that errors, that a batch budget stopped short, or that holds a row the
+   * #6009 guard withheld, stays unmarked and keeps its read-side repair —
+   * correct answers, just unindexed. Nothing in any read or write path may
+   * depend on this having run (ADR-0053 D-B3 / cloud#1003).
    *
    * A no-op outside remote mode: local and replica reach the same state through
    * the inherited Knex backfill during `initObjects`.
@@ -1708,12 +1709,21 @@ export class TursoDriver extends SqlDriver {
     const report = await backfillRemoteCanonicalColumns(
       client,
       columns,
-      // The driver's OWN repair expression — handed over, never copied, so the
-      // backfill cannot drift from the read path it is retiring.
-      (kind, columnSql) =>
-        kind === 'datetime'
-          ? this.sqliteCanonicalDatetimeSql(columnSql)
-          : this.sqliteCanonicalTimeSql(columnSql),
+      {
+        // The driver's OWN repair expression — handed over, never copied, so the
+        // backfill cannot drift from the read path it is retiring.
+        canonical: (kind, columnSql) =>
+          kind === 'datetime'
+            ? this.sqliteCanonicalDatetimeSql(columnSql)
+            : this.sqliteCanonicalTimeSql(columnSql),
+        // [#6009] And the driver's OWN backfill-side guard, across the identical
+        // boundary and for the identical reason: the rows whose only reading is
+        // SQLite's julian-day limb must be withheld from the remote `UPDATE` by
+        // the same predicate the local twin withholds them by, or the two
+        // transports quietly disagree about which bytes are safe to overwrite.
+        // Kind-free — it probes parseability, not a format.
+        nonTemporalText: (columnSql) => this.sqliteNonTemporalTextSql(columnSql),
+      },
       options,
       this.logger,
     );

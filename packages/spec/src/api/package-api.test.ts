@@ -43,28 +43,108 @@ describe('PackagePathParamsSchema', () => {
 // ==========================================
 
 describe('ListInstalledPackagesRequestSchema', () => {
-  it('should accept minimal request with defaults', () => {
+  // [#17667] These two cases used to pin `limit`'s `.default(50)` and a
+  // round-tripped `cursor`. They are REPLACED rather than respelled: they
+  // pinned exactly the branch route 2 deleted, so keeping them in any form
+  // would have meant re-asserting a contract that no longer exists.
+  it('accepts a minimal request and materializes no window', () => {
     const result = ListInstalledPackagesRequestSchema.parse({});
-    expect(result.limit).toBe(50);
     expect(result.status).toBeUndefined();
     expect(result.enabled).toBeUndefined();
+    expect(result.type).toBeUndefined();
+    // ⭐ There is no default to apply any more: the door has never capped this
+    // list, so an omitted request declares no window rather than a fictional
+    // 50-row one.
+    expect(result).not.toHaveProperty('limit');
   });
 
-  it('should accept full request', () => {
+  it('accepts every filter the serving door actually executes', () => {
     const result = ListInstalledPackagesRequestSchema.parse({
       status: 'installed',
       enabled: true,
-      limit: 20,
-      cursor: 'abc123',
+      type: 'app',
     });
     expect(result.status).toBe('installed');
     expect(result.enabled).toBe(true);
-    expect(result.limit).toBe(20);
-    expect(result.cursor).toBe('abc123');
+    expect(result.type).toBe('app');
   });
 
   it('should reject invalid status', () => {
     expect(() => ListInstalledPackagesRequestSchema.parse({ status: 'running' })).toThrow();
+  });
+
+  // ── #17667 retirement pins: the prescription, and the absence ────────────
+  //
+  // The NEGATIVE half. A bare `.toThrow()` would be satisfied by any refusal,
+  // including the generic unrecognized-key issue a plain deletion produces —
+  // which is exactly the silent-ish failure the tombstone exists to replace.
+  // So the assertion is the prescription text itself. The `s` flag is house
+  // style: the message is one long string and matchers span its clauses.
+  it.each(['limit', 'cursor'])('refuses a retired `%s` with the prescription, not a bare unknown key', (key) => {
+    const result = ListInstalledPackagesRequestSchema.safeParse({ [key]: key === 'limit' ? 20 : 'abc123' });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === key);
+    expect(issue, `must fault on the \`${key}\` path`).toBeDefined();
+    expect(issue!.message).toMatch(/`limit` \/ `cursor` were removed from GET \/api\/v1\/packages/s);
+    expect(issue!.message).toMatch(/removed .*in @objectstack\/spec 17\.5\.0 \(ADR-0049 enforce-or-remove\)/s);
+    // The `.default(50)` is named specifically — a reader who trusted the cap
+    // is the consumer this retirement owes an explanation to.
+    expect(issue!.message).toMatch(/`\.default\(50\)`/s);
+    expect(issue!.message).toMatch(/Delete the key\./s);
+  });
+
+  // The POSITIVE half. Absence still parses — the retirement removed a
+  // declaration, not the ability to call the route without one.
+  it('parses clean when neither retired key is sent', () => {
+    const result = ListInstalledPackagesRequestSchema.safeParse({ status: 'installed' });
+    expect(result.success).toBe(true);
+    expect(result.data).not.toHaveProperty('cursor');
+  });
+
+  // [#17667] `hasMore` is a constant `false` that is now true BY CONSTRUCTION:
+  // with no request-side way to ask for a page, there can be no next one. This
+  // pins the response half against a future author "fixing" the constant back
+  // into a computed value without restoring a way to ask.
+  it('declares a response that can honestly report one page', () => {
+    const parsed = ListInstalledPackagesResponseSchema.parse({
+      success: true,
+      data: { packages: [], total: 0, hasMore: false },
+    });
+    expect(parsed.data.hasMore).toBe(false);
+    expect(parsed.data).not.toHaveProperty('nextCursor');
+  });
+});
+
+// ==========================================
+// [#17667] Executed-but-undeclared query parameters, now declared
+// ==========================================
+
+describe('the /packages doors declare the query parameters they execute (#17667)', () => {
+  it('GET /packages/:id declares the `?version=` scope it honours', () => {
+    const parsed = GetInstalledPackageRequestSchema.parse({ packageId: 'com.acme.crm', version: '1.2.3' });
+    expect(parsed.packageId).toBe('com.acme.crm');
+    expect(parsed.version).toBe('1.2.3');
+    // `latest` is a literal the door treats as "the installed row" — it is a
+    // plain string here, deliberately NOT a dist-tag or semver-range grammar.
+    expect(GetInstalledPackageRequestSchema.parse({ packageId: 'p', version: 'latest' }).version).toBe('latest');
+    // Omitted stays omitted: the by-id read is unscoped without it.
+    expect(GetInstalledPackageRequestSchema.parse({ packageId: 'p' }).version).toBeUndefined();
+  });
+
+  it('DELETE /packages/:id declares the `?keepData=` option it honours', () => {
+    const parsed = UninstallPackageApiRequestSchema.parse({ packageId: 'com.acme.crm', keepData: true });
+    expect(parsed.packageId).toBe('com.acme.crm');
+    expect(parsed.keepData).toBe(true);
+    // Omitted is the destructive default — storage goes with the metadata.
+    expect(UninstallPackageApiRequestSchema.parse({ packageId: 'p' }).keepData).toBeUndefined();
+  });
+
+  it('binds each declaration to the door that executes it', () => {
+    // The contract map is what SDKs and codegen read; a declaration that is
+    // right in the file and unbound in the map is invisible to both.
+    expect(PackageApiContracts.listPackages.input).toBe(ListInstalledPackagesRequestSchema);
+    expect(PackageApiContracts.getPackage.input).toBe(GetInstalledPackageRequestSchema);
+    expect(PackageApiContracts.uninstallPackage.input).toBe(UninstallPackageApiRequestSchema);
   });
 });
 
@@ -73,7 +153,7 @@ describe('ListInstalledPackagesRequestSchema', () => {
 // ==========================================
 
 describe('PackageInstallRequestSchema', () => {
-  it('should accept a minimal install request', () => {
+  it('should accept a minimal install request — and leave an absent `enableOnInstall` UNDEFINED', () => {
     const result = PackageInstallRequestSchema.parse({
       manifest: {
         id: 'com.acme.crm',
@@ -82,7 +162,13 @@ describe('PackageInstallRequestSchema', () => {
         type: 'plugin',
       },
     });
-    expect(result.enableOnInstall).toBe(true);
+    // ⭐ [#19273] This assertion read `toBe(true)` while the declaration spelled
+    // `.default(true)`, and it was the lit control proving absence really was
+    // erased at parse time. The declaration is `optional()` now — 「缺省 = 保持，
+    // 有旗 = 设置」 — so the absence survives the parse and the door's three-way
+    // read has a third state to see. The full matrix, with the flip-trigger it
+    // was registered under, is in `package-install-one-authority.test.ts`.
+    expect(result.enableOnInstall).toBeUndefined();
   });
 
   it('should accept full install request with platform version', () => {
@@ -573,7 +659,7 @@ describe('`InstalledPackageAtEitherStageSchema` admits both stages and NOTHING e
   });
 });
 
-describe('the record-body override set is MEASURED, never hand-picked', () => {
+describe('the set the record stage must RE-DECLARE is MEASURED, never hand-picked', () => {
   /** Does this schema have a JSON Schema form at all? */
   const emits = (schema: unknown): boolean => {
     try {
@@ -585,12 +671,12 @@ describe('the record-body override set is MEASURED, never hand-picked', () => {
   };
 
   it('exactly `functions` and `hooks` have no JSON form on the assembled body', () => {
-    // The two published response schemas below embed the assembled body. Any
-    // collection with no JSON form makes them BOTH vanish from
-    // `json-schema/api/`, which the build's disappearance ratchet refuses — so
-    // the read-API record body overrides exactly this set, and this pin is what
-    // keeps the two in step. A new non-serialisable collection reddens HERE,
-    // naming itself, rather than unpublishing two response schemas.
+    // The two published response schemas below embed the row, whose manifest is
+    // the RECORD stage. Any collection with no JSON form makes them BOTH vanish
+    // from `json-schema/api/`, which the build's disappearance ratchet refuses
+    // — so the record stage declares exactly this set in its lowered form, and
+    // this pin is what keeps the two in step. A new non-serialisable collection
+    // reddens HERE, naming itself, rather than unpublishing two responses.
     const shape = (AssembledPackageBodySchema as unknown as { shape: Record<string, unknown> }).shape;
     const noJsonForm = Object.keys(shape).filter((k) => !emits(shape[k]));
     expect(noJsonForm.sort()).toEqual(['functions', 'hooks']);
@@ -601,6 +687,63 @@ describe('the record-body override set is MEASURED, never hand-picked', () => {
     expect(emits(AssembledPackageBodySchema)).toBe(false);
     expect(emits(ListInstalledPackagesResponseSchema)).toBe(true);
     expect(emits(GetInstalledPackageResponseSchema)).toBe(true);
+  });
+});
+
+describe('#17518 the row\'s manifest is the RECORD stage — a declaration, ⛔ not `z.unknown()`', () => {
+  /**
+   * What `toRecordManifest` really leaves on a `GET /packages` row: each
+   * `functions` declaration MINUS its callable, and a hook whose inline handler
+   * is gone. Until #17518 both keys were `z.unknown().optional()` here, i.e.
+   * accepted without being checked.
+   */
+  const RECORD_ROW = {
+    ...LIFECYCLE,
+    manifest: {
+      ...MANIFEST_BASE,
+      objects: [{ name: 'stage_lead', fields: { title: { type: 'text' } } }],
+      functions: {
+        summarizeCompletedTask: { effect: 'pure' },
+        sweepProjectHealth: { effect: 'writes' },
+      },
+      hooks: [{ name: 'on_insert', object: 'stage_lead', events: ['beforeInsert'] }],
+    },
+  };
+
+  it('parses a row carrying the residual the projection really produces', () => {
+    expect(AssembledInstalledPackageSchema.safeParse(RECORD_ROW).success).toBe(true);
+    expect(InstalledPackageAtEitherStageSchema.safeParse(RECORD_ROW).success).toBe(true);
+  });
+
+  it('parses a row carrying what `objectstack build` lowered', () => {
+    const lowered = {
+      ...RECORD_ROW,
+      manifest: {
+        ...RECORD_ROW.manifest,
+        functions: { bare: 'bare', declared: { handler: 'declared', effect: 'writes' } },
+        hooks: [{ name: 'on_insert', object: 'stage_lead', events: ['beforeInsert'], handler: 'on_insert' }],
+      },
+    };
+    expect(AssembledInstalledPackageSchema.safeParse(lowered).success).toBe(true);
+  });
+
+  it('⛔ REFUSES a live callable — a row the registry can never serve', () => {
+    // The direction that matters: the two keys moved from "accepts anything" to
+    // a declaration, so a value no JSON row can hold is refused by name instead
+    // of waved through. ⛔ Never widen either key back to `unknown` to make a
+    // payload fit: a row parsing through neither declared stage is a producer
+    // defect.
+    const live = {
+      ...RECORD_ROW,
+      manifest: { ...RECORD_ROW.manifest, functions: { sweepProjectHealth: () => 'ran' } },
+    };
+    const verdict = AssembledInstalledPackageSchema.safeParse(live);
+    expect(verdict.success).toBe(false);
+    expect(verdict.error!.issues.some((i) => i.path.join('.').startsWith('manifest.functions'))).toBe(true);
+  });
+
+  it('⛔ still refuses the AUTHORING spelling of `objects` — the stage boundary did not move', () => {
+    expect(AssembledInstalledPackageSchema.safeParse(GLOB_ROW).success).toBe(false);
   });
 });
 
@@ -787,12 +930,23 @@ describe('#18058 — install contract bound to the live door', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(false);
     });
 
-    it('the missing keys are what decide it — completing each drive turns it green', () => {
+    it('the missing keys are what decide it — and since #17534 the registry drive needs its id repaired too', () => {
       // The control that makes the two refusals above a measurement of the
       // MANIFEST's required keys rather than of the bare branch existing at all.
       expect(PackageInstallBodySchema.safeParse({ ...DOOR_DRIVE_CONFLICT, type: 'app' }).success).toBe(true);
+      // ⭐ #17534 moved this half. `ManifestSchema.id` carries
+      // `MANIFEST_ID_PATTERN` now, and `pkg-a` is not reverse-domain notation,
+      // so completing the missing keys is no longer sufficient for THIS drive —
+      // it stays refused, on the id's shape rather than on an absent key.
+      // ⛔ The remedy is to say that, not to relax the pattern: the drive posts
+      // an id the registry face has always refused to publish.
+      const registryKeysCompleted = { ...DOOR_DRIVE_REGISTRY, version: '1.0.0', type: 'app' };
+      expect(PackageInstallBodySchema.safeParse(registryKeysCompleted).success).toBe(false);
+      // Lit control — the id is what decides it now: the same body with a
+      // reverse-domain id parses green, so the refusal above is not the missing
+      // keys coming back.
       expect(PackageInstallBodySchema.safeParse({
-        ...DOOR_DRIVE_REGISTRY, version: '1.0.0', type: 'app',
+        ...registryKeysCompleted, id: 'com.acme.pkg-a',
       }).success).toBe(true);
     });
 
@@ -813,10 +967,20 @@ describe('#18058 — install contract bound to the live door', () => {
       }
     });
 
-    it('and the residual runs the OTHER way too — a whitespace-only `id` parses here and the door answers 400', () => {
-      // `handlePackages` trims before keying and refuses an empty id, so this
-      // is the one class where the declaration is WIDER than the door.
-      expect(PackageInstallBodySchema.safeParse({ manifest: { ...SDK_MANIFEST, id: '   ' } }).success).toBe(true);
+    it('⭐ #17534 closed the one spelling that ran the OTHER way — a whitespace-only `id` is refused HERE now, not only by the door', () => {
+      // What this pinned before: `handlePackages` trims before keying and
+      // refuses an empty id, while this declaration ADMITTED `'   '` — the one
+      // measured class where the declaration was WIDER than the door.
+      // `ManifestSchema.id` now carries `MANIFEST_ID_PATTERN`, which no
+      // whitespace-only string matches, so the declaration refuses it first and
+      // the two faces agree on this spelling.
+      expect(PackageInstallBodySchema.safeParse({ manifest: { ...SDK_MANIFEST, id: '   ' } }).success).toBe(false);
+      // Lit control — the id is what decided it: the same wrapped body with the
+      // fixture's own conforming id parses green.
+      expect(PackageInstallBodySchema.safeParse({ manifest: SDK_MANIFEST }).success).toBe(true);
+      // ⛔ NOT a claim that declaration and door are now equal: the refusals
+      // pinned above still run the other way — bodies the door answers 201 to
+      // that this declaration refuses. One spelling closed; the class remains.
     });
   });
 

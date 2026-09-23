@@ -4,6 +4,10 @@ import type { z } from 'zod';
 import { FieldType } from '../data/field.zod';
 
 import { aliasProbe } from './alias-probe';
+import {
+  oppositePoleAmbiguity,
+  oppositePolePrescription,
+} from './polarity-axes';
 
 /**
  * "Did you mean?" Suggestion Utilities
@@ -378,6 +382,13 @@ export interface StrictUnknownKeyErrorOptions {
  * length-relative edit-distance fallback (matching `suggestKey` in
  * `data/object.zod.ts`: a flat distance of 3 is noise on a short key).
  *
+ * The fallback's answer is screened once more before it ships, because a
+ * distance ranking cannot see meaning: on a shape that declares both ends of a
+ * range, an axis-silent key is answered with whichever end is spelled more
+ * cheaply, and that end PARSES. Such a guess is replaced by a prescription
+ * naming both ends — `polarity-axes.ts`, which also explains why a declared
+ * alias is never screened.
+ *
  * Wire it as the object's `error` alongside `.strict()`:
  *
  * ```ts
@@ -465,8 +476,25 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
         continue;
       }
       const maxDistance = Math.max(2, Math.floor(key.length / 3));
-      const canonical =
-        aliases[aliasProbe(key)] ?? findClosestMatches(key, knownKeys, maxDistance, 1)[0];
+      const declared = aliases[aliasProbe(key)];
+      const guessed = declared ? undefined : findClosestMatches(key, knownKeys, maxDistance, 1)[0];
+      // Screen the GUESS, never the declaration. `findClosestMatches` ranks by
+      // edit distance and nothing else, so on a shape declaring both ends of a
+      // range it answers a key that names neither end with whichever end is
+      // spelled more cheaply — `dateField` lands on `endDateField` at distance
+      // 3 while `startDateField` sits at 5, outside the budget, unreachable.
+      // Both parse, so the author who takes the advice binds the wrong end of
+      // the event and is told nothing. A declared `aliases` entry is a human
+      // statement about that one spelling and is left exactly as written; only
+      // a coin flip is replaced, and it is replaced by naming BOTH ends rather
+      // than by silence. `polarity-axes.ts` carries the four conditions, the
+      // measurement, and why the accepted key set does not move.
+      const ambiguity = guessed ? oppositePoleAmbiguity(key, guessed, knownKeys) : undefined;
+      if (ambiguity) {
+        prescriptions.push(oppositePolePrescription(key, ambiguity));
+        continue;
+      }
+      const canonical = declared ?? guessed;
       if (canonical && canonical !== key) renames.push(`\`${key}\` → \`${canonical}\``);
     }
     // Order: WHICH KEY IS WRONG → HOW TO FIX IT → why it used to be silent.

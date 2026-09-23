@@ -288,12 +288,12 @@ conversion 是消费者跟的。两个都要写。
       Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写,你的
       changeset(下一项)才是通往它们的输入。`content/docs/**` 的其余部分:先 grep 键
       名,再读周边文件 —— 被删的键会藏在离参考表三节远的一个 `defineFlow` 示例里。
-- [ ] **Changeset** —— `@objectstack/spec` 用 `major`。AGENTS.md:breaking
-      changeset 必须带 FROM → TO 映射与一行修复;它作为 npm 包里的 `CHANGELOG.md`
-      发出,是升级中的 agent 撞上墓碑报错后 grep 的东西。
-      样板是任一条活着的 `.changeset/*-retired.md` —— 抄它的 "The retirement
-      kit:" 段。⚠ 并带上 ADR-0087 处置标记(AGENTS.md 的 changeset 一节;
-      `pnpm check:adr-0087-registration` 把门)—— 退役正是它点名的那一类。
+- [ ] **Changeset** —— `@objectstack/spec` 用 `minor`,⛔ 不用 `major`:逐 PR 的 `Check Changeset` 跑
+      `scripts/check-changeset-no-major.mjs`,发射窗口期内拒收 `major`,照抄即红。破坏性语义由 BREAKING
+      banner 承载 —— AGENTS.md:breaking changeset 必须带 FROM → TO 映射与一行修复;它作为 npm 包里
+      的 `CHANGELOG.md` 发出,是升级中的 agent 撞上墓碑报错后 grep 的东西。样板抄任一条活着的
+      `.changeset/*-retired.md` 的 "The retirement kit:" 段。⚠ 并带上 ADR-0087 处置标记(AGENTS.md 的
+      changeset 一节;`pnpm check:adr-0087-registration` 把门)—— 退役正是它点名的那一类。
 - [ ] **`check:generated` 明确不跑的源码审计 —— 整组跑,永不单点。** 它的输出会点名
       它们;陷阱是跑了五个漏了第六个。咬退役的是 `check:variant-docs`:删掉一个
       discriminated union 会孤儿化它的 variant/doc-ledger 条目(实测:条目比它的 union

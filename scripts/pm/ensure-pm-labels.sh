@@ -275,37 +275,27 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # entirely from objectui).
   gh label create pm:retriage         -R "$R" -c d4c5f9 -d "Question for triage, answered each fire; coexists with the standing pm:* label; no dispatch" 2>/dev/null || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" 2>/dev/null || true
+  # tooling marks a card whose fix lands in a gate, script, workflow, skill,
+  # seat protocol or PM tooling file (scripts/**, .github/**, .claude/**,
+  # packages/lint gate rules, packages/spec/scripts/**) rather than in a product
+  # package. Triage applies it at FIRST GRADING, in the same label write as
+  # domain:* and priority:*; a filer may pre-apply it. Four named consumers, all
+  # in the pm-dispatch charter (SKILL.md 状态模型 row, 分诊座位职责 and 候选与批次):
+  # the execution seat's candidate query, which excludes a tooling card carrying
+  # neither an `Unblocks: #N` line nor a named published surface; the triage
+  # first-touch close; the fleet-wide one-tooling-card-in-flight count; and the
+  # census / half-state patrol, for which a tooling card open in pm:queue with
+  # neither line is a half-state. It is in this five-repo loop on the rule stated
+  # beside priority:p0 above — the sweep that reads it is repo-parameterized
+  # (PM_SWEEP_REPO) and first-touch grading is a five-repo triage duty. Measured
+  # 2026-09-21 in objectstack, where the label is live on 44 queue cards: the
+  # object is GitHub's default `ededed` with an EMPTY description, because until
+  # this row nothing here named it — the exact drift the header describes, and
+  # one no rerun of the default mode can repair. The -d below is 100 characters,
+  # at the hard cap (check:pm-label-desc-cap).
+  gh label create tooling             -R "$R" -c fbca04 -d "Fix lands in tooling, not a product package — enters pm:queue only with Unblocks: or a named surface" 2>/dev/null || true
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Reserved by a dedicated epic PM, parent or sub-issue; other PMs never take it; never with pm:queue" 2>/dev/null || true
 done
-
-# needs:contract-review — the clause-② enqueue gate's re-review chain (SKILL.md
-# 入队与落地): a PR whose ACTUAL diff touches the contract surface — or whose
-# card's claim comment declares `Clause-②: yes` (the content limb, judged from
-# the card, path-independent) — but was dispatched below the contract-review
-# tier waits outside the queue under this label until the review sub-round
-# clears it. Named consumers: the enqueue gate and the triage sub-round's label
-# query. Main repo only — the contract surface (packages/spec) lives here. The
-# label names WHAT is reviewed, never a model; the tier's single source is
-# CONTRACT_REVIEW_TIER in scripts/pm/dispatch-gates.mjs. The -d below is kept
-# ≤100 chars (the hard cap — see the header). It did NOT match the live label
-# object: measured 2026-08-20, that object was grey with an EMPTY description,
-# so the claim this comment used to make had never been true — nothing had ever
-# checked it. `--reconcile` is what makes it true.
-#
-# ⚠️ WHAT THIS FILE DOES AND DOES NOT DO, because a card read it the other way
-# (#13922): everything here reconciles the label OBJECT — its colour and its
-# description. It says nothing about whether the label is HUNG correctly on any
-# pair, and it never did. Two other files answer that, and neither is this one:
-#   * `scripts/pm/check-half-states.mjs` H31 — the two carriers of one gate
-#     compared across the whole board, on the half-state patrol's schedule.
-#   * `scripts/pm/check-clause2-carriers.mjs` — the same comparison anchored on
-#     ONE pair (`--pair <pr>`, a pre-arm predicate), plus the two readings H31
-#     cannot make: the DECLARATION limb quoted three paragraphs up has no other
-#     reader in this repo, and a gate missing from BOTH carriers is a carrier
-#     comparison's silent case.
-# ⛔ None of the three writes the label. Hanging or clearing a review gate from
-# a script would be issuing the review verdict, which is 自查放行.
-gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d "Clause-② enqueue gate: dispatched below contract-review tier — blocked until the review clears it" 2>/dev/null || true
 
 # needs:pack-smoke — the opt-in pre-merge pack smoke (#14214, derived from the
 # #14000 ruling; maintainer-approved 2026-09-01, director batch #23, 「同意」).
@@ -389,8 +379,7 @@ gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam c
 #
 # ⛔ Two acts this record deliberately does NOT perform. Stripping the label off
 # those 4 live carriers is a BOARD act for the PM at the landing window —
-# nothing in this file ever hangs or clears a label on a card (the
-# needs:contract-review block above states the same discipline). And the
+# nothing in this file ever hangs or clears a label on a card. And the
 # `repo:*` predicate in `scripts/pm/check-half-states.mjs` H14 stays LITERAL:
 # narrowing it is a predicate change ruled on #13992, never a side effect of a
 # vocabulary record. SKILL.md names no `repo:objectstack` (checked 2026-09-01),
@@ -464,6 +453,58 @@ gh label create status:parked -R objectstack-ai/objectui    -c cfd3d7 -d "Parked
 gh label create domain:devx -R objectstack-ai/objectui -c bfd4f2 -d "objectui devx stream: fix lands on .github/, scripts/ or release pipeline — devx lane cross-repo" 2>/dev/null || true
 gh label create domain:spec -R objectstack-ai/objectui -c bfd4f2 -d "objectui spec stream: fix lands on packages/types, schema corpus or spec pin coupling — spec lane" 2>/dev/null || true
 gh label create domain:ui   -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui stream: fix lands on the published library or apps — objectui execution seat" 2>/dev/null || true
+
+# The FEATURE AXIS — `area:*`, one per card, eleven values. It is the PLANNING
+# axis: priority is judged on it, and `domain:*` beside it decides only which
+# seat may claim which files. The eleven values are the North Star definition
+# line (「做出来的是什么」) plus the road it measures, so the axis and the
+# product definition cannot drift apart without one of them being edited.
+# The eleven were put to the maintainer on the charter card and confirmed there
+# (2026-09-21) with ONE amendment: the API/integration value was shortened to
+# `area:api`, its customer capability (可对外的 API 与集成) unchanged. ⛔ The
+# longer spelling this replaced is deliberately NOT written here — the retired
+# name must not survive a `git grep` as though it were still a value. The
+# maintainer's sentence is quoted verbatim on that card's ruling comment.
+#
+# Triage applies it at FIRST GRADING, in the same label write as `domain:*` and
+# `priority:*`; a filer may pre-apply it; a tooling card carries the area it
+# PROTECTS (a card that protects no area is not filed at all). ⛔ No backfill of
+# the existing backlog — a card gets its area when it is next touched.
+#
+# Four named consumers (SKILL.md 状态模型, 「一个标签存在当且仅当有具名读者」):
+# the maintainer's board view by area; triage grading, where the card's priority
+# is inherited from the checklist item in that area; the parent-card grouping
+# for a cross-layer feature point; and the execution seat's candidate order.
+# The checklist end of that inheritance is machine-readable: every
+# docs/qa/platform-checklist/areas/*.json carries a top-level `axis` naming one
+# of these eleven values.
+#
+# TWO repos, deliberately, and not the five-repo loop above: a feature point
+# spans 协议 → 运行时 → 前端, which is objectstack plus objectui. cloud is
+# parked (北极星「现在不做」), objectos is the docs/site repo, and hotcrm is the
+# exemplar APP — its cards are app cards, and a platform gap found there is
+# filed in the platform repo, where it gets its area. Widening the loop is a
+# vocabulary decision, not a maintenance edit.
+#
+# ⚠️ Every -d below is ≤100 characters (`check:pm-label-desc-cap`), and each
+# names the CUSTOMER capability rather than the packages that implement it —
+# the axis is read by the maintainer planning product, not by a seat routing
+# files. One colour family (`c2e0c6` … `0e8a16` are taken; the axis uses one
+# shade of its own, `d2dae2`, so an area label is recognisable at a glance in a
+# label list that already carries `domain:*` in `bfd4f2`).
+for R in objectstack-ai/objectstack objectstack-ai/objectui; do
+  gh label create area:records  -R "$R" -c d2dae2 -d "Business objects, records, the views that show data, usable forms, search" 2>/dev/null || true
+  gh label create area:access   -R "$R" -c d2dae2 -d "Permissions that actually hold — RLS/FLS, sharing model, write-path guards" 2>/dev/null || true
+  gh label create area:workflow -R "$R" -c d2dae2 -d "Approvals and automation — the work that runs without a person driving it" 2>/dev/null || true
+  gh label create area:reports  -R "$R" -c d2dae2 -d "Business reporting — dashboards, reports, the numbers a manager reads" 2>/dev/null || true
+  gh label create area:identity -R "$R" -c d2dae2 -d "Login and identity — sign-up, sessions, organization membership, SSO" 2>/dev/null || true
+  gh label create area:api      -R "$R" -c d2dae2 -d "The API a customer can call, and integrations — REST, connectors, webhooks, jobs" 2>/dev/null || true
+  gh label create area:files    -R "$R" -c d2dae2 -d "Files — upload, download, signed URLs, access derived from the parent record" 2>/dev/null || true
+  gh label create area:i18n     -R "$R" -c d2dae2 -d "The customer's own language, across UI, metadata and notifications" 2>/dev/null || true
+  gh label create area:studio   -R "$R" -c d2dae2 -d "Changing a running app without code — authoring, publish, docs and the portal" 2>/dev/null || true
+  gh label create area:ai       -R "$R" -c d2dae2 -d "AI-native — agent / tool / skill metadata, and the MCP surface an agent drives" 2>/dev/null || true
+  gh label create area:devpath  -R "$R" -c d2dae2 -d "The road — create, dev, verify, publish/install, connect an agent, iterate" 2>/dev/null || true
+done
 
 # Release board — `target:<major>` marks a release BLOCKER for that major
 # (SKILL.md "发版板"). Its consumer is a named query, one per backlog:

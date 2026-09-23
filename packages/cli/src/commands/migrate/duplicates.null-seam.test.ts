@@ -59,7 +59,7 @@ beforeAll(() => {
   writeFileSync(
     join(dir, 'dist', 'objectstack.json'),
     JSON.stringify({
-      manifest: { id: 'dup_null_seam', name: 'Null Seam', version: '0.0.0', type: 'app' },
+      manifest: { id: 'com.example.dup-null-seam', name: 'Null Seam', version: '0.0.0', type: 'app' },
       objects: [
         {
           name: 'crm_case',
