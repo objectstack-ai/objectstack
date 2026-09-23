@@ -4223,8 +4223,17 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
 function nullGuardForFieldSpec(spec: unknown): NullGuard {
   // `{ field: null }` compiles to `IS NULL` — already total.
   if (spec === null) return 'none';
-  // A scalar / Date / array comparand is an implicit `=`; a NULL column fails it.
-  if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
+  // Every comparand that is not an operator map — a scalar, a Date, an array, a
+  // binary value — is an implicit `=`; a NULL column fails it.
+  //
+  // [#19885] "Not an operator map" is {@link isFilterNode}'s reading, the one the
+  // emitter and the validating walk use. This test used to name the exceptions
+  // one by one (`Date`, array) and read every other object as a map, so a binary
+  // comparand was guarded by accident: a non-empty one's byte indices fell to
+  // the per-operator default below, and an EMPTY one had no entries, came out
+  // `'none'`, and `{ $not: { data: <empty buffer> } }` compiled to a bare
+  // `NOT (data = ?)` that dropped every NULL row.
+  if (!isFilterNode(spec)) return 'requireValue';
   const entries = Object.entries(spec as Record<string, unknown>);
   // [#5240, was #5146] The `entries.length === 0` escape that used to sit here —
   // "`{ field: {} }` compiles to no SQL, so guarding it would turn a shape that
@@ -15404,11 +15413,20 @@ export class SqlDriver implements IDataDriver {
         // ({@link isFilterNode}, which {@link classifyFilterKey} and the
         // top-level `{ field: value }` loop in `compileFilters` agree with). This
         // test used to be "any non-array object", so a `Date` or binary comparand
-        // landed here, `Object.entries` found nothing to emit, and the leaf was
-        // DROPPED: `{ $and: [{ d: <Date> }] }` answered every row on SQLite and
-        // Postgres while the same `{ d: <Date> }` at top level answered the one
-        // matching row. Such a value is a comparand, and it now takes the
-        // bare-value branch below, the same compilation the top-level loop gives it.
+        // landed here and was read as an operator map, with a different wrong
+        // answer per shape:
+        //
+        // - a `Date` has no own entries, so its leaf was DROPPED:
+        //   `{ $and: [{ d: <Date> }] }` answered every row on SQLite and Postgres
+        //   while the same `{ d: <Date> }` at top level answered the one matching row;
+        // - a NON-EMPTY binary comparand (`Buffer` / `Uint8Array`) had its byte
+        //   indices read as operator names, so it was REFUSED — `INVALID_FILTER` /
+        //   400, `Unsupported filter operator "0"` — a comparand the top level binds;
+        // - an EMPTY binary comparand has no entries either, so it was dropped
+        //   like the `Date`.
+        //
+        // Each is a comparand, and it now takes the bare-value branch below, the
+        // same compilation the top-level loop gives it.
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
