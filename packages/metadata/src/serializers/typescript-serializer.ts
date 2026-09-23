@@ -17,8 +17,10 @@ import type { MetadataSerializer, SerializeOptions } from './serializer-interfac
  * An emitted annotation must never be false. So a metadata type is listed only
  * when the spec exports a type that IS the input type of the schema
  * `getMetadataTypeSchema()` resolves for it (`z.input<typeof XSchema>`, the
- * ADR-0122 authoring name): the annotation then states that type's own
- * contract, nothing narrower and nothing else. A metadata type that is not
+ * ADR-0122 authoring name): the annotation is then that metadata type's own
+ * static input type, never another type's shape. (It is not a runtime verdict:
+ * a strip-mode schema drops an undeclared key that `tsc` refuses as TS2353.)
+ * A metadata type that is not
  * listed (a plugin's own type, a misspelling, or one whose spec type does not
  * state its schema) gets no annotation and no `import type`: never `any`,
  * `unknown` or another type's shape.
@@ -35,8 +37,9 @@ import type { MetadataSerializer, SerializeOptions } from './serializer-interfac
  * `TypeScriptSerializer.serialize()` never annotates.
  *
  * `typescript-serializer-annotation.test.ts` compiles every entry with `tsc`:
- * a valid body must type-check and an undeclared key must not, so a renamed,
- * moved or widened-to-`unknown` spec type fails there instead of in a saved
+ * the spec type must be identical to its bound schema's `z.input`, a valid
+ * body must type-check and an undeclared key must not, so a renamed, moved,
+ * drifted or widened-to-`unknown` spec type fails there instead of in a saved
  * file.
  */
 const ANNOTATION_BY_METADATA_TYPE: ReadonlyMap<string, readonly [typeName: string, subpath: string]> = new Map([
@@ -93,8 +96,9 @@ function renderModule(
 /**
  * PACKAGE-INTERNAL: the `typescript`-format file for an item of a known
  * metadata type, annotated per {@link ANNOTATION_BY_METADATA_TYPE}.
- * `FilesystemLoader.save()` calls it for the built-in `typescript` serializer,
- * because only the loader knows the item's metadata type.
+ * `FilesystemLoader.save()` calls it in place of the built-in `typescript`
+ * serializer's own, un-overridden `serialize()`, because only the loader knows
+ * the item's metadata type.
  *
  * ⛔ Not re-exported from any `exports` entry of `@objectstack/metadata`, and
  * the public `SerializeOptions` does not carry the metadata type. Publishing

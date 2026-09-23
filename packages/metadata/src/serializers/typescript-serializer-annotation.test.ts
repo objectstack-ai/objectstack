@@ -6,7 +6,9 @@
  * `serializeTypeScriptForMetadataType`. This file holds that annotation to the
  * one property that makes it worth writing: it is never false.
  *
- * Every annotated metadata type is compiled here with `tsc`, twice:
+ * Every annotated metadata type is compiled here with `tsc`:
+ *  - its spec type must be IDENTICAL to `z.input` of the schema
+ *    `getMetadataTypeSchema()` binds (the table's admission rule);
  *  - a spec-valid body must type-check with no diagnostic at all;
  *  - the same body plus one undeclared key must fail with exactly TS2353. That
  *    is what makes the annotation a check: a spec type that is `unknown` (as
@@ -24,6 +26,15 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { MetadataTypeSchema, getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import * as SpecData from '@objectstack/spec/data';
+import * as SpecUi from '@objectstack/spec/ui';
+import * as SpecAutomation from '@objectstack/spec/automation';
+import * as SpecSystem from '@objectstack/spec/system';
+import * as SpecApi from '@objectstack/spec/api';
+import * as SpecSecurity from '@objectstack/spec/security';
+import * as SpecIdentity from '@objectstack/spec/identity';
+import * as SpecAi from '@objectstack/spec/ai';
+import * as SpecIntegration from '@objectstack/spec/integration';
 import { TypeScriptSerializer, serializeTypeScriptForMetadataType } from './typescript-serializer.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +73,36 @@ const REPRESENTATIVE: Record<string, Record<string, unknown>> = {
   skill: { name: 'case_management', label: 'Case management', tools: [] },
   connector: { name: 'status_api', label: 'Status API', type: 'api', authentication: { type: 'none' } },
 };
+
+/**
+ * The schema `getMetadataTypeSchema()` binds for each annotated metadata type,
+ * by its export name on the annotation's own `@objectstack/spec` subpath. The
+ * binding is pinned at run time below, and the type identity by `tsc`.
+ */
+const BOUND_SCHEMA: Record<string, string> = {
+  object: 'ObjectSchema', field: 'FieldSchema', hook: 'HookSchema', seed: 'SeedSchema',
+  mapping: 'MappingSchema', datasource: 'DatasourceSchema', analytics_cube: 'CubeSchema',
+  page: 'PageSchema', dashboard: 'DashboardSchema', app: 'AppSchema', action: 'ActionSchema',
+  report: 'ReportSchema', dataset: 'DatasetSchema', flow: 'FlowSchema', webhook: 'WebhookSchema',
+  job: 'JobSchema', translation: 'TranslationItemSchema', email_template: 'EmailTemplateDefinitionSchema',
+  doc: 'DocSchema', api: 'ApiEndpointSchema', permission: 'PermissionSetSchema',
+  sharing_rule: 'SharingRuleSchema', capability: 'CapabilityDeclarationSchema', position: 'PositionSchema',
+  agent: 'AgentSchema', tool: 'ToolSchema', skill: 'SkillSchema', connector: 'DeclarativeConnectorEntrySchema',
+};
+
+const SPEC_SUBPATHS: Record<string, Record<string, unknown>> = {
+  data: SpecData, ui: SpecUi, automation: SpecAutomation, system: SpecSystem, api: SpecApi,
+  security: SpecSecurity, identity: SpecIdentity, ai: SpecAi, integration: SpecIntegration,
+};
+
+/** `[type name, subpath]` of the annotation the loader path writes for a metadata type. */
+function annotationOf(metadataType: string): readonly [typeName: string, subpath: string] {
+  const m = /^import type \{ (\w+) \} from '@objectstack\/spec\/(\w+)';/.exec(
+    serializeTypeScriptForMetadataType({}, metadataType),
+  );
+  if (!m) throw new Error(`no annotation for ${metadataType}`);
+  return [m[1], m[2]];
+}
 
 /** Stack collections `getMetadataTypeSchema()` binds that are not `MetadataTypeSchema` members. */
 const NON_MEMBER_TYPES = ['webhook', 'connector', 'sharing_rule', 'analytics_cube'];
@@ -134,13 +175,23 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
     }
   }, 60_000);
 
+  it('each annotation names a spec type on the subpath that exports the schema getMetadataTypeSchema() binds', () => {
+    expect(Object.keys(BOUND_SCHEMA).sort()).toEqual(Object.keys(REPRESENTATIVE).sort());
+    for (const [metadataType, schemaName] of Object.entries(BOUND_SCHEMA)) {
+      const [, subpath] = annotationOf(metadataType);
+      const bound = getMetadataTypeSchema(metadataType);
+      expect(bound, metadataType).toBeDefined();
+      expect(SPEC_SUBPATHS[subpath]?.[schemaName] === bound, `${metadataType}: ${subpath}.${schemaName}`).toBe(true);
+    }
+  });
+
   it('round-trips every annotated body through serialize and deserialize', () => {
     for (const [metadataType, item] of Object.entries(REPRESENTATIVE)) {
       expect(serializer.deserialize(serializeTypeScriptForMetadataType(item, metadataType)), metadataType).toEqual(item);
     }
   });
 
-  it('tsc: a valid body type-checks and an undeclared key is refused (TS2353), for every annotation', () => {
+  it('tsc: each spec type is identical to its schema\'s z.input, a valid body type-checks and an undeclared key is refused (TS2353)', () => {
     const dir = join(HERE, '__annotation_type_check__');
     const files = new Map<string, string>();
     for (const [metadataType, item] of Object.entries(REPRESENTATIVE)) {
@@ -148,6 +199,26 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
       files.set(join(dir, `${metadataType}.ts`), valid);
       files.set(join(dir, `${metadataType}.undeclared-key.ts`), valid.replace('= {', '= {\n  "undeclared_key": 1,'));
     }
+    // Identity, not mutual assignability: `Book` is assignable both ways to
+    // `z.input` of `BookSchema` yet lacks two optional keys, so only identity
+    // refuses it. That pair is the control line, and it must be the one error.
+    const rows = [
+      ...Object.entries(BOUND_SCHEMA).map(([metadataType, schemaName]) => {
+        const [typeName, subpath] = annotationOf(metadataType);
+        return { id: metadataType, typeName, schemaName, subpath };
+      }),
+      { id: 'control_book', typeName: 'Book', schemaName: 'BookSchema', subpath: 'system' },
+    ];
+    const identity = [
+      "import type { z } from 'zod';",
+      ...rows.map((r) => `import type { ${r.typeName} as T_${r.id}, ${r.schemaName} as S_${r.id} } from '@objectstack/spec/${r.subpath}';`),
+      'type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;',
+      ...rows.map((r) => `export const ${r.id}: Identical<T_${r.id}, z.input<typeof S_${r.id}>> = true;`),
+      '',
+    ].join('\n');
+    const identityFile = join(dir, 'identity.ts');
+    files.set(identityFile, identity);
+    const controlLine = identity.split('\n').findIndex((l) => l.startsWith('export const control_book:'));
     const diagnostics = typeCheck(files);
     const byFile = new Map<string, number[]>();
     const unattributed: string[] = [];
@@ -169,5 +240,9 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
       expect(byFile.get(join(dir, `${metadataType}.ts`)) ?? [], report).toEqual([]);
       expect(byFile.get(join(dir, `${metadataType}.undeclared-key.ts`)) ?? [], report).toEqual([2353]);
     }
+    const identityErrors = diagnostics
+      .filter((d) => d.file?.fileName === identityFile)
+      .map((d) => [d.file!.getLineAndCharacterOfPosition(d.start ?? 0).line, d.code]);
+    expect(identityErrors, report).toEqual([[controlLine, 2322]]);
   }, 60_000);
 });

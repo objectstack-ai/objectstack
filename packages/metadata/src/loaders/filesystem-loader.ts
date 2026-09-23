@@ -464,11 +464,19 @@ export class FilesystemLoader implements MetadataLoader {
       // that annotates, and the annotation depends on the metadata type, which
       // only this call knows: it goes through the package-internal
       // `serializeTypeScriptForMetadataType`, so the published
-      // `SerializeOptions` does not grow a key. Any other serializer, including
-      // a custom one registered for `typescript`, is called as it always was.
+      // `SerializeOptions` does not grow a key.
+      //
+      // The test is the METHOD, not the class: only when this module's own,
+      // un-overridden `TypeScriptSerializer.prototype.serialize` is the one
+      // that would run. `instanceof` also matched a subclass whose overridden
+      // `serialize()` must still be called. Any other serializer (a custom
+      // one, a subclass that overrides `serialize()`, or a `TypeScriptSerializer`
+      // from the package's other entry bundle, whose prototype is a different
+      // object) is called as it always was.
       const serializeOptions = { prettify, indent, sortKeys };
       const content =
-        serializer instanceof TypeScriptSerializer && serializer.getFormat() === 'typescript'
+        serializer.serialize === TypeScriptSerializer.prototype.serialize &&
+        serializer.getFormat() === 'typescript'
           ? serializeTypeScriptForMetadataType(data, type, serializeOptions)
           : serializer.serialize(data, serializeOptions);
 

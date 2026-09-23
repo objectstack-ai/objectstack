@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +7,7 @@ import { JSONSerializer } from '../serializers/json-serializer.js';
 import { YAMLSerializer } from '../serializers/yaml-serializer.js';
 import { TypeScriptSerializer, serializeTypeScriptForMetadataType } from '../serializers/typescript-serializer.js';
 import type { MetadataFormat } from '@objectstack/spec/system';
-import type { MetadataSerializer } from '../serializers/serializer-interface.js';
+import type { MetadataSerializer, SerializeOptions } from '../serializers/serializer-interface.js';
 import { FilesystemLoader } from '../loaders/filesystem-loader.js';
 
 describe('Serializers', () => {
@@ -162,6 +162,41 @@ describe('Serializers', () => {
       } finally {
         await fs.rm(rootDir, { recursive: true, force: true });
       }
+    });
+
+    // A FilesystemLoader wired by hand with one `typescript` serializer, saving `object`.
+    const saveObjectWith = async (tsSerializer: MetadataSerializer): Promise<string> => {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-wired-'));
+      try {
+        const loader = new FilesystemLoader(rootDir, new Map<MetadataFormat, MetadataSerializer>([['typescript', tsSerializer]]));
+        await loader.save('object', 'account', object);
+        return await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+      } finally {
+        await fs.rm(rootDir, { recursive: true, force: true });
+      }
+    };
+
+    it('FilesystemLoader.save() calls a subclass that overrides serialize(), as it always did', async () => {
+      class HeaderSerializer extends TypeScriptSerializer {
+        override serialize<T>(item: T, options?: SerializeOptions): string {
+          return '// header\n' + super.serialize(item, options);
+        }
+      }
+      expect(await saveObjectWith(new HeaderSerializer('typescript'))).toBe('// header\n' + plain(object));
+    });
+
+    it('FilesystemLoader.save() annotates through the built-in serialize(), inherited by a subclass or not', async () => {
+      class KeepsSerialize extends TypeScriptSerializer {}
+      expect(await saveObjectWith(new TypeScriptSerializer('typescript'))).toBe(annotatedObject);
+      expect(await saveObjectWith(new KeepsSerialize('typescript'))).toBe(annotatedObject);
+    });
+
+    it('FilesystemLoader.save() calls a TypeScriptSerializer from another module copy through its own serialize(): no annotation', async () => {
+      // The published `.` and `./node` entries are separate bundles, each with its own class copy.
+      vi.resetModules();
+      const other = await import('../serializers/typescript-serializer.js');
+      expect(other.TypeScriptSerializer).not.toBe(TypeScriptSerializer);
+      expect(await saveObjectWith(new other.TypeScriptSerializer('typescript'))).toBe(plain(object));
     });
 
     it('should get correct extension', () => {
