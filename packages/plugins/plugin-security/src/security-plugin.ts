@@ -5183,10 +5183,9 @@ export class SecurityPlugin implements Plugin {
    * carries. ⛔ Not a post-default image: a key the runtime filled is not a
    * field the caller wrote.
    *
-   * The equality with the registered middleware is pinned as an EQUIVALENCE
-   * (`can-write-object-admission.test.ts`) rather than asserted here, for the
-   * same reason `canReadObject`'s is: two doors that merely agree today drift
-   * the first time one of them grows an arm.
+   * `can-write-object-admission.test.ts` pins this method's answer equal to the
+   * registered middleware's on the cases it lists, and pins one arm-3 UPDATE
+   * case as a direction: this method `false`, the middleware `true`.
    *
    * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
    * denial too.
@@ -5199,14 +5198,8 @@ export class SecurityPlugin implements Plugin {
    * unresolvable posture and the D10 dangling delegator), the ADR-0066 D3
    * capability AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD
    * grant, the D10 delegator's independent grant, and the step 2.5 FLS write
-   * gate over the keys THIS payload names. Each of those is pinned EQUAL to the
-   * registered middleware's, arm for arm, with ONE exception, pinned as a
-   * DIRECTION and not as an equivalence: a preview names no stored row, so on
-   * an UPDATE arm 3 is handed no id and refuses a scope-holding delegate it
-   * cannot boundary-check, where the middleware — holding that id — can admit.
-   * `can-write-object-admission.test.ts` holds that case in a block of its own,
-   * asserting this method `false` and the middleware `true`: NARROWER, never
-   * wider. It means nothing about any refusal not in that list.
+   * gate over the keys THIS payload names. It means nothing about any refusal
+   * not in that list.
    *
    * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
    * an enumeration of the distance to success: the middleware refuses both
@@ -5277,16 +5270,11 @@ export class SecurityPlugin implements Plugin {
           context,
         );
         // 3. [ADR-0090 D12] Delegated administration on the RBAC link tables.
-        //    The middleware hands its whole `opCtx`; `assert` reads exactly
-        //    `object`, `operation`, `context` and the ROWS of `data` (plus, for
-        //    a delegate's update/delete, a single scalar id off
-        //    `options.where.id` / `where.id` / `id`). A preview names no stored
-        //    row, so it supplies the four it has and NOTHING else — which
-        //    leaves the gate's delegate branch refusing an id-less mutation it
-        //    cannot boundary-check. That is NARROWER than the write path for a
-        //    scope-holding delegate, never wider, and narrower is the safe
-        //    direction for a gate whose whole job is to withhold — pinned as
-        //    that direction in `can-write-object-admission.test.ts`.
+        //    The middleware hands its whole `opCtx`; a preview names no stored
+        //    row, so this hands `object`, `operation`, `context` and the rows
+        //    of `data` and NOTHING else — leaving the gate's delegate branch
+        //    refusing an id-less mutation it cannot boundary-check, pinned as a
+        //    direction in `can-write-object-admission.test.ts`.
         //
         //    ⭐ And the rows it supplies are SHALLOW COPIES, never the caller's
         //    own objects. The gate stamps `granted_by` onto the rows it

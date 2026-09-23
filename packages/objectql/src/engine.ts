@@ -3977,15 +3977,11 @@ export class ObjectQL implements IObjectQLEngine {
    * D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
    * principals, the `allowCreate`/`allowEdit` CRUD grant, the ADR-0090 D10
    * delegator's independent grant, and the middleware's own step 2.5 FLS write
-   * gate over the keys THIS payload names. Each of those is pinned EQUAL to the
-   * registered middleware's, arm for arm, with ONE exception, pinned as a
-   * DIRECTION and not as an equivalence: a preview names no stored row, so on
-   * an UPDATE the D12 arm is handed no id and refuses a scope-holding delegate
-   * it cannot boundary-check, where the middleware — holding that id — can
-   * admit. `@objectstack/plugin-security`'s `can-write-object-admission.test.ts`
-   * holds that case in a block of its own, asserting the probe `false` and the
-   * middleware `true`: NARROWER, never wider. The gate says nothing about any
-   * refusal not in that list.
+   * gate over the keys THIS payload names. The gate says nothing about any
+   * refusal not in that list. `@objectstack/plugin-security`'s
+   * `can-write-object-admission.test.ts` pins the probe's answer equal to the
+   * registered middleware's on the cases it lists, and pins one D12 UPDATE case
+   * as a direction: the probe `false`, the middleware `true`.
    *
    * ⛔ A `true` here is NOT a promise that the write would succeed, and ⛔ no
    * enumeration of the distance to success is attempted — the middleware

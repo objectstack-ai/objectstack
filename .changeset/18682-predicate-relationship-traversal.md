@@ -88,9 +88,7 @@ the field-level security WRITE gate over it (`getFieldPermissions`, folded
 through the D3 field-capability contract, intersected with the delegator's mask
 under D10, then the forbidden-write detection). It exists for doors that must ask
 "could this caller perform this write" without running the engine middleware —
-the write preview is the first — and an equivalence suite pins its answer EQUAL
-to the registered middleware's, case for case AND payload for payload, so the
-two cannot drift.
+the write preview is the first.
 
 ⭐ What it answers, POSITIVELY — by naming what it RUNS, never a category of the
 write decision: the ADR-0103 engine-owned affordance gate, the ADR-0090 D12
@@ -98,14 +96,11 @@ delegated-admin gate, the fail-closed postures (#3545's unresolvable posture and
 the D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
 principals, the `allowCreate`/`allowEdit` CRUD grant, the D10 delegator's
 independent grant, and the step 2.5 FLS write gate over the keys the payload
-names — each pinned EQUAL to the registered middleware's, arm for arm, with ONE
-exception, pinned as a DIRECTION and not as an equivalence: a preview names no
-stored row, so on an UPDATE the D12 arm is handed no id and refuses a
-scope-holding delegate it cannot boundary-check, where the middleware — holding
-that id — can admit. `@objectstack/plugin-security`'s admission suite holds that
-case in a block of its own, asserting the method `false` and the middleware
-`true`: NARROWER, never wider. It says nothing about any refusal not in that
-list.
+names. It says nothing about any refusal not in that list.
+`@objectstack/plugin-security`'s `can-write-object-admission.test.ts` pins the
+method's answer equal to the registered middleware's on the cases it lists, and
+pins one D12 UPDATE case as a direction: the method `false`, the middleware
+`true`.
 
 ⛔ `true` never means the write will succeed, and ⛔ what follows is not an
 enumeration of the distance to success: the middleware refuses both before and

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#18682] `canWriteObject` agrees with the engine middleware, case for case.
+ * [#18682] `canWriteObject` against the engine middleware.
  *
  * ## Why this file exists, and why it is an EQUIVALENCE
  *
@@ -51,7 +51,7 @@
  * carries a field the fixtures actually restrict — in both directions, and once
  * under D10 delegation where the two masks must intersect rather than union.
  *
- * ## …and the two blocks that are NOT equivalences
+ * ## …and two blocks that are NOT equivalences
  *
  * Both need a caller the equivalence block has no fixture for: a DELEGATED
  * administrator (ADR-0090 D12) holding a real `adminScope` over a business-unit
@@ -66,8 +66,7 @@
  *     stamp back, so no admission answer can notice the copy — only the
  *     caller's row can, and that is what the block asserts.
  *   - **The DIRECTION.** On an id-less UPDATE the probe refuses a delegate the
- *     middleware — holding the id — admits: the one place the two doors are
- *     pinned UNEQUAL, and only in the narrower direction.
+ *     middleware — holding the id — admits.
  *
  * Harness mirrors `can-read-object-admission.test.ts`, whose read twin this is.
  */
@@ -672,8 +671,7 @@ describe("the D12 arm judges copies — a preview never stamps the caller's rows
 });
 
 /**
- * ⭐ DIRECTION, not equivalence — the ONE arm where this method is pinned
- * NARROWER than the middleware, and only in that direction.
+ * ⭐ DIRECTION, not equivalence.
  *
  * A preview names no stored row, so on an UPDATE the probe hands the D12 gate
  * no id, and the gate's delegate branch refuses a mutation it cannot attribute
@@ -686,9 +684,7 @@ describe("the D12 arm judges copies — a preview never stamps the caller's rows
  * `true` — ⛔ never as equality, and it is kept out of the equivalence block,
  * whose doors must agree by construction. Both doors get the shape they really
  * receive: the probe an ARRAY (`validate()` always sends `rawRows`), the
- * middleware the engine's by-id `data` and id. If the two ever agree here,
- * either the probe learned an id it has no way to hold, or the middleware lost
- * the one it has — a change to be looked at, not absorbed.
+ * middleware the engine's by-id `data` and id.
  */
 describe('DIRECTION — the one arm where the probe is narrower than the write path', () => {
   it("REFUSES a scope-holding delegate's id-less UPDATE that the middleware, holding the id, ADMITS (ADR-0090 D12)", async () => {
