@@ -40,8 +40,8 @@ export const entry: SemanticMigration = {
     + 'the published predicate isRefusedTextComparand and the published reason text '
     + 'textComparandRefusalReason, the pair lifted into this package at #18113 for exactly '
     + 'this reason, so a row added to the table reaches both doors without an edit at either. '
-    + 'Scope is the one operator the table writes rows for: $contains, $startsWith, '
-    + '$endsWith, $like and $ilike have no such row and keep the answer they give today, '
+    + '$contains, $startsWith, '
+    + '$endsWith, $like and $ilike keep the answer they give today, '
     + 'because widening by analogy is the table\'s decision and not a door\'s. '
     + 'The two vocabularies differ on one point and it is a fact about them rather than an '
     + 'extra rule: a view rule\'s value key is OPTIONAL, so an absent comparand is left '
@@ -64,7 +64,5 @@ export const entry: SemanticMigration = {
     + 'formula matcher answers false for every row. How earlier releases answered them was '
     + 'NOT measured, so re-check '
     + 'what the view is supposed to show rather than assuming the old result set was correct. '
-    + 'Both refusals now arrive at the authoring path with the same reason text '
-    + 'the runtime gives, so the message an author reads is the same message wherever they '
-    + 'hit it.',
+    + 'Both refusals now arrive at the authoring path.',
 };

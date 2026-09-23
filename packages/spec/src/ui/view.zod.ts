@@ -573,11 +573,8 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  * The first two checks below are `assertListComparandShapes`' constraints, one
  * for one: `$in`/`$nin` must be an array, `$between` must be a 2-array. The
  * third — a SCALAR operator handed an array — is `driver-sql`'s
- * `assertCompilableComparand` scalar arm, and it is here for the same reason the
- * other two are: the query path refuses it (on the SQL family and
- * `driver-memory`; all four backends are named below), so refusing it at
- * authoring time moves the refusal to the moment the author can still act on
- * it. Nothing beyond those is judged, deliberately — #5685 already ruled on the
+ * `assertCompilableComparand` scalar arm.
+ * Nothing beyond those is judged, deliberately — #5685 already ruled on the
  * opposite error, where `FieldOperatorsSchema` declared `$gt` as
  * `number | Date | FieldReference` while every first-party producer put an ISO
  * STRING there; the schema was ruled the wrong side and widened to match the
@@ -588,7 +585,7 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  * ⚠️ **The scalar arm REVERSES a reading recorded here at #6227**, which said
  * `equals: ['a','b']` "lowers to a bare `{ field: value }` deep-equality
  * comparand, which every backend answers". **The backends a lowered view rule
- * reaches are four, not three, and at this change they do not agree** — so
+ * reaches at this change do not agree** — so
  * each is named rather than generalised, in the present tense:
  *
  * - **The SQL family REFUSES** — `driver-sql`, the `driver-turso` /
@@ -605,10 +602,7 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  *   `@objectstack/driver-memory@17.4.0`; published 17.3.0 returned the row
  *   stored as `['a']` (run in this change's review; which other rows it
  *   selected is NOT MEASURED).
- * - **`@objectstack/formula` EXCLUDES** — `matchesFilterCondition` answers
- *   `false` for every row, a row whose stored value IS `['a']` included.
- * - **`driver-mongodb` ANSWERS** — the fourth backend, and the one the earlier
- *   wording left out. `translateFilter({ tags: ['a'] })` emits
+ * - **`driver-mongodb` ANSWERS** — `translateFilter({ tags: ['a'] })` emits
  *   `{"tags":["a"]}` unchanged (the array falls to the implicit-equality arm),
  *   and the engine's shared comparand doors — `normalizeFilterComparandTypes`
  *   and `assertListComparandShapes` — both pass the shape, so the server
@@ -620,7 +614,7 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  *   face, at those engine doors and through `mingo`; a live `mongod` cell is
  *   NOT MEASURED.
  *
- * Method: `driver-sql` on SQLite, `driver-memory`, the formula matcher,
+ * Method: `driver-sql` on SQLite, `driver-memory`,
  * `driver-mongodb`'s `translateFilter` and `mingo` were each run on the
  * lowered `{ tags: ['a'] }` beside a scalar and an `$in` control; this
  * change's review also ran `driver-sql` on a live PostgreSQL 16 (refused with
@@ -629,8 +623,8 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  * a live `mongod` are NOT MEASURED, and so is whether any SQL-family release
  * before this change answered the shape.
  *
- * So **none of the four reads the array as the SCALAR the operator
- * declares**: three refuse or exclude it outright, and `driver-mongodb` returns
+ * So **none reads the array as the SCALAR the operator
+ * declares**: `driver-mongodb` returns
  * rows for a different predicate — array equality, and only on an array-valued
  * field (live `mongod` NOT MEASURED). The ORIGINAL reading was therefore the one that widened the accept
  * set past the query path; this arm pulls it back to what `value`'s own
@@ -647,9 +641,9 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  *   as many words. Arity is not this check's business for membership; only "is it
  *   a list at all".
  * - **A string operator carrying a number** (`contains: 5`). Lowers to
- *   `$contains: 5`; none of the four backends above refuses it (`driver-sql`
+ *   `$contains: 5`; none of the backends above refuses it (`driver-sql`
  *   on SQLite and `driver-memory` answer it, `driver-mongodb` compiles it to a
- *   `$regex`, the formula matcher excludes every row). `icontains` is the ONE
+ *   `$regex`). `icontains` is the ONE
  *   exception and it is not an analogy — `FILTER_TEXT_CASES` declares that
  *   comparand refused as data, and {@link checkViewFilterRuleTextComparand}
  *   below answers those rows and only those rows.
@@ -767,8 +761,7 @@ function checkViewFilterRuleValueShape(
 }
 
 /**
- * [#19514] `icontains` takes the comparand `FILTER_TEXT_CASES` declares,
- * on the one operator that table writes a row for.
+ * [#19514] `icontains` takes the comparand `FILTER_TEXT_CASES` declares.
  *
  * ## The half this answers, and the half it leaves alone
  *
@@ -795,8 +788,8 @@ function checkViewFilterRuleValueShape(
  * 2. **ARRAYS** are {@link checkViewFilterRuleValueShape}'s business. One defect,
  *    one issue: an author who wrote `icontains: ['a']` is told about the SHAPE,
  *    which is what they have to fix first.
- * 3. **THE SIBLING OPERATORS.** `contains` / `starts_with` / `ends_with` have no
- *    row in the table and keep the answer they give today. Widening by
+ * 3. **THE SIBLING OPERATORS.** `contains` / `starts_with` / `ends_with`
+ *    keep the answer they give today. Widening by
  *    analogy is the table's decision to make, never this door's.
  *
  * ## The `$` twin is named here, not in the contract half

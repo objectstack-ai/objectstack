@@ -17,19 +17,7 @@
  * reasoning but a correction of one of its readings: an array on a scalar
  * operator was recorded here as accepted because it 「lowers to a bare
  * deep-equality comparand, which every backend answers」, and re-measurement
- * found the opposite. The four backends a lowered view rule reaches do not
- * agree at this change: the SQL family (`driver-sql`, the `driver-turso` /
- * `driver-sqlite-wasm` drivers built on it, and turso's remote transport) and
- * `driver-memory` REFUSE the comparand with `INVALID_FILTER`;
- * `@objectstack/formula`'s matcher EXCLUDES every row; and `driver-mongodb`
- * ANSWERS — it passes the array through to the server, where MongoDB's
- * equality rule for an array operand selects a row whose stored array equals
- * `['a']` or holds `['a']` as an element, and not a row storing the scalar
- * `'a'` (read at the driver's compile face, at the engine's shared comparand
- * doors and through mingo 7.2.4; a live `mongod` cell is NOT MEASURED). None
- * of the four reads the array as the scalar the operator declares, so a view
- * carrying it gets a 400 or no rows on three of them and, on MongoDB, rows
- * chosen by a predicate the rule never wrote. The pins below carry both
+ * found the opposite. The pins below carry both
  * directions of that arm, and the carve-outs
  * (an absent value, the four valueless operators) keep their
  * own pins, because the #5685 side of this file is what stops a narrowing from
@@ -186,10 +174,10 @@ describe('#6227 — what stays accepted (the #5685 side: never stricter than the
     ['not_in + empty array', { field: 'f', operator: 'not_in', value: [] }],
     ['between + pair', { field: 'f', operator: 'between', value: [1, 2] }],
     ['between + ISO date pair', { field: 'd', operator: 'between', value: ['2024-01-01', '2024-12-31'] }],
-    // A string operator carrying a number: none of the four backends a lowered
+    // A string operator carrying a number: none of the backends a lowered
     // view rule reaches refuses it (`driver-sql` on SQLite and `driver-memory`
-    // answer it, `driver-mongodb` compiles it, the formula matcher excludes
-    // every row). (`icontains` is the one exception and it is the TABLE's row,
+    // answer it, `driver-mongodb` compiles it).
+    // (`icontains` is the one exception and it is the TABLE's row,
     // not an analogy — see the comparand pins below.)
     ['contains + number', { field: 'f', operator: 'contains', value: 5 }],
     ['starts_with + number', { field: 'f', operator: 'starts_with', value: 5 }],

@@ -2737,8 +2737,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    *
    * ⛔ **Narrowed, NOT retired.** Refusing the key outright is the other arm this
    * could have taken and it is a REMOVAL of an accepted shape, which needs its
-   * own ruling; this change only pulls the ACCEPT SET back to the one the
-   * consumer already honours. The deprecation stated in the description stands
+   * own ruling. The deprecation stated in the description stands
    * exactly where it stood — prefer `filter` — and is unchanged by this.
    *
    * The `{ error }` map is `filter`'s, deliberately: an author who wrote the
