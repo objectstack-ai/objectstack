@@ -66,8 +66,8 @@ promise the key makes. So this change leaves it unenforced, with the reason
 recorded at the mapping and in `packages/spec/liveness/connector.json`, whose
 row for it stays `dead`. That left it owed a second, narrower ADR-0049
 decision, and this same release takes it: `connector.connectionTimeoutMs` is
-**retired**, and that release entry says what to write instead. The key never
-reaches `ConnectorProviderContext` in any release.
+**retired**, and its own entry in this release says what to write instead. The
+key never reaches `ConnectorProviderContext` in any release.
 
 Nine of the ten ledger rows flip `dead` → `live` with the consumer site named;
 the tenth is `connectionTimeoutMs`, above. This change itself moves no
