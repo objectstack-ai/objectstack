@@ -1137,10 +1137,10 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   + 'AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`',
 ));
 
-/** A view's row bound is `pagination.pageSize`; the per-kind blocks answer `limit` with this. */
+/** The per-kind blocks answer `limit` with this; `timeline` is also nested on `object-timeline`. */
 const VIEW_ROW_BOUND_GUIDANCE =
-  'A view\'s row bound is `pagination.pageSize` on the view; this block declares no `limit`. '
-  + 'Delete the key and set `pagination.pageSize` instead.';
+  'This block declares no `limit`. Delete the key: the row bound is `pagination.pageSize` on a view, '
+  + 'or the flat `limit` on a page component node.';
 
 /**
  * Gallery View Configuration (Airtable-style)
