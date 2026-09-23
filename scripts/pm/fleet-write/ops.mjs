@@ -84,8 +84,22 @@ export const TARGET_OWNER = 'objectstack-ai';
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
 export const TRANSPORTS = Object.freeze(['direct', 'dispatch', 'auto']);
 
-/** The session id a dispatch carries; a seat sets it to its own `session_…`. */
+/**
+ * The session id a dispatch carries. A cloud seat's is READ FROM THE CONTAINER
+ * (`CONTAINER_SESSION_ENV` below); this variable OVERRIDES it — for a local
+ * checkout, or a test — and an explicit value that is malformed is refused,
+ * never replaced by the container's.
+ */
 export const SESSION_ENV = 'OS_FLEET_SESSION';
+/**
+ * The container's own name for the seat's session: the cloud harness sets
+ * `CLAUDE_CODE_REMOTE_SESSION_ID=cse_<id>` in every cloud seat container
+ * measured, and `session_<id>` — the same tail — is the seat's id in the shape
+ * `SESSION_SHAPE` takes. Read only when `SESSION_ENV` is absent; a subagent
+ * dev runs in its PM's container and so inherits the DISPATCHING seat's id,
+ * which is the identity the envelope should carry.
+ */
+export const CONTAINER_SESSION_ENV = 'CLAUDE_CODE_REMOTE_SESSION_ID';
 
 /** The merge method the auto-merge op arms. ⛔ Never a free string. */
 export const MERGE_METHOD = 'SQUASH';
@@ -113,6 +127,8 @@ export const PAYLOAD_KEYS = Object.freeze(['request_id', 'repo', 'session', 'act
 
 export const REQUEST_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const SESSION_SHAPE = /^session_[A-Za-z0-9]{6,}$/;
+/** The container variable's shape; group 1 is the tail `session_` is prefixed to. */
+export const CONTAINER_SESSION_SHAPE = /^cse_([A-Za-z0-9]{6,})$/;
 export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`);
 
 /**

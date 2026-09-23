@@ -24,8 +24,10 @@
 #   --via dispatch  `--repo owner/name --actions <file>`; never a command — the relay hands out no token.
 #   --via auto      (the default, or OS_FLEET_TRANSPORT) — asks `fleet-write/dispatch.mjs --route`,
 #                   the ONE selector every tool shares: `dispatch` only when the cloud discriminator,
-#                   a well-formed OS_FLEET_SESSION and a live relay on the board all hold, `direct`
-#                   otherwise (the line says which condition failed). A COMMAND under auto that
+#                   the seat's session (read from the container's CLAUDE_CODE_REMOTE_SESSION_ID;
+#                   OS_FLEET_SESSION overrides it — a local checkout, a test) and a live relay on the
+#                   board — the workflow file on main AND its Actions state `active` — all hold,
+#                   `direct` otherwise (the line says which condition failed). A COMMAND under auto that
 #                   resolves to `dispatch` is REFUSED (exit 3) with the actions-file spelling: it
 #                   cannot be run as the fleet there, and running it as the session's login instead
 #                   would be a silent change of identity.
@@ -95,7 +97,7 @@ log() { printf 'with-fleet: %s\n' "$*" >&2; }
 
 ST_PASS=0
 ST_FAIL=0
-ST_MIN_CASES=28
+ST_MIN_CASES=29
 st_case() {
   local name="$1" got="$2" want="$3"
   if [[ "$got" == "$want" ]]; then
@@ -241,13 +243,25 @@ EOF
   run --via dispatch --repo objectstack-ai/objectstack --actions "$dir/actions.json" -- true || rc=$?
   st_case '--actions AND a command is usage (2)' "$rc" "$EXIT_USAGE"
   # A cloud seat container, under auto, with a command: the ONE shared selector decides. With no
-  # OS_FLEET_SESSION the seat has not opted in, so it is direct — said out loud — and the command runs.
+  # session from EITHER source (OS_FLEET_SESSION blank, the container variable unset — this self-test
+  # runs inside cloud containers too, so the inherited one is dropped) it is direct — said out loud —
+  # and the command runs.
+  : > "$err.cloud"
+  rc=0
+  env -u GIT_DIR -u CLAUDE_CODE_REMOTE_SESSION_ID OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= OS_FLEET_TRANSPORT= OS_FLEET_SESSION= \
+    CCR_AGENT_PROXY_ENABLED=1 bash "$SELF" --read -- sh -c 'printf "%s" "$GITHUB_TOKEN"' > "$dir/cloud.out" 2> "$err.cloud" || rc=$?
+  st_case 'a command under auto in a cloud container WITHOUT a session from either source is direct: it runs, and the line names OS_FLEET_SESSION' \
+    "$rc|$(grep -c 'auto → direct' "$err.cloud")|$(grep -c 'OS_FLEET_SESSION' "$err.cloud")|$(cat "$dir/cloud.out")" "0|1|1|$token"
+  cat "$err.cloud" >> "$err"
+  # …with NO OS_FLEET_SESSION but the container's own session variable (a cloud seat's default) and a live
+  # relay (stood in by the test override): the selector DERIVES the session, all three hold, so a command
+  # is refused with the relay spelling — the allowed command spelling routes through the relay with no prefix.
   : > "$err.cloud"
   rc=0
   env -u GIT_DIR OS_FLEET_TOKEN_CACHE_FILE="$cache" OS_FLEET_APP_ID=1 OS_FLEET_INSTALLATION_ID=2 OS_PM_WRITE_PACE_FILE="$pace" HTTPS_PROXY= https_proxy= OS_FLEET_TRANSPORT= OS_FLEET_SESSION= \
-    CCR_AGENT_PROXY_ENABLED=1 bash "$SELF" --read -- sh -c 'printf "%s" "$GITHUB_TOKEN"' > "$dir/cloud.out" 2> "$err.cloud" || rc=$?
-  st_case 'a command under auto in a cloud container WITHOUT a session is direct (the seat has not opted in): it runs, and the line names OS_FLEET_SESSION' \
-    "$rc|$(grep -c 'auto → direct' "$err.cloud")|$(grep -c 'OS_FLEET_SESSION' "$err.cloud")|$(cat "$dir/cloud.out")" "0|1|1|$token"
+    CCR_AGENT_PROXY_ENABLED=1 CLAUDE_CODE_REMOTE_SESSION_ID=cse_01ABCDEFGHJKMNPQRSTVWXYZ OS_FLEET_RELAY_LIVE=1 bash "$SELF" --read -- sh -c 'printf "%s" "$GITHUB_TOKEN"' > "$dir/cloud.out" 2> "$err.cloud" || rc=$?
+  st_case 'a command under auto with the session DERIVED from the container (no OS_FLEET_SESSION) is REFUSED (3) with the relay spelling, the line naming the container variable, and no token reached it' \
+    "$rc|$(grep -c -- '--via dispatch' "$err.cloud")|$(grep -c 'CLAUDE_CODE_REMOTE_SESSION_ID' "$err.cloud")|$(cat "$dir/cloud.out")" '3|1|1|'
   cat "$err.cloud" >> "$err"
   # …with a session AND a live relay (stood in by the test override): dispatch, so a command is refused with the relay spelling.
   : > "$err.cloud"
@@ -367,8 +381,9 @@ if [[ "$VIA" == dispatch ]]; then
   exit "$EXIT_USAGE"
 fi
 if [[ "$VIA" == auto ]]; then
-  # The ONE selector every tool shares decides: dispatch only when the cloud discriminator, a
-  # well-formed OS_FLEET_SESSION and a live relay all hold. Its JSON line is read, never re-derived.
+  # The ONE selector every tool shares decides: dispatch only when the cloud discriminator, the seat's
+  # session (from the container, OS_FLEET_SESSION overriding it) and a live relay all hold. Its JSON
+  # line is read, never re-derived.
   ROUTE_JSON="$(node "$HERE/fleet-write/dispatch.mjs" --route)" || {
     log "the transport selector refused (fleet-write/dispatch.mjs --route exit $?); nothing ran."
     exit 3

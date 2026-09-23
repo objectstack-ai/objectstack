@@ -867,6 +867,7 @@ import {
 } from './check-half-states.mjs';
 import { readClause2Line } from './clause2-line.mjs';
 import { EXIT_UNCONFIRMED, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { MAX_BODY_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
@@ -2828,6 +2829,53 @@ export function relayExitFor(result) {
   return EXIT_UNCONFIRMED;
 }
 
+/**
+ * The size route: the relay's body cap decides the transport for THIS write,
+ * and nothing else does. Pure.
+ *
+ * The relay carries a body of at most `MAX_BODY_BYTES` UTF-8 bytes (a
+ * `repository_dispatch` `client_payload` is capped by the platform at 64 KB,
+ * hence the 60,000-byte body cap in `fleet-write/ops.mjs`), so a body over it
+ * cannot take the relay however live the relay is:
+ *
+ *   - under `auto`, THIS write goes DIRECT — as the seat's own user, the token
+ *     this process holds — and the route's reason becomes the ONE printed line
+ *     that says so, naming the bytes, the cap and the identity. ⛔ Never silent.
+ *   - under an explicit `OS_FLEET_TRANSPORT=dispatch` the route becomes a
+ *     PREREQUISITE refusal (exit 3) naming the bytes: the operator asked for
+ *     the relay, and a fall-back would change the identity the write is booked
+ *     against.
+ *
+ * ⛔ Only the size re-routes. A refused op, a failed run and an UNCONFIRMED
+ * outcome keep the register `relayExitFor` gives them; and ⛔ there is no
+ * compression codec — a body this size is the thing to shrink, not to encode.
+ * A route that is not `dispatch`, one already carrying an error, or a body at
+ * or under the cap comes back unchanged (flagged `sizeRouted: false`).
+ */
+export function sizeRoute(route, body) {
+  const bytes = Buffer.byteLength(String(body ?? ''), 'utf8');
+  const cap = MAX_BODY_BYTES;
+  if (!route || route.transport !== 'dispatch' || route.error || bytes <= cap) return { ...route, bytes, cap, sizeRouted: false };
+  const size = `the body is ${grouped(bytes)} UTF-8 bytes, ${grouped(bytes - cap)} over the relay's ${grouped(cap)}-byte body cap (a repository_dispatch client_payload is capped by the platform at 64 KB)`;
+  if (route.requested === 'auto') {
+    return {
+      ...route,
+      transport: 'direct',
+      bytes,
+      cap,
+      sizeRouted: true,
+      reason: `${TRANSPORT_ENV} is auto → direct for THIS write: ${size}, so it cannot take the relay. Written DIRECT as the seat's own user (the token this process holds), not as objectstack-fleet[bot]. ⛔ Not compressed: a body this size is the thing to shrink.`,
+    };
+  }
+  return {
+    ...route,
+    bytes,
+    cap,
+    sizeRouted: true,
+    error: `${TRANSPORT_ENV}=dispatch but ${size} — the relay cannot carry it. ⛔ Not falling back to direct: the operator asked for the relay, and the fall-back would change the identity the write is booked against. Shrink the body, or run under ${TRANSPORT_ENV}=auto to let THIS write go direct as the seat's own user.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Live layer
 // ---------------------------------------------------------------------------
@@ -3074,7 +3122,10 @@ async function main(argv) {
 
   // The transport, decided and SAID before anything leaves. A dry run makes no
   // request, so a route that cannot be resolved is a note there, not a refusal.
-  const route = await resolveRoute(process.env);
+  // The size route runs on the RENDERED body (the stamp is part of what is
+  // sent): over the relay's cap, `auto` takes direct for this write and the
+  // line below says so; explicit dispatch is refused.
+  const route = sizeRoute(await resolveRoute(process.env), rendered.body);
   if (route.error && !options.dryRun) {
     console.error(`post-stamped: PREREQUISITE NOT MET — ${route.error}\n  NOTHING WAS WRITTEN.`);
     return EXIT_PREREQUISITE_NOT_MET;
@@ -3264,6 +3315,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
+  "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 12,
 });
 const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -4354,6 +4406,33 @@ export function selfTest() {
     const ownSource = readFileSync(SELF_PATH, 'utf8');
     const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
     t('structural: in main a dry run returns before the relay can be reached, and ONE read-back verdict serves both transports', mainSource.indexOf('if (options.dryRun) {') < mainSource.indexOf('await writeViaRelay(') && (mainSource.match(/readBackVerdict\(\{/g) ?? []).length === 1);
+  }
+
+  // ── the size route ───────────────────────────────────────────────────────
+  battery("the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes");
+  {
+    const AUTO = { requested: 'auto', transport: 'dispatch', reason: 'auto → dispatch (fixture)', error: null, failed: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' };
+    const STRICT = { ...AUTO, requested: 'dispatch', reason: 'OS_FLEET_TRANSPORT=dispatch (fixture)' };
+    const ofBytes = (n) => 'x'.repeat(n);
+    const over = sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES + 1));
+    t('one byte over the cap under auto: DIRECT for this write, flagged as size-routed, no error', over.transport === 'direct' && over.sizeRouted === true && over.error === null);
+    t('…and the ONE line names the bytes sent', over.reason.includes(`${grouped(MAX_BODY_BYTES + 1)} UTF-8 bytes`));
+    t('…the cap', over.reason.includes(`${grouped(MAX_BODY_BYTES)}-byte body cap`));
+    t("…and the identity used — the seat's own user, not the fleet bot", over.reason.includes("seat's own user") && over.reason.includes('not as objectstack-fleet[bot]'));
+    const under = sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES - 1));
+    t('one byte under the cap under auto: the relay, the route untouched', under.transport === 'dispatch' && under.sizeRouted === false && under.reason === AUTO.reason && under.error === null);
+    t('…and exactly AT the cap is still the relay (the validator admits it)', sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES)).transport === 'dispatch');
+    const strict = sizeRoute(STRICT, ofBytes(MAX_BODY_BYTES + 1));
+    t('⛔ explicit dispatch one byte over: a PREREQUISITE refusal naming the bytes and saying it will NOT fall back, the transport NOT changed', strict.transport === 'dispatch' && typeof strict.error === 'string' && strict.error.includes(grouped(MAX_BODY_BYTES + 1)) && strict.error.includes('Not falling back'));
+    t('bytes are UTF-8 BYTES, not characters: 20,001 three-byte characters are over the cap, 20,000 are not', sizeRoute(AUTO, '中'.repeat(20_001)).transport === 'direct' && sizeRoute(AUTO, '中'.repeat(20_000)).transport === 'dispatch');
+    t('a route already direct is never touched, whatever the size', sizeRoute({ ...AUTO, transport: 'direct' }, ofBytes(MAX_BODY_BYTES + 1)).sizeRouted === false);
+    t('a route that already carries an error is never touched — the size never masks a missing session', sizeRoute({ ...STRICT, error: 'no session' }, ofBytes(MAX_BODY_BYTES + 1)).error === 'no session');
+    t('⛔ nothing else re-routes: a refused dispatch, a failed run and UNCONFIRMED keep their register', relayExitFor({ state: 'refused' }) === EXIT_PREREQUISITE_NOT_MET && relayExitFor({ state: 'failure' }) === EXIT_NOT_STORED && relayExitFor({ state: 'timeout' }) === EXIT_UNCONFIRMED);
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
+    t('structural: main hands the resolved route through sizeRoute on the RENDERED body before the transport line is printed', mainSource.includes('sizeRoute(await resolveRoute(process.env), rendered.body)') && mainSource.indexOf('sizeRoute(') < mainSource.indexOf('transport ${route.transport}'));
+    // An import SHAPE, not the module's bare name: the name is spelled in this very line, so a name test could never fail.
+    t('⛔ no compression codec: this file imports nothing from zlib', /from '(node:)?zlib'/.test(ownSource) === false && /require\('(node:)?zlib'\)/.test(ownSource) === false);
   }
 
   // The floor, evaluated last: a battery that stops running names itself here.
