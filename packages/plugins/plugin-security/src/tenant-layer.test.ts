@@ -221,11 +221,11 @@ describe('sys_api_key is not org-walled (#8287)', () => {
   });
 
   /**
-   * [#8778] The stamp-only declaration must not move this object's Layer 0
+   * [#8778] The stamp-only divergence must not move this object's Layer 0
    * inputs. `security-plugin.ts` derives them from exactly two reads — the
    * registered field set (`objectHasOrgIdField`) and
    * `tenancy.enabled === false || systemFields.tenant === false`
-   * (`tenancyDisabled`) — and `tenancy.organizationField` feeds neither.
+   * (`tenancyDisabled`) — and the stamp column feeds neither.
    * Derived here against the REAL shipped object, same doctrine as the rest
    * of this suite: a hand-written boolean and the object can drift, and this
    * is the pair that must not.
@@ -234,13 +234,21 @@ describe('sys_api_key is not org-walled (#8287)', () => {
     (SysApiKey as { tenancy?: { enabled?: boolean } }).tenancy?.enabled === false ||
     (SysApiKey as { systemFields?: { tenant?: boolean } }).systemFields?.tenant === false;
 
-  it('declares the stamp-only organizationField without acquiring the walling column (#8778)', () => {
-    // The declaration exists (the audit writer's input)…
-    expect((SysApiKey as any).tenancy?.organizationField).toBe('active_organization_id');
-    // …and it did not smuggle a wall in: the field set still has no
-    // `organization_id`, and the block states `enabled: false` explicitly.
+  it('carries the stamp column as a FIELD and declares no wall around it (#8778, #19054)', () => {
+    // [#19054] This case used to read the authorable `tenancy.organizationField`
+    // declaration off the shipped object. Protocol 18 retires that key
+    // (ADR-0049) and the divergence moves into
+    // `PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`,
+    // which is not an object declaration and is pinned in that package. What
+    // this suite owns is the half that was always about THIS object: the stamp
+    // column exists as a real field, and nothing about it smuggled a wall in.
+    expect(apiKeyFields.has('active_organization_id')).toBe(true);
+    // ⛔ The retirement must not have been "simplified" by renaming the column:
+    // in this platform an `organization_id` column IS the wall (#8287).
     expect(apiKeyFields.has('organization_id')).toBe(false);
-    expect((SysApiKey as any).tenancy?.enabled).toBe(false);
+    // And the block still states the opt-out explicitly, with no residue of the
+    // removed key.
+    expect((SysApiKey as any).tenancy).toEqual({ enabled: false });
   });
 
   for (const tenancyPosture of ['single', 'group', 'isolated'] as const) {
@@ -249,10 +257,11 @@ describe('sys_api_key is not org-walled (#8287)', () => {
         ...base,
         tenancyPosture,
         // Exactly what security-plugin.ts computes from the registered fields
-        // and the tenancy block — the REAL declaration, post-#8778, so this
-        // case is also the read-neutrality pin for `organizationField`: if the
-        // stamp-only key (or the `enabled: false` that must accompany it) ever
-        // started feeding the wall, this filter would stop being null.
+        // and the tenancy block — the REAL shipped declaration, so this case is
+        // also the wall-neutrality pin for the stamp column: if the
+        // `active_organization_id` column (or the `enabled: false` that must
+        // accompany it) ever started feeding the wall, this filter would stop
+        // being null.
         objectHasOrgIdField: apiKeyFields.has('organization_id'),
         tenancyDisabled: apiKeyTenancyDisabled,
       });

@@ -178,6 +178,8 @@
     "automation/FlowEdge:source",
     "automation/FlowEdge:target",
     "automation/FlowEdge:type",
+    "automation/FlowFunctionLoweredDeclaration:effect",
+    "automation/FlowFunctionLoweredDeclaration:handler",
     "automation/FlowNode:boundaryConfig",
     "automation/FlowNode:config",
     "automation/FlowNode:connectorConfig",

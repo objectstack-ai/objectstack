@@ -6660,14 +6660,31 @@ export class ObjectQL implements IObjectQLEngine {
    * - **Already-expanded objects are skipped.** A read round-trip can hand back
    *   `{id, name, …}` in the slot; that is not an id write.
    *
-   * ## Why the probe is unscoped
+   * ## Why the probe bypasses RLS — and why it keeps the tenant wall
    *
-   * Existence is a fact about the database, not about the caller's visibility —
-   * the same distinction the #4435 existence probe turns on. A scoped probe
-   * would refuse a link to a permission set the caller cannot READ, which is
-   * ordinary in an RLS-scoped deployment and would make the platform's own
-   * admin flows fail. Whether the caller may create the binding at all is the
-   * RBAC/RLS layer's decision, made where it already is.
+   * Existence is a fact about the database, not about the caller's ROW-LEVEL
+   * visibility — the same distinction the #4435 existence probe turns on. A
+   * probe under the caller's own context would refuse a link to a permission
+   * set the caller cannot READ, which is ordinary in an RLS-scoped deployment
+   * and would make the platform's own admin flows fail. Whether the caller may
+   * create the binding at all is the RBAC/RLS layer's decision, made where it
+   * already is. So the probe is elevated: `isSystem` bypasses RBAC, RLS and FLS.
+   *
+   * That argument is about visibility, never about TENANCY, and the elevation
+   * is therefore `sudo()`-shaped — `{ ...context, isSystem: true }`, see
+   * {@link referenceExists} — not a bare `{ isSystem: true }` (#19808). The
+   * bare spelling carried no `tenantId`, so the probe spanned every
+   * organization: an org-bound caller could store a reference to another
+   * organization's row, and could tell "exists in another organization" (the
+   * write committed) from "exists nowhere" (refused) — a cross-tenant existence
+   * oracle. With the caller's context spread first, `buildDriverOptions`
+   * forwards its `tenantId` to the driver, a row stamped with another
+   * organization is not found, and both cases answer the same
+   * `reference_not_found`. The tenancy exemptions stay where they are decided:
+   * `buildDriverOptions` withholds `tenantId` for a `tenancy.enabled: false`
+   * (platform-global) object and for a federated one, so a reference to either
+   * still resolves from an org-bound caller, and a NULL-organization row passes
+   * the driver's `OR … IS NULL` term.
    *
    * Fails OPEN when the target cannot be checked (unregistered object, no
    * driver, a probe that throws): an integrity check that cannot run must not
@@ -6742,7 +6759,7 @@ export class ObjectQL implements IObjectQLEngine {
       for (const v of values) {
         if (v === null || v === undefined || v === '') continue;
         if (typeof v === 'object') continue;
-        const resolved = await this.referenceExists(target, v);
+        const resolved = await this.referenceExists(target, v, context);
         if (resolved === false) {
           failures.push(buildFieldError(
             {
@@ -6764,15 +6781,30 @@ export class ObjectQL implements IObjectQLEngine {
    * Does `id` name a row in `target`? `false` only when the probe RAN and found
    * nothing; `null` when it could not run at all (see the fail-open note on
    * {@link assertReferencesResolve}).
+   *
+   * `context` is the CALLER's execution context. The probe runs under
+   * {@link ObjectQL.referenceCheckContext} — the same `sudo()`-shaped elevation
+   * the pre-delete reference check uses, so the two reference checks share one
+   * spelling: RLS/FLS bypassed, the caller's `tenantId` (and, under the `group`
+   * posture, its membership set) forwarded to the driver by
+   * `buildDriverOptions`. A row outside the caller's tenant scope is therefore
+   * `false` here, exactly like a row that exists nowhere (#19808).
+   *
+   * Without a `context` the elevation is the bare `{ isSystem: true }` and the
+   * probe spans every organization. That is how
+   * {@link inspectDanglingReferences} calls it — the audit has no caller, and
+   * its semantics are unchanged by #19808 — so the audit does not report a
+   * stored reference whose target lives in ANOTHER organization than the row
+   * holding it; only the write-path guard refuses one.
    */
-  private async referenceExists(target: string, id: unknown): Promise<boolean | null> {
+  private async referenceExists(target: string, id: unknown, context?: ExecutionContext): Promise<boolean | null> {
     try {
       const resolved = this.resolveObjectName(target);
       if (!this._registry.getObject(resolved)) return null;
       const row = await this.findOne(resolved, {
         where: { id },
         fields: ['id'],
-        context: { isSystem: true },
+        context: ObjectQL.referenceCheckContext(context),
       } as any);
       return !!row;
     } catch {

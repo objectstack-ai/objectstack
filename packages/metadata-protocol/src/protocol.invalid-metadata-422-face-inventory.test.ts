@@ -217,7 +217,7 @@ describe('[#10888] `meta-envelope` renders the headline, not the prose', () => {
         const { protocol } = makeProtocol();
         const err = await refusal(protocol, 'meta-envelope');
 
-        expect(err.message).toContain('[invalid_metadata] view/task_list failed spec validation: ');
+        expect(err.message).toContain('view/task_list failed spec validation: ');
         expect(err.message).toContain(`${err.issues.length} issue`);
         // The same grammar `seedRequestValidationError` composes — count plus
         // `path [zod code]` locators — so one mistake reads the same whichever
@@ -279,7 +279,7 @@ describe('[#10888 · GUARD] a face that carries no `issues[]` keeps the whole se
             + (err.issues.length > 3 ? ` (+${err.issues.length - 3} more)` : '');
 
         expect(err.message).toBe(
-            `[invalid_metadata] view/task_list failed spec validation: ${expected}`,
+            `view/task_list failed spec validation: ${expected}`,
         );
         // The #4001 self-correcting prescription, whole.
         expect(err.message).toContain(PRESCRIPTION);

@@ -574,7 +574,7 @@ export const ScheduledExportSchema = lazySchema(() => z.object({
   /**
    * Schedule timing configuration.
    *
-   * `cronExpression` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * `cronExpression` was DELETED here in @objectstack/spec 17 (ADR-0049
    * enforce-or-remove, #16320): the whole `ExportJobApiContracts` family has zero
    * consumers, rest-server serves no `/api/v1/data/export` route and `IExportService`
    * has no provider binding, so the cron was parsed and never fired. Deleted outright —
@@ -715,7 +715,7 @@ export const ScheduleExportRequestSchema = lazySchema(() => z.object({
   /**
    * Schedule timing configuration.
    *
-   * `cronExpression` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * `cronExpression` was DELETED here in @objectstack/spec 17 (ADR-0049
    * enforce-or-remove, #16320): the whole `ExportJobApiContracts` family has zero
    * consumers, rest-server serves no `/api/v1/data/export` route and `IExportService`
    * has no provider binding, so the cron was parsed and never fired. Deleted outright —

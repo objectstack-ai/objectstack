@@ -118,9 +118,21 @@ export const SeedSchema = lazySchema(() => strictObject({
    *
    * The platform translates nothing. This is the axis that SELECTS between
    * record sets the app authored itself.
+   *
+   * **Publishing and installing are locale-neutral acts — this axis is scoped
+   * to the boot path, by decision.** The loader evaluates it against
+   * `SeedLoaderConfig.locale`, which only the boot path supplies (AppPlugin
+   * reads the app's declared `i18n.defaultLocale`). Package apply, draft
+   * publish and marketplace install each build their own load request and pass
+   * no locale, so a `locale`-scoped dataset reaching one of them is loaded for
+   * **every** locale and the loader warns naming each dataset it let through.
+   * That bound is the contract, not an unfinished path: a package is assembled
+   * once for every market, and selecting a market is what happens when it is
+   * opened. Ruled on #17011 (2026-09-10), which also kept the warning rather
+   * than turning those paths into a refusal.
    */
   locale: z.array(LocaleSchema).min(1).optional()
-    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale'),
+    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn'),
 
   /**
    * The Payload

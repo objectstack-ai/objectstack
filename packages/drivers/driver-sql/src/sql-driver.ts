@@ -647,6 +647,13 @@ function canonicalTimeOfDay(value: unknown): unknown {
 const SQLITE_TIME_EXPR_REFS = 8;
 
 /**
+ * How many times {@link SqlDriver.sqliteNonTemporalTextSql} spells its column
+ * reference — the binding count a caller must supply per use of the predicate.
+ * (1 `typeof` + 2 `instr` + 1 `julianday`.)
+ */
+const SQLITE_NON_TEMPORAL_TEXT_REFS = 4;
+
+/**
  * [#4436] A filter this driver cannot COMPILE — the caller sent an operator (or
  * an operand shape) outside what the backend can express.
  *
@@ -11111,10 +11118,36 @@ export class SqlDriver implements IDataDriver {
    * is left alone rather than destroyed. So a converged table costs one scan and
    * zero writes, and re-running is a no-op.
    *
+   * ## The one shape `coalesce` does NOT preserve, and what happens to it (#6009)
+   *
+   * "A value SQLite cannot parse falls through the `coalesce`" is true of
+   * everything except the julian-day limb of SQLite's time-value grammar (and
+   * its `now` keyword): for a bare-numeric TEXT cell `strftime` returns a
+   * confident wrong answer instead of NULL, so `coalesce` never fires and this
+   * `UPDATE` would write `-4707-06-11T12:00:00.000Z` over a stored `'2026'`,
+   * irrecoverably. {@link sqliteNonTemporalTextSql} is the structural
+   * complement of the parseable spellings; rows it matches are excluded from
+   * the `UPDATE` and left exactly as they are, which is what the paragraph
+   * above already promises for every other uninterpretable value.
+   *
+   * ⭐ **A withheld row also blocks the canonical mark, and that is the half
+   * that keeps query answers identical.** Skipping a row costs nothing while
+   * the read-side repair is still applied to it — it keeps reading as the same
+   * (wrong) instant it read as before, so no query answer moves. Marking the
+   * column clean is what would move one: `needsLegacyDatetimeRepair` would then
+   * drop the repair and the raw `'2026'` would be compared as TEXT. Unlike the
+   * `coalesce` fixpoints, these rows are NOT invariant under the repair, so
+   * they cannot ride through the mark the way genuinely unparseable junk does.
+   * The column therefore stays un-marked, the reads keep their (unindexed)
+   * repair, and the answers are bit-for-bit what they were before this method
+   * ran — the same degradation a failed `UPDATE` already takes.
+   *
    * Failures are logged and swallowed: the column simply stays un-marked, the
    * read paths keep their repair, and queries stay CORRECT (just unindexed). A
    * migration that cannot run must never be able to take the process down at
-   * boot, and correctness must never be contingent on one having run.
+   * boot, and correctness must never be contingent on one having run. The
+   * #6009 probe runs BEFORE the `UPDATE` for the same reason: a gate that could
+   * not be measured must stop the write, not wave it through.
    */
   protected async backfillCanonicalDatetimes(table: string, tableExisted: boolean): Promise<void> {
     const fields = this.datetimeFields[table];
@@ -11132,11 +11165,19 @@ export class SqlDriver implements IDataDriver {
     // The expression spells `??` 4×, and the statement uses it twice (the SET
     // value and the WHERE guard) — hence the column name repeated per use.
     const exprBindings = (field: string) => [field, field, field, field];
+    // #6009: the rows whose only reading is the julian-day limb.
+    const guard = this.sqliteNonTemporalTextSql('??');
+    const guardBindings = (field: string): string[] =>
+      Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field);
     for (const field of fields) {
       try {
+        const withheld = await this.countNonTemporalTextRows(table, field, canonical, exprBindings(field));
         const res = await this.knex.raw(
-          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical}`,
-          [table, field, ...exprBindings(field), field, field, ...exprBindings(field)],
+          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical} and not ${guard}`,
+          [
+            table, field, ...exprBindings(field),
+            field, field, ...exprBindings(field), ...guardBindings(field),
+          ],
         );
         const converted = (res as any)?.changes ?? 0;
         if (converted) {
@@ -11144,6 +11185,19 @@ export class SqlDriver implements IDataDriver {
             `[sql-driver] canonicalised datetime storage (#3912) for ${table}.${field}`,
             { rowsConverted: converted },
           );
+        }
+        if (withheld > 0) {
+          // #6009 — the tracker id stays in this comment, never in the string:
+          // an operator reading the log has no way to resolve one.
+          this.logger.warn(
+            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
+            `their stored value is a bare number, which SQLite's date functions read as a ` +
+            `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
+            `date nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +
+            `read-side repair until the values are corrected or cleared at the source`,
+            { table, field, rowsWithheld: withheld },
+          );
+          continue;
         }
         clean.add(field);
       } catch (err) {
@@ -11155,6 +11209,39 @@ export class SqlDriver implements IDataDriver {
         );
       }
     }
+  }
+
+  /**
+   * How many not-yet-canonical rows of `table.field` the #6009 guard withholds
+   * from a temporal backfill's `UPDATE` — the count shared by
+   * {@link backfillCanonicalDatetimes} and {@link backfillCanonicalTimes}, so
+   * the two cannot end up asking the question two ways.
+   *
+   * The predicate is the migration's own `WHERE` with
+   * {@link sqliteNonTemporalTextSql} ANDed on instead of negated, so what this
+   * counts and what the `UPDATE` skips are one expression by construction. It
+   * deliberately does NOT swallow its own failure: the caller's `catch` owns
+   * that, and there the whole column is skipped — a gate that could not be
+   * measured must stop the write rather than wave it through.
+   *
+   * @param canonicalSql the caller's canonical expression, spelling `??`
+   * @param exprBindings one binding per `??` in `canonicalSql`
+   */
+  protected async countNonTemporalTextRows(
+    table: string,
+    field: string,
+    canonicalSql: string,
+    exprBindings: string[],
+  ): Promise<number> {
+    const guard = this.sqliteNonTemporalTextSql('??');
+    const res: any = await this.knex.raw(
+      `select count(*) as n from ?? where ?? is not null and ?? is not ${canonicalSql} and ${guard}`,
+      [
+        table, field, field, ...exprBindings,
+        ...Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field),
+      ],
+    );
+    return Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
   }
 
   /**
@@ -11273,6 +11360,14 @@ export class SqlDriver implements IDataDriver {
    * old write path never recorded correctly. An epoch row folds to its UTC
    * time-of-day — the same answer reads have always given for it.
    *
+   * It inherits the #6009 guard for the same reason and on the same terms: a
+   * bare-numeric TEXT cell is read through SQLite's julian-day limb here too
+   * (`'2026'` → `12:00:00`, `'now'` → the wall clock), so
+   * {@link sqliteNonTemporalTextSql} withholds those rows from the `UPDATE`
+   * and, because they are not fixpoints of the read-side repair, from the
+   * canonical mark as well — see {@link backfillCanonicalDatetimes} for the
+   * argument in full.
+   *
    * Failures are logged and swallowed: the column stays un-marked, the read and
    * filter paths keep their repair expression, and queries stay correct (just
    * unindexed). A migration must never take boot down.
@@ -11289,11 +11384,19 @@ export class SqlDriver implements IDataDriver {
 
     const canonical = this.sqliteCanonicalTimeSql('??');
     const exprBindings = (field: string) => Array(SQLITE_TIME_EXPR_REFS).fill(field);
+    // #6009: the rows whose only reading is the julian-day limb.
+    const guard = this.sqliteNonTemporalTextSql('??');
+    const guardBindings = (field: string): string[] =>
+      Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field);
     for (const field of fields) {
       try {
+        const withheld = await this.countNonTemporalTextRows(table, field, canonical, exprBindings(field));
         const res = await this.knex.raw(
-          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical}`,
-          [table, field, ...exprBindings(field), field, field, ...exprBindings(field)],
+          `update ?? set ?? = ${canonical} where ?? is not null and ?? is not ${canonical} and not ${guard}`,
+          [
+            table, field, ...exprBindings(field),
+            field, field, ...exprBindings(field), ...guardBindings(field),
+          ],
         );
         const converted = (res as any)?.changes ?? 0;
         if (converted) {
@@ -11301,6 +11404,19 @@ export class SqlDriver implements IDataDriver {
             `[sql-driver] canonicalised time-of-day storage (#3994) for ${table}.${field}`,
             { rowsConverted: converted },
           );
+        }
+        if (withheld > 0) {
+          // #6009 — the tracker id stays in this comment, never in the string:
+          // an operator reading the log has no way to resolve one.
+          this.logger.warn(
+            `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: ` +
+            `their stored value is a bare number, which SQLite's date functions read as a ` +
+            `JULIAN DAY, so canonicalising them would overwrite the original bytes with a ` +
+            `time nobody wrote. Reads are unchanged — the column keeps its (unindexed) ` +
+            `read-side repair until the values are corrected or cleared at the source`,
+            { table, field, rowsWithheld: withheld },
+          );
+          continue;
         }
         clean.add(field);
       } catch (err) {
@@ -11724,8 +11840,10 @@ export class SqlDriver implements IDataDriver {
    *
    * Each probe reuses the very predicate its migration uses, so the preview
    * cannot claim work the migration will not do (or miss work it will):
-   *   - SQLite counts rows matching `col IS NOT <canonical>` — the backfill's
-   *     entire `WHERE`.
+   *   - SQLite counts rows matching `col IS NOT <canonical>` **and not**
+   *     {@link sqliteNonTemporalTextSql} — the backfill's entire `WHERE`,
+   *     #6009 exclusion included, so the plan does not promise to rewrite the
+   *     julian-day rows the migration now deliberately leaves alone.
    *   - MySQL lists the candidate columns still typed `timestamp` — the
    *     migration's own `information_schema` filter.
    *
@@ -11743,12 +11861,16 @@ export class SqlDriver implements IDataDriver {
         const declared = [...(this.datetimeFields[table] ?? [])].filter((c) => existingColumns.has(c));
         if (declared.length === 0) return [];
         const canonical = this.sqliteCanonicalDatetimeSql('??');
+        const guard = this.sqliteNonTemporalTextSql('??');
         const columns: string[] = [];
         let rows = 0;
         for (const field of declared) {
           const res: any = await this.knex.raw(
-            `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical}`,
-            [table, field, field, field, field, field, field],
+            `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical} and not ${guard}`,
+            [
+              table, field, field, field, field, field, field,
+              ...Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field),
+            ],
           );
           const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
           if (n > 0) { columns.push(field); rows += n; }
@@ -11790,12 +11912,16 @@ export class SqlDriver implements IDataDriver {
         const declared = [...(this.timeFields[table] ?? [])].filter((c) => existingColumns.has(c));
         if (declared.length === 0) return [];
         const canonical = this.sqliteCanonicalTimeSql('??');
+        const guard = this.sqliteNonTemporalTextSql('??');
         const columns: string[] = [];
         let rows = 0;
         for (const field of declared) {
           const res: any = await this.knex.raw(
-            `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical}`,
-            [table, field, field, ...Array(SQLITE_TIME_EXPR_REFS).fill(field)],
+            `select count(*) as n from ?? where ?? is not null and ?? is not ${canonical} and not ${guard}`,
+            [
+              table, field, field, ...Array(SQLITE_TIME_EXPR_REFS).fill(field),
+              ...Array(SQLITE_NON_TEMPORAL_TEXT_REFS).fill(field),
+            ],
           );
           const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
           if (n > 0) { columns.push(field); rows += n; }
@@ -14026,6 +14152,66 @@ export class SqlDriver implements IDataDriver {
       `(case when typeof(${columnSql}) in ('integer','real') ` +
       `then strftime('%Y-%m-%dT%H:%M:%fZ', ${columnSql}/1000.0, 'unixepoch') ` +
       `else coalesce(strftime('%Y-%m-%dT%H:%M:%fZ', ${columnSql}), ${columnSql}) end)`
+    );
+  }
+
+  /**
+   * Is this TEXT cell one that SQLite's date functions ANSWER FOR without it
+   * being a spelling of any temporal literal? (#6009)
+   *
+   * The `else` arm of {@link sqliteCanonicalDatetimeSql} /
+   * {@link sqliteCanonicalTimeSql} leans on `coalesce(strftime(…), col)` to
+   * preserve what it cannot parse. That reasoning has one hole, and it is not a
+   * NULL: SQLite's time-value grammar accepts a **bare number** as a JULIAN DAY
+   * (`DDDD.DDDD`, the last of its documented formats) and the keyword `now`.
+   * For those two shapes `strftime` does not return NULL — it returns a
+   * confident wrong answer, so `coalesce` never fires. Measured on
+   * better-sqlite3 13.0.3 / SQLite 3.53.4, with the column declared `TEXT`:
+   *
+   * ```text
+   * '2026'      -> -4707-06-11T12:00:00.000Z   'now'  -> the wall clock, now
+   * '86400'     -> -4476-06-15T12:00:00.000Z   '1e5'  -> -4439-09-09T12:00:00.000Z
+   * '2440587.5' ->  1970-01-01T00:00:00.000Z   (the julian epoch — still a julian read)
+   * ```
+   *
+   * On a READ that is a temporary misreading and the bytes on disk survive it.
+   * On the SET side of {@link backfillCanonicalDatetimes} /
+   * {@link backfillCanonicalTimes} the same expression WRITES that answer over
+   * the original value, and no later run can get it back — which is the one
+   * thing the backfill contract promises it never does ("a value SQLite cannot
+   * parse … is left alone rather than destroyed").
+   *
+   * ## The predicate is the COMPLEMENT of the parseable spellings, not a heuristic
+   *
+   * Every other format `sqlite3ParseDateOrTime` accepts goes through
+   * `parseYyyyMmDd` (which requires `YYYY-MM-DD`, so a `-`) or `parseHhMmSs`
+   * (which requires `HH:MM`, so a `:`). So a cell that the date functions parse
+   * while containing NEITHER character reached them through the julian-day
+   * limb or the `now` limb — there is no third way in. That is a structural
+   * exclusion, not a guess about what a value "looks like": it never inspects
+   * the magnitude of the number and never decides what the cell MEANS.
+   *
+   * `julianday()` rather than `strftime()` for the parse probe because the two
+   * agree on NULL-ness by construction (both call the same parser) and this way
+   * the predicate is format-free, so one spelling serves both the datetime
+   * expression and the time one.
+   *
+   * ⛔ This is a BACKFILL-SIDE guard and belongs nowhere near the read path.
+   * The maintainer's 2026-08-03 ruling on cloud#1005 refused teaching the
+   * shared read expression to recognise numeric-looking text: that expression
+   * is a public contract for every SQLite consumer, it runs on every read, and
+   * there it would misread a legitimate numeric-string column. Everything here
+   * runs once, as a migration, only on a column the METADATA declares
+   * `Field.datetime` / `Field.time`, and it only ever declines to WRITE.
+   *
+   * The column reference appears {@link SQLITE_NON_TEMPORAL_TEXT_REFS} times;
+   * callers bind accordingly.
+   */
+  protected sqliteNonTemporalTextSql(columnSql: string): string {
+    return (
+      `(typeof(${columnSql}) not in ('integer','real') ` +
+      `and instr(${columnSql}, '-') = 0 and instr(${columnSql}, ':') = 0 ` +
+      `and julianday(${columnSql}) is not null)`
     );
   }
 

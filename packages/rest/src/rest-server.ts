@@ -305,7 +305,7 @@ import { runImport } from './import-runner.js';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
-// [#17058] The `POST …/analytics/dataset/query` door parse — the half of the
+// [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
 // analytics family this route never had. See the module header for the
 // measurement that decides its shape.
 import { datasetSelectionRefusal } from './analytics-selection-door.js';
@@ -11131,7 +11131,7 @@ export class RestServer {
                         });
                     }
 
-                    // [#17058] …and every OTHER member of `selection` had no
+                    // [PR #17548] …and every OTHER member of `selection` had no
                     // door at all, so a malformed one travelled into
                     // `dataset-executor` and was answered by whatever the face
                     // behind it happened to do with it — while the sibling
@@ -11139,13 +11139,18 @@ export class RestServer {
                     // identical failure to a 400 at the entry. One family, two
                     // postures, decided by which door the client knocked on.
                     //
-                    // The parse is a PROJECTION, never the siblings' schema:
-                    // `selection` is a `DatasetSelection`, which is NOT the
-                    // `AnalyticsQuery` the siblings parse — it carries no
-                    // `cube` and has four members of its own, so the sibling
-                    // schema would 400 every real dashboard widget.
-                    // {@link datasetSelectionRefusal} carries that measurement
-                    // and the reason those four are deliberately left out.
+                    // [#17551, ruled] The parse is the WHOLE selection, against
+                    // `DatasetSelectionSchema` — the one declaration of this
+                    // wire shape, authored in `packages/spec` beside the
+                    // sibling routes' own request body. ⛔ Never the siblings'
+                    // schema: `selection` is a `DatasetSelection`, which
+                    // carries no `cube` and has four members of its own, so
+                    // `AnalyticsQueryRequestSchema` would 400 every real
+                    // dashboard widget. PR #17548 could only door the seven
+                    // members whose declarations coincided; the four that were
+                    // left — `runtimeFilter`, `dateGranularity`, `compareTo`,
+                    // `totals` — are what this closes. {@link datasetSelectionRefusal}
+                    // carries both measurements.
                     //
                     // Validation-only: the caller's `selection` is what reaches
                     // `queryDataset` below, never a parse output.

@@ -477,13 +477,13 @@ branching and a human-readable hint pointing at this ADR:
 
 ```jsonc
 // L1
-{ "error": "[not_overridable] ...", "code": "not_overridable", "status": 403 }
+{ "error": "[not_overridable] ...", "code": "NOT_OVERRIDABLE", "status": 403 }
 // L2
 { "error": "[package_locked] App 'setup' belongs to package 'com.objectstack.setup' which sets metadataDefaults.lock=full.",
-  "code": "package_locked", "status": 403, "package": "com.objectstack.setup" }
+  "code": "ITEM_LOCKED", "status": 403, "package": "com.objectstack.setup" }
 // L3
 { "error": "[item_locked] App 'setup' is locked (_lock=full). See ADR-0010 §3.3.",
-  "code": "item_locked", "status": 403, "lock": "full" }
+  "code": "ITEM_LOCKED", "status": 403, "lock": "full" }
 // L4
 { "error": "[frozen_path] Path 'fields.id.type' is frozen on packaged object 'crm_account'.",
   "code": "frozen_path", "status": 422, "path": "fields.id.type" }

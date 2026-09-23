@@ -9,7 +9,7 @@ import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
 import { retiredKey } from '../shared/retired-key';
-import { AssembledPackageBodySchema } from '../stack.zod';
+import { RecordStagePackageBodySchema } from '../stack.zod';
 
 /**
  * # Package API Protocol
@@ -77,15 +77,9 @@ export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
  * The body half is deliberately typed `Record<string, unknown>`; the reason is
  * recorded at `AssembledPackageBodySchema` and is not repeated here. The RUNTIME
  * schema still carries the manifest's every field plus every collection's full
- * declaration, so a wrong-shaped body is refused exactly as it is there — with
- * the one measured exception {@link AssembledPackageRecordBodySchema} states
- * and pins.
- */
-/**
- * The assembled package body AS THE REGISTRY RECORDS IT — the same declaration,
- * with the two collections that have no JSON form left unchecked.
+ * declaration, so a wrong-shaped body is refused exactly as it is there.
  *
- * ## Why this exists at all, measured rather than assumed
+ * ## The row's manifest is the RECORD stage, not the assembled one
  *
  * `SchemaRegistry.installPackage` does not store the caller's object; it stores
  * `toRecordManifest(manifest)`, a structural JSON projection that DROPS
@@ -97,37 +91,34 @@ export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
  * - `hooks` — a `z.custom()` branch (a lifecycle handler).
  *
  * Those same two are the reason `AssembledPackageBodySchema` has NO JSON Schema
- * at all: `z.toJSONSchema` refuses a function and a custom type, which is also
- * why `ArtifactPackageSchema` and `ObjectStackDefinitionSchema` publish none.
- * Embedding the body verbatim in the two published response schemas below made
- * BOTH of them disappear from `json-schema/api/`, which the build's own
- * disappearance ratchet refuses and whose only other remedy is retiring two
- * published defs. `build-schemas.ts` names the remedy taken here instead:
+ * at all: `z.toJSONSchema` refuses a function and a custom type, and embedding
+ * the body verbatim in the two published response schemas below made BOTH of
+ * them disappear from `json-schema/api/`, which the build's own disappearance
+ * ratchet refuses. `build-schemas.ts` names the remedy taken here:
  * «make it emit — narrow the unrepresentable member».
  *
- * ⛔ The override set is NOT hand-picked, and must never become so. It is the
- * measured set of shape members with no JSON form, pinned key-by-key in
- * `./package-api.test.ts`: a new collection with no JSON form reddens there,
- * naming itself, instead of silently unpublishing these responses again.
+ * ⚠️ ⛔ Those two members are NOT why `ArtifactPackageSchema` and
+ * `ObjectStackDefinitionSchema` publish no JSON Schema — an earlier version of
+ * this docblock said they were, and it is false. `src/stack.zod.ts` is not one
+ * of the subpath namespaces `build-schemas.ts` walks, so neither schema is ever
+ * reached by the emit loop; repairing the two branches would not make either
+ * appear. What the narrowing below buys is this file's own two responses, which
+ * ARE in the emit loop.
  *
- * ⚠️ What `unknown` costs, stated plainly: on THIS surface those two keys are
- * accepted without being checked. It is a widening from today, where both are
- * refused outright by `ManifestSchema`'s strict close while the door really can
- * serve them — so the declaration moves from wrong to incomplete, never from
- * checked to tolerant. Every other key, `objects` included, is checked at the
- * assembled stage exactly as `AssembledPackageBodySchema` declares it. The
- * ARTIFACT surface is untouched and keeps both collections fully declared.
+ * ⭐ The narrowing is a DECLARATION rather than a hole. Until #17518 these two
+ * keys were `z.unknown().optional()` here — accepted without being checked —
+ * and that hole is what `RecordStagePackageBodySchema` replaces: the registry
+ * record stage, declared in `../stack.zod` beside the assembled and artifact
+ * stages, is the assembled body with both collections lowered and
+ * `functions[].handler` optional. ⛔ Never widen either key back to `unknown`
+ * to make a row fit: a row that parses through neither declared stage is a
+ * producer defect, and the record stage exists to keep saying so. The set of
+ * members that need the treatment is MEASURED, never hand-picked — pinned
+ * key-by-key in `./package-api.test.ts`, so a new collection with no JSON form
+ * reddens there, naming itself.
  */
-const AssembledPackageRecordBodySchema = lazySchema(() =>
-  (AssembledPackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
-    functions: z.unknown().optional()
-      .describe('Named handler functions, as they survived the record JSON projection'),
-    hooks: z.unknown().optional()
-      .describe('Object lifecycle hooks, as they survived the record JSON projection'),
-  }).describe('One package as assembled, as the registry RECORDS it (JSON only)'));
-
 export const AssembledInstalledPackageSchema = lazySchema(() => InstalledPackageSchema.extend({
-  manifest: AssembledPackageRecordBodySchema.describe('The ASSEMBLED package body this row carries'),
+  manifest: RecordStagePackageBodySchema.describe('The ASSEMBLED package body this row carries, at the stage the registry records it'),
 }).describe('Installed package row whose manifest is the assembled package body'));
 export type AssembledInstalledPackage = z.input<typeof AssembledInstalledPackageSchema>;
 /** Post-parse shape of {@link AssembledInstalledPackage} — defaults applied, transforms run (ADR-0122). */
@@ -369,25 +360,60 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
   /**
    * Whether to enable the package immediately after install.
    *
+   * ## ⭐ THREE STATES, and absence is one of them — that is why it is
+   * `optional()` and NOT `.default(true)`
+   *
+   * - `true`  — the row is ENABLED after this install, existing or fresh.
+   * - `false` — the row is DISABLED after this install: present-but-not-active,
+   *   and the disable survives a restart.
+   * - ABSENT  — the row KEEPS ITS CURRENT LIFECYCLE STATE. No lifecycle call is
+   *   made at all, so a package an operator disabled stays disabled across an
+   *   upgrade or a re-install. A FRESH id has no state to keep and lands
+   *   ENABLED, which is the registry's own new-row value, ⛔ not a default
+   *   this declaration applies.
+   *
+   * ⭐ 「缺省 = 保持，有旗 = 设置」 — ruled in maintainer batch #157 item 5
+   * letter C and implemented at the door (`packages/runtime/src/domains/packages.ts`),
+   * which reads the raw body and makes NO lifecycle call when the key is
+   * absent. The declaration followed in batch #210 item 4 letter A.
+   *
+   * ⛔ `.default(true)` is what this key may never go back to, and the reason
+   * is mechanical rather than stylistic: a default RESOLVES absence at parse
+   * time, so a parsed request that omitted the key becomes byte-identical to
+   * one that set `true`, and the third state stops existing on the published
+   * surface while the door still honours it — 「declared ≠ enforced」 on a
+   * contract this repo does not own both ends of.
+   *
+   * ⛔ Nor may the key be made to MEAN nothing in the name of making absence
+   * visible: the `true` and `false` arms are unchanged by that ruling and are
+   * re-read as such in `package-install-one-authority.test.ts`.
+   *
    * ## ⭐ THE ONE AUTHORITY for this key, and the map to the other two
    *
    * `enableOnInstall` is declared in three published schemas. This one is the
    * authority, because it is the request contract of the door that HONOURS it:
-   * `POST /api/v1/packages` writes the registry row's `enabled` from
-   * `enableOnInstall ?? true`, through the same registry flip and durable
-   * state write `PATCH /packages/:id/disable` uses
-   * (`packages/runtime/src/domains/packages.ts`). A `false` here installs the
-   * package present-but-not-active and survives a restart; `true` and absent
-   * install it enabled, which is this declaration's default.
+   * `POST /api/v1/packages` moves the registry row through the same registry
+   * flip and durable state write `PATCH /packages/:id/enable` and
+   * `PATCH /packages/:id/disable` use.
    *
    * The other two are re-read here so a reader never has to guess which of
    * three identical-looking declarations governs:
    *
    * - `InstallPackageRequestSchema` (`src/kernel/package-registry.zod.ts`) —
    *   **a COPY of this key**, restated on the in-process protocol primitive
-   *   `ObjectStackProtocol.installPackage`. Same type, same default, same
-   *   meaning; its own implementation does not read it, and this door does not
-   *   forward it down that seam. Held to this declaration by
+   *   `ObjectStackProtocol.installPackage`. Same type, same optionality, same
+   *   meaning; its own implementation HONOURS it on the REGISTRY ROW —
+   *   `true` enables, `false` disables, an ABSENT key makes no lifecycle
+   *   call at all, the same three states this door implements
+   *   (`packages/metadata-protocol/src/protocol.ts`, the `requestedEnabled`
+   *   arms). The DURABLE half is not that seam's to write: the
+   *   disabled-package record is keyed by ENVIRONMENT, which an
+   *   `InstallPackageRequest` does not carry — which is also why this door
+   *   still does not forward the key down that seam. It calls
+   *   `installPackage({ manifest, settings })` and performs the
+   *   enable/disable flip itself, so the record that survives a restart
+   *   follows the row this door returned rather than the request's intent.
+   *   Held to this declaration by
    *   `package-install-one-authority.test.ts`, not by an import: the authority
    *   sits above `kernel/` in the module graph, so a `…Schema.shape.…`
    *   reference from there is a cycle that dies under `OS_EAGER_SCHEMAS=1`.
@@ -396,13 +422,15 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
    *   listing, its door is the control plane's `POST /api/v1/marketplace/install`,
    *   and its `enableOnInstall` is what a caller asks the marketplace channel
    *   to request on its behalf, one translation upstream of this one. It stays
-   *   a declaration of its own and says why at its own site.
+   *   a declaration of its own and says why at its own site. Its 缺省 cell moved
+   *   with the other two so the matrix stays readable as one row per state, ⛔
+   *   not because the key was folded.
    *
    * ⛔ Never unify the three silently, in either direction: two of them are
    * one commitment and the third is a different party's.
    */
-  enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row\'s `enabled` is written from this key'),
+  enableOnInstall: z.boolean().optional()
+    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row\'s current lifecycle state (a fresh install lands enabled)'),
 
   /**
    * Opt back in to overwriting an already-installed package id.

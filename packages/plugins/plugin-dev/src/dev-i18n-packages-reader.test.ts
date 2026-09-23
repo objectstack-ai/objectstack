@@ -134,9 +134,22 @@ const modulePackage = (): ObjectStackDefinition =>
     ],
   });
 
-/** Today's emitted shape: flattened top level PLUS `packages[]`. */
-const additiveProject = (): Record<string, unknown> =>
+/** Today's emitted shape: `packages[]` only (#14512's emitter half). */
+const optionBProject = (): Record<string, unknown> =>
   composeStacks([modulePackage(), corePackage()], { manifest: 'preserve' }) as unknown as Record<string, unknown>;
+
+/**
+ * The LEGACY additive shape — flattened top level PLUS `packages[]` — which is
+ * every multi-package artifact built before #14512 and still read off disk
+ * under D4's read-both rule. Synthesized for the one collection this reader
+ * reads, the same way option B used to be.
+ */
+const additiveProject = (): Record<string, unknown> => {
+  const composed = optionBProject();
+  composed.translations = (composed.packages as Array<{ manifest?: { translations?: unknown[] } }>)
+    .flatMap((entry) => entry.manifest?.translations ?? []);
+  return composed;
+};
 
 /**
  * The SAME composition with no i18n anywhere — no `translations` at any level,
@@ -149,17 +162,11 @@ const additiveNoI18nProject = (): Record<string, unknown> => {
     [modulePackage(), { ...corePackage(), translations: undefined } as ObjectStackDefinition],
     { manifest: 'preserve' },
   ) as unknown as Record<string, unknown>;
-  delete composed.translations;
+  delete composed.translations;   // absent already since #14512; deleted so the
+                                  // fixture states the shape it means
   for (const entry of composed.packages as Array<{ manifest?: Record<string, unknown> }>) {
     delete entry.manifest?.translations;
   }
-  return composed;
-};
-
-/** The ruled option-B shape, for the one collection this reader reads. */
-const optionBProject = (): Record<string, unknown> => {
-  const composed = additiveProject();
-  delete composed.translations;
   return composed;
 };
 

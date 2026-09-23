@@ -6,6 +6,9 @@ import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/built
 import {
   TranslationDataSchema,
   TranslationBundleSchema,
+  PlatformTranslationDataSchema,
+  PlatformTranslationBundleSchema,
+  defineTranslationBundle,
   LocaleSchema,
   FieldTranslationSchema,
   ObjectTranslationDataSchema,
@@ -786,13 +789,25 @@ describe('translation unknown-key strictness (#4001)', () => {
     ['a page translation', { pages: { home: { subtitel: 'Welcome' } } }, 'subtitle'],
     ['a dashboard widget', { dashboards: { sales: { widgets: { rev: { titel: 'Revenue' } } } } }, 'title'],
     ['a dashboard global filter', { dashboards: { sales: { globalFilters: { region: { lable: 'Region' } } } } }, 'label'],
-    ['a settings key', { settings: { mail: { keys: { host: { lable: 'Host' } } } } }, 'label'],
     ['a metadata form field', { metadataForms: { object: { fields: { name: { helpTxt: 'x' } } } } }, 'helpText'],
   ])('rejects a typo in %s and names the key it meant', (_what, body, expected) => {
     const result = TranslationDataSchema.safeParse(body);
     expect(result.success).toBe(false);
     expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
       .toContain(`→ \`${expected}\``);
+  });
+
+  it.each([
+    ['a settings key', { settings: { mail: { keys: { host: { lable: 'Host' } } } } }, 'label'],
+  ])('rejects a typo in %s on the PLATFORM face and names the key it meant', (_what, body, expected) => {
+    // Same probe as the per-app battery above, moved rather than deleted: the
+    // group left the per-app door with #15178, so the per-app schema answers
+    // `settings` itself now (the battery two blocks down) and the nested-key
+    // suggester can only be exercised where the group still exists.
+    const result = PlatformTranslationDataSchema.safeParse(body);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+      .toContain(`\u2192 \`${expected}\``);
   });
 
   it.each([
@@ -1259,8 +1274,10 @@ describe('translation unknown-key strictness (#4001)', () => {
   });
 
   it('still accepts every declared group together', () => {
-    // The shape is spread into two schemas (bundle entry + metadata item); this
-    // is the guard against closing one of them against a stale key list.
+    // The shape is spread into three schemas (per-app bundle entry, platform
+    // bundle entry, metadata item); this is the guard against closing one of
+    // them against a stale key list. `settings` is the one group the per-app
+    // face does NOT take, so it is authored separately below.
     const body = {
       objects: { account: { label: 'Account', _views: { all: { label: 'All', emptyState: { title: 'None' } } } } },
       apps: { crm: { label: 'CRM', navigation: { sales: { label: 'Sales' } } } },
@@ -1269,12 +1286,56 @@ describe('translation unknown-key strictness (#4001)', () => {
       dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue', subCaption: 'vs last quarter' } }, globalFilters: { region: { label: 'Region', options: { emea: 'EMEA' } } } } },
       pages: { home: { label: 'Home', title: 'Welcome' } },
       flows: { lead_conversion: { label: 'Convert Lead', screens: { details: { title: 'Details', fields: { name: { label: 'Name', placeholder: 'Enter a name' } } } } } },
-      settings: { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } },
       metadataForms: { object: { label: 'Object', fields: { name: { label: 'Name' } } } },
       settingsCommon: { sourceLabels: { env: 'Env', tenant: 'Tenant' } },
     };
+    const settings = { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } };
     expect(() => TranslationDataSchema.parse(body)).not.toThrow();
-    expect(() => TranslationItemSchema.parse({ locale: 'en', ...body })).not.toThrow();
+    expect(() => PlatformTranslationDataSchema.parse({ ...body, settings })).not.toThrow();
+    expect(() => TranslationItemSchema.parse({ locale: 'en', ...body, settings })).not.toThrow();
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // #15178 — `settings` is a PLATFORM group; the per-app door refuses it
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('per-app `settings` is refused with the platform-only prescription (#15178)', () => {
+    const settings = { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } };
+
+    it.each([
+      ['`settings`', 'settings'],
+      // The singular used to be an ALIAS for `settings`; an alias whose target
+      // the shape no longer accepts is a suggestion the author cannot take, so
+      // it rides the same prescription instead.
+      ['the singular `setting`', 'setting'],
+    ])('refuses %s on a per-app bundle entry', (_what, key) => {
+      const result = TranslationDataSchema.safeParse({ [key]: settings });
+      expect(result.success).toBe(false);
+      const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+      // The prescription, not a rename: naming a key this door rejects would
+      // send the author into a second rejection.
+      expect(message).toContain('PLATFORM group');
+      expect(message).toContain('PlatformTranslationData');
+      expect(message).not.toContain(`\`${key}\` \u2192`);
+    });
+
+    it('refuses it at the bundle door too, which is the one an app actually authors', () => {
+      // `defineTranslationBundle` and `stack.translations` both parse through
+      // `TranslationBundleSchema`; #3778's asymmetry was a guard that closed
+      // one door and left the other open.
+      const result = TranslationBundleSchema.safeParse({ 'zh-CN': { settings } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '')
+        .toContain('PLATFORM group');
+      expect(() => defineTranslationBundle({ 'zh-CN': { settings } } as never)).toThrow(/PLATFORM group/s);
+    });
+
+    it('still accepts it on the platform face and on the registered `translation` item', () => {
+      // The over-acceptance control for the refusals above: the group did not
+      // leave the contract, it left ONE of its three faces.
+      expect(() => PlatformTranslationDataSchema.parse({ settings })).not.toThrow();
+      expect(() => PlatformTranslationBundleSchema.parse({ 'zh-CN': { settings } })).not.toThrow();
+      expect(() => TranslationItemSchema.parse({ locale: 'zh-CN', settings })).not.toThrow();
+    });
   });
 
   it.each(['fileOrganization', 'messageFormat', 'lazyLoad', 'cache'])(

@@ -11,14 +11,18 @@
  * composition that produces `packages[]` (see
  * `examples/app-multi-package/objectstack.config.ts`).
  *
- * ## The two shapes, and why the second one is DERIVED
+ * ## The two shapes, and why the LEGACY one is DERIVED
  *
- * `additiveProject()` is what the platform emits today: every collection
- * flattened to the top level, PLUS `packages[]` carrying the same definitions
- * a second time.
+ * `optionBProject()` is what the platform emits today, straight out of
+ * `composeStacks(…, { manifest: 'preserve' })`: the flattened top level GONE,
+ * `packages[]` carrying everything exactly once (#14512's emitter half, ADR-0130
+ * D4 addendum 2026-09-22).
  *
- * `optionBProject()` is what the ruled emitter half will emit: the flattened
- * top level GONE, `packages[]` carrying everything exactly once.
+ * `additiveProject()` is the shape the platform emitted BEFORE that — every
+ * collection flattened to the top level, PLUS `packages[]` carrying the same
+ * definitions a second time. It is still a live shape, not history: D4's
+ * read-both rule reads an artifact already built and on disk at a customer, so
+ * both legs of this probe stay required and both must see every collection.
  *
  * The key set that separates them is **derived from the two schemas**, never
  * transcribed here — `ObjectStackDefinitionSchema` ∩ `AssembledPackageBodySchema`
@@ -33,11 +37,13 @@
  *
  * ## What this fixture is NOT
  *
- * It is not a claim about what `composeStacks` emits. `optionBProject()` builds
- * the option-B shape by STRIPPING the composed stack, in the fixture, precisely
- * so the probe can measure readers against that shape while the producer stays
- * additive — which is the ruled order (readers first, emitter last) and the
- * reason this card touches zero production files.
+ * It is not a claim about what `composeStacks` emits. Until #14512's emitter
+ * half landed it was `optionBProject()` that was synthesized, by stripping the
+ * composed stack, so the probe could measure readers while the producer stayed
+ * additive — the ruled order (readers first, emitter last). The synthesis has
+ * moved to the other leg for the same reason it existed: the shape the producer
+ * does NOT emit is the one the fixture has to build, and a reader that stopped
+ * resolving either shape is what both legs are here to catch.
  */
 
 import {
@@ -323,23 +329,33 @@ const ordersStack = (): ObjectStackDefinition =>
 
 // ─── The two shapes ─────────────────────────────────────────────────────────
 
-/** Today's emitted shape: flattened top level PLUS `packages[]`. */
-export const additiveProject = (): ObjectStackDefinition =>
+/**
+ * Today's emitted shape: `packages[]` carries every definition once, and the
+ * flattened top-level collections are not emitted at all (#14512).
+ */
+export const optionBProject = (): ObjectStackDefinition =>
   composeStacks([ordersStack(), coreStack()], { manifest: 'preserve' });
 
 /**
- * The ruled option-B shape: `packages[]` carries every definition once, and the
- * flattened top-level collections are gone.
+ * The LEGACY additive shape: flattened top level PLUS `packages[]` carrying the
+ * same definitions a second time — every multi-package artifact built before
+ * #14512's emitter half, which D4's read-both rule still reads.
  *
- * Built by stripping the composed project — see the module header for why the
- * fixture, and not `composeStacks`, is what strips.
+ * Built by composing the same two packages with the DEFAULT manifest strategy —
+ * which is the flattening half of what preserve used to do, merges and
+ * action-binding included — and attaching the preserve composition's envelope.
+ * ⛔ Not a hand-written concatenation of the package bodies: the flattened
+ * `objects` of a composition is `mergeObjects` + `mergeActionsIntoObjects`
+ * output, and a fixture that re-derived it by concatenating would stop
+ * resembling the artifacts this leg exists to keep readable.
  */
-export const optionBProject = (): ObjectStackDefinition => {
-  const composed = additiveProject() as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
+export const additiveProject = (): ObjectStackDefinition => {
+  const preserved = optionBProject() as Record<string, unknown>;
+  const flattened = composeStacks([ordersStack(), coreStack()]) as Record<string, unknown>;
   const owned = new Set(PACKAGE_OWNED_COLLECTION_KEYS);
-  for (const [key, value] of Object.entries(composed)) {
-    if (!owned.has(key)) out[key] = value;
+  const out: Record<string, unknown> = { ...preserved };
+  for (const [key, value] of Object.entries(flattened)) {
+    if (owned.has(key)) out[key] = value;
   }
   return out as ObjectStackDefinition;
 };

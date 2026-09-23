@@ -571,7 +571,27 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `field :: relatedListFilter :: data.type in ['lookup','master_detail']`
     // — and NONE was removed. The same card's second row, `object.validations`,
     // carries no predicate at all, so it does not enter this census.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(53);
+    // It is 72 today, and this one is an ADDITION of NINETEEN: #19331 gave the
+    // 45 declared-but-unoffered object-rooted live scalar keys a form row each,
+    // and nineteen of those rows carry a MEANINGFULNESS gate — the schema
+    // accepts each key whatever the sibling value is, but only some field
+    // types, page kinds or action operations ever read it, and offering a knob
+    // the runtime does not deliver is what Prime Directive #10 forbids. Fifteen
+    // are `field.form.ts` rows mirrored from the same key's row in the object
+    // designer's quick-add grid, so the two surfaces cannot disagree about when
+    // a knob applies; the other four are `page :: source`, `action :: openIn`,
+    // `action :: newTabUrl` and `action :: undoable`.
+    // Measured rather than inferred from the delta: the shipped `*.form.ts`
+    // corpus was differenced against the merge base `5ce3705052` by
+    // `<form>::<field>::<source>`. Exactly nineteen entries were added and NONE
+    // was removed — `field :: ackPlaintextMasking | allowCreate |
+    // autonumberFormat | descriptionField | dimensions | displayField |
+    // inlineAmountField | inlineTitle | language | lookupPageSize | maxSize |
+    // referenceVia | relatedListTitle | returnType | step`, plus
+    // `page :: source`, `action :: openIn`, `action :: newTabUrl` and
+    // `action :: undoable`. The other twenty-six rows that card landed carry no
+    // predicate at all, so they do not enter this census.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(72);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -651,7 +671,16 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // section with the `type: 'page'` mount it configured (ADR-0049
     // enforce-or-remove), taking that one `==` literal comparison with it. The
     // seven sibling surface blocks that share its shape are untouched.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(41);
+    // It is 52 today: eleven of #19331's nineteen new predicates compare
+    // against a single-quoted literal (`data.type == 'password'`,
+    // `== 'autonumber'`, `== 'vector'`, two `== 'master_detail'`, `== 'code'`,
+    // `== 'url'`, `== 'text'`, `== 'formula'`, `== 'slider'`,
+    // `data.operation == 'update'`). The other eight do not reach this rule:
+    // seven are `in`-list gates, whose literals belong to `in` and are
+    // deliberately outside this rule (see the anchor note above), and
+    // `action :: newTabUrl` compares against the bare `true`, which is not a
+    // quoted literal and is not rewritten.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(52);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

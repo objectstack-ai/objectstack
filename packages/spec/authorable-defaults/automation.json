@@ -42,6 +42,7 @@
     "automation/Flow:version = 1",
     "automation/FlowEdge:isDefault = false",
     "automation/FlowEdge:type = \"default\"",
+    "automation/FlowFunctionLoweredDeclaration:effect = \"pure\"",
     "automation/FlowVariable:isInput = false",
     "automation/FlowVariable:isOutput = false",
     "automation/LoopConfig:iteratorVariable = \"item\"",

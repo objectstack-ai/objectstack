@@ -1,11 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { TranslationData } from '@objectstack/spec/system';
+import type { PlatformTranslationData } from '@objectstack/spec/system';
 
 /**
  * 简体中文 (zh-CN) — built-in settings manifest translations.
  */
-export const zhCN: TranslationData = {
+export const zhCN: PlatformTranslationData = {
   settingsCommon: {
     sourceLabels: {
       env: '环境变量',

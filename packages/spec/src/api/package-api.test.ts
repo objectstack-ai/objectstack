@@ -153,7 +153,7 @@ describe('the /packages doors declare the query parameters they execute (#17667)
 // ==========================================
 
 describe('PackageInstallRequestSchema', () => {
-  it('should accept a minimal install request', () => {
+  it('should accept a minimal install request — and leave an absent `enableOnInstall` UNDEFINED', () => {
     const result = PackageInstallRequestSchema.parse({
       manifest: {
         id: 'com.acme.crm',
@@ -162,7 +162,13 @@ describe('PackageInstallRequestSchema', () => {
         type: 'plugin',
       },
     });
-    expect(result.enableOnInstall).toBe(true);
+    // ⭐ [#19273] This assertion read `toBe(true)` while the declaration spelled
+    // `.default(true)`, and it was the lit control proving absence really was
+    // erased at parse time. The declaration is `optional()` now — 「缺省 = 保持，
+    // 有旗 = 设置」 — so the absence survives the parse and the door's three-way
+    // read has a third state to see. The full matrix, with the flip-trigger it
+    // was registered under, is in `package-install-one-authority.test.ts`.
+    expect(result.enableOnInstall).toBeUndefined();
   });
 
   it('should accept full install request with platform version', () => {
@@ -653,7 +659,7 @@ describe('`InstalledPackageAtEitherStageSchema` admits both stages and NOTHING e
   });
 });
 
-describe('the record-body override set is MEASURED, never hand-picked', () => {
+describe('the set the record stage must RE-DECLARE is MEASURED, never hand-picked', () => {
   /** Does this schema have a JSON Schema form at all? */
   const emits = (schema: unknown): boolean => {
     try {
@@ -665,12 +671,12 @@ describe('the record-body override set is MEASURED, never hand-picked', () => {
   };
 
   it('exactly `functions` and `hooks` have no JSON form on the assembled body', () => {
-    // The two published response schemas below embed the assembled body. Any
-    // collection with no JSON form makes them BOTH vanish from
-    // `json-schema/api/`, which the build's disappearance ratchet refuses — so
-    // the read-API record body overrides exactly this set, and this pin is what
-    // keeps the two in step. A new non-serialisable collection reddens HERE,
-    // naming itself, rather than unpublishing two response schemas.
+    // The two published response schemas below embed the row, whose manifest is
+    // the RECORD stage. Any collection with no JSON form makes them BOTH vanish
+    // from `json-schema/api/`, which the build's disappearance ratchet refuses
+    // — so the record stage declares exactly this set in its lowered form, and
+    // this pin is what keeps the two in step. A new non-serialisable collection
+    // reddens HERE, naming itself, rather than unpublishing two responses.
     const shape = (AssembledPackageBodySchema as unknown as { shape: Record<string, unknown> }).shape;
     const noJsonForm = Object.keys(shape).filter((k) => !emits(shape[k]));
     expect(noJsonForm.sort()).toEqual(['functions', 'hooks']);
@@ -681,6 +687,63 @@ describe('the record-body override set is MEASURED, never hand-picked', () => {
     expect(emits(AssembledPackageBodySchema)).toBe(false);
     expect(emits(ListInstalledPackagesResponseSchema)).toBe(true);
     expect(emits(GetInstalledPackageResponseSchema)).toBe(true);
+  });
+});
+
+describe('#17518 the row\'s manifest is the RECORD stage — a declaration, ⛔ not `z.unknown()`', () => {
+  /**
+   * What `toRecordManifest` really leaves on a `GET /packages` row: each
+   * `functions` declaration MINUS its callable, and a hook whose inline handler
+   * is gone. Until #17518 both keys were `z.unknown().optional()` here, i.e.
+   * accepted without being checked.
+   */
+  const RECORD_ROW = {
+    ...LIFECYCLE,
+    manifest: {
+      ...MANIFEST_BASE,
+      objects: [{ name: 'stage_lead', fields: { title: { type: 'text' } } }],
+      functions: {
+        summarizeCompletedTask: { effect: 'pure' },
+        sweepProjectHealth: { effect: 'writes' },
+      },
+      hooks: [{ name: 'on_insert', object: 'stage_lead', events: ['beforeInsert'] }],
+    },
+  };
+
+  it('parses a row carrying the residual the projection really produces', () => {
+    expect(AssembledInstalledPackageSchema.safeParse(RECORD_ROW).success).toBe(true);
+    expect(InstalledPackageAtEitherStageSchema.safeParse(RECORD_ROW).success).toBe(true);
+  });
+
+  it('parses a row carrying what `objectstack build` lowered', () => {
+    const lowered = {
+      ...RECORD_ROW,
+      manifest: {
+        ...RECORD_ROW.manifest,
+        functions: { bare: 'bare', declared: { handler: 'declared', effect: 'writes' } },
+        hooks: [{ name: 'on_insert', object: 'stage_lead', events: ['beforeInsert'], handler: 'on_insert' }],
+      },
+    };
+    expect(AssembledInstalledPackageSchema.safeParse(lowered).success).toBe(true);
+  });
+
+  it('⛔ REFUSES a live callable — a row the registry can never serve', () => {
+    // The direction that matters: the two keys moved from "accepts anything" to
+    // a declaration, so a value no JSON row can hold is refused by name instead
+    // of waved through. ⛔ Never widen either key back to `unknown` to make a
+    // payload fit: a row parsing through neither declared stage is a producer
+    // defect.
+    const live = {
+      ...RECORD_ROW,
+      manifest: { ...RECORD_ROW.manifest, functions: { sweepProjectHealth: () => 'ran' } },
+    };
+    const verdict = AssembledInstalledPackageSchema.safeParse(live);
+    expect(verdict.success).toBe(false);
+    expect(verdict.error!.issues.some((i) => i.path.join('.').startsWith('manifest.functions'))).toBe(true);
+  });
+
+  it('⛔ still refuses the AUTHORING spelling of `objects` — the stage boundary did not move', () => {
+    expect(AssembledInstalledPackageSchema.safeParse(GLOB_ROW).success).toBe(false);
   });
 });
 

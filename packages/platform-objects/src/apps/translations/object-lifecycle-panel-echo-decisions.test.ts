@@ -1105,7 +1105,12 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
     // `.label` leaves, which a parser matching everything could not produce.
     for (const [locale, m] of catalogs) {
       const translated = [...en].filter(([k, v]) => k.endsWith('.label') && m.get(k) !== undefined && m.get(k) !== v);
-      expect(translated.length, `${locale} positive control`).toBe(538);
+      // 583 since #19331: that card gave 45 declared-but-unoffered scalar keys a
+      // form row each across ten forms, and authored every one of their labels
+      // in all three locales rather than leaving it an extractor fill — so this
+      // control moves by exactly the number of rows that landed, in every
+      // locale, which is the reading a per-locale count is for.
+      expect(translated.length, `${locale} positive control`).toBe(583);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

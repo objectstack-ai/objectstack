@@ -56,6 +56,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "描述",
         helpText: "开发文档说明"
       },
+      nameField: {
+        label: "记录标题字段",
+        helpText: "用作每条记录标题的字段（例如 \"name\"、\"subject\"）。ADR-0079 规定的规范指针——记录展示、ObjectQL 搜索和关联记录预览都读它。"
+      },
       isSystem: {
         label: "系统内置",
         helpText: "系统对象（受保护，不可删除；共享默认为公开）"
@@ -257,6 +261,26 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "数据源",
         helpText: "目标数据源 ID（默认：\"default\"）"
       },
+      ownership: {
+        label: "归属模型",
+        helpText: "记录归属模型。留空按 user 处理。"
+      },
+      sharingModel: {
+        label: "共享模型",
+        helpText: "面向内部用户的组织级默认记录可见性（OWD）。自定义对象若不声明，运行时按 private 处理（ADR-0090 D1）。"
+      },
+      managedBy: {
+        label: "生命周期归属",
+        helpText: "生命周期分类：platform（用户可增删改查）、config（管理员编写）、system-data（平台定义结构、管理员/用户可写数据）、engine-owned（引擎独占，用户不可写）、append-only（审计）、better-auth（身份）。UI 客户端据此推导 CRUD 能力，因此它决定用户在该对象记录上能做什么。"
+      },
+      editMode: {
+        label: "编辑方式",
+        helpText: "该对象记录的编辑交互意图。留空则由渲染端自行选择默认方式。这是跨渲染端的意图声明，不是样式。"
+      },
+      fileAccessDelegate: {
+        label: "文件访问委托服务",
+        helpText: "授权下载该对象媒体字段所属文件的内核服务；有了它就不再以“调用方能否读取宿主记录”来判断。适用于访问权由某个服务裁决的对象。失败即拒绝。"
+      },
       lifecycle: {
         label: "数据生命周期",
         helpText: "数据生命周期契约（ADR-0057）：数据保留多久、空间如何回收。留空即永久保留（record 语义）。非 record 类必须声明至少一个界定策略（保留期、TTL 或轮转）。"
@@ -384,6 +408,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "占位文本",
         helpText: "显示在空输入框内的提示文本（输入内容后消失）；需要常驻帮助请使用 inlineHelpText"
       },
+      inlineHelpText: {
+        label: "常驻帮助文本",
+        helpText: "显示在输入框下方、始终可见的帮助文本；与 `placeholder` 不同，后者一旦填入值就消失。"
+      },
       minLength: {
         label: "最小长度",
         helpText: "最少字符数"
@@ -415,6 +443,30 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       scale: {
         label: "小数位",
         helpText: "小数部分位数"
+      },
+      step: {
+        label: "步进值",
+        helpText: "滑块的步进增量（默认 1）。仅渲染端使用：写入路径不会拒绝偏离步进网格的值。"
+      },
+      maxSize: {
+        label: "最大文件大小",
+        helpText: "允许的最大文件大小，单位为字节（正整数）。写入时在服务端按已记录的文件大小校验——没有记录大小的文件不会被它拦下。"
+      },
+      dimensions: {
+        label: "向量维度",
+        helpText: "向量维度——1 到 10000 之间的整数（例如 OpenAI 嵌入为 1536）。"
+      },
+      language: {
+        label: "代码语言",
+        helpText: "编辑器语法高亮所用的语言（例如 javascript、python、sql）。"
+      },
+      autonumberFormat: {
+        label: "自动编号格式",
+        helpText: "字面文本加 {0000} 计数器、按业务时区取值的 {YYYY}/{MM}/{DD}/{YYYYMMDD} 日期标记，以及 {field_name} 字段插值。计数器按渲染出的前缀分别重置。autonumber 字段不填时默认为 {0000}。"
+      },
+      referenceVia: {
+        label: "多态指针伴随字段",
+        helpText: "把该文本字段声明为多态指针的 id 半边：此处填写同一对象上保存目标对象名的另一个字段，目标逐行决定（ADR-0052 §5）。使用 snake_case；仅限文本字段，且与 `reference` 互斥。"
       },
       options: {
         label: "选项",
@@ -450,9 +502,41 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "关联列表筛选",
         helpText: "该关系在父记录详情页上的关联列表的默认筛选——以 AND 方式与父记录匹配条件组合，标签页徽标统计的也是同一集合"
       },
+      displayField: {
+        label: "候选项标题字段",
+        helpText: "在选择器中作为每个候选记录标题显示的字段。留空则使用被引用对象自身的标题字段。"
+      },
+      descriptionField: {
+        label: "候选项副标题字段",
+        helpText: "在快速选择浮层中显示于标题下方的次要字段。"
+      },
+      allowCreate: {
+        label: "允许即时新建",
+        helpText: "选择器找不到匹配项时，允许用户用已输入的文本直接创建记录。适合只有标题字段为必填的对象。"
+      },
+      lookupPageSize: {
+        label: "选择器每页行数",
+        helpText: "记录选择对话框每页显示的行数——正整数，默认 10。"
+      },
+      relatedListTitle: {
+        label: "关联列表标题",
+        helpText: "该关系在父记录详情页上关联列表的标题。"
+      },
+      inlineTitle: {
+        label: "内嵌表格标题",
+        helpText: "父记录上内嵌主从表格的标题。"
+      },
+      inlineAmountField: {
+        label: "内嵌合计字段",
+        helpText: "用于内嵌表格合计行求和的子对象数值字段。"
+      },
       expression: {
         label: "表达式",
         helpText: "用 CEL 表达式计算此字段的值（自动设为只读）"
+      },
+      returnType: {
+        label: "公式返回类型",
+        helpText: "公式声明的值类型，按推断出的 CEL 类型写入。消费方直接读它，无需重新解析表达式。"
       },
       summaryOperations: {
         label: "汇总操作",
@@ -501,6 +585,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maskingRule: {
         label: "脱敏规则",
         helpText: "部分脱敏:预设('phone'、'id_card'、'bank_account'、'email'、'name')或 {\"keepHead\": n, \"keepTail\": m}。未持有该字段 requiredPermissions 的调用者将看到脱敏值"
+      },
+      internal: {
+        label: "不对外返回",
+        helpText: "该字段的值永远不经通用数据通道返回：引擎会从 find/findOne 结果以及创建和更新的响应体中删除这个键——默认投影如此，客户端在 ?select= 中点名它时同样如此。存储、过滤和索引都不受影响。"
+      },
+      trackHistory: {
+        label: "记录变更历史",
+        helpText: "把该字段的值变更渲染为记录活动时间线上的条目（ADR-0052 §5b）。按字段逐个开启。"
+      },
+      widget: {
+        label: "控件覆盖",
+        helpText: "表单控件覆盖——填写已注册的字段组件名，查找时会拼成 `field:` 加该名称，用它代替按 type 推断出的默认控件。名称未注册时退回 type 对应的控件。"
+      },
+      ackPlaintextMasking: {
+        label: "确认明文存储",
+        helpText: "确认该通用 password 字段“落盘为明文、读取时打码”的契约确实是有意为之，从而不再提示编写期警告（ADR-0100）。对其他字段类型无效。"
       }
     }
   },
@@ -813,6 +913,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       description: {
         label: "描述",
         helpText: "用于导航的页面描述"
+      },
+      source: {
+        label: "页面源码",
+        helpText: "页面源码文本。kind 为 'html'（别名 'jsx'）时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 'react' 时，它是真正的 React，由受信任运行时在渲染时执行。"
       },
       object: {
         label: "对象",
@@ -1144,6 +1248,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "默认",
         helpText: "设为新用户的默认应用"
       },
+      hidden: {
+        label: "从应用切换器隐藏",
+        helpText: "把该应用排除在应用切换器之外——外壳改为从头像菜单展示它。这只影响导航：隐藏的应用依然可路由，且照常做权限校验。"
+      },
       navigation: {
         label: "导航",
         helpText: "递归的导航结构"
@@ -1225,6 +1333,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       variant: {
         label: "按钮样式",
         helpText: "按钮样式（primary=蓝色，danger=红色，ghost=透明）"
+      },
+      mode: {
+        label: "语义模式",
+        helpText: "该动作的语义模式。目前只有 AI 人工确认（HITL）启发式会读它——没有任何渲染端按它分支。"
+      },
+      order: {
+        label: "排序权重",
+        helpText: "同一放置分组内的排序值——数值越小越靠前，记录头部会取排在最前的那个作为主按钮。不填则保持注册顺序。"
       },
       target: {
         label: "目标",
@@ -1316,6 +1432,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.requiresFeature": {
         label: "所需功能"
       },
+      operation: {
+        label: "声明式写入",
+        helpText: "对单条记录的声明式字段写入：'update' 会把 `patch`（合并在已收集的 `params` 之下）应用到当前记录，并且以调用方的身份执行——绝不提权，因此调用方的权限、对象的钩子与校验都会像用户手动编辑那样触发。"
+      },
+      undoable: {
+        label: "可撤销",
+        helpText: "更新成功后提供“撤销”入口。撤销捕获的是该动作写入的每个字段的原值——也就是合并后的写入集合，即 `params` 之下的 `patch`。没有声明 `operation` 的动作没有写入集合，因此也没有可捕获的内容。"
+      },
+      execution: {
+        label: "批量分发契约",
+        helpText: "该动作主体所依据的批量分发契约：'perRecord' 为每条选中的记录各发一次调用，并带上该行的 recordId；'aggregate' 对整批选中只发一次调用，所有 id 都在 params._selectedIds 里。不填则按逐条记录分发。"
+      },
       confirmText: {
         label: "确认文本",
         helpText: "执行前的确认提示（如 \"确定要执行吗？\"）"
@@ -1327,6 +1455,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       refreshAfter: {
         label: "完成后刷新",
         helpText: "执行完成后刷新当前列表/页面"
+      },
+      openIn: {
+        label: "链接打开位置",
+        helpText: "静态 `target` URL 的打开位置——'self' 在当前页跳转，'new-tab' 打开新的浏览器标签页。不填时，绝对或外部 URL 打开新标签页，相对 URL 在当前页跳转。"
+      },
+      opensInNewTab: {
+        label: "结果在新标签页打开",
+        helpText: "在新标签页打开动作的执行结果：渲染端在点击时同步预开一个标签页（不会被弹窗拦截），随后把它导航到处理程序返回的 redirectUrl。与 `openIn` 不同，后者决定静态 URL 目标的去向。"
+      },
+      newTabUrl: {
+        label: "新标签页 URL 模板",
+        helpText: "直接使用的新标签页 URL 模板，可用 {recordId} 占位符。与 `opensInNewTab` 同时设置时，渲染端会立即把预开的标签页导航到这里，不再发起动作请求——因此该端点必须自行校验鉴权。"
       },
       locations: {
         label: "位置",
@@ -1343,6 +1483,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       disabled: {
         label: "禁用",
         helpText: "CEL 表达式：满足条件时禁用"
+      },
+      requiresFeature: {
+        label: "所需认证特性",
+        helpText: "用于控制该动作是否出现的公共认证特性开关。它在解析时被降解进 `visible` 断言并从输出中移除，因此下游消费方永远看不到这个键。"
       },
       ai: {
         label: "AI 暴露",
@@ -1695,6 +1839,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       errorHandling: {
         label: "错误处理",
         helpText: "节点失败时的处理方式（fail / retry / continue）"
+      },
+      successMessage: {
+        label: "成功提示消息",
+        helpText: "流程成功结束时随运行结果返回的消息；屏幕流界面会用它代替通用的“Done”弹出提示。"
+      },
+      errorMessage: {
+        label: "失败提示消息",
+        helpText: "流程失败时随运行结果返回的消息；屏幕流界面会用它代替原始错误弹出提示。"
       }
     }
   },
@@ -1831,6 +1983,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "显示名称",
         helpText: "面向管理员的显示标签"
       },
+      description: {
+        label: "描述",
+        helpText: "在 Setup 中展示的可读描述（持久化为 sys_permission_set.description）。"
+      },
+      isDefault: {
+        label: "默认权限集",
+        helpText: "面向 everyone 岗位的应用基线（ADR-0090 D5）：应用级权限集在启动时自动绑定；包级权限集则成为安装时由管理员确认的建议。默认 false。"
+      },
+      managedBy: {
+        label: "归属来源",
+        helpText: "记录来源（ADR-0086 D3）：跨版本升级时由谁拥有这个权限集。"
+      },
+      packageId: {
+        label: "所属包 ID",
+        helpText: "随包分发的权限集所属的包 id（ADR-0086 D3）。环境内自行编写的权限集留空即可。"
+      },
       systemPermissions: {
         label: "系统权限",
         helpText: "系统能力键列表"
@@ -1871,6 +2039,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "描述"
+      },
+      delegatable: {
+        label: "可自助委派",
+        helpText: "持有者可自行委派该岗位，需限定时段并填写理由（ADR-0091 D3）。默认 false——委派仅限管理员。"
       }
     }
   },
@@ -1918,6 +2090,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "启用",
         helpText: "启用或禁用此代理"
+      },
+      surface: {
+        label: "绑定产品界面",
+        helpText: "该智能体绑定的产品界面（ADR-0063 §1）。只有自身界面与之相符、或声明为 'both' 的技能才会挂载，而该智能体的工具集就是这些技能工具的并集。默认 'ask'。"
       },
       instructions: {
         label: "指令",
@@ -2028,6 +2204,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "启用",
         helpText: "启用或禁用此技能"
+      },
+      surface: {
+        label: "绑定智能体界面",
+        helpText: "该技能绑定的智能体界面（ADR-0063 §3）。把它挂到界面不相符的智能体上会在解析时直接报错，而不是悄悄跳过。默认 'ask'。"
       },
       instructions: {
         label: "指令",
