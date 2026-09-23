@@ -553,6 +553,12 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     expect(drops.it_yl).toEqual([{ object: 'pb_item', fields: ['memo'], reason: 'readonly_when' }]);
     expect(drops.it_yo).toEqual(drops.it_yl);
 
+    // The bulk branch's batch header read: the same verdict, row by row.
+    items.set('it_bl', { id: 'it_bl', header: 'hy_locked', memo: 'orig', organization_id: ORG_X });
+    items.set('it_bo', { id: 'it_bo', header: 'hy_open', memo: 'orig', organization_id: ORG_X });
+    await engine.update('pb_item', { memo: 'new' }, { where: { id: { $in: ['it_bl', 'it_bo'] } }, multi: true, context: MEMBER_X } as any);
+    expect([items.get('it_bl')?.memo, items.get('it_bo')?.memo]).toEqual(['orig', 'orig']);
+
     // …and under `strictReadonlyWrites`, both are the same loud refusal.
     const strict = (id: string) => refusalOf(() => engine.update('pb_item', { memo: 'new' }, {
       where: { id }, context: MEMBER_X, strictReadonlyWrites: true,
@@ -574,8 +580,11 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     // both are now judged with `parent` unbound (#4977: fail-open) — alike.
     await engine.update('pb_line', { note: '' }, { where: { id: 'ln_yl' }, context: MEMBER_X } as any);
     await engine.update('pb_line', { note: '' }, { where: { id: 'ln_yo' }, context: MEMBER_X } as any);
-    await engine.update('pb_line', { note: '' }, { where: { id: 'ln_bl' }, multi: true, context: MEMBER_X } as any);
-    await engine.update('pb_line', { note: '' }, { where: { id: 'ln_bo' }, multi: true, context: MEMBER_X } as any);
+    // An OPERATOR on `id` is a predicate, so these take the bulk branch and its
+    // batch header read; a scalar `where.id` would route to the by-id branch
+    // even under `multi: true` (`resolveEngineUpdateDispatch`).
+    await engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bl'] } }, multi: true, context: MEMBER_X } as any);
+    await engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bo'] } }, multi: true, context: MEMBER_X } as any);
 
     expect(['ln_yl', 'ln_yo', 'ln_bl', 'ln_bo'].map((id) => lines.get(id)?.note)).toEqual(['', '', '', '']);
   });
