@@ -13,7 +13,12 @@ import { hasPlatformObjectPrefix } from './system/constants/platform-object-name
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
-import { normalizeStackInput, type MetadataCollectionInput, type MapSupportedField } from './shared/metadata-collection.zod';
+import {
+  normalizeStackInput,
+  MAP_SUPPORTED_FIELDS,
+  type MetadataCollectionInput,
+  type MapSupportedField,
+} from './shared/metadata-collection.zod';
 import type { ConversionNotice } from './conversions/types.js';
 import { formatUnknownAuthoringKey } from './data/authoring-key-lint';
 import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadata-authoring-lint';
@@ -2453,11 +2458,14 @@ class StackComposeActionKeyCollisionError extends StackRefusalError {
  * or a scalar. Those shapes are SKIPPED, never dereferenced: a rule whose job
  * is to resolve object references must not turn a malformed collection into a
  * bare `TypeError` with no `code` and no `status` — the refusal discipline of
- * this file is the ADR-0112 envelope. A non-array `data` gets the same word
- * {@link composeStacks}'s concat pass gives it ({@link warnMalformedCollectionKey},
- * #5005, deduplicated per key so the two passes speak once); an entry that is
- * not an object, or whose `object` is not a string, carries no object
- * reference for this rule to resolve and is simply not this rule's finding.
+ * this file is the ADR-0112 envelope. A non-array `data` no longer reaches
+ * here from either caller — the strict parse rejects it before
+ * {@link validateCrossReferences}, and {@link composeStacks}'s step 3 refuses it
+ * (#19784) before the artifact pass — so the `Array.isArray` guard below is the
+ * rule's own type guard, kept so it never depends on its caller's ordering, and
+ * says nothing because no caller can reach it. An entry that is not an object,
+ * or whose `object` is not a string, carries no object reference for this rule
+ * to resolve and is simply not this rule's finding.
  */
 function collectSeedDataObjectErrors(
   config: ObjectStackDefinition,
@@ -2466,10 +2474,7 @@ function collectSeedDataObjectErrors(
   const errors: string[] = [];
   const datasets: unknown = (config as { data?: unknown }).data;
   if (datasets === undefined || datasets === null) return errors;
-  if (!Array.isArray(datasets)) {
-    warnMalformedCollectionKey('data');
-    return errors;
-  }
+  if (!Array.isArray(datasets)) return errors;
   for (const dataset of datasets) {
     if (!dataset || typeof dataset !== 'object') continue;
     const objectName: unknown = (dataset as { object?: unknown }).object;
@@ -2497,9 +2502,10 @@ function collectSeedDataObjectErrors(
  * carrying CRUD on the RBAC link tables, ADR-0090 D12) — skip them here.
  *
  * `resolvable` carries the same two readings as its seed-data sibling above,
- * and so does its shape guard: a non-array `permissions` is announced through
- * {@link warnMalformedCollectionKey} and skipped, and a `permissions` entry
- * that is not an object is skipped, because this rule reads
+ * and so does its shape guard: a non-array `permissions` is refused before
+ * either caller reaches this rule (the strict parse; {@link composeStacks}'s
+ * step 3, #19784), so its guard is a silent type guard like the sibling's, and
+ * a `permissions` entry that is not an object is skipped, because this rule reads
  * `permissions[].objects` and an unparsed input may carry neither. Same reason
  * as the sibling — a malformed collection must not become a bare `TypeError`
  * in the pass whose refusals are ADR-0112 envelopes.
@@ -2511,10 +2517,7 @@ function collectPermissionGrantObjectErrors(
   const errors: string[] = [];
   const permissions: unknown = (config as { permissions?: unknown }).permissions;
   if (permissions === undefined || permissions === null) return errors;
-  if (!Array.isArray(permissions)) {
-    warnMalformedCollectionKey('permissions');
-    return errors;
-  }
+  if (!Array.isArray(permissions)) return errors;
   for (const perm of permissions) {
     if (!perm || typeof perm !== 'object') continue;
     const grants = (perm as { objects?: Record<string, unknown> }).objects;
@@ -3674,38 +3677,56 @@ function composeFunctions(
   return { declared: true, value: merged };
 }
 
-const warnedMalformedCollectionKeys = new Set<string>();
-
 /**
- * Report a collection key that carried a non-array value (#5005).
- *
- * The concat rule can only concatenate arrays, so such a value is skipped —
- * and skipping it silently is the same defect in miniature. Only reachable
- * with an unparsed stack (`strict: false`, hand-built object); the strict
- * `defineStack` path rejects the shape outright.
+ * The shared half of every non-array collection refusal in {@link composeStacks}
+ * (#18239 for `objects`, #19784 for the concatenated collections): what the
+ * value IS, in words the message can name, and the zod issue the strict parse
+ * would raise for it, re-rooted at the key's path — so a refusal raised here
+ * carries the same `issues` shape {@link StackSchemaInvalidError} carries from
+ * `defineStack`'s own door.
  * @internal
  */
-function warnMalformedCollectionKey(key: string, shape: 'value' | 'entry' = 'value'): void {
-  // [#18239] `'entry'`: the collection IS an array but one of its entries is not
-  // an object (`mergeObjects`, where a non-array `objects` is refused instead).
-  // Deduplicated apart from the `'value'` notice, so neither silences the other.
-  const dedupKey = shape === 'value' ? key : `${key}[]`;
-  if (warnedMalformedCollectionKeys.has(dedupKey)) return;
-  warnedMalformedCollectionKeys.add(dedupKey);
-  if (shape === 'entry') {
-    console.warn(
-      `composeStacks: top-level key '${key}' is a collection but at least one stack carries an ` +
-        `entry in it that is not an object — that entry cannot be composed and was skipped. Author ` +
-        `every entry as an object, or run the stack through strict \`defineStack\` to have the ` +
-        `shape rejected where it is written.`,
-    );
-    return;
-  }
+function describeNonArrayCollection(
+  key: string,
+  declared: unknown,
+): { kind: string; issues: z.core.$ZodIssue[] } {
+  const parsed = z.array(z.unknown()).safeParse(declared);
+  const issues = parsed.success
+    ? []
+    : parsed.error.issues.map((issue) => ({ ...issue, path: [key, ...issue.path] }));
+  const kind =
+    declared === null
+      ? 'null'
+      : typeof declared !== 'object'
+        ? `a ${typeof declared}`
+        : Object.getPrototypeOf(declared) === Object.prototype
+          ? 'an object'
+          : `a ${(declared as object).constructor?.name ?? 'non-plain'} object`;
+  return { kind, issues: issues as z.core.$ZodIssue[] };
+}
+
+const warnedMalformedCollectionEntries = new Set<string>();
+
+/**
+ * Report a collection whose array carries an entry that is not an object
+ * (#18239 — `mergeObjects`).
+ *
+ * The collection itself is well-formed, so composition goes on; the entry
+ * carries nothing to merge and is skipped, and skipping it silently would be
+ * the #5005 defect in miniature. Deduplicated per key. A non-array VALUE is no
+ * longer this helper's case at all: {@link composeStacks} refuses it (steps 2
+ * and 3), because skipping a whole collection composes an artifact that
+ * silently lacks a stack's content (#19784).
+ * @internal
+ */
+function warnMalformedCollectionEntry(key: string): void {
+  if (warnedMalformedCollectionEntries.has(key)) return;
+  warnedMalformedCollectionEntries.add(key);
   console.warn(
-    `composeStacks: top-level key '${key}' is a collection (concatenated across stacks) but at ` +
-      `least one stack carries a non-array value for it — that value cannot be composed and was ` +
-      `skipped. Author it as an array, or run the stack through strict \`defineStack\` to have ` +
-      `the shape rejected where it is written.`,
+    `composeStacks: top-level key '${key}' is a collection but at least one stack carries an ` +
+      `entry in it that is not an object — that entry cannot be composed and was skipped. Author ` +
+      `every entry as an object, or run the stack through strict \`defineStack\` to have the ` +
+      `shape rejected where it is written.`,
   );
 }
 
@@ -4023,32 +4044,21 @@ function mergeObjects(
     const declared: unknown = (stack as { objects?: unknown }).objects;
     if (declared === undefined) continue;
     if (!Array.isArray(declared)) {
-      const parsed = z.array(z.unknown()).safeParse(declared);
-      const issues = parsed.success
-        ? []
-        : parsed.error.issues.map((issue) => ({ ...issue, path: ['objects', ...issue.path] }));
-      const kind =
-        declared === null
-          ? 'null'
-          : typeof declared !== 'object'
-            ? `a ${typeof declared}`
-            : Object.getPrototypeOf(declared) === Object.prototype
-              ? 'an object'
-              : `a ${(declared as object).constructor?.name ?? 'non-plain'} object`;
+      const { kind, issues } = describeNonArrayCollection('objects', declared);
       throw new StackSchemaInvalidError(
         `composeStacks validation failed: ${stackLabel(stack, i)} declares 'objects' as ${kind}, ` +
           `not an array. Its objects cannot be composed, and skipping them would compose an artifact ` +
           `that silently lacks them. Author 'objects' as an array (\`defineStack\` normalizes the map ` +
           `form into one), or run the stack through strict \`defineStack\` to have the shape rejected ` +
           `where it is written.`,
-        issues as z.core.$ZodIssue[],
+        issues,
       );
     }
     for (const obj of declared as Obj[]) {
       // A non-object ENTRY carries no object to merge — step 3's shape: skip it
       // and say so once, never dereference it into a bare `TypeError`.
       if (!isRecord(obj)) {
-        warnMalformedCollectionKey('objects', 'entry');
+        warnMalformedCollectionEntry('objects');
         continue;
       }
       const existing = map.get(obj.name);
@@ -4508,20 +4518,44 @@ export function composeStacks(
   }
 
   // 3. Array collections — simple concatenation, in stack order.
+  //
+  //    [ADR-0112 · #19784] A collection key holding something that is not an
+  //    array cannot be concatenated, and it is REFUSED, never skipped — step 2's
+  //    rule for `objects`, applied to every concatenated key: skipping the value
+  //    composes an artifact that silently lacks that stack's grants, seed rows,
+  //    views, … (measured per key for every `CONCAT_ARRAY_FIELDS` entry: the
+  //    skipped value's content was absent from the composed top level, and under
+  //    `manifest: 'preserve'` survived only inside that stack's package body, so
+  //    the artifact disagreed with itself). A composed artifact is complete or it
+  //    is refused. `defineStack` rejects the shape at its own door, so this is
+  //    reachable only via `strict: false` or a hand-built stack object; the code
+  //    is the strict parse's own (`STACK_SCHEMA_INVALID`), as in step 2.
+  //    `undefined` is the one non-array that is not malformed: the key is absent.
+  //    A non-object ENTRY inside an array is concatenated as-is — the entry is
+  //    carried, not lost, so the composed content is unchanged.
   for (const field of CONCAT_ARRAY_FIELDS) {
-    const declared = stacks
-      .map((s) => (s as Record<string, unknown>)[field])
-      .filter((v) => v !== undefined);
-    const arrays = declared.filter((v): v is unknown[] => Array.isArray(v));
+    const arrays: unknown[][] = [];
+    for (const [i, stack] of stacks.entries()) {
+      const declared: unknown = (stack as Record<string, unknown>)[field];
+      if (declared === undefined) continue;
+      if (!Array.isArray(declared)) {
+        const { kind, issues } = describeNonArrayCollection(field, declared);
+        throw new StackSchemaInvalidError(
+          `composeStacks validation failed: ${stackLabel(stack, i)} declares '${field}' as ${kind}, ` +
+            `not an array. Its '${field}' entries cannot be concatenated, and skipping them would ` +
+            `compose an artifact that silently lacks them. Author '${field}' as an array` +
+            ((MAP_SUPPORTED_FIELDS as readonly string[]).includes(field)
+              ? ` (\`defineStack\` normalizes the map form into one)`
+              : '') +
+            `, or run the stack through strict \`defineStack\` to have the shape rejected where it ` +
+            `is written.`,
+          issues,
+        );
+      }
+      arrays.push(declared);
+    }
     if (arrays.length > 0) {
       composed[field] = arrays.flat();
-    }
-    // A collection key holding something that is not an array cannot be
-    // concatenated. `defineStack` rejects that shape, so this is only
-    // reachable via `strict: false` or a hand-built stack object — but
-    // dropping it without a word is the exact defect #5005 closes.
-    if (declared.length !== arrays.length) {
-      warnMalformedCollectionKey(field);
     }
   }
 
@@ -4529,7 +4563,7 @@ export function composeStacks(
   //     artifact package list (ADR-0130 D4, follow-up row 3).
   //
   //     Deliberately AFTER the concat pass, which owns `packages`' declared
-  //     disposition and its malformed-value warning. For stacks that already
+  //     disposition and its malformed-value refusal. For stacks that already
   //     carry `packages`, preserve emits the same concatenation the pass just
   //     computed; what it adds is the single-`manifest` stacks the pass has
   //     nothing to concatenate for. Left undefined when there is nothing to

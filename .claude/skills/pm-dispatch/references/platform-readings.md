@@ -132,7 +132,7 @@
 - 两次实测:分诊席 2026-09-15 `claude[bot]`→`os-sam`;技能席 2026-09-15→16 `claude[bot]`→`os-zhuang`。
 - 类只认每次写回读的 `user.login`/`user.type`,⛔ 不从开轮标记沿用:标记读数带日期、不站住。
 - `performed_via_github_app`、`GET /user` 与 core 限流头对两类同答 ⇒ 三者都不是判别式。
-- 用户类写绑作者:封号则其评论与卡按作者 404,标签/状态/标题/正文存活。
+- 封号隐藏其全部评论、无 timeline 事件;assignee、PR、正文存活;分诊没了挂 `pm:retriage`。
 - ⇒ 耐久算按令牌类重算,⛔ 不假定署名恒 `claude[bot]`;用户类下请 PR 作者复审回 422。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
 - 那几件 = `rest-channel.md`〈不可迁移〉那三件;draft 翻转与 auto-merge 挂载有 ccr 路、不在内。
