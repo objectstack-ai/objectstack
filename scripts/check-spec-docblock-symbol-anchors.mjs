@@ -367,9 +367,9 @@ export const RECENSUS_17242 = {
    * anchors have different LIFETIMES, not different contents: `measuredOn` is a
    * commit this branch was cut from, `boundAgainstSha` is a commit ON it, and a
    * squash merge leaves only the first resolvable. The pin block in `selfTest()`
-   * states the consequence and takes both, and because it requires BOTH to read
-   * `objectuiPinSha`, this sentence is checked rather than trusted on any tree
-   * where both anchors still resolve. */
+   * states the consequence and takes both. Where both resolve, it requires
+   * `.objectui-sha` to read `objectuiPinSha` at each; ⛔ it compares no other
+   * file, so the byte-identity above is not checked by it. */
   boundAgainstSha: 'cdd68cf15ed863468ce6eecdd5c0824b760ea22a',
   objectuiPinSha: '87af769e9a3ee28ace099fdd653d3ebd79fe82e2',
   objectuiMainSha: '0cf2d6644bdb96a9a6784ef801ee6a60a5306bd8',
@@ -740,9 +740,9 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock
  * The contents of `path` at `commit`, WITH THE CAUSE when there are none.
  *
  * ⛔ A single `null` was the previous shape and it is what made this readable as
- * one cause. `git show <commit>:<path>` answers the same non-zero exit FOUR ways
- * -- git missing, cwd not a repository, the commit absent, and the path absent at
- * a commit that is perfectly present -- so a caller handed one `null` can name a
+ * one cause. `git show <commit>:<path>` fails in each of four cases -- git
+ * missing, cwd not a repository, the commit absent, and the path absent at a
+ * commit that is perfectly present -- so a caller handed one `null` can name a
  * cause only by guessing, and the caller here named the anchor's absence out loud
  * on a run where the anchor resolved fine. The four are separated here, before
  * the read, by two cheap probes:
@@ -751,9 +751,9 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock
  *                    directory is not a repository. Nothing about any commit can
  *                    be established from here.
  *   'commit-absent'  the repository answers and `git cat-file -e <commit>^{commit}`
- *                    does not resolve: a shallow clone, or a squash merge that left
- *                    the object unreachable. ⭐ THE ONLY cause that is a legitimate
- *                    NOT MEASURED for a frozen anchor.
+ *                    does not resolve: the literal names no commit of this
+ *                    repository, or names one this clone does not hold. This
+ *                    probe does not tell the two apart.
  *   'path-absent'    the commit IS an object here and `path` is not readable at it.
  *                    A hard failure, ⛔ never a skip: this is the state a renamed or
  *                    mistyped pin file produces, and reporting it as an unreachable
@@ -763,8 +763,8 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock
  *
  * ⛔ Callers must read every status but `'ok'` as NOT MEASURED, never as agreement,
  * and must name the status they were HANDED rather than whichever cause reads best.
- * It is spelled as a return rather than a throw because a FROZEN anchor legitimately
- * stops resolving once the branch carrying it is squashed -- but only that one does.
+ * It is spelled as a return rather than a throw because the caller decides, per
+ * anchor, whether `'commit-absent'` is a skip.
  *
  * Spawned with `gitFreeEnv()` per the rule in `scripts/git-env.mjs`: these are
  * local reads that must resolve against the repository their `cwd` names, and an
@@ -796,6 +796,19 @@ function readTextAtCommit(commit, path) {
     };
   } catch {
     return { status: 'path-absent', text: null };
+  }
+}
+
+/** `true` only when `git rev-parse --is-shallow-repository` answers `true`. */
+function gitReportsShallow() {
+  try {
+    return execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+      encoding: 'utf8',
+      env: gitFreeEnv(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() === 'true';
+  } catch {
+    return false;
   }
 }
 
@@ -1076,10 +1089,9 @@ export function selfTest() {
   //    where a pin against reality is both cheap and FROZEN, it is taken: the
   //    objectui-pin cases below are those, and they are the only ones here.
   //    ⚠️ "Cheap and FROZEN" does not by itself pick an anchor, and the previous
-  //    spelling read that as if it did. Two of this record's shas are frozen; only
-  //    one of them is still an object on main after the squash, and a pin read at
-  //    the other holds nothing for the whole post-merge life of the record. The
-  //    pin block below states which is which and why, and takes both.
+  //    spelling read that as if it did. Two of this record's shas are commits of
+  //    this repository, and only `measuredOn` is an ancestor of main. The pin
+  //    block below states which is which, and takes both.
   check(
     RECENSUS_17242.trackedTargetLineCitations + RECENSUS_17242.declinedCitations
       === RECENSUS_17242.commentProseLineCitations,
@@ -1137,7 +1149,7 @@ export function selfTest() {
         + `got \`${RECENSUS_17242[field]}\``);
   }
   // ⭐ THE REALITY PINS this battery takes, and there are TWO because the record
-  // carries two anchors that fail in opposite ways.
+  // names two commits of this repository.
   //
   // The mechanism is one: this repo records the objectui commit it builds against
   // in its own pin file, so reading that file AT a tree the sweep stood on says
@@ -1159,53 +1171,52 @@ export function selfTest() {
   // on every run, before and after the squash. The pin file is byte-identical at
   // the two commits — the only file differing between them is this gate, which is
   // the record's own claim at `boundAgainstSha` — so reading at `measuredOn` reads
-  // the same pin, and the loop below holds that claim by requiring BOTH anchors to
-  // read `objectuiPinSha` rather than by leaving it as prose.
+  // the same pin.
   //
-  // ⇒ `measuredOn` is the PRIMARY pin and is expected to be taken on main forever;
-  // `boundAgainstSha` is a SECOND, conditional one that lapses after the squash.
+  // ⇒ `measuredOn` is the PRIMARY pin: in a clone git does not report as shallow,
+  // it is taken or this battery reds. `boundAgainstSha` is a SECOND one, skipped
+  // wherever it names no commit in this clone.
   //
-  // ⛔ NOT TAKEN names exactly ONE cause — the commit is not an object in this
-  // clone. Every other way the read can fail is a hard red, because a pin file
-  // that was renamed or mistyped otherwise switches the guard off while the notice
-  // tells the reader to expect the skip. That conflation is what the previous
-  // spelling shipped: it printed "is not an object in this clone" on a run where
-  // `git cat-file -t` answered `commit` for the very same sha.
+  // ⛔ NOT TAKEN is printed only for an anchor naming no commit in this clone, and
+  // for the primary only when git reports the clone as shallow. Every other failed
+  // read is a hard red: a renamed or mistyped pin file lands there, and so does a
+  // mistyped primary literal in a clone git does not report as shallow.
   const realityPins = [
     ['primary', 'measuredOn', RECENSUS_17242.measuredOn],
     ['second', 'boundAgainstSha', RECENSUS_17242.boundAgainstSha],
   ].map(([role, field, commit]) => ({ role, field, commit, read: readTextAtCommit(commit, OBJECTUI_PIN_FILE) }));
   for (const { role, field, commit, read } of realityPins) {
-    if (read.status === 'commit-absent') {
+    const shallow = read.status === 'commit-absent' && gitReportsShallow();
+    const skipped = read.status === 'commit-absent' && (role === 'second' || shallow);
+    if (skipped) {
       console.log(
-        `   ⚠️ ${role} reality pin NOT TAKEN: \`${commit}\` (\`${field}\`) is not an object in this clone, so `
-          + `\`${OBJECTUI_PIN_FILE}\` could not be read at it. A shallow clone reaches neither anchor; `
-          + `\`boundAgainstSha\` is additionally unreachable on main once this branch is squashed.`,
+        `   ⚠️ ${role} reality pin NOT TAKEN: \`${commit}\` (\`${field}\`) names no commit in this clone, which git `
+          + `${shallow ? 'reports' : 'does not report'} as shallow, so \`${OBJECTUI_PIN_FILE}\` could not be read at it.`,
       );
     }
-    // ⛔ Everything that is not the one legitimate skip is a hard red, and the
+    // ⛔ Everything not `skipped` is a hard red, and the
     // message names the status it was HANDED rather than picking a cause — which
     // is the whole of what went wrong here. ⚠️ Measured: `no-repo` is not
     // reachable through `--self-test`, because the live-corpus sweep above asks
     // `git ls-files` and throws first; it is discriminated anyway so this caller
-    // never has to infer it, and the message describes both without asserting
-    // either.
-    check(read.status === 'ok' || read.status === 'commit-absent',
-      `the ${role} reality pin was NOT taken, and not for the one reason that is a legitimate skip: the read of `
-        + `\`${OBJECTUI_PIN_FILE}\` at \`${commit}\` (\`${field}\`) answered \`${read.status}\`. \`path-absent\` `
-        + 'means the anchor RESOLVED and the pin file is not readable at it — a renamed or mistyped pin path lands '
-        + 'here, and reporting that as an unreachable anchor is how this pin gets switched off while its own notice '
-        + 'tells the reader to expect the skip. `no-repo` means this directory is not a git repository at all. '
-        + '⛔ Either way the pin is NOT MEASURED, and NOT MEASURED is not a pass.');
+    // never has to infer it.
+    check(read.status === 'ok' || skipped,
+      `the ${role} reality pin was NOT taken, and not for a reason this battery skips: the read of `
+        + `\`${OBJECTUI_PIN_FILE}\` at \`${commit}\` (\`${field}\`) answered \`${read.status}\`. \`commit-absent\` `
+        + 'is a failure only for the primary anchor, in a clone git does not report as shallow — a mistyped literal '
+        + 'lands here. `path-absent` means the anchor RESOLVED and the pin file is not readable at it — a renamed or '
+        + 'mistyped pin path lands here, and reporting that as an unreachable anchor is how this pin gets switched off '
+        + 'while its own notice tells the reader to expect the skip. `no-repo` means this directory is not a git '
+        + 'repository at all. ⛔ In every case the pin is NOT MEASURED, and NOT MEASURED is not a pass.');
     check(read.status !== 'ok' || read.text === RECENSUS_17242.objectuiPinSha,
       `\`objectuiPinSha\` (${RECENSUS_17242.objectuiPinSha}) must be the objectui commit this repo was pinned to at `
         + `\`${field}\` — the pin file reads \`${read.text}\` there, so the binding sweep and this repo were standing `
         + 'on different sibling trees');
   }
-  // ⭐ The record's "the only file differing between the two commits is this gate"
-  // is what makes the primary anchor a substitute for the second, and the loop
-  // above already holds it: BOTH anchors must read `objectuiPinSha`, so the pin
-  // file cannot differ between them without one of the two cases reddening.
+  // ⭐ Where both anchors resolve, the loop above requires each to read
+  // `objectuiPinSha`. ⛔ It compares no other file between them, so the record's
+  // "the only file differing between the two commits is this gate" is not held
+  // here.
   // ⛔ A further case comparing the two reads TO EACH OTHER was written here and
   // removed: it can only be reached once both have been asserted equal to the same
   // string, so it can never fail. That is a phantom check — a case that evaluates,
