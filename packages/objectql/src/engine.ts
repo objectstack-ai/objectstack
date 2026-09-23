@@ -2539,26 +2539,27 @@ function withoutKey<T extends Record<string, unknown>>(data: T, key: string): T 
  * master-detail FK that strip takes is a repoint that never lands.
  *
  * Answered by the SAME function the strip runs, over the same `supplied`
- * snapshot, the same hook-write record and the same two exemptions (`isSystem`
- * skips the strip; `preserveAudit` keeps a preservable column) — never by
+ * snapshot, the same hook-write record and the same two exemptions — never by
  * re-deriving "is this FK read-only" from its declaration, which is a second
- * opinion that disagrees the moment either exemption applies. Silent: no
- * logger, because the strip itself owns every word said about the key, and
- * `strictReadonlyWrites` / `addressKey` shape only that wording, never the
- * verdict.
+ * opinion that disagrees the moment either exemption applies. `runs` is the
+ * strip's own gate (a system caller skips it), handed in as the value the
+ * strip's call site reads once and consumes itself, so the two cannot
+ * disagree about whether it runs; `preserveAudit` keeps a preservable column.
+ * Silent: no logger, because the strip itself owns every word said about the
+ * key, and `strictReadonlyWrites` / `addressKey` shape only that wording,
+ * never the verdict.
  */
 function staticReadonlyStripTakes(
   schema: unknown,
   data: Record<string, unknown>,
   key: string,
   supplied: Readonly<Record<string, unknown>>,
-  context: ExecutionContext | undefined,
-  hookWrittenKeys: ReadonlySet<string> | undefined,
+  strip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined },
 ): boolean {
-  if (context?.isSystem) return false;
+  if (!strip.runs) return false;
   const after = stripReadonlyFields(
     schema as any, data, supplied, undefined,
-    { preserveAudit: context?.preserveAudit === true, hookWrittenKeys },
+    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
   );
   return after != null && !(key in after);
 }
@@ -6912,8 +6913,7 @@ export class ObjectQL implements IObjectQLEngine {
     schema: unknown;
     data: Record<string, unknown>;
     supplied: Readonly<Record<string, unknown>>;
-    context: ExecutionContext | undefined;
-    hookWrittenKeys: ReadonlySet<string> | undefined;
+    staticStrip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined };
     resolve: (view: Record<string, unknown>) => Promise<H>;
     judgeFkLock: (named: H | undefined, fkSupplied: Readonly<Record<string, unknown>>) => Record<string, unknown>;
   }): Promise<{
@@ -6922,7 +6922,7 @@ export class ObjectQL implements IObjectQLEngine {
     view: Record<string, unknown>;
     header: H;
   }> {
-    const { schema, data, supplied, context, hookWrittenKeys, resolve, judgeFkLock } = args;
+    const { schema, data, supplied, staticStrip, resolve, judgeFkLock } = args;
     const fk = resolveMasterDetailRelation(schema as any)?.fk;
     if (fk === undefined || !(fk in data)) {
       return { subject: data, supplied, view: data, header: await resolve(data) };
@@ -6935,7 +6935,7 @@ export class ObjectQL implements IObjectQLEngine {
     const subject = judgeFkLock(named, fkSupplied);
     const rest = withoutKey(supplied as Record<string, unknown>, fk);
     // ②
-    const lands = fk in subject && !staticReadonlyStripTakes(schema, subject, fk, supplied, context, hookWrittenKeys);
+    const lands = fk in subject && !staticReadonlyStripTakes(schema, subject, fk, supplied, staticStrip);
     if (lands) {
       return { subject, supplied: rest, view: data, header: namedNeeded ? (named as H) : await resolve(data) };
     }
@@ -12881,10 +12881,14 @@ export class ObjectQL implements IObjectQLEngine {
                const wantsParentBinding =
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen) ||
                    schemaHasParentRequiredWhen;
+               // [#19853] The static strip's gate, read ONCE and consumed by
+               // both the settlement below and the strip itself (#2948, further
+               // down), so the two cannot disagree about whether it runs.
+               const staticReadonlyStripRuns = !opCtx.context?.isSystem;
                const landing = wantsParentBinding
                    ? await this.settleMasterDetailLanding({
                        schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
-                       context: opCtx.context, hookWrittenKeys,
+                       staticStrip: { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys },
                        resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
                        judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: fkSupplied }) as Record<string, unknown>,
                      })
@@ -12938,7 +12942,7 @@ export class ObjectQL implements IObjectQLEngine {
                // only the WARN that called the address a caller forgery is gone.
                // Undefined on every other path (the multi branch below, and the
                // insert-side sibling), which is what keeps those byte-identical.
-               if (!opCtx.context?.isSystem) {
+               if (staticReadonlyStripRuns) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
                    // [#8214] `strictReadonlyWrites` is threaded INTO the strip
                    // rather than consulted only at `assertNoStrictDrops()`
@@ -13101,12 +13105,15 @@ export class ObjectQL implements IObjectQLEngine {
                // any field — locked in ≥1 matched row keeps it out of all.
                const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
                const schemaHasParentRequiredWhenMulti = hasParentScopedRequiredWhen(updateSchema as any);
+               // [#19853] One read of the static strip's gate, both consumers —
+               // as on the by-id branch.
+               const staticReadonlyStripRunsMulti = !opCtx.context?.isSystem;
                const landingMulti =
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
                    schemaHasParentRequiredWhenMulti
                        ? await this.settleMasterDetailLanding({
                            schema: updateSchema, data: preRoWhenMulti, supplied: suppliedValues,
-                           context: opCtx.context, hookWrittenKeys,
+                           staticStrip: { runs: staticReadonlyStripRunsMulti, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys },
                            resolve: (view) => this.resolveMasterDetailParents(updateSchema, view, priorRows, opCtx.context),
                            judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: fkSupplied }) as Record<string, unknown>,
                          })
@@ -13133,7 +13140,7 @@ export class ObjectQL implements IObjectQLEngine {
                // a forged read-only column in a multi-row update is dropped for
                // non-system callers (a foreign `organization_id` is additionally
                // rejected upstream by the tenant write wall, #2946).
-               if (!opCtx.context?.isSystem) {
+               if (staticReadonlyStripRunsMulti) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
                    // [#8214] Same threading as the by-id branch; the multi
                    // branch still passes no `addressKey` (nothing addresses a
