@@ -51,6 +51,24 @@
  * carries a field the fixtures actually restrict — in both directions, and once
  * under D10 delegation where the two masks must intersect rather than union.
  *
+ * ## …and the two blocks that are NOT equivalences
+ *
+ * Both need a caller the equivalence block has no fixture for: a DELEGATED
+ * administrator (ADR-0090 D12) holding a real `adminScope` over a business-unit
+ * subtree — the only caller the D12 gate's delegate branch judges, stamps and
+ * refuses without an id. `boot(sets, tables)` hands the gate the stored rows it
+ * reads for one (the topology is `delegated-admin-gate.test.ts`'s own); every
+ * other boot passes no tables and gets the engine double exactly as before.
+ *
+ *   - **The copy.** The D12 arm is handed SHALLOW COPIES of the caller's rows,
+ *     because the gate stamps `granted_by` onto the rows it is handed and the
+ *     preview passes this method the caller's own payload. Nothing reads the
+ *     stamp back, so no admission answer can notice the copy — only the
+ *     caller's row can, and that is what the block asserts.
+ *   - **The DIRECTION.** On an id-less UPDATE the probe refuses a delegate the
+ *     middleware — holding the id — admits: the one place the two doors are
+ *     pinned UNEQUAL, and only in the narrower direction.
+ *
  * Harness mirrors `can-read-object-admission.test.ts`, whose read twin this is.
  */
 
@@ -218,7 +236,69 @@ const RBAC_PAYLOAD = { user: 'u_target', position: 'sales' };
 /** …and the one that names the column the FLS fixtures restrict. */
 const REFERENCE_PAYLOAD = { title: 'x', account: 'acc_churn' };
 
-async function boot(sets: PermissionSet[]) {
+/**
+ * ⭐ A DELEGATED administrator (ADR-0090 D12): no tenant-level wildcard, a plain
+ * CRUD grant on the link table, and an `adminScope` over the `east` subtree —
+ * the scope `delegated-admin-gate.test.ts` calls `EAST_SCOPE`, over the same
+ * topology:
+ *
+ *   hq (bu_hq)
+ *   ├── east (bu_east)          ← the scope's root
+ *   │   └── east_sales (bu_es)
+ *   └── west (bu_west)
+ */
+const EAST_SCOPE = {
+  businessUnit: 'east',
+  includeSubtree: true,
+  manageAssignments: true,
+  manageBindings: true,
+  authorEnvironmentSets: true,
+  assignablePermissionSets: ['sales_user', 'sub_admin'],
+};
+const DELEGATE_SET: PermissionSet = {
+  name: 'sub_admin',
+  label: 'Delegated administrator of the east subtree',
+  objects: { sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true } },
+  adminScope: EAST_SCOPE,
+} as unknown as PermissionSet;
+const DELEGATE_CTX = {
+  userId: 'u_delegate', tenantId: 'org-1', positions: [], permissions: ['sub_admin'], posture: 'MEMBER',
+};
+
+type Tables = Record<string, Array<Record<string, unknown>>>;
+
+/**
+ * The stored rows the D12 gate reads for that delegate: the BU tree its subtree
+ * resolves over, the one set `sales_rep` distributes (allowlisted by the scope),
+ * and — for the by-id update — the pre-image `a_prev`, anchored inside the
+ * subtree. A fresh copy per boot, so no case sees another's rows.
+ */
+const delegateTables = (): Tables => ({
+  sys_business_unit: [
+    { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
+    { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
+    { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east' },
+    { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq' },
+  ],
+  sys_position: [{ id: 'pos_sales', name: 'sales_rep' }],
+  sys_position_permission_set: [{ id: 'b1', position_id: 'pos_sales', permission_set_id: 'ps_sales' }],
+  sys_permission_set: [{ id: 'ps_sales', name: 'sales_user' }],
+  sys_user_position: [{ id: 'a_prev', user: 'u_east_1', position: 'sales_rep', business_unit_id: 'bu_es' }],
+});
+
+/** Equality and `$in`, nothing else — an operator this double does not know fails loudly, never matches silently. */
+function rowMatches(row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean {
+  return Object.entries(where ?? {}).every(([key, want]) => {
+    if (key.startsWith('$')) throw new Error(`engine double: unsupported operator ${key}`);
+    if (want && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)) {
+      return ((want as { $in: unknown[] }).$in).includes(row[key]);
+    }
+    if (want && typeof want === 'object') throw new Error(`engine double: unsupported predicate on ${key}`);
+    return row[key] === want;
+  });
+}
+
+async function boot(sets: PermissionSet[], tables?: Tables) {
   const middlewares: Array<(opCtx: any, next: () => Promise<void>) => Promise<void>> = [];
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
@@ -228,12 +308,26 @@ async function boot(sets: PermissionSet[]) {
       // Exactly one delegator exists. Every other lookup misses — which is what
       // makes DANGLING_DELEGATOR_CTX the D10 fail-closed case, while
       // DELEGATED_AGENT_CTX gets a delegator that really resolves (to the
-      // additive baseline, and to nothing else).
-      findOne: vi.fn(async (_object: string, query: any) => (
-        query?.where?.id === LIVE_DELEGATOR
+      // additive baseline, and to nothing else). A boot handed `tables` answers
+      // those objects from its rows instead; no other boot does.
+      findOne: vi.fn(async (object: string, query: any) => {
+        if (tables && object in tables) {
+          return tables[object].find((row) => rowMatches(row, query?.where)) ?? null;
+        }
+        return query?.where?.id === LIVE_DELEGATOR
           ? { id: LIVE_DELEGATOR, email: 'boss@example.test' }
-          : null
-      )),
+          : null;
+      }),
+      // `find` exists ONLY on a boot handed `tables`, so every other boot keeps
+      // the engine double the equivalence block has always run against.
+      ...(tables
+        ? {
+            find: vi.fn(async (object: string, query: any) => {
+              const rows = (tables[object] ?? []).filter((row) => rowMatches(row, query?.where));
+              return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+            }),
+          }
+        : {}),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],
@@ -256,21 +350,27 @@ async function boot(sets: PermissionSet[]) {
   return { plugin, middleware: middlewares[0] };
 }
 
-/** Would the ENGINE middleware admit this write here? */
+/**
+ * Would the ENGINE middleware admit this write here?
+ *
+ * Without `id` this is the id-less write every equivalence case uses. With one
+ * it is the engine's by-id update: the row named as `options.where.id`, and no
+ * AST, because `update()` builds one only when it has no single id.
+ */
 async function middlewareAdmits(
   middleware: (opCtx: any, next: () => Promise<void>) => Promise<void>,
   object: string,
   operation: 'insert' | 'update',
   context: Record<string, unknown>,
   data: unknown,
+  id?: string,
 ): Promise<boolean> {
   const opCtx: any = {
     object,
     operation,
     context: { ...context },
-    options: {},
+    ...(id === undefined ? { options: {}, ast: { where: {} } } : { options: { where: { id } } }),
     data,
-    ast: { where: {} },
   };
   try {
     await middleware(opCtx, async () => {});
@@ -515,5 +615,90 @@ describe('the arms the CRUD grant alone does not cover', () => {
   it('leaves an ordinary object untouched by either pre-resolution arm', async () => {
     const { plugin } = await boot([WRITER_SET]);
     await expect(plugin.canWriteObject('invoice', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
+  });
+});
+
+/**
+ * ⭐ The D12 arm is handed COPIES of the caller's rows — a preview never writes
+ * into the caller's own objects.
+ *
+ * The gate stamps `granted_by` (its dual audit) onto the rows it materialises,
+ * and on an insert it materialises the payload rows BY REFERENCE. `validate()`
+ * hands this method the caller's RAW payload, so passing it straight through
+ * would stamp the caller's objects during a PREVIEW. No admission answer can
+ * notice either way — nothing reads `granted_by` back — so only the caller's
+ * row can, and that is what these cases read.
+ *
+ * Driven through the REAL booted plugin and the REAL gate. The call-through spy
+ * is the non-vacuity leg: each case first proves the gate DID stamp what it was
+ * handed — the hazard is live on this path — and only then that the caller's
+ * row carries no stamp. Without that leg a gate refusing before its stamp would
+ * leave the caller's row clean for the wrong reason, and the pin would hold
+ * while pinning nothing.
+ */
+describe("the D12 arm judges copies — a preview never stamps the caller's rows", () => {
+  const assignment = (user: string, businessUnit: string) => ({
+    user, position: 'sales_rep', business_unit_id: businessUnit,
+  });
+
+  it('leaves a single caller row unstamped, while the gate stamps the copy it was handed', async () => {
+    const { plugin } = await boot([DELEGATE_SET], delegateTables());
+    const handedToGate = vi.spyOn((plugin as any).delegatedAdminGate, 'assert');
+    const row = assignment('u_east_1', 'bu_es');
+
+    await expect(
+      plugin.canWriteObject('sys_user_position', 'insert', DELEGATE_CTX, row),
+    ).resolves.toBe(true);
+
+    expect(handedToGate).toHaveBeenCalledTimes(1);
+    expect((handedToGate.mock.calls[0][0] as any).data.granted_by).toBe('u_delegate');
+    expect('granted_by' in row).toBe(false);
+  });
+
+  it('leaves every row of a batch unstamped — the shape validate() actually sends', async () => {
+    const { plugin } = await boot([DELEGATE_SET], delegateTables());
+    const handedToGate = vi.spyOn((plugin as any).delegatedAdminGate, 'assert');
+    const rows = [assignment('u_east_1', 'bu_es'), assignment('u_east_2', 'bu_east')];
+
+    await expect(
+      plugin.canWriteObject('sys_user_position', 'insert', DELEGATE_CTX, rows),
+    ).resolves.toBe(true);
+
+    expect(handedToGate).toHaveBeenCalledTimes(1);
+    const handed = (handedToGate.mock.calls[0][0] as any).data as Array<Record<string, unknown>>;
+    expect(handed.map((r) => r.granted_by)).toEqual(['u_delegate', 'u_delegate']);
+    expect(rows.map((r) => 'granted_by' in r)).toEqual([false, false]);
+  });
+});
+
+/**
+ * ⭐ DIRECTION, not equivalence — the ONE arm where this method is pinned
+ * NARROWER than the middleware, and only in that direction.
+ *
+ * A preview names no stored row, so on an UPDATE the probe hands the D12 gate
+ * no id, and the gate's delegate branch refuses a mutation it cannot attribute
+ * to one pre-imaged row (`isMutationWithoutId`, ahead of its branch switch).
+ * The middleware holds that id — the engine's by-id update carries it as
+ * `options.where.id` — and judges the pre-image instead, so the same delegate
+ * sending the same patch is ADMITTED there.
+ *
+ * So this is asserted as a direction — this method `false`, the middleware
+ * `true` — ⛔ never as equality, and it is kept out of the equivalence block,
+ * whose doors must agree by construction. Both doors get the shape they really
+ * receive: the probe an ARRAY (`validate()` always sends `rawRows`), the
+ * middleware the engine's by-id `data` and id. If the two ever agree here,
+ * either the probe learned an id it has no way to hold, or the middleware lost
+ * the one it has — a change to be looked at, not absorbed.
+ */
+describe('DIRECTION — the one arm where the probe is narrower than the write path', () => {
+  it("REFUSES a scope-holding delegate's id-less UPDATE that the middleware, holding the id, ADMITS (ADR-0090 D12)", async () => {
+    const { plugin, middleware } = await boot([DELEGATE_SET], delegateTables());
+    const patch = { position: 'sales_rep', business_unit_id: 'bu_es' };
+
+    const admitted = await middlewareAdmits(middleware, 'sys_user_position', 'update', DELEGATE_CTX, patch, 'a_prev');
+    const answered = await plugin.canWriteObject('sys_user_position', 'update', DELEGATE_CTX, [patch]);
+
+    expect(admitted).toBe(true);
+    expect(answered).toBe(false);
   });
 });

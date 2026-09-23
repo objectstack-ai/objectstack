@@ -99,10 +99,13 @@ the D10 dangling delegator), the ADR-0066 D3 capability AND-gate for both
 principals, the `allowCreate`/`allowEdit` CRUD grant, the D10 delegator's
 independent grant, and the step 2.5 FLS write gate over the keys the payload
 names — each pinned EQUAL to the registered middleware's, arm for arm, with ONE
-exception disclosed because it is not pinned: a preview names no stored row, so
-on an UPDATE the D12 arm is handed no id and refuses a scope-holding delegate it
-cannot boundary-check, where the middleware — holding that id — can admit.
-NARROWER, never wider. It says nothing about any refusal not in that list.
+exception, pinned as a DIRECTION and not as an equivalence: a preview names no
+stored row, so on an UPDATE the D12 arm is handed no id and refuses a
+scope-holding delegate it cannot boundary-check, where the middleware — holding
+that id — can admit. `@objectstack/plugin-security`'s admission suite holds that
+case in a block of its own, asserting the method `false` and the middleware
+`true`: NARROWER, never wider. It says nothing about any refusal not in that
+list.
 
 ⛔ `true` never means the write will succeed, and ⛔ what follows is not an
 enumeration of the distance to success: the middleware refuses both before and

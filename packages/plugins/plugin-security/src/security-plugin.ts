@@ -5200,12 +5200,13 @@ export class SecurityPlugin implements Plugin {
    * capability AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD
    * grant, the D10 delegator's independent grant, and the step 2.5 FLS write
    * gate over the keys THIS payload names. Each of those is pinned EQUAL to the
-   * registered middleware's, arm for arm, with ONE exception disclosed here
-   * because it is not pinned: a preview names no stored row, so on an UPDATE
-   * arm 3 is handed no id and refuses a scope-holding delegate it cannot
-   * boundary-check, where the middleware — holding that id — can admit.
-   * NARROWER, never wider. It means nothing about any refusal not in that
-   * list.
+   * registered middleware's, arm for arm, with ONE exception, pinned as a
+   * DIRECTION and not as an equivalence: a preview names no stored row, so on
+   * an UPDATE arm 3 is handed no id and refuses a scope-holding delegate it
+   * cannot boundary-check, where the middleware — holding that id — can admit.
+   * `can-write-object-admission.test.ts` holds that case in a block of its own,
+   * asserting this method `false` and the middleware `true`: NARROWER, never
+   * wider. It means nothing about any refusal not in that list.
    *
    * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
    * an enumeration of the distance to success: the middleware refuses both
@@ -5284,7 +5285,8 @@ export class SecurityPlugin implements Plugin {
         //    leaves the gate's delegate branch refusing an id-less mutation it
         //    cannot boundary-check. That is NARROWER than the write path for a
         //    scope-holding delegate, never wider, and narrower is the safe
-        //    direction for a gate whose whole job is to withhold.
+        //    direction for a gate whose whole job is to withhold — pinned as
+        //    that direction in `can-write-object-admission.test.ts`.
         //
         //    ⭐ And the rows it supplies are SHALLOW COPIES, never the caller's
         //    own objects. The gate stamps `granted_by` onto the rows it
@@ -5293,7 +5295,8 @@ export class SecurityPlugin implements Plugin {
         //    method the caller's RAW payload, so passing it straight through
         //    would let a PREVIEW write into the caller's own objects. The
         //    decision cannot notice the copy: nothing reads `granted_by` back,
-        //    it is only ever written.
+        //    it is only ever written — so its pin reads the caller's rows
+        //    instead (`can-write-object-admission.test.ts`, the copy block).
         if (this.delegatedAdminGate) {
           const shallow = (row: unknown) =>
             row && typeof row === 'object' && !Array.isArray(row)
