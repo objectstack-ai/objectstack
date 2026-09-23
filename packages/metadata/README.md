@@ -74,7 +74,7 @@ Serializers convert metadata objects to/from different file formats:
 
 - **JSONSerializer** — `.json` files with optional key sorting
 - **YAMLSerializer** — `.yaml`/`.yml` files (JSON_SCHEMA for security)
-- **TypeScriptSerializer** — `.ts`/`.js` module exports (for `ObjectSchema.create()`, `defineView()`, etc.)
+- **TypeScriptSerializer** — the `typescript` / `javascript` formats (`.ts` / `.js`): a JSON document wrapped in a module, the file format `FilesystemLoader` writes and reads for those two formats (`typescript` is `FilesystemLoader.save()`'s default, so `MetadataManager.save()` routed to the filesystem loader writes `{rootDir}/{type}/{name}.ts`). It writes `export const metadata = { …JSON… };` then `export default metadata;` — the `typescript` format also imports the `ServiceObject` type and annotates the constant with it, whatever the item's metadata type — and reads back the first `{ … }` block after the first `export const` (or, failing that, `export default`), which must be JSON: double-quoted keys and strings, no comments, no trailing commas, no functions. It is **not** an authoring shape: authored metadata such as a `*.object.ts` is written `ObjectSchema.create({ … })` (or `defineView()`, …), which this serializer never emits, and an authored file with unquoted keys is refused rather than read.
 
 ### 4. Overlay / Customization System
 
