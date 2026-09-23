@@ -24,4 +24,4 @@ It stays, and its published description says what it is: the marketplace channel
 
 **What does not move**
 
-No key is added, removed, renamed or retyped, and no default changes: the accept set of all three schemas is byte-for-byte what it was, and `api-surface`, `api-surface-declarations`, `authorable-surface` and `authorable-defaults` are all unchanged. What moves is the published description text of three keys and the reference pages generated from it. The `Clause-②` declaration is `yes` as the conservative arm, because three published declarations' stated meaning moves.
+No key is added, removed, renamed or retyped, and no default changes: the accept set of all three schemas is byte-for-byte what it was, and `api-surface`, `authorable-surface` and `authorable-defaults` are all unchanged. What moves is the published description text of three keys and the reference pages generated from it. The `Clause-②` declaration is `yes` as the conservative arm, because three published declarations' stated meaning moves.

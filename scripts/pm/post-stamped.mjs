@@ -39,12 +39,18 @@
  *
  * `check-half-states.mjs`'s H56 reads two POSITIONS as belonging to the writing
  * act: the artefact's OPENING line, and a subscript reading-time line. This
- * tool imports that same reader, so the write side refuses exactly what the
- * read-side patrol would file:
+ * tool imports that same reader and runs it over the body AS IT WILL BE
+ * POSTED, so a stamp the read-side patrol could file at either position is
+ * refused before the write instead of filed on a board hours later:
  *
  *   POSITIONAL  a bare stamp sits in one of those two positions. That is the
  *               act's own stamp typed by hand, which is the whole defect. Write
- *               `{{NOW}}`, or `{{WAS:…}}` if it really is a quoted reading.
+ *               `{{NOW}}` there; a stamp that really is a reading of something
+ *               ELSE does not belong at that position at all — declare it with
+ *               `{{WAS:…}}` in the body.
+ *   DECLARED    a `{{WAS:…}}` renders AT one of those two positions. The
+ *               declaration is spent at render time, so what lands there is bare
+ *               digits the patrol reads as this act's clock. Section below.
  *   MIXED       the body uses `{{NOW}}` AND carries a bare stamp somewhere
  *               else. The author knows the token and typed a time anyway; that
  *               typed one is the estimate. This is the case the filing card
@@ -61,6 +67,47 @@
  * alone leaves the estimated stamp fully spellable — a seat that never types
  * `{{NOW}}` is never refused — so mixed alone would not have caught the
  * recorded failure, whose comments carried no token at all.
+ *
+ * ## A declared reading is not a spelling for those two positions (#18995)
+ *
+ * The parity sentence above is falsifiable, and it was false. The positional
+ * walk read `maskQuotedStamps`'d text, where a declaration is blanked, so a
+ * `{{WAS:…}}` on the OPENING line passed the write side — and the refusal text
+ * above offered it there by name. `substituteTokens` renders a declaration as
+ * its payload and nothing else, so it is SPENT at render time and the board
+ * carries bare digits where the patrol reads the writing act's own clock.
+ * Measured twice, on live artefacts written by FOLLOWING this file's own
+ * prescription: an opening line declaring a card's close time, filed 19 minutes
+ * out; a subscript line declaring a CI-log reading, filed 23 out, six such rows
+ * in one sweep.
+ *
+ * So the positional judgement runs over the body `substituteTokens` will
+ * actually send, and a stamp standing at one of those positions that is not
+ * this act's own clock is refused whichever spelling put it there. The REMEDIES
+ * differ where the spellings do: a typed stamp becomes `{{NOW}}`; a real
+ * reading MOVES into the body and is declared there.
+ *
+ * Two shapes it leaves alone, both because the patrol does. A position carrying
+ * MORE THAN ONE stamp once rendered — `{{NOW}}` beside a declared reading on
+ * one line is that shape — is read by nobody: H56 holds that line out rather
+ * than guess, and so does this. And a declaration whose value IS this act's
+ * clock minute renders the bytes `{{NOW}}` would have, so refusing it would
+ * refuse a body the patrol reads as perfectly stamped — the parity claim false
+ * the other way round.
+ *
+ * ⛔ It does not widen the BARE scan, which stays value-free: a typed stamp
+ * equal to this act's minute is still typed, and the positional refusal keeps
+ * it. The two rules meet at the position and part at the spelling. ⛔ And a
+ * declaration the value rules already refused is not ALSO filed here — one
+ * typo, one refusal, the rule this file states for the calendar and direction
+ * checks: a payload that is not a stamp declared nothing, so there is no
+ * reading standing in the wrong place.
+ *
+ * ⛔ The rejected route, recorded because it is the one that reads well: render
+ * a marker H56 recognises. That is a THIRD spelling both halves must learn, on
+ * a board the marker is visible on, bought to keep a reading in the one
+ * position where no reader can tell it from the act's own clock. The position
+ * is the defect; a marker makes it survivable instead of removing it.
  *
  * ## ⛔ Never pipe this tool, then `&&` the write that follows
  *
@@ -286,6 +333,54 @@
  * — the state before this rule — while over-detecting leaves an artefact
  * UNSTAMPED. The status line's verbatim count is what makes the second one
  * visible in the same breath.
+ *
+ * ## The remedy for a quoted stamp names the route that WORKS (#19319)
+ *
+ * The rule above is kept; the card that re-measured it was right about the half
+ * that was broken. A seat pasted a `git log` line into a fenced block, declared
+ * the stamp inside the fence exactly as the contract spells a declaration, and
+ * was refused MIXED with the remedy 「Declare it with `{{WAS:<those same
+ * digits>}}`」 — the declaration already standing at the position the refusal
+ * was complaining about, character for character. Three reproductions; the way
+ * out was discoverable only by disbelieving the text.
+ *
+ * ⛔ The refusal is NOT the defect, and the two arms that would soften it are
+ * both refused here:
+ *
+ *   TEACH THE FENCE   read a `{{WAS:…}}` inside a quotation as a declaration.
+ *                     That is a THIRD semantic for a quoted span — text for
+ *                     substitution, declaration for the contract — and the rule
+ *                     above is worth what it is because it has exactly one.
+ *   EXEMPT THE FENCE  drop quoted content from the bare scan. That is the one
+ *                     direction this file may not take, for the reason the
+ *                     MIXED and MASKING rows above already give.
+ *
+ * ⭐ And neither arm serves the body that was filed. A pasted `git log` line
+ * carries its stamp BARE, so no arm reaches it; wrapping that stamp in
+ * `{{WAS:…}}` to satisfy one would print the token inside the fence and publish
+ * a quotation the quoted command never emitted. The route that body has is the
+ * one the seat found by hand: the reading moves OUT of the quotation and is
+ * declared in the prose beside it, where a declaration is a declaration.
+ *
+ * So the remedy is a TAIL chosen by where the stamp stands, never a clause
+ * appended to a prescription the same sentence then takes back — and where the
+ * author HAS already written the declaration inside the quotation, it says what
+ * stands there is a PICTURE of one. A refusal prescribing a refused remedy is a
+ * tool arguing with itself; a refusal prescribing what is already on the page is
+ * that same tool telling the author to change nothing.
+ *
+ * ⛔ And the route is BOTH HALVES, always, because a remedy is worth what
+ * FOLLOWING it does. A first cut of this rule named only the declaration —
+ * 「the same declaration OUTSIDE the quotation」 — and the author who did
+ * exactly that, pasting the quoted line back unchanged, was refused a second
+ * time by the ordinary text, which prescribed the declaration now standing in
+ * the prose. The circle had MOVED ONE STEP, not closed. The digits are what
+ * has to leave the quotation, so the remedy says so: declare the reading in the
+ * prose AND paste the quoted line without its stamp, or quote the placeholder
+ * form instead of digits. A quotation that KEEPS the digits is still a bare
+ * stamp there, and the refusal for the half-done body names the declaration
+ * that already reads rather than asking for it again — pinned as a CHAIN, from
+ * the filed repro to a body that posts, every step's text naming the next.
  *
  * ## A quoted token is not a stamp — the carve-out's PARTNER check (#19091)
  *
@@ -760,6 +855,7 @@ import {
   ISSUE_BODY_LIMIT,
   PROXY_FLAG,
   claimSeatNumber,
+  h56EstimatedStamp,
   h56StampedReadings,
   markerMatches,
   protocolStamps,
@@ -769,7 +865,10 @@ import {
   stampSpan,
   threadReadField,
 } from './check-half-states.mjs';
-import { readClause2Line } from './check-clause2-carriers.mjs';
+import { readClause2Line } from './clause2-line.mjs';
+import { EXIT_UNCONFIRMED, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { MAX_BODY_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
+import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -801,6 +900,8 @@ export const EXIT_NOT_STORED = 4;
  * number.
  */
 export const EXIT_TOO_LARGE = 5;
+// 6 is EXIT_UNCONFIRMED, imported from fleet-write/dispatch.mjs: the relay was
+// dispatched and its outcome could not be confirmed — go READ, never retry blind.
 
 /**
  * The re-exec guard, per script rather than shared with its neighbours: two
@@ -1247,28 +1348,109 @@ function quotedRouteClosed(stamp, nowMs) {
 }
 
 /**
- * The clause a remedy appends when EVERY occurrence of the offending stamp sits
- * inside a quoted span — empty when at least one of them does not.
+ * Whether a declared reading names an instant inside the MINUTE this act's own
+ * clock spells — the bytes `{{NOW}}` would have written at that position, at
+ * either grain.
  *
- * Without it the two remedies prescribe a route that cannot work there: inside
- * a quotation neither spelling is substituted, so a seat that follows the text
- * literally gets the token printed where it wanted a time and reads the same
- * refusal again. A refusal text prescribing a refused remedy is a tool arguing
- * with itself — the rule the `{{WAS:…}}` direction check already states, taken
- * one step further now that a quotation can hold a stamp.
+ * ⛔ An equality against the rendered minute is not this question: a seconds
+ * grain of the same minute is the same reading, spelled narrower, and the
+ * read-side patrol — which widens a stamp to its own grain before it measures
+ * anything — files nothing on it. Refusing it would be this tool refusing what
+ * the patrol calls clean, which is the one disagreement between them that may
+ * never open. ⛔ And it is the MINUTE, never `H56_STAMP_TOLERANCE_MIN`: that
+ * number is a backward gap on the read side, and spending it here would buy
+ * back the typed stamp this file exists to make unspellable.
  */
-function quotedSpanClause(raw, spans, stamp) {
+function readingIsThisMinute(stamp, nowMs) {
+  const span = stampSpan(String(stamp ?? '').trim());
+  if (span === null) return false;
+  const minute = Math.floor(nowMs / 60000) * 60000;
+  return span.from >= minute && span.from < minute + 60000;
+}
+
+/**
+ * The WHOLE remedy tail for an offending stamp whose every occurrence sits
+ * inside a quoted span — null when at least one of them does not, and the
+ * caller then writes its ordinary remedy.
+ *
+ * ⛔ A tail, never a clause appended to the ordinary one. Inside a quotation
+ * neither spelling is substituted, so a text that prescribes `{{WAS:…}}` THERE
+ * and then takes it back in a trailing warning has prescribed a route that
+ * cannot work and argued with itself in one breath — which is how a seat that
+ * had ALREADY written the declaration inside the quotation read its own remedy
+ * back, character for character, and disbelieved the refusal. So the route the
+ * remedy names is the one that works: the same declaration, OUTSIDE the
+ * quotation.
+ *
+ * ⛔ And it is not an exemption. The refusal still fires; only the sentence
+ * telling the author what to do about it changes, which is the half that was
+ * wrong.
+ */
+function quotedSpanRemedy(raw, spans, stamp, closed = null) {
   const text = String(raw ?? '');
   const hits = [];
   for (let at = text.indexOf(stamp); at !== -1; at = text.indexOf(stamp, at + 1)) hits.push(at);
-  if (hits.length === 0 || !hits.every((at) => insideQuotedSpan(spans, at))) return '';
-  return (
-    ' ⚠️ Every occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and ' +
-    'substitutes nothing — so writing either spelling there prints the token itself, not a time. Move ' +
-    'the stamp out of the quotation to declare it, or, if the quotation is an EXAMPLE, quote the ' +
-    'placeholder form (`YYYY-MM-DDThh:mmZ`) instead of digits: quoting changes what is rendered, never ' +
-    'what was typed onto the board.'
-  );
+  if (hits.length === 0) return null;
+  const openers = [];
+  const re = globalOf(QUOTED_TOKEN_RE);
+  let m;
+  while ((m = re.exec(text))) {
+    openers.push({ from: m.index, to: m.index + m[0].length, quoted: insideQuotedSpan(spans, m.index) });
+  }
+  // Each occurrence of the DIGITS is one of four things, and only the fourth
+  // leaves this remedy to the ordinary one.
+  let quotedDeclared = 0; // inside a `{{WAS:…}}` that is itself quoted: a picture of a declaration
+  let quotedBare = 0; //     inside a quotation with no opener round it: digits, plainly
+  let proseDeclared = 0; //  inside a `{{WAS:…}}` TOKEN outside every quotation: a real declaration
+  for (const at of hits) {
+    const opener = openers.find((o) => at >= o.from && at < o.to) ?? null;
+    if (insideQuotedSpan(spans, at)) {
+      if (opener) quotedDeclared += 1;
+      else quotedBare += 1;
+    } else if (opener && !opener.quoted) {
+      proseDeclared += 1;
+    } else {
+      return null; // a loose stamp in prose — the ordinary remedy is the right one
+    }
+  }
+  if (quotedDeclared + quotedBare === 0) return null;
+  // ⛔ BOTH halves, always. Naming only the declaration sends an author who
+  // pastes the quoted line back as it was straight into a second refusal, and
+  // that second one prescribes the declaration now standing in the prose — the
+  // circle, moved one step instead of closed.
+  const route = (alreadyDeclared) =>
+    'The DIGITS are what has to leave the quotation: ' +
+    (alreadyDeclared
+      ? 'keep the declaration where it is and paste the quoted line WITHOUT its stamp'
+      : `declare the reading in the PROSE beside it${
+          closed ? ` (once the value is one the quoted route takes at all: ${closed})` : ` with \`{{WAS:${stamp}}}\``
+        } AND paste the quoted line WITHOUT its stamp`) +
+    ' — or, if the quotation is an EXAMPLE, quote the placeholder form (`YYYY-MM-DDThh:mmZ`) instead of ' +
+    'digits. ⛔ A quotation that KEEPS the digits is still a bare stamp there, whatever spelling is ' +
+    'wrapped round them: quoting changes what is rendered, never what was typed onto the board.';
+  if (proseDeclared > 0) {
+    return {
+      text:
+        `⚠️ This reading is ALREADY declared in the prose, and that declaration reads — ⛔ re-typing it ` +
+        `changes nothing. What is left is ${
+          quotedDeclared > 0 ? 'the declaration-shaped text' : 'the same digits'
+        } standing inside a quotation, where this tool renders text and substitutes nothing, so what ` +
+        `stands there is digits on the board. ${route(true)}`,
+      declared: true,
+      proseDeclared: true,
+    };
+  }
+  return {
+    text:
+      (quotedDeclared > 0
+        ? `⚠️ The \`{{WAS:${stamp}}}\` you already wrote round it is inside that quotation too, so what ` +
+          'stands there is a PICTURE of a declaration, not one, and re-typing it changes nothing. '
+        : '⚠️ Every occurrence of this stamp sits inside a QUOTED SPAN, where this tool renders text and ' +
+          'substitutes nothing — so writing either spelling there prints the token itself, not a time. ') +
+      route(false),
+    declared: quotedDeclared > 0,
+    proseDeclared: false,
+  };
 }
 
 /**
@@ -1285,8 +1467,18 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
   const refusals = [];
   const now = stampNow(nowMs);
 
+  const refusedValues = new Set();
+  // ⛔ The payload AND every stamp inside it. The declared walk below reads the
+  // RENDERED body, where a payload the shape rule refused stands as its own text,
+  // so what it has to decline is the DIGITS a reader would see at that position —
+  // the payload's whole spelling never reaches one.
+  const noteRefusedValue = (value) => {
+    refusedValues.add(String(value).trim());
+    for (const inside of protocolStamps(value)) refusedValues.add(inside);
+  };
   for (const value of quotedStampValues(raw, spans)) {
     if (protocolStamps(value).length !== 1 || protocolStamps(value)[0] !== value.trim()) {
+      noteRefusedValue(value);
       refusals.push({
         kind: 'quoted-not-a-stamp',
         detail:
@@ -1298,6 +1490,7 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     }
     const calendar = stampRealInstant(value);
     if (!calendar.real) {
+      noteRefusedValue(value);
       refusals.push({
         kind: 'quoted-no-such-instant',
         detail:
@@ -1314,6 +1507,7 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
       continue;
     }
     if (!stampIsFuture(value, nowMs)) continue;
+    noteRefusedValue(value);
     refusals.push({
       kind: 'quoted-in-the-future',
       detail:
@@ -1326,20 +1520,65 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     });
   }
 
+  // Everything above judges what a DECLARATION may SAY, and the VALUES it
+  // refused are kept so the declared walk below declines a second row about a
+  // value that already has one — one typo, one refusal. ⛔ Per value, never
+  // body-wide: a count would let one mistyped declaration anywhere suppress the
+  // row for a real declared reading at a position, so the caller repairs the
+  // typo and is refused a second time by a rule that was silent the first.
   const positional = h56StampedReadings(masked);
+  // ⛔ A MULTISET, not a set. Its credits exist only so the declared walk
+  // declines a position the bare scan already took; keyed on position-name plus
+  // stamp, a set also collapses two subscript lines carrying the SAME stamp into
+  // one row, and the second line then reaches the board unnamed.
+  const positionsTaken = new Map();
+  const takeCredit = (key) => {
+    const left = positionsTaken.get(key) ?? 0;
+    if (left === 0) return false;
+    positionsTaken.set(key, left - 1);
+    return true;
+  };
   for (const hit of positional) {
+    const key = `${hit.where} :: ${hit.stamp}`;
+    positionsTaken.set(key, (positionsTaken.get(key) ?? 0) + 1);
     const opener =
       `${hit.where} carries the bare stamp \`${hit.stamp}\`. That position belongs to the writing ` +
       'act, so a stamp typed there is the act\'s own time written from memory — the defect this tool ' +
       'exists to make unspellable. ';
     const closed = quotedRouteClosed(hit.stamp, nowMs);
+    const quoted = quotedSpanRemedy(raw, spans, hit.stamp, closed);
     refusals.push({
       kind: 'positional',
-      detail:
-        (closed
+      detail: quoted
+        ? `${opener}Write \`${STAMP_TOKEN}\` there. ${quoted.text}`
+        : closed
           ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
-          : `${opener}Write \`${STAMP_TOKEN}\` there, or \`{{WAS:${hit.stamp}}}\` if it ` +
-            'is genuinely a reading of something else.') + quotedSpanClause(raw, spans, hit.stamp),
+          : `${opener}Write \`${STAMP_TOKEN}\` there. A stamp that is genuinely a reading of something ` +
+            'else does not belong at that position at all: move it into the BODY and declare it there ' +
+            `with \`{{WAS:${hit.stamp}}}\`.`,
+    });
+  }
+
+  // ⛔ The other half of the same position, and the reason this judges the
+  // RENDERED body: a declaration is spent at render time, so a `{{WAS:…}}`
+  // standing at one of these two positions lands as bare digits the patrol
+  // reads as this act's own clock. The reader is H56's, run over the body
+  // `substituteTokens` will actually send — never a second idea of what a
+  // position is. The header section names the two shapes left alone, and why.
+  for (const hit of h56StampedReadings(substituteTokens(raw, now, spans).body)) {
+    if (refusedValues.has(hit.stamp) || readingIsThisMinute(hit.stamp, nowMs)) continue;
+    if (takeCredit(`${hit.where} :: ${hit.stamp}`)) continue;
+    refusals.push({
+      kind: 'positional-declared',
+      detail:
+        `${hit.where} carries the declared reading \`{{WAS:${hit.stamp}}}\`, which renders THERE as ` +
+        `the bare stamp \`${hit.stamp}\` — the quoted route writes the payload and nothing else, so ` +
+        'the declaration is spent and no reader of the board can recover it. That position belongs to ' +
+        'the writing act, so the read-side patrol reads those digits as this act\'s own clock and files ' +
+        `them against the instant the platform stored this artefact. Write \`${STAMP_TOKEN}\` there, ` +
+        'and move the quoted reading into the BODY, where a stamp is prose: the declaration is spent ' +
+        'wherever it sits, and only these two positions turn what is left of it into a claim about ' +
+        'this act\'s own clock.',
     });
   }
 
@@ -1348,19 +1587,29 @@ export function stampRefusals(text, nowMs = Date.now(), spans = quotedSpans(text
     for (const stamp of protocolStamps(masked)) {
       if (seen.has(stamp)) continue;
       seen.add(stamp);
-      const opener =
-        `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
-        'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
       const closed = quotedRouteClosed(stamp, nowMs);
+      const quoted = quotedSpanRemedy(raw, spans, stamp, closed);
+      const opener = quoted?.proseDeclared
+        ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\` inside a quotation, ` +
+          'beside a declaration of the SAME value in the prose. The declaration reads; the quoted digits ' +
+          'are not covered by it, because a quotation renders text and those digits stand on the board as ' +
+          'they were typed. '
+        : quoted?.declared
+          ? `this body uses \`${STAMP_TOKEN}\` and also carries the stamp \`${stamp}\`, declared only inside ` +
+            'a quotation. The clock this act read and a time it did not stand on one board, and a quotation ' +
+            'does not take the second out of the contract. '
+          : `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
+            'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
       refusals.push({
         kind: 'mixed',
-        detail:
-          (closed
+        detail: quoted
+          ? `${opener}${quoted.text}`
+          : closed
             ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
               `it: ${closed}.`
             : `${opener}Declare ` +
               `it with \`{{WAS:${stamp}}}\` if it is a quoted reading, or make it \`${STAMP_TOKEN}\` if it ` +
-              'is this act\'s own.') + quotedSpanClause(raw, spans, stamp),
+              'is this act\'s own.',
       });
     }
   }
@@ -1684,7 +1933,7 @@ export function keyedLineRefusalText(rows) {
   return (
     `post-stamped: REFUSED — ${rows.length} keyed line(s) in this \`Claim:\` cannot be read by the checker that owns them. Nothing was written.\n` +
     rows.map((r, i) => `  ${i + 1}. [${r.key}] ${r.why}\n      line:  ${r.line}\n      write: ${CLAIM_KEY_SPELLINGS[r.key]}`).join('\n') +
-    '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`) and `readClause2Line` (`check-clause2-carriers.mjs`)\n' +
+    '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`) and `readClause2Line` (`clause2-line.mjs`)\n' +
     '  are imported HERE, so this IS the row they would file — hours earlier, and on your own claim rather than on someone\n' +
     '  else\'s post. ⛔ No flag turns it off: a line those readers cannot read is a half-state, not a formatting preference.'
   );
@@ -2536,6 +2785,98 @@ export function parseOptions(argv) {
 }
 
 // ---------------------------------------------------------------------------
+// The relay transport — pure halves. `OS_FLEET_TRANSPORT` direct | dispatch |
+// auto: `dispatch` packs THIS act's one write — the comment, or the body
+// rewrite — into ONE `repository_dispatch` that the fleet-write relay executes
+// as `objectstack-fleet[bot]`; `auto` (the default) takes it in a cloud seat
+// container and `direct` elsewhere. The stamp is substituted BEFORE packing
+// (the stamp is the seat's act), and the read-back afterwards is the same
+// `readBackVerdict` the direct path runs — what changes is only where the
+// stored body is fetched from.
+// ---------------------------------------------------------------------------
+
+/** The relay action this act's write becomes: the SAME comment or body rewrite, as one op. Pure. */
+export function relayAction(options, body) {
+  return options.mode === 'comment' ? { op: 'comment', issue: options.number, body } : { op: 'issue_patch', issue: options.number, body };
+}
+
+/**
+ * Under the relay the comment's id comes back from the BOARD, not from a
+ * response: the newest comment on the card created at or after the dispatch
+ * (a minute of clock slack) whose stored body is what this act sent — the
+ * platform's own footer appending and newline stripping are the read-back
+ * classes that still count as landed. Pure. Returns the comment, or null.
+ */
+export function pickRelayComment(comments, sent, dispatchedAtMs) {
+  const since = dispatchedAtMs - 60_000;
+  const landed = (c) => {
+    const rb = classifyReadBack({ sent, stored: c?.body });
+    return rb.class !== 'unreadable' && sentBodyLanded(rb);
+  };
+  const candidates = (Array.isArray(comments) ? comments : []).filter((c) => Date.parse(c?.created_at) >= since && landed(c));
+  return candidates.length ? candidates[candidates.length - 1] : null;
+}
+
+/**
+ * What a relay outcome that is not success means for THIS tool's register.
+ * Pure. A refused dispatch is no act at all (3); a run that completed without
+ * success is a write the platform did not keep whole (4 — go READ); no run,
+ * or no completion, is UNCONFIRMED (6).
+ */
+export function relayExitFor(result) {
+  if (result?.state === 'refused') return EXIT_PREREQUISITE_NOT_MET;
+  if (result?.state === 'failure') return EXIT_NOT_STORED;
+  return EXIT_UNCONFIRMED;
+}
+
+/**
+ * The size route: the relay's body cap decides the transport for THIS write,
+ * and nothing else does. Pure.
+ *
+ * The relay carries a body of at most `MAX_BODY_BYTES` UTF-8 bytes (a
+ * `repository_dispatch` `client_payload` is capped by the platform at 64 KB,
+ * hence the 60,000-byte body cap in `fleet-write/ops.mjs`), so a body over it
+ * cannot take the relay however live the relay is:
+ *
+ *   - under `auto`, THIS write goes DIRECT — as the seat's own user, the token
+ *     this process holds — and the route's reason becomes the ONE printed line
+ *     that says so, naming the bytes, the cap and the identity. ⛔ Never silent.
+ *   - under an explicit `OS_FLEET_TRANSPORT=dispatch` the route becomes a
+ *     PREREQUISITE refusal (exit 3) naming the bytes: the operator asked for
+ *     the relay, and a fall-back would change the identity the write is booked
+ *     against.
+ *
+ * ⛔ Only the size re-routes. A refused op, a failed run and an UNCONFIRMED
+ * outcome keep the register `relayExitFor` gives them; and ⛔ there is no
+ * compression codec — a body this size is the thing to shrink, not to encode.
+ * A route that is not `dispatch`, one already carrying an error, or a body at
+ * or under the cap comes back unchanged (flagged `sizeRouted: false`).
+ */
+export function sizeRoute(route, body) {
+  const bytes = Buffer.byteLength(String(body ?? ''), 'utf8');
+  const cap = MAX_BODY_BYTES;
+  if (!route || route.transport !== 'dispatch' || route.error || bytes <= cap) return { ...route, bytes, cap, sizeRouted: false };
+  const size = `the body is ${grouped(bytes)} UTF-8 bytes, ${grouped(bytes - cap)} over the relay's ${grouped(cap)}-byte body cap (a repository_dispatch client_payload is capped by the platform at 64 KB)`;
+  if (route.requested === 'auto') {
+    return {
+      ...route,
+      transport: 'direct',
+      bytes,
+      cap,
+      sizeRouted: true,
+      reason: `${TRANSPORT_ENV} is auto → direct for THIS write: ${size}, so it cannot take the relay. Written DIRECT as the seat's own user (the token this process holds), not as objectstack-fleet[bot]. ⛔ Not compressed: a body this size is the thing to shrink.`,
+    };
+  }
+  return {
+    ...route,
+    bytes,
+    cap,
+    sizeRouted: true,
+    error: `${TRANSPORT_ENV}=dispatch but ${size} — the relay cannot carry it. ⛔ Not falling back to direct: the operator asked for the relay, and the fall-back would change the identity the write is booked against. Shrink the body, or run under ${TRANSPORT_ENV}=auto to let THIS write go direct as the seat's own user.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Live layer
 // ---------------------------------------------------------------------------
 
@@ -2602,6 +2943,33 @@ async function writeArtefact(repo, options, body) {
   const patched = await rest(`/repos/${repo}/issues/${options.number}`, { method: 'PATCH', body: { body } });
   const back = await rest(`/repos/${repo}/issues/${options.number}`);
   return { id: options.number, url: back?.html_url ?? patched?.html_url ?? null, writtenAt: back?.updated_at ?? patched?.updated_at ?? null, stored: back?.body };
+}
+
+/**
+ * The same act through the relay: one dispatch, its run, then the stored
+ * body read from the board. Returns the shape `writeArtefact` returns on
+ * success; `{ refused }` when the packed payload failed the validator;
+ * `{ sent }` when the relay did not succeed; `{ sent, unfound }` when the run
+ * succeeded and the board does not show the write.
+ */
+async function writeViaRelay(repo, options, body, route) {
+  const packed = packRequest({ repo, session: route.session, actions: [relayAction(options, body)] });
+  if (!packed.ok) return { refused: packed.errors };
+  const dispatchedAt = Date.now();
+  const sent = await sendFleetWrite(packed.payload, { token: TOKEN });
+  if (!sent.ok) return { sent };
+  try {
+    if (options.mode === 'comment') {
+      const tail = await readCardTail(repo, options.number, dispatchedAt - 60_000);
+      const hit = pickRelayComment(tail.comments, body, dispatchedAt);
+      if (!hit) return { sent, unfound: true };
+      return { id: hit.id, url: hit.html_url ?? null, writtenAt: hit.created_at ?? null, stored: hit.body, sent };
+    }
+    const back = await rest(`/repos/${repo}/issues/${options.number}`);
+    return { id: options.number, url: back?.html_url ?? null, writtenAt: back?.updated_at ?? null, stored: back?.body, sent };
+  } catch (err) {
+    return { sent, unfound: true, error: err?.message ?? 'the read-back threw' };
+  }
 }
 
 /**
@@ -2752,6 +3120,18 @@ async function main(argv) {
     return EXIT_REFUSED;
   }
 
+  // The transport, decided and SAID before anything leaves. A dry run makes no
+  // request, so a route that cannot be resolved is a note there, not a refusal.
+  // The size route runs on the RENDERED body (the stamp is part of what is
+  // sent): over the relay's cap, `auto` takes direct for this write and the
+  // line below says so; explicit dispatch is refused.
+  const route = sizeRoute(await resolveRoute(process.env), rendered.body);
+  if (route.error && !options.dryRun) {
+    console.error(`post-stamped: PREREQUISITE NOT MET — ${route.error}\n  NOTHING WAS WRITTEN.`);
+    return EXIT_PREREQUISITE_NOT_MET;
+  }
+  console.error(route.error ? `post-stamped: transport undecidable on a live run — ${route.error}` : `post-stamped: transport ${route.transport} — ${route.reason}`);
+
   if (options.dryRun) {
     console.error(
       `post-stamped: DRY RUN — nothing was written. Substituted with \`${rendered.stamp}\` — ` +
@@ -2782,8 +3162,38 @@ async function main(argv) {
   }
 
   let written;
+  let relayed = null;
   try {
-    written = await writeArtefact(repoRes.repo, options, rendered.body);
+    if (route.transport === 'dispatch') {
+      relayed = await writeViaRelay(repoRes.repo, options, rendered.body, route);
+      if (relayed.refused) {
+        console.error(relayRefusalText(relayed.refused));
+        return EXIT_REFUSED;
+      }
+      if (relayed.sent && !relayed.sent.ok) {
+        if (route.requested === 'auto' && relayed.sent.state === 'no-run') {
+          console.error(`post-stamped: ${fallbackText(relayed.sent, 'post-stamped')}`);
+          relayed = null;
+        } else if (relayed.sent.state === 'no-run' || relayed.sent.state === 'timeout') {
+          console.error(unconfirmedText(relayed.sent, 'post-stamped'));
+          return EXIT_UNCONFIRMED;
+        } else {
+          console.error(
+            `post-stamped: relay ${relayed.sent.state === 'refused' ? `REFUSED the dispatch (HTTP ${relayed.sent.status})` : 'run FAILED'} — ${relayed.sent.detail}` +
+              `${relayed.sent.run?.url ? ` ${relayed.sent.run.url}` : ''}. ⛔ Not retried and not fallen back: go READ the run and the card.`,
+          );
+          return relayExitFor(relayed.sent);
+        }
+      } else if (relayed.unfound) {
+        console.error(
+          `post-stamped: UNCONFIRMED — the relay run ${relayed.sent.run?.url ?? relayed.sent.run?.id ?? ''} completed, but ` +
+            `${relayed.error ? `the read-back threw (${relayed.error})` : `no comment created since the dispatch on ${repoRes.repo}#${options.number} stores the body this act sent`}. ` +
+            `Go READ the card; ⛔ do not re-run blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`,
+        );
+        return EXIT_UNCONFIRMED;
+      }
+    }
+    written = relayed ?? (await writeArtefact(repoRes.repo, options, rendered.body));
   } catch (err) {
     // ⛔ Only the WRITE path is classified. A read sends no body, so a size
     // refusal cannot be what it was answered with, and the pre-read above keeps
@@ -2831,6 +3241,8 @@ async function main(argv) {
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
           body_landed: verdict.landed,
+          transport: route.transport,
+          relay_run: relayed?.sent?.run?.url ?? null,
           read_back: {
             class: verdict.readBack.class,
             first_difference_byte: verdict.readBack.offset,
@@ -2859,6 +3271,7 @@ async function main(argv) {
         ...verdict.lines,
         ...(unread ? [unreadPassText(unread)] : []),
         `  substitutions: ${substitutionSummary(rendered)}`,
+        ...(relayed ? [`  transport: dispatch — via the relay run ${relayed.sent?.run?.url ?? relayed.sent?.run?.id ?? ''}`] : []),
       ].join('\n'),
     );
   }
@@ -2886,7 +3299,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
   'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
-  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 52,
+  'the quoting spelling: Markdown code is a quotation, and a quotation is rendered as written': 67,
   'the stamp verdict: a quoted token is not a stamp, and the carve-out has a partner check': 63,
   'the calendar rule: a stamp shaped like an instant the calendar does not have': 34,
   'the direction check: a stamp no act can have read': 22,
@@ -2898,10 +3311,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
+  'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
+  'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
+  "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 12,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -2968,11 +3384,12 @@ export function selfTest() {
   t('⭐ MIXED — the token plus a bare stamp elsewhere is refused', kinds('Claim: {{NOW}}\n\nThe board was read at 2026-09-08T14:00Z.').includes('mixed'));
   t('…and the mixed refusal says a reader cannot tell the two clocks apart', stampRefusals('Claim: {{NOW}}\n\nread 2026-09-08T14:00Z').find((r) => r.kind === 'mixed').detail.includes('a reader cannot tell which'));
   t('⛔ a bare stamp in PROSE with no token is NOT refused — quoting a ruling is a reading of something else', stampRefusals('Title\n\nThe 2026-09-08T14:00Z ruling stands.').length === 0);
-  t('a DECLARED quoted stamp is accepted even in the opening position', stampRefusals('The {{WAS:2026-09-08T14:00Z}} ruling stands.').length === 0);
+  t('⭐ a DECLARED quoted stamp in the OPENING position is refused — it renders there as bare digits', kinds('The {{WAS:2026-09-08T14:00Z}} ruling stands.', NOW_MS).join() === 'positional-declared');
+  t('…and the SAME declaration one line down is accepted, because no position claims it', stampRefusals('A ruling.\n\nThe {{WAS:2026-09-08T14:00Z}} ruling stands.', NOW_MS).length === 0);
   t('…and beside a token, which is the whole point of the declaration', stampRefusals('Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.').length === 0);
   t('⛔ the quoted route is not a free-text escape: a non-stamp value is refused', kinds('{{WAS:yesterday}}').includes('quoted-not-a-stamp'));
   t('⛔ …nor a smuggling route: a stamp with prose glued on is refused', kinds('{{WAS:2026-09-08T14:00Z ruling}}').includes('quoted-not-a-stamp'));
-  t('surrounding whitespace inside the declaration is tolerated', stampRefusals('{{WAS: 2026-09-08T14:00Z }}').length === 0);
+  t('surrounding whitespace inside the declaration is tolerated', stampRefusals('Note.\n\nread {{WAS: 2026-09-08T14:00Z }}', NOW_MS).length === 0);
   t('a mistyped token is refused rather than posted literally', renderBody('Claim: {{now}} — dispatched.', NOW_MS).kind === 'unknown-token');
   t('…and the refusal names the survivor so the typo is findable', renderBody('Claim: {{now}}', NOW_MS).error.includes('{{now}}'));
   t('…and says why the quiet direction is the dangerous one', renderBody('Claim: {{now}}', NOW_MS).error.includes('leave the artefact unstamped'));
@@ -3022,7 +3439,7 @@ export function selfTest() {
   t('⭐ THE CONTROL: one valid `{{NOW}}` and one valid quoted stamp still render', renderBody(SCAN_CONTROL, NOW_MS).ok === true);
   t('…with the scan finding nothing to refuse', unrecognisedOpeners(SCAN_CONTROL).length === 0);
   t('…and the rendered body carrying no opener at all', renderBody(SCAN_CONTROL, NOW_MS).body.includes('{{') === false);
-  t('⛔ NO accepted form narrowed: whitespace inside the declaration still clears the scan', unrecognisedOpeners('read {{WAS: 2026-09-08T14:00Z }}').length === 0 && renderBody('read {{WAS: 2026-09-08T14:00Z }}', NOW_MS).ok === true);
+  t('⛔ NO accepted form narrowed: whitespace inside the declaration still clears the scan', unrecognisedOpeners('read {{WAS: 2026-09-08T14:00Z }}').length === 0 && renderBody('Note.\n\nread {{WAS: 2026-09-08T14:00Z }}', NOW_MS).ok === true);
   t('⛔ …and the seconds grain still clears it', unrecognisedOpeners('read {{WAS:2026-09-08T14:00:30Z}}').length === 0);
   t('⛔ …and a bare stamp in prose is no opener\'s business', unrecognisedOpeners('The 2026-09-08T14:00Z ruling stands.').length === 0);
   t('⛔ the scan opens NO escape hatch: the entity spelling is not an opener, so it is prose', unrecognisedOpeners('the token &#123;&#123;NOW&#125;&#125;').length === 0);
@@ -3109,6 +3526,42 @@ export function selfTest() {
   t('⭐ the remedy SAYS the stamp sits inside a quotation, rather than prescribing a route that cannot work there', QUOTED_REMEDY.includes('sits inside a QUOTED SPAN'));
   t('…and names the placeholder as the way to quote an example', QUOTED_REMEDY.includes('YYYY-MM-DDThh:mmZ'));
   t('⛔ …and a stamp with even ONE unquoted occurrence gets the ordinary remedy, with no such clause', stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('QUOTED SPAN') === false);
+
+  // ⭐ THE FILED REPRO, and the half of it that was a defect. The refusal is
+  // RIGHT — a declaration inside a fence is text there, so the digits stand on
+  // the board like any others — and the remedy was wrong: it prescribed, digit
+  // for digit, the declaration already written at the position it complained
+  // about, then took it back in a trailing clause. One route, and it is the one
+  // that posts.
+  const FENCED_DECLARATION = 'Record {{NOW}}.\n\n```\nabc1234  {{WAS:2026-09-08T14:00Z}}\n```\n';
+  const FENCED_BARE = 'Record {{NOW}}.\n\n```\nabc1234  2026-09-08T14:00Z\n```\n';
+  const fencedRemedy = stampRefusals(FENCED_DECLARATION, NOW_MS)[0]?.detail ?? '';
+  t('⭐ THE FILED REPRO: a `{{WAS:…}}` DECLARED inside a fence, beside the token, is still refused', kinds(FENCED_DECLARATION, NOW_MS).join() === 'mixed');
+  t('⭐ …and the remedy no longer prescribes the declaration that is ALREADY there — the circle the card measured', fencedRemedy.includes('Declare it with `{{WAS:2026-09-08T14:00Z}}`') === false);
+  t('⭐ …it names what stands in the fence: a PICTURE of a declaration, so re-typing it changes nothing', fencedRemedy.includes('you already wrote round it is inside that quotation too') && fencedRemedy.includes('PICTURE of a declaration'));
+  // ⭐ THE CHAIN, pinned end to end. A remedy is worth what FOLLOWING it does:
+  // the first patch of this card named 「the same declaration OUTSIDE the
+  // quotation」 and stopped there, so an author who declared the reading in the
+  // prose and pasted the quoted line back UNCHANGED was refused again — by the
+  // old circular text, prescribing the declaration now standing in the prose.
+  // The circle had moved one step instead of closing. Every step below names
+  // the next, and the last one posts.
+  const CHAIN_2 = 'Record {{NOW}}, read {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234  2026-09-08T14:00Z\n```\n';
+  const CHAIN_2_TOKENISED = 'Record {{NOW}}, read {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234  {{WAS:2026-09-08T14:00Z}}\n```\n';
+  const CHAIN_3 = 'Record {{NOW}}, read {{WAS:2026-09-08T14:00Z}}.\n\n```\nabc1234\n```\n';
+  const chain2Remedy = stampRefusals(CHAIN_2, NOW_MS)[0]?.detail ?? '';
+  t('⭐ STEP 1 — the repro\'s remedy names BOTH halves: declare in the prose AND paste the line without its stamp', fencedRemedy.includes('declare the reading in the PROSE beside it') && fencedRemedy.includes('paste the quoted line WITHOUT its stamp'));
+  t('⭐ STEP 2 — declaring in the prose while pasting the line unchanged is STILL refused: the digits never left', kinds(CHAIN_2, NOW_MS).join() === 'mixed');
+  t('⭐ …and that refusal ⛔ does NOT prescribe the declaration now standing in the prose — the circle, closed', chain2Remedy.includes('Declare it with `{{WAS:2026-09-08T14:00Z}}`') === false);
+  t('⭐ …it says the declaration ALREADY reads, and names the quoted occurrence as the one thing left', chain2Remedy.includes('ALREADY declared in the prose') && chain2Remedy.includes('keep the declaration where it is and paste the quoted line WITHOUT its stamp'));
+  t('⭐ …and its opener stops calling that value BARE, because a declaration of it reads in the prose', chain2Remedy.includes('beside a declaration of the SAME value in the prose') && chain2Remedy.includes('carries the bare stamp') === false);
+  t('⭐ STEP 3 — the body that did BOTH halves POSTS: the chain ends ACCEPTED, measured, not asserted', stampRefusals(CHAIN_3, NOW_MS).length === 0);
+  t('⛔ the TOKEN-WRAPPED variant of step 2 lands on the same remedy — a picture of a declaration is not one', stampRefusals(CHAIN_2_TOKENISED, NOW_MS)[0].detail.includes('ALREADY declared in the prose'));
+  t('⛔ …and every text in the chain says a quotation KEEPING the digits is still a bare stamp there', [fencedRemedy, chain2Remedy].every((d) => d.includes('still a bare stamp there')));
+  t('⛔ CONTROL: one LOOSE occurrence in prose still gets the ordinary remedy, with no quoted clause at all', stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('Declare it with `{{WAS:2026-09-08T14:00Z}}`') && stampRefusals('Verdict {{NOW}}.\n\nread 2026-09-08T14:00Z and `2026-09-08T14:00Z`.\n', NOW_MS)[0].detail.includes('QUOTED SPAN') === false);
+  t('⛔ THE CONTROL: a truly BARE stamp in the same fence is refused identically — no widening was bought', kinds(FENCED_BARE, NOW_MS).join() === 'mixed');
+  t('⛔ …and the two are told APART in the text: nothing was written there to call a picture of one', stampRefusals(FENCED_BARE, NOW_MS)[0].detail.includes('you already wrote') === false);
+  t('⛔ …and a declared stamp is no longer called BARE, which was the reader disagreeing with the board', fencedRemedy.includes('carries the bare stamp') === false && stampRefusals(FENCED_BARE, NOW_MS)[0].detail.includes('carries the bare stamp'));
 
   const UNMATCHED = 'Write `{{NOW}} there.';
   t('⛔ an unmatched backtick opens NO span — the run needs a closer of the same length on the line', renderBody(UNMATCHED, NOW_MS).body === 'Write `2026-09-10T06:37Z there.');
@@ -3283,12 +3736,12 @@ export function selfTest() {
   t('\u26d4 \u2026and NOT also filed as a direction problem, though 2027 is ahead of this clock', kinds('read {{WAS:2027-02-29T00:00Z}}', NOW_MS).join() === 'quoted-no-such-instant');
   t('hour 24 rolls into the next day and is refused as the date it is not', stampRealInstant('2026-09-10T24:00Z').rolledTo === '2026-09-11T00:00Z');
 
-  t('\u2b50 THE CONTROL: a real instant at the MINUTE grain still renders verbatim', renderBody('read {{WAS:2026-09-08T14:00Z}}', NOW_MS).body === 'read 2026-09-08T14:00Z');
-  t('\u2b50 \u2026and a real instant at the SECONDS grain, which this tool takes too \u2014 NOT narrowed', renderBody('read {{WAS:2026-09-08T14:00:30Z}}', NOW_MS).body === 'read 2026-09-08T14:00:30Z');
+  t('\u2b50 THE CONTROL: a real instant at the MINUTE grain still renders verbatim', renderBody('Note.\n\nread {{WAS:2026-09-08T14:00Z}}', NOW_MS).body === 'Note.\n\nread 2026-09-08T14:00Z');
+  t('\u2b50 \u2026and a real instant at the SECONDS grain, which this tool takes too \u2014 NOT narrowed', renderBody('Note.\n\nread {{WAS:2026-09-08T14:00:30Z}}', NOW_MS).body === 'Note.\n\nread 2026-09-08T14:00:30Z');
   t('\u2026both judged real by the round trip itself', stampRealInstant('2026-09-08T14:00Z').real === true && stampRealInstant('2026-09-08T14:00:30Z').real === true);
   t('\u2b50 a real LEAP DAY is an instant the calendar has: 2028-02-29 is not a calendar problem', stampRealInstant('2028-02-29T00:00Z').real === true && kinds('read {{WAS:2028-02-29T00:00Z}}', NOW_MS).includes('quoted-no-such-instant') === false);
   t('\u2026it is refused by the DIRECTION rule alone, because 2028 is ahead of this clock', kinds('read {{WAS:2028-02-29T00:00Z}}', NOW_MS).join() === 'quoted-in-the-future');
-  t('\u2026and a leap day already PAST clears every rule', stampRefusals('read {{WAS:2024-02-29T00:00Z}}', NOW_MS).length === 0);
+  t('\u2026and a leap day already PAST clears every rule', stampRefusals('Note.\n\nread {{WAS:2024-02-29T00:00Z}}', NOW_MS).length === 0);
   t('\u2b50 the act\'s OWN minute is still accepted \u2014 the boundary rule is untouched', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', NOW_MS).length === 0);
   t('\u26d4 whitespace inside the declaration is no escape: the value is trimmed before it is judged', kinds('read {{WAS: 2026-13-45T99:99Z }}', NOW_MS).includes('quoted-no-such-instant'));
   t('\u26d4 a payload that fails the SHAPE is not also filed as a calendar problem', kinds('{{WAS:2026-13-45T99:99Z ruling}}', NOW_MS).join() === 'quoted-not-a-stamp');
@@ -3841,6 +4294,57 @@ export function selfTest() {
   t('⛔ …from the contract refusal, which is this tool\'s rule and not the platform\'s', EXIT_TOO_LARGE !== EXIT_REFUSED);
   t('⛔ …and from the write that HAPPENED and was not stored', EXIT_TOO_LARGE !== EXIT_NOT_STORED);
 
+  // ⛔ The two positions the patrol reads are the other half of this tool's
+  // contract, so every row here asserts the two halves AGREE about ONE body:
+  // what the write side does with it, and what H56 would file on the bytes
+  // that would have gone to the board. Both the reader and the row are
+  // imported — this battery restates neither.
+  battery('the two positions: a declaration renders as bare digits, and the patrol reads digits');
+  {
+    const READING = '2026-09-08T14:00Z'; // a real reading of something ELSE, two days back
+    const STORED = '2026-09-10T06:37:55Z'; // the platform's write instant, seconds after this act's clock
+    const posted = (body) => substituteTokens(body, stampNow(NOW_MS)).body;
+    const patrolFiles = (body) => h56EstimatedStamp({ body: posted(body), created_at: STORED, updated_at: STORED }) !== null;
+    const writeRefuses = (body) => stampRefusals(body, NOW_MS).length > 0;
+    const agree = (body) => writeRefuses(body) === patrolFiles(body);
+    const DECLARED_OPENING = `Unlock — upstream #18373 closed at {{WAS:${READING}}}.`;
+    const DECLARED_SUB = `Seat post.\n\n<sub>read {{WAS:${READING}}}</sub>`;
+    const DECLARED_IN_BODY = `Unlock — released {{NOW}}.\n\nUpstream #18373 closed at {{WAS:${READING}}}.`;
+    const ACT_CLOCK_OPENING = 'Unlock — released {{NOW}}.';
+    const HOLDOUT = `Verdict {{NOW}} — on the board read {{WAS:${READING}}}.`;
+    const OWN_MINUTE = `Round opened {{WAS:${stampNow(NOW_MS)}}}.`;
+    const TYPED_OPENING = `Claim: seat ${READING} — dispatched.`;
+
+    t('⭐ THE FILED REPRO: a declared reading on the OPENING line is REFUSED', kinds(DECLARED_OPENING, NOW_MS).join() === 'positional-declared');
+    t('⛔ WHY it used to pass: the positional walk read MASKED text, where a declaration is blanked', h56StampedReadings(maskQuotedStamps(DECLARED_OPENING)).length === 0);
+    t('⭐ …while the patrol reads the RENDERED body, where the declaration is spent and the digits stand bare', h56StampedReadings(posted(DECLARED_OPENING))[0]?.stamp === READING);
+    t('…and files a row on it, because a reading of something ELSE is not the write time', patrolFiles(DECLARED_OPENING) === true);
+    t('⭐ PARITY: the two halves now answer the same about that body', agree(DECLARED_OPENING) === true);
+    t('⭐ the SECOND position the card measured behaves identically', kinds(DECLARED_SUB, NOW_MS).join() === 'positional-declared' && agree(DECLARED_SUB) === true);
+    t('the refusal names the position, the declaration and the digits it renders to', ['the opening line', `{{WAS:${READING}}}`, READING].every((s) => stampRefusals(DECLARED_OPENING, NOW_MS)[0]?.detail?.includes(s) === true));
+    t('…and prescribes the act-clock token THERE, with the reading moved into the body', stampRefusals(DECLARED_OPENING, NOW_MS)[0]?.detail?.includes(STAMP_TOKEN) === true && stampRefusals(DECLARED_OPENING, NOW_MS)[0]?.detail?.includes('into the BODY') === true);
+    t('⭐ THE CONTROL: the act-clock token at that position is ACCEPTED, and the patrol files nothing', writeRefuses(ACT_CLOCK_OPENING) === false && patrolFiles(ACT_CLOCK_OPENING) === false);
+    t('⭐ …and the same declaration one line down is accepted, with the patrol silent there too', writeRefuses(DECLARED_IN_BODY) === false && patrolFiles(DECLARED_IN_BODY) === false);
+    t('⛔ the patrol HOLDS OUT a rendered position carrying two stamps rather than guess, and so does this', h56StampedReadings(posted(HOLDOUT)).length === 0 && writeRefuses(HOLDOUT) === false && agree(HOLDOUT) === true);
+    t('⛔ a declaration whose value IS this act\'s clock writes the bytes the token would, so it is not this refusal\'s business', writeRefuses(OWN_MINUTE) === false && patrolFiles(OWN_MINUTE) === false);
+    t('⛔ the BARE scan is untouched and stays value-free: a typed stamp at that position is still refused', kinds(TYPED_OPENING, NOW_MS).join() === 'positional');
+    t('…with ONE row, not two — the declared walk declines a position the bare scan already took', stampRefusals(TYPED_OPENING, NOW_MS).length === 1);
+    t('…and its remedy no longer offers the quoted route AT the position, but in the body', stampRefusals(TYPED_OPENING, NOW_MS)[0].detail.includes('into the BODY') && stampRefusals(TYPED_OPENING, NOW_MS)[0].detail.includes(`{{WAS:${READING}}}`));
+    t('⛔ a value the shape or direction rules already refused is not ALSO filed here — one typo, one refusal', kinds('read {{WAS:2099-01-01T00:00Z}}', NOW_MS).join() === 'quoted-in-the-future' && kinds('read {{WAS:2026-13-45T99:99Z}}', NOW_MS).join() === 'quoted-no-such-instant');
+    const TYPO_ELSEWHERE = `${DECLARED_OPENING}\n\nthe form is {{WAS:yesterday}}.`;
+    const TWO_SUBS = `Seat post.\n\n<sub>read {{WAS:${READING}}}</sub>\n\n<sub>read {{WAS:${READING}}}</sub>`;
+    const TWO_SUBS_BARE = `Seat post.\n\n<sub>read ${READING}</sub>\n\n<sub>read ${READING}</sub>`;
+    const OWN_SECONDS = `Round opened {{WAS:${new Date(NOW_MS).toISOString().slice(0, 19)}Z}}.`;
+    t('⭐ the quoted-value gate is per VALUE: a typo elsewhere no longer hides the row at a position', kinds(TYPO_ELSEWHERE, NOW_MS).join() === 'quoted-not-a-stamp,positional-declared');
+    t('⛔ …while the refused value itself is still not filed twice — one typo, one refusal, unchanged', kinds('{{WAS:2026-13-45T99:99Z ruling}}', NOW_MS).join() === 'quoted-not-a-stamp');
+    t('⭐ two subscript lines carrying the SAME declared stamp are TWO rows — a set collapsed them into one', stampRefusals(TWO_SUBS, NOW_MS).length === 2);
+    t('⛔ …and the bare control is unchanged: the declared walk still declines a position the bare scan took', kinds(TWO_SUBS_BARE, NOW_MS).join() === 'positional,positional');
+    t('⭐ a declaration of THIS act\'s clock at the SECONDS grain is accepted, like the minute one beside it', writeRefuses(OWN_SECONDS) === false && writeRefuses(OWN_MINUTE) === false);
+    t('⭐ …and the patrol files nothing on it either, which is the parity that decides it', patrolFiles(OWN_SECONDS) === false && agree(OWN_SECONDS) === true);
+    t('⛔ …and the skip is MINUTE CONTAINMENT, not a tolerance: the minute BEFORE is still refused', kinds(`Round opened {{WAS:${stampNow(NOW_MS - 60000)}}}.`, NOW_MS).join() === 'positional-declared');
+    t('structural: the walk runs over the body `substituteTokens` will SEND, and the reader is the patrol\'s own', /h56StampedReadings\(substituteTokens\(raw, now, spans\)\.body\)/u.test(stampSource) && new RegExp('function\\s+h56StampedReadings\\b').test(stampSource) === false);
+  }
+
   battery('the shared rule: this tool and H56 cannot come to disagree');
   t('⭐ the positions this tool refuses are the ones H56 reads — one imported reader, never two', h56StampedReadings(maskQuotedStamps(OPENING)).length === 1);
   t('⭐ …so a body this tool accepts leaves H56 nothing in those positions', h56StampedReadings(maskQuotedStamps(TWO.body.replace(/2026-09-10T06:37Z/g, '{{NOW}}'))).length === 0);
@@ -3875,6 +4379,60 @@ export function selfTest() {
     t('↔ owner coupling: the id pattern and the `none` are `check-half-states.mjs`\'s own spellings, read off its source', ownerSource.includes('/^[1-9]\\d*$/') && ownerSource.includes("'none'") && THREAD_READ_VALUE.source.includes('[1-9]\\d*') && THREAD_READ_VALUE.test('none'));
     t('structural: the CLI runs this on `--comment` only, ⛔ never on a card body, and every reader is imported, ⛔ none restated', /const keyed = options\.mode === 'comment' \? claimKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && new RegExp('function\\s+(claimSeatNumber|threadReadField|readClause2Line)\\b').test(stampSource) === false);
     t('the refusal names all three readers, and that no flag turns it off', ['claimSeatNumber', 'h50ThreadReadMismatch', 'readClause2Line', 'No flag turns it off'].every((s) => keyedLineRefusalText(claimKeyedLineRefusals(MISLAID_SEAT)).includes(s)));
+  }
+
+  // ── the relay transport ──────────────────────────────────────────────────
+  battery('the relay transport: the same act as one op, the comment found on the board, the exit register kept apart');
+  {
+    const body = 'A stamped body.\n';
+    t('a comment becomes ONE `comment` op on the card', JSON.stringify(relayAction({ mode: 'comment', number: 17 }, body)) === JSON.stringify({ op: 'comment', issue: 17, body }));
+    t('a body rewrite becomes ONE `issue_patch` op carrying only the body', JSON.stringify(relayAction({ mode: 'body', number: 17 }, body)) === JSON.stringify({ op: 'issue_patch', issue: 17, body }));
+    const NOW = Date.UTC(2026, 8, 22, 9, 4, 0);
+    const at = (s) => new Date(NOW + s * 1000).toISOString();
+    const comments = [
+      { id: 1, body, created_at: at(-3600) },
+      { id: 2, body: 'another seat\'s comment', created_at: at(20) },
+      { id: 3, body: `${body.replace(/\n$/, '')}${PLATFORM_COMMENT_FOOTER}`, created_at: at(30) },
+    ];
+    t('the newest comment since the dispatch whose stored body is the sent one is picked — the platform footer counts as landed', pickRelayComment(comments, body, NOW)?.id === 3);
+    t('…a comment from before the dispatch is never it, however equal', pickRelayComment([comments[0]], body, NOW) === null);
+    t('…another body is never it', pickRelayComment([comments[1]], body, NOW) === null);
+    t('…a mutated body is never it', pickRelayComment([{ id: 4, body: 'A stamped body, edited.', created_at: at(5) }], body, NOW) === null);
+    t('…and a minute of clock slack before the dispatch is allowed', pickRelayComment([{ id: 5, body, created_at: at(-30) }], body, NOW)?.id === 5);
+    t('no comments at all is null, not a crash', pickRelayComment(null, body, NOW) === null && pickRelayComment([], body, NOW) === null);
+    t('a refused dispatch is exit 3 (no act at all)', relayExitFor({ state: 'refused' }) === EXIT_PREREQUISITE_NOT_MET);
+    t('a run that completed without success is exit 4 (go READ)', relayExitFor({ state: 'failure' }) === EXIT_NOT_STORED);
+    t('no run, or no completion, is exit 6 UNCONFIRMED', relayExitFor({ state: 'no-run' }) === EXIT_UNCONFIRMED && relayExitFor({ state: 'timeout' }) === EXIT_UNCONFIRMED);
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
+    t('structural: in main a dry run returns before the relay can be reached, and ONE read-back verdict serves both transports', mainSource.indexOf('if (options.dryRun) {') < mainSource.indexOf('await writeViaRelay(') && (mainSource.match(/readBackVerdict\(\{/g) ?? []).length === 1);
+  }
+
+  // ── the size route ───────────────────────────────────────────────────────
+  battery("the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes");
+  {
+    const AUTO = { requested: 'auto', transport: 'dispatch', reason: 'auto → dispatch (fixture)', error: null, failed: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' };
+    const STRICT = { ...AUTO, requested: 'dispatch', reason: 'OS_FLEET_TRANSPORT=dispatch (fixture)' };
+    const ofBytes = (n) => 'x'.repeat(n);
+    const over = sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES + 1));
+    t('one byte over the cap under auto: DIRECT for this write, flagged as size-routed, no error', over.transport === 'direct' && over.sizeRouted === true && over.error === null);
+    t('…and the ONE line names the bytes sent', over.reason.includes(`${grouped(MAX_BODY_BYTES + 1)} UTF-8 bytes`));
+    t('…the cap', over.reason.includes(`${grouped(MAX_BODY_BYTES)}-byte body cap`));
+    t("…and the identity used — the seat's own user, not the fleet bot", over.reason.includes("seat's own user") && over.reason.includes('not as objectstack-fleet[bot]'));
+    const under = sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES - 1));
+    t('one byte under the cap under auto: the relay, the route untouched', under.transport === 'dispatch' && under.sizeRouted === false && under.reason === AUTO.reason && under.error === null);
+    t('…and exactly AT the cap is still the relay (the validator admits it)', sizeRoute(AUTO, ofBytes(MAX_BODY_BYTES)).transport === 'dispatch');
+    const strict = sizeRoute(STRICT, ofBytes(MAX_BODY_BYTES + 1));
+    t('⛔ explicit dispatch one byte over: a PREREQUISITE refusal naming the bytes and saying it will NOT fall back, the transport NOT changed', strict.transport === 'dispatch' && typeof strict.error === 'string' && strict.error.includes(grouped(MAX_BODY_BYTES + 1)) && strict.error.includes('Not falling back'));
+    t('bytes are UTF-8 BYTES, not characters: 20,001 three-byte characters are over the cap, 20,000 are not', sizeRoute(AUTO, '中'.repeat(20_001)).transport === 'direct' && sizeRoute(AUTO, '中'.repeat(20_000)).transport === 'dispatch');
+    t('a route already direct is never touched, whatever the size', sizeRoute({ ...AUTO, transport: 'direct' }, ofBytes(MAX_BODY_BYTES + 1)).sizeRouted === false);
+    t('a route that already carries an error is never touched — the size never masks a missing session', sizeRoute({ ...STRICT, error: 'no session' }, ofBytes(MAX_BODY_BYTES + 1)).error === 'no session');
+    t('⛔ nothing else re-routes: a refused dispatch, a failed run and UNCONFIRMED keep their register', relayExitFor({ state: 'refused' }) === EXIT_PREREQUISITE_NOT_MET && relayExitFor({ state: 'failure' }) === EXIT_NOT_STORED && relayExitFor({ state: 'timeout' }) === EXIT_UNCONFIRMED);
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
+    t('structural: main hands the resolved route through sizeRoute on the RENDERED body before the transport line is printed', mainSource.includes('sizeRoute(await resolveRoute(process.env), rendered.body)') && mainSource.indexOf('sizeRoute(') < mainSource.indexOf('transport ${route.transport}'));
+    // An import SHAPE, not the module's bare name: the name is spelled in this very line, so a name test could never fail.
+    t('⛔ no compression codec: this file imports nothing from zlib', /from '(node:)?zlib'/.test(ownSource) === false && /require\('(node:)?zlib'\)/.test(ownSource) === false);
   }
 
   // The floor, evaluated last: a battery that stops running names itself here.

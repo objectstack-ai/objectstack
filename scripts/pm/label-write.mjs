@@ -67,6 +67,20 @@
  * gets no exit code from here at all, and is in the exit-5 position by another
  * route: it hands the write to a seat that has a channel.
  *
+ * ## The transport — `OS_FLEET_TRANSPORT` direct | dispatch | auto
+ *
+ * A cloud seat container cannot write as the fleet directly (its proxy
+ * replaces the Authorization header), so step ③ has two transports and ONE
+ * shape: `direct` issues the additive verbs above with the token this process
+ * holds; `dispatch` packs the SAME verbs — the adds, the directed removes and
+ * the assignee change of this one write — into ONE `repository_dispatch` and
+ * `scripts/pm/fleet-write/dispatch.mjs` waits for the relay run that executes
+ * them as `objectstack-fleet[bot]`. Steps ①, ② and ④ are the same on both:
+ * reads are unaffected, and the read-back is what closes the write either
+ * way. `auto` (the default) picks `dispatch` in a cloud seat container and
+ * `direct` elsewhere, and prints which. The whole-set `PATCH` fallback below
+ * belongs to `direct` alone: the relay only has additive verbs.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0  the write landed AND the read-back matched the target.
@@ -83,6 +97,9 @@
  *      the write to a seat that has one by filing a card in the target lane.
  *      ⛔ Never MCP `issue_write` — lock 1 denies it, and it was the whole-set
  *      replace this tool exists to avoid in the first place.
+ *   6  UNCONFIRMED — the dispatch was accepted and its run did not appear, or
+ *      did not complete, within the ceiling. The run URL is printed. Go READ
+ *      the card; ⛔ never re-run blind: a second dispatch is a second write.
  *
  *   `node scripts/pm/label-write.mjs … > /tmp/lw.log 2>&1; EXIT=$?; tail -40 /tmp/lw.log`
  *
@@ -103,7 +120,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { isWriteMethod, noteResponse, paceWrite } from './write-pace.mjs';
+import { EXIT_UNCONFIRMED, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
+import { isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
   PM_EXCLUSIVE_STATE_LABELS,
@@ -289,6 +308,20 @@ export function patchFallbackBody({ labelTarget = [], assigneeTarget = [] } = {}
 }
 
 /**
+ * Step ③ as ONE relay stroke: the same additive verbs the direct plan issues,
+ * in the same order, as the relay's actions. Pure. An empty plan packs to no
+ * actions — and no dispatch leaves for it.
+ */
+export function relayActions({ issue, labels, assignees } = {}) {
+  const out = [];
+  if (labels?.addCalls?.length) out.push({ op: 'labels_add', issue, labels: [...labels.addCalls] });
+  if (labels?.removeCalls?.length) out.push({ op: 'labels_remove', issue, labels: [...labels.removeCalls] });
+  if (assignees?.addCalls?.length) out.push({ op: 'assign', issue, assignees: [...assignees.addCalls] });
+  if (assignees?.removeCalls?.length) out.push({ op: 'unassign', issue, assignees: [...assignees.removeCalls] });
+  return out;
+}
+
+/**
  * What an HTTP answer MEANS for the op that asked. Pure, because this is the
  * decision that routes between "try the fallback", "stop, nothing is measured"
  * and "that was a success spelled as a 404".
@@ -345,6 +378,7 @@ async function rest(path, { method = 'GET', body = null } = {}) {
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch (e) {
+    if (paced) releaseWriteLease(); // ⏱ rule ④: no response will come, so the fleet's turn ends here
     return { status: 0, rateRemaining: null, json: null, detail: e?.message ?? 'fetch threw', call: `${method} ${path}` };
   }
   const rateRemaining = res.headers.get('x-ratelimit-remaining');
@@ -455,8 +489,13 @@ const USAGE = [
   '  the full target set AND the current assignees echoed, then reads back either way.',
   '  ⛔ Never `PUT .../labels` and ⛔ never MCP `issue_write` (lock 1 denies it).',
   '',
+  '  OS_FLEET_TRANSPORT=direct|dispatch|auto (default auto): dispatch packs step ③ into ONE repository_dispatch the',
+  '  fleet-write relay executes as objectstack-fleet[bot]; auto takes it in a cloud seat container (the seat\'s session is',
+  "  read from the container's CLAUDE_CODE_REMOTE_SESSION_ID; OS_FLEET_SESSION overrides it — a local checkout, a test)",
+  '  and direct elsewhere. Steps ①, ② and ④ are the same either way.',
+  '',
   '  Exits: 0 landed+read-back · 2 usage · 3 prerequisite (no token/route, or rate-limit exhausted)',
-  '         4 read-back disagrees with the target · 5 every channel refused.',
+  '         4 read-back disagrees with the target · 5 every channel refused · 6 dispatched but UNCONFIRMED.',
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -470,6 +509,8 @@ const loginsOf = (raw) => (Array.isArray(raw) ? raw : []).map((a) => (typeof a =
 
 export async function runLabelWrite(options, deps = {}) {
   const call = deps.call ?? rest;
+  const send = deps.send ?? sendFleetWrite;
+  const route = deps.route ?? (await resolveRoute(process.env));
   const clock = deps.now ?? (() => new Date());
   const emit = deps.log ?? ((line) => console.log(line));
   const lines = [];
@@ -545,6 +586,14 @@ export async function runLabelWrite(options, deps = {}) {
 
   const fallbackBody = patchFallbackBody({ labelTarget: labels.target, assigneeTarget: assignees.target });
 
+  // ── the transport, said out loud before anything leaves ───────────────────
+  if (route.error) {
+    record(`[${stamp()}] ③ PREREQUISITE NOT MET — ${route.error}`);
+    record(`[${stamp()}] ⛔ NOTHING WAS WRITTEN.`);
+    return result(EXIT_PREREQUISITE, { stoppedAt: 3, labels, assignees, transport: route.transport });
+  }
+  record(`[${stamp()}] ③ transport ${route.transport} — ${route.reason}`);
+
   if (options.dryRun) {
     record(`[${stamp()}] ③ DRY RUN — no request made. The one fallback body, if every additive verb is refused: ${JSON.stringify(fallbackBody)}`);
     record(`[${stamp()}] ④ read-back SKIPPED — ⛔ a dry run proves the PLAN and never the board.`);
@@ -562,17 +611,46 @@ export async function runLabelWrite(options, deps = {}) {
     record(`[${stamp()}] ③ 写 — 0 calls: the target already equals the current set. An idempotent no-op is a success, not a skip.`);
   }
 
+  // ── ③ via the relay: the SAME verbs, packed into one dispatch ─────────────
   let stopReason = null;
-  for (const [op, path, init] of plan) {
-    const r = await doCall(op, path, init);
-    record(`[${stamp()}] ③ 写 — ${r.call} -> HTTP ${r.status} (${r.verdict})${r.detail ? ` — ${r.detail}` : ''}`);
-    if (r.verdict === 'ok') continue;
-    if (r.verdict === 'idempotent') {
-      record(`[${stamp()}] ③ …404 on a directed DELETE is the label already being gone. Idempotent success, ⛔ not a refusal.`);
-      continue;
+  let relay = null;
+  if (route.transport === 'dispatch' && plan.length > 0) {
+    const actions = relayActions({ issue, labels, assignees });
+    const packed = packRequest({ repo, session: route.session, actions });
+    if (!packed.ok) {
+      record(relayRefusalText(packed.errors));
+      record(`[${stamp()}] ⛔ NOTHING WAS WRITTEN.`);
+      return result(EXIT_USAGE, { stoppedAt: 3, labels, assignees, transport: route.transport });
     }
-    stopReason = r;
-    break;
+    record(`[${stamp()}] ③ 写 (relay) — ONE dispatch, request ${packed.payload.request_id}: ${actions.map((a) => a.op).join(' · ')}`);
+    const sent = await send(packed.payload, { token: TOKEN, log: (line) => record(`      ${line}`) });
+    httpCalls.push({ op: 'relay', call: `dispatch ${packed.payload.request_id}`, status: sent.status, verdict: sent.state, detail: sent.run?.url ?? sent.detail ?? '' });
+    if (sent.ok) {
+      relay = sent;
+    } else if (route.requested === 'auto' && sent.state === 'no-run') {
+      record(`[${stamp()}] ③ ${fallbackText(sent, 'label-write')}`);
+    } else if (sent.state === 'no-run' || sent.state === 'timeout') {
+      record(unconfirmedText(sent, 'label-write'));
+      return result(EXIT_UNCONFIRMED, { stoppedAt: 3, labels, assignees, transport: route.transport, relay: sent });
+    } else {
+      record(`[${stamp()}] ③ relay ${sent.state === 'refused' ? 'REFUSED the dispatch' : 'run FAILED'} — ${sent.detail}${sent.run?.url ? ` ${sent.run.url}` : ''}. ⛔ Not retried and not fallen back: go READ the run and the card.`);
+      return result(exitForResult(sent), { stoppedAt: 3, labels, assignees, transport: route.transport, relay: sent });
+    }
+  }
+
+  // ── ③ direct: the additive verbs, one call each ───────────────────────────
+  if (relay === null) {
+    for (const [op, path, init] of plan) {
+      const r = await doCall(op, path, init);
+      record(`[${stamp()}] ③ 写 — ${r.call} -> HTTP ${r.status} (${r.verdict})${r.detail ? ` — ${r.detail}` : ''}`);
+      if (r.verdict === 'ok') continue;
+      if (r.verdict === 'idempotent') {
+        record(`[${stamp()}] ③ …404 on a directed DELETE is the label already being gone. Idempotent success, ⛔ not a refusal.`);
+        continue;
+      }
+      stopReason = r;
+      break;
+    }
   }
 
   if (stopReason?.verdict === 'ratelimit') {
@@ -674,9 +752,9 @@ export async function runLabelWrite(options, deps = {}) {
 
   record(
     `[${stamp()}] ④ MATCHES the target — labels ${render(backLabels)} · assignees ${render(backAssignees)}` +
-      `${fallbackUsed ? ' (via the whole-set PATCH fallback)' : ''}${reAdded.length ? ` (after re-adding ${render(reAdded)})` : ''}.`,
+      `${fallbackUsed ? ' (via the whole-set PATCH fallback)' : ''}${relay ? ` (via the relay run ${relay.run?.url ?? relay.run?.id ?? ''})` : ''}${reAdded.length ? ` (after re-adding ${render(reAdded)})` : ''}.`,
   );
-  return result(EXIT_OK, { labels, assignees, fallbackUsed, reAdded, verdict, assigneeVerdict, backLabels, backAssignees });
+  return result(EXIT_OK, { labels, assignees, fallbackUsed, reAdded, verdict, assigneeVerdict, backLabels, backAssignees, transport: route.transport, relay });
 }
 
 const HANDOFF =
@@ -794,13 +872,42 @@ export function fakeBoard(initial = {}) {
 }
 
 /** Drive the whole tool offline: parse, plan, write and read back against a fake board. */
-async function driveOffline(argv, boardInit = {}) {
+const DIRECT_ROUTE = Object.freeze({ requested: 'direct', transport: 'direct', reason: 'self-test: direct', error: null, session: null });
+
+/**
+ * A fake relay: for `success` it applies the actions to THE SAME fake board
+ * the run reads back from, the way the executor would on the real one, then
+ * answers a completed run; the other outcomes answer the shapes
+ * `sendFleetWrite` returns without touching the board.
+ */
+function fakeRelay(board, outcome = 'success', sent = []) {
+  const RUN = { id: 42, url: 'https://github.test/run/42', status: 'completed', conclusion: 'success' };
+  return async (payload) => {
+    sent.push(payload);
+    const base = { requestId: payload.request_id, startMs: 1, ceilingMs: 2, status: 204, verdict: 'ok', detail: '' };
+    if (outcome === 'no-run') return { ...base, state: 'no-run', ok: false, run: null, detail: 'no run appeared' };
+    if (outcome === 'timeout') return { ...base, state: 'timeout', ok: false, run: { ...RUN, status: 'in_progress', conclusion: null } };
+    if (outcome === 'failure') return { ...base, state: 'failure', ok: false, run: { ...RUN, conclusion: 'failure' }, detail: 'conclusion failure' };
+    if (outcome === 'refused') return { ...base, state: 'refused', ok: false, status: 404, verdict: 'refusal', run: null, detail: 'Not Found' };
+    for (const a of payload.actions) {
+      if (a.op === 'labels_add') board.labels = dedupe([...board.labels, ...a.labels]);
+      if (a.op === 'labels_remove') board.labels = board.labels.filter((l) => !a.labels.includes(l));
+      if (a.op === 'assign') board.assignees = dedupe([...board.assignees, ...a.assignees]);
+      if (a.op === 'unassign') board.assignees = board.assignees.filter((u) => !a.assignees.includes(u));
+    }
+    return { ...base, state: 'success', ok: true, run: RUN, detail: 'conclusion success' };
+  };
+}
+
+async function driveOffline(argv, boardInit = {}, extra = {}) {
   const fake = fakeBoard(boardInit);
   const parsed = parseOptions(argv);
   if (!parsed.ok) return { parsed, exit: EXIT_USAGE, fake, out: [] };
   const out = [];
-  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l) });
-  return { parsed, exit: res.exit, res, fake, out, text: out.join('\n') };
+  const sent = [];
+  const send = extra.send ?? (extra.relay ? fakeRelay(fake.board, extra.relay, sent) : undefined);
+  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l), route: extra.route ?? DIRECT_ROUTE, send });
+  return { parsed, exit: res.exit, res, fake, out, sent, text: out.join('\n') };
 }
 
 // The battery ledger this self-test's floor is evaluated against. A battery
@@ -816,8 +923,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the fallback: one PATCH, and the assignee echo that makes it survivable': 7,
   'the remaining exits: refusal, mismatch, the ONE-OF block and the dry run': 5,
   'the CLI: what a typo must never be allowed to mean': 8,
+  'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, auto falls back only on no-run': 12,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1008,6 +1116,40 @@ export async function selfTest() {
   t('--add is repeatable AND comma-separated', parseOptions(['--issue', '7', '--add', 'a,b', '--add=c']).options.add, ['a', 'b', 'c']);
   t('--repo defaults to this board, never to a sibling', parseOptions(['--issue', '7', '--add', 'x']).options.repo, resolveSweepRepo(process.env).repo);
 
+  // ── the relay transport ──────────────────────────────────────────────────
+  battery('the relay transport: ONE dispatch carrying the whole stroke, the same read-back, auto falls back only on no-run');
+  {
+    const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    const dispatchRoute = (requested = 'dispatch') => ({ requested, transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION });
+    t('the stroke packs the SAME verbs in the SAME order as the direct plan', relayActions({ issue: 7, labels: computeLabelTarget({ current: ['pm:queue'], add: ['pm:dispatched'], remove: ['pm:queue'] }), assignees: computeAssigneeTarget({ current: [], assign: ['dev'] }) }), [
+      { op: 'labels_add', issue: 7, labels: ['pm:dispatched'] },
+      { op: 'labels_remove', issue: 7, labels: ['pm:queue'] },
+      { op: 'assign', issue: 7, assignees: ['dev'] },
+    ]);
+    const init = { labels: ['pm:queue', 'domain:skills'], assignees: ['pm'] };
+    const viaRelay = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'pm:dispatched', '--remove', 'pm:queue', '--assign', 'dev'], init, { route: dispatchRoute(), relay: 'success' });
+    t('under dispatch the write lands through the relay and reads back at the target, exit 0', [viaRelay.exit, viaRelay.text.includes('via the relay run'), viaRelay.fake.board.labels, viaRelay.fake.board.assignees], [EXIT_OK, true, ['domain:skills', 'pm:dispatched'], ['pm', 'dev']]);
+    t('…and the ONLY calls this process made were the two reads — no additive verb left directly', viaRelay.fake.calls.map((c) => c.op), ['card-read', 'card-read']);
+    t('the payload carries the session, the target repo and the three actions of this ONE write', [viaRelay.sent.length, viaRelay.sent[0].session, viaRelay.sent[0].repo, viaRelay.sent[0].actions.map((a) => a.op)], [1, SESSION, 'objectstack-ai/objectstack', ['labels_add', 'labels_remove', 'assign']]);
+    const noop = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'domain:skills'], { labels: ['domain:skills'] }, { route: dispatchRoute(), send: async () => { throw new Error('a no-op must not dispatch'); } });
+    t('an idempotent no-op dispatches NOTHING under the relay either', [noop.exit, noop.fake.calls.map((c) => c.op)], [EXIT_OK, ['card-read', 'card-read']]);
+    const timedOut = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute(), relay: 'timeout' });
+    t('a run that did not complete within the ceiling is exit 6 UNCONFIRMED with the run url, no read-back, no retry', [timedOut.exit, timedOut.text.includes('UNCONFIRMED') && timedOut.text.includes('https://github.test/run/42'), timedOut.fake.calls.length], [EXIT_UNCONFIRMED, true, 1]);
+    const noRunExplicit = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('dispatch'), relay: 'no-run' });
+    t('under an EXPLICIT dispatch, no run is exit 6 — no fall-back', [noRunExplicit.exit, noRunExplicit.fake.calls.map((c) => c.op)], [EXIT_UNCONFIRMED, ['card-read']]);
+    const noRunAuto = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('auto'), relay: 'no-run' });
+    t('under AUTO, no run falls back to direct — said out loud — and the write lands and reads back', [noRunAuto.exit, noRunAuto.text.includes('Falling back to DIRECT'), noRunAuto.fake.calls.map((c) => c.op)], [EXIT_OK, true, ['card-read', 'label-add', 'card-read']]);
+    const failedRun = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('auto'), relay: 'failure' });
+    t('⛔ a run that FAILED is never fallen back from, even under auto: exit 5, no direct write', [failedRun.exit, failedRun.fake.calls.map((c) => c.op)], [EXIT_PLATFORM_REFUSAL, ['card-read']]);
+    const refusedDispatch = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: dispatchRoute('auto'), relay: 'refused' });
+    t('a refused dispatch (404) is exit 5 — the platform refused, nothing ran', refusedDispatch.exit, EXIT_PLATFORM_REFUSAL);
+    const badRoute = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x'], { labels: [] }, { route: { requested: 'dispatch', transport: 'dispatch', reason: '', error: 'OS_FLEET_SESSION is absent', session: null } });
+    t('a route with an error (no session in dispatch mode) is exit 3 before any write', [badRoute.exit, badRoute.fake.calls.map((c) => c.op)], [EXIT_PREREQUISITE, ['card-read']]);
+    t('the transport is printed on every run, direct included', clean.text.includes('③ transport direct'));
+    const dryRelay = await driveOffline(['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'x', '--dry-run'], { labels: [] }, { route: dispatchRoute(), send: async () => { throw new Error('a dry run must not dispatch'); } });
+    t('a dry run under dispatch names the transport and sends nothing', [dryRelay.exit, dryRelay.text.includes('③ transport dispatch')], [EXIT_OK, true]);
+  }
+
   // ── the floor, BEFORE the verdict ────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const floor = [];
@@ -1123,6 +1265,8 @@ export async function main(argv) {
           assignees: result.assignees?.target ?? null,
           fallbackUsed: Boolean(result.fallbackUsed),
           reAdded: result.reAdded ?? [],
+          transport: result.transport ?? null,
+          relay: result.relay ? { state: result.relay.state, run: result.relay.run ?? null, request_id: result.relay.requestId ?? null } : null,
           httpCalls: result.httpCalls,
         },
         null,

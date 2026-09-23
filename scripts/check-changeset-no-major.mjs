@@ -391,7 +391,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 // from the gate the PM protocol actually runs. Both modules import node
 // builtins only, so this file still runs before `pnpm install`.
 import { CONTRACT_REVIEW_LABEL } from './pm/check-half-states.mjs';
-import { readClause2Line } from './pm/check-clause2-carriers.mjs';
+import { readClause2Line } from './pm/clause2-line.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -885,7 +885,7 @@ export function render(result) {
 //   ① the CLAUSE-② declaration — "this PR puts a new key on a published
 //      payload" — carried by the `needs:contract-review` gate label and/or by
 //      the fixed `Clause-②: yes` line the PM protocol spells (read here through
-//      `check-clause2-carriers.mjs`'s own `readClause2Line`, imported rather
+//      `clause2-line.mjs`'s own `readClause2Line`, imported rather
 //      than restated, so the two readers cannot drift);
 //   ② the CHANGESET LEVEL for the package whose `packages/**/src/**` the diff
 //      moves.
@@ -1383,7 +1383,7 @@ export function packagesTouched({ cwd, from, head }) {
 // `readClause2Line` returns a REASON with every near miss, and this gate used
 // to print the offending line without it: the reader knew which of three
 // different mistakes the author had made, and the refusal said only "a near
-// miss". The three owe different remedies — `check-clause2-carriers.mjs` says
+// miss". The three owe different remedies — `clause2-line.mjs` says
 // so in its own words ("⛔ The reason changes the sentence, never the state") —
 // so the sentence is what this map supplies.
 //
@@ -1433,7 +1433,7 @@ export function clause2NearMissRemedy(reason, line) {
   }
   return (
     `this gate carries no remedy sentence for a near miss of reason ${JSON.stringify(reason ?? null)} — ` +
-    '`readClause2Line` (scripts/pm/check-clause2-carriers.mjs) reports a reason this file has not been taught, ' +
+    '`readClause2Line` (scripts/pm/clause2-line.mjs) reports a reason this file has not been taught, ' +
     `and the reason plus the line are printed rather than swallowed. The offending line is: ${line}. Whatever the ` +
     'reason, a declaration is `Clause-②: yes` or `Clause-②: no`, bare, at the start of a line of its own. Add the ' +
     'sentence for this reason to CLAUSE2_NEAR_MISS_REMEDIES in scripts/check-changeset-no-major.mjs.'

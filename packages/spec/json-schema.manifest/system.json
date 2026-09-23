@@ -178,6 +178,8 @@
     "system/PNCounter",
     "system/PackagePublishResult",
     "system/Plan",
+    "system/PlatformTranslationBundle",
+    "system/PlatformTranslationData",
     "system/PresignedUrlConfig",
     "system/QueueConfig",
     "system/QuotaEnforcementResult",

@@ -1,0 +1,65 @@
+{
+  "skill_name": "objectstack-ui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form.",
+      "expected_output": "One `defineView({ list, listViews, formViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, a `listViews.my_open` entry with `filter` triples (`{ field: 'assigned_to', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `formViews.edit` with `type: 'simple'` and `sections` referencing a declared field group.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineView", "provider: 'object'", "listViews", "groupByField", "link: true", "{current_user_id}"],
+        "must_not_contain": ["groupBy:", "conditionalRequired:"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team.",
+      "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and `requiresObject: 'sys_approval_request'` on the approvals item. Exactly one App per `type: 'app'` package: the support audience is a `requiredPermissions`-gated group inside it, not a second `App.create`. Registered under `defineStack({ apps })`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["App.create", "navigation", "objectName", "viewName", "filters", "requiresObject", "requiredPermissions"],
+        "must_not_contain": ["\"path\":", "pageName"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Add a Convert action on `lead` — only for qualified, not-yet-converted leads, from the record header and each list row, launching the `lead_conversion` flow — and a bulk 'Add to campaign' that asks which campaign, for the selected rows.",
+      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'modal'`, `locations: ['list_toolbar']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input.selectedIds`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineAction", "locations", "record_header", "list_toolbar", "visible", "successMessage", "selectedIds"],
+        "must_not_contain": ["{record."]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Design a custom lead record page: the Convert action inline in the header, a highlights strip, a stage path over `status`, and the related contacts. Also write a user guide for the `crm` package under src/docs and link it from the nav.",
+      "expected_output": "`definePage({ name, label, type: 'record', object: 'lead', template: 'three-column', regions: [...] })` with `page:header` (the Action object passed in `properties.actions`, no sibling action node), `record:highlights`, `record:path` (`statusField`, `stages`), `record:related_list`. The guide is a flat, namespace-prefixed `src/docs/crm_user_guide.md` in pure Markdown (MDX and image references are rejected at build), surfaced by a `type: 'url'` nav item pointing at `/docs/crm_user_guide`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["definePage", "type: 'record'", "regions", "page:header", "record:path", "src/docs/", "/docs/"],
+        "must_not_contain": ["record_detail", ".mdx"]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Sales reps need a locked-down task workbench: only open tasks, sorted by due date, grid only, no switching to other views; plus a report of opportunity amounts by stage.",
+      "expected_output": "Capability narrowing is the signal for an interface page: `definePage({ type: 'list', object: 'task', interfaceConfig: { source: 'task', columns: [...], sort: [...], filterBy: [...], userFilters: { element: 'dropdown', ... }, appearance: { allowedVisualizations: ['grid'] }, userActions: {...} } })` — the page IS the view definition (no deprecated `sourceView`). The report is `type: 'summary'` selecting `rows` / `values` from a declared `dataset`; there is no `chart` report type.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["definePage", "interfaceConfig", "columns", "allowedVisualizations", "summary", "dataset"],
+        "must_not_contain": ["sourceView", "type: 'chart'"]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "Invoice entry as a stepped form — header, then line items, then review — saving the invoice and its lines together.",
+      "expected_output": "A stepped form over ONE object is `formViews` with `type: 'wizard'` and `sections`, not a screen flow (nothing branches). Line items come from the DATA MODEL: `inlineEdit` on the child's `master_detail` field, which renders the editable grid and saves parent + children in one atomic `/api/v1/batch`; `subforms` only to override derived columns. No custom page, and no 'Add line' button (the ghost row exists).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'wizard'", "inlineEdit", "formViews", "master_detail"],
+        "must_not_contain": ["type: 'screen'"]
+      }
+    }
+  ]
+}

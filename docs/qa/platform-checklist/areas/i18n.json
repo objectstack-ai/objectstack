@@ -251,7 +251,7 @@
           "evidence": "the /i18n/locales response"
         },
         {
-          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (translationDataShape) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
+          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (PlatformTranslationDataSchema — the SERVED document is the merged tree, so it is the eleven-group platform face and not the ten-group per-app one) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
           "oracle": "api",
           "verify": "translations for zh-CN is non-empty; spot-check that sampled keys resolve under objects/_views/_actions/_sections/apps.navigation/dashboards/pages/settings groups, not a fourth dialect",
           "evidence": "the /translations/zh-CN response + the key check"
@@ -299,7 +299,7 @@
       ],
       "traps": ["stale-console-bundle", "hydration-race", "wrong-panel", "dispatcher-vs-hono-route"],
       "source": [
-        "packages/spec/src/system/translation.zod.ts#translationDataShape (translationDataShape — the authoritative group vocabulary: objects/_views/_actions/_sections, apps.navigation, messages, globalActions, dashboards, pages, settings, metadataForms, settingsCommon)",
+        "packages/spec/src/system/translation.zod.ts#appTranslationDataShape (appTranslationDataShape — the group vocabulary an APPLICATION may author: objects/_views/_actions/_sections, apps.navigation, messages, globalActions, dashboards, datasets, pages, flows, metadataForms, settingsCommon. `settings` is platform-only since #15178 and lives in platformSettingsShape, spread into PlatformTranslationDataSchema and TranslationItemSchema)",
         "examples/app-showcase/src/system/translations/index.ts (full-column coverage rationale)",
         "packages/services/service-i18n/src/i18n-service-plugin.ts#i18n (GET /i18n/locales | /translations/:locale | /labels/:object/:locale; { success, data } envelope #3636/#3675; resolveObjectFieldLabels nested shape #3778/#3833; the plugin mount and the dispatcher /i18n domain serve the same routes interchangeably)",
         "packages/services/service-i18n/src/file-i18n-adapter.ts#getLocales (getLocales / getTranslations — unloaded locale → {}; fallbackLocale applies per-KEY in t(), not to the bulk route)",

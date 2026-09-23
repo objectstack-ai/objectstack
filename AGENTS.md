@@ -413,6 +413,13 @@ and posts a `Release:` line. Findings are filed unassigned; assign at the moment
 maintainer's own work under the shared account carries no claim comment and is indistinguishable
 from a dispatch — an accepted blind spot; per-seat identities are not introduced.
 
+**Every GitHub write leaves through `scripts/pm/`, as `objectstack-fleet[bot]`, behind the shared write
+gate.** `fleet-token.mjs` mints the App token from `OS_FLEET_APP_ID` / `OS_FLEET_INSTALLATION_ID` /
+`OS_FLEET_PRIVATE_KEY`; `write-pace.mjs` serialises and spaces every write verb fleet-wide; `issue-create`,
+`label-write`, `post-stamped` and `close-cards` own their writes; `with-fleet.sh -- <command…>` runs anything
+else behind the gate (`--read` for reads). ⛔ Never a bare `curl` / `fetch` / `gh api -X POST|PATCH|PUT|DELETE`
+write; never a token in a remote URL, a `git config` value on disk or a log line. Each header is the authority.
+
 **State on your PR that you did not set belongs to another actor — ask, never "correct"
 it.** Under one shared identity every other participant's write arrives unsigned: the PM
 flipping your draft to ready and arming auto-merge, a bot re-labelling, the platform
@@ -750,15 +757,15 @@ Principles the wrapper encodes (its own output is the authority on detail):
 
 **`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against an
 implementation** — the props the spec zod schema declares vs the inputs the objectui
-registry config declares. A prop both sides declare and no renderer reads is, to this gate,
-perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real; just
-don't read it as proof anything renders. Its right-hand side is the **tracked repo-root
-`sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs` beside
-`scripts/sdui-manifest.record.json` and held honest in the required lint job by
-`scripts/check-sdui-manifest.mjs` — so `lint.yml` runs this gate `--strict` against it on
-every PR. It still **exits 1** with no usable manifest and `check:generated` files it
-`EXTERNAL_INPUT_REQUIRED` because that aggregate hands it none. ⛔ Do not "fix" a red by
-re-adding a skip.
+registry config declares. Its `spec-only` / `registry-only` / `missing` signals are real;
+just don't read it as proof anything renders. Its right-hand side is the **tracked
+repo-root `sdui.manifest.json`** and its record `scripts/sdui-manifest.record.json`, which
+the required lint job's `scripts/check-sdui-manifest.mjs` checks OFFLINE only — existence,
+shape, sha256 vs the record, record pin vs `.objectui-sha`; its version-vs-pin leg runs
+only where an objectui checkout is in hand, so lint prints `NOT CHECKED` by design.
+`lint.yml` runs THIS gate `--strict` against it on every PR; it still **exits 1** with no
+usable manifest and `check:generated` files it `EXTERNAL_INPUT_REQUIRED` because that
+aggregate hands it none. ⛔ Do not "fix" a red by re-adding a skip.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.

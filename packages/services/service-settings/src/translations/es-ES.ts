@@ -1,11 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { TranslationData } from '@objectstack/spec/system';
+import type { PlatformTranslationData } from '@objectstack/spec/system';
 
 /**
  * Español (es-ES) — built-in settings manifest translations.
  */
-export const esES: TranslationData = {
+export const esES: PlatformTranslationData = {
   settingsCommon: {
     sourceLabels: {
       env: 'Entorno',

@@ -146,11 +146,23 @@ import { esESMetadataForms } from './es-ES.metadata-forms.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+// ⭐ #19403 round 10 — added for the POSITIVE half of the discrimination below,
+// which round 10 moved off the `metadataForms.` slice because it emptied it.
+import { enObjects } from './en.objects.generated.js';
+import { zhCNObjects } from './zh-CN.objects.generated.js';
+import { jaJPObjects } from './ja-JP.objects.generated.js';
+import { esESObjects } from './es-ES.objects.generated.js';
 
 const TRANSLATED_LOCALES: ReadonlyArray<readonly [string, Record<string, any>]> = [
   ['zh-CN', zhCNMetadataForms as Record<string, any>],
   ['ja-JP', jaJPMetadataForms as Record<string, any>],
   ['es-ES', esESMetadataForms as Record<string, any>],
+];
+
+const TRANSLATED_OBJECTS: ReadonlyArray<readonly [string, Record<string, any>]> = [
+  ['zh-CN', zhCNObjects as Record<string, any>],
+  ['ja-JP', jaJPObjects as Record<string, any>],
+  ['es-ES', esESObjects as Record<string, any>],
 ];
 
 const PROVENANCE: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> = [
@@ -1034,14 +1046,40 @@ describe('#19403 round 9 — the provenance table agrees these leaves are now au
         authored.filter((p) => table[`metadataForms.${p}`] !== undefined),
         'an authored metadata-form leaf carries a provenance row — the lookup over-reports',
       ).toEqual([]);
-      // zh-CN has answered every metadata-form leaf, so it contributes the
-      // NEGATIVE half only; ja-JP and es-ES still carry the round 10 population
-      // and contribute the positive half.
-      if (locale === 'zh-CN') {
-        expect(echoing, 'zh-CN started echoing a metadata-form leaf again').toEqual([]);
-      } else {
-        expect(echoing.length, `${locale} has no echoing leaf to sample`).toBeGreaterThan(0);
-      }
+      // ⭐⭐ #19403 ROUND 10 REPAIRED THIS LEG, AND THE REPAIR IS A WIDENING, ⛔ NOT
+      // A LOWERED FLOOR. As written, the POSITIVE half of the discrimination was
+      // drawn from the `metadataForms.` slice and survived only because ja-JP and
+      // es-ES still carried round 10's population: 32 lifecycle leaves and one
+      // email-template sample. Round 10 authored all 33, so that slice now reads
+      // ZERO echoes in every locale and `toBeGreaterThan(0)` became false in two
+      // of the three — a landed assertion this diff genuinely falsified.
+      //
+      // The repair is round 9's own precedent, applied to round 9's own file: draw
+      // the positive sample from a population THIS CARD DOES NOT TOUCH. The
+      // `objects.` slice still carries hundreds of echoing leaves in every locale,
+      // including zh-CN, so the composer is shown to produce a real positive AND a
+      // real negative in the same run — in ALL THREE locales now, where before it
+      // managed it in only two. ⛔ The contract assertion is untouched: what moved
+      // is the SAMPLE DRAW, not the claim.
+      expect(echoing, `${locale} started echoing a metadata-form leaf again`).toEqual([]);
+      const enObjectPaths = flattenLeaves(enObjects as Record<string, any>);
+      const localeObjectPaths = flattenLeaves(
+        (TRANSLATED_OBJECTS.find(([name]) => name === locale)![1]) as Record<string, any>,
+      );
+      const objectEchoes = [...enObjectPaths].filter(([p, en]) => localeObjectPaths.get(p) === en).map(([p]) => p);
+      const objectAuthored = [...enObjectPaths]
+        .filter(([p, en]) => localeObjectPaths.has(p) && localeObjectPaths.get(p) !== en)
+        .map(([p]) => p);
+      expect(objectEchoes.length, `${locale} has no echoing objects leaf to sample`).toBeGreaterThan(50);
+      expect(objectAuthored.length, `${locale} has no authored objects leaf to sample`).toBeGreaterThan(50);
+      expect(
+        objectEchoes.filter((p) => table[`objects.${p}`] === undefined),
+        'an echoing objects leaf carries NO provenance row — the lookup under-reports',
+      ).toEqual([]);
+      expect(
+        objectAuthored.filter((p) => table[`objects.${p}`] !== undefined),
+        'an authored objects leaf carries a provenance row — the lookup over-reports',
+      ).toEqual([]);
     });
   }
 });

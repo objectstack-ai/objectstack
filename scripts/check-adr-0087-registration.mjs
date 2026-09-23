@@ -371,7 +371,7 @@ import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 // #16421 — the DIRECTION ARM, read through the fleet's one declaration reader.
 // ⛔ Not re-implemented here: the ruling's condition on the arm is that it has a
 // single legal spelling read in a single place, and every reader imports it.
-import { readClause2Line } from './pm/check-clause2-carriers.mjs';
+import { readClause2Line } from './pm/clause2-line.mjs';
 // #16421 — the staging manifest for this gate's own I1/I2 fixture, derived from
 // the module graph rather than typed out. Shared with the OTHER site that copies
 // this gate into a sandbox (`objectui-changeset-digest.mjs`), because two hand
@@ -7024,8 +7024,8 @@ function selfTest() {
     // ⭐ DERIVED, not listed, and derived by a module BOTH staging sites of this
     // gate import (#16421). It was a two-name list here and the same two-name
     // list in `objectui-changeset-digest.mjs`'s `fw-gate` sandbox. Signal (4)
-    // added an edge to `pm/check-clause2-carriers.mjs`, whose own closure is nine
-    // modules deep; this site was updated in the same edit and the other was not,
+    // added an edge to the clause-② declaration reader, then ten thousand lines
+    // of sweep behind it; this site was updated in the same edit and the other was not,
     // and `check:objectui-changeset` went red in CI with an error naming neither
     // the import nor the manifest. One in two is the measured hit rate of "the
     // next author remembers", so neither site holds an opinion about the graph
@@ -7037,7 +7037,7 @@ function selfTest() {
     // moment signal (4) is reached, and the two I-cases below would again report
     // about the wrong thing. This names the one edge that made the list a graph.
     assert(
-      staged.includes(copy) && staged.includes('scripts/pm/check-clause2-carriers.mjs'),
+      staged.includes(copy) && staged.includes('scripts/pm/clause2-line.mjs'),
       `I1/I2: the staged closure must carry the gate AND the declaration reader it imports — got ${staged.length} file(s): ${staged.join(', ')}`,
     );
     w(

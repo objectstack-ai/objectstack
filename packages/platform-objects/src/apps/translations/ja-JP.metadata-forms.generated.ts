@@ -56,6 +56,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "説明",
         helpText: "開発者向けドキュメント"
       },
+      nameField: {
+        label: "レコードタイトル項目",
+        helpText: "各レコードのタイトルに使う項目（例: \"name\"、\"subject\"）。ADR-0079 の正規ポインタで、レコード表示・ObjectQL 検索・関連レコードのプレビューが参照します。"
+      },
       isSystem: {
         label: "システム組み込み",
         helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
@@ -257,69 +261,89 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "データソース",
         helpText: "対象データソース ID（既定: \"default\"）"
       },
+      ownership: {
+        label: "所有権モデル",
+        helpText: "レコードの所有権モデル。未設定の場合は user として解決されます。"
+      },
+      sharingModel: {
+        label: "共有モデル",
+        helpText: "社内ユーザー向けの組織既定のレコード可視性（OWD）。カスタムオブジェクトで省略した場合、実行時は private として解決されます（ADR-0090 D1）。"
+      },
+      managedBy: {
+        label: "ライフサイクル区分",
+        helpText: "ライフサイクル区分: platform（ユーザーによる CRUD）、config（管理者が記述）、system-data（プラットフォーム定義のスキーマで、データは管理者／ユーザーが書き込み可）、engine-owned（エンジン所有、ユーザー書き込み不可）、append-only（監査）、better-auth（ID）。UI クライアントはこの値から CRUD の可否を導くため、このオブジェクトのレコードでユーザーに何が提供されるかを決めます。"
+      },
+      editMode: {
+        label: "編集の開き方",
+        helpText: "このオブジェクトのレコードを編集するときの操作意図。未設定ならレンダラー側の既定に従います。スタイルではなく、レンダラー横断の意図表明です。"
+      },
+      fileAccessDelegate: {
+        label: "ファイルアクセス委譲サービス",
+        helpText: "このオブジェクトのメディア項目が持つファイルのダウンロードを認可するカーネルサービス。指定すると「呼び出し元がそのレコードを読めるか」では判定しなくなります。アクセスがサービスによって仲介されるオブジェクト向けで、判定できない場合は拒否します。"
+      },
       lifecycle: {
-        label: "Lifecycle",
-        helpText: "Data lifecycle contract (ADR-0057): how long rows live and how space is reclaimed. Leave empty for permanent record semantics. Non-record classes require at least one bounding policy (retention, TTL, or rotation)."
+        label: "データライフサイクル",
+        helpText: "データライフサイクルのコントラクト（ADR-0057）: 行をどれだけ保持し、容量をどう回収するか。空欄の場合は永続的な record セマンティクスになります。record 以外のクラスは、少なくとも 1 つの境界ポリシー（保持期間、TTL、ローテーション）を宣言する必要があります。"
       },
       "lifecycle.class": {
-        label: "Class",
-        helpText: "Persistence contract for the rows of this object"
+        label: "ライフサイクルクラス",
+        helpText: "このオブジェクトの行の永続化コントラクト"
       },
       "lifecycle.retention": {
-        label: "Retention",
-        helpText: "Age-based retention window"
+        label: "保持期間",
+        helpText: "行の経過時間にもとづく保持ウィンドウ"
       },
       "lifecycle.retention.maxAge": {
-        label: "Max Age",
-        helpText: "Rows older than this (by created_at) are reaped. Duration literal: h/d/w/y, e.g. \"30d\""
+        label: "最大経過時間",
+        helpText: "これより古い行（created_at 基準）は削除されます。期間リテラル: h/d/w/y、例: \"30d\""
       },
       "lifecycle.ttl": {
-        label: "Ttl",
-        helpText: "Per-row TTL expiry"
+        label: "TTL 期限切れ",
+        helpText: "行ごとの TTL による期限切れ"
       },
       "lifecycle.ttl.field": {
-        label: "Field",
-        helpText: "Timestamp field the TTL is measured from (e.g. expires_at)"
+        label: "タイムスタンプフィールド",
+        helpText: "TTL の起点となるタイムスタンプフィールド（例: expires_at）"
       },
       "lifecycle.ttl.expireAfter": {
-        label: "Expire After",
-        helpText: "Rows expire this long after the field, e.g. \"1d\""
+        label: "期限切れまでの期間",
+        helpText: "行はこのフィールドの時刻からこの期間が経過すると期限切れになります。例: \"1d\""
       },
       "lifecycle.storage": {
-        label: "Storage",
-        helpText: "Physical rotation for high-frequency telemetry (SQLite: O(1) shard DROP)"
+        label: "ストレージ",
+        helpText: "高頻度テレメトリー向けの物理ローテーション（SQLite: O(1) のシャード DROP）"
       },
       "lifecycle.storage.strategy": {
-        label: "Strategy",
-        helpText: "Storage strategy"
+        label: "戦略",
+        helpText: "ストレージ戦略"
       },
       "lifecycle.storage.shards": {
-        label: "Shards",
-        helpText: "Shards retained; total window = shards × unit"
+        label: "シャード数",
+        helpText: "保持するシャード数。合計ウィンドウ = シャード数 × 単位"
       },
       "lifecycle.storage.unit": {
-        label: "Unit",
-        helpText: "Time width of one shard"
+        label: "シャード単位",
+        helpText: "シャード 1 つあたりの時間幅"
       },
       "lifecycle.archive": {
-        label: "Archive",
-        helpText: "Cold-store hand-off (audit class). Rows are never hot-deleted before the archive copy succeeded."
+        label: "アーカイブ",
+        helpText: "コールドストレージへの引き渡し（audit クラス）。アーカイブのコピーが成功する前に、行がホット側から削除されることはありません。"
       },
       "lifecycle.archive.after": {
-        label: "After",
-        helpText: "Archive rows older than this — must equal retention.maxAge"
+        label: "アーカイブ対象の経過時間",
+        helpText: "これより古い行をアーカイブします — retention.maxAge と一致している必要があります"
       },
       "lifecycle.archive.to": {
-        label: "To",
-        helpText: "Target datasource name for cold storage"
+        label: "アーカイブ先データソース",
+        helpText: "コールドストレージ用の対象データソース名"
       },
       "lifecycle.archive.keep": {
-        label: "Keep",
-        helpText: "How long the archive keeps rows (empty = forever), e.g. \"7y\""
+        label: "アーカイブ保持期間",
+        helpText: "アーカイブが行を保持する期間（空欄 = 無期限）。例: \"7y\""
       },
       "lifecycle.reclaim": {
-        label: "Reclaim",
-        helpText: "Reclaim driver space after sweeps (default on for non-record classes)"
+        label: "容量の回収",
+        helpText: "スイープ後にドライバーの容量を回収します（record 以外のクラスでは既定で有効）"
       }
     }
   },
@@ -384,6 +408,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "プレースホルダー",
         helpText: "空の入力欄の内側に表示されるヒント文言（値を入力すると消えます）。常時表示のヘルプには inlineHelpText を使用します"
       },
+      inlineHelpText: {
+        label: "常時表示のヘルプ",
+        helpText: "入力欄の下に常に表示されるヘルプ。値を入力すると消える `placeholder` とは異なります。"
+      },
       minLength: {
         label: "最小長",
         helpText: "最小文字数"
@@ -415,6 +443,30 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       scale: {
         label: "小数桁",
         helpText: "小数部の桁数"
+      },
+      step: {
+        label: "ステップ値",
+        helpText: "スライダーのステップ増分（既定は 1）。レンダラー専用で、書き込み経路はステップから外れた値を拒否しません。"
+      },
+      maxSize: {
+        label: "最大ファイルサイズ",
+        helpText: "許可する最大ファイルサイズ（バイト単位の正の整数）。書き込み時にサーバー側で保存済みのファイルサイズと照合します。サイズが記録されていないファイルは判定対象になりません。"
+      },
+      dimensions: {
+        label: "ベクトル次元数",
+        helpText: "ベクトルの次元数 — 1 から 10000 までの整数（例: OpenAI の埋め込みは 1536）。"
+      },
+      language: {
+        label: "コード言語",
+        helpText: "エディタのシンタックスハイライトに使う言語（例: javascript、python、sql）。"
+      },
+      autonumberFormat: {
+        label: "自動採番フォーマット",
+        helpText: "リテラル文字列に加えて、{0000} のカウンター、業務タイムゾーンで評価される {YYYY}/{MM}/{DD}/{YYYYMMDD} の日付トークン、{field_name} による項目埋め込みが使えます。カウンターは描画された接頭辞ごとにリセットされます。autonumber 項目で省略した場合の既定は {0000} です。"
+      },
+      referenceVia: {
+        label: "ポリモーフィック参照の相棒項目",
+        helpText: "このテキスト項目をポリモーフィック参照の id 側にします。ここには、対象オブジェクト名を行ごとに保持する同一オブジェクト上の別項目名を指定します（ADR-0052 §5）。snake_case で記述し、テキスト項目のみ、`reference` とは併用できません。"
       },
       options: {
         label: "選択肢",
@@ -450,9 +502,41 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "関連リストのフィルター",
         helpText: "親レコードの詳細ページに表示される、この関係の関連リストの既定フィルター — 親レコードとの一致条件と AND で結合され、タブのバッジも同じ集合を数えます"
       },
+      displayField: {
+        label: "候補の表示項目",
+        helpText: "ピッカーで各候補のラベルとして表示する項目。省略すると参照先オブジェクト自身のタイトル項目が使われます。"
+      },
+      descriptionField: {
+        label: "候補の補助表示項目",
+        helpText: "クイック選択ポップオーバーでラベルの下に表示する補助項目。"
+      },
+      allowCreate: {
+        label: "その場で新規作成",
+        helpText: "ピッカーで一致が見つからないとき、入力したテキストからレコードを作成できるようにします。必須項目が表示用項目だけのオブジェクトに向いています。"
+      },
+      lookupPageSize: {
+        label: "ピッカーの 1 ページ行数",
+        helpText: "レコードピッカーのダイアログで 1 ページに表示する行数。正の整数で、既定は 10 です。"
+      },
+      relatedListTitle: {
+        label: "関連リストのタイトル",
+        helpText: "親レコードの詳細ページに表示される、この関係の関連リストのタイトル。"
+      },
+      inlineTitle: {
+        label: "インライン表のタイトル",
+        helpText: "親レコードに埋め込まれるマスター／ディテール表のタイトル。"
+      },
+      inlineAmountField: {
+        label: "インライン合計項目",
+        helpText: "インライン表の合計に用いる、子オブジェクト側の数値項目。"
+      },
       expression: {
         label: "式",
         helpText: "このフィールドを計算する CEL 式（読み取り専用化）"
+      },
+      returnType: {
+        label: "数式の戻り値型",
+        helpText: "数式が宣言する値の型。推論された CEL の型から記録され、利用側は式を解析し直さずにこの値を読みます。"
       },
       summaryOperations: {
         label: "集計操作",
@@ -501,6 +585,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       maskingRule: {
         label: "マスキングルール",
         helpText: "部分マスキング:プリセット('phone'、'id_card'、'bank_account'、'email'、'name')または {\"keepHead\": n, \"keepTail\": m}。フィールドの requiredPermissions を持たない呼び出し元にはマスク値が表示されます"
+      },
+      internal: {
+        label: "外部に返さない",
+        helpText: "この項目の値を汎用データ経路では返しません。エンジンは find／findOne の結果と、作成・更新のレスポンスボディからこのキーを削除します。既定の射影でも、クライアントが ?select= で名指ししたときも同様です。保存・絞り込み・インデックスには影響しません。"
+      },
+      trackHistory: {
+        label: "変更履歴を記録",
+        helpText: "この項目の値の変更を、レコードのアクティビティタイムラインの項目として表示します（ADR-0052 §5b）。項目ごとのオプトインです。"
+      },
+      widget: {
+        label: "ウィジェット指定",
+        helpText: "フォームウィジェットの上書き。登録済みのフィールドコンポーネント名を指定すると、`field:` にその名前をつないだ識別子で解決され、type から決まる既定のコントロールの代わりに描画されます。未登録の名前を書いた場合は type のコントロールに戻ります。"
+      },
+      ackPlaintextMasking: {
+        label: "平文保存を承知する",
+        helpText: "この汎用 password 項目が「保存時は平文、読み取り時はマスク」という契約であることを承知のうえで指定したと表明し、作成時の警告を抑止します（ADR-0100）。他の型には影響しません。"
       }
     }
   },
@@ -813,6 +913,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       description: {
         label: "説明",
         helpText: "ナビゲーション用ページ説明"
+      },
+      source: {
+        label: "ページソース",
+        helpText: "ページのソーステキスト。kind が 'html'（別名 'jsx'）の場合は制約付きの JSX で、保存時にコンポーネントツリーへコンパイルされます（解析のみで、実行はしません）。kind が 'react' の場合は本物の React で、信頼済みランタイムが描画時に実行します。"
       },
       object: {
         label: "オブジェクト",
@@ -1144,6 +1248,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "既定",
         helpText: "新規ユーザーの既定アプリにする"
       },
+      hidden: {
+        label: "アプリスイッチャーで非表示",
+        helpText: "このアプリをアプリスイッチャーに出さず、シェルはアバターメニューから表示します。ナビゲーションだけの設定で、非表示のアプリも通常どおりルーティングされ権限チェックも行われます。"
+      },
       navigation: {
         label: "ナビゲーション",
         helpText: "ナビツリー — 再帰構造"
@@ -1225,6 +1333,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       variant: {
         label: "ボタン種別",
         helpText: "ボタンスタイル（primary=blue, danger=red, ghost=transparent）"
+      },
+      mode: {
+        label: "セマンティックモード",
+        helpText: "このアクションの意味上のモード。現在読んでいるのは AI の人手確認（HITL）ヒューリスティックだけで、レンダラーはこの値で分岐しません。"
+      },
+      order: {
+        label: "並び順",
+        helpText: "同じ配置グループ内での並び順。値が小さいほど前に出て、レコードヘッダーは先頭のものを主ボタンにします。未設定の場合は登録順のままです。"
       },
       target: {
         label: "ターゲット",
@@ -1316,6 +1432,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.requiresFeature": {
         label: "必要な機能"
       },
+      operation: {
+        label: "宣言的な書き込み",
+        helpText: "単一レコードに対する宣言的な項目書き込み。'update' は `patch`（収集された `params` の下にマージされます）を現在のレコードに適用します。実行は呼び出し元の権限のままで、システム権限に昇格しません。したがって呼び出し元の権限・オブジェクトのフック・バリデーションは、ユーザーが編集した場合と同じように動作します。"
+      },
+      undoable: {
+        label: "取り消し可能",
+        helpText: "更新が成功した後に「元に戻す」操作を提示します。取り消しが保持するのは、このアクションが書き込むすべての項目の変更前の値、すなわち `params` の下にマージされた `patch` という書き込み一式です。`operation` を宣言していないアクションは書き込み一式を持たないため、保持する対象がありません。"
+      },
+      execution: {
+        label: "一括ディスパッチ契約",
+        helpText: "このアクションの本体が前提とする一括ディスパッチの契約です。'perRecord' は選択された行ごとに 1 回ずつ、その行の recordId を添えてディスパッチします。'aggregate' は選択全体で 1 回だけディスパッチし、すべての id を params._selectedIds に入れて渡します。省略した場合はレコードごとのディスパッチになります。"
+      },
       confirmText: {
         label: "確認文",
         helpText: "確認メッセージ（例: \"Are you sure?\"）"
@@ -1327,6 +1455,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       refreshAfter: {
         label: "完了後に更新",
         helpText: "アクション完了後にリスト/ページを更新"
+      },
+      openIn: {
+        label: "リンクを開く場所",
+        helpText: "静的な `target` URL をどこで開くか。'self' はその場で遷移し、'new-tab' は新しいブラウザタブで開きます。省略した場合、絶対 URL や外部 URL は新しいタブで開き、相対 URL はその場で遷移します。"
+      },
+      opensInNewTab: {
+        label: "結果を新しいタブで開く",
+        helpText: "アクションの実行結果を新しいタブで開きます。レンダラーはクリック時に同期的にタブを先に開き（ポップアップブロックを回避します）、ハンドラーが返す redirectUrl へ遷移させます。静的な URL の行き先を決める `openIn` とは別物です。"
+      },
+      newTabUrl: {
+        label: "新しいタブの URL テンプレート",
+        helpText: "新しいタブで直接開く URL テンプレート。{recordId} プレースホルダーが使えます。`opensInNewTab` と併せて設定すると、レンダラーは先に開いたタブをただちにここへ遷移させ、アクションの POST は行いません。したがってこのエンドポイントは自前で認証を強制する必要があります。"
       },
       locations: {
         label: "表示位置",
@@ -1343,6 +1483,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       disabled: {
         label: "無効",
         helpText: "CEL 式: 条件が true の場合に無効化"
+      },
+      requiresFeature: {
+        label: "必要な認証機能",
+        helpText: "このアクションの表示可否を決める公開認証機能フラグ。解析時に `visible` の述語へ畳み込まれ、出力からは取り除かれるため、下流の利用側がこのキーを見ることはありません。"
       },
       ai: {
         label: "AI 公開",
@@ -1695,6 +1839,14 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       errorHandling: {
         label: "エラー処理",
         helpText: "ノード失敗時の処理（fail, retry, continue）"
+      },
+      successMessage: {
+        label: "成功メッセージ",
+        helpText: "フローが正常終了したときに実行結果に載るメッセージ。画面フローの UI は、汎用の「Done」の代わりにこれをトーストで表示します。"
+      },
+      errorMessage: {
+        label: "エラーメッセージ",
+        helpText: "フローが失敗したときに実行結果に載るメッセージ。画面フローの UI は、生のエラーの代わりにこれをトーストで表示します。"
       }
     }
   },
@@ -1774,7 +1926,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "変数",
-        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
+        helpText: "例: [{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "送信者オーバーライド",
@@ -1831,6 +1983,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "表示名",
         helpText: "管理者向け表示ラベル"
       },
+      description: {
+        label: "説明",
+        helpText: "Setup に表示される説明文（sys_permission_set.description として保存されます）。"
+      },
+      isDefault: {
+        label: "既定の権限セット",
+        helpText: "everyone ポジション向けのアプリ基準です（ADR-0090 D5）。アプリレベルのセットは起動時に自動でバインドされ、パッケージレベルのセットはインストール時に管理者が確認する提案になります。既定は false です。"
+      },
+      managedBy: {
+        label: "管理元",
+        helpText: "レコードの由来（ADR-0086 D3）。アップグレードをまたいで、このセットを誰が所有するかを示します。"
+      },
+      packageId: {
+        label: "所属パッケージ ID",
+        helpText: "パッケージ同梱のセットが属するパッケージ id（ADR-0086 D3）。環境側で作成したセットでは空のままにします。"
+      },
       systemPermissions: {
         label: "システム権限",
         helpText: "システム機能キーのリスト"
@@ -1871,6 +2039,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "説明"
+      },
+      delegatable: {
+        label: "セルフ委任を許可",
+        helpText: "保有者が自分でこのポジションを委任できるようにします。期間を区切り、理由の記入が必要です（ADR-0091 D3）。既定は false で、委任は管理者のみです。"
       }
     }
   },
@@ -1918,6 +2090,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "有効",
         helpText: "このエージェントの有効/無効"
+      },
+      surface: {
+        label: "バインドする製品サーフェス",
+        helpText: "このエージェントがバインドする製品サーフェス（ADR-0063 §1）。自身のサーフェスが一致するか 'both' のスキルだけがアタッチされ、エージェントのツールセットはそれらのスキルのツールの和集合になります。既定は 'ask' です。"
       },
       instructions: {
         label: "指示",
@@ -2028,6 +2204,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       active: {
         label: "有効",
         helpText: "このスキルの有効/無効"
+      },
+      surface: {
+        label: "バインドするエージェントサーフェス",
+        helpText: "このスキルがバインドするエージェントのサーフェス（ADR-0063 §3）。サーフェスが食い違うエージェントにバインドすると、黙ってスキップされるのではなく解決時にエラーになります。既定は 'ask' です。"
       },
       instructions: {
         label: "指示",

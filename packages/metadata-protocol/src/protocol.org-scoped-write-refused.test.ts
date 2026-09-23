@@ -410,7 +410,7 @@ describe('#6190 — org-scoped writes of non-org-overridable types are refused',
             .catch((e: any) => e);
 
         expect(err.message).toContain(
-            "[not_overridable] Metadata item 'object/org_widget' cannot be written org-scoped (organization 'org_a').",
+            "Metadata item 'object/org_widget' cannot be written org-scoped (organization 'org_a').",
         );
         expect(err.message).toContain('allowOrgOverride=false');
         expect(err.message).toContain('Save it env-wide instead');

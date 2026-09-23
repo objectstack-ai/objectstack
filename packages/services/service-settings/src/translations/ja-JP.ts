@@ -1,11 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { TranslationData } from '@objectstack/spec/system';
+import type { PlatformTranslationData } from '@objectstack/spec/system';
 
 /**
  * 日本語 (ja-JP) — built-in settings manifest translations.
  */
-export const jaJP: TranslationData = {
+export const jaJP: PlatformTranslationData = {
   settingsCommon: {
     sourceLabels: {
       env: '環境変数',

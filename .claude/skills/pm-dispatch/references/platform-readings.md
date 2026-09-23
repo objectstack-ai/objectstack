@@ -14,7 +14,7 @@
 - ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
 - 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
 - 成功序列读伴随不读次序:`removed_from_merge_queue` 与 `merged` 同秒或数秒内到,次序实测不定。
-- 真被踢是其后无 `merged`、几分钟后 PR 仍 open。
+- 真被踢是其后无 `merged`、几分钟后 PR 仍 open;两种退出的 actor 同为 `github-merge-queue[bot]`。
 - 不在 `origin/main` 上是二义读数:在队列里等 / 没入队,两者处置相反。
 - ⇒ 落地检查恒两个读数:队列成员资格 和 `origin/main`,缺一不可。
 - `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
@@ -61,7 +61,6 @@
 - 回读 `auto_merge` 非空本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员。
 - 效果读数 = 下列阳性探针、timeline 入队事件、最终落地;队列分支仅在场时算。
 - 队列 ref 答 BUILD 不答成员资格:`gh-readonly-queue/*` 只在存在时有意义,即有 build 在跑。
-- ⛔ 它的缺席不是任何方向的读数。
 - 阳性探针 ①:`update_pull_request_branch` 回已入队分支不能更新 = 在队。
 - 它正常返回则顺带逼出暗冲突;它不踢已挂 PR,只是永不入队。
 - 阳性探针 ②:`merge_pull_request` 回 405 `Pull Request is in the merge queue` = 在队。
@@ -103,7 +102,9 @@
 - 只要 `totalCount` 的健康指标取 perPage=1;只要最近 N 张就取 N。
 - 小时池之外还有分钟级二级限流:GraphQL 端点 2,000 点/分、并发 ≤100。
 - 官方指引:变更类请求间停 ~1 秒,mutation 按 5 倍计;批量写因此 ~1 秒一发。
-- 双载体清标、批量重分诊这类把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙。
+- 批量重分诊这类把写挤在同一秒的扫动,会在小时池仍绿时撞上分钟墙。
+- 中继读数:dispatch 后 5 s 建 run、17 s 起 job、22 s 评论落地、墙钟 31 s;上限 90 s / 5 min 不动。
+- `write-pace` 把一次 dispatch 记作那一笔写(40/时不变);`close-cards` 每步一次 dispatch。
 - REST 可达性是会话属性(GitHub App 会话门),⛔ 不是端点或席位类型的属性。
 - 开轮探一次、按班存档;探针必须是一条真 repo-scoped 读。
 - 门关着时 repo-scoped 路径整类回 403 `GitHub access is not enabled for this session`。
@@ -117,7 +118,6 @@
 - CCR 容器的 GitHub 出口是代理加凭据的:无 header 的 REST 读回 200 带会话身份,core 上限 15000。
 - 调用方自带的 `Authorization` 头被代理覆盖;`HTTPS_PROXY` 端口打死也不切断网络。
 - ⇒ 容器内得出的 token 作用域结论 ⛔ 不迁移到出口未经代理的会话。
-- 同因:`check-clause2-carriers.mjs --pair` 带与不带 token 都不再 403 退 3;真缺声明照常退 4。
 - REST 写侧经出口代理必带 `Content-Type: application/json`,否则代理回 415 且一个字节都没写。
 - 判别式:该 415 的 `documentation_url` 指 Claude Code 不指 GitHub ⇒ 代理拒,不是 GitHub;四端点实测。
 - 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
@@ -144,9 +144,7 @@
 - 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器无 `gh`,本条只对本机席适用。
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
 - 走队列的仓落地仍必经 auto-merge,红窗里照样走 ccr REST 挂载;直合仓合并本身有 REST 端点。
-- 红窗里 draft 翻转与 auto-merge 挂载照常走 ccr REST,⛔ 不为它们守候。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
-- 其余动作(评论、标签、请审、读、timeline)照常走 REST。
 - 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
 - `issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的在目的仓重建配方。
 - 该配方 = 出处头加裸 `#N` 改全名加关源单为 moved:纯 REST、配额免疫,⛔ 不为它空等重置。
@@ -244,6 +242,7 @@
 - ⇒ ⛔ 读成功而标签空或缺席不读作没有标签:按 `data-name=` 确认,否则整集作 UNKNOWN。
 - 可达时优先加法端点;⛔ 单读与单次即时读回都不决断。
 - ⇒ union-write 欠一次延迟确认;必需标签(如 `skip-changeset`)其后每次触碰重核。
+- objectui labeler 带 `sync-labels: true`:PR 标签按路径整集重算,手打的下次 push 即失,⛔ 不重挂。
 - `list_issues` 永不返回 assignees:`fields` 枚举无此成员,不传也没有。
 - 已认领卡与空闲卡响应逐字节相同,清单只是候选名单 ⇒ 认领前必须过完整 `issue_read`。
 - `comments` 计数会多读:实测 1 而列表与 timeline 双 0 ⇒ 线程空否读那两条,⛔ 不读计数。
@@ -302,8 +301,8 @@
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
 - 两仓 CI 并发组都按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
 - CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
-- `get_check_run` 回空 `output.text`;`get_job_logs` 无论 `tail_lines` 只回尾部的 service-container teardown。
-- ⇒ 两者都答不了到底挂在哪;`GET /actions/jobs/{id}/logs` 被出口代理拒绝,CONNECT 403。
+- `get_check_run` 回空 `output.text`;`get_job_logs` 带 `tail_lines` 只回尾部的 service-container teardown。
+- ⇒ 改带 `return_content: true` 整份日志回包(2026-09-20 一 job)⇒ REST 腿被拒只是该腿的读数。
 - 失败 step 名免下载即得:`actions_get method=get_workflow_job`。
 - check-run annotations 端点带退出码与失败命令,是免归档的第二条便宜读。
 - 真实断言文本走 run 日志归档:`actions_get method=get_workflow_run_logs_url` 后下载解压。
@@ -346,6 +345,7 @@
 - 改侧 · 裸 REST `PATCH /pulls` 恒追加一条裸页脚并保留既有页脚,差恰 58 字节,与尾部无关。
 - 尾部已是 `---` 加页脚块也照追加,重送复现 ⇒ 建侧的不追加判据 ⛔ 不外推到改侧。
 - 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
+- 该追加按面不按路由:`PATCH /issues/{n}` 打在 PR 上同样 +58 追加裸页脚,而 draft 位不动。
 - 页脚两拼写:裸版与 session-URL 版都要剥,漏剥的卡在正文中段,而 58 字节差照常。
 - ⇒ 代价是归属:裸形无 session id,按此剥净的 PR 正文不载明哪个会话写的;另置见 AGENTS.md。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
@@ -382,8 +382,8 @@
 - ⛔ 不据 `ls-remote | grep issue-` 正命中回避该卡:失效方向是活卡被读成已认领,无红信号。
 - 会话从上下文检测不到自己的静默降档:横幅只在 UI 侧渲染,上下文零信号。
 - 服役档的权威读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`。
-- 它是最近一轮服役者,降档链中途照真;`session_context.model` 是配置档,⛔ 不作保险丝输入。
-- 该读数按宿主分叉:有的宿主的 `get_session` 按契约排除当前会话 ⇒ 保险丝无输入。
+- 它是最近一轮服役者,降档链中途照真;`session_context.model` 是配置档。
+- 该读数按宿主分叉:有的宿主的 `get_session` 按契约排除当前会话。
 - ⛔ 不据一台宿主推全体;替代读数用时在卡上申报。
 - 无它时的合法替代 = grep 本会话 transcript 里 harness 写的 `"model":`,逐请求写入、非自述。
 - 档位额度终止是第三种死法:子代理死在编辑中途、宿主报本账户档位额度到顶。
@@ -391,7 +391,7 @@
 - 处置 = 死认领回收加 worktree 抢救,⛔ 不重核前提、不升级。
 - 无前置探针,只在 dev 死在里面时可观测;缓解只在 dev 侧的早 WIP 提交。
 - 档位不可用时 ⛔ 不凭记忆宣告车道阻塞,逐文件面现推 mandate。
-- 强制档不得因不可用而降档 —— 那正是降档保险丝要拒的替换。
+- 强制档不因临缺授权降档:临缺非退役,退役唯维护者裁;不达档起隔离达档子代理或等档。
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
 - `os-verify-lock.sh` 只住 objectstack:objectui 无它,跑本仓副本读的是容器级锁,非该仓深度。
@@ -412,7 +412,7 @@
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
 - MCP `issue_write` update 送尾部横线加页脚块则两者同被吃掉,而调用照常回 id 与 url。
 - 建卡走 REST `POST /issues`:带页脚存活,无页脚合成恰一条(+58);回读后 `PATCH` 重送逐字节存下。
-- issue 正文 `PATCH` 识别按整块:送全块或不送页脚都存回恰一条,已有页脚归一末尾不复制。
+- 真 issue 正文 `PATCH` 识别按整块:送全块或不送页脚都存恰一条,已有页脚归一末尾不复制。
 - 无横线的裸页脚不算页脚:它被保留而整块另追加,总数二 ⇒ 恒一条只对上行两输入成立。
 - 该格两空:MCP 送裸页脚、`title`/`labels` 单字段 `issue_write` 是否动页脚,均未实测。
 - issue `PATCH` 同体带 `labels` 与 `type` 回 500 且零写入;拆两次写各 200,已带 type 的卡未实测。

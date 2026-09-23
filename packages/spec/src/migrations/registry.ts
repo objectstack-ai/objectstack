@@ -38,6 +38,13 @@
  * hand-written and still merges as text.
  */
 
+// A VALUE import, and the only one here: an entry literal below derives its
+// group enumeration from this schema's own keys rather than restating them
+// (`translation-per-app-settings-platform-only`). Entry files carry their own
+// copy of this import, but the generator treats a file's imports as scaffolding
+// and concatenates only the literal — so an entry that references a value needs
+// that value in scope HERE, hand-written, outside the generated regions.
+import { TranslationDataSchema } from '../system/translation.zod.js';
 import type { MigrationStep } from './types.js';
 
 /**
@@ -5212,6 +5219,19 @@ const step18: MigrationStep = {
     + 'tier keep their own axes — and the paired semantic entry carries what the stripped '
     + 'keys were saying, because an authored axis field may name a column the widget never '
     + 'selected and no walker can move that intent into the dataset. '
+    + 'Finally, it splits the translation bundle type in two (#15178, ruling batch #132 item 2 '
+    + 'letter ②): the platform bundle keeps all eleven groups and the per-app bundle '
+    + '(`stack.translations`, `defineTranslationBundle`) no longer declares `settings`, which is '
+    + 'keyed by `SettingsManifest.namespace` and only platform code declares a manifest. Both '
+    + 'bundles load into ONE served tree, so an app-authored `settings` branch did not sit inert — '
+    + 'but nor did it override the platform: the app’s bundles arrive in `AppPlugin`’s `start()` '
+    + '(Phase 2) and the platform’s at `kernel:ready` (Phase 3), and `deepMerge` gives the later '
+    + 'source the leaf, so what an application had was a GAP FILLER on a namespace it does not own '
+    + '— rendering only where the platform bundle carried no string for that key and locale. The '
+    + 'D2 conversion strips the group from per-app bundle entries only (never from a `translation` '
+    + 'ITEM, which still declares it), and the paired semantic entry says what the strip means, '
+    + 'because a notice reading "(removed)" does not say that those gaps fall back to the '
+    + "manifest's own English literal. "
     + 'Finally it retires object `tenancy.organizationField` (#19054, ADR-0049 '
     + 'enforce-or-remove). The key named the column a PLATFORM ROW is stamped from, as '
     + 'opposed to the column the object is WALLED by (`tenantField`); on an ordinary object '
@@ -5259,6 +5279,7 @@ const step18: MigrationStep = {
     'page-assigned-profiles-removed',
     'chart-config-aria-removed',
     'dashboard-widget-chart-config-structure-removed',
+    'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
   ],
   semantic: [
@@ -5814,6 +5835,109 @@ const step18: MigrationStep = {
         'the declared permission set). Every other deployment verifies operators can still add users ' +
         '(invitation, admin create-user / import, SCIM, or an operator-registered identity provider) ' +
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
+    },
+    {
+      id: 'automation-runs-cursor-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'api.listRuns cursor — the pagination query parameter of '
+        + 'GET /api/automation/:name/runs declared by ListRunsRequestSchema, its slot on '
+        + 'IAutomationService.listRuns, and its option on all three @objectstack/client run-list '
+        + 'surfaces (automation.runs.list, automation.listRuns, environment().automation.listRuns). '
+        + 'The limit parameter of the same door is NOT part of this retirement and is unchanged, '
+        + 'default(20) included',
+      replacement:
+        'a wider `limit` — this door does read it, bounded to 1..100, and it is spent as the run '
+        + "store's history window. There is no replacement for `cursor` itself, deliberately: "
+        + 'nothing ever minted one, so no caller holds a value to carry over, and the response '
+        + '`nextCursor` it would have paired with has never been emitted. Read the response '
+        + '`hasMore` to learn whether the window was short — it is now computed from the engine '
+        + 'rather than the constant `false` it used to be, so for the first time it answers the '
+        + 'question a caller reaching for a cursor was actually asking',
+      reason:
+        'ADR-0049 enforce-or-remove (director seat, decision batch #204 item 2, maintainer '
+        + '「204 同意」 2026-09-21, letter C of three for this door; letter A — build a cursor '
+        + 'protocol for a 100-row window — and letter B — retire the key and leave the '
+        + '`hasMore` lie standing — were both considered and refused). `cursor` was declared on '
+        + 'the request, VALIDATED at the boundary, forwarded into a `cursor?: string` slot on '
+        + 'the service contract, and read by no implementation: the engine never looked at the '
+        + 'option, and no emit site has ever written the response half `nextCursor`, so a caller '
+        + 'looping until the cursor ran out re-read the first and only window forever with no '
+        + 'error. '
+        + '⭐ The `limit` half of this door was NOT retired, and the distinction is the ruling, '
+        + 'not an oversight. The sibling `/packages` door retired its `limit` with its `cursor` '
+        + '(#17667, decision batch #126 item 1) because nothing read it; the parent ruling '
+        + 'explicitly does not transfer here. On this door `limit` is read end to end — the '
+        + 'boundary enforces the declared 1..100 range off the schema itself, the service takes '
+        + 'it as an option, and the engine spends it as `RunStore.listHistory`\'s window — and '
+        + "the Console's flow-runs page sends it today. Retiring it would have been a "
+        + 'regression, and its `.default(20)` stays with it. '
+        + 'The same card computes `hasMore`, which is the half a bare retirement would have left '
+        + 'lying. `GET /api/automation/:name/runs` shipped a literal `hasMore: false` beside a '
+        + 'list the engine had already truncated with `.slice(0, limit)`, so a caller asking for '
+        + 'one row of a thousand was handed one row and told that was all of them. The engine '
+        + 'now reports truncation to the door through a new optional contract member, '
+        + '`IAutomationService.listRunsPage`, which returns `{ runs, hasMore }`: it over-reads '
+        + 'its history source by exactly one row and compares the merged, filtered, ordered set '
+        + 'to the caller\'s window. The over-read is what makes the answer sound — '
+        + '`runs.length === limit` cannot tell a flow with exactly `limit` runs from one with '
+        + 'ten thousand, and `RunStore.listHistory`\'s signature is deliberately unchanged '
+        + 'because over-reading is expressible in the `limit` it already takes. '
+        + 'There IS a tombstone: the request schema is non-strict, so a bare deletion would have '
+        + 'made Zod SILENTLY STRIP whatever a generated client kept sending — a clean parse and '
+        + "a parameter that never takes effect, which is this card's own defect re-created one "
+        + 'layer down (ADR-0104). `cursor` is therefore a `retiredKey()`, typed `never` for tsc '
+        + 'and raising the prescription at any parse, and is registered in '
+        + 'RETIRED_KEYS_BY_MAJOR[18]. There is NO D2 conversion: a conversion rewrites an '
+        + 'authored source or a stored `sys_metadata` row, and this shape is HTTP-only — nobody '
+        + 'authors a `ListRunsRequest` and nothing persists one. The `os migrate meta` house '
+        + 'sentence is therefore correctly absent from the prescription. There is no '
+        + '`acceptRetiredDefaultResidue` stage either: `cursor` carried no default, so it '
+        + 'materialized into no artifact and there is no residue to accept. '
+        + 'The SDK half is part of the retirement rather than a follow-up: `@objectstack/client` '
+        + 'declared `cursor` and appended it on all three run-list surfaces, so retiring the key '
+        + 'in the schema alone would have left the one generated client this repo ships typing it '
+        + '`string` and sending it into a route that silently drops it — the ADR-0104 shape the '
+        + 'tombstone exists to prevent, re-created one layer down. The same call was made when '
+        + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
+        + 'the removal in its docblock. ADR-0049 / ADR-0087, #19543.',
+      acceptanceCriteria:
+        'No caller sends `cursor` to `GET /api/automation/:name/runs`, and that is true of every '
+        + 'channel this repo ships rather than of the schema alone. Writing it on a '
+        + '`ListRunsRequest` is a `tsc` error (the input type is `never`), and any value reaching a '
+        + 'parse raises the prescription rather than a generic unrecognized-key issue. The option is '
+        + 'gone from `IAutomationService.listRuns`, so an implementation can no longer declare a slot '
+        + 'for it. ⭐ It is also gone from the SDK, which is the channel most callers actually reach '
+        + 'this door through: `@objectstack/client` no longer declares `cursor` on '
+        + '`automation.runs.list`, `automation.listRuns` or '
+        + '`client.environment(id).automation.listRuns`, and no longer appends `?cursor=` on any of '
+        + 'the three — so the key cannot be smuggled past the retired schema by an untyped caller. '
+        + 'Without that half the retirement would have re-created its own defect one layer down: '
+        + 'the schema typing the key `never` while the shipped client typed it `string` and sent it, '
+        + 'silently dropped by a route that no longer reads it (ADR-0104). '
+        + '⚠️ ONE wire behaviour CHANGES and must be verified as such, because it reverses a '
+        + 'decision recorded under #7300: a repeated `?cursor=a&cursor=b` used to answer '
+        + '`400 VALIDATION_FAILED` with a `details.fields[]` entry naming `cursor`, and now '
+        + 'answers `200` with the key ignored like any other unrecognised query name. #7300 '
+        + 'validated the key rather than deciding it, so that a future cursor implementation '
+        + 'would not be the one to discover the type was unenforced; this ruling decides it '
+        + 'instead — there will be no cursor implementation on this door — so the refusal would '
+        + 'be validating a key the contract no longer has. This route declares no closed query '
+        + 'set (AGENTS.md route-ownership rule 5), so an unrecognised name has never been refused here '
+        + 'on its own account. '
+        + '⚠️ `hasMore` also changes, from a constant to an answer: a request whose window is '
+        + 'shorter than the matching run set now receives `hasMore: true` where it previously '
+        + 'received `false`. A caller that treated `false` as "this is the whole history" was '
+        + 'always wrong and is now told so. ⚠️ Read the new `false` with one qualification: '
+        + 'unfiltered it is exact, but under `?status=` it means "no further match inside the '
+        + 'window that was scanned" rather than "none exists", because the durable history '
+        + 'source has no status slot and the window is taken before the filter is applied. '
+        + 'Pushing the filter down is a store-contract change this card did not scope. '
+        + '`nextCursor` stays absent — nothing mints one — and '
+        + '`limit` behaves exactly as it did, including its `.default(20)`. '
+        + 'A deployment whose automation service does not implement `listRunsPage` answers `501` '
+        + 'naming the member, and ⛔ never a `200` carrying an invented `hasMore`.',
     },
     {
       id: 'autonumber-default-unique-organization',
@@ -8282,11 +8406,30 @@ const step18: MigrationStep = {
       // code span already, and a nested backtick would close it.
       surface:
         'either endpoint of a $between range, authored BLANK — the empty string, or an absent '
-        + '(undefined) bound — on any carrier of FieldOperatorsSchema / RangeOperatorSchema: a view '
-        + 'or dashboard widget filter, a dataset filter, a report runtimeFilter, a page or component '
-        + 'filter, a rollup filter, and the NormalizedFilter AST the query faces validate against. '
-        + 'ARITY is not what changed: a blank bound is a well-formed TWO-element range one of whose '
-        + 'elements means nothing',
+        + '(undefined) bound — in any filter this platform stores or executes. The carriers split '
+        + 'in two, because they are DETECTED differently and only one half answers on save. '
+        + '(a) REFUSED AT SAVE — the enforced FieldOperatorsSchema / RangeOperatorSchema copy '
+        + 'itself, reached by a caller that validates a filter against it directly, and the '
+        + 'NormalizedFilter AST. (b) NOT JUDGED AT SAVE — every stored metadata carrier, and that '
+        + 'is BOTH authoring dialects, not only the loose one. A view, page or component filter '
+        + 'RULE (ViewFilterRuleSchema) admits it: the rule value accepts a string and the '
+        + 'operator-shape check judges ARITY alone, so a two-element range with a blank element is '
+        + 'a well-formed rule. A dashboard widget filter, a dashboard options-source filter, a '
+        + 'dataset filter, a dataset measure filter, a report runtimeFilter, a rollup '
+        + 'summaryOperations filter and a relatedListFilter are typed FilterConditionSchema, a '
+        + 'loose record intersected with the $and / $or / $not shape and carrying one refinement. '
+        + '⚠️ That refinement DOES judge an operator map, so the slot is not unjudged: a bare '
+        + 'date-range PRESET name in an ordering position — a $gt / $gte / $lt / $lte value, or a '
+        + '$between endpoint — is refused at that position\'s own path, and it is refused through '
+        + 'an otherwise GREEN document; the sibling entry filter-preset-ordering-comparand-refused '
+        + 'is that rule, on this same carrier set. What these carriers never judge is a $between '
+        + 'endpoint for BLANKNESS or for ARITY. Measured: a dashboard widget whose filter reads '
+        + 'close_date $between 2026-01-01 and an empty string parses GREEN, as do a one-element, a '
+        + 'three-element and an empty $between, while the same widget carrying a preset endpoint is '
+        + 'refused at filter.close_date.$between.0. So for THIS shape every one of those documents '
+        + 'parses GREEN and the endpoint is refused only when the filter is EXECUTED, at the engine '
+        + 'comparand-shape door. ARITY is not what changed: a '
+        + 'blank bound is a well-formed TWO-element range one of whose elements means nothing',
       replacement:
         'two endpoints that are present and non-empty — the bound the author meant, written out. '
         + 'If only ONE side is genuinely bounded, that is not a range at all: drop `$between` and '
@@ -8337,27 +8480,42 @@ const step18: MigrationStep = {
         + 'Dropping the operator would be worse than guessing: it deletes a constraint the author '
         + 'wrote and WIDENS the result set silently, the failure mode `$nin` carries in the same '
         + 'file. The read path does not re-validate stored rows, so no stored view becomes '
-        + 'unreadable; what changes is that RE-SAVING one is refused, at the key\'s own path, with '
-        + 'the blank side named. The objectui half — the builder stops padding a half-typed pair, so '
+        + 'unreadable — and, because every stored carrier is typed loosely or judged by arity '
+        + 'alone (see `surface`), re-saving one is not refused either. What changes is the enforced '
+        + 'operator schema itself, which answers at the endpoint\'s own path with the blank side '
+        + 'named, and the engine comparand-shape door, which refuses an executed filter carrying '
+        + 'one. The objectui half — the builder stops padding a half-typed pair, so '
         + 'the console never meets this refusal mid-typing — is objectui#9695 and lands on its own '
         + 'schedule, either side of this one. ADR-0049 / ADR-0078 / ADR-0087.',
       acceptanceCriteria:
-        'Grep every authored `$between` array — view and dashboard widget filters, dataset filters, '
-        + 'report runtimeFilters, page and component filters, rollup filters, saved AST filters, SDK '
-        + 'and MCP callers — and read BOTH of its elements. A range with two present, non-empty '
-        + 'endpoints parses byte-identically to before, numbers, Dates, ISO days, UTC instants, '
-        + 'clock times and non-temporal text included, and `[\'0\', \'9\']` and `[0, 100]` are '
-        + 'untouched (the rule is blankness, not falsiness). An empty-string or absent bound now '
-        + 'answers one prescriptive issue at that endpoint\'s own path (`$between.0` / `$between.1`) '
-        + 'naming MIN or MAX, so `FieldOperatorsSchema.safeParse` and re-saving the document both '
-        + 'make the sweep mechanical; a range blank on BOTH sides reports both positions. Nothing is '
-        + 'normalised on the way through — no bound is trimmed, defaulted or copied from its '
-        + 'neighbour — so an accepted range arrives byte-identical to what was written. ⚠️ Do not '
-        + 'assume a converted range was previously showing the window it named: a blank bound stopped '
-        + 'bounding on that side at every backend, so the surface was reading a wider set than its '
-        + 'filter claimed. Decide the window from what the surface was SUPPOSED to show, and if only '
-        + 'one side was ever meant, write it as `$gte` / `$lte` rather than inventing a second bound. '
-        + '`null` bounds are unaffected by this entry and keep their own refusal and prescription.',
+        'Grep every authored `$between` array — view, page and component filter rules, dashboard '
+        + 'widget and options-source filters, dataset and dataset-measure filters, report '
+        + 'runtimeFilters, rollup and related-list filters, saved AST filters, SDK and MCP callers '
+        + '— and read BOTH of its elements. A range with two present, non-empty endpoints parses '
+        + 'byte-identically to before, numbers, Dates, ISO days, UTC instants, clock times and '
+        + 'non-temporal text included, and `[\'0\', \'9\']` and `[0, 100]` are untouched (the rule '
+        + 'is blankness, not falsiness). An empty-string or absent bound now answers one '
+        + 'prescriptive issue at that endpoint\'s own path (`$between.0` / `$between.1`) naming MIN '
+        + 'or MAX, and a range blank on BOTH sides reports both positions. ⚠️ THE DETECTOR IS NOT '
+        + 'THE SAME ON EVERY CARRIER, and re-saving the document is mechanical on NONE of them. '
+        + '`FieldOperatorsSchema.safeParse` is mechanical, and it is the whole of what the save '
+        + 'door offers: it answers for a caller that validates a filter against that schema, or '
+        + 'against the NormalizedFilter AST, directly. ⛔ Re-saving surfaces NOTHING for a stored '
+        + 'document — not a dashboard, dataset, report, rollup or related list, whose filter slots '
+        + 'are FilterConditionSchema, and not a view, page or component filter RULE either, whose '
+        + 'value check judges arity and not blankness, so a range written `[\'2026-01-01\', \'\']` '
+        + 'saves exactly as green as it always did. Measured, not assumed. For those carriers the '
+        + 'detectors are the GREP above and EXECUTING the surface, where the engine '
+        + 'comparand-shape door refuses with INVALID_FILTER / 400 naming the index and the side. '
+        + '⛔ Do not read a clean re-save of a dashboard — or of a view — as a completed sweep. '
+        + 'Nothing is normalised on the way through — no bound is trimmed, defaulted or copied '
+        + 'from its neighbour — so an accepted range arrives byte-identical to what was written. '
+        + '⚠️ Do not assume a converted range was previously showing the window it named: a blank '
+        + 'bound stopped bounding on that side at every backend, so the surface was reading a wider '
+        + 'set than its filter claimed. Decide the window from what the surface was SUPPOSED to '
+        + 'show, and if only one side was ever meant, write it as `$gte` / `$lte` rather than '
+        + 'inventing a second bound. `null` bounds are unaffected by this entry and keep their own '
+        + 'refusal and prescription.',
     },
     // The ledger's FIRST record of the 2026-08-11 removal, registered when the
     // RUNTIME door finally enforced it. The schema-door half shipped without an
@@ -8374,9 +8532,18 @@ const step18: MigrationStep = {
         + 'NormalizedFilter AST the query faces validate against, plus the enforced FieldOperatorsSchema '
         + 'copy itself. (b) NOT JUDGED AT SAVE — a dashboard widget filter, a dataset filter, a report '
         + 'runtimeFilter, a rollup filter and a relatedListFilter: every one of those slots is typed '
-        + 'FilterConditionSchema, a loose record intersected with the $and / $or / $not shape that never '
-        + 'judges an operator map, so such a document parses GREEN and the endpoint is refused only when '
-        + 'the filter is EXECUTED, at the runtime lowering door this change closes. ARITY is not what '
+        + 'FilterConditionSchema, a loose record intersected with the $and / $or / $not shape and '
+        + 'carrying one refinement. ⚠️ That refinement DOES judge an operator map, so the slot is not '
+        + 'unjudged: a bare date-range PRESET name in an ordering position — a $gt / $gte / $lt / $lte '
+        + 'value, or a $between endpoint — is refused at that position\'s own path, and it is refused '
+        + 'through an otherwise GREEN document; the sibling entry '
+        + 'filter-preset-ordering-comparand-refused is that rule, on this same carrier set. What these '
+        + 'carriers never judge is a $between endpoint for a COLUMN REFERENCE or for ARITY. Measured: a '
+        + 'dashboard widget whose filter reads close_date $between { $field: "contract.start" } and '
+        + '2026-12-31 parses GREEN, as do a one-element, a three-element and an empty $between, while '
+        + 'the same widget carrying a preset endpoint is refused at filter.close_date.$between.0. So '
+        + 'for THIS shape every one of those documents parses GREEN and the endpoint is refused only '
+        + 'when the filter is EXECUTED, at the runtime lowering door this change closes. ARITY is not what '
         + 'changed: a reference endpoint is a well-formed TWO-element range one of whose elements no '
         + 'backend resolves',
       replacement:
@@ -8443,8 +8610,10 @@ const step18: MigrationStep = {
         + 'path ($between.0 / $between.1) — note the schema door names the INDEX, while the runtime '
         + 'door additionally names the side, MIN or MAX. ⛔ Re-saving surfaces NOTHING for a dashboard '
         + 'widget filter, a dataset filter, a report runtimeFilter, a rollup filter or a '
-        + 'relatedListFilter: those slots are FilterConditionSchema and such a document parses green — '
-        + 'measured, not assumed. For those carriers the detectors are the GREP above and EXECUTING the '
+        + 'relatedListFilter: those slots are FilterConditionSchema, whose one refinement judges bare '
+        + 'date-range preset comparands and nothing about a reference endpoint, so such a document '
+        + 'parses green — measured, not assumed. For those carriers the detectors are the GREP above '
+        + 'and EXECUTING the '
         + 'surface, where the runtime lowering door now refuses with INVALID_FILTER / 400 naming the '
         + 'index and the side. ⛔ Do not read a clean re-save of a dashboard as a completed sweep. A '
         + 'range whose BOTH endpoints are references reports both positions at the schema door; the '
@@ -10635,6 +10804,97 @@ const step18: MigrationStep = {
         + 'the source manifest and republishing.',
     },
     {
+      id: 'plugin-security-scan-result-surface-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'the plugin-security scan-result family: the defs '
+        + 'KernelSecurityScanResult and KernelSecurityVulnerability '
+        + '(kernel/plugin-security-advanced.zod.ts), their two authorable carriers on '
+        + 'PluginSecurityManifest — scanResults and vulnerabilities — and the sibling '
+        + 'verdict block PluginQualityMetrics.securityScan (kernel/plugin-registry.zod.ts)',
+      replacement:
+        'nothing to re-declare — delete the keys and every import of the two types. Plugin '
+        + 'security scanning is not a platform capability and there is no replacement schema. '
+        + 'What the platform does still enforce, and what to reach for instead: `permissions` and '
+        + '`sandbox` on the same PluginSecurityManifest are unchanged, and artifact provenance is '
+        + 'answered by `verifyPluginArtifactIntegrity` and the plugin signature verifier — which '
+        + 'tell you an artifact is the one its publisher signed, and never that it is safe. For '
+        + 'dependency vulnerabilities use the tools built for it against your own project (npm '
+        + 'audit / pnpm audit, Dependabot, the GitHub Advisory Database, OSV) and treat an '
+        + 'unaudited third-party plugin as untrusted code. A publisher who used scanResults to '
+        + 'advertise diligence keeps the surviving securityContact and vulnerabilityDisclosure '
+        + 'blocks, which are contact terms rather than a verdict.',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-07 on #15932 (director seat, decision batch #65, adopted verbatim 「同意」). '
+        + 'This is the second half of the scanner retirement — issue 14919, a number since '
+        + 'DELETED from the board, landed as PR #15930. That card retired PluginSecurityScanner — a '
+        + '@objectstack/core class that shipped as a SECURITY control and could not fail, whose '
+        + 'verdict was status "passed" for every plugin it was ever handed. The SCHEMAS the '
+        + 'scanner fed survived it, and the scanner had been their only importer of any kind (a '
+        + 'type-only import in packages/core/src/security/security-scanner.ts), so the family went '
+        + 'from one type-only importer to zero consumers while staying fully published: 27 '
+        + 'authorable rows across kernel.json, six api-surface exports, two authorable defaults '
+        + 'and two json-schema manifest keys. An author could write any of it, be accepted, and '
+        + 'get nothing — declared-not-enforced, Prime Directive #10, one layer out from the class '
+        + 'removed for the same reason. The census was taken on origin/main after that removal landed, '
+        + 'with a lit control (five hits for PluginSecurityManifest inside the declaring module) '
+        + 'proving the file greppable, and found no .parse or .safeParse site against either '
+        + 'schema anywhere in packages/**. securityScan is the sharpest member: scanResults '
+        + 'published a report, but securityScan.passed published a VERDICT, so a plugin could '
+        + 'declare itself clean with nothing behind it. Route: the two defs leave the build whole '
+        + '(RETIRED_DEFS_BY_MAJOR[18]) because nothing parses them and a prescription nobody can '
+        + 'receive is not worth its cost; the three authorable keys are retiredKey() tombstones '
+        + '(RETIRED_KEYS_BY_MAJOR[18]) because both carrying shapes are non-strict, where a bare '
+        + 'deletion is a silent strip (ADR-0104). Why this entry and not a D2 conversion: a plugin '
+        + 'security manifest and a plugin registry entry are package artifacts a publisher ships, '
+        + 'never stack collection members and never stored sys_metadata rows, so the conversion '
+        + 'chain has no seam that would see one — the disposition the sibling '
+        + 'kernel-plugin-security-durations-unit-in-key entry already records for this same '
+        + 'manifest. No deprecation window (maintainer 2026-08-27: 「项目在创业阶段，用户也很少，短期不考虑渐进」). '
+        + 'Scope note, recorded rather than acted on: PluginSecurityManifest.vulnerabilities is a '
+        + 'forced consequence rather than a name the ruling listed — it was the last authorable '
+        + 'referent of KernelSecurityVulnerability and could not outlive the def. Two neighbours '
+        + 'the ruling made CONDITIONAL are deliberately untouched here because the repository the '
+        + 'condition names, objectstack-ai/cloud, is not reachable from the session that executed '
+        + 'this: the marketplace "scanning" status stays exactly as it is — unremoved, and NOT '
+        + 'recorded as checked. Its two siblings were MEASURED rather than assumed, and the '
+        + 'record is corrected here: both were ALREADY GONE when that ruling was written. The '
+        + 'incident "malware" type was a member of system/IncidentCategory, and the whole '
+        + 'incident-response family was retired by #15513 (maintainer ruling 2026-09-05 — two '
+        + 'days BEFORE the 2026-09-07 ruling that made it conditional); see '
+        + 'incident-response-family-retired. And marketplace-admin.zod.ts was deleted outright '
+        + 'with the cloud subpath (#16526); see cloud-subpath-retired. Verified on this tree by '
+        + 'shape: both files return zero tree entries and no *.zod.ts names malware at all, '
+        + 'against a lit control where "scanning" still returns a live declaration in '
+        + 'marketplace.zod.ts. So the conditional question is ONE enum member wide, not three, '
+        + 'and the objectstack-ai/cloud producer grep it still owes is that much smaller. '
+        + '⚠️ The out-of-repo consumer population is NOT MEASURED. @objectstack/spec is published, '
+        + 'so this removal is breaking for consumers no download, dependent or source telemetry '
+        + 'was consulted for — accepted as an input to the ruling, exactly as that retirement states '
+        + 'of its own three exports, and not a reason to soften the removal. #15932, PR #15930 '
+        + '(for the deleted issue 14919), ADR-0049, ADR-0087.',
+      acceptanceCriteria:
+        'No source imports KernelSecurityScanResult, KernelSecurityVulnerability or either '
+        + 'Schema from @objectstack/spec/kernel: both defs are absent from the built kernel '
+        + 'barrel and from api-surface/kernel.json, so a TypeScript consumer gets the refusal at '
+        + 'compile time at the import site rather than a missing runtime value. Authoring '
+        + 'PluginSecurityManifest.scanResults, PluginSecurityManifest.vulnerabilities or '
+        + 'PluginQualityMetrics.securityScan fails to compile (input type `never`) and fails to '
+        + 'parse with the tombstone prescription naming that key — verified by refusal pins that '
+        + 'assert the issue code, the path naming WHICH key was refused, and the prescription '
+        + 'text, plus a positive pin that the surrounding manifest still parses and grows no such '
+        + 'property. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + 'nothing ever read any of these keys, so deleting one removes no check that was running. '
+        + 'A publisher who believed a declared scanResults entry gated anything was never getting '
+        + 'that gate; the remediation is to audit with a real tool, not to find a replacement key. '
+        + 'The surviving neighbours must still parse and still be exported — permissions, sandbox, '
+        + 'policy, codeSigning, certifications, securityContact and vulnerabilityDisclosure on the '
+        + 'manifest, testCoverage/documentationScore/codeQuality/conformanceTests on the quality '
+        + 'metrics, and the separately-declared SecurityScanResultSchema / '
+        + 'SecurityVulnerabilitySchema in kernel/plugin-security.zod.ts, which this change does '
+        + 'not touch.',
+    },
+    {
       id: 'plugin-security-scanner-retired',
       surface:
         '`@objectstack/core` runtime exports: `PluginSecurityScanner`, and the two types '
@@ -12232,6 +12492,123 @@ const step18: MigrationStep = {
         + 'and must be verified as such: nothing ever parsed or read these shapes, so removing '
         + 'them removes no behaviour.',
     },
+    // The judgment half of `translation-per-app-settings-removed`. The D2
+    // conversion deletes the group mechanically; what it cannot say in a
+    // `to: '(removed)'` notice is WHERE those strings were rendering — only in the
+    // gaps the platform's own bundle left — and that deleting them sends those
+    // gaps back to the manifest's English literal.
+    {
+      id: 'translation-per-app-settings-platform-only',
+      surface: 'stack.translations[].<locale>.settings — the per-app bundle’s settings group',
+      // The group names are DERIVED from `TranslationDataSchema.shape`, never typed
+      // out beside it. A hand-maintained copy of a schema's key set is the construct
+      // that drifted to nine-of-ten in this very message, so the copy is deleted
+      // rather than pinned: there is one spelling of the set, and a group added to
+      // the per-app face reaches this sentence the day it is declared.
+      // `Object.keys` on a zod object shape yields the declaration order of the
+      // literal it was built from — the order this sentence promises the operator.
+      // A getter, not an eager template: importing the registry must not force the
+      // lazy translation schema at module load.
+      get replacement(): string {
+        const groups = Object.keys(TranslationDataSchema.shape);
+        return 'Delete the group from the per-app bundle. There is no per-app replacement key: settings copy '
+          + 'is not application-authorable at all. `settings` is keyed by `SettingsManifest.namespace`, '
+          + 'and only platform code declares a manifest '
+          + '(`packages/services/service-settings/src/manifests/*.manifest.ts`), so the only namespaces a '
+          + 'per-app entry could ever address were the platform’s own. Platform settings copy is '
+          + 'translated in the PLATFORM bundle — `@objectstack/service-settings`’s '
+          + '`settingsBuiltinTranslations`, typed `PlatformTranslationData` — which is where a correction '
+          + 'to a platform string belongs. An application’s own copy goes in the '
+          + `${groups.length} groups the per-app bundle still declares, in the order it declares them: `
+          + groups.map((g) => `\`${g}\``).join(', ')
+          + '. Note `settingsCommon` among them: it IS on this face, so the Settings UI shell strings an '
+          + 'application may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT '
+          + 'what is being removed here — only the per-namespace manifest copy under `settings` is.';
+      },
+      reason:
+        'Not losslessly convertible, and NOT because the content was inert — but not because it '
+        + 'overrode anything either. Measured on this tree before the split: '
+        + '`AppPlugin.loadTranslations` hands each `stack.translations` bundle entry WHOLE to '
+        + '`II18nService.loadTranslations`, the adapter deep-merges it into the one per-locale tree, and '
+        + 'every platform plugin contributes into that same tree — so `settings` from an app bundle and '
+        + '`settings` from `@objectstack/service-settings` land in one place. `resolveSettingsTitle` and '
+        + 'the rest of the `resolveSettings*` family read it (`pickSettingsEntry` → '
+        + "`pickData(bundle, locale)?.settings`), and so does the console's `useSettingsLabel`, which "
+        + 'scans every namespace carrying a `settings` branch; the liveness ledger '
+        + '`packages/spec/liveness/translation.json` records that reader with its evidence pointer. '
+        + 'ORDER decides the rest, and it runs against the application: `AppPlugin` loads the app’s '
+        + 'bundles in its own `start()` (kernel Phase 2), `SettingsServicePlugin` contributes the '
+        + 'platform’s settings translations from a `kernel:ready` hook (Phase 3), and `deepMerge` gives '
+        + 'the LATER source the leaf — `AppPlugin`’s own comment says as much (“the platform bundles have '
+        + 'not arrived yet at this point in the lifecycle”). So the platform won every key both bundles '
+        + 'defined, and what an application actually had was a GAP FILLER on a namespace it does not own: '
+        + 'the entry rendered only where the platform bundle carried no string for that key and locale '
+        + '(the platform ships en / zh-CN / ja-JP / es-ES), silently, with no way for the author to tell '
+        + 'a filled gap from an ignored override. Dropping the group therefore takes those gaps back to '
+        + 'the manifest’s own literal — the `?? fallback` every `resolveSettings*` helper ends in, which '
+        + 'is English — and that is a VISIBLE change to what a Settings screen renders, not a no-op, '
+        + 'which a mechanical notice reading "(removed)" does not convey. The two bundles are separate '
+        + 'namespaces from this major on (ruling batch #132 item 2 letter ②, 2026-09-13; ADR-0049 '
+        + 'enforce-or-remove supplied the question, not the answer — the maintainer struck the card’s own '
+        + 'removal disposition, because `settings` is a LIVE platform key). No deprecation window: the '
+        + 'per-app door refuses the key by name from this major, with the prescription on the rejection.',
+      acceptanceCriteria:
+        'No per-app bundle carries `settings`: `defineTranslationBundle({ <locale>: { settings: … } })` '
+        + 'and a `defineStack({ translations: [...] })` entry carrying it are both refused as an '
+        + 'unrecognized key, and the refusal names the group as platform-only rather than suggesting a '
+        + 'rename (pinned in `packages/spec/src/system/translation.test.ts`). The platform face still '
+        + 'accepts it: `PlatformTranslationDataSchema.parse({ settings: … })` succeeds, '
+        + '`settingsBuiltinTranslations` still type-checks, and `GET /api/v1/i18n/translations/:locale` '
+        + 'still declares `settings` on its response (`GetTranslationsResponseSchema`), because the '
+        + 'served document is the merged tree. The registered `translation` metadata type is unchanged '
+        + 'and still declares `settings`. For a deployment that WAS authoring per-app settings copy: the '
+        + 'screens to re-read after the upgrade are the ones where it was FILLING A GAP — a namespace, '
+        + 'key or locale the platform bundle does not translate — because those now render the '
+        + 'manifest’s own literal, which is English. Everywhere the platform already carried the string, '
+        + 'nothing changes on screen: the platform value was already the one being served. If a platform '
+        + 'string is wrong or missing for your locale, correct it in the platform bundle '
+        + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add the '
+        + 'app-side copy, which the platform overwrites on every boot wherever it has its own value.',
+    },
+    {
+      id: 'ui-action-undoable-unfulfillable-refused',
+      surface: '`action` documents declaring `undoable: true` on a shape no runtime fulfils — '
+        + "`type: 'script'` (the default route) and `type: 'url'`, plus the dormant "
+        + "`type: 'flow'` / `'modal'` / `'form'`, in each case WITHOUT `operation: 'update'`",
+      replacement: "either of the two fulfilled shapes — `operation: 'update'` with a `patch`, "
+        + 'where the framework runtime snapshots the prior value of every field in the merged '
+        + "write bag, or `type: 'api'`, where the pinned console builds the undo envelope — or "
+        + 'no `undoable` at all. ⛔ NOT mechanically convertible: which of the two the author '
+        + 'meant is an intent no artifact records (a `script` action with an inline handler and '
+        + 'an api action calling an endpoint are different dispatches, not two spellings of '
+        + 'one), and dropping the flag silently would remove an Undo the author asked for. The '
+        + 'refusal names both shapes and the drop, and the author chooses',
+      reason:
+        'The key was a plain optional boolean read by no refinement, so every combination '
+        + 'parsed clean while only two of them ever produced an Undo — the declared-but-inert '
+        + 'shape ADR-0078 refuses at author time. ⚠️ The obvious repair, requiring '
+        + "`operation: 'update'`, was MEASURED WRONG and is deliberately not what this entry "
+        + "records: the pinned console's two readers gate the undo envelope on "
+        + '`action.undoable` alone with zero reads of `action.operation`, and those same two '
+        + "files are the entire recorded evidence for this package's own liveness verdict "
+        + '`action/undoable: live`. A blanket requirement would therefore have refused the '
+        + 'published `ReassignLeadAction` skill example (`type: \'api\'` + `undoable: true`, no '
+        + '`operation`) at import time, since `defineAction` IS `ActionSchema.parse`, and every '
+        + 'console api action with undo along with it. So the accepted set is closed to the '
+        + 'two shapes some runtime fulfils rather than to the one the framework runtime '
+        + 'fulfils. Stating "`type: \'api\'` is fulfilled by the console" in the contract is '
+        + 'the point, not a leak: the spec is the contract for every runtime including the '
+        + 'console, and a closed table of fulfillable combinations is what the '
+        + 'declared-is-delivered rule asks for.',
+      acceptanceCriteria:
+        "Every `action` document declaring `undoable: true` carries `operation: 'update'` or "
+        + "`type: 'api'`. Both fulfilled shapes parse byte-identically to before — the "
+        + 'published `ReassignLeadAction` example included — and an action with `undoable` '
+        + 'absent or `false` is untouched on every type. An action declaring `undoable: true` '
+        + 'on any other shape is refused with a per-key issue at `undoable` whose message names '
+        + 'both fulfilling shapes and the runtime that fulfils each; the author adds the shape '
+        + 'they meant or drops the flag.',
+    },
     // The one key this close DECLARES rather than refuses is `dependsOn`, so an author
     // who wrote it keeps working and now has a contract saying so. Everything else
     // undeclared becomes a parse error. Registered as a structured TODO (ADR-0087 D3)
@@ -13406,6 +13783,35 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/ListNotificationsRequest:cursor` (#6361) already took for the same
     // shape one route over.
     'api/ListInstalledPackagesRequest:limit',
+    // #19543 — ADR-0049 enforce-or-remove (director seat, decision batch #204
+    // item 2, maintainer 「204 同意」 2026-09-21, letter C for this door). The
+    // prescription is `RUNS_LIST_CURSOR_REMOVED` in `api/automation-api.zod.ts`.
+    //
+    // ⭐ `cursor` retires ALONE here, and the asymmetry with the sibling
+    // `/packages` retirement is the whole point of the ruling. On that door both
+    // `limit` and `cursor` were decorative, so both went (#17667,
+    // `api/ListInstalledPackagesRequest:limit` / `:cursor`). On THIS door `limit`
+    // is read end to end — boundary bounds check, service option, then the run
+    // store's history window — and the Console's flow-runs page sends it today, so
+    // retiring it would have been a regression rather than a narrowing. The card's
+    // own body called it "declared, never read"; that sentence is false and was
+    // measured false before this entry was written.
+    //
+    // What made `cursor` retirable is the response half: no emit site has ever
+    // written `nextCursor`, and the only ordering this door has is a required but
+    // non-unique `startedAt` timestamp that nothing ever minted a resume point
+    // from — so nothing could ever have minted a value for a caller to send back.
+    // A caller looping "until the cursor runs out" re-read the first and only
+    // window forever.
+    //
+    // Same registration shape as the `/packages` pair: major 18 (the removal ships
+    // on the 17.x line as a minor; the prescription lives at the major boundary
+    // where `migrate meta` users look), and NO D2 conversion, because a conversion
+    // rewrites an authored source or a stored `sys_metadata` row and this shape is
+    // HTTP-only — nobody authors a `ListRunsRequest` and nothing persists one. The
+    // D3 semantic entry `automation-runs-cursor-retired` carries the record to
+    // `spec-changes.json`, the generated upgrade guide and `os migrate meta`.
+    'api/ListRunsRequest:cursor',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
@@ -14763,6 +15169,74 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (`packages/core/src/health-monitor.ts`), never authored. See
     // `kernel-plugin-health-report-durations-unit-in-key`.
     'kernel/PluginHealthReport:metrics.uptime',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `PluginQualityMetrics.securityScan` is
+    // the scan-result family's sibling on the plugin registry entry, named by the
+    // ruling alongside it: a last-scan date, per-severity vulnerability counts and a
+    // `passed` boolean, read by no scanner, registry, installer or UI. The census put
+    // every reference in `packages/spec/src/kernel/plugin-registry.test.ts` — the
+    // spec's own self-test and nothing else.
+    //
+    // It is the sharper half of the family for an author: `scanResults` published a
+    // report, but `securityScan.passed` published a VERDICT, so a plugin could ship
+    // `passed: true` with nothing at all behind it and a consumer reading the
+    // registry entry had no way to tell that from a real result.
+    //
+    // Tombstoned with `retiredKey()`: `PluginQualityMetricsSchema` is a plain
+    // `z.object`, so a bare deletion would strip an authored block in silence
+    // (ADR-0104). The key carried NO default of its own — the defaults inside it
+    // (`critical`/`high`/`medium`/`low = 0`, `passed = false`) fired only for an
+    // author who wrote the block — so `acceptRetiredDefaultResidue` is not owed:
+    // there is no value a released toolchain materialized into an artifact whose
+    // author never typed the key.
+    //
+    // No D2 conversion: a plugin registry entry is a published package artifact, not
+    // a stack collection member or a stored `sys_metadata` row. The ledger channel is
+    // `plugin-security-scan-result-surface-retired`.
+    'kernel/PluginQualityMetrics:securityScan',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `PluginSecurityManifest.scanResults`
+    // published an array of `KernelSecurityScanResult` on the authorable surface with
+    // zero authors and zero parsers: no `.parse`/`.safeParse` site existed anywhere
+    // against the scan-result schemas, so a publisher could declare a clean scan on a
+    // plugin manifest, be accepted, and get nothing — the declared-not-enforced shape
+    // Prime Directive #10 names, one layer out from the runtime scanner that PR
+    // #15930 removed for the same reason (that PR closed issue 14919, a number since
+    // deleted from the board and no longer resolving).
+    //
+    // Tombstoned with `retiredKey()`, not deleted: `PluginSecurityManifestSchema` is a
+    // plain `z.object`, not `.strict()`, so a bare deletion would strip an authored
+    // key in silence (ADR-0104) — swapping an inert declaration for an invisible one.
+    // The value type leaves this build entirely (`RETIRED_DEFS_BY_MAJOR[18]`,
+    // `kernel/KernelSecurityScanResult`).
+    //
+    // No D2 conversion: a security manifest is a package artifact a publisher ships,
+    // never a stack collection member and never a stored `sys_metadata` row, so the
+    // chain has no seam that would see one — the disposition the sibling
+    // `vulnerabilityDisclosure.responseTime` entry on this same schema already
+    // records. The prescription an author meets is the tombstone itself; the ledger
+    // channel is `plugin-security-scan-result-surface-retired`.
+    'kernel/PluginSecurityManifest:scanResults',
+    // #15932 — ADR-0049 enforce-or-remove, decision batch #65.
+    // `PluginSecurityManifest.vulnerabilities` was an array of
+    // `KernelSecurityVulnerability` and is this retirement's FORCED CONSEQUENCE
+    // rather than a name the ruling listed: it was the last authorable referent of a
+    // def the ruling retires by name, so it cannot survive the def, and keeping the
+    // def alive only to carry it would be keeping the retired family alive under a
+    // second name. It is inert on its own terms too — nothing ever wrote the list and
+    // nothing ever read it, so declaring a known vulnerability against a plugin
+    // warned nobody and blocked no install.
+    //
+    // ⚠️ This is the ONE key outside the four names the #15932 dispatch fenced
+    // (`KernelSecurityScanResult`, `KernelSecurityVulnerability`,
+    // `PluginSecurityManifest.scanResults`, `PluginQualityMetrics.securityScan`), and
+    // it is reported as such on the card and in the landing PR rather than absorbed
+    // silently. It is not a neighbour retired by proximity — the fence's stated
+    // concern — it is a referent of a named retiree.
+    //
+    // Tombstoned with `retiredKey()` for the reason its `scanResults` sibling records
+    // (non-strict shape, ADR-0104 silent strip). No D2 conversion, same reasoning.
+    'kernel/PluginSecurityManifest:vulnerabilities',
     // #15678 (stack card 3/6 of #14478) — ruling B.
     // `PluginSecurityManifest.vulnerabilityDisclosure.responseTime` said "Expected
     // response time in hours" in prose and nothing else. Renamed to
@@ -17242,6 +17716,60 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // keeps emitting — see `18.kernel__PluginStartupResult__health.ts`. Route 3;
     // the D3 semantic entry `startup-orchestrator-retired` carries the record.
     'kernel/HealthStatus',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). `KernelSecurityScanResult` declared a
+    // complete scan report — timestamp, scanner name/version, a passed/failed/warning
+    // status, vulnerability and code-issue lists, dependency findings, license
+    // compliance and a six-number summary — and no layer ever emitted, stored, parsed
+    // or read one. Its only importer of any kind was `PluginSecurityScanner`, a
+    // type-only import from `packages/core/src/security/security-scanner.ts`, and
+    // PR #15930 deleted that file (it closed issue 14919, a number since deleted
+    // from the board and no longer resolving); the census after it landed put every remaining
+    // reference inside the declaring module itself, against a lit control (five hits
+    // for `PluginSecurityManifest` in the same file), so the zero is a reading.
+    //
+    // Whole-def retirement, not a tombstone: nothing parses this def, so there is no
+    // author to hand a prescription to and no `${defKey}:${name}` key leaving a live
+    // shape. `RETIRED_DEFS_BY_MAJOR[18]` plus the semantic entry
+    // `plugin-security-scan-result-surface-retired` ARE the declaration — the
+    // #11825 shape (its sibling in the pair this tree usually cites, issue 8715, is
+    // a number deleted from the board; 11825 is the half that still resolves).
+    // The two authorable carriers that pointed here,
+    // `PluginSecurityManifest.scanResults` and `.vulnerabilities`, are separately
+    // tombstoned and registered in `RETIRED_KEYS_BY_MAJOR[18]`.
+    //
+    // No D2 conversion: a plugin security manifest is a package artifact a publisher
+    // ships, never a stack collection member and never a stored `sys_metadata` row,
+    // so the conversion chain has no seam that would see one (the sibling
+    // `kernel/PluginSecurityManifest:vulnerabilityDisclosure.responseTime` entry
+    // records the same reasoning for the same schema).
+    'kernel/KernelSecurityScanResult',
+    // #15932 — ADR-0049 enforce-or-remove (director seat, decision batch #65,
+    // 2026-09-07, maintainer verbatim 「同意」). The other half of the scan-result
+    // family: a CVE-shaped vulnerability record (severity, CVSS score, affected and
+    // fixed versions, exploit/patch availability, remediation, disclosure dates) that
+    // nothing ever constructed, validated or consulted. It reached this build through
+    // exactly three referents, all now gone — `KernelSecurityScanResult.vulnerabilities`
+    // and `.dependencyVulnerabilities[].vulnerability` (that def leaves in the same
+    // change) and `PluginSecurityManifest.vulnerabilities` (tombstoned). Retired
+    // together with `KernelSecurityScanResult` because declaring a vulnerability
+    // vocabulary with no scan to carry it reads as a capability, which is the
+    // ADR-0049 shape.
+    //
+    // Whole-def retirement for the reason its sibling entry records, and the same
+    // disposition: `RETIRED_DEFS_BY_MAJOR[18]` plus
+    // `plugin-security-scan-result-surface-retired`, no D2 conversion, no tombstone
+    // of its own. Its two authorable defaults —
+    // `KernelSecurityVulnerability:exploitAvailable = false` and
+    // `:patchAvailable = false` — leave `authorable-defaults/kernel.json` with the
+    // def; nothing ever parsed this schema, so no released toolchain ever
+    // materialized either value into an artifact and there is no residue to accept.
+    //
+    // ⛔ NOT in scope, and deliberately untouched: the unprefixed
+    // `SecurityVulnerabilitySchema` / `SecurityScanResultSchema` pair in the sibling
+    // module `kernel/plugin-security.zod.ts`. Those are separate defs with their own
+    // self-test and are outside this ruling.
+    'kernel/KernelSecurityVulnerability',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of

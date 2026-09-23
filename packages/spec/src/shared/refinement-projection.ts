@@ -128,10 +128,39 @@ export type ProjectableRefinement =
    *
    * ⛔ A ban over an open set of names — every key starting with `$`, say — is
    * NOT this arm: its keys are a finite list, and a list that merely sampled an
-   * open set would be wider than the rule. Such a rule stays dropped and
-   * annotated until the list learns a pattern-shaped arm of its own.
+   * open set would be wider than the rule. That shape is
+   * {@link BannedKeyPattern}'s arm below, and the two are deliberately separate
+   * rather than one arm taking either — a finite list is readable off the
+   * declaration and a regex is not, so a reviewer must be able to see which of
+   * the two a site chose.
    */
-  | { readonly pattern: 'banned-keys'; readonly keys: readonly string[] };
+  | { readonly pattern: 'banned-keys'; readonly keys: readonly string[] }
+  /**
+   * "no document may carry a key MATCHING this pattern" — published as
+   * `propertyNames` with a `not` over a `pattern`, the spelling JSON Schema has
+   * for a rule about the SHAPE of a name where {@link ProjectableRefinement}'s
+   * `banned-keys` arm has one about a finite list of them.
+   *
+   * Exact in the JSON domain, and by the same reading `banned-keys` rests on
+   * from the other end. A JSON object's properties are exactly its own
+   * enumerable string-keyed ones and `propertyNames` judges exactly those
+   * names, so "no own property name matches" and "no property name matches" are
+   * one sentence. The two halves of the match agree as well: JSON Schema
+   * specifies `pattern` as an ECMA-262 regular expression evaluated as a
+   * SEARCH — unanchored, "does a match occur anywhere in the string" — which is
+   * `RegExp.prototype.test` and nothing else, so the same source text decides
+   * the same set of names on both sides. It is PRESENCE and never value: a
+   * matching key present with a `null` value is present to both.
+   *
+   * ⛔ The pattern is not free text. {@link BannedKeyPattern} is a CLOSED union
+   * of the patterns this repository publishes, exactly one today, and widening
+   * it is the same public-contract decision that adding an arm is — the reason
+   * it is a type and not a `string`. The objection this arm has to answer is
+   * that a regex's over-reach cannot be read off the declaration the way a key
+   * list's can; it is answered by keeping the set of patterns small enough to
+   * read, ⛔ never by trusting the next caller to pick a good one.
+   */
+  | { readonly pattern: 'banned-key-pattern'; readonly keyPattern: BannedKeyPattern };
 
 /** Every arm's `pattern` tag, for a reader that needs the list itself. */
 export const PROJECTABLE_REFINEMENT_PATTERNS = [
@@ -139,7 +168,32 @@ export const PROJECTABLE_REFINEMENT_PATTERNS = [
   'non-blank-string',
   'dependent-required',
   'banned-keys',
+  'banned-key-pattern',
 ] as const;
+
+/**
+ * "a key naming a query operator rather than a field" — every name beginning
+ * with `$`.
+ *
+ * ECMA-262 source text, because that is what a JSON Schema `pattern` holds and
+ * what {@link bannedKeyPattern} builds its `RegExp` from: one string, read
+ * twice. The `$` is escaped because it is the end-of-input anchor unescaped,
+ * and `^\$` — start of input, then a literal dollar — is the rule the normalized
+ * filter's field-condition record enforces.
+ */
+export const OPERATOR_PREFIX_KEY_PATTERN = '^\\$';
+
+/**
+ * The CLOSED set of key patterns the published JSON Schema may state.
+ *
+ * ⛔ Widening this union is a public-contract decision exactly as growing
+ * {@link ProjectableRefinement} is, and it is written as a type so the decision
+ * cannot be taken by a call site: a caller cannot invent a pattern, because
+ * there is no `string` to pass. That is the whole mechanism answering the
+ * objection to a regex-shaped arm — over-reach a reader cannot see in the
+ * declaration is instead bounded by how few declarations there are.
+ */
+export type BannedKeyPattern = typeof OPERATOR_PREFIX_KEY_PATTERN;
 
 /**
  * The ECMA-262 pattern accepting exactly the strings {@link NON_BLANK_STRING}
@@ -279,5 +333,45 @@ export function bannedKeys<K extends string>(
     !(declared as { keys: readonly string[] }).keys.some((key) =>
       Object.prototype.hasOwnProperty.call(value, key),
     );
+  return declare(rule, declared);
+}
+
+/**
+ * "no key matches this pattern", as a `.refine()` predicate that also declares
+ * itself.
+ *
+ * The pattern is read once into the declaration and the `RegExp` the predicate
+ * tests with is COMPILED FROM IT, so the published `pattern` and the enforced
+ * match are one string used twice — the construction {@link requiredOneOf},
+ * {@link dependentRequired} and {@link bannedKeys} share, and the reason this
+ * arm needs no drift pin either. There is no second spelling of the rule
+ * anywhere for a future edit to move independently.
+ *
+ * Spell the slot's own pattern at the call site, from the closed set:
+ *
+ * ```ts
+ * z.record(z.string(), FieldOperatorsSchema).refine(
+ *   bannedKeyPattern(OPERATOR_PREFIX_KEY_PATTERN),
+ *   { message: 'A field condition's keys are field names, never $-prefixed operators.', abort: true },
+ * )
+ * ```
+ *
+ * ⛔ The `RegExp` carries NO flags, and that is part of the equality rather
+ * than a style choice. A JSON Schema `pattern` has no flags to carry, so a
+ * flagged `RegExp` would be enforcing something the keyword cannot state — and
+ * `g` in particular makes `test` stateful through `lastIndex`, which would make
+ * the verdict for a key depend on which keys were tested before it. It is also
+ * compiled ONCE per declaration rather than per call: same object, no
+ * per-parse construction cost on a hot validation path.
+ *
+ * ⛔ And the predicate reads OWN enumerable keys — `Object.keys` — never
+ * `for…in` and never `key in value`, for the reason {@link bannedKeys} records
+ * in full: the prototype chain carries names no JSON document has, and judging
+ * them would refuse documents `propertyNames` accepts.
+ */
+export function bannedKeyPattern(keyPattern: BannedKeyPattern): (value: object) => boolean {
+  const declared: ProjectableRefinement = { pattern: 'banned-key-pattern', keyPattern };
+  const matches = new RegExp((declared as { keyPattern: string }).keyPattern);
+  const rule = (value: object): boolean => !Object.keys(value).some((key) => matches.test(key));
   return declare(rule, declared);
 }
