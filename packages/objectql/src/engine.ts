@@ -2557,11 +2557,41 @@ function staticReadonlyStripTakes(
   strip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined },
 ): boolean {
   if (!strip.runs) return false;
-  const after = stripReadonlyFields(
+  return !(key in staticReadonlyStoredView(schema, data, supplied, strip));
+}
+
+/**
+ * [#19887] The UPDATE payload as the static `readonly` strip will leave it —
+ * `data` without every key that strip takes back out — which is the view a
+ * `readonlyWhen` predicate's `record` binding is built from
+ * (`ReadonlyWhenStripOptions.stored`).
+ *
+ * The conditional strip runs BEFORE the static one, so the payload it is
+ * handed still holds a value a non-system caller forged for a statically
+ * `readonly` field. Judged over that payload, `amount` locked by
+ * `record.status == 'closed'` read the forged `status: 'open'`, stayed
+ * writable, and the static strip then removed the `status`: the closed row
+ * committed with its locked amount rewritten. The strips keep their order —
+ * each still reports its own fields under its own reason — and only what the
+ * predicate reads moves.
+ *
+ * The same verdict {@link staticReadonlyStripTakes} asks for one key, asked
+ * for all of them by the same function with the same arguments: `data` itself
+ * when the strip does not run (a system caller), and a key a hook wrote, a
+ * value a hook overwrote or a column `preserveAudit` keeps all stay, because
+ * the write stores them. Silent for the same reason.
+ */
+function staticReadonlyStoredView(
+  schema: unknown,
+  data: Record<string, unknown>,
+  supplied: Readonly<Record<string, unknown>>,
+  strip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined },
+): Record<string, unknown> {
+  if (!strip.runs) return data;
+  return stripReadonlyFields(
     schema as any, data, supplied, undefined,
     { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
-  );
-  return after != null && !(key in after);
+  ) ?? data;
 }
 
 /**
@@ -12885,12 +12915,16 @@ export class ObjectQL implements IObjectQLEngine {
                // both the settlement below and the strip itself (#2948, further
                // down), so the two cannot disagree about whether it runs.
                const staticReadonlyStripRuns = !opCtx.context?.isSystem;
+               // [#19887] The static strip's verdict, described once: the
+               // settlement asks it of the FK, and both `readonlyWhen` strips
+               // build their `record` view from the payload it leaves.
+               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys };
                const landing = wantsParentBinding
                    ? await this.settleMasterDetailLanding({
                        schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
-                       staticStrip: { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys },
+                       staticStrip,
                        resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
-                       judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: fkSupplied }) as Record<string, unknown>,
+                       judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: fkSupplied, stored: staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip) }) as Record<string, unknown>,
                      })
                    : undefined;
                const roWhenParent = landing?.header;
@@ -12924,7 +12958,11 @@ export class ObjectQL implements IObjectQLEngine {
                // [#19853] `landing` has already judged the FK's own lock; this
                // judges the rest, and reports against `preRoWhen` so both
                // verdicts arrive as one `readonly_when` event.
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, landing?.subject ?? preRoWhen, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? suppliedValues }) as any;
+               // [#19887] `stored` — `record` is the payload the write STORES,
+               // so a value forged for a static `readonly` field (stripped
+               // below) cannot unlock a field whose predicate reads it.
+               const roWhenSubject = landing?.subject ?? preRoWhen;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? suppliedValues, stored: staticReadonlyStoredView(updateSchema, roWhenSubject, suppliedValues, staticStrip) }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -13108,14 +13146,17 @@ export class ObjectQL implements IObjectQLEngine {
                // [#19853] One read of the static strip's gate, both consumers —
                // as on the by-id branch.
                const staticReadonlyStripRunsMulti = !opCtx.context?.isSystem;
+               // [#19887] Described once, three consumers — as on the by-id
+               // branch.
+               const staticStripMulti = { runs: staticReadonlyStripRunsMulti, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys };
                const landingMulti =
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
                    schemaHasParentRequiredWhenMulti
                        ? await this.settleMasterDetailLanding({
                            schema: updateSchema, data: preRoWhenMulti, supplied: suppliedValues,
-                           staticStrip: { runs: staticReadonlyStripRunsMulti, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys },
+                           staticStrip: staticStripMulti,
                            resolve: (view) => this.resolveMasterDetailParents(updateSchema, view, priorRows, opCtx.context),
-                           judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: fkSupplied }) as Record<string, unknown>,
+                           judgeFkLock: (named, fkSupplied) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: fkSupplied, stored: staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti) }) as Record<string, unknown>,
                          })
                        : undefined;
                const parentForRow = landingMulti?.header;
@@ -13133,7 +13174,10 @@ export class ObjectQL implements IObjectQLEngine {
                    // by-id branch above — "both call sites" is the #3106 /
                    // #4441 shape that gets missed, and a bulk write must not
                    // reach a different verdict about who wrote a key.
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, landingMulti?.subject ?? preRoWhenMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? suppliedValues }) as any;
+                   // [#19887] Nor read a different payload: each matched row's
+                   // `record` is the payload the write stores, over that row.
+                   const roWhenSubjectMulti = landingMulti?.subject ?? preRoWhenMulti;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? suppliedValues, stored: staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, suppliedValues, staticStripMulti) }) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —

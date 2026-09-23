@@ -500,7 +500,7 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  * there is no insert case to answer here.
  */
 function readonlyWhenBindings(
-  data: Record<string, unknown>,
+  data: Readonly<Record<string, unknown>>,
   prior: Record<string, unknown> | undefined | null,
   fields: Record<string, ConditionalFieldDef>,
 ): { merged: Record<string, unknown>; previous: Record<string, unknown> | undefined } {
@@ -569,6 +569,24 @@ interface ReadonlyWhenStripOptions {
    * before the before-phase hooks. Omit to judge every key in the payload.
    */
   supplied?: Readonly<Record<string, unknown>>;
+  /**
+   * [#19887] The payload the write STORES once the static `readonly` strip,
+   * which runs after this one, has taken its keys back out. The `record`
+   * binding is built from this view over the prior row; the keys judged, the
+   * authorship test and the returned payload stay `data`'s, so only what a
+   * predicate READS moves.
+   *
+   * Built from `data` instead, the binding still held a value a caller forged
+   * for a statically `readonly` field: `amount` locked by `record.status ==
+   * 'closed'` was judged against a forged `status: 'open'`, the static strip
+   * then removed that `status`, and the closed row committed with its locked
+   * amount rewritten.
+   *
+   * ⚠️ Unlike `supplied`, omitting this is NOT fail-safe: the view is then
+   * `data`, which is right only when nothing downstream takes a key back out.
+   * Every engine call site passes it.
+   */
+  stored?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -661,7 +679,9 @@ function isCallerSuppliedValue(
  * when the fault is an unbound scope root — see {@link isReadonlyWhenLocked}.
  *
  * The `record` / `previous` bindings are TOTAL over the object's declared
- * fields (#4953) — see {@link readonlyWhenBindings}.
+ * fields (#4953) — see {@link readonlyWhenBindings}. `record` is the payload
+ * the write STORES over the prior row (`options.stored`, #19887), so a
+ * predicate never reads a value the static `readonly` strip takes back out.
  */
 export function stripReadonlyWhenFields(
   objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
@@ -674,7 +694,7 @@ export function stripReadonlyWhenFields(
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const supplied = options?.supplied ?? data;
-  const view = readonlyWhenBindings(data, previous, fields);
+  const view = readonlyWhenBindings(options?.stored ?? data, previous, fields);
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
@@ -882,7 +902,8 @@ export function hasReadonlyWhenInPayload(
  * Each matched row's `record` / `previous` bindings are made TOTAL over the
  * declared fields (#4953, {@link readonlyWhenBindings}) exactly as on the
  * single-id path — a bulk write must not judge the same predicate by a
- * different record shape than a one-row write does. The views are built ONCE
+ * different record shape than a one-row write does, nor over a different payload
+ * (`options.stored`, #19887). The views are built ONCE
  * per row (they do not depend on which field is being judged) and only when a
  * `readonlyWhen` field is actually in the payload, so a batch that touches none
  * still pays nothing.
@@ -906,11 +927,14 @@ export function stripReadonlyWhenFieldsMulti(
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const supplied = options?.supplied ?? data;
+  // [#19887] Each row's `record` is the payload the write stores, over THAT
+  // row — the same `stored` view the single-id strip reads.
+  const stored = options?.stored ?? data;
   const rows = priorRows ?? [];
   // Built lazily: a payload writing no `readonlyWhen` field never reaches the
   // `.some()` below, and then no row view is materialised at all.
   let views: Array<ReturnType<typeof readonlyWhenBindings>> | null = null;
-  const rowViews = () => (views ??= rows.map((row) => readonlyWhenBindings(data, row, fields)));
+  const rowViews = () => (views ??= rows.map((row) => readonlyWhenBindings(stored, row, fields)));
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
