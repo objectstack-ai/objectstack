@@ -2948,6 +2948,54 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * @internal
  */
 function mergeActionsIntoObjects(config: ObjectStackDefinition): ObjectStackDefinition {
+  // [ADR-0112 · #19785] Shape guard, because `defineStack(config, { strict:
+  // false })` hands this merge the normalized input with no parse in between.
+  // A non-array `objects` is REFUSED with the strict parse's own envelope
+  // (`STACK_SCHEMA_INVALID`, 422, the zod issue at `['objects']`) — never a bare
+  // `TypeError` from `.map`, and never a pass-through: bound actions cannot be
+  // merged into objects that are not a list, and a stack handed on in that
+  // shape is one `composeStacks` refuses with this same code anyway. `strict:
+  // false` skips VALIDATION (cross-references, schema detail); it never
+  // promised to accept a shape this merge cannot read. `undefined` is the one
+  // non-array that is not malformed — the key is simply absent — the same line
+  // `mergeObjects` draws for the same key.
+  const declaredObjects: unknown = (config as { objects?: unknown }).objects;
+  if (declaredObjects !== undefined && !Array.isArray(declaredObjects)) {
+    const { kind, issues } = describeNonArrayCollection('objects', declaredObjects);
+    throw new StackSchemaInvalidError(
+      `defineStack validation failed: 'objects' is ${kind}, not an array. Bound actions cannot be ` +
+        `merged into it, and \`strict: false\` skips validation, not this shape — \`composeStacks\` ` +
+        `refuses the same stack with the same code. Author 'objects' as an array or in the map form ` +
+        `(\`{ name: { … } }\`), or drop \`strict: false\` to have every schema check run.`,
+      issues,
+    );
+  }
+
+  // [#19785] A non-object ENTRY is refused with the same envelope, one zod
+  // issue per entry at `['objects', index]` (`expected: 'object'`) — the
+  // strict parse's own answer for it. Never handed on: the merge cannot read
+  // it, and a stack returned with it is a success whose objects are not all
+  // objects — the next consumer (plugin-object registration) then drops every
+  // object after it inside one warn-level catch, which is concealment, not
+  // leniency.
+  if (Array.isArray(declaredObjects) && declaredObjects.some((entry) => !isRecord(entry))) {
+    const parsed = z.array(z.looseObject({})).safeParse(declaredObjects);
+    const issues = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => ({ ...issue, path: ['objects', ...issue.path] }));
+    const positions = declaredObjects
+      .map((entry, index) => (isRecord(entry) ? null : `#${index} (${entry === null ? 'null' : Array.isArray(entry) ? 'an array' : `a ${typeof entry}`})`))
+      .filter((position): position is string => position !== null);
+    throw new StackSchemaInvalidError(
+      `defineStack validation failed: 'objects' holds ${positions.length === 1 ? 'an entry' : 'entries'} ` +
+        `that ${positions.length === 1 ? 'is' : 'are'} not an object — ${positions.join(', ')}. Bound actions ` +
+        `cannot be merged into such an entry, and \`strict: false\` skips validation, not this shape. Author ` +
+        `every entry of 'objects' as an object definition, or drop \`strict: false\` to have every schema ` +
+        `check run.`,
+      issues as z.core.$ZodIssue[],
+    );
+  }
+
   // Honour `order` on the preserved top-level actions regardless of objects.
   const sortedTop = config.actions ? sortActionsByOrder(config.actions) : config.actions;
   const topChanged = sortedTop !== config.actions;

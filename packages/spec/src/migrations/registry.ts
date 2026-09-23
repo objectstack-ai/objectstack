@@ -5232,6 +5232,21 @@ const step18: MigrationStep = {
     + 'ITEM, which still declares it), and the paired semantic entry says what the strip means, '
     + 'because a notice reading "(removed)" does not say that those gaps fall back to the '
     + "manifest's own English literal. "
+    + 'Finally it retires object `tenancy.organizationField` (#19054, ADR-0049 '
+    + 'enforce-or-remove). The key named the column a PLATFORM ROW is stamped from, as '
+    + 'opposed to the column the object is WALLED by (`tenantField`); on an ordinary object '
+    + 'those are the same column, and the entire protocol declared it exactly once — on '
+    + '`sys_api_key`, a better-auth-managed credential table this platform ships and no '
+    + 'application authors. Its three readers were all platform-row writers, scope-pinned by '
+    + 'name, so an application declaration was inert by construction while still forcing '
+    + 'every future piece of organization logic to ask "what if somebody set this?". The '
+    + 'divergence is NOT retired, only its authorability: it moves to '
+    + '`PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`, keyed by object '
+    + 'name and read by the stamp face alone, so audit stamping, the approval-row writer and '
+    + 'the automation-run recorder keep their behaviour with no authorable input. The '
+    + 'conversion is a lossless delete and there is no semantic residue — an application '
+    + 'whose tenant column genuinely is not `organization_id` declares `tenancy.tenantField`, '
+    + 'which both walls the object and stamps its platform rows. '
     + 'It also retires `connector.connectionTimeoutMs` (ADR-0049 enforce-or-remove; '
     + 'maintainer ruling 2026-09-22, letter A — the narrower SECOND decision the key was '
     + 'owed after the ruling that made its nine ledger siblings live deliberately left this '
@@ -5294,6 +5309,7 @@ const step18: MigrationStep = {
     'chart-config-aria-removed',
     'dashboard-widget-chart-config-structure-removed',
     'translation-per-app-settings-removed',
+    'object-tenancy-organization-field-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -8691,18 +8707,36 @@ const step18: MigrationStep = {
         'a dashboard date-range preset name (last_7_days / last_30_days / last_90_days, today, '
         + 'yesterday, this_week, last_week, this_month, last_month, this_quarter, last_quarter, '
         + 'this_year, last_year) authored as a bare ORDERING comparand in a filter — a '
-        + '$gt / $gte / $lt / $lte value or a $between endpoint on any carrier of '
-        + 'FilterConditionSchema (dashboard widget filter, dataset filter, report runtimeFilter, '
-        + 'page filter, component filter, rollup filter), a greater_than / less_than / before / '
-        + 'after / between view filter rule value, or an ordering [field, op, value] filter triple',
+        + '$gt / $gte / $lt / $lte value or a $between endpoint, a greater_than / less_than / '
+        + 'before / after / between view filter rule value, or an ordering [field, op, value] '
+        + 'filter triple. WHICH DOOR refuses it at publish is decided by the carrier\'s declared '
+        + 'type and by its key. The carriers measured fall in three groups, and the groups are a '
+        + 'list of what was measured, not a closed partition: the grep in the acceptance criteria '
+        + 'is the catch-all. (1) A slot typed FilterConditionSchema — a '
+        + 'dashboard widget filter, a dashboard global-filter options-source filter '
+        + '(optionsFrom.filter), a dataset filter, a dataset measure filter, a report runtimeFilter '
+        + '(on the report or on a joined-report block), a rollup summaryOperations.filter and a '
+        + 'relatedListFilter — is refused at PARSE, at the comparand\'s own path, and the '
+        + '@objectstack/lint filter-preset-comparand rule reports it as well. (2) A filter under a '
+        + 'key the lint walks, whose declared type carries no preset check, parses GREEN, and the '
+        + 'lint rule is the only door that refuses it: a ViewFilterRuleSchema rule array (a view\'s '
+        + 'filter, a page element\'s dataSource.filter, a page component\'s filter prop), and a '
+        + 'Mongo-shape filter record typed as a loose record rather than FilterConditionSchema (a '
+        + 'flow CRUD node\'s config.filter). The lint is likewise what refuses a preset in an '
+        + 'ordering filter triple wherever its walk meets one. (3) A filter under a key the lint '
+        + 'does NOT walk parses GREEN and lints GREEN, so neither door refuses it at publish and '
+        + 'only a search of the authored and stored metadata finds it: a page\'s '
+        + 'interfaceConfig.filterBy rule array, and a lookup field\'s lookupFilters, whose ordering '
+        + 'operators are spelled gt / gte / lt / lte',
       replacement:
         'the date-macro window the preset already means — { $gte: "{30_days_ago}" } for '
         + 'last_30_days, { $between: ["{week_start}", "{week_end}"] } for this_week, and so on '
         + '(the rejection names the exact window per preset; DATE_RANGE_PRESET_MACRO_WINDOWS in '
         + '@objectstack/spec/data is the table) — or an ISO date such as 2026-01-15. The preset '
-        + 'names themselves stay fully legal in the dashboard date-filter positions '
-        + '(dateRange.defaultRange, a date global filter defaultValue), which is the only place '
-        + 'any layer ever resolved them',
+        + 'names themselves stay fully legal where a layer resolves them to a window: the dashboard '
+        + 'date-filter positions (dateRange.defaultRange, a date global filter defaultValue) and an '
+        + 'analytics query\'s timeDimensions[].dateRange. A filter comparand is not one of those '
+        + 'positions',
       reason:
         'The C half of #8690, maintainer-ruled 2026-08-15 alongside the engine door (PR #8808). '
         + 'The preset vocabulary is declared in the dashboard schema and lowered to {date-macro} '
@@ -8713,13 +8747,22 @@ const step18: MigrationStep = {
         + 'count 0, indistinguishable from "there is no data" (measured on #8690: $gte '
         + '"last_30_days" returned 0 of 51 seeded rows where the macro spelling returned the 38 '
         + 'in-window). The engine now refuses the bare name on a declared temporal field at query '
-        + 'time (INVALID_FILTER / 400); this entry records the AUTHORING-time half: the schema '
-        + 'door and the @objectstack/lint filter-preset-comparand rule refuse it at publish, '
-        + 'where the author — an AI author in particular — can still act on the message. '
-        + 'Ordering positions only, deliberately: equality and membership are NOT judged, because '
-        + 'a select/picklist column legitimately stores values that collide with preset names, '
-        + 'and on a temporal field the engine door already refuses those with the field type in '
-        + 'hand. ⚠️ Metadata AT REST is deliberately not rewritten and there is no D2 conversion: '
+        + 'time (INVALID_FILTER / 400); this entry records the AUTHORING-time half, and that half '
+        + 'is two doors with different reach, not one: the FilterConditionSchema parse refuses the '
+        + 'shape on the slots typed that way, and the @objectstack/lint filter-preset-comparand '
+        + 'rule refuses it on every filter its walk reaches, which makes it the only door for a '
+        + 'walked filter whose declared type carries no preset check. Both answer at publish, where '
+        + 'the author — an AI author in particular — can still act on the message; a page\'s '
+        + 'interfaceConfig.filterBy and a lookup field\'s lookupFilters are reached by neither, and '
+        + 'the surface\'s groups say which measured carrier sits under which door. Ordering '
+        + 'positions only at the schema door, deliberately: it judges no equality or membership, '
+        + 'because a select/picklist column legitimately stores values that collide with preset '
+        + 'names and a schema has no field type in hand. The lint rule, which reads the stack\'s '
+        + 'object metadata, additionally refuses a preset in an equality or membership position, '
+        + 'in a filter its walk reaches, on a field it can resolve to a declared date or datetime '
+        + '(where the filter binds to no object, or the field resolves to nothing, that arm cannot '
+        + 'fire), and on a temporal field the engine door already refuses those with the field '
+        + 'type in hand. ⚠️ Metadata AT REST is deliberately not rewritten and there is no D2 conversion: '
         + 'this shape was never written by any first-party producer (every preset in this repo '
         + 'and the example apps sits in a dashboard date-filter position — measured) and never '
         + 'executed usefully (it returned a silent zero before #8808 and a 400 after). Coercing '
@@ -8730,9 +8773,19 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Grep your authored filters for the thirteen preset names in ordering positions — a '
         + '$gt/$gte/$lt/$lte value, a $between endpoint, a greater_than/less_than/before/after/'
-        + 'between view rule value, an ordering filter triple — and rewrite each to the '
-        + '{date-macro} window the rejection names (or an ISO date). `os validate` / `os lint` '
-        + 'report each one by path, so the sweep is mechanical. Leave presets in dashboard '
+        + 'between view rule value, an ordering filter triple, a gt/gte/lt/lte lookup filter value '
+        + '— and rewrite each to the {date-macro} window the rejection names (or an ISO date). That '
+        + 'grep is the catch-all; the surface\'s groups are the carriers measured. The sweep is '
+        + 'mechanical for groups (1) and (2): `os validate` / `os lint` report each one by path, and '
+        + 'a group (1) slot is also refused by a `safeParse` of the schema that declares it, at the '
+        + 'comparand\'s own path. Group (3) is BY HAND, because nothing reports it. Search every '
+        + 'page for an `interfaceConfig.filterBy` rule whose operator is an ordering one '
+        + '(greater_than, greater_than_or_equal, less_than, less_than_or_equal, before, after, '
+        + 'between, or an alias of one) and whose value — or either `between` endpoint — is one of '
+        + 'the thirteen names. Search every lookup field for a `lookupFilters` entry whose operator '
+        + 'is `gt`, `gte`, `lt` or `lte` — the only ordering spellings that key accepts; it has no '
+        + '`between` — and whose value is one of the thirteen names. Take each window from '
+        + '`DATE_RANGE_PRESET_MACRO_WINDOWS`, since no rejection names it. Leave presets in dashboard '
         + 'date-filter positions (dateRange.defaultRange, date global filter defaultValue) '
         + 'untouched — they remain the declared vocabulary there. A filter that carried one of '
         + 'these shapes was never returning the window it named (silent zero before the engine '
@@ -14360,6 +14413,19 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `AggregationPipeline.options`, which no `stack.zod.ts` collection declares
     // and no `sys_metadata` row stores. See `data-nosql-query-options-timeout-unit-in-key`.
     'data/NoSQLQueryOptions:timeout',
+    // #19054 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18, verbatim
+    // and untranslated: 「organizationField 撤出可授权面 同意你的建议」).
+    // `TenancyConfig.organizationField` named the column a platform row is STAMPED
+    // from, as opposed to the column the object is WALLED by (`tenantField`). On an
+    // ordinary object those are the same column, and the whole protocol declared it
+    // exactly once — on `sys_api_key`, a table this platform ships and no
+    // application authors. The `tenancy` block is `.strict()`, so the key is
+    // removed from the shape and its prescription is served from
+    // `TENANCY_RETIRED_KEY_GUIDANCE`. The divergence itself is unchanged: it moves
+    // to `PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`, read
+    // by the three sanctioned platform-row writers alone. D2:
+    // `object-tenancy-organization-field-removed`.
+    'data/TenancyConfig:organizationField',
     // #15680 (stack card 5/6 of #14478) — ruling B. `TursoConfig.timeout` said
     // "Operation timeout in milliseconds" in prose and carried a `.meta({ title:
     // 'Timeout (ms)' })` no parse reads — and sat two keys below

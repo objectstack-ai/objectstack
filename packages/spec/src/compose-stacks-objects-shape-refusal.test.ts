@@ -81,10 +81,13 @@ const rows: Array<{ label: string; build: () => ObjectStackDefinition }> = [
   { label: 'a hand-built stack whose `objects` is a map', build: () => handBuilt({ manifest: mf('com.example.b'), objects: { b_item: obj('b_item') } }) },
   { label: 'a hand-built stack whose `objects` is a number', build: () => handBuilt({ manifest: mf('com.example.b'), objects: 5 }) },
   { label: 'a hand-built stack whose `objects` is a Set of objects', build: () => handBuilt({ manifest: mf('com.example.b'), objects: new Set([obj('b_item')]) }) },
-  { label: '`strict: false` with `objects: null`', build: () => unparsed({ manifest: mf('com.example.b'), objects: null }) },
-  { label: "`strict: false` with `objects: ''`", build: () => unparsed({ manifest: mf('com.example.b'), objects: '' }) },
-  { label: '`strict: false` with `objects: 0`', build: () => unparsed({ manifest: mf('com.example.b'), objects: 0 }) },
-  { label: '`strict: false` with `objects: false`', build: () => unparsed({ manifest: mf('com.example.b'), objects: false }) },
+  // The falsy rows reach composition hand-built: since #19785 the `strict:
+  // false` door refuses them itself (`define-stack-non-strict-objects-shape-refusal.test.ts`),
+  // so it can no longer carry them this far.
+  { label: 'a hand-built stack whose `objects` is null', build: () => handBuilt({ manifest: mf('com.example.b'), objects: null }) },
+  { label: "a hand-built stack whose `objects` is ''", build: () => handBuilt({ manifest: mf('com.example.b'), objects: '' }) },
+  { label: 'a hand-built stack whose `objects` is 0', build: () => handBuilt({ manifest: mf('com.example.b'), objects: 0 }) },
+  { label: 'a hand-built stack whose `objects` is false', build: () => handBuilt({ manifest: mf('com.example.b'), objects: false }) },
 ];
 
 describe('#18239 — composeStacks refuses a non-array `objects` with an ADR-0112 envelope', () => {
