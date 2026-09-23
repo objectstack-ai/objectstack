@@ -7,6 +7,8 @@
 - 欠不欠按面判 ⛔ 不按车道:diff 碰下列任一面即欠达档复核,交付后当轮完成。
 - 复核面 = 出货给用户或 agent 的五处:`content/docs/**`、`apps/docs/**`、CHANGELOG/`.changeset` 散文。
 - 加已发布 schema(`packages/spec/src/**` 非测试)与 governed 规则文本(统一定义见 SKILL.md)。
+- 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
+  出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
 - 五面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
 - 同形 = `## Contract review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
