@@ -49,6 +49,22 @@ const OBJECTS = [
       message: RULE_MESSAGE, condition: "record.line.kind == 'secret'",
     }],
   },
+  {
+    // The same rule on an object the organization wall does not cover.
+    name: 'qa_note',
+    label: 'Note',
+    sharingModel: 'public_read_write',
+    tenancy: { enabled: false },
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      name: { name: 'name', type: 'text' },
+      line: { name: 'line', type: 'lookup', reference: 'qa_line' },
+    },
+    validations: [{
+      name: 'no_secret_line', type: 'script', severity: 'error',
+      message: RULE_MESSAGE, condition: "record.line.kind == 'secret'",
+    }],
+  },
 ];
 
 const MEMBER: PermissionSet = {
@@ -56,6 +72,7 @@ const MEMBER: PermissionSet = {
   label: 'Member',
   objects: {
     qa_inspection: { allowRead: true, allowCreate: true, allowEdit: true },
+    qa_note: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_line: { allowRead: true },
   },
 } as unknown as PermissionSet;
@@ -77,7 +94,7 @@ afterEach(async () => {
 });
 
 /** `kind` is org Y's row's value; org X holds one `secret` line of its own. */
-async function boot(kind: 'secret' | 'public', posture?: 'group') {
+async function boot(kind: 'secret' | 'public', posture?: 'group' | 'isolated') {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   const engine = new ObjectQL();
   engine.registerDriver(driver as never, true);
@@ -129,31 +146,34 @@ async function boot(kind: 'secret' | 'public', posture?: 'group') {
     return rows;
   });
 
-  const stored = async (name: string) => (await table('qa_inspection').where({ name }).select('id')).length;
+  const stored = async (object: string, name: string) => (await table(object).where({ name }).select('id')).length;
   return { engine, readsOfLine, stored, table };
 }
 
 /** Everything the caller sees of one write and one preview naming `line`. */
-async function observe(kind: 'secret' | 'public', line: string, caller: object = CALLER, posture?: 'group') {
+async function observe(
+  kind: 'secret' | 'public', line: string, caller: object = CALLER,
+  posture?: 'group' | 'isolated', object = 'qa_inspection',
+) {
   const h = await boot(kind, posture);
   const refusal = await h.engine
-    .insert('qa_inspection', { name: 'probe', line }, { context: caller } as never)
+    .insert(object, { name: 'probe', line }, { context: caller } as never)
     .then(() => null, (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }));
   const preview = await h.engine.validate(
-    'qa_inspection', { name: 'probe', line }, { mode: 'insert', context: caller } as never,
+    object, { name: 'probe', line }, { mode: 'insert', context: caller } as never,
   );
-  // Under `group`, the by-id UPDATE door too: org X's own inspection repointed at `line`.
+  // Given a posture, the by-id UPDATE door too: a seeded row the caller may edit, repointed at `line`.
   let update: unknown;
   if (posture) {
-    await h.table('qa_inspection').insert([{ id: 'insp_x', name: 'seed', organization_id: 'org_x' }]);
+    await h.table(object).insert([{ id: 'row_x', name: 'seed', ...(object === 'qa_inspection' ? { organization_id: 'org_x' } : {}) }]);
     update = await h.engine
-      .update('qa_inspection', { line }, { where: { id: 'insp_x' }, context: caller } as never)
+      .update(object, { line }, { where: { id: 'row_x' }, context: caller } as never)
       .then(() => 'committed', (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }));
   }
   return {
     seen: {
       refusal,
-      committed: await h.stored('probe'),
+      committed: await h.stored(object, 'probe'),
       preview: { valid: preview.results?.[0]?.valid, errors: preview.results?.[0]?.errors?.map((e) => e.message) },
       update,
     },
@@ -206,6 +226,38 @@ describe('#18682 — under `group`, a member with no active organization reads n
 
   it('CONTROL: WITH an active organization, org X’s own secret line reaches the rule on every door', async () => {
     const own = await observe('public', 'line_x', { ...ORGLESS_MEMBER, tenantId: 'org_x' }, 'group');
+
+    expect(own.seen.refusal).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
+    expect(own.seen.preview).toEqual({ valid: false, errors: [RULE_MESSAGE] });
+    expect(own.seen.update).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
+    expect(own.readsOfLine.map((rows) => rows.length)).toEqual([1, 1, 1]);
+  });
+});
+
+/**
+ * Under `isolated` the organization wall refuses an org-less writer only on an
+ * object it covers. On an object declared `tenancy: { enabled: false }` the
+ * write is admitted, and its rule's related read has no `tenantId` to scope by:
+ * such a caller gets no related read at all.
+ */
+describe('#18682 — under `isolated`, an org-less writer of an unwalled object reads nothing related', () => {
+  const ORGLESS_USER = { userId: 'u_x', positions: [], permissions: [], posture: 'MEMBER' };
+
+  it('a reference to org Y’s row ends identically whether that row is secret or public', async () => {
+    const secret = await observe('secret', 'line_y', ORGLESS_USER, 'isolated', 'qa_note');
+    const open = await observe('public', 'line_y', ORGLESS_USER, 'isolated', 'qa_note');
+
+    expect(open.seen).toEqual(secret.seen);
+    expect(secret.seen.refusal?.code).toBe('VALIDATION_FAILED');
+    expect(secret.seen.committed).toBe(0);
+    expect(secret.seen.preview.valid).toBe(false);
+    expect(secret.seen.update).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(secret.readsOfLine).toEqual([]);
+    expect(open.readsOfLine).toEqual([]);
+  });
+
+  it('CONTROL: WITH an active organization, org X’s own secret line reaches the rule on every door', async () => {
+    const own = await observe('public', 'line_x', { ...ORGLESS_USER, tenantId: 'org_x' }, 'isolated', 'qa_note');
 
     expect(own.seen.refusal).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
     expect(own.seen.preview).toEqual({ valid: false, errors: [RULE_MESSAGE] });

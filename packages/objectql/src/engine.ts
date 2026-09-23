@@ -153,7 +153,7 @@ import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object
 import { resolveTenancyPosture } from '@objectstack/types';
 import {
   normalizeTenancyPosture,
-  postureUsesUnionScope,
+  postureEnforcesWall,
   TenantLayer0VerdictSchema,
   type TenancyPosture,
   type TenantLayer0Verdict,
@@ -7071,10 +7071,10 @@ export class ObjectQL implements IObjectQLEngine {
     if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) return unbound;
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
-    // ⛔ `group`: a USER caller with no `tenantId` cannot be scoped here, so it reads nothing.
+    // ⛔ Walled posture: a USER caller with no `tenantId` cannot be scoped here, so it reads nothing.
     const caller = context as ExecutionContext | undefined;
     const readsNothing = !!caller?.userId && !carriesOrganization(caller?.tenantId)
-      && postureUsesUnionScope(this.resolveEnginePosture());
+      && postureEnforcesWall(this.resolveEnginePosture());
 
     const fields = (schema?.fields ?? {}) as Record<string, unknown>;
     type Resolved = {
