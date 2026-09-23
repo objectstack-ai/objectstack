@@ -326,9 +326,10 @@ export interface DanglingReferenceAuditPort {
    * its references were written under — or `null` when the row carries none (a
    * NULL-organization row, or an object with no tenant column). The engine
    * probes under that organization, as the write-path guard probes under its
-   * caller's; `null` probes unscoped.
+   * caller's; `null` probes unscoped. Optional so a port written before it, or
+   * a caller asking the unscoped question, stays well-typed.
    */
-  probe(target: string, id: unknown, organization: string | null): Promise<boolean | null>;
+  probe(target: string, id: unknown, organization?: string | null): Promise<boolean | null>;
   warn?(message: string, meta?: unknown): void;
 }
 

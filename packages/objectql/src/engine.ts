@@ -7058,7 +7058,7 @@ export class ObjectQL implements IObjectQLEngine {
         objects: () => this._registry.getAllObjects() as unknown as AuditableObject[],
         find: (object, opts) => this.find(object, opts as any) as Promise<Array<Record<string, unknown>>>,
         probe: (target, id, organization) => this.referenceExists(
-          target, id, organization === null ? undefined : ({ tenantId: organization } as ExecutionContext),
+          target, id, organization == null ? undefined : ({ tenantId: organization } as ExecutionContext),
         ),
         warn: (msg, meta) => this.logger?.warn?.(msg, meta as any),
       },
