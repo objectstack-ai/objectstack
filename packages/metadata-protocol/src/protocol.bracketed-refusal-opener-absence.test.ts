@@ -7,6 +7,9 @@
  * raised used to open with a `[lower_snake]` tag that was the restatement of the
  * `code` the very same throw declared — `[no_draft]` in front of `NO_DRAFT`,
  * `[item_locked]` in front of `ITEM_LOCKED`, and so on for the whole family.
+ * The runtime authoring gate (`runtime-authoring-gate.ts`) is the third
+ * producer: its one refusal opened with `[invalid_metadata]` in front of its own
+ * `INVALID_METADATA` / 422, the same shape, and reached `dist` the same way.
  *
  * They were not invisible. `withoutDeclaredCodePrefix`
  * (`packages/rest/src/error-response.ts`) strips a leading restatement only when
@@ -28,8 +31,8 @@
  * this package assert the prose a given door answers, so one re-introduced tag
  * reds exactly one of them and a newly-written refusal reds none — and a new
  * refusal copied from a neighbouring producer is precisely how the idiom spread
- * in the first place. Reading the source covers every throw site in both files,
- * including ones no test can provoke.
+ * in the first place. Reading the source covers every throw site in every
+ * producer file, including ones no test can provoke.
  *
  * ⚠️ A scan that matches nothing passes for free, so the family floor below is
  * part of the pin: the scanner must still be finding refusals to have an opinion
@@ -48,11 +51,29 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import {
+  PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING,
+  evaluateRuntimeAuthoringGate,
+} from './runtime-authoring-gate.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** The two producers the ruling was applied to. */
-const PRODUCERS = ['protocol.ts', 'sys-metadata-repository.ts'] as const;
+/**
+ * The producers the ruling was applied to, each with its REFUSAL FLOOR: the
+ * minimum `new Error(` count the scan must still see in that file for its
+ * silence to mean anything.
+ *
+ * ⚠️ Per file, not one shared number. `runtime-authoring-gate.ts` constructs
+ * exactly one error — its 422 — so the floor of 5 the first two producers
+ * carry would red it for being small rather than for being wrong, and a
+ * shared floor of 1 would let either large producer lose nearly every throw
+ * site before this pin noticed.
+ */
+const PRODUCERS: Readonly<Record<string, number>> = {
+  'protocol.ts': 5,
+  'sys-metadata-repository.ts': 5,
+  'runtime-authoring-gate.ts': 1,
+};
 
 /**
  * A string literal whose FIRST characters are a bracketed tag — the shape
@@ -65,7 +86,7 @@ const PRODUCERS = ['protocol.ts', 'sys-metadata-repository.ts'] as const;
  * every grep for a literal tag walked straight past. A detector that reads only
  * literals would let exactly that shape back in.
  */
-const TAGGED_OPENER = /(`|')\[(?:([A-Za-z][A-Za-z0-9_]*)\]|\$\{)/;
+const TAGGED_OPENER = /(`|')\[(?:([A-Za-z][A-Za-z0-9_]*)\]|\$\{([^}]*))/;
 
 /**
  * The bracketed openers that are NOT this family, by name.
@@ -82,6 +103,25 @@ const TAGGED_OPENER = /(`|')\[(?:([A-Za-z][A-Za-z0-9_]*)\]|\$\{)/;
  */
 const NON_REFUSAL_PREFIXES = new Set(['Protocol', 'SysMetadataRepository']);
 
+/**
+ * The INTERPOLATED bracket that is NOT this family, by the expression it
+ * interpolates.
+ *
+ * `advisory.rule` is the `[rule]` locator the author-time gate composes on its
+ * advisory log line: it opens a continuation literal in the middle of that
+ * line, after the `[Protocol]` prefix, and names WHICH rule produced the
+ * finding. That is the `[rule]`-locator vocabulary the header above already
+ * declares out of scope — it restates no declared `code`, and no throw sits
+ * beside it. The line-based scan cannot tell a mid-message continuation from
+ * an opener, so the exemption is spelled here rather than inferred.
+ *
+ * ⚠️ Keyed on the exact expression, never on "anything interpolated": the
+ * interpolated arm exists because an opener written as `[${code}]` from the
+ * throw's own `code` variable is the most redundant member of the family.
+ * ⛔ Never add an expression here that holds a declared error code.
+ */
+const NON_REFUSAL_LOCATORS = new Set(['advisory.rule']);
+
 function scan(file: string): { openers: string[]; refusals: number } {
   const lines = readFileSync(join(HERE, file), 'utf8').split('\n');
   const openers: string[] = [];
@@ -96,13 +136,14 @@ function scan(file: string): { openers: string[]; refusals: number } {
     // The bracket must open the literal, not merely appear inside it.
     if (!m || line[m.index + 1] !== '[') continue;
     if (m[2] !== undefined && NON_REFUSAL_PREFIXES.has(m[2])) continue;
+    if (m[3] !== undefined && NON_REFUSAL_LOCATORS.has(m[3].trim())) continue;
     openers.push(`${file}:${i + 1}  ${trimmed.slice(0, 100)}`);
   }
   return { openers, refusals };
 }
 
 describe('refusal messages open with prose, never with a bracketed restatement of their own code', () => {
-  it.each(PRODUCERS)('%s raises no message opening with a bracketed lowercase tag', (file) => {
+  it.each(Object.entries(PRODUCERS))('%s raises no message opening with a bracketed lowercase tag', (file, floor) => {
     const { openers, refusals } = scan(file);
 
     // THE FLOOR — the scan has to still be looking at refusals for its silence
@@ -111,7 +152,7 @@ describe('refusal messages open with prose, never with a bracketed restatement o
     expect(
       refusals,
       `${file} no longer constructs errors here — this pin is scanning the wrong file`,
-    ).toBeGreaterThanOrEqual(5);
+    ).toBeGreaterThanOrEqual(floor);
 
     expect(
       openers,
@@ -119,8 +160,8 @@ describe('refusal messages open with prose, never with a bracketed restatement o
     ).toEqual([]);
   });
 
-  it('the whole family is covered — both producers together still raise the refusals this pin is about', () => {
-    const total = PRODUCERS.reduce((n, f) => n + scan(f).refusals, 0);
+  it('the whole family is covered — the producers together still raise the refusals this pin is about', () => {
+    const total = Object.keys(PRODUCERS).reduce((n, f) => n + scan(f).refusals, 0);
     expect(total).toBeGreaterThanOrEqual(30);
   });
 });
@@ -167,5 +208,44 @@ describe('the refusal a caller actually receives', () => {
     expect(err.status).toBe(400);
     expect(err.message.startsWith('['), `message opens with a tag: ${err.message.slice(0, 48)}`).toBe(false);
     expect(err.message).toContain("rollbackMetaItem requires a positive integer 'toVersion'");
+  });
+
+  it('carries the token on `code` and opens with the sentence — the author-time gate `INVALID_METADATA`', () => {
+    // A schedule-triggered, platform-level flow that creates rows naming no
+    // organization, on a deployment that walls organizations: the gate-local
+    // refusal, which needs no engine and no registry to fire.
+    const { error: err } = evaluateRuntimeAuthoringGate({
+      type: 'flow',
+      name: 'nightly_sweep',
+      state: 'active',
+      organizationId: null,
+      orgWallEnforced: true,
+      body: {
+        name: 'nightly_sweep',
+        label: 'Nightly Sweep',
+        type: 'schedule',
+        status: 'active',
+        runAs: 'system',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start', config: { schedule: '0 1 * * *' } },
+          {
+            id: 'log',
+            type: 'create_record',
+            label: 'Write sweep log',
+            config: { objectName: 'sweep_log', fields: { note: 'swept' } },
+          },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'log' }],
+      },
+    }) as { error: any };
+
+    expect(err, 'the gate let a refused publish through — nothing to assert on').not.toBeNull();
+    expect(err.code).toBe('INVALID_METADATA');
+    expect(err.status).toBe(422);
+    expect(err.message.startsWith('['), `message opens with a tag: ${err.message.slice(0, 48)}`).toBe(false);
+    expect(err.message).not.toContain('[invalid_metadata]');
+    expect(err.message).toMatch(/^flow\/nightly_sweep failed author-time validation: \d+ issues? — /);
+    // The `[rule]` locator is NOT this family and stays in the sentence.
+    expect(err.message).toContain(`[${PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING}]`);
   });
 });
