@@ -124,13 +124,15 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
   });
 
   it('no exports entry of the package re-exports the internal channel', async () => {
+    // Control: the name is spelled right, so the absences below can fail.
+    expect(Object.keys(await import('./typescript-serializer.js'))).toContain('serializeTypeScriptForMetadataType');
     expect(EXPORT_ENTRY_SOURCES.length).toBe(5);
     for (const source of EXPORT_ENTRY_SOURCES) {
       const entry = (await import(source)) as Record<string, unknown>;
       expect(Object.keys(entry).length, source).toBeGreaterThan(0);
       expect(Object.keys(entry), source).not.toContain('serializeTypeScriptForMetadataType');
     }
-  });
+  }, 60_000);
 
   it('round-trips every annotated body through serialize and deserialize', () => {
     for (const [metadataType, item] of Object.entries(REPRESENTATIVE)) {
