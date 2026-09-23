@@ -93,10 +93,21 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
    * gets a list here without anyone remembering to edit this line.
    *
    * The probe uses a two-element array, which is legal for all three list
-   * operators, so it never trips the shape door it is used to satisfy.
+   * operators, so it never trips the shape door it is used to satisfy. The
+   * EQUALITY spellings (`=`, `==`, `equals`, `eq`) do refuse it, since the
+   * 2026-09-23 equality-slot ruling (#19757) — and they answer `undefined`
+   * either way: before that ruling they lowered it to the implicit form, which
+   * carries no `$` key. So a refusal here reads as `undefined`, exactly the
+   * answer this helper always gave them, and `valueFor` still hands them a
+   * scalar.
    */
   const loweredOperatorOf = (op: string): string | undefined => {
-    const lowered = parseFilterAST([['probe', op, ['a', 'b']]]) as Record<string, unknown> | undefined;
+    let lowered: Record<string, unknown> | undefined;
+    try {
+      lowered = parseFilterAST([['probe', op, ['a', 'b']]]) as Record<string, unknown> | undefined;
+    } catch {
+      return undefined;
+    }
     const spec = lowered?.probe;
     if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return undefined;
     return Object.keys(spec).find((key) => key.startsWith('$'));

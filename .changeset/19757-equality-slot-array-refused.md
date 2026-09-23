@@ -49,10 +49,12 @@ On `driver-mongodb`, check what the query is supposed to return, and do not assu
 
 ## Who is affected, measured
 
-Nothing in this repository's examples, seeds, docs or published skills authors the shape. The repo was grepped for the FilterArray triple on `=` / `==` / `equals` / `eq` carrying an array, for `$eq` carrying an array, and for filter / where objects whose field value is an array. The only hits are tests, and two of them pinned the old accept set and were re-judged rather than rewritten by rote:
+Nothing in this repository's examples, seeds, docs or published skills authors the shape. The repo was grepped for the FilterArray triple on `=` / `==` / `equals` / `eq` carrying an array, for `$eq` carrying an array, and for filter / where objects whose field value is an array. The hits are tests and the engine-double conformance tables. The full suites of `@objectstack/spec`, `objectql`, `driver-memory`, `driver-sql`, `driver-mongodb`, `driver-turso`, `driver-sqlite-wasm`, `formula`, `service-analytics`, `metadata-protocol`, `metadata-core`, `plugin-sharing` and `lint` were run, and four things went red. Each was re-judged, not rewritten by rote:
 
 - The comparand-shape suite pinned `{ tags: ['a','b'] }` and `$eq: ['a','b']` as shapes the face passes through. Both rows are inverted, and the shapes now live in the arm's refusal section.
 - The field-reference lowering suite pinned `['stage', '=', ['a','b']]` lowering to the implicit form. What that row proved still holds, because an array is not promoted to `$eq`. The row now asserts the refusal, which names the implicit slot and not `$eq`.
+- Two probe helpers passed a two-element array through every AST spelling to find its `$` operator. One is in this package's comparand-shape suite, the other in `driver-memory`'s vocabulary suite. Each assumed the array could never trip the face. The equality spellings now refuse it, so each helper reads that refusal as `undefined`, which is the answer the helper always gave those spellings.
+- `@objectstack/metadata-core`'s engine-double dispatch tables carried three ARRAY `where.id` rows. The real engine now refuses that input at the face before its dispatch runs, so the rows are retired. Their own changeset explains why.
 
 `FILTER_COMPARAND_TYPE_CASES` gains three `door-refusal` rows (implicit, `$eq`, and nested under `$or`). Every driver suite that consumes the table runs them through `parseFilterAST`.
 

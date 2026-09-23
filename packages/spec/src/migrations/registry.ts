@@ -8740,7 +8740,10 @@ const step18: MigrationStep = {
         + 'translateFilter emits the array unchanged, and MongoDB equality on an array operand '
         + 'selects a stored array equal to ["a"] or holding ["a"] as an element — mingo 7.2.4, the '
         + 'named proxy, over ["a"], "a", ["a","b"], ["b","a"], [["a"],"x"], [["a"]], "b" and [] '
-        + 'selected ["a"], [["a"],"x"] and [["a"]]. A live mongod, MySQL, PostgreSQL and a live '
+        + 'selected ["a"], [["a"],"x"] and [["a"]]. The service-analytics filter normalizer read the '
+        + 'FilterArray form as MEMBERSHIP: ["stage", "=", ["won", "lost"]] charted as stage IN '
+        + '(won, lost); that form now gets the refusal too, while its OBJECT form, which that '
+        + 'normalizer does not route through the shared face, still reads as membership. A live mongod, MySQL, PostgreSQL and a live '
         + 'Turso server were NOT measured. So one stored filter was a 400 on most backends and a '
         + 'silent, differently-shaped row set on one. The shared face now refuses it with '
         + 'INVALID_FILTER / 400 before any driver runs, naming the field, the path and both remedies. '
@@ -8759,7 +8762,9 @@ const step18: MigrationStep = {
         + 'what it meant: one of these values ($in), the stored list holds a value ($contains, an '
         + '$or of them for several), or one value. Each is refused at query time with INVALID_FILTER '
         + '/ 400 naming the field and the path, so a test suite that exercises the query finds '
-        + 'every one. On driver-mongodb re-check what the query is supposed to return rather than '
+        + 'every one. A dashboard or dataset filter written as the FilterArray sugar with an array on '
+        + 'equality charted as membership through the analytics normalizer; $in is the spelling that '
+        + 'charts the same rows. On driver-mongodb re-check what the query is supposed to return rather than '
         + 'assuming the old rows were right: the old answer was MongoDB array equality, which '
         + 'neither $in nor $contains reproduces.',
     },
