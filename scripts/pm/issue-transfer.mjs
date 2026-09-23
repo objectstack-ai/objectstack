@@ -61,8 +61,11 @@
  * setting no seat token can read. A failed run, a target whose node id cannot
  * be read, or a refused mutation is refused here with `transferRemedy`
  * (`fleet-write/ops.mjs`): the maintainer adds the target to the App's
- * repository access. ⛔ The door never falls back to a rebuild; that recipe
- * stays for a target GitHub refuses outright (outside the organization).
+ * repository access. ⛔ The door never falls back to a rebuild: an
+ * installation gap is a setting to fix. The rebuild recipe
+ * (`.claude/skills/pm-dispatch/references/cross-repo-coordination.md`) stays
+ * for a target outside `TRANSFER_TARGETS` and for a move GitHub refuses
+ * outright — another organization, a private card into a public repository.
  *
  * ## Exit codes — capture them BEFORE any pipe (issue-create's ladder)
  *

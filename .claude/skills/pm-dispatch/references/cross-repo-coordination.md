@@ -22,7 +22,7 @@
 - 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
 - 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
 - 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
-- transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
+- 转仓走 `issue-transfer.mjs`;名册外或平台拒才重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
 - 决策收件箱按仓:平台在 objectstack / objectui,元数据项目在本仓;在飞卡 ⛔ 不中途转仓。
 - 规则 2:跨层功能点或 objectui 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。

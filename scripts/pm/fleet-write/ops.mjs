@@ -232,7 +232,8 @@ export function transferRemedy(source, target) {
     `a transfer needs the fleet App installed on BOTH ${source} and ${target} with issues write on each: a failed mint, a target whose ` +
     `node id cannot be read, or "Resource not accessible by integration" / "Could not resolve to a Repository" on the mutation means ` +
     `the installation does not cover ${target} — the maintainer adds it to the objectstack-fleet App's repository access. ` +
-    '⛔ Not rebuilt by hand meanwhile: a rebuild is only for a target GitHub refuses (outside the organization).'
+    '⛔ Not rebuilt by hand meanwhile — an installation gap is a setting to fix, not a refusal; the rebuild recipe is for a target ' +
+    'outside TRANSFER_TARGETS or a move GitHub refuses outright (another organization, a private card into a public repository).'
   );
 }
 
