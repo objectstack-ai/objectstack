@@ -216,8 +216,9 @@ const CORE_REASON =
  * the gate kind (pinned against the live `if:` by `--self-test`) and a one-line
  * reason a seat can read at enqueue time.
  *
- * Measured, not remembered: the eleven names below are the union of every
- * `skipped` name over the ten landed heads the header lists. Five of them
+ * Measured, not remembered: the roster was eleven names, the union of every
+ * `skipped` name over the ten landed heads the header lists — ten below since
+ * `Console Pin Gate` left it (see the end of this block). Five of them
  * (`Build Core`, `Temporal Conformance`, both matrix templates, `Dogfood Verify
  * CLI`) skipped on ALL ten; `Build Docs` and `Console Pin Gate` on all ten;
  * `Check Changeset` on all ten (every one carried `skip-changeset`);
@@ -229,6 +230,12 @@ const CORE_REASON =
  * ⛔ Adding a row is a declaration that the skip is BY DESIGN, and the row must
  * name the mechanism — a row added to silence an exit 4 without one is the
  * finding written somewhere quieter.
+ *
+ * `Console Pin Gate` LEFT the roster (#17673, ruling #18900 ⑤): its job now
+ * concludes on every run — its own `if:` is `!cancelled()` alone and the
+ * `console` filter term sits on each step — so an unaffected PR reads
+ * `success` with a NOT BUILT notice, and a skipped `Console Pin Gate` is no
+ * longer by design. It is exit 4, like any other name outside the roster.
  */
 export const EXPECTED_SKIPS = Object.freeze([
   {
@@ -302,13 +309,6 @@ export const EXPECTED_SKIPS = Object.freeze([
     job: 'build-docs',
     gate: { kind: 'filter-output', outputs: ['docs'] },
     reason: "gated on ci.yml's `filter` job `docs` output (apps/docs, content, the lockfile, ci.yml itself); a diff outside it skips the docs build on the PR head",
-  },
-  {
-    name: 'Console Pin Gate',
-    workflow: 'ci.yml',
-    job: 'console-pin',
-    gate: { kind: 'filter-output', outputs: ['console'] },
-    reason: "gated on ci.yml's `filter` job `console` output (the `.objectui-sha` pin and the console build/probe scripts); a diff that moves none of them skips the pinned-console build",
   },
 ]);
 
@@ -837,6 +837,12 @@ function fixtureRun(name, conclusion, suite = 1, extra = {}) {
  * on one head. Names, conclusions and check-suite ids VERBATIM from the
  * listing. This is the real shape the roster must accept, kept here so the
  * measured family and the declared family cannot drift apart unnoticed.
+ *
+ * ⚠️ It predates #17673, so ONE of its 19 skips — `Console Pin Gate` — is a
+ * finding under today's roster, and the cases below say so rather than edit
+ * a measurement. What the same head reads NOW is `CONCLUDING_18315`: that one
+ * row as the job concludes on an unaffected run since #17673 (`success`, with
+ * a NOT BUILT notice), every other row untouched — DERIVED, not measured.
  */
 const MEASURED_18315 = [
   ['Auto Label', 'skipped', 94769348293],
@@ -880,8 +886,12 @@ const MEASURED_18315 = [
   ['TypeScript Type Check', 'success', 94769267736],
 ];
 
-function measuredPayload() {
-  return { total_count: MEASURED_18315.length, check_runs: MEASURED_18315.map(([name, conclusion, suite]) => fixtureRun(name, conclusion, suite)) };
+const CONCLUDING_18315 = MEASURED_18315.map(([name, conclusion, suite]) =>
+  name === 'Console Pin Gate' ? [name, 'success', suite] : [name, conclusion, suite],
+);
+
+function measuredPayload(rows = MEASURED_18315) {
+  return { total_count: rows.length, check_runs: rows.map(([name, conclusion, suite]) => fixtureRun(name, conclusion, suite)) };
 }
 
 /** Spawn this file's CLI on a payload file, offline; returns { status, stdout, stderr }. */
@@ -915,6 +925,19 @@ export function selfTest() {
   t('roster: a never-skipping required context is NOT in it (Lint & Repo Gates)', EXPECTED_SKIPS.some((r) => r.name === 'Lint & Repo Gates'), false);
   t('roster: …nor the ci.yml aggregates, which run if: always()', EXPECTED_SKIPS.some((r) => r.name === 'Test Core' || r.name === 'Dogfood Regression Gate'), false);
   t('roster: …nor the queue guard', EXPECTED_SKIPS.some((r) => r.name === 'Governed Surface Queue Guard'), false);
+  // #17673: the console gate concludes on every run, so its skip is no longer
+  // by design. Tied to the tree, not just to the array: the live job's own
+  // `if:` must carry no filter term — a job that could skip by design again
+  // belongs back in the roster, and this case reds first.
+  t('roster: …nor Console Pin Gate, which concludes on every run since #17673', EXPECTED_SKIPS.some((r) => r.name === 'Console Pin Gate'), false);
+  t(
+    "roster: …and the live console-pin job's own if: reads no filter output, so it cannot skip by design",
+    (() => {
+      const job = readLive('ci.yml')?.jobs?.['console-pin'];
+      return Boolean(job) && job.name === 'Console Pin Gate' && typeof job.if === 'string' && !job.if.includes('needs.filter.outputs');
+    })(),
+    true,
+  );
 
   // The audit must go RED on synthetic drift, in every direction it claims to see.
   const liveCi = readLive('ci.yml');
@@ -937,15 +960,27 @@ export function selfTest() {
   t('audit: a clean roster over the live tree yields zero findings for the label rows too', auditRoster(EXPECTED_SKIPS.filter((r) => r.gate.kind === 'label'), readLive).length, 0);
 
   // ---- the judge -------------------------------------------------------------
+  // The measured head, VERBATIM: every one of its 19 skips was expected when it
+  // was read, and one of them is a finding now (#17673).
   const measured = judgeCheckRuns(measuredPayload());
   t('measured head: judged (no pending run)', measured.kind, 'judged');
   t('measured head: 20 success', measured.success, 20);
-  t('measured head: 19 skipped, every one expected', measured.expected.reduce((n, e) => n + e.count, 0), 19);
-  t('measured head: zero unexpected skips', measured.unexpected.length, 0);
-  t('measured head: eleven of eleven rostered names appear', measured.expected.length, 11);
-  t('measured head: exit 0', verdictExit(measured), 0);
+  t('measured head: 19 skipped, 18 of them expected', measured.expected.reduce((n, e) => n + e.count, 0), 18);
+  t('measured head: its skipped Console Pin Gate is now the one UNEXPECTED skip (#17673)', measured.unexpected.map((u) => u.name).join('|'), 'Console Pin Gate');
+  t('measured head: …classified as a filter miss (no failure in its suite)', measured.unexpected[0]?.classification.kind, 'filter-miss');
+  t('measured head: ten of ten rostered names appear', measured.expected.length, 10);
+  t('measured head: exit 4', verdictExit(measured), 4);
   t('measured head: the multiplicity is reported (Auto Label ×3)', measured.expected.find((e) => e.name === 'Auto Label')?.count, 3);
-  t('measured head: the report ends on the OK verdict line', renderReport(measured, { head: 'b671f83b', repo: 'objectstack-ai/objectstack' }).at(-1).startsWith('VERDICT check-expected-skips: OK'), true);
+  t('measured head: the report ends on the exit-4 verdict line', renderReport(measured, { head: 'b671f83b', repo: 'objectstack-ai/objectstack' }).at(-1).includes('(exit 4)'), true);
+
+  // The same head as it reads since #17673 — `Console Pin Gate` concluding
+  // `success` on an unaffected run, every other row verbatim.
+  const concluding = judgeCheckRuns(measuredPayload(CONCLUDING_18315));
+  t('concluding head: 21 success', concluding.success, 21);
+  t('concluding head: 18 skipped, every one expected', concluding.expected.reduce((n, e) => n + e.count, 0), 18);
+  t('concluding head: zero unexpected skips', concluding.unexpected.length, 0);
+  t('concluding head: exit 0', verdictExit(concluding), 0);
+  t('concluding head: the report ends on the OK verdict line', renderReport(concluding, { head: 'b671f83b', repo: 'objectstack-ai/objectstack' }).at(-1).startsWith('VERDICT check-expected-skips: OK'), true);
 
   const oneExpected = judgeCheckRuns({ total_count: 2, check_runs: [fixtureRun('Lint & Repo Gates', 'success'), fixtureRun('Build Core', 'skipped')] });
   t('fixture: one expected skip → exit 0', verdictExit(oneExpected), 0);
@@ -1014,9 +1049,9 @@ export function selfTest() {
   const dir = mkdtempSync(join(tmpdir(), 'check-expected-skips-'));
   try {
     const okFile = join(dir, 'ok.json');
-    writeFileSync(okFile, JSON.stringify({ head_sha: 'b671f83b', ...measuredPayload() }));
+    writeFileSync(okFile, JSON.stringify({ head_sha: 'b671f83b', ...measuredPayload(CONCLUDING_18315) }));
     const ok = spawnSelf(['--check-runs-json', okFile]);
-    t('cli: the measured head on disk → exit 0', ok.status, 0);
+    t('cli: the concluding head on disk → exit 0', ok.status, 0);
     t('cli: …with the OK verdict line on stdout', ok.stdout.includes('VERDICT check-expected-skips: OK'), true);
     t('cli: …naming the head it read from the payload', ok.stdout.includes('head b671f83b'), true);
 
@@ -1085,7 +1120,8 @@ export function selfTest() {
   console.log(
     `✓ check-expected-skips self-test: ${cases.length} cases pass (the exit register; the roster's shape — reasons, no duplicates, ` +
       'declared gate kinds — and its truth on this checkout\'s workflows, with the audit driven red on a deleted, renamed, un-gated and ' +
-      "re-gated job, a lost || 'true' widening and an unreadable workflow; the judge on the measured 39-run head and on fixtures for an " +
+      "re-gated job, a lost || 'true' widening and an unreadable workflow; the judge on the measured 39-run head (its Console Pin Gate " +
+      'skip a finding since #17673) and on that head as it concludes today, and on fixtures for an ' +
       'expected skip, an unexpected skip named as a filter miss, a same-suite failure read as a dependency skip, a raw matrix template, ' +
       'other conclusions, a pending run and an empty head; read classification for 422 / 404 / 401 / 403 / 5xx / network; argv; the real ' +
       'CLI on payload files for 0 / 4 / 3 and --json; and the structural no-write-path, single-sourced transport and SKILL.md pointer pins).',
