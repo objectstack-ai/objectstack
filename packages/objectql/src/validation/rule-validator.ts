@@ -2982,12 +2982,14 @@ function resolveTraversalScope(
     // referential FK clear). Leave the record alone and let evaluation meet the
     // bare id as it did before — this function invents no verdict for it.
     if (!binding) continue;
-    if (binding.row) {
+    // ⛔ Only the row this record's own foreign key names; any other is unresolved.
+    if (binding.row && binding.row.id != null && String(binding.row.id) === String(record[field])) {
       if (!copy) copy = { ...record };
       copy[field] = binding.row;
       continue;
     }
-    return { ok: false, ...traversalRefusal(field, binding, analysis.traversals.get(field)) };
+    const reason = binding.row ? { object: binding.object, unavailable: 'unresolved' as const } : binding;
+    return { ok: false, ...traversalRefusal(field, reason, analysis.traversals.get(field)) };
   }
   return { ok: true, record: copy ?? record };
 }

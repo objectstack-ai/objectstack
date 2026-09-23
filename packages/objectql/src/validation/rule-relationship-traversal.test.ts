@@ -323,3 +323,17 @@ describe('#18682 — a readable but EMPTY related column evaluates, it does not 
     ).not.toThrow();
   });
 });
+
+describe('#18682 — a binding is used only for the record its foreign key names', () => {
+  // The evaluator judges `record`, so a related row for any OTHER id is not
+  // this record's parent: it refuses as unresolved rather than evaluating.
+  it('REFUSES a row whose id is not the record’s foreign key', () => {
+    try {
+      evaluate({ name: 'A', amount: 50000, account: 'acc_1' }, { account: row({ id: 'acc_2', type: 'direct' }) });
+      throw new Error('expected a ValidationError');
+    } catch (e) {
+      const detail = JSON.stringify((e as unknown as { errors?: unknown }).errors ?? (e as Error).message);
+      expect(detail).toContain('the related record was not found');
+    }
+  });
+});

@@ -364,3 +364,67 @@ describe('#18682 — engine-produced relationship bindings', () => {
     expect(d.calls.filter((c) => c.object === 'crm_account')).toHaveLength(0);
   });
 });
+
+// ⛔ A by-id UPDATE whose FK repoint is STRIPPED keeps the stored FK, so the
+// rule must be judged against the account the stored row points at — never the
+// one the caller asked for and did not get.
+describe.each([
+  ['static `readonly`', { readonly: true }],
+  ['a TRUE `readonlyWhen`', { readonlyWhen: "record.stage == 'closed'" }],
+])('#18682 — a stripped FK repoint is judged against the stored FK (%s)', (_name, lock) => {
+  let engine: ObjectQL;
+  let d: ReturnType<typeof makeDriver>;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    d = makeDriver();
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'crm_account',
+      fields: { name: { type: 'text' }, type: { type: 'text' } },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'crm_opportunity',
+      fields: {
+        name: { type: 'text' },
+        amount: { type: 'number' },
+        stage: { type: 'text' },
+        account: { type: 'lookup', reference: 'crm_account', ...lock },
+      },
+      validations: [{
+        name: 'partner_cap', type: 'script', severity: 'error',
+        message: 'Partner accounts are capped at 10000.',
+        condition: "record.account.type == 'partner' && record.amount > 10000",
+      }],
+    } as any, 'test-package');
+    d.storeFor('crm_account').set('acc_p', { id: 'acc_p', name: 'P', type: 'partner' });
+    d.storeFor('crm_account').set('acc_d', { id: 'acc_d', name: 'D', type: 'direct' });
+  });
+
+  const seed = (account: string) =>
+    d.storeFor('crm_opportunity').set('opp_1', { id: 'opp_1', name: 'O', amount: 10, stage: 'closed', account });
+  const update = (patch: Record<string, unknown>) =>
+    engine.update('crm_opportunity', patch, { where: { id: 'opp_1' }, context: ACTING } as any);
+  const readIds = () => d.calls.filter((c) => c.object === 'crm_account').map((c) => c.ast?.where?.id?.$in);
+
+  it('REFUSES a repoint away from a partner account the strip keeps', async () => {
+    seed('acc_p');
+    await expect(update({ amount: 50000, account: 'acc_d' })).rejects.toThrow(/Partner accounts are capped/);
+    expect(d.storeFor('crm_opportunity').get('opp_1')).toMatchObject({ account: 'acc_p', amount: 10 });
+    expect(readIds()).toEqual([['acc_p']]);
+  });
+
+  it('CONTROL: the same amount without the repoint is refused alike', async () => {
+    seed('acc_p');
+    await expect(update({ amount: 50000 })).rejects.toThrow(/Partner accounts are capped/);
+    expect(d.storeFor('crm_opportunity').get('opp_1')).toMatchObject({ account: 'acc_p', amount: 10 });
+  });
+
+  it('ACCEPTS a repoint onto a partner account the strip drops', async () => {
+    seed('acc_d');
+    await expect(update({ amount: 50000, account: 'acc_p' })).resolves.toBeTruthy();
+    expect(d.storeFor('crm_opportunity').get('opp_1')).toMatchObject({ account: 'acc_d', amount: 50000 });
+    expect(readIds()).toEqual([['acc_d']]);
+  });
+});

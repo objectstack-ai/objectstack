@@ -12985,12 +12985,6 @@ export class ObjectQL implements IObjectQLEngine {
                // field is read-only for this record's state, so the incoming
                // change is ignored (the persisted value is kept).
                const preRoWhen = hookContext.input.data as Record<string, unknown>;
-               // [#18682] The reference FK a predicate traverses may come from
-               // the PATCH or from the stored row, so the id is read off the
-               // same merged view `evaluateValidationRules` will evaluate.
-               const relatedForUpdate = (await this.resolvePredicateRelated(
-                   updateSchema, [{ ...(priorRecord ?? {}), ...preRoWhen }], opCtx.context,
-               ))({ ...(priorRecord ?? {}), ...preRoWhen });
                // [#4889] A `parent`-scoped predicate ("once the header invoice
                // is Paid, its lines are frozen") needs the master-detail header
                // bound as `parent`. Only the engine can fetch it, so the strip
@@ -13079,6 +13073,11 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
+               // [#18682] The reference FK a predicate traverses may come from
+               // the PATCH or from the stored row, so the id is read off the
+               // POST-strip merged view `evaluateValidationRules` evaluates.
+               const updateView = { ...(priorRecord ?? {}), ...(hookContext.input.data as Record<string, unknown>) };
+               const relatedForUpdate = (await this.resolvePredicateRelated(updateSchema, [updateView], opCtx.context))(updateView);
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
