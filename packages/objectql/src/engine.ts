@@ -6843,9 +6843,11 @@ export class ObjectQL implements IObjectQLEngine {
    * id learned one bit of it per write (`requiredWhen` answered `required` for a
    * `locked` header and `reference_not_found` for an `open` one; `readonlyWhen`
    * dropped or kept the field). With the caller's context spread first,
-   * `buildDriverOptions` forwards its `tenantId`, a header stamped with another
-   * organization is not found, and it binds exactly as a header that exists
-   * nowhere does — absent. The tenancy exemptions stay where they are decided:
+   * `buildDriverOptions` forwards its `tenantId` (and, under the `group`
+   * posture, its membership set as `tenantIds`), a header stamped with an
+   * organization outside that scope — another organization, or under `group`
+   * one outside the caller's membership set — is not found, and it binds
+   * exactly as a header that exists nowhere does — absent. The tenancy exemptions stay where they are decided:
    * a `tenancy.enabled: false` or federated master gets no `tenantId`, and a
    * NULL-organization header passes the driver's `OR … IS NULL` term. A system
    * caller with no `tenantId` (seed replay, boot) still reads unscoped.
@@ -7049,9 +7051,10 @@ export class ObjectQL implements IObjectQLEngine {
    * legitimately wrote, on every sweep of healthy data. So the probe stays
    * unscoped there, as before #19837 — never stricter than the rule. ⚠️ The
    * blind spot this leaves, stated rather than implied: under `group` a stored
-   * reference into an organization NO writer of that row could reach (an
-   * `isSystem` write, or a membership since revoked) resolves and is NOT
-   * reported; only a reference that resolves nowhere is.
+   * reference into an organization NO writer of that row could reach (a write
+   * made before #19808's guard existed, an `isSystem` write, or a membership
+   * since revoked) resolves and is NOT reported; only a reference that
+   * resolves nowhere is.
    *
    * See {@link auditDanglingReferences} for the judgments (readonly SPLIT —
    * `readonly` references are read like any other and their findings filed

@@ -639,6 +639,31 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     expect(read[0].options?.tenantId).toBeUndefined();
   });
 
+  it('`group` posture: a header inside the caller\'s membership set binds — the union reaches the header read', async () => {
+    // The spread carries `accessible_org_ids`, which `buildDriverOptions` widens
+    // into `tenantIds` under `group` (ADR-0105 D2) — the caller's read reach, so
+    // the header binds wherever the caller could read it, and nowhere else.
+    engine.setTenancyPostureProvider(() => 'group');
+    const GROUP_MEMBER = { ...MEMBER_X, accessible_org_ids: [ORG_X, ORG_Y] } as unknown as ExecutionContext;
+    observed.length = 0;
+
+    const inside = await refusalOf(() =>
+      engine.insert('pb_line', { id: 'ln_grp', header: 'hy_locked' }, { context: GROUP_MEMBER } as any));
+
+    expect(envelopeOf(inside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
+    const read = observed.filter((c) => c.object === 'pb_header' && c.method === 'find');
+    expect(read).toHaveLength(1);
+    expect([...(read[0].options?.tenantIds ?? [])].sort()).toEqual([ORG_X, ORG_Y].sort());
+
+    // Lit control: a member whose set is org X alone cannot see the org-Y
+    // header, so it binds absent and the write answers `reference_not_found`.
+    const ONLY_X = { ...MEMBER_X, accessible_org_ids: [ORG_X] } as unknown as ExecutionContext;
+    const outside = await refusalOf(() =>
+      engine.insert('pb_line', { id: 'ln_x_only', header: 'hy_locked' }, { context: ONLY_X } as any));
+
+    expect(envelopeOf(outside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] });
+  });
+
   it('the header read runs ELEVATED and TENANT-SCOPED — the two halves of `{ ...context, isSystem: true }`', async () => {
     const reads: Array<{ operation: string; context: ExecutionContext }> = [];
     engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
