@@ -649,6 +649,8 @@ const PROSE_ALIAS_TARGETS: ReadonlySet<string> = new Set([
   "type: 'dashboard' (with dashboardName)",
   "type: 'report' (with reportName)",
   "type: 'component' (with componentRef)",
+  "type: 'doc' (with book)",
+  "type: 'doc' (with doc)",
   "type: 'group' (with expanded)",
 ]);
 

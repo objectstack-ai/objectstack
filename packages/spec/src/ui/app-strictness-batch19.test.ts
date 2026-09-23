@@ -58,6 +58,7 @@ import {
   ReportNavItemSchema,
   ActionNavItemSchema,
   ComponentNavItemSchema,
+  DocNavItemSchema,
   GroupNavItemSchema,
   AppSchema,
 } from './app.zod';
@@ -82,7 +83,7 @@ const BASE_KEYS = {
   requiresService: 'tenant',
 } as const;
 
-/** The eight exported branches, each with the payload its own `type` requires. */
+/** The nine exported branches, each with the payload its own `type` requires. */
 const MEMBERS: Array<[string, { safeParse: (v: unknown) => { success: boolean; error?: unknown } }, Record<string, unknown>]> = [
   ['object', ObjectNavItemSchema, { type: 'object', objectName: 'crm_lead' }],
   ['dashboard', DashboardNavItemSchema, { type: 'dashboard', dashboardName: 'sales' }],
@@ -91,6 +92,7 @@ const MEMBERS: Array<[string, { safeParse: (v: unknown) => { success: boolean; e
   ['report', ReportNavItemSchema, { type: 'report', reportName: 'pipeline' }],
   ['action', ActionNavItemSchema, { type: 'action', actionDef: { actionName: 'run_it' } }],
   ['component', ComponentNavItemSchema, { type: 'component', componentRef: 'metadata:resource' }],
+  ['doc', DocNavItemSchema, { type: 'doc', book: 'crm_manual' }],
   ['group', GroupNavItemSchema, { type: 'group' }],
 ];
 

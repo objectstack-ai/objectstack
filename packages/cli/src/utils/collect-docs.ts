@@ -1016,6 +1016,104 @@ export function lintMetadataEmbeds(docs: DocItem[], stack: Record<string, unknow
 }
 
 /**
+ * `type: 'doc'` navigation items → the book / doc they open (ADR-0046, the
+ * spec's `DocNavItemSchema`). A target that names nothing in this package is a
+ * build error, with the remedy in the message — the same posture as
+ * `docs/metadata-embed-ref` above, pointed the other way: that rule asks
+ * whether a DOC's references into the stack resolve, this one whether the
+ * STACK's references into the docs do.
+ *
+ * ## Why here, and not in `defineStack`'s cross-reference walk
+ *
+ * The sibling nav targets (`objectName`, `dashboardName`, `pageName`,
+ * `reportName`) are resolved by `validateCrossReferences` in
+ * `packages/spec/src/stack.zod.ts`, because every one of those items is written
+ * inside `defineStack()`. A doc is not: it enters the artifact from
+ * `src/docs/*.md` in THIS module, after the config module (and so
+ * `defineStack`) has already run. A doc arm there would either be dormant (size-
+ * gated off, because the stack holds no docs yet) or refuse a doc that the build
+ * is about to collect. This call sees the complete set — inline docs, docs read
+ * off disk, and every package's docs — and `os build`, `os validate` and
+ * `os lint` all reach it through {@link collectAndLintDocs}. Both targets are
+ * judged here so one nav item is judged in one place.
+ *
+ * ## What resolves
+ *
+ * - `doc` — any doc name this artifact carries (`docNames`, whoever owns it).
+ * - `book` — a declared book (the stack's `books`, and each package body's), or
+ *   a package id: the package is its own implicit book (ADR-0046 §6.4,
+ *   `deriveImplicitPackageBook`), keyed by that id.
+ *
+ * ⛔ Not judged: whether the named doc is a MEMBER of the named book. Membership
+ * is derived at read time from the book's group rules (§6.2.1) and moves as docs
+ * are added, so a build-time verdict on it would be a snapshot the next doc
+ * contradicts.
+ */
+export function lintDocNavTargets(stack: Record<string, unknown>, docNames: ReadonlySet<string>): DocIssue[] {
+  const issues: DocIssue[] = [];
+  const bookNames = new Set<string>();
+  const packageIds = new Set<string>();
+  const addBooks = (books: unknown): void => {
+    if (!Array.isArray(books)) return;
+    for (const b of books as AnyRec[]) if (typeof b?.name === 'string') bookNames.add(b.name);
+  };
+  addBooks(stack.books);
+  const ownId = (stack.manifest as { id?: unknown } | undefined)?.id;
+  if (typeof ownId === 'string' && ownId !== '') packageIds.add(ownId);
+  for (const { body } of artifactPackages(stack)) {
+    addBooks(body.books);
+    if (typeof body.id === 'string' && body.id !== '') packageIds.add(body.id);
+  }
+  const bookCandidates = [...bookNames, ...packageIds];
+  const docCandidates = [...docNames];
+
+  const check = (items: unknown, appName: string): void => {
+    if (!Array.isArray(items)) return;
+    for (const item of items as AnyRec[]) {
+      if (!item || typeof item !== 'object') continue;
+      if (item.type === 'doc') {
+        const where = `apps/${appName}/navigation/${typeof item.id === 'string' ? item.id : '(unnamed)'}`;
+        if (typeof item.book === 'string' && !bookNames.has(item.book) && !packageIds.has(item.book)) {
+          const s = nearest(item.book, bookCandidates);
+          issues.push({
+            severity: 'error',
+            rule: 'docs/nav-target',
+            message: `App '${appName}' navigation item '${String(item.id)}' opens book "${item.book}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : '.'} `
+              + `Name a book declared in \`books\`${packageIds.size > 0 ? `, or the package id (${[...packageIds].map((id) => `"${id}"`).join(', ')}) to open the package's implicit book` : ''}; `
+              + 'or remove `book` and open a single page with `doc`.',
+            path: where,
+          });
+        }
+        if (typeof item.doc === 'string' && !docNames.has(item.doc)) {
+          const s = nearest(item.doc, docCandidates);
+          issues.push({
+            severity: 'error',
+            rule: 'docs/nav-target',
+            message: `App '${appName}' navigation item '${String(item.id)}' opens doc "${item.doc}", which does not exist in this package${s ? ` — did you mean \`${s}\`?` : '.'} `
+              + 'Name a doc this package carries — the filename stem of a `src/docs/*.md` file, or a doc declared in `docs` — '
+              + 'or remove `doc` and open the whole book with `book`.',
+            path: where,
+          });
+        }
+      }
+      // Recurse wherever children are — `group` and `object` items both nest.
+      if (Array.isArray(item.children)) check(item.children, appName);
+    }
+  };
+
+  const apps = Array.isArray(stack.apps) ? (stack.apps as AnyRec[]) : [];
+  for (const app of apps) {
+    if (!app || typeof app !== 'object') continue;
+    const appName = typeof app.name === 'string' ? app.name : '(unnamed)';
+    check(app.navigation, appName);
+    if (Array.isArray(app.areas)) {
+      for (const area of app.areas as AnyRec[]) check(area?.navigation, appName);
+    }
+  }
+  return issues;
+}
+
+/**
  * A doc's identity for the "does some package already own this one?" question.
  *
  * Reference first, structural second — the shape `resolveArtifactCollections`
@@ -1211,6 +1309,7 @@ export function collectAndLintDocs(
     ...collected.issues,
     ...lintDocs(stackScoped, namespace, artifactNames),
     ...lintMetadataEmbeds(docs, stack),
+    ...lintDocNavTargets(stack, artifactNames),
   ];
   for (const entry of owned) {
     issues.push(...underPackage(lintDocs(entry.all, entry.ref.namespace, artifactNames), entry.ref.index));
