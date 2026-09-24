@@ -108,6 +108,22 @@ const NUL_CASES: readonly NulCase[] = [
 
 const show = (s: string) => JSON.stringify(s).replace(/\\u0000/g, 'U+0000');
 
+/**
+ * `$not` over `$endsWith`, which tells a NULL predicate from a false one where a
+ * bare `$endsWith` cannot. `''` ends with no comparand holding U+0000, so each
+ * negation below must return the `empty` row — and `substr()` over a
+ * zero-length BLOB is NULL, not the empty blob, so the suffix construct has to
+ * say false there itself.
+ */
+const NOT_ENDS_CASES: ReadonlyArray<{ comparand: string; expected: readonly string[] }> = [
+  { comparand: NUL, expected: ['empty', 'glob_nul', 'missing', 'nul_lead', 'nul_mid', 'plain', 'upper_nul'] },
+  {
+    comparand: NUL + 'b',
+    expected: ['accent_nul', 'empty', 'glob_nul', 'missing', 'nul_lead', 'nul_trail', 'plain', 'upper_nul'],
+  },
+  { comparand: 'a' + NUL, expected: Object.keys(ROWS).sort() },
+];
+
 /** The JavaScript baseline face's answer over the same rows. */
 function jsAnswer(where: FilterCondition): string[] {
   return Object.entries(ROWS)
@@ -120,6 +136,11 @@ describe('[#19999] the expected rows are the JavaScript answer', () => {
   for (const c of NUL_CASES) {
     it(`${c.op} ${show(c.comparand)}`, () => {
       expect(jsAnswer({ v: { [c.op]: c.comparand } } as FilterCondition)).toEqual([...c.expected]);
+    });
+  }
+  for (const c of NOT_ENDS_CASES) {
+    it(`$not $endsWith ${show(c.comparand)}`, () => {
+      expect(jsAnswer({ $not: { v: { $endsWith: c.comparand } } } as FilterCondition)).toEqual([...c.expected]);
     });
   }
 });
@@ -158,6 +179,14 @@ describe('[#19999] SqlDriver on better-sqlite3 — a comparand holding U+0000 is
   for (const c of NUL_CASES) {
     it(`${c.op} ${show(c.comparand)} answers the JavaScript rows`, async () => {
       expect(await labelsWhere({ v: { [c.op]: c.comparand } } as FilterCondition)).toEqual([...c.expected]);
+    });
+  }
+
+  for (const c of NOT_ENDS_CASES) {
+    it(`$not $endsWith ${show(c.comparand)} returns the '' row`, async () => {
+      expect(await labelsWhere({ $not: { v: { $endsWith: c.comparand } } } as FilterCondition)).toEqual([
+        ...c.expected,
+      ]);
     });
   }
 });

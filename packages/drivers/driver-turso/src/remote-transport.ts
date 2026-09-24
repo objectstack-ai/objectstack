@@ -3280,10 +3280,12 @@ export class RemoteTransport {
    * measured NUL-safe first: `instr(col, ?) > 0` for `contains`,
    * `instr(col, ?) = 1` for `starts`, and a byte suffix over BLOB for `ends`
    * (`length()` and `substr()` over TEXT stop at U+0000; over BLOB they count
-   * bytes). None has a pattern language, so nothing is escaped and the
-   * comparand is bound as written. Every other comparand keeps `GLOB`, byte for
-   * byte. `turso-19999-glob-nul-comparand.test.ts` holds this emitter and the
-   * local one to the same rows.
+   * bytes), which falls back to the value itself through `coalesce()` because
+   * `substr()` over a zero-length BLOB is NULL — so `''` answers false, not
+   * NULL, and a `$not` over it keeps the row. None has a pattern language, so
+   * nothing is escaped and the comparand is bound as written. Every other
+   * comparand keeps `GLOB`, byte for byte. `turso-19999-glob-nul-comparand.test.ts`
+   * holds this emitter and the local one to the same rows.
    */
   private pushLike(
     clauses: string[],
@@ -3301,7 +3303,8 @@ export class RemoteTransport {
     if (text.includes(NUL_CHARACTER)) {
       const positive =
         shape === 'ends'
-          ? `substr(CAST(${lhs} AS BLOB), -length(CAST(${rhs} AS BLOB))) = CAST(${rhs} AS BLOB)`
+          ? `coalesce(substr(CAST(${lhs} AS BLOB), -length(CAST(${rhs} AS BLOB))), CAST(${lhs} AS BLOB))`
+            + ` = CAST(${rhs} AS BLOB)`
           : `instr(${lhs}, ${rhs}) ${shape === 'starts' ? '= 1' : '> 0'}`;
       const predicate = negate ? `NOT (${positive})` : positive;
       clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);

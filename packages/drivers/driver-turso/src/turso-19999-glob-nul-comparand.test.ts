@@ -78,6 +78,22 @@ const NUL_CASES: ReadonlyArray<{ op: TextOp; comparand: string; expected: readon
 
 const show = (s: string) => JSON.stringify(s).replace(/\\u0000/g, 'U+0000');
 
+/**
+ * `$not` over `$endsWith`, which tells a NULL predicate from a false one where a
+ * bare `$endsWith` cannot. `''` ends with no comparand holding U+0000, so each
+ * negation below must return the `empty` row — and `substr()` over a
+ * zero-length BLOB is NULL, not the empty blob, so the suffix construct has to
+ * say false there itself.
+ */
+const NOT_ENDS_CASES: ReadonlyArray<{ comparand: string; expected: readonly string[] }> = [
+  { comparand: NUL, expected: ['empty', 'glob_nul', 'missing', 'nul_lead', 'nul_mid', 'plain', 'upper_nul'] },
+  {
+    comparand: NUL + 'b',
+    expected: ['accent_nul', 'empty', 'glob_nul', 'missing', 'nul_lead', 'nul_trail', 'plain', 'upper_nul'],
+  },
+  { comparand: 'a' + NUL, expected: Object.keys(ROWS).sort() },
+];
+
 describe('[#19999] TursoDriver LOCAL and REMOTE — a comparand holding U+0000 is compared whole', () => {
   let local: TursoDriver;
   let remote: TursoDriver;
@@ -133,6 +149,16 @@ describe('[#19999] TursoDriver LOCAL and REMOTE — a comparand holding U+0000 i
   for (const c of NUL_CASES) {
     it(`${c.op} ${show(c.comparand)} answers the JavaScript rows on both transports`, async () => {
       const where = { v: { [c.op]: c.comparand } } as DriverQuery['where'];
+      expect({ local: await labels(local, where), remote: await labels(remote, where) }).toEqual({
+        local: [...c.expected],
+        remote: [...c.expected],
+      });
+    });
+  }
+
+  for (const c of NOT_ENDS_CASES) {
+    it(`$not $endsWith ${show(c.comparand)} returns the '' row on both transports`, async () => {
+      const where = { $not: { v: { $endsWith: c.comparand } } } as DriverQuery['where'];
       expect({ local: await labels(local, where), remote: await labels(remote, where) }).toEqual({
         local: [...c.expected],
         remote: [...c.expected],

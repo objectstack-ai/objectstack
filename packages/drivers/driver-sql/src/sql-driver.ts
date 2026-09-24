@@ -3140,7 +3140,7 @@ const NUL_CHARACTER = String.fromCharCode(0x00);
  * |---|---|
  * | `contains` | `instr(col, ?) > 0` |
  * | `starts` | `instr(col, ?) = 1` — the first occurrence IS the prefix |
- * | `ends` | `substr(CAST(col AS BLOB), -length(CAST(? AS BLOB))) = CAST(? AS BLOB)` |
+ * | `ends` | `coalesce(substr(CAST(col AS BLOB), -length(CAST(? AS BLOB))), CAST(col AS BLOB)) = CAST(? AS BLOB)` |
  *
  * `instr()` compares bytes over the full length of both arguments, and `lower()`
  * folds every byte it is given. `length()` and `substr()` over TEXT do NOT —
@@ -3149,12 +3149,22 @@ const NUL_CHARACTER = String.fromCharCode(0x00);
  * comparing characters: UTF-8 is self-synchronising, so a byte suffix equal to
  * a valid UTF-8 comparand starts on a character boundary. The comparand holds a
  * U+0000, so it is at least one byte long and the start offset is never `-0`
- * (which `substr` reads as "from the start"); a comparand longer than the value
- * yields the whole, shorter value, which is never equal to it.
+ * (which `substr` reads as "from the start"); a comparand longer than a
+ * non-empty value yields the whole, shorter value, which is never equal to it.
+ * Over a ZERO-LENGTH blob `substr` yields NULL, not the empty blob (measured on
+ * all three engines: `typeof(substr(CAST('' AS BLOB), -1))` is `null`), which
+ * would answer NULL for `''` where the answer is false: invisible to a bare
+ * `$endsWith`, but a `$not` over it dropped the `''` row. So `coalesce()` falls
+ * back to the value itself — `substr` answers NULL exactly when the value is
+ * NULL or zero-length, and the value is then the right stand-in: the empty
+ * blob, never equal to a comparand of one byte or more, or NULL, which stays
+ * NULL as it does under `GLOB`.
  *
  * Nothing is escaped: none of the three has a pattern language, so `*`, `?` and
  * `[` are literal by construction and the comparand is bound as written. The
- * fold is the GLOB arm's own `lower()` on both sides, ASCII-only. The negation
+ * fold is the GLOB arm's own `lower()` on both sides, ASCII-only; it only ever
+ * arrives with `contains` (`$icontains`), and the other two shapes honour it
+ * anyway, as the GLOB arm does. The negation
  * is `NOT (…)`, which is NULL for a NULL value exactly as `NOT GLOB` is, so the
  * NULL-safe wrapper `$notContains` puts around it composes unchanged (#5298).
  *
@@ -3175,11 +3185,12 @@ function sqliteLengthAwareTextMatch(
   const comparand = fold ? 'lower(?)' : '?';
   const positive =
     shape === 'ends'
-      ? `substr(CAST(${column} AS BLOB), -length(CAST(${comparand} AS BLOB))) = CAST(${comparand} AS BLOB)`
+      ? `coalesce(substr(CAST(${column} AS BLOB), -length(CAST(${comparand} AS BLOB))), CAST(${column} AS BLOB))`
+        + ` = CAST(${comparand} AS BLOB)`
       : `instr(${column}, ${comparand}) ${shape === 'starts' ? '= 1' : '> 0'}`;
   return {
     sql: negate ? `NOT (${positive})` : positive,
-    bindings: shape === 'ends' ? [field, text, text] : [field, text],
+    bindings: shape === 'ends' ? [field, text, field, text] : [field, text],
   };
 }
 
