@@ -144,8 +144,9 @@ describe('registerFlow refuses a blank string in a ledger predicate slot (#17493
  * registers a placeholder and rewrites the stored branch to the blank.
  *
  * Dropping the branch is NOT that fix: a decision left with no branch is a
- * plain gateway (`logic-nodes.ts`), so every out-edge no `condition` or
- * `isDefault` gates runs — pinned last, because the prescription warns of it.
+ * plain gateway (`logic-nodes.ts`) that routes by its out-edges alone, so the
+ * out-edge the branch labelled is no longer held back — pinned last, because
+ * the prescription warns of it.
  */
 describe('a blank decision branch rewritten to `false` runs what the blank ran (#17493)', () => {
     type Out = { target: string; label?: string; isDefault?: boolean };
@@ -218,7 +219,7 @@ describe('a blank decision branch rewritten to `false` runs what the blank ran (
         expect(after).toEqual(before);
     });
 
-    it('dropping a decision\'s only branch is not that fix: every ungated out-edge then runs', async () => {
+    it('dropping a decision\'s only branch is not that fix: the out-edge it labelled then runs', async () => {
         const c = CASES['its only branch, beside an `isDefault` out-edge'];
         expect((await runOf(c.branches, c.out, c.blankAt)).ran).toEqual(['start', 'd', 'y']);
         expect((await runOf([], c.out)).ran).toEqual(['start', 'd', 'y', 'x']);
