@@ -280,7 +280,10 @@
  * The refusal is {@link undefinedComparandError}, in this module's existing
  * envelope (`INVALID_FILTER` / 400) — the opposite attribution from
  * `read-scope-sql`'s 500, and deliberately so: that door compiles a platform
- * artifact, this one receives what the CALLER wrote.
+ * artifact, this one receives what the CALLER wrote. [#20035] In every
+ * position the shared comparand-TYPE face judges, that face now refuses the
+ * `undefined` first, in the same envelope and in its own sentence (see the
+ * #20035 section below); this gate answers the positions it does not judge.
  *
  * ⛔ `null` does not move, and that is the way this change could do harm: the two
  * live one `===` apart in every polarity table here. `{d: null}`, `{$eq: null}`,
@@ -361,9 +364,27 @@
  * `INVALID_FILTER` / 400. {@link assertWhereComparandShapes} now hands every
  * field entry to the face after the #19888 equality pass, so both spellings
  * get the face's own refusal byte for byte, on every face of this door and on
- * the draft preview. The comparand-TYPE face is not run here; `undefined`
- * keeps {@link assertDefinedComparands}' refusal except as a `$between`
- * endpoint, which the face now answers.
+ * the draft preview. [#20035] The comparand-TYPE face now runs right after
+ * it — the next section.
+ *
+ * # …and so does the shared comparand-TYPE face (#20035)
+ *
+ * The maintainer's ruling on #7872 (2026-08-12) puts the accepted comparand
+ * types — `string | number | bigint | boolean | null | Date` — on the shared
+ * type face, `normalizeFilterComparandTypes`, which 「refuses everything else
+ * loudly at the compile face」 and narrows a `bigint` within 2^53 to its
+ * number. `parseFilterAST` runs it on the `FilterArray` spelling and the
+ * engine seam on every object-form `where`; the object spelling of this door
+ * never met it, so a plain object under `$ne` bound as JSON text and served
+ * every row while the other spelling was refused 400. {@link normalizeWhereComparands}
+ * now runs it after the shape face and before any node is built, in
+ * `parseFilterAST`'s order, and the condition this door lowers is the face's
+ * RETURN value. Refusals this door gave in its own words for a position the
+ * type face judges (#6386's `undefined`, #5234's unbindable member and
+ * LIKE-family comparand) now read in the face's words; the positions it does
+ * not judge keep theirs. Binary is reconciled to the face's refusal rather
+ * than kept as a declared local extra — the evidence is on
+ * {@link normalizeWhereComparands}.
  *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
@@ -381,7 +402,8 @@
  * `where-equality-slot-list-refusal.test.ts` for the equality-slot list refusal
  * on every analytics face and its neighbouring shapes (#19888), and
  * `where-face-arms-refusal.test.ts` for the face's other arms, both spellings,
- * every face (#20010).
+ * every face (#20010), and `where-type-face-refusal.test.ts` for the
+ * comparand-TYPE face, both spellings, every face, and its narrowing (#20035).
  */
 
 import {
@@ -500,7 +522,8 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
  * ## Addendum (#6386): the `undefined` arm is now UNREACHABLE from this door
  *
  * {@link assertDefinedComparands} refuses an `undefined` before any comparand is
- * read, and it covers every call site of this function — the `$between` bounds,
+ * read — and since #20035 the shared comparand-TYPE face refuses it before that,
+ * in every position it judges — and it covers every call site of this function — the `$between` bounds,
  * the operator value and its array members, and the implicit `=` (the bare-array
  * `$in` that used to be a fifth call site is refused whole since #19888) — so
  * nothing can arrive here holding `undefined` any more. The refusal
@@ -619,7 +642,11 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  *
  * Two shapes are refused, the two #5234 measured. `$eq` and friends keep
  * binding any OTHER object as JSON (`toSqlBindValue`), which remains a separate
- * account.
+ * account. [#20035] That account is closed: the shared comparand-TYPE face
+ * refuses a plain object, a `Map`, a binary or a class instance in every
+ * comparand position before this function runs (the #7872 ruling). From the
+ * `where` door this gate now answers only what that face steps around — an
+ * ARRAY and a `{ $field }` reference, as a list member or a LIKE comparand.
  *
  * ⚠️ [#7598, maintainer ruling 2026-08-12 Q1 = B] A THIRD arm briefly lived
  * here — a `{$field}` reference in the comparand of the six scalar comparison
@@ -793,14 +820,29 @@ function undefinedComparandError(field: string, path: string): Error {
  *     that face before any leaf is built, so this gate's sentence is reached
  *     only in the other positions.
  *
+ * [#20035] From the `where` door, the shared comparand-TYPE face now answers
+ * first in every position it judges — the implicit comparand, each declared
+ * operator's comparand, each `$in` / `$nin` member — in its own sentence and at
+ * its own path (the #7872 ruling). This gate's sentence is reached only where
+ * that face steps around: a member of an ARRAY comparand outside the list
+ * operators (`{d: {$contains: ['a', undefined]}}`) and the comparand of an
+ * operator outside the vocabulary (`{d: {$wat: undefined}}`). It stays as
+ * {@link fieldLeaves}' invariant, the same stance {@link assertCompilableComparand}
+ * takes, and `where-type-face-refusal.test.ts` pins those two positions.
+ *
  * `$null` / `$exists` are deliberately NOT swept, exactly as on the twin: their
  * comparand is a declared BOOLEAN — a flag, not a value to compare against — so
  * `undefined` there is not a comparand at all. ⚠️ This module reads that flag by
  * IDENTITY (`=== true` / `=== false`, see {@link fieldLeaves}) where the twin
- * reads it by truthiness, so `{$null: undefined}` lowers here to `set`
+ * reads it by truthiness, so `{$null: undefined}` used to lower here to `set`
  * (`IS NOT NULL`). That is the boolean-DOMAIN question #5347 / #5369 opened and
- * #6387 is measuring on the sibling door; it is a different cell and is not
- * decided as a rider on this one.
+ * #6387 measured on the sibling door; it is a different cell and is not
+ * decided as a rider on this one. [#20035] The `undefined` half of it is
+ * answered upstream now, and not by this gate: the shared comparand-TYPE face
+ * judges the `$null` / `$exists` comparand as a literal (its operator split),
+ * so from the `where` door `{$null: undefined}` is refused before any leaf
+ * exists. An ACCEPTED non-boolean flag (`{$null: 'false'}`) still reaches the
+ * identity read unchanged.
  *
  * ## Why the gate sits HERE, and what that decides for `{$not: {d: undefined}}`
  *
@@ -2086,7 +2128,11 @@ export function collectFilterLeaves(
  *     unbindable object would otherwise reach the driver.
  *   - any other object / array → JSON text. Not a meaningful comparison on any
  *     column, but the shape `filter.zod.ts` cannot exclude, and a driver-level
- *     bind error tells the author nothing about their filter.
+ *     bind error tells the author nothing about their filter. [#20035] From the
+ *     `where` door no plain object, `Map`, binary or class instance reaches
+ *     this arm any more: the shared comparand-TYPE face refuses each before a
+ *     leaf exists, where it used to bind here as JSON text (a plain object
+ *     under `$ne` served every row that way).
  *
  * `number`, `bigint`, `null` and `string` pass through — `null` included, and
  * that is deliberate: `col > NULL` is UNKNOWN, so the widget draws nothing. It is
