@@ -1,5 +1,5 @@
 ---
-"@objectstack/driver-sql": patch
+"@objectstack/driver-sql": minor
 "@objectstack/driver-turso": patch
 ---
 
@@ -9,4 +9,4 @@ The backfill that converges legacy json cells on their JSON-encoded form (#12380
 
 SQL now only pre-selects the candidate cells, a page at a time. The driver's own codec decides each one: a cell `JSON.parse` reads is left exactly as stored; a cell it cannot read is a legacy plain string and is rewritten to `JSON.stringify` of that string — byte-for-byte what the old statement wrote for it. Each rewrite is a compare-and-set on the text it was decided from, so a value written concurrently is never overwritten, and a re-run over a converged table still writes nothing. This covers every local SQLite face that inherits the backfill: `SqlDriver` on better-sqlite3, `SqliteWasmDriver`, and `TursoDriver` in local mode.
 
-The decision rule is exported from `@objectstack/driver-sql` as `recoverUnencodedJsonText(stored)`, and `@objectstack/driver-turso`'s remote codec-residue backfill now imports it instead of carrying its own copy, so the local and remote backfills apply one rule. The remote backfill's behaviour is unchanged.
+The decision rule is exported from `@objectstack/driver-sql` as `recoverUnencodedJsonText(stored)`, and `@objectstack/driver-turso`'s remote codec-residue backfill now imports it instead of carrying its own copy, so the local and remote backfills apply one rule. That is a new public export on `@objectstack/driver-sql`'s root entry, and the reason this package takes `minor`: the function returns `null` for text `JSON.parse` accepts and `JSON.stringify(stored)` for text it rejects, and it is exported so that `SqlDriver.backfillCanonicalJsonEncoding` and the remote backfill's `recoverResidueCell` decide each cell by one shared rule rather than by two copies that could drift apart. The remote backfill's behaviour is unchanged.
