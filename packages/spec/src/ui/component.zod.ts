@@ -4209,9 +4209,14 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `62597c588`), re-measured there
- * 2026-09-23: all three files are byte-identical to `87af769e9`, where they
- * were re-READ 2026-09-22, so no anchor below moved on this hop.
+ * repo builds against (`.objectui-sha` = `f8a9d0fb0`), re-measured there
+ * 2026-09-24: `ObjectTimeline.tsx` and `index.tsx` are byte-identical to
+ * `62597c588` (`git diff --quiet`), and `renderer.tsx` changed (+46/-20,
+ * objectui `0b6b295a1`: a gantt row that is not an object is refused), so
+ * its three anchors were re-READ — each MOVED with its cited text
+ * byte-identical, `1215` -> `1240`, `1505` -> `1531`, `1442-1457` ->
+ * `1468-1483`. All three files were byte-identical to `87af769e9` at
+ * `62597c588`, and were re-READ there 2026-09-22.
  *
  * ⛔ This record used to be MIXED, and the historical spelling is what let it
  * be: its `limit` clause was re-read at this pin on 2026-09-21 while every
@@ -4253,11 +4258,11 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `variant` (`:706`) and `navigation` (`:650-653` → `:785` → `:840-841`).
  * Four more are read by the presentational renderer off the schema this
  * component spreads into it (`effectiveSchema`, `:769-788`): `dateFormat`
- * (`plugin-timeline/src/renderer.tsx:1215`, every variant — its number is the
- * same at both pins, as `plugin-timeline/src/index.tsx:333`'s also is, which is
- * why the number alone is never the reading) and the gantt trio `rowLabel`
- * (`plugin-timeline/src/renderer.tsx:1505`), `minDate` / `maxDate`
- * (`plugin-timeline/src/renderer.tsx:1442-1457`). ⚠️ All three name their
+ * (`plugin-timeline/src/renderer.tsx:1240`, every variant — its number was the
+ * same at `53ded82bf` and `87af769e9`, as `plugin-timeline/src/index.tsx:333`'s
+ * also was, which is why the number alone is never the reading) and the gantt
+ * trio `rowLabel` (`plugin-timeline/src/renderer.tsx:1531`), `minDate` /
+ * `maxDate` (`plugin-timeline/src/renderer.tsx:1468-1483`). ⚠️ All three name their
  * package because objectui has a second `renderer.tsx` (in `plugin-chatbot`):
  * a suffix that matches two files names neither, and the gate drops it from
  * the population rather than guessing.
@@ -4384,8 +4389,8 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
-   * `62597c588`; the file is byte-identical to `87af769e9`, where they were
-   * re-READ 2026-09-22), all in
+   * `f8a9d0fb0`; the file is byte-identical to `62597c588` and `87af769e9`,
+   * where they were re-READ 2026-09-22), all in
    * `ObjectTimeline.tsx`: `:255` seeds the loading state off it, `:420`
    * SKIPS the object query when it is present, `:442` tracks it, and `:444`
    * is the row source itself — `(props as any).data || boundData ||
@@ -4593,10 +4598,13 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `62597c588`), all three re-measured there 2026-09-23 (gantt and tree
-  // byte-identical to `87af769e9`, where all three were re-READ 2026-09-22;
-  // the map's anchors moved with their text byte-identical and no key set
-  // moved) — per-block citations in
+  // `f8a9d0fb0`), all three re-measured there 2026-09-24 (the map
+  // byte-identical to `62597c588`; the gantt and tree renderers changed and
+  // were re-READ — no declared key set moved, the gantt's new `search` /
+  // `searchableFields` reads are recorded in its header as host-generated and
+  // undeclared, and the tree lost its `filter.tree` stash read; at `62597c588`
+  // gantt and tree were byte-identical to `87af769e9`, where all three were
+  // re-READ 2026-09-22) — per-block citations in
   // each schema's header, including what each block reads and deliberately
   // does NOT declare, and what the hop from `53ded82bf` deleted rather than
   // moved.
@@ -4610,8 +4618,10 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `62597c588`), re-measured there 2026-09-23 (byte-identical to `87af769e9`,
-  // where it was re-READ 2026-09-22); the schema's own header
+  // `f8a9d0fb0`), re-measured there 2026-09-24 (`ObjectTimeline.tsx` and
+  // `index.tsx` byte-identical to `62597c588` and `87af769e9`, where it was
+  // re-READ 2026-09-22; `renderer.tsx`'s three anchors moved with their text
+  // byte-identical); the schema's own header
   // carries the per-key citations and what it deliberately does NOT declare.
   'object-timeline': ObjectTimelinePropsSchema,
 } as const;

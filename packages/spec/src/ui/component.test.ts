@@ -3661,10 +3661,15 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
 // renderer's read points support at the pin this repo builds against
-// (`.objectui-sha` = `62597c588`; re-measured there 2026-09-23 — the gantt and
-// tree renderers are byte-identical to `87af769e9`, and the map's
-// `ObjectMap.tsx` changed only in a docblock and a dev-warning string
-// (objectui `2252653d0`), so its anchors MOVED with their cited text
+// (`.objectui-sha` = `f8a9d0fb0`; re-measured there 2026-09-24 — the map's
+// `ObjectMap.tsx` is byte-identical to `62597c588`, and the gantt and tree
+// renderers changed on this hop, so their anchors were re-READ: no declared
+// key set moved (the gantt's new host-generated `search` / `searchableFields`
+// reads, objectui#10250, stay undeclared and are recorded in its header; the
+// tree's `filter.tree` stash read was deleted, objectui#9549). At `62597c588`
+// the gantt and tree renderers were byte-identical to `87af769e9`, and the
+// map's `ObjectMap.tsx` had changed only in a docblock and a dev-warning
+// string (objectui `2252653d0`), so its anchors MOVED with their cited text
 // byte-identical and no key set moved. They were re-READ at `87af769e9`
 // 2026-09-22 — all three renderers moved hard on the hop from `53ded82bf`,
 // so NO anchor in this block was carried and every one was re-derived. Four
