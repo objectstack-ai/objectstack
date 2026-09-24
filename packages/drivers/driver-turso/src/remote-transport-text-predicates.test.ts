@@ -171,15 +171,18 @@ describe('TursoDriver remote — declared text predicates return rows', () => {
     executed.length = 0;
     await driver.find('widget', { where: { name: { $icontains: 'ALP' } } });
     const icontainsSql = executed.join('\n');
-    expect(icontainsSql).toContain('lower("name") GLOB lower(?)');
-    // GLOB has no ESCAPE clause in SQLite's grammar — emitting one is a syntax
-    // error, so its absence is part of the construct rather than an omission.
+    // [#20024] `instr()`, not `GLOB`: it reads the whole stored value, where
+    // `glob()` stopped at the value's first U+0000.
+    expect(icontainsSql).toContain('instr(lower("name"), lower(?)) > 0');
+    expect(icontainsSql).not.toContain('GLOB');
+    // `instr()` takes no ESCAPE clause, and neither did the GLOB it replaced.
     expect(icontainsSql).not.toContain('ESCAPE');
 
     executed.length = 0;
     await driver.find('widget', { where: { name: { $contains: 'ALP' } } });
     const containsSql = executed.join('\n');
-    expect(containsSql).toContain('"name" GLOB ?');
+    expect(containsSql).toContain('instr("name", ?) > 0');
+    expect(containsSql).not.toContain('GLOB');
     expect(containsSql).not.toContain('lower');
     expect(containsSql).not.toContain('LIKE');
   });
@@ -373,6 +376,9 @@ describe('RemoteTransport — text predicates bind an ESCAPED pattern, never the
    * self-closing character class. So `%` needs no escape here any more — and
    * `*` needs one it did not need before. Both directions are asserted, because
    * a half-migrated escape rule is precisely the P0 this case exists for.
+   * [#20024] Only `$startsWith` still binds a GLOB pattern; `$contains` and the
+   * other shapes bind the raw text into `instr()` / a BLOB suffix, which have
+   * no metacharacters at all — the last case below pins that side.
    */
   const captureOne = async (where: Record<string, unknown>) => {
     const calls: Array<{ sql: string; args: any[] }> = [];
@@ -397,12 +403,29 @@ describe('RemoteTransport — text predicates bind an ESCAPED pattern, never the
     expect(args).toEqual(['50%*']);
   });
 
+  /**
+   * [#20024] `$startsWith` is the one text operator still on `GLOB` (the other
+   * shapes compile to `instr()` / a BLOB suffix, which read the whole stored
+   * value), so it is the one that carries the escape class now.
+   */
   it('escapes the GLOB metacharacters as self-closing classes', async () => {
-    expect((await captureOne({ name: { $contains: '*' } })).args).toEqual(['*[*]*']);
-    expect((await captureOne({ name: { $contains: '?' } })).args).toEqual(['*[?]*']);
-    expect((await captureOne({ name: { $contains: '[' } })).args).toEqual(['*[[]*']);
-    // Unescaped, `*a*b*` is a wildcard pattern rather than a literal — the same
+    expect((await captureOne({ name: { $startsWith: '*' } })).args).toEqual(['[*]*']);
+    expect((await captureOne({ name: { $startsWith: '?' } })).args).toEqual(['[?]*']);
+    expect((await captureOne({ name: { $startsWith: '[' } })).args).toEqual(['[[]*']);
+    // Unescaped, `a*b*` is a wildcard pattern rather than a literal — the same
     // filter bypass an unescaped `%` was under LIKE.
-    expect((await captureOne({ name: { $contains: 'a*b' } })).args).toEqual(['*a[*]b*']);
+    expect((await captureOne({ name: { $startsWith: 'a*b' } })).args).toEqual(['a[*]b*']);
+  });
+
+  /**
+   * [#20024] The other side of the same line: `instr()` has no pattern
+   * language, so `$contains` binds the metacharacters exactly as written — an
+   * escape class bound here would be searched for literally.
+   */
+  it('binds $contains raw: instr() has no metacharacters to escape', async () => {
+    const { sql, args } = await captureOne({ name: { $contains: 'a*b' } });
+    expect(sql).toMatch(/instr\("name", \?\) > 0/);
+    expect(sql).not.toMatch(/GLOB|ESCAPE/i);
+    expect(args).toEqual(['a*b']);
   });
 });

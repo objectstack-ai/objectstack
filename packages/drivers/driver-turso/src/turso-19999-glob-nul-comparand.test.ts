@@ -166,9 +166,12 @@ describe('[#19999] TursoDriver LOCAL and REMOTE — a comparand holding U+0000 i
     });
   }
 
-  it('the remote keeps GLOB for a comparand without U+0000, and never uses it for one holding U+0000', async () => {
+  // [#20024] Of the comparands without U+0000, only `$startsWith`'s keeps GLOB;
+  // every `contains` / `ends` one reads the whole stored value
+  // (`turso-20024-glob-stored-nul.test.ts`).
+  it('the remote keeps GLOB for a $startsWith without U+0000, and never uses it for a comparand holding U+0000', async () => {
     executed.length = 0;
-    await remote.find(OBJECT.name, { where: { v: { $contains: 'a*b' } } });
+    await remote.find(OBJECT.name, { where: { v: { $startsWith: 'a*b' } } });
     expect(executed.join('\n')).toContain('"v" GLOB ?');
 
     for (const op of ['$contains', '$notContains', '$icontains', '$startsWith', '$endsWith'] as const) {
