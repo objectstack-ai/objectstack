@@ -855,26 +855,37 @@ function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any
  *    with `clause: 'check'` reads `using` for a policy that declares no
  *    `check`), OR-combined. This is the half that changed: those writes were
  *    unchecked, and a row outside every applicable `using` is now refused.
- * 3. **The platform's ownership floor never takes part in case 2**
- *    (`owner_only_writes`, recognised by provenance through
- *    {@link isPlatformOwnershipFloorPolicy}). The floor is a PRE-image
- *    construct. The by-id write gate lets a declared write authority replace it
- *    (a record share at edit depth, a `public_read_write` OWD, the
- *    controlled-by-parent master gate), and each of those writes targets a row
- *    whose `created_by` is someone else. Defaulting the floor's `using` onto
- *    the post-image would refuse exactly those writes again, one step later.
- *    The floor keeps its pre-image enforcement unchanged. An app-authored
- *    policy with the same predicate is not the floor, and it takes part.
+ * 3. **The platform's ownership floor takes part in case 2 exactly when the
+ *    pre-image gate kept it** (`owner_only_writes`, recognised by provenance
+ *    through {@link isPlatformOwnershipFloorPolicy}; `keepOwnershipFloor`).
+ *    The by-id write gate lets a declared write authority replace the floor
+ *    (an `allow` from the sharing service, a `public_read_write` OWD, a
+ *    covering controlled-by-parent master gate). Each of those writes targets
+ *    a row whose `created_by` is someone else, so the floor's `using` on the
+ *    post-image would refuse them again one step later; there it stays out.
+ *    Where the pre-image kept it, it stays in: an app-authored USING-only
+ *    update policy is a WIDENER OR-ed with the floor at the pre-image
+ *    (`stage == 'prospecting'`: anyone may edit an open deal), and leaving
+ *    the floor out of the check would turn that widener into a restriction on
+ *    the creator's own rows. With the floor in, the check is the pre-image's
+ *    write-class OR applied to the new row — PostgreSQL's reading. An
+ *    app-authored policy with the floor's predicate is not the floor; it
+ *    always takes part.
  *
  * Layers compose as before: this is one principal's check. The delegator's
  * check (ADR-0090 D10) and the Layer 0 tenant post-image check are AND-ed with
  * it by the caller. The `modifyAllRecords` bypass on private / platform-global
  * objects still returns before this selector runs.
  */
-function writeCheckPolicies(applicable: RowLevelSecurityPolicy[]): RowLevelSecurityPolicy[] {
+function writeCheckPolicies(
+  applicable: RowLevelSecurityPolicy[],
+  opts: { keepOwnershipFloor: boolean },
+): RowLevelSecurityPolicy[] {
   const declared = applicable.filter((p) => policyDeclaresClause(p, 'check'));
   if (declared.length > 0) return declared;
-  return applicable.filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
+  return applicable.filter(
+    (p) => policyDeclaresClause(p, 'using') && (opts.keepOwnershipFloor || !isPlatformOwnershipFloorPolicy(p)),
+  );
 }
 
 export class SecurityPlugin implements Plugin {
@@ -2034,6 +2045,13 @@ export class SecurityPlugin implements Plugin {
       // additive baseline would resurrect access for a non-existent user).
       let delegatorSets: PermissionSet[] | null = null;
       let delegatorContext: any = null;
+      // [ADR-0058 D4] What the by-id pre-image gate (step 2.7) decided about the
+      // platform ownership floor for THIS write. The post-image check (step
+      // 3.6) reads it so that a USING-only policy set is held, on the new row,
+      // to the same write-class policies the pre-image admitted the caller by.
+      // Null until step 2.7 runs; step 3.6 judges an update post-image only on
+      // a path where it did (same single id, same guard triple).
+      let preImageFloorOpts: RlsFilterOptions | null = null;
       if (permissionSets.length > 0 && opCtx.context?.onBehalfOf?.userId) {
         const del = await resolveDelegatorContext(this.ql, opCtx.context);
         if (del.kind === 'missing') {
@@ -2534,6 +2552,7 @@ export class SecurityPlugin implements Plugin {
           // BOTH floors, exactly as before, and that residual is recorded on the
           // card rather than resolved by a guess.
           const masterGateCoversThisWrite = !delegatorSets;
+          preImageFloorOpts = { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
           const writeFilter = await this.computeRlsFilter(
             permissionSets,
             opCtx.object,
@@ -2987,6 +3006,7 @@ export class SecurityPlugin implements Plugin {
           opCtx.object,
           opCtx.operation,
           opCtx.context,
+          preImageFloorOpts ?? undefined,
         );
         // [ADR-0090 D10] The post-image must satisfy the delegator's CHECK too —
         // an on-behalf-of write may not produce a row the delegator itself
@@ -6008,6 +6028,31 @@ export class SecurityPlugin implements Plugin {
    * Shared by the engine middleware (read + by-id write pre-image) and
    * {@link getReadFilter}. Returns `null` when neither layer contributes.
    */
+  /**
+   * Does the object's own write model replace the platform ownership floor
+   * for this operation? True for a `public_read_write` OWD on `update` (#8023)
+   * and for a `controlled_by_parent` detail whose master gate the caller
+   * vouches covers this write (#8757). The reasons are recorded where
+   * {@link computeLayeredRlsFilter} applies the drop.
+   *
+   * One predicate, two readers: the pre-image Layer 1 composition and the
+   * post-image check's floor decision (`computeWriteCheckFilter`). Keeping it
+   * in one place keeps the two from disagreeing about when the floor applies.
+   */
+  private platformFloorYieldsToObjectWriteModel(
+    meta: { owdOpensRowWrites?: boolean },
+    object: string,
+    operation: string,
+    opts?: RlsFilterOptions,
+  ): boolean {
+    if (meta.owdOpensRowWrites && owdOpenWritesCoversOperation(operation)) return true;
+    return (
+      !!opts?.masterGateCoversThisWrite &&
+      masterGateCoversOperation(operation) &&
+      this.declaresControlledByParent(object)
+    );
+  }
+
   private async computeRlsFilter(
     permissionSets: PermissionSet[],
     object: string,
@@ -6151,9 +6196,12 @@ export class SecurityPlugin implements Plugin {
       //     that also meant delete was removed for being wider than it.
       // Layer 0 (the tenant wall) is untouched — a `public_read_write` object is
       // org-wide open, never cross-tenant open.
-      if (meta.owdOpensRowWrites && owdOpenWritesCoversOperation(operation)) {
-        collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
-      }
+      //
+      // Both drops below ask ONE predicate,
+      // {@link platformFloorYieldsToObjectWriteModel}, which the post-image
+      // check (`computeWriteCheckFilter`) asks too, so the floor a defaulted
+      // check composes is the floor this pre-image composed.
+      //
       // [#8757] An ADR-0055 `controlled_by_parent` detail does not inherit the
       // platform's wildcard write ownership floor either — for a DIFFERENT
       // reason from the OWD above, and under one extra condition.
@@ -6194,11 +6242,7 @@ export class SecurityPlugin implements Plugin {
       //     (`masterGateCoversOperation`), which is every class the floor ships.
       // Layer 0 (the tenant wall) is untouched, and so is the read path: the
       // floor is a write-side construct that never applied to `select`.
-      if (
-        opts?.masterGateCoversThisWrite &&
-        masterGateCoversOperation(operation) &&
-        this.declaresControlledByParent(object)
-      ) {
+      if (this.platformFloorYieldsToObjectWriteModel(meta, object, operation, opts)) {
         collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
       }
       // [#7665] The write-visibility floor: a write target must be inside the
@@ -6514,6 +6558,7 @@ export class SecurityPlugin implements Plugin {
     object: string,
     operation: string,
     context: any,
+    preImageOpts?: RlsFilterOptions,
   ): Promise<Record<string, unknown> | null> {
     // [ADR-0066 ①] modifyAllRecords bypasses write-side RLS (incl. the post-image
     // check) on private/platform-global objects.
@@ -6537,6 +6582,13 @@ export class SecurityPlugin implements Plugin {
     // either once site 1 had let it past the row gate. The domain still
     // decides: a non-holder is outside it and the policy still does not apply
     // to them.
+    // The platform ownership floor takes part in a defaulted check exactly
+    // when the pre-image gate kept it: the same three replacements drop it here
+    // (an `allow` from the declared write authority, a `public_read_write` OWD,
+    // a covering master gate), and nothing else does.
+    const floorReplaced =
+      !!preImageOpts?.dropPlatformOwnershipFloor ||
+      this.platformFloorYieldsToObjectWriteModel(meta, object, operation, preImageOpts);
     const withCheck = writeCheckPolicies(
       this.collectRLSPolicies(
         permissionSets,
@@ -6544,6 +6596,7 @@ export class SecurityPlugin implements Plugin {
         operation,
         (context?.positions ?? []) as string[],
       ),
+      { keepOwnershipFloor: !floorReplaced },
     );
     if (withCheck.length === 0) return null;
     // [ADR-0105 D11 / #16607] Stage the app-resolved membership sets on THIS
