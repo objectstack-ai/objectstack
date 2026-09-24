@@ -129,6 +129,13 @@ describe('default permission sets', () => {
       // deliberate, not a duplicate to be collapsed.
       'sys_invitation_issuer',
       'sys_invitation_self',
+      // [#20027] The credential tables' row scope (`id == null`, no row) —
+      // re-judged here, not a drift. `sys_jwks` and `sys_verification` declare
+      // `access: private` and "DENY for non-admins", but the managed-object
+      // blanket's EXPLICIT read entry opened them to every set holding it.
+      // Behaviour is pinned end to end in `private-credential-row-scope.test.ts`;
+      // this list only records presence (its twin is last in the list).
+      'sys_jwks_none',
       'sys_notification_receipt_self',
       'sys_oauth_access_token_self',
       'sys_oauth_application_self',
@@ -154,6 +161,7 @@ describe('default permission sets', () => {
       'sys_user_org_members',
       'sys_user_preference_self',
       'sys_user_self',
+      'sys_verification_none',
     ]);
     expect(policyNames).not.toContain('tenant_isolation');
     const orgSelf = (member.rowLevelSecurity ?? []).find((p) => p.name === 'sys_organization_self')!;

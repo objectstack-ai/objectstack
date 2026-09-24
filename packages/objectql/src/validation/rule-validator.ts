@@ -604,6 +604,48 @@ export interface RelatedFieldBinding {
 export type RelatedRecordBinding = Readonly<Record<string, RelatedFieldBinding>>;
 
 /**
+ * [#20006] Why a write resolved no related record: it is the cleanup UPDATE a
+ * delete issues to clear a reference to the record being deleted.
+ *
+ * `ObjectQL.cascadeDeleteRelations` clears each `set_null` reference with an
+ * UPDATE of the referencing record, and that UPDATE resolves NO related record
+ * for a traversing rule (see `resolvePredicateRelated` for why). A rule that
+ * reads through a reference can therefore fault there and refuse the cleanup,
+ * which refuses the delete. That refusal stands — fail-closed. What this
+ * carries is what its TEXT must name: the delete, and the reference it clears.
+ *
+ * ⛔ Package-internal, and deliberately not a key of the public
+ * {@link RelatedRecordBinding} or {@link EvaluateRulesOptions}: it rides a
+ * binding only {@link referentialClearBinding} mints, so no caller of
+ * `evaluateValidationRules` can express it.
+ */
+export interface ReferentialClearCause {
+  /** The object whose record is being deleted. */
+  readonly object: string;
+  /** That record's id. */
+  readonly id: string;
+  /** The object whose reference the delete clears — the one carrying the rule. */
+  readonly referencingObject: string;
+  /** The reference field the delete clears. */
+  readonly field: string;
+}
+
+const referentialClearCauses = new WeakMap<object, ReferentialClearCause>();
+
+/**
+ * [#20006] The `related` binding for a delete's reference cleanup. It is EMPTY:
+ * the cleanup still resolves nothing, so every rule is evaluated against exactly
+ * the record it was evaluated against before, and the set of cleanups refused
+ * does not move. It only remembers WHY, for {@link checkPredicate} to say when a
+ * traversing rule faults.
+ */
+export function referentialClearBinding(cause: ReferentialClearCause): RelatedRecordBinding {
+  const binding: RelatedRecordBinding = Object.freeze({});
+  referentialClearCauses.set(binding, Object.freeze({ ...cause }));
+  return binding;
+}
+
+/**
  * The two CEL roots a field `readonlyWhen` predicate reads — `record` (the
  * prior row overlaid with the PATCH) and `previous` — made TOTAL over the
  * object's DECLARED fields (#4953).
@@ -3525,6 +3567,150 @@ function traversalRefusal(
   }
 }
 
+/**
+ * [#20006] The repair that guards a rule on a reference being set, in ONE
+ * spelling, so every prescription that names it gives the author the same
+ * words. Measured end to end: the wrapped rule is skipped while the reference is
+ * empty, and judged exactly as before while it is set.
+ */
+function referenceGuardRepair(field: string): string {
+  return `make it the \`then\` of a \`conditional\` rule whose \`when\` is \`record.${field} != null\``;
+}
+
+/**
+ * [#20006] Does the predicate make an OWN read that faults on this write — a
+ * read of the rule's own record, not one through a reference? Then the rule is
+ * its author's to fix whatever the cleanup does, and the generic text stands.
+ *
+ * Answered for EVERY own read the predicate makes, never only for the key a
+ * fault reports: when both operands of `&&` / `||` fault, this CEL front end
+ * reports the RIGHT one's key (measured), so `record.kind == 'x' &&
+ * record.account.status == 'closed'` on an object declaring no `kind` reports
+ * the traversal's `status` — and a check keyed on it would blame the cleanup
+ * for a rule that faults on `kind` on every write.
+ *
+ * Each read below faults exactly when its holder lacks the key, so each counts
+ * only then:
+ *
+ *  - `record.KEY` — the record is made total over its DECLARED fields, so this
+ *    faults only on an undeclared key, and does so on every write;
+ *  - `record.FIELD.KEY` through a field that is not a reference, which nothing
+ *    hydrates;
+ *  - `previous.KEY`, and `previous.FIELD.KEY` through ANY field, a reference
+ *    included — the `previous` root is never hydrated, so a read through a
+ *    reference there meets its bare id.
+ *
+ * ⛔ Not a re-evaluation with the traversals served: measured, CEL's `&&` and
+ * `||` absorb an error when the other side decides, so `record.status == 'x'
+ * && record.account.status == 'closed'` evaluates to `false` once `account`
+ * holds a row, and a counterfactual run would pin the bare fault on the
+ * traversal.
+ */
+function readsAnOwnColumnItLacks(
+  source: string,
+  record: Record<string, unknown>,
+  previous: Record<string, unknown> | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): boolean {
+  const lacks = (holder: unknown, key: string): boolean =>
+    !(holder && typeof holder === 'object' && key in holder);
+  const faultsOn = (
+    analysis: RelationshipTraversalAnalysis | null,
+    holder: Record<string, unknown> | undefined,
+    skipReferences: boolean,
+  ): boolean => {
+    if (!analysis) return false;
+    for (const key of analysis.bareFields) if (lacks(holder, key)) return true;
+    for (const [through, columns] of analysis.traversals) {
+      if (skipReferences && referenceTargetOf(fields?.[through])) continue;
+      for (const key of columns) if (lacks(holder?.[through], key)) return true;
+    }
+    return false;
+  };
+  return faultsOn(analysisFor(source), record, true)
+    || faultsOn(analyzeRelationshipTraversals(source, 'previous'), previous, false);
+}
+
+/**
+ * [#20006] The refusal a traversing rule gives when it faults on a delete's
+ * reference cleanup — or `null` when this fault is not that one, and the
+ * generic {@link unevaluableRuleError} text stands unchanged.
+ *
+ * The generic text is about the rule's OWN object: for `record.account.status`
+ * it reads "the predicate reads 'status', which this object does not declare —
+ * fix the rule's condition, or declare the field". On the cleanup every clause
+ * of that is wrong, and it reaches someone who deleted a record and wrote none
+ * of it. So this names what happened instead: the delete that is refused, the
+ * reference it clears, the rule and the object carrying it, and the repairs
+ * measured to let such a delete through.
+ *
+ * Only the TEXT changes. The verdict was decided before this is reached — the
+ * predicate faulted — and the machine-readable half (`code`, `constraint`) is
+ * the generic one, byte for byte.
+ *
+ * The fault is attributed to the cleanup only when the missing key is a column
+ * the rule reads through a reference AND the rule makes no own read that
+ * faults — see {@link readsAnOwnColumnItLacks}. `record.status == 'x' &&
+ * record.account.status == 'closed'` on an object declaring no `status` is its
+ * author's to fix whatever the cleanup does, and so is `record.kind == 'x' &&
+ * …` beside it, though CEL reports the traversal's key there. Such a rule, and
+ * a fault on any other key, keeps the generic text.
+ */
+function referentialClearRefusal(
+  ruleName: string,
+  expr: Expression,
+  fault: FieldValidationError,
+  record: Record<string, unknown>,
+  previous: Record<string, unknown> | undefined,
+  related: RelatedRecordBinding | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): FieldValidationError | null {
+  const cause = related ? referentialClearCauses.get(related) : undefined;
+  const missingKey = fault.constraint?.missingKey;
+  const analysis = cause && typeof missingKey === 'string' && typeof expr.source === 'string'
+    ? analysisFor(expr.source)
+    : null;
+  if (!cause || !analysis) return null;
+
+  const reads: string[] = [];
+  const traversed = new Set<string>();
+  let named = false;
+  for (const [through, columns] of analysis.traversals) {
+    if (!referenceTargetOf(fields?.[through])) continue;
+    traversed.add(through);
+    if (columns.has(missingKey as string)) named = true;
+    reads.push(`${[...columns].sort().map((n) => `'${n}'`).join(', ')} through \`${through}\``);
+  }
+  if (!named || readsAnOwnColumnItLacks(expr.source as string, record, previous, fields)) {
+    return null;
+  }
+
+  const { object, id, referencingObject, field } = cause;
+  const cleared = record[field];
+  // The guard skips the rule wherever `field` is empty, so it is offered only
+  // where that costs nothing the rule still does: when the rule reads through
+  // `field` itself, it already refuses every write that leaves `field` empty
+  // ("no single related record"). A rule reading only ANOTHER reference is
+  // still judged on those records, and a guard on `field` would stop that. A
+  // multi-value reference keeps its other members, so there the guard would
+  // not even skip the rule. Both are offered the delete behaviour alone.
+  const clears = Array.isArray(cleared) ? `removes it from \`${field}\`` : `clears \`${field}\``;
+  const deleteBehavior =
+    ` \`deleteBehavior\` on ${referencingObject}.${field}: 'cascade' deletes those records with the ${object},`
+    + ` 'restrict' refuses the delete while they exist.`;
+  const repair = cleared == null && traversed.has(field)
+    ? `Guard the rule on \`${field}\` being set: ${referenceGuardRepair(field)}. Or change${deleteBehavior}`
+    : `Change${deleteBehavior}`;
+  return {
+    ...fault,
+    message:
+      `Cannot delete ${object} (${id}): the delete ${clears} on the ${referencingObject} records that`
+      + ` reference it, and validation rule '${ruleName}' on ${referencingObject} could not be evaluated on`
+      + ` that write — it reads ${reads.join(' and ')}, and a rule is given no related record while a`
+      + ` delete clears references. ${repair}`,
+  };
+}
+
 function checkPredicate(
   rule: PredicateRule,
   record: Record<string, unknown>,
@@ -3569,7 +3755,12 @@ function checkPredicate(
     logger?.warn?.(
       `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected (#4649)`,
     );
-    return unevaluableRuleError(rule.name, field, result.error, 'predicate');
+    const unevaluable = unevaluableRuleError(rule.name, field, result.error, 'predicate');
+    // [#20006] Same verdict; on a delete's reference cleanup, a text that names it.
+    const onCleanup = expr.dialect === 'cel'
+      ? referentialClearRefusal(rule.name, expr, unevaluable, record, previous, related, fields)
+      : null;
+    return onCleanup ?? unevaluable;
   }
 
   if (result.value === true) {

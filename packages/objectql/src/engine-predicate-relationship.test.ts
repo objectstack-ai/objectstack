@@ -428,3 +428,310 @@ describe.each([
     expect(readIds()).toEqual([['acc_d']]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#20006] Deleting a record clears the references to it (`set_null`, the
+// lookup default) through a cleanup UPDATE of each referencing record. That
+// UPDATE resolves no related record for a traversing rule — deliberately, see
+// `resolvePredicateRelated` — so such a rule faults and refuses the cleanup,
+// which refuses the delete. The refusal stands; what these pin is its TEXT.
+//
+// The generic fault text named the wrong object: "The predicate reads 'status',
+// which this object does not declare — fix the rule's condition, or declare the
+// field." The DELETER did not write the referencing object's rule, and an
+// author who follows that sentence adds a bogus column to the object carrying
+// the rule. The text now names the blocked delete, the reference being cleared,
+// the rule and its object, and the two repairs measured to work.
+// ---------------------------------------------------------------------------
+
+describe('#20006 — a cascade reference clear refused by a traversing rule says so', () => {
+  const CLOSED_MESSAGE = 'Deals on a closed account are frozen.';
+  const SECRET_MESSAGE = 'Deals in a secret region are frozen.';
+  /** Reads the account the delete is clearing — the card's own shape. */
+  const readsCleared = {
+    name: 'closed_account_frozen', type: 'script', severity: 'error',
+    message: CLOSED_MESSAGE, condition: "record.account.status == 'closed'",
+  };
+  /** Reads a DIFFERENT reference, which the clear leaves set. */
+  const readsOther = {
+    name: 'no_secret_region', type: 'script', severity: 'error',
+    message: SECRET_MESSAGE, condition: "record.region.kind == 'secret'",
+  };
+  /** The repair the refusal prescribes, as an author writes it. */
+  const guarded = (rule: Record<string, unknown>) => ({
+    name: `${String(rule.name)}_when_linked`, type: 'conditional', severity: 'error',
+    message: 'Only checked while the deal is linked to an account.',
+    when: 'record.account != null', then: rule,
+  });
+
+  async function boot(validations: unknown[], deal: Record<string, unknown> = {}) {
+    const engine = new ObjectQL();
+    const d = makeDriver();
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'crm_account', fields: { name: { type: 'text' }, status: { type: 'text' } },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'crm_region', fields: { name: { type: 'text' }, kind: { type: 'text' } },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'crm_deal',
+      fields: {
+        name: { type: 'text' },
+        amount: { type: 'number' },
+        // An OPTIONAL lookup with no `deleteBehavior`: the delete clears it.
+        account: { type: 'lookup', reference: 'crm_account' },
+        region: { type: 'lookup', reference: 'crm_region' },
+      },
+      validations,
+    } as any, 'test-package');
+    d.storeFor('crm_account').set('acc_1', { id: 'acc_1', name: 'A', status: 'closed' });
+    d.storeFor('crm_region').set('reg_1', { id: 'reg_1', name: 'R', kind: 'secret' });
+    // Straight into the store: a seed through the engine is judged by the very
+    // rule under test, and the fixture is not the subject.
+    d.storeFor('crm_deal').set('deal_1', {
+      id: 'deal_1', name: 'D', amount: 50, account: 'acc_1', region: 'reg_1', ...deal,
+    });
+    return { engine, d };
+  }
+
+  async function deleteAccount(validations: unknown[], deal?: Record<string, unknown>) {
+    const { engine, d } = await boot(validations, deal);
+    const err: any = await engine
+      .delete('crm_account', { where: { id: 'acc_1' }, context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    return {
+      err,
+      accountStored: d.storeFor('crm_account').has('acc_1'),
+      deal: d.storeFor('crm_deal').get('deal_1'),
+    };
+  }
+
+  it('REFUSES with the delete, the reference, the rule and both repairs named — a rule reading the cleared reference', async () => {
+    const { err, accountStored, deal } = await deleteAccount([readsCleared]);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.fields).toHaveLength(1);
+    // The machine-readable half is unchanged: same code, same reason, same fault.
+    expect(err.fields[0]).toMatchObject({ field: '_record', code: 'rule_violation' });
+    expect(err.fields[0].constraint).toEqual({
+      rule: 'closed_account_frozen', reason: 'unevaluable',
+      fault: 'runtime: No such key: status', missingKey: 'status',
+    });
+    const message: string = err.message;
+    expect(message).toBe(err.fields[0].message);
+    expect(message).toContain('Cannot delete crm_account (acc_1)');           // the blocked delete
+    expect(message).toContain('clears `account` on the crm_deal records');    // the reference cleared
+    expect(message).toContain("validation rule 'closed_account_frozen' on crm_deal"); // rule + object
+    expect(message).toContain('`when` is `record.account != null`');          // repair 1
+    expect(message).toContain('`deleteBehavior` on crm_deal.account');        // repair 2
+    // ⛔ The wrong-object prescription the generic fault text carried.
+    expect(message).not.toContain('declare the field');
+    // The refusal itself stands (fail-closed): nothing landed.
+    expect(accountStored).toBe(true);
+    expect(deal?.account).toBe('acc_1');
+  });
+
+  it('ACCEPTS the same delete once the rule is guarded as the refusal prescribes', async () => {
+    const { err, accountStored, deal } = await deleteAccount([guarded(readsCleared)]);
+    expect(err).toBe(null);
+    expect(accountStored).toBe(false);
+    expect(deal?.account).toBe(null);
+  });
+
+  it('CONTROL: the guard does not switch the rule off — an ordinary write on a linked deal is still judged', async () => {
+    const { engine } = await boot([guarded(readsCleared)]);
+    const err: any = await engine
+      .update('crm_deal', { id: 'deal_1', amount: 60 }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(CLOSED_MESSAGE);
+  });
+
+  it('REFUSES naming the reference the rule reads AND the one the delete clears — a rule reading another reference', async () => {
+    const { err, accountStored, deal } = await deleteAccount([readsOther]);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err.fields[0].constraint).toEqual({
+      rule: 'no_secret_region', reason: 'unevaluable',
+      fault: 'runtime: No such key: kind', missingKey: 'kind',
+    });
+    const message: string = err.message;
+    expect(message).toContain('Cannot delete crm_account (acc_1)');
+    expect(message).toContain('clears `account` on the crm_deal records');
+    expect(message).toContain("validation rule 'no_secret_region' on crm_deal");
+    expect(message).toContain("reads 'kind' through `region`");
+    expect(message).toContain('`deleteBehavior` on crm_deal.account');
+    // ⛔ No guard: on a rule reading ANOTHER reference it costs enforcement (next pin).
+    expect(message).not.toContain('conditional');
+    expect(message).not.toContain('declare the field');
+    expect(accountStored).toBe(true);
+    expect(deal?.account).toBe('acc_1');
+  });
+
+  // An ordinary insert of a deal with NO account, in a secret region.
+  async function insertAccountless(validations: unknown[], deleteBehavior?: string) {
+    const { engine } = await boot(validations);
+    if (deleteBehavior) {
+      const deal = engine.registry.getObject('crm_deal') as any;
+      engine.registry.registerObject({
+        ...deal,
+        fields: { ...deal.fields, account: { ...deal.fields.account, deleteBehavior } },
+      }, 'test-package');
+    }
+    return engine
+      .insert('crm_deal', { id: 'deal_2', name: 'E', amount: 5, region: 'reg_1' }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: any) => e?.message as string);
+  }
+
+  it('the guard gives up nothing a rule on the CLEARED reference enforced: unguarded, it refuses an account-less write anyway', async () => {
+    expect(await insertAccountless([readsCleared])).toContain('no single related record');
+    expect(await insertAccountless([guarded(readsCleared)])).toBe(null);
+  });
+
+  it('keeps a rule on ANOTHER reference judged on account-less records — why the guard is not offered for it', async () => {
+    // What the refusal offers — `deleteBehavior` — leaves the rule judging such a deal.
+    expect(await insertAccountless([readsOther])).toBe(SECRET_MESSAGE);
+    expect(await insertAccountless([readsOther], 'restrict')).toBe(SECRET_MESSAGE);
+    expect(await insertAccountless([readsOther], 'cascade')).toBe(SECRET_MESSAGE);
+    // What it does NOT offer: a guard on `account` stops judging it there at all.
+    expect(await insertAccountless([guarded(readsOther)])).toBe(null);
+  });
+
+  it("ACCEPTS the delete when the reference's deleteBehavior is 'cascade' — the other named repair", async () => {
+    const { engine, d } = await boot([readsCleared]);
+    const deal = engine.registry.getObject('crm_deal') as any;
+    engine.registry.registerObject({
+      ...deal,
+      fields: { ...deal.fields, account: { ...deal.fields.account, deleteBehavior: 'cascade' } },
+    }, 'test-package');
+    const err = await engine
+      .delete('crm_account', { where: { id: 'acc_1' }, context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err).toBe(null);
+    expect(d.storeFor('crm_account').has('acc_1')).toBe(false);
+    expect(d.storeFor('crm_deal').has('deal_1')).toBe(false);
+  });
+
+  it("REFUSES the delete up front when the reference's deleteBehavior is 'restrict' — as the refusal says", async () => {
+    const { engine, d } = await boot([readsCleared]);
+    const deal = engine.registry.getObject('crm_deal') as any;
+    engine.registry.registerObject({
+      ...deal,
+      fields: { ...deal.fields, account: { ...deal.fields.account, deleteBehavior: 'restrict' } },
+    }, 'test-package');
+    const err: any = await engine
+      .delete('crm_account', { where: { id: 'acc_1' }, context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('DELETE_RESTRICTED');
+    expect(err?.status).toBe(409);
+    expect(d.storeFor('crm_account').has('acc_1')).toBe(true);
+    expect(d.storeFor('crm_deal').get('deal_1')?.account).toBe('acc_1');
+  });
+
+  it('CONTROL: a rule that traverses nothing keeps its text byte for byte on the same clear', async () => {
+    const { err } = await deleteAccount([{
+      name: 'broken', type: 'script', severity: 'error', message: 'never shown',
+      condition: "record.nope == 'x'",
+    }]);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'broken' could not be evaluated (runtime: No such key: nope) — write rejected."
+      + " The predicate reads 'nope', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
+  it('CONTROL: a fault on a bare column of the rule\'s own object keeps its text, though a reference reads the same name', async () => {
+    // crm_deal declares no `status`, so `record.status` faults on EVERY write —
+    // the rule is broken by its author, not by the cleanup. `account` also
+    // reads a `status`, and the attribution must not confuse the two.
+    const { err } = await deleteAccount([{
+      ...readsCleared, condition: "record.status == 'x' && record.account.status == 'closed'",
+    }]);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'closed_account_frozen' could not be evaluated (runtime: No such key: status) — write rejected."
+      + " The predicate reads 'status', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
+  // When BOTH operands of `&&` / `||` fault, this CEL front end reports the
+  // RIGHT one's key — here `status`, the traversal's. The rule's own
+  // undeclared `kind` must still decide the text, whichever side it sits on.
+  it.each([
+    ['&&', "record.kind == 'x' && record.account.status == 'closed'"],
+    ['||', "record.kind == 'x' || record.account.status == 'closed'"],
+    ['previous', "previous.kind == 'x' && record.account.status == 'closed'"],
+  ])('CONTROL: an own read the record lacks keeps the text, whatever key CEL reports — %s', async (_leg, condition) => {
+    const { err } = await deleteAccount([{ ...readsCleared, condition }]);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'closed_account_frozen' could not be evaluated (runtime: No such key: status) — write rejected."
+      + " The predicate reads 'status', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
+  it('CONTROL: that rule is broken on every write — a linked deal refuses it on its own `kind`', async () => {
+    const { engine } = await boot([{ ...readsCleared, condition: "record.kind == 'x' && record.account.status == 'closed'" }]);
+    const err: any = await engine
+      .update('crm_deal', { id: 'deal_1', amount: 60 }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'closed_account_frozen' could not be evaluated (runtime: No such key: kind) — write rejected."
+      + " The predicate reads 'kind', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
+  it('CONTROL: an ordinary write keeps its text byte for byte', async () => {
+    const { engine } = await boot([{
+      name: 'broken', type: 'script', severity: 'error', message: 'never shown',
+      condition: "record.nope == 'x'",
+    }]);
+    const err: any = await engine
+      .update('crm_deal', { id: 'deal_1', amount: 70 }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'broken' could not be evaluated (runtime: No such key: nope) — write rejected."
+      + " The predicate reads 'nope', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
+  it('CONTROL: a user emptying the same reference by hand is not told about a delete', async () => {
+    const { engine } = await boot([readsCleared]);
+    const err: any = await engine
+      .update('crm_deal', { id: 'deal_1', account: null }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toContain("Validation rule 'closed_account_frozen' could not be evaluated");
+    expect(err?.message).not.toContain('Cannot delete');
+  });
+
+  it('THE REFUSED SET DOES NOT MOVE: a rule that never reaches its traversal still lets the delete through', async () => {
+    // `false && <fault>` is `false` in CEL, so this rule has a verdict on the
+    // clear without reading anything through `account` — and had one before.
+    const { err, accountStored } = await deleteAccount([{
+      ...readsCleared, condition: "record.amount > 100 && record.account.status == 'closed'",
+    }]);
+    expect(err).toBe(null);
+    expect(accountStored).toBe(false);
+  });
+
+  it('a write that only INHERITS the clear marker keeps the generic text — the cause names another record', async () => {
+    const { engine } = await boot([readsOther]);
+    const inherited = (cause: Record<string, unknown>) => engine
+      .update('crm_deal', { id: 'deal_1', amount: 80 }, {
+        context: { isSystem: true, __referentialFieldClear: true, __referentialFieldClearCause: cause },
+      } as any)
+      .then(() => null, (e: any) => e?.message as string);
+    const base = { object: 'crm_account', id: 'acc_1', referencingObject: 'crm_deal', referencingId: 'deal_1', field: 'account' };
+    // CONTROL — the cause names THIS record: the delete's text.
+    expect(await inherited(base)).toContain('Cannot delete crm_account (acc_1)');
+    // Another object's cleanup, or another row's: today's text.
+    for (const other of [{ referencingObject: 'crm_other' }, { referencingId: 'deal_2' }]) {
+      const message = await inherited({ ...base, ...other });
+      expect(message).toContain("Validation rule 'no_secret_region' could not be evaluated (runtime: No such key: kind)");
+      expect(message).not.toContain('Cannot delete');
+    }
+  });
+});
