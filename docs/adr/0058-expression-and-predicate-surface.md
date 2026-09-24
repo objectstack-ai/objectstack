@@ -609,14 +609,6 @@ With D1/D2, the spec sharing-rule **`condition` (CEL) is compiled** to `criteria
 
 Compile the RLS **`check`** clause (defaulting to `using` when omitted) with the same canonical compiler and enforce it on the **write pre-image path** that already exists for by-id writes (ADR-0056/`#1994`) and on the AST-injected bulk path. A `check` that the compiler cannot lower is a compile error (D2). This closes the declared-but-unenforced `check` gap (ADR-0049).
 
-> **Note (2026-09-24, #19953) — a clarification of "defaulting to `using` when omitted", not an amendment.**
-> The default is applied per write operation across the applicable policies, not policy by policy. When any
-> applicable policy for the operation declares `check`, only the declared checks take part, OR-combined, and a
-> policy with only a `using` beside them adds nothing. Only when none declares `check` does each applicable
-> policy's `using` stand in as its check, OR-combined. The published contract is
-> `RowLevelSecurityPolicySchema.check`; the runtime selector is `writeCheckPolicies` in
-> `packages/plugins/plugin-security/src/security-plugin.ts`. The rest of D4 is unchanged by this note.
-
 ### D5 — One fail-policy matrix for the whole expression surface
 
 Today each surface invents its own behavior. Standardize on **three tiers keyed by (when) × (security-relevance)**:
