@@ -3446,8 +3446,10 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `62597c588`; re-READ there 2026-09-23 — `ObjectCalendar.tsx` changed
-   * across the hop from `87af769e9` (objectui `afb228418`, the calendar's
+   * `f8a9d0fb0`; re-checked there 2026-09-24 — `ObjectCalendar.tsx` is
+   * byte-identical to `62597c588` (`git diff --quiet`), so every anchor below
+   * holds unmoved from the re-READ taken at `62597c588` 2026-09-23. That file
+   * changed across the hop from `87af769e9` (objectui `afb228418`, the calendar's
    * copy routed through the locale packs, +43/-17), so every anchor was
    * re-derived rather than carried: `:921-935`, `:936` and `:938-939` did not
    * move, and the three after the change MOVED with their cited text
@@ -3672,7 +3674,10 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `62597c588`, re-READ there 2026-09-23. `ObjectMap.tsx`
+ * `.objectui-sha` = `f8a9d0fb0`, re-checked there 2026-09-24: `ObjectMap.tsx`,
+ * `index.tsx` and `core/src/utils/record-source.ts` are byte-identical to
+ * `62597c588` (`git diff --quiet`), so every anchor below holds unmoved from
+ * the re-READ taken there 2026-09-23. `ObjectMap.tsx`
  * changed across the hop from `87af769e9` only in `warnOnTopLevelStyleUrl`'s
  * docblock and dev-warning text (objectui `2252653d0`, +27/-8, which names
  * the flat `mapStyle` spelling the flatten really carries), so no read point
@@ -3758,9 +3763,10 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `62597c588`, re-READ
+   * pin this repo builds against (`.objectui-sha` = `f8a9d0fb0`, where
+   * `ObjectMap.tsx` is byte-identical to `62597c588`; re-READ at `62597c588`
    * 2026-09-23 — both anchors MOVED 19 lines from `:814` / `:895` with their
-   * text byte-identical, the hop changing only a docblock and a dev warning
+   * text byte-identical, that hop changing only a docblock and a dev warning
    * above them): `ObjectMap.tsx:833` and `:914` hand `schema.filter` verbatim
    * to `$filter` on the inline and the object fetch, where the adapter lowers a
    * rule array exactly as it does for the kanban and the calendar. The record
@@ -3777,8 +3783,10 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `62597c588`, re-READ 2026-09-23 — both anchors MOVED
-   * 19 lines from `:815` / `:896` with their text byte-identical):
+   * (`.objectui-sha` = `f8a9d0fb0`, where `ObjectMap.tsx` and
+   * `plugin-map/src/index.tsx` are byte-identical to `62597c588`; re-READ at
+   * `62597c588` 2026-09-23 — both anchors MOVED 19 lines from `:815` / `:896`
+   * with their text byte-identical):
    * `ObjectMap.tsx:834` and `:915`
    * hand `schema.sort` to the shared `convertSortToQueryParams` sink as the
    * fetch's `$orderby` — the same sink `object-grid` and `object-calendar`
@@ -3856,38 +3864,49 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `62597c588`, re-measured there 2026-09-23: both files,
- * and `core/src/utils/record-source.ts`, are byte-identical to `87af769e9`
- * (`git diff --quiet`), so no anchor moved on this hop. At `87af769e9`
+ * — `.objectui-sha` = `f8a9d0fb0`, re-measured there 2026-09-24:
+ * `plugin-gantt/src/index.tsx` and `core/src/utils/record-source.ts` are
+ * byte-identical to `62597c588` (`git diff --quiet`); `ObjectGantt.tsx`
+ * changed on this hop (+29/-2, objectui#10250: the toolbar Search term, below),
+ * so every anchor in it was re-mapped through the diff and re-read — those
+ * above the insertion (`:501-503`, `:613`) did not move, and every later one
+ * MOVED 21 or 29 lines with its cited text byte-identical (the retired `:1849`
+ * reading is a blank line at its new `:1878` too). All three files were
+ * byte-identical across the hop onto `62597c588`. At `87af769e9`
  * (re-READ 2026-09-22) not one anchor below was carried from `53ded82bf`;
  * every number was re-derived from that tree, and the `label` one moved far
  * enough that the retired reading now lands in an unrelated callback.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
  * `:613` — rung 1, `core/src/utils/record-source.ts:292`), `staticData` (rung 2,
- * `record-source.ts:296`), `objectName` (rung 3; also `:1487` and `:1682` here),
- * `filter` (`:844`, verbatim to `$filter`), `sort` (`:845`, through
+ * `record-source.ts:296`), `objectName` (rung 3; also `:1516` and `:1711` here),
+ * `filter` (`:865`, verbatim to `$filter`), `sort` (`:866`, through
  * `convertSortToQueryParams` to `$orderby`), `gantt` (`:501-503` —
  * `getGanttConfig` branch 1, the author face and the registration's declared
  * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:121`),
  * validated there against this
- * repo's own {@link GanttConfigSchema}), `navigation` (`:1615`), `label`
- * (`:2181`, resolved through `resolveI18nLabel` for the export file name —
+ * repo's own {@link GanttConfigSchema}), `navigation` (`:1644`), `label`
+ * (`:2210`, resolved through `resolveI18nLabel` for the export file name —
  * ⚠️ the retired reading `:1849` was the comment ABOVE that chain and at this
  * pin is a BLANK line, two above a dependency-delete callback's own comment,
  * so it is re-READ here, not re-pointed),
- * `skipWeekends` (`:1333`), `holidays` (`:1334`), `persistLayout` (`:1485`),
- * `viewName` (`:1487`), `markers` (`:2136`), `criticalPath` (`:2139`),
- * `showBaselines` (`:2142`), `readOnly` (`:1985` and `:2143`) and
- * `mobileReadOnly` (`:2144`).
+ * `skipWeekends` (`:1362`), `holidays` (`:1363`), `persistLayout` (`:1514`),
+ * `viewName` (`:1516`), `markers` (`:2165`), `criticalPath` (`:2168`),
+ * `showBaselines` (`:2171`), `readOnly` (`:2014` and `:2172`) and
+ * `mobileReadOnly` (`:2173`).
  *
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
  * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
- * `label` → the OBJECT's label → `objectName`, `:2179-2185`); a row cap — the
- * reload's `$top` is the platform ceiling `NON_GRID_ROW_CEILING_TOP` (`:855`)
- * and the renderer's own comment marks it "⛔ Not authorable" (`:853`); and
+ * `label` → the OBJECT's label → `objectName`, `:2208-2214`); a row cap — the
+ * reload's `$top` is the platform ceiling `NON_GRID_ROW_CEILING_TOP` (`:876`)
+ * and the renderer's own comment marks it "⛔ Not authorable" (`:874`); and
  * the `onTaskClick` / `onRowClick` / `onBeforeTaskUpdate` callbacks, which are
- * host props.
+ * host props. ⚠️ New at this pin and recorded, not ruled: objectui#10250
+ * gave the renderer two more reads, `search` and `searchableFields`
+ * (`:776-779`, sent as `$search` / `$searchFields` at `:880-885`), which
+ * `ListView.tsx` writes onto the node it generates from its toolbar Search
+ * box — a host-generated key pair in the same position as the flatten
+ * product, and not declared here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
  * contract is already the SPEC's — `ObjectGantt.tsx:503` validates it against
@@ -3964,12 +3983,15 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
- * block (`ObjectTree.tsx:235-248`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:3261-3275`, `case 'tree'`: the
- * product carries these keys and NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `62597c588`) on
- * 2026-09-23 — `ObjectTree.tsx` and `ListView.tsx` are byte-identical to
- * `87af769e9`, where both were re-READ 2026-09-22 (this record carried no pin
+ * block (`ObjectTree.tsx:246-259`) and that `ObjectView` / `ListView` EMIT when
+ * they flatten `options.tree` (`ListView.tsx:3366-3385`, `case 'tree'`: the
+ * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
+ * NO `tree` key). Both halves re-READ at the
+ * pin this repo builds against (`.objectui-sha` = `f8a9d0fb0`) on
+ * 2026-09-24 — both files changed on this hop (`getTreeConfig` lost its
+ * `filter.tree` arm, objectui#9549; the flatten gained `filter`), and the
+ * flat key set each reads or emits did not move. At `62597c588` both were
+ * byte-identical to `87af769e9`, where both were re-READ 2026-09-22 (this record carried no pin
  * at all before that, so nothing re-checked it when the pin moved). Read, but NOT authorable —
  * one composition key per concept (Prime Directive #12), the ruling the map and
  * the gantt carry from objectui#5018 / #6469 and the channel `object-calendar`
@@ -3978,7 +4000,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  *
  * `titleField` is in the set although no `tree` block key is spelled that way:
  * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3270`, `labelField: treeCfg.labelField ||
+ * emitting (`ListView.tsx:3380`, `labelField: treeCfg.labelField ||
  * treeCfg.titleField || 'name'`), so the author's intent is always the block's
  * `labelField`, and the prescription below says so.
  *
@@ -3986,7 +4008,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  * read rather than a moved one: `getTreeConfig`'s `?? schema.titleField` rung
  * — the `:117` this record used to cite — was removed on objectui#8841
  * because it read the FLATTENED NODE and never the block, and the docblock at
- * `ObjectTree.tsx:197-218` records the three measurements that retired it.
+ * `ObjectTree.tsx:198-219` records the three measurements that retired it.
  * The flatten half above is what keeps the key in this set; ⛔ do not restore
  * the renderer half from this record's history.
  */
@@ -4007,57 +4029,70 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `62597c588`, re-measured there 2026-09-23: both files,
- * and `core/src/utils/record-source.ts`, are byte-identical to `87af769e9`
- * (`git diff --quiet`), so no anchor moved on this hop. At `87af769e9`
+ * — `.objectui-sha` = `f8a9d0fb0`, re-measured there 2026-09-24:
+ * `plugin-tree/src/index.tsx` and `core/src/utils/record-source.ts` are
+ * byte-identical to `62597c588` (`git diff --quiet`); `ObjectTree.tsx`
+ * changed (+69/-3: objectui#9549 deleted `getTreeConfig`'s `filter.tree`
+ * arm, and objectui#9136 routed the inline `value` provider through a
+ * `ValueDataSource` query that honours `filter` and the row ceiling), so
+ * every anchor in it was re-READ: two changed CONTENT and say so where they
+ * are cited, and every other one MOVED with its cited text byte-identical.
+ * All three files were byte-identical across the hop onto `62597c588`. At `87af769e9`
  * (re-READ 2026-09-22) no anchor below was carried from `53ded82bf`; every
  * one was re-derived from that tree, and the ladder call changed in CONTENT
  * as well as position.)
  * Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:582` — rung 1, `core/src/utils/record-source.ts:292`, which returns the
+ * `:593` — rung 1, `core/src/utils/record-source.ts:292`, which returns the
  * authored value VERBATIM; that ONE site is the whole support
  * for the arm this row declares. ⚠️ The ARM this renderer passes is
  * `'undeclared'`, not the `'view-data'` its siblings pass, so rung 1 honours
  * any truthy value there — WIDER than this row, which is the harmless
  * direction: the bare array this door refuses is one the renderer would have
  * taken, never the reverse), `staticData` (rung 2,
- * `record-source.ts:296`), `objectName` (rung 3; also `:871`, `:922` and
- * `:985` here, each behind `resolveRecordSourceObjectName`, plus the
- * parent-field detection at `:813-814`),
- * `filter` (`:742`, verbatim to `$filter`), `tree` (`:236`, the
- * nested config block `getTreeConfig` (`:235-248`) reads, and the
+ * `record-source.ts:296`), `objectName` (rung 3; also `:937`, `:988` and
+ * `:1051` here, each behind `resolveRecordSourceObjectName`, plus the
+ * parent-field detection at `:879-880`),
+ * `filter` (`:753`, verbatim to `$filter` on the object fetch, and — new at
+ * this pin, objectui#9136 — `:837`, the same key on the inline `value`
+ * provider's `ValueDataSource` query), `tree` (`:247`, the
+ * nested config block `getTreeConfig` (`:246-259`) reads, and the
  * registration's declared `{ name: 'tree', type: 'object' }` input
- * (`plugin-tree/src/index.tsx:27-31`)) and `navigation` (`:908`, handed to
- * `useNavigationOverlay` at `:891`).
+ * (`plugin-tree/src/index.tsx:27-31`)) and `navigation` (`:974`, handed to
+ * `useNavigationOverlay` at `:957`).
  *
  * ⚠️ `data` IS declared here, and that is the measurement, not a family
  * symmetry. objectui#9234 left this block's rung-1 read marked `undeclared`
  * because neither published face carried the key: `ObjectTreeSchema` on
- * `@object-ui/types` declares no `data`, no `staticData`, no `filter` and no
- * `navigation` at all, and requires `objectName`. The renderer reads all four
+ * `@object-ui/types` declared no `data`, no `staticData`, no `filter` and no
+ * `navigation` at all, and requires `objectName` (⚠️ at this pin it declares
+ * `filter`, in the `QueryParams['$filter']` shape, objectui#9549; the other
+ * three are still absent). The renderer reads all four
  * — so the protocol row follows the READ POINTS, which is what 「以协议为准」
  * resolving for this block means, and the mirror is the face that has to
  * follow.
  *
- * ⛔ `:775` is NOT a second site for the object arm, and citing it as one would
+ * ⛔ `:786` is NOT a second site for the object arm, and citing it as one would
  * be citing a read of the opposite SHAPE: `(rest as any).data ?? schema.data`
  * (the cast on `schema` went away with objectui#8655; the one on `rest` stays)
  * is gated by `Array.isArray(passed)` on the very next line, so it
  * honours only the bare-ARRAY shorthand this row REFUSES — the same shorthand
  * `object-map` measures and declines one section up. One ladder site is
- * sufficient, and `:582` is it.
+ * sufficient, and `:593` is it.
  *
  * Measured and deliberately NOT declared: the flat `TreeConfig` spellings
  * ({@link OBJECT_TREE_FLAT_CONFIG_GUIDANCE}); the bare-array `data` shorthand
- * `:775-776` accepts, which `ViewData` cannot publish (a discriminated union
+ * `:786-787` accepts, which `ViewData` cannot publish (a discriminated union
  * over OBJECT variants) and for which `staticData` is this block's declared
  * door; `sort` — this renderer's fetch
- * (`:741-753`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, and
+ * (`:752-764`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, the
+ * inline query (`:836-845`) carries `$filter` and `$top` only, and
  * nothing else reads an order, so declaring one would publish a key with no read
  * site; a row cap, for the same reason `object-gantt` declares none (the `$top`
- * is the platform ceiling at `:751`, marked "⛔ Not authorable" at `:750`); and
- * `filter.tree`, the legacy stash `:236` still reads, which is a shape to stop
- * writing rather than a key to declare.
+ * is the platform ceiling at `:762` and again at `:844`, marked "⛔ Not
+ * authorable" at `:761`); and `filter.tree`, the legacy stash — ⚠️ no longer
+ * read at this pin: objectui#9549 deleted that arm, so `getTreeConfig`
+ * (`:247`) takes the block from `tree` alone — which was a shape to stop
+ * writing and is not a key to declare.
  *
  * This is also the one block of the three whose type is absent from the tracked
  * `sdui.manifest.json`, so `check:react-declaration-parity` reports it as
@@ -4085,13 +4120,13 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `62597c588`, re-COUNTED there
-   * 2026-09-23) its registry shell has ZERO hits for that wiring, against 3
+   * builds against (`.objectui-sha` = `f8a9d0fb0`, re-COUNTED there
+   * 2026-09-24) its registry shell has ZERO hits for that wiring, against 3
    * each in `plugin-map`, `plugin-gantt`, `plugin-grid` and `plugin-calendar`
    * — four controls, so the zero discriminates. ⚠️ Re-counted at every end
    * with ONE method (occurrences of that identifier in each `src/index.tsx`):
-   * `87af769e9` and `53ded82bf` both read 3 each and 0 for the tree as well —
-   * `plugin-grid/src/index.tsx` changed on this hop and still reads 3 — so
+   * `62597c588`, `87af769e9` and `53ded82bf` all read 3 each and 0 for the tree as well —
+   * `plugin-grid/src/index.tsx` changed on the hop onto `62597c588` and still reads 3 — so
    * nothing about this reading moved. The `7 each` this record used to carry is
    * reproducible at neither pin by that method, nor by a whole-package count
    * (7 / 5 / 11 / 5, not 7 each). ⛔ A count is a reading only with its METHOD
