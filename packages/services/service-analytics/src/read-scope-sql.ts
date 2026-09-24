@@ -406,6 +406,14 @@ import {
  * and answers a different question — whether to DROP a degenerate policy
  * before emitting it. This one answers whether a scope that arrived from any
  * producer at all may be handed to an engine.
+ *
+ * ## A list under `$eq` is refused, not bound (#19975, applying ruling 乙 of #19757)
+ *
+ * The explicit spelling of the equality slot, `{ f: { $eq: [...] } }`, used to
+ * compile with the whole list bound as one parameter; the implicit spelling was
+ * already refused by the bare-array arm. {@link assertNoListInEqualitySlot}
+ * refuses it in this module's envelope. See there for the measured answers, the
+ * reachability reading, and why `$ne` is not judged here.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -722,6 +730,13 @@ function compileNode(node: unknown, qAlias: string, params: unknown[], opts: Rea
 function compileField(field: string, value: unknown, qAlias: string, params: unknown[], opts: ReadScopeCompileOptions): string {
   const col = `${qAlias}.${quoteIdent(field, 'field')}`;
 
+  // [#19975] A LIST under `$eq`, refused before any gate reads one of its
+  // members — so `{ $eq: [undefined] }` is diagnosed as the list it is, the
+  // precedence the bare-array arm below already gets (every member gate skips
+  // a non-node spec). After `quoteIdent`, like every gate here. See
+  // {@link assertNoListInEqualitySlot}.
+  assertNoListInEqualitySlot(field, value);
+
   // [#6125] `undefined` in a comparand position, refused before anything binds —
   // and after `quoteIdent`, so an unsafe identifier (the injection vector) keeps
   // its own message and its precedence. See {@link assertDefinedComparands} for
@@ -752,6 +767,8 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
     params.push(value);
     return `${col} = ?`;
   }
+  // The implicit spelling of the equality slot {@link assertNoListInEqualitySlot}
+  // guards under `$eq` — the shape a CEL `field == <list>` lowers to.
   if (Array.isArray(value)) {
     throw readScopeCompileError(`[read-scope-sql] bare array value for "${field}" — use { $in: [...] } (fail-closed).`);
   }
@@ -1261,6 +1278,58 @@ function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
   }
 }
 
+/**
+ * [#19975] A LIST in the explicit equality slot — `{ f: { $eq: [...] } }` —
+ * refused, never bound.
+ *
+ * Ruling 乙 on #19757 (2026-09-23) refuses a list in the equality slot, implicit
+ * and `$eq` alike, at the shared comparand-shape face (`assertListComparandShapes`,
+ * `@objectstack/spec/data`) 「for every driver at once」. This compiler never
+ * meets that face: a read scope arrives through `getReadScope`, not through
+ * `parseFilterAST` or the engine's lowering seam. So the ruling is pushed down
+ * here, the way #6125, #6387 and #7598 pushed theirs.
+ *
+ * The implicit spelling was already refused ({@link compileField}'s bare-array
+ * arm). The `$eq` spelling was compiled to `col = ?` with the WHOLE list bound
+ * as one parameter, which hands the meaning of the predicate to whatever the
+ * executing engine makes of a list. Measured on the NativeSQL execute path
+ * (`applyReadScope` → `executeRawSql`), one scope got four answers: a driver
+ * error, zero rows, the rows whose stored text equals the driver's own
+ * serialisation of the list (rows the scope never named), and — under `$not` —
+ * every row. A read-scope compiler must never bind a list into an equality.
+ *
+ * ## Reachability, measured before this gate was written
+ *
+ * No in-repo producer emits the `$eq` spelling. `@objectstack/formula`'s CEL
+ * lowering emits `$eq` only around a `{ $field }` reference and lowers
+ * `field == <list>` to the implicit spelling, which the bare-array arm refuses;
+ * the tenant layer, `plugin-sharing`'s read filter and the controlled-by-parent
+ * filter carry no `$eq` at all. What remains is the door #6387 recorded: a
+ * host-supplied `getReadScope` (a documented option) and any direct caller of
+ * the `compileScopedFilterToSql` export.
+ *
+ * ## Envelope and wording
+ *
+ * `READ_SCOPE_COMPILE_FAILED` / 500, like every other site — not the shared
+ * face's `INVALID_FILTER` / 400. The #5367 ruling (re-affirmed as #7598 Q2 = A)
+ * is why, and it is recorded in the module header: the producer is a policy the
+ * caller cannot author, and a 4xx would echo it. The sentence follows this
+ * module's own bare-array refusal, so the two spellings of one condition read
+ * alike in the operator's log (#5240), and it names `$in`, the list operator an
+ * author holding a list was reaching for.
+ *
+ * ⛔ `$ne` is not judged here: ruling 乙 names equality, and `$ne` with a list is
+ * #19886's ruling A, carried on that card. The other scalar operators carrying a
+ * list are not this ruling's either.
+ */
+function assertNoListInEqualitySlot(field: string, spec: unknown): void {
+  if (!isFilterNode(spec) || !Array.isArray(spec.$eq)) return;
+  throw readScopeCompileError(
+    `[read-scope-sql] array value for "${field}".$eq — an equality compares one value, so a list is refused ` +
+      `rather than bound; use { $in: [...] } (fail-closed).`,
+  );
+}
+
 function compileOperator(
   col: string,
   op: string,
@@ -1270,6 +1339,8 @@ function compileOperator(
   opts: ReadScopeCompileOptions,
 ): string {
   switch (op) {
+    // [#19975] `val` is never a list here: {@link assertNoListInEqualitySlot}
+    // refused one at {@link compileField}, before this emitter runs.
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
     // [#5298] `$ne: null` stays `IS NOT NULL` — already total, and "has any
     // value" is false for a row that has none. Only the comparison is guarded.

@@ -150,10 +150,15 @@ const MATRIX: readonly Row[] = [
     bindable: false, renderable: false,
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: OK,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: OK },
+  // [#19975] One cell of this row moved AFTER the #8186 measurement, on
+  // purpose: ruling 乙 (#19757) refuses a list in the equality slot, and the
+  // read-scope lowering now refuses it under `$eq` instead of binding the list
+  // as one parameter (`read-scope-eq-array-refusal.test.ts`). The `where`
+  // door's `$eq` cell is not that change's and keeps its measured answer.
   { label: 'array', value: ['al', 'be'],
     bindable: false, renderable: false,
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: OK,
-    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: OK },
+    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // A `$field` scalar comparand is SERVED on the `where` door since the
   // 2026-08-12 ruling (NativeSQLStrategy declines, the engine path runs it) and
   // refused by the read-scope lowering, which cannot honestly render it (#7598).
