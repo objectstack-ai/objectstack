@@ -829,6 +829,54 @@ function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any
   return rows;
 }
 
+/**
+ * [ADR-0058 D4] The policies whose predicate the write post-image check
+ * compiles, out of the policies that apply to this principal, object and write
+ * operation (`insert` / `update`, `all` included).
+ *
+ * The published contract is `RowLevelSecurityPolicySchema.check`: "defaults to
+ * USING clause if not specified". That is also PostgreSQL's rule: a policy
+ * without `WITH CHECK` holds new rows to its `USING`. Before this selector the
+ * runtime compiled only policies that declared `check`, so a USING-only policy
+ * never gated an INSERT or an UPDATE's new row. An author writing
+ * `record.status != 'closed'` could store a closed row they could then not see.
+ *
+ * The composition, stated exactly:
+ *
+ * 1. **Some applicable policy declares `check`** → only those policies take
+ *    part, OR-combined by `compileFilter`. That is today's result, byte for
+ *    byte. A USING-only sibling in the same set does NOT add its `using` to
+ *    the OR. Under PostgreSQL's permissive-OR composition it would, and that
+ *    could only WIDEN the check. A grant spelled `id != null` would then erase
+ *    every declared `check` beside it. Taking the narrower of the two readings
+ *    is the fail-closed choice: a declared check never admits more than it did.
+ * 2. **No applicable policy declares `check`** → every applicable policy with a
+ *    `using` takes part, its `using` compiled as its check (`compileFilter`
+ *    with `clause: 'check'` reads `using` for a policy that declares no
+ *    `check`), OR-combined. This is the half that changed: those writes were
+ *    unchecked, and a row outside every applicable `using` is now refused.
+ * 3. **The platform's ownership floor never takes part in case 2**
+ *    (`owner_only_writes`, recognised by provenance through
+ *    {@link isPlatformOwnershipFloorPolicy}). The floor is a PRE-image
+ *    construct. The by-id write gate lets a declared write authority replace it
+ *    (a record share at edit depth, a `public_read_write` OWD, the
+ *    controlled-by-parent master gate), and each of those writes targets a row
+ *    whose `created_by` is someone else. Defaulting the floor's `using` onto
+ *    the post-image would refuse exactly those writes again, one step later.
+ *    The floor keeps its pre-image enforcement unchanged. An app-authored
+ *    policy with the same predicate is not the floor, and it takes part.
+ *
+ * Layers compose as before: this is one principal's check. The delegator's
+ * check (ADR-0090 D10) and the Layer 0 tenant post-image check are AND-ed with
+ * it by the caller. The `modifyAllRecords` bypass on private / platform-global
+ * objects still returns before this selector runs.
+ */
+function writeCheckPolicies(applicable: RowLevelSecurityPolicy[]): RowLevelSecurityPolicy[] {
+  const declared = applicable.filter((p) => policyDeclaresClause(p, 'check'));
+  if (declared.length > 0) return declared;
+  return applicable.filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -2886,8 +2934,10 @@ export class SecurityPlugin implements Plugin {
       // match the resolved FilterCondition against the post-image in-memory
       // (the single-record backend for the same filter shape, ADR-0058 D6). A
       // row that fails the check is DENIED (fail closed, D5) — never silently
-      // written. Scoped to policies that EXPLICITLY declare `check`, so an
-      // object governed only by `using` is unaffected.
+      // written. A policy that declares no `check` is held to its `using`
+      // (the published default), except when a sibling declares one — the
+      // exact composition, and the ownership-floor exception, live on
+      // `writeCheckPolicies`.
       //
       // ── [#16608] WHICH IMAGE, on an INSERT ────────────────────────────────
       //
@@ -3037,8 +3087,8 @@ export class SecurityPlugin implements Plugin {
       //   • UPDATE (Finding 1 / BLOCKER): the pre-image check (step 2.7) validates
       //     only that the caller may touch the EXISTING row (old org == A); it
       //     never sees the NEW value. `organization_id` is auto-stamp-insert-only,
-      //     FLS doesn't protect it, server-side `readonly` isn't enforced, and the
-      //     RLS `check` fires only for explicit policies — so a member owning a
+      //     FLS doesn't protect it, server-side `readonly` isn't enforced, and
+      //     business RLS may not govern the column at all — so a member owning a
       //     row R in org A could `update` R with `{organization_id: victim org B}`
       //     and MOVE the row into another tenant, where it becomes visible. This
       //     is a cross-tenant write by any member.
@@ -6452,10 +6502,12 @@ export class SecurityPlugin implements Plugin {
 
   /**
    * [ADR-0058 D4] Compile the WRITE `check` predicate for a post-image
-   * validation. Scoped to applicable policies that EXPLICITLY declare a `check`
-   * clause — an object governed only by `using` (the pre-image path) yields no
-   * check filter and is unaffected. The compiled FilterCondition is matched
-   * against the post-image record by the caller (fail closed).
+   * validation. Which applicable policies take part is decided by
+   * {@link writeCheckPolicies}: the ones that declare `check` when any does,
+   * otherwise every applicable policy's `using` standing in as its check — the
+   * published `RowLevelSecurityPolicySchema.check` default. The compiled
+   * FilterCondition is matched against the post-image record by the caller
+   * (fail closed).
    */
   private async computeWriteCheckFilter(
     permissionSets: PermissionSet[],
@@ -6485,12 +6537,14 @@ export class SecurityPlugin implements Plugin {
     // either once site 1 had let it past the row gate. The domain still
     // decides: a non-holder is outside it and the policy still does not apply
     // to them.
-    const withCheck = this.collectRLSPolicies(
-      permissionSets,
-      object,
-      operation,
-      (context?.positions ?? []) as string[],
-    ).filter((p) => policyDeclaresClause(p, 'check'));
+    const withCheck = writeCheckPolicies(
+      this.collectRLSPolicies(
+        permissionSets,
+        object,
+        operation,
+        (context?.positions ?? []) as string[],
+      ),
+    );
     if (withCheck.length === 0) return null;
     // [ADR-0105 D11 / #16607] Stage the app-resolved membership sets on THIS
     // context before the `check` clause compiles — the same staging the read
@@ -6540,8 +6594,8 @@ export class SecurityPlugin implements Plugin {
    * "is this a tenant object?" field/posture test, same platform-admin posture
    * exemption, same fail-closed deny sentinel when the context has no active
    * organization. Only `layer0` is returned — business RLS (`layer1`) is NOT
-   * applied to the write post-image (that path is governed by explicit `check`
-   * clauses via {@link computeWriteCheckFilter}).
+   * applied to the write post-image by this method (that path is governed by
+   * {@link computeWriteCheckFilter}).
    */
   /**
    * [ADR-0105 D11] Populate `context.rlsMembership` from the registered
