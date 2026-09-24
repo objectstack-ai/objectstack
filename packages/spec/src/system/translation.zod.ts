@@ -601,6 +601,47 @@ const APP_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
   setting: PER_APP_SETTINGS_PLATFORM_ONLY,
 };
 
+/**
+ * The `translation` ITEM door's answer for `settings` (#19620, ruling batch
+ * #210 item 2 letter B: the file door and the item door are two authoring
+ * surfaces for one app metadata type, so they accept one shape).
+ *
+ * Its own sentence rather than {@link PER_APP_SETTINGS_PLATFORM_ONLY} reused,
+ * because what the key DID differs by door and the prescription must not
+ * understate it. A bundle entry only filled gaps (the platform's later
+ * `kernel:ready` contribution won every key both defined). An item did not
+ * load into that tree at all: `authored-translation-sync` puts it in the
+ * runtime-authored layer, which both i18n adapters read OVER the shipped
+ * bundles (`deepMerge(static, authored)`), so an item's `settings` OVERRODE the
+ * platform's own copy. Telling an item author "the platform overwrote it
+ * anyway" would be false. The singular `setting` rides the same entry, as on
+ * the bundle door: it was an alias for `settings` while this door declared it.
+ */
+const ITEM_SETTINGS_PLATFORM_ONLY =
+  '`settings` is a PLATFORM group, not an application one: it is keyed by '
+  + '`SettingsManifest.namespace`, and a manifest is platform code — an application cannot '
+  + 'declare one, so the only namespaces this key could address are the platform\'s own. '
+  + 'On a `translation` item it did more than fill gaps: the runtime-authored layer is read over '
+  + 'the shipped bundles, so an item\'s entry OVERRODE the platform\'s own settings copy for its '
+  + 'locale — application metadata rewriting a platform screen. '
+  + 'Delete the group. Platform settings copy is translated in the platform bundle '
+  + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
+  + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
+  + 'literal, so correct it there rather than overriding it from an application. For an '
+  + 'application\'s own copy use the groups this item does declare — the same ten a per-app '
+  + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
+  + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
+  + "refused here — only the per-namespace manifest copy under 'settings' is. "
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply '
+  + 'them by hand.';
+
+/** The item door's guidance: the shared table plus the platform-only `settings`. */
+const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
+  ...TRANSLATION_KEY_GUIDANCE,
+  settings: ITEM_SETTINGS_PLATFORM_ONLY,
+  setting: ITEM_SETTINGS_PLATFORM_ONLY,
+};
+
 // ────────────────────────────────────────────────────────────────────────────
 // Locale-level Translation Data (per-locale aggregate)
 // ────────────────────────────────────────────────────────────────────────────
@@ -633,7 +674,8 @@ const APP_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  * entry of a per-app file-authored bundle — these ten and no more),
  * {@link PlatformTranslationDataSchema} (these ten plus `settings`) and
  * {@link TranslationItemSchema} (the registered `translation` metadata type —
- * the platform face plus `locale` and the ADR-0010 envelope). The item used to
+ * the per-app face plus `locale`, its identity keys and the ADR-0010
+ * envelope; it carried the platform face's `settings` too until #19620). The item used to
  * reach them with `.extend()`, which is correct for the *validation* but wrong
  * for the *error*: `.extend()` inherits the strict error map that closed over
  * the keys the BASE was built with, so a typo of `locale` on an item would be
@@ -1312,8 +1354,12 @@ const appTranslationDataShape = () => ({
  * string for that key and locale, and was overwritten wherever both defined the
  * key. Platform labels and application labels are separate namespaces (ruling
  * batch #132 item 2 letter ②), so this shape is spread into
- * {@link PlatformTranslationDataSchema} and {@link TranslationItemSchema} and
- * NOT into {@link TranslationDataSchema}, whose door refuses it by name.
+ * {@link PlatformTranslationDataSchema} ONLY. Both application-authored doors
+ * refuse it by name: {@link TranslationDataSchema} since #15178, and
+ * {@link TranslationItemSchema} since #19620 (ruling batch #210 item 2
+ * letter B) — the item had been the stronger of the two, because the
+ * runtime-authored layer it feeds is read OVER the shipped bundles, so an
+ * item's `settings` overrode the platform's copy rather than filling its gaps.
  *
  * A function, not a `const`, for the same reason
  * {@link appTranslationDataShape} is one.
@@ -1559,6 +1605,17 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * sync skips an item whose locale it cannot resolve, and a skip is invisible
  * to whoever — or whatever — authored it.
  *
+ * `settings` is NOT on this door (#19620, ruling batch #210 item 2 letter B):
+ * the item takes the PER-APP face, the same ten groups as
+ * {@link TranslationDataSchema}, and refuses `settings` (and the singular
+ * `setting`) by name with {@link ITEM_SETTINGS_PLATFORM_ONLY} as the remedy.
+ * The file door and the item door are two authoring surfaces for one app
+ * metadata type, so they accept one shape; settings copy belongs to the
+ * platform bundle ({@link PlatformTranslationDataSchema}). A row stored
+ * before the door closed is converted rather than refused — the runtime sync
+ * replays the ADR-0087 chain over it (`translation-per-app-settings-removed`)
+ * and drops the group with a warning.
+ *
  * `messages` ids are single-segment, for the reason spelled out on
  * {@link TranslationDataSchema}: `t()` walks the dot path, so an id containing
  * a dot resolves to nothing.
@@ -1583,11 +1640,14 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
 export const TranslationItemSchema = lazySchema(() => strictObject({
   surface: 'this translation',
   history: TRANSLATION_HISTORY,
-  guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  guidance: ITEM_TRANSLATION_KEY_GUIDANCE,
+  // ⛔ No `setting: 'settings'` alias any more, for the file door's reason:
+  // this door no longer declares `settings`, and an alias prescribing a key
+  // the shape rejects is a suggestion the author cannot take. Both spellings
+  // are answered by `guidance` above instead.
+  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', flow: 'flows', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...appTranslationDataShape(),
-  ...platformSettingsShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),
 
   // Item identity. Every other registered metadata type declares these;

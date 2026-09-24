@@ -123,6 +123,7 @@ import {
   formatAttribute,
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
+import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
@@ -652,6 +653,13 @@ const SQLITE_TIME_EXPR_REFS = 8;
  * (1 `typeof` + 2 `instr` + 1 `julianday`.)
  */
 const SQLITE_NON_TEMPORAL_TEXT_REFS = 4;
+
+/**
+ * How many candidate cells {@link SqlDriver.backfillCanonicalJsonEncoding}
+ * reads per page. It bounds the memory one column's pass holds, never how much
+ * of the column one pass converges: the pass walks every page.
+ */
+const SQLITE_JSON_BACKFILL_PAGE_SIZE = 500;
 
 /**
  * [#4436] A filter this driver cannot COMPILE — the caller sent an operator (or
@@ -11265,16 +11273,47 @@ export class SqlDriver implements IDataDriver {
    *
    * ## What it converts, and the one class it converts
    *
-   * ONE `UPDATE` per column. `json_quote()` is SQLite's own spelling of
-   * `JSON.stringify` over a scalar, so "what the canonical form means" has a
-   * single definition per dialect and the migration cannot drift from the codec
-   * it exists to serve.
+   * The ONLY on-disk class the pre-fix encoding left unambiguous — a TEXT cell
+   * the driver's JSON codec cannot parse. Nothing but a stored plain string
+   * could have produced one: `JSON.stringify` of an object or an array always
+   * parses, and every other input either stayed a primitive storage class or
+   * already parses.
    *
-   * The `WHERE` names the ONLY on-disk class the pre-fix encoding left
-   * unambiguous — a TEXT cell that is not valid JSON. Nothing but a stored
-   * plain string could have produced one: `JSON.stringify` of an object or an
-   * array is always valid JSON, and every other input either stayed a primitive
-   * storage class or already parses.
+   * ## SQL pre-filters, the codec decides (#19912)
+   *
+   * Which cell is rewritten, and into what, is {@link recoverUnencodedJsonText}
+   * — the rule the Turso remote backfill imports too, so the two faces cannot
+   * come to disagree about a cell. It asks `JSON.parse`, the same question
+   * `formatOutput` asks of every json TEXT cell it reads, and answers the
+   * `JSON.stringify` the write path stores.
+   *
+   * The SQL only narrows the scan: `typeof(col) = 'text' and json_valid(col) =
+   * 0` selects the candidates, a page at a time in `rowid` order
+   * ({@link SQLITE_JSON_BACKFILL_PAGE_SIZE}). It must not decide, because
+   * SQLite's JSON parser and the driver's disagree in the dangerous direction:
+   * `json_valid()` answers 0 for JSON nested past SQLite's depth limit (a
+   * build-time constant; 1000 in the better-sqlite3, sql.js and libsql builds
+   * this repository bundles) while `JSON.parse` reads it. The single `UPDATE …
+   * set col = json_quote(col) where … json_valid(col) = 0` this method used to
+   * run therefore quoted a correctly stored deep array into a string on the
+   * next schema sync. Such a candidate is now left as stored and counted in
+   * `rowsWithheld`.
+   *
+   * The pre-filter is a superset of what the rule rewrites, with one exception
+   * in the safe direction: `json_valid()` stops at an embedded NUL, so a text
+   * that is valid JSON up to a NUL is never selected and stays as stored.
+   *
+   * Each rewrite is a compare-and-set, `where rowid = ? and typeof(col) =
+   * 'text' and col = <the text the decision read>`, so a value written between
+   * the page read and the write is never overwritten. A page's writes commit as
+   * one transaction. Because the new text is a function of the old text alone,
+   * the compare-and-set also withholds, in the safe direction, a cell whose
+   * stored bytes the engine does not read back verbatim (sql.js drops an
+   * embedded NUL and a leading U+FEFF; any engine replaces invalid UTF-8): its
+   * bytes are not what was read, so it is not written, and it keeps reading as
+   * it did. On better-sqlite3 every other text round-trips byte-for-byte, and
+   * `JSON.stringify` of it is byte-identical to the `json_quote()` this method
+   * used to write (measured over every non-surrogate BMP code point).
    *
    * ⛔ **It does not guess, because the rest cannot be guessed.** Two classes are
    * left exactly as they are, and both are named here rather than discovered:
@@ -11302,11 +11341,13 @@ export class SqlDriver implements IDataDriver {
    *
    * ## Idempotent by construction, not by convention
    *
-   * The `WHERE` is the exact complement of the `SET`'s output: `json_quote(X)`
-   * of a TEXT value is a quoted JSON string, for which `json_valid()` is 1, so
-   * a converted row cannot match the predicate again. Re-running costs one scan
-   * and zero writes — the same "a converged table is a no-op" property
-   * {@link backfillCanonicalDatetimes} has, and pinned the same way.
+   * The pre-filter is the exact complement of the rewrite's output:
+   * `JSON.stringify` of a string is a quoted JSON string, for which
+   * `json_valid()` is 1, so a converted row cannot be selected again. A
+   * withheld cell is selected on every run and never written. Re-running costs
+   * one scan, a read of the withheld cells, and zero writes — the same "a
+   * converged table is a no-op" property {@link backfillCanonicalDatetimes}
+   * has, and pinned the same way.
    *
    * ⚠️ An out-of-band reader of the SQLite file sees quoted JSON text where it
    * saw a bare value. That is the accepted cost of the format, recorded here so
@@ -11317,6 +11358,9 @@ export class SqlDriver implements IDataDriver {
    * reading them correctly, and correctness never becomes contingent on a
    * migration having run. That also covers a SQLite build without the JSON
    * functions and a `skipSchemaSync` deployment that never reaches this path.
+   * A failure part-way through a column leaves the committed pages converted
+   * and the rest legacy — each cell reads the same either way, so nothing is
+   * lost and `warn` is the level (AGENTS.md, degradation log levels).
    */
   protected async backfillCanonicalJsonEncoding(table: string, tableExisted: boolean): Promise<void> {
     const fields = this.jsonFields[table];
@@ -11326,18 +11370,9 @@ export class SqlDriver implements IDataDriver {
     if (!tableExisted) return;
 
     for (const field of fields) {
+      const tally = { converted: 0, withheld: 0 };
       try {
-        const res = await this.knex.raw(
-          `update ?? set ?? = json_quote(??) where typeof(??) = 'text' and json_valid(??) = 0`,
-          [table, field, field, field, field],
-        );
-        const converted = (res as any)?.changes ?? 0;
-        if (converted) {
-          this.logger.info?.(
-            `[sql-driver] canonicalised json storage (#12380) for ${table}.${field}`,
-            { rowsConverted: converted },
-          );
-        }
+        await this.convergeJsonColumn(table, field, tally);
       } catch (err) {
         // Correctness does not depend on this succeeding: `formatOutput` keeps
         // its parse fallback precisely so an un-migrated row still reads back
@@ -11345,9 +11380,75 @@ export class SqlDriver implements IDataDriver {
         this.logger.warn(
           `[sql-driver] could not canonicalise json storage for ${table}.${field}; ` +
           `reads stay correct via formatOutput's parse fallback`,
-          { error: err instanceof Error ? err.message : String(err) },
+          { error: err instanceof Error ? err.message : String(err), rowsConverted: tally.converted },
+        );
+        continue;
+      }
+      if (tally.converted) {
+        this.logger.info?.(
+          `[sql-driver] canonicalised json storage (#12380) for ${table}.${field}`,
+          { rowsConverted: tally.converted },
         );
       }
+      if (tally.withheld) {
+        this.logger.info?.(
+          `[sql-driver] left ${tally.withheld} json cell(s) of ${table}.${field} as stored: ` +
+          `SQLite's json_valid() rejects them but they parse as JSON (e.g. nested past ` +
+          `SQLite's JSON depth limit), so they already read back as the value they encode`,
+          { rowsWithheld: tally.withheld },
+        );
+      }
+    }
+  }
+
+  /**
+   * One column's pass for {@link backfillCanonicalJsonEncoding}: walk the
+   * pre-filtered candidates a page at a time in `rowid` order, let
+   * {@link recoverUnencodedJsonText} decide each, and compare-and-set the ones
+   * it rewrites. Throws on a failed statement; `tally` then holds what the
+   * committed pages did.
+   */
+  private async convergeJsonColumn(
+    table: string,
+    field: string,
+    tally: { converted: number; withheld: number },
+  ): Promise<void> {
+    let cursor: number | undefined;
+    for (;;) {
+      const page = this.knex(table)
+        .select(this.knex.raw('rowid as ??', ['rid']), this.knex.raw('?? as ??', [field, 'val']))
+        .whereRaw(`typeof(??) = 'text' and json_valid(??) = 0`, [field, field]);
+      if (cursor !== undefined) page.andWhereRaw('rowid > ?', [cursor]);
+      const rows = (await page.orderByRaw('rowid').limit(SQLITE_JSON_BACKFILL_PAGE_SIZE)) as Array<{
+        rid: number;
+        val: unknown;
+      }>;
+
+      const writes: Array<{ rid: number; stored: string; next: string }> = [];
+      for (const row of rows) {
+        const next = typeof row.val === 'string' ? recoverUnencodedJsonText(row.val) : null;
+        if (next === null) tally.withheld++;
+        else writes.push({ rid: row.rid, stored: row.val as string, next });
+      }
+      if (writes.length > 0) {
+        tally.converted += await this.knex.transaction(async (trx) => {
+          let changed = 0;
+          for (const w of writes) {
+            changed += await trx(table)
+              .whereRaw(`rowid = ? and typeof(??) = 'text' and ?? = ?`, [w.rid, field, field, w.stored])
+              .update({ [field]: w.next });
+          }
+          return changed;
+        });
+      }
+
+      if (rows.length < SQLITE_JSON_BACKFILL_PAGE_SIZE) return;
+      const last = rows[rows.length - 1].rid;
+      // The cursor must advance, or the same page would be read forever. A
+      // rowid past 2^53 comes back rounded and can stall it; the rest of the
+      // column then stays legacy, which reads the same.
+      if (cursor !== undefined && !(last > cursor)) return;
+      cursor = last;
     }
   }
 

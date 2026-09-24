@@ -280,10 +280,11 @@ export interface HeadlessScreenContext {
  *
  * ## Absent: the inference, kept for producers that state nothing
  *
- * A record-change, schedule, time-relative or webhook trigger, a `subflow` /
- * `map` child run, or code calling the engine directly carries no signal, and
- * for those the verdict below still infers — unchanged, and failing toward a
- * pause.
+ * A record-change, time-relative or webhook trigger, a `subflow` / `map` child
+ * run, or code calling the engine directly carries no signal, and for those the
+ * verdict below still infers — unchanged, and failing toward a pause. (The
+ * schedule trigger has no caller and states `[]`, #19900, so its `jobId` /
+ * `flowName` / `schedule` seeds never reach the inference.)
  *
  * This distinction is the whole safety story of {@link judgeHeadlessScreen},
  * because the params bag a flow action reaches the engine with is NOT the

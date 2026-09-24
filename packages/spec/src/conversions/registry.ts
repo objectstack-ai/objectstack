@@ -7114,9 +7114,10 @@ const elementFormRemoved: MetadataConversion = {
 };
 
 /**
- * `translation.<locale>.settings` on a PER-APP bundle — the platform-only
- * group leaving `stack.translations` with the type split (protocol 18,
- * #15178, ruling batch #132 item 2 letter ②).
+ * `settings` on every APPLICATION-authored translation face — the platform-only
+ * group leaving `stack.translations` with the type split (protocol 18, #15178,
+ * ruling batch #132 item 2 letter ②) and then the registered `translation`
+ * item (#19620, ruling batch #210 item 2 letter B), both faces in one entry.
  *
  * ⛔ NOT a lossless delete, and this entry says so rather than claiming the
  * house phrase. `settings` is keyed by `SettingsManifest.namespace`, and only
@@ -7140,30 +7141,49 @@ const elementFormRemoved: MetadataConversion = {
  * `18.translation-per-app-settings-platform-only.ts` is where an author is
  * told that, because a notice reading "(removed)" does not say it.
  *
- * ⚠️ The BUNDLE shape only. `TranslationItemSchema` still declares `settings`
- * (the registered `translation` metadata type is out of this ruling's scope),
- * so a bare item entry replaying through this seam is left exactly as it is —
- * the opposite of the `translation-component-submit-label-removed` neighbour,
- * which retires its key at both doors and therefore walks both shapes. Getting
- * this backwards would strip a key its own schema still accepts.
+ * The ITEM shape went further, and that is why it is walked too (#19620). A
+ * stored `translation` item is NOT a bundle loaded into the static tree: the
+ * runtime-authored layer is read OVER the shipped bundles
+ * (`deepMerge(static, authored)` in both i18n adapters), so an item's
+ * `settings` did override the platform's own copy for its locale, not merely
+ * fill gaps in it. Dropping it takes those keys back to the platform bundle's
+ * string where it has one and to the manifest literal where it does not. The
+ * seam that matters for an item is the runtime one: `authored-translation-sync`
+ * replays this chain over each stored row before merging it
+ * (`applyConversionsToStoredItem`), so a row written before the item door
+ * closed stops overriding at the next sync, with this entry's notice logged,
+ * rather than at the next re-save. That needed the stored pass itself to
+ * reach `translation` rows at all — it had no collection for the type and
+ * returned every one untouched (`STORED_ONLY_COLLECTIONS` in `./stored.ts`) —
+ * which also puts the metadata API's reads and `os migrate meta --stored`
+ * on this entry.
  *
- * The bundle is told from an item structurally rather than by key spelling:
- * `locale` is REQUIRED on an item and never present on a bundle entry (the
- * bundle's keys ARE the locales), and the candidate value must be a dict whose
- * every key is a declared translation group — which an `objects` record, the
- * one other dict-of-dicts at that depth, is not.
+ * Two shapes, told apart structurally rather than by key spelling:
+ *
+ * - **A bare item** carries `locale` (REQUIRED on an item since #3778), or —
+ *   for a row written before `locale` was required, which the sync still reads
+ *   by its name — has a declared translation GROUP as a top-level key. A
+ *   bundle entry never does either: its top-level keys ARE the locale codes.
+ *   Only the item's own top-level `settings` is stripped, so an object
+ *   literally named `settings` under `objects` is untouched.
+ * - **A bundle entry**: the candidate value under each locale must be a dict
+ *   whose every key is a declared translation group — which an `objects`
+ *   record, the one other dict-of-dicts at that depth, is not.
  */
 const translationPerAppSettingsRemoved: MetadataConversion = {
   id: 'translation-per-app-settings-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
-  surface: 'stack.translations[].<locale>.settings',
+  surface: 'stack.translations[].<locale>.settings / translation.settings',
   summary:
-    "per-app translation group 'settings' removed (#15178 — it is keyed by SettingsManifest.namespace "
-    + 'and only platform code declares a manifest, so an app-authored entry could only fill gaps the '
-    + "platform's own bundle left in the one merged served tree, and was overwritten wherever both "
-    + 'defined the key; those gaps now fall back to the manifest literal, and the group stays on the '
-    + 'PLATFORM bundle, PlatformTranslationData)',
+    "translation group 'settings' removed from both application-authored faces, the per-app bundle "
+    + 'entry (#15178) and the registered translation item (#19620). It is keyed by '
+    + 'SettingsManifest.namespace and only platform code declares a manifest. A per-app bundle entry '
+    + "could only fill gaps the platform's own bundle left in the one merged served tree, and was "
+    + 'overwritten wherever both defined the key; a stored item OVERRODE the platform copy, because the '
+    + 'runtime-authored layer is read over the shipped bundles. Overrides now give way to the platform '
+    + 'copy, gaps fall back to the manifest literal, and the group stays on the PLATFORM bundle, '
+    + 'PlatformTranslationData',
   apply(stack, emit) {
     /** The top-level groups a translation bundle entry may carry (either face). */
     const GROUPS = new Set([
@@ -7171,9 +7191,10 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
       'pages', 'flows', 'settings', 'metadataForms', 'settingsCommon',
     ]);
     return mapCollection(stack, 'translations', (entry, path) => {
-      // A `translation` ITEM, not a bundle — `settings` is still declared
-      // there. Leave it whole.
-      if ('locale' in entry) return entry;
+      // A bare `translation` ITEM: strip its own top-level group only.
+      if ('locale' in entry || Object.keys(entry).some((k) => GROUPS.has(k))) {
+        return stripKeys(entry, ['settings'], emit, path);
+      }
       let next = entry;
       for (const [locale, data] of Object.entries(entry)) {
         if (!isDict(data) || !isDict(data.settings)) continue;
@@ -7196,6 +7217,20 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
             apps: { crm: { label: '客户关系管理' } },
           },
         },
+        {
+          // The bare item shape a stored `translation` row replays as.
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          settings: { mail: { title: 'メール配信' } },
+          messages: { commonSave: '保存' },
+        },
+        {
+          // A row written before `locale` was required — told from a bundle
+          // entry by its top-level group key. The object literally NAMED
+          // `settings` is application copy under `objects` and stays.
+          name: 'fr',
+          objects: { settings: { label: 'Paramètres' } },
+        },
       ],
     },
     after: {
@@ -7205,10 +7240,19 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
             apps: { crm: { label: '客户关系管理' } },
           },
         },
+        {
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          messages: { commonSave: '保存' },
+        },
+        {
+          name: 'fr',
+          objects: { settings: { label: 'Paramètres' } },
+        },
       ],
     },
-    // One per stripped group: the single `zh-CN` entry.
-    expectedNotices: 1,
+    // One per stripped group: the `zh-CN` bundle entry and the `ja-JP` item.
+    expectedNotices: 2,
   },
 };
 
