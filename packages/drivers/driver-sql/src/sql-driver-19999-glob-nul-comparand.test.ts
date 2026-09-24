@@ -27,8 +27,10 @@
  * well as pinned literally, so the table cannot drift from what the other
  * faces answer. `driver-memory` answered the same 50-row probe identically.
  *
- * A comparand WITHOUT U+0000 keeps `GLOB` and binds exactly what it bound
- * before, so no existing plan moves; the second block pins that.
+ * [#20024] A `$startsWith` comparand WITHOUT U+0000 keeps `GLOB` and binds
+ * exactly what it bound before; every `contains` / `ends` comparand now reads
+ * the whole stored value too (`sql-driver-20024-glob-stored-nul.test.ts`). The
+ * second block pins that split.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -213,22 +215,21 @@ describe('[#19999] the SQLite construct, compiled', () => {
   });
 
   /**
-   * A comparand without U+0000 compiles exactly as it did before this change —
-   * `GLOB`, one bound escaped pattern — so no existing plan moves (a
-   * `$startsWith` GLOB over an indexed column can still use the index).
+   * [#20024] Of the comparands without U+0000, only `$startsWith`'s keeps
+   * `GLOB` and its bound escaped pattern — so a `$startsWith` GLOB over an
+   * indexed column can still use the index. Every `contains` / `ends` shape
+   * reads the whole stored value now (`sql-driver-20024-glob-stored-nul.test.ts`).
    */
-  it('a comparand without U+0000 keeps GLOB and its pattern', () => {
-    expect(probe.compile({ v: { $contains: 'a*b' } })).toEqual({
+  it('a comparand without U+0000 keeps GLOB and its pattern for $startsWith only', () => {
+    expect(probe.compile({ v: { $startsWith: 'ab' } })).toEqual({
       sql: 'select * from `nul_text_match` where `v` GLOB ?',
-      bindings: ['*a[*]b*'],
+      bindings: ['ab*'],
     });
-    expect(probe.compile({ v: { $startsWith: 'ab' } }).bindings).toEqual(['ab*']);
-    expect(probe.compile({ v: { $endsWith: 'ab' } }).bindings).toEqual(['*ab']);
-    expect(probe.compile({ v: { $icontains: 'Ab' } })).toEqual({
-      sql: 'select * from `nul_text_match` where lower(`v`) GLOB lower(?)',
-      bindings: ['*Ab*'],
-    });
-    expect(probe.compile({ v: { $notContains: 'ab' } }).sql).toMatch(/`v` NOT GLOB \?/);
+    for (const op of ['$contains', '$notContains', '$icontains', '$endsWith'] as const) {
+      const { sql, bindings } = probe.compile({ v: { [op]: 'a*b' } } as FilterCondition);
+      expect(sql, op).not.toMatch(/GLOB/);
+      for (const b of bindings) expect(b, op).toBe('a*b');
+    }
   });
 
   /**

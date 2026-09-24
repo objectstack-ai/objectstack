@@ -3123,15 +3123,23 @@ function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: st
 const NUL_CHARACTER = String.fromCharCode(0x00);
 
 /**
- * [#19999] The SQLite text match for a comparand that holds U+0000 — the one
- * comparand `GLOB` cannot read.
+ * [#19999, #20024] The SQLite text match that reads the WHOLE comparand and the
+ * WHOLE stored value — every `contains` / `ends` comparand, and a `starts`
+ * comparand that holds U+0000.
  *
  * SQLite's `glob()` reads its pattern AND the stored value as C strings, so each
  * is cut at its first U+0000. Measured on better-sqlite3 (SQLite 3.53.4),
  * sql.js (3.49.1) and a local libSQL engine (3.45.1), all alike and none
- * raising: `$contains` / `$endsWith` of a comparand that STARTS with U+0000
- * matched every row (the pattern was cut to `*`), and `$startsWith` of one
- * matched the rows that are empty before their first U+0000, `''` among them.
+ * raising:
+ *
+ * - **The comparand's cut (#19999).** `$contains` / `$endsWith` of a comparand
+ *   that STARTS with U+0000 matched every row (the pattern was cut to `*`), and
+ *   `$startsWith` of one matched the rows that are empty before their first
+ *   U+0000, `''` among them.
+ * - **The stored value's cut (#20024).** With a comparand WITHOUT U+0000, `GLOB`
+ *   still saw a stored value only up to its first U+0000: `$contains: 'b'`
+ *   missed `'a'` + U+0000 + `'b'`, `$endsWith: 'a'` returned it, and
+ *   `$icontains: 'B'` missed `'A'` + U+0000 + `'B'`.
  *
  * So the comparand is compared whole, against the whole value, by constructs
  * each measured NUL-safe on those three engines first:
@@ -3147,18 +3155,24 @@ const NUL_CHARACTER = String.fromCharCode(0x00);
  * they stop at the first U+0000 (`length('a' || char(0) || 'b')` is 1) — so the
  * suffix is taken over BLOB, where both count bytes. Comparing UTF-8 bytes is
  * comparing characters: UTF-8 is self-synchronising, so a byte suffix equal to
- * a valid UTF-8 comparand starts on a character boundary. The comparand holds a
- * U+0000, so it is at least one byte long and the start offset is never `-0`
- * (which `substr` reads as "from the start"); a comparand longer than a
- * non-empty value yields the whole, shorter value, which is never equal to it.
- * Over a ZERO-LENGTH blob `substr` yields NULL, not the empty blob (measured on
- * all three engines: `typeof(substr(CAST('' AS BLOB), -1))` is `null`), which
- * would answer NULL for `''` where the answer is false: invisible to a bare
- * `$endsWith`, but a `$not` over it dropped the `''` row. So `coalesce()` falls
- * back to the value itself — `substr` answers NULL exactly when the value is
- * NULL or zero-length, and the value is then the right stand-in: the empty
- * blob, never equal to a comparand of one byte or more, or NULL, which stays
- * NULL as it does under `GLOB`.
+ * a valid UTF-8 comparand starts on a character boundary. A comparand longer
+ * than a non-empty value yields the whole, shorter value, which is never equal
+ * to it. Over a ZERO-LENGTH blob `substr` yields NULL, not the empty blob
+ * (measured on all three engines: `typeof(substr(CAST('' AS BLOB), -1))` is
+ * `null`), which would answer NULL for `''` where the answer is false: invisible
+ * to a bare `$endsWith`, but a `$not` over it dropped the `''` row. So
+ * `coalesce()` falls back to the value itself — `substr` answers NULL exactly
+ * when the value is NULL or zero-length, and the value is then the right
+ * stand-in: the empty blob, never equal to a comparand of one byte or more, or
+ * NULL, which stays NULL as it does under `GLOB`.
+ *
+ * The EMPTY comparand never reaches the suffix construct: `-length('')` is
+ * `-0`, which `substr` reads as "from the start", so the construct would ask
+ * whether the whole value equals `''` and answer false for `'abc'`. An empty
+ * string is a suffix — and a prefix, and a substring — of every value, so it
+ * takes `instr(col, '') > 0` instead, which is 1 for every non-NULL value
+ * (`instr('abc', '')` and `instr('', '')` are both 1 on all three engines) and
+ * NULL for NULL, exactly as `GLOB '*'` answered it.
  *
  * Nothing is escaped: none of the three has a pattern language, so `*`, `?` and
  * `[` are literal by construction and the comparand is bound as written. The
@@ -3168,11 +3182,11 @@ const NUL_CHARACTER = String.fromCharCode(0x00);
  * is `NOT (…)`, which is NULL for a NULL value exactly as `NOT GLOB` is, so the
  * NULL-safe wrapper `$notContains` puts around it composes unchanged (#5298).
  *
- * A comparand WITHOUT U+0000 stays on `GLOB`, byte for byte as before, so no
- * existing plan moves. `GLOB` still reads the stored VALUE only up to its first
- * U+0000: that cannot change a `starts` answer for such a comparand, and it can
- * change a `contains` / `ends` answer on a value holding one — a separate
- * defect, left to its own change.
+ * `starts` with a comparand WITHOUT U+0000 stays on `GLOB` in
+ * {@link textMatchPredicate}, byte for byte: cutting the stored value at its
+ * first U+0000 cannot change that answer (a prefix free of U+0000 lies wholly
+ * before the value's first one, or the value does not start with it), and a
+ * `GLOB` prefix pattern is the one text construct here an index can serve.
  */
 function sqliteLengthAwareTextMatch(
   field: string,
@@ -3183,14 +3197,14 @@ function sqliteLengthAwareTextMatch(
 ): { sql: string; bindings: unknown[] } {
   const column = fold ? 'lower(??)' : '??';
   const comparand = fold ? 'lower(?)' : '?';
-  const positive =
-    shape === 'ends'
-      ? `coalesce(substr(CAST(${column} AS BLOB), -length(CAST(${comparand} AS BLOB))), CAST(${column} AS BLOB))`
-        + ` = CAST(${comparand} AS BLOB)`
-      : `instr(${column}, ${comparand}) ${shape === 'starts' ? '= 1' : '> 0'}`;
+  const suffix = shape === 'ends' && text !== '';
+  const positive = suffix
+    ? `coalesce(substr(CAST(${column} AS BLOB), -length(CAST(${comparand} AS BLOB))), CAST(${column} AS BLOB))`
+      + ` = CAST(${comparand} AS BLOB)`
+    : `instr(${column}, ${comparand}) ${shape === 'starts' ? '= 1' : '> 0'}`;
   return {
     sql: negate ? `NOT (${positive})` : positive,
-    bindings: shape === 'ends' ? [field, text, field, text] : [field, text],
+    bindings: suffix ? [field, text, field, text] : [field, text],
   };
 }
 
@@ -3274,9 +3288,15 @@ function mysqlAsciiLowerBinary(expr: string): string {
  *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
  *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
  *   answers row 3 — the Q1 = A boundary, executed rather than argued.
- *   One comparand is the exception: `glob()` cuts its pattern at the first
- *   U+0000, so a comparand holding one goes to
- *   {@link sqliteLengthAwareTextMatch} instead (#19999).
+ *   `glob()` cuts its pattern AND the stored value at their first U+0000, so
+ *   `GLOB` now serves only `starts` with a comparand free of U+0000 — the one
+ *   shape the value's cut cannot change, and the one an index can serve.
+ *   Every `contains` / `ends` comparand (#20024), and a `starts` comparand
+ *   holding U+0000 (#19999), goes to {@link sqliteLengthAwareTextMatch}, whose
+ *   `instr()` / BLOB-suffix constructs read both whole. Measured over an
+ *   indexed TEXT column on all three SQLite engines, `EXPLAIN QUERY PLAN` was
+ *   already `SCAN` for every `contains` / `ends` shape under `GLOB` (a leading
+ *   `*` is never index-usable) and stays `SCAN`; `starts` keeps its `SEARCH`.
  * - **Postgres → `LIKE`, unchanged**, because `LIKE` there is already exact.
  *   Only the fold moves, from `LOWER()` to {@link ASCII_UPPER_LETTERS}-driven
  *   `translate()`. Measured live (PG 16, ICU database): `LOWER(name) LIKE
@@ -3313,10 +3333,11 @@ function textMatchPredicate(
   fold: boolean,
 ): { sql: string; bindings: unknown[] } {
   if (dialect === 'sqlite') {
-    // [#19999] `glob()` cuts its pattern at the first U+0000, so a comparand
-    // holding one is compared by a length-aware construct instead.
+    // [#19999, #20024] `glob()` cuts its pattern AND the stored value at their
+    // first U+0000. Only a `starts` comparand free of U+0000 is immune to both
+    // cuts; every other comparand is compared by a length-aware construct.
     const text = String(value);
-    if (text.includes(NUL_CHARACTER)) {
+    if (shape !== 'starts' || text.includes(NUL_CHARACTER)) {
       return sqliteLengthAwareTextMatch(field, text, shape, negate, fold);
     }
     // GLOB takes no ESCAPE clause, so this arm binds two values, not three.

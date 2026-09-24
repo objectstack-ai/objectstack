@@ -339,10 +339,12 @@ describe('RemoteTransport $null comparand refusal (#1116)', () => {
       // #5041 comment excludes the family from its guard by name.
       // [#6518] The wildcard is `*`, not `%` — this transport emits `GLOB` now,
       // because the family is case-SENSITIVE by contract and SQLite's `LIKE`
-      // is not. The claim under test is still that a NUMBER and a BOOLEAN keep
-      // rendering to text rather than being refused.
+      // is not. [#20024] `$contains` binds the text itself now: it compiles to
+      // `instr()`, which reads the whole stored value and has no wildcard. The
+      // claim under test is still that a NUMBER and a BOOLEAN keep rendering to
+      // text rather than being refused.
       expect((await compile({ name: { $startsWith: 42 } })).args).toEqual(['42*']);
-      expect((await compile({ name: { $contains: true } })).args).toEqual(['*true*']);
+      expect((await compile({ name: { $contains: true } })).args).toEqual(['true']);
     });
   });
 

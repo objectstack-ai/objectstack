@@ -3269,23 +3269,32 @@ export class RemoteTransport {
    * row-level suite in `remote-transport-text-predicates.test.ts` is what pins
    * them to the same answers.
    *
-   * # [#19999] A comparand holding U+0000 does not reach `GLOB`
+   * # [#19999, #20024] Only a `starts` comparand free of U+0000 reaches `GLOB`
    *
    * SQLite's `glob()` reads its pattern and the stored value as C strings, so
-   * each is cut at its first U+0000 — measured on this transport before the fix
-   * (on `makeLibsqlSqliteStub` and on a local libSQL engine, SQLite 3.45.1):
+   * each is cut at its first U+0000 — measured on this transport (on
+   * `makeLibsqlSqliteStub` and on a local libSQL engine, SQLite 3.45.1):
    * `$contains` / `$endsWith` of a comparand starting with U+0000 matched every
-   * row. Such a comparand is compared whole instead, by the length-aware
-   * constructs `SqlDriver`'s `sqliteLengthAwareTextMatch` emits locally, each
-   * measured NUL-safe first: `instr(col, ?) > 0` for `contains`,
-   * `instr(col, ?) = 1` for `starts`, and a byte suffix over BLOB for `ends`
-   * (`length()` and `substr()` over TEXT stop at U+0000; over BLOB they count
-   * bytes), which falls back to the value itself through `coalesce()` because
-   * `substr()` over a zero-length BLOB is NULL — so `''` answers false, not
-   * NULL, and a `$not` over it keeps the row. None has a pattern language, so
-   * nothing is escaped and the comparand is bound as written. Every other
-   * comparand keeps `GLOB`, byte for byte. `turso-19999-glob-nul-comparand.test.ts`
-   * holds this emitter and the local one to the same rows.
+   * row (#19999), and with a comparand free of U+0000 `$contains: 'b'` missed
+   * the stored `'a'` + U+0000 + `'b'` while `$endsWith: 'a'` returned it
+   * (#20024). So every `contains` / `ends` comparand, and a `starts` comparand
+   * holding U+0000, is compared whole instead, by the length-aware constructs
+   * `SqlDriver`'s `sqliteLengthAwareTextMatch` emits locally, each measured
+   * NUL-safe first: `instr(col, ?) > 0` for `contains`, `instr(col, ?) = 1` for
+   * `starts`, and a byte suffix over BLOB for `ends` (`length()` and `substr()`
+   * over TEXT stop at U+0000; over BLOB they count bytes), which falls back to
+   * the value itself through `coalesce()` because `substr()` over a zero-length
+   * BLOB is NULL — so `''` answers false, not NULL, and a `$not` over it keeps
+   * the row. An EMPTY `ends` comparand takes `instr(col, '') > 0` instead: the
+   * suffix construct's `-length('')` is `-0`, which `substr()` reads as "from
+   * the start", while `instr(col, '')` is 1 for every non-NULL value — the
+   * `GLOB '*'` answer. None of these has a pattern language, so nothing is
+   * escaped and the comparand is bound as written. A `starts` comparand free of
+   * U+0000 keeps `GLOB`, byte for byte: the value's cut cannot change a prefix
+   * answer, and the prefix pattern is the one an index can serve.
+   * `turso-19999-glob-nul-comparand.test.ts` and
+   * `turso-20024-glob-stored-nul.test.ts` hold this emitter and the local one to
+   * the same rows.
    */
   private pushLike(
     clauses: string[],
@@ -3300,15 +3309,15 @@ export class RemoteTransport {
     const lhs = fold ? `lower(${column})` : column;
     const rhs = fold ? 'lower(?)' : '?';
     const text = String(value);
-    if (text.includes(NUL_CHARACTER)) {
-      const positive =
-        shape === 'ends'
-          ? `coalesce(substr(CAST(${lhs} AS BLOB), -length(CAST(${rhs} AS BLOB))), CAST(${lhs} AS BLOB))`
-            + ` = CAST(${rhs} AS BLOB)`
-          : `instr(${lhs}, ${rhs}) ${shape === 'starts' ? '= 1' : '> 0'}`;
+    if (shape !== 'starts' || text.includes(NUL_CHARACTER)) {
+      const suffix = shape === 'ends' && text !== '';
+      const positive = suffix
+        ? `coalesce(substr(CAST(${lhs} AS BLOB), -length(CAST(${rhs} AS BLOB))), CAST(${lhs} AS BLOB))`
+          + ` = CAST(${rhs} AS BLOB)`
+        : `instr(${lhs}, ${rhs}) ${shape === 'starts' ? '= 1' : '> 0'}`;
       const predicate = negate ? `NOT (${positive})` : positive;
       clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
-      args.push(...(shape === 'ends' ? [text, text] : [text]));
+      args.push(...(suffix ? [text, text] : [text]));
       return;
     }
     const escaped = text.replace(/[*?[]/g, '[$&]');

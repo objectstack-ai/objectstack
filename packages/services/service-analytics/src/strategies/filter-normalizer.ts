@@ -196,11 +196,13 @@
  *     non-NULL row — because `stringifyForCube(null)` was `''`. It is now
  *     `LIKE '%null%'`, which is what `driver-sql` has always compiled it to.
  *   - `{amount: {$gt: null}}` compiled to `amount > ''`, a real comparison
- *     against the empty string. It now binds NULL, so the predicate is UNKNOWN
- *     and the widget draws nothing — the honest answer for an unordered
- *     comparand, and the one `driver-memory` / `formula` give. (#5332 named this
+ *     against the empty string. It then bound NULL, so the predicate was UNKNOWN
+ *     and the widget drew nothing — the honest answer for an unordered
+ *     comparand, and the one `driver-memory` / `formula` gave. (#5332 named this
  *     comparand position as covered by no ruling and left the `''` placeholder
- *     alone; deleting the encoder decides it by construction.)
+ *     alone; deleting the encoder decided it by construction.) [#20010] The
+ *     position has a ruling now (2026-09-01, #14080) and it is a refusal, at the
+ *     shared comparand-shape face this door runs — see the #20010 section below.
  *
  * # A `where` ARRAY is lowered here, not dropped (#5334)
  *
@@ -346,6 +348,23 @@
  * `{ f: { $in: [...] } }` for "one of these values". `$ne` with a list is not
  * this ruling's.
  *
+ * # The same face's OTHER arms reach the object spelling too (#20010)
+ *
+ * The same face carries the null and blank carve-outs ruled onto it — a `null`
+ * `$in` / `$nin` member and a `null` `$between` endpoint (2026-08-31), a `null`
+ * ordering comparand (2026-09-01), a blank `$between` endpoint (2026-09-20) —
+ * and its original rule, that `$in` / `$nin` / `$between` receive a list at
+ * all. The `FilterArray` spelling met every one of them inside
+ * `parseFilterAST`; the object spelling met none, so `{ s: { $in: ['won', null] } }`
+ * compiled to `s IN ('won', NULL)` and `{ s: { $in: 'won' } }` was laundered to
+ * a one-member list, while the array spelling of each was refused
+ * `INVALID_FILTER` / 400. {@link assertWhereComparandShapes} now hands every
+ * field entry to the face after the #19888 equality pass, so both spellings
+ * get the face's own refusal byte for byte, on every face of this door and on
+ * the draft preview. The comparand-TYPE face is not run here; `undefined`
+ * keeps {@link assertDefinedComparands}' refusal except as a `$between`
+ * endpoint, which the face now answers.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -360,7 +379,9 @@
  * `filter-normalizer-mixed-wrapper.test.ts` for the mixed `$`/non-`$` wrapper
  * refusal and its pure-shape control groups (#6444), and
  * `where-equality-slot-list-refusal.test.ts` for the equality-slot list refusal
- * on every analytics face and its neighbouring shapes (#19888).
+ * on every analytics face and its neighbouring shapes (#19888), and
+ * `where-face-arms-refusal.test.ts` for the face's other arms, both spellings,
+ * every face (#20010).
  */
 
 import {
@@ -674,6 +695,13 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
  * Asserted under the `$between` name, not under the `gte` / `lte` the bounds
  * lower to, because the author wrote `$between` and that is the key they have
  * to repair.
+ *
+ * [#20010] The `where` door now hands every field entry to the shared
+ * comparand-shape face before any leaf is built, and the face refuses this
+ * endpoint by the 2026-08-11 ruling (#7596), which the face now enforces — so the
+ * door answers in the face's words, the ones the `FilterArray` spelling always
+ * got, and this check is {@link fieldLeaves}' own invariant rather than the
+ * door's refusal. The laundering argument above is why the invariant stays.
  */
 function assertNoFieldReferenceComparand(opKey: string, field: string, value: unknown): void {
   if (opKey !== '$between' || !Array.isArray(value)) return;
@@ -758,7 +786,11 @@ function undefinedComparandError(field: string, path: string): Error {
  *   - an OPERATOR's comparand — `{d: {$gt: undefined}}`, `$eq`, `$ne`, the LIKE
  *     family, every other single-value operator;
  *   - a MEMBER of a list operator's array — `{d: {$in: [undefined]}}`, `$nin`,
- *     and `$between`'s two bounds.
+ *     and `$between`'s two bounds. [#20010] A `$between` bound is answered
+ *     first by the shared comparand-shape face, whose 2026-09-20 ruling
+ *     refuses an `undefined` endpoint as BLANK, naming the side; the door runs
+ *     that face before any leaf is built, so this gate's sentence is reached
+ *     only in the other positions.
  *
  * `$null` / `$exists` are deliberately NOT swept, exactly as on the twin: their
  * comparand is a declared BOOLEAN — a flag, not a value to compare against — so
@@ -970,6 +1002,10 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // (`native-sql-temporal-conformance.test.ts`).
         if (opKey === '$between') {
           const v = wrapper[opKey];
+          // [#20010] From `lowerAnalyticsWhere`, the shared comparand-shape face
+          // has already judged this range — arity, a null or blank endpoint, a
+          // `{ $field }` endpoint — in its own words, so the two checks below
+          // are this function's invariants and are not reached from the door.
           if (!Array.isArray(v) || v.length !== 2) {
             // Never drop it: an unbounded read is the failure mode this whole
             // branch exists to prevent, and it is indistinguishable from a
@@ -1507,7 +1543,55 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
   );
 }
 
-// ── [#19888] A LIST in the equality slot ─────────────────────────────────────
+// ── [#19888 / #20010] The shared comparand-shape face, on the object spelling ──
+
+/**
+ * [#20010] Visit every FIELD ENTRY of an object-form `where` — `{ key: spec }`
+ * with the `path` of the node that holds it — the way the shared
+ * comparand-shape face walks a condition, plus one step the face does not take.
+ *
+ * The face's traversal: `$and` / `$or` arrays, `$not`, and field entries; any
+ * other `$` key at node level is a logical operator the face does not judge
+ * (an unknown one is refused by {@link buildNode} by name), and a non-array
+ * `$and` / `$or` operand is {@link buildNode}'s to refuse with its own message.
+ *
+ * The extra step: a NESTED-RELATION object (`{ acct: { region: … } }`, no `$`
+ * key) is descended, where the face leaves one alone because a driver reads it
+ * as a deep-equality comparand or another object's condition. This compiler
+ * reads it as neither: {@link fieldLeaves} flattens it to the dotted member
+ * `acct.region`, so its entries are comparisons in their own right. The entry
+ * is visited as `{ region: … }` at path `where.acct`, which is how the #19888
+ * gate has named that position since it landed.
+ *
+ * One traversal for both passes of {@link assertWhereComparandShapes}, so the
+ * two cannot disagree about which positions a `where` has.
+ */
+function forEachWhereFieldEntry(
+  node: unknown,
+  path: string,
+  visit: (key: string, spec: unknown, path: string) => void,
+): void {
+  if (!isFilterObject(node)) return;
+  for (const [key, spec] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      if (Array.isArray(spec)) {
+        spec.forEach((child, index) => forEachWhereFieldEntry(child, `${here}[${index}]`, visit));
+      }
+      continue;
+    }
+    if (key === '$not') {
+      forEachWhereFieldEntry(spec, here, visit);
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    if (isFilterObject(spec) && !Object.keys(spec).some((k) => k.startsWith('$'))) {
+      forEachWhereFieldEntry(spec, here, visit);
+      continue;
+    }
+    visit(key, spec, path);
+  }
+}
 
 /**
  * [#19888] Refuse every LIST in the EQUALITY slot of an object-form `where` —
@@ -1555,42 +1639,107 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
  *
  * It runs before every gate {@link buildNode} reaches, so a list is diagnosed
  * as the list and not by one of its members (`{ f: [1, undefined] }`), the
- * order the face and `read-scope-sql.ts`'s twin use.
+ * order the face and `read-scope-sql.ts`'s twin use. [#20010] It also runs
+ * before the face's OTHER arms, as the first pass of
+ * {@link assertWhereComparandShapes}: a `where` carrying both an equality-slot
+ * list and another refused shape is answered with the list.
  *
  * ⛔ `$ne` is not judged: the ruling names equality, and `$ne` with a list is
  * #19886's ruling A, carried on that card. The list operators keep their
  * lists, `$in: []` / `$nin: []` included, and every scalar — `null` above all —
  * passes exactly as before.
  *
+ * [#20010] Module-private since the draft-data preview calls
+ * {@link assertWhereComparandShapes}, which runs this first.
+ */
+function assertNoListInEqualitySlot(node: unknown, path = 'where'): void {
+  forEachWhereFieldEntry(node, path, (key, spec, at) => {
+    if (Array.isArray(spec)) {
+      assertListComparandShapes({ [key]: spec }, undefined, at);
+    } else if (isFilterObject(spec) && Array.isArray(spec.$eq)) {
+      assertListComparandShapes({ [key]: { $eq: spec.$eq } }, undefined, at);
+    }
+  });
+}
+
+/**
+ * [#20010] Hand every field entry of an object-form `where` to the shared
+ * comparand-shape face — ALL of its arms, not only the equality one — before
+ * any node is built.
+ *
+ * ## Why
+ *
+ * `assertListComparandShapes` (`@objectstack/spec/data`) declares itself "the
+ * one place that decides whether `$in` / `$nin` / `$between` received a list at
+ * all, for every driver", and carries the rulings that carved the null and
+ * blank positions onto that same door. Quoted from its docblock:
+ *
+ * - 2026-08-31 (#13357): "A `null` member of `$in` / `$nin`, and a `null`
+ *   `$between` endpoint (#13495's shape), are refused at this door";
+ * - 2026-09-01 (#14080): "A `null` comparand of `$gt` / `$gte` / `$lt` /
+ *   `$lte` … refused at this door, same envelope, so the divergent cells are
+ *   constructively unreachable";
+ * - 2026-09-20 (#19071): "`''` and `undefined` are refused, naming the blank
+ *   side (MIN / MAX and the index)" — the runtime twin of the schema door's
+ *   non-blank endpoint rule.
+ *
+ * This door met that face for the `FilterArray` spelling only, inside
+ * `parseFilterAST`. {@link assertNoListInEqualitySlot} (#19888) carried the
+ * equality arm to the object spelling and, by design, none of the others. So
+ * one condition got two answers on one door, measured over a real engine
+ * before this gate:
+ *
+ *   | object `where`                   | before                                          |
+ *   |---|---|
+ *   | `{ s: { $in: ['won', null] } }`  | `s IN ('won', NULL)`, served; the draft preview also served the NULL row |
+ *   | `{ a: { $lt: null } }`           | `a < NULL`: no row; the draft preview served every non-NULL row |
+ *   | `{ a: { $between: [null, 5] } }` | `a >= NULL AND a <= 5`; the ENGINE path received `$gte: null` and refused it under an operator the author never wrote |
+ *   | `{ a: { $between: ['', 5] } }`   | `a >= '' AND a <= 5`, and the engine path ACCEPTED it |
+ *   | `{ s: { $in: 'won' } }`          | laundered to `s IN ('won')`: served natively, and ACCEPTED by the engine path as a list |
+ *
+ * while the `FilterArray` spelling of each row was refused `INVALID_FILTER` /
+ * 400 by the face. Every row now answers like the `FilterArray` spelling, with
+ * the face's own envelope, wording, path and prescription.
+ *
+ * ## How
+ *
+ * Two passes over {@link forEachWhereFieldEntry}'s one traversal. The first is
+ * {@link assertNoListInEqualitySlot}, unchanged, so the equality arm keeps the
+ * precedence #19888 gave it. The second hands each whole entry to the face as a
+ * one-entry node with the same path seed, `where`: the face then reports
+ * exactly the path and field it reports on the whole condition, so the object
+ * spelling gets the `FilterArray` spelling's refusal byte for byte. A nested
+ * relation's entries are handed over too, since this compiler flattens them to
+ * the dotted member.
+ *
+ * Refusals this door already gave in its own words now give the face's, the
+ * same words the `FilterArray` spelling gets: a `$between` that is not a
+ * two-element list, a `{ $field }` endpoint, an `undefined` endpoint. The
+ * local checks for those in {@link fieldLeaves} stay as that function's own
+ * invariants and are no longer reached from this door.
+ *
+ * ⛔ Not moved:
+ *
+ * - `$ne` with a list. The face does not judge it yet; #19886's stage 2 puts
+ *   that refusal on the face, and this gate carries it the day it does, with no
+ *   change here.
+ * - The comparand-TYPE face (`normalizeFilterComparandTypes`). An `undefined`
+ *   comparand outside a `$between` endpoint is still refused by
+ *   {@link assertDefinedComparands}, in this door's own words.
+ * - `$in: []` / `$nin: []`, every scalar ordering comparand, a `{ $field }` in
+ *   an ordering slot, and `null` in the equality slot (`{ f: null }`,
+ *   `$eq: null`, `$ne: null`, the null predicate) all compile as before.
+ *
  * EXPORTED for the one other face in this package that evaluates a `where`
  * without this door: the draft-data preview (`preview-evaluator.ts`), which
  * calls it so a drafted chart refuses what the published one refuses, rather
  * than spelling the rule a second time.
  */
-export function assertNoListInEqualitySlot(node: unknown, path = 'where'): void {
-  if (!isFilterObject(node)) return;
-  for (const [key, spec] of Object.entries(node)) {
-    const here = `${path}.${key}`;
-    if (key === '$and' || key === '$or') {
-      // A non-array operand is refused by `buildNode` with its own message.
-      if (Array.isArray(spec)) {
-        spec.forEach((child, index) => assertNoListInEqualitySlot(child, `${here}[${index}]`));
-      }
-      continue;
-    }
-    if (key === '$not') {
-      assertNoListInEqualitySlot(spec, here);
-      continue;
-    }
-    if (key.startsWith('$')) continue;
-    if (Array.isArray(spec)) assertListComparandShapes({ [key]: spec }, undefined, path);
-    if (!isFilterObject(spec)) continue;
-    if (!Object.keys(spec).some((k) => k.startsWith('$'))) {
-      assertNoListInEqualitySlot(spec, here);
-      continue;
-    }
-    if (Array.isArray(spec.$eq)) assertListComparandShapes({ [key]: { $eq: spec.$eq } }, undefined, path);
-  }
+export function assertWhereComparandShapes(node: unknown, path = 'where'): void {
+  assertNoListInEqualitySlot(node, path);
+  forEachWhereFieldEntry(node, path, (key, spec, at) => {
+    assertListComparandShapes({ [key]: spec }, undefined, at);
+  });
 }
 
 /**
@@ -1638,9 +1787,10 @@ export function lowerAnalyticsWhere(
     return condition as Record<string, unknown>;
   }
 
-  // [#19888] The object spelling meets the shared face's equality arm here, the
-  // way the array spelling met it inside `parseFilterAST` just above.
-  assertNoListInEqualitySlot(where);
+  // [#19888, #20010] The object spelling meets the shared comparand-shape face
+  // here — the equality arm first, then every other arm — the way the array
+  // spelling met it inside `parseFilterAST` just above.
+  assertWhereComparandShapes(where);
   return where as Record<string, unknown>;
 }
 
@@ -1780,6 +1930,8 @@ export function collectFilterLeaves(
  * the honest answer for an unordered comparand and the one the JS backends give;
  * the `''` this used to bind was a real comparison against the empty string,
  * which on a text column silently matched rows (see the module header).
+ * [#20010] From the `where` door, a `null` no longer reaches an ordering slot
+ * at all: the shared comparand-shape face refuses it first (2026-09-01 ruling).
  */
 export function toSqlBindValue(v: unknown): unknown {
   if (typeof v === 'boolean') return v ? 1 : 0;

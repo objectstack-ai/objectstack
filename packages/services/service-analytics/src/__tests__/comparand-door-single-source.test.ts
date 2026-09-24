@@ -127,15 +127,22 @@ const MATRIX: readonly Row[] = [
   { label: 'boolean', value: true,
     bindable: true, renderable: true,
     whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
-  // [#20018] One cell moved AFTER the #8186 measurement, on purpose: the
-  // read-scope lowering now runs the shared list-shape face after its own
-  // gates, so a `null` MEMBER of `$in` is refused there by the null-member
-  // ruling (2026-08-31), as the ObjectQL execute face already refused it
+  // [#20010] One cell of this row moved AFTER the #8186 measurement, on
+  // purpose: the `where` door now hands every field entry to the shared
+  // comparand-shape face, whose 2026-08-31 ruling (#13357) refuses "a `null`
+  // member of `$in` / `$nin`" at that door, for every driver. The object
+  // spelling used to compile it to `status IN (NULL)`; the FilterArray
+  // spelling was already refused (`where-face-arms-refusal.test.ts`). The
+  // read-scope cell is that door's own and is not this card's.
+  // [#20018] …and the read-scope cell moved too, by the same ruling at the
+  // other door: the read-scope lowering now runs the shared list-shape face
+  // after its own gates, so a `null` MEMBER of `$in` is refused there as the
+  // ObjectQL execute face already refused it
   // (`read-scope-comparand-three-faces.test.ts`). `null` as a scalar or LIKE
-  // comparand is not a list member and does not move.
+  // comparand is not a list member and moves at neither door.
   { label: 'null', value: null,
     bindable: true, renderable: true,
-    whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: REFUSED_SCOPE, scopeEq: OK },
+    whereLike: OK, whereIn: REFUSED_WHERE, whereEq: OK, scopeLike: OK, scopeIn: REFUSED_SCOPE, scopeEq: OK },
   { label: 'Date', value: new Date('2026-01-01T00:00:00.000Z'),
     bindable: true, renderable: true,
     whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
@@ -284,22 +291,22 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
     expect(doorTypes.map((r) => r.label)).toEqual([
       'string', 'number', 'bigint', 'boolean', 'null', 'Date',
     ]);
+    // The cells a SHAPE ruling moved, not a TYPE verdict: `null` is an accepted
+    // comparand type, but not as an `$in` MEMBER — the shared shape face's
+    // 2026-08-31 carve-out, now run at BOTH doors. Every cell is named with the
+    // change that moved it, so no other cell can move under this sentence.
+    const moved: Record<string, string> = {
+      'null whereIn': REFUSED_WHERE, // [#20010] the `where` door's envelope
+      'null scopeIn': REFUSED_SCOPE, // [#20018] the read-scope lowering's envelope
+    };
     for (const row of doorTypes) {
       const cells = {
         whereLike: row.whereLike, whereIn: row.whereIn, whereEq: row.whereEq,
         scopeLike: row.scopeLike, scopeIn: row.scopeIn, scopeEq: row.scopeEq,
       };
       for (const [position, cell] of Object.entries(cells)) {
-        // [#20018] The one cell a SHAPE ruling moved, not a TYPE verdict: `null`
-        // is an accepted comparand type, and the null-member ruling (2026-08-31)
-        // refuses it as an `$in` MEMBER at the shared list-shape face, which the
-        // read-scope lowering now runs. Named here so no other cell can move
-        // under this sentence.
-        if (row.label === 'null' && position === 'scopeIn') {
-          expect(cell, `${row.label} ${position}`).toBe(REFUSED_SCOPE);
-          continue;
-        }
-        expect(cell, `${row.label} ${position}`).toBe(OK);
+        const key = `${row.label} ${position}`;
+        expect(cell, key).toBe(moved[key] ?? OK);
       }
     }
   });

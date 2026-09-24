@@ -169,9 +169,21 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
       expect(tree({ status: { $in: ['a', 'b'] } })).toEqual({
         kind: 'leaf', member: 'status', operator: 'in', values: ['a', 'b'],
       });
-      expect(tree({ status: { $in: ['a', null, 5, true] } })).toEqual({
-        kind: 'leaf', member: 'status', operator: 'in', values: ['a', null, 5, true],
+      expect(tree({ status: { $in: ['a', 5, true] } })).toEqual({
+        kind: 'leaf', member: 'status', operator: 'in', values: ['a', 5, true],
       });
+      // [#20010] RE-JUDGED. This list carried a `null` member, pinned as a
+      // legitimate `$in` member TYPE for this guard. It still is one for this
+      // guard, which asks only "can it bind". But the shared comparand-shape
+      // face refuses a null list member by its 2026-08-31 ruling (#13357: "A
+      // `null` member of `$in` / `$nin` … refused at this door"), and this door
+      // now runs that face first. So the list is refused whole, in the face's
+      // words and not this guard's.
+      const err = refusalOf(() => tree({ status: { $in: ['a', null, 5, true] } }));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message.startsWith('Operator "$in" on field "status" does not accept null as a list member')).toBe(true);
+      expect(err.message).not.toContain('cannot be bound as a SQL parameter');
     });
 
     it('keeps every primitive LIKE comparand, including the two #5526 pinned', () => {

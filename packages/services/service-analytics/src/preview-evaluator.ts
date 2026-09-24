@@ -26,6 +26,7 @@
 // operators (`{ name: {} }`), at any depth — see isEmptyFieldConstraint.
 // [#19888] And a list in the equality slot (`{ stage: ['won', 'lost'] }`,
 // `{ stage: { $eq: [...] } }`), through the published door's own gate.
+// [#20010] Which now carries every arm of the shared comparand-shape face.
 
 import {
   calendarPartsInTzOrUtc,
@@ -39,8 +40,9 @@ import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // invent a second spelling of it. A draft-preview filter is a `where`-door
 // refusal in every respect that matters: the caller authored the predicate and
 // the repair is theirs. [#19888] So is the equality-slot list gate, for the
-// same reason: one rule, one spelling, on both faces.
-import { assertNoListInEqualitySlot, invalidFilterError } from './strategies/filter-normalizer.js';
+// same reason: one rule, one spelling, on both faces. [#20010] And, through
+// the same gate, every other arm of the shared comparand-shape face.
+import { assertWhereComparandShapes, invalidFilterError } from './strategies/filter-normalizer.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, type Cube } from '@objectstack/spec/data';
 
@@ -636,7 +638,12 @@ export function evaluateAnalyticsQueryOverRows(
   // `where` door runs: {@link matchesWhere} would otherwise compare each row
   // against the list's STRING form (`'won,lost'`) and chart that, for a filter
   // publish refuses `INVALID_FILTER` / 400 (ruling 乙, #19757).
-  assertNoListInEqualitySlot(query.where);
+  // [#20010] Then the shared face's other arms, through the same gate: a null
+  // `$in` member, a null ordering comparand, a null or blank `$between` bound,
+  // a scalar `$in` / `$nin`. Measured before, {@link matchesWhere} answered
+  // them (`{ amt: { $lt: null } }` charted every non-NULL row) for filters
+  // publish now refuses.
+  assertWhereComparandShapes(query.where);
   assertPreviewCanEvaluate(query.where);
   let filtered = rows.filter((r) => matchesWhere(r, query.where));
   const timeDims = query.timeDimensions ?? [];

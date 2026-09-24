@@ -257,7 +257,11 @@ describe('[#17590] the per-dialect membership construct, compiled', () => {
       for (const field of ['tags_', 'picks', 'nums']) {
         const sql = d.compileWhere({ [field]: { $contains: 'red' } } as FilterCondition);
         expect(sql, `${field} on ${label}`).toMatch(CONSTRUCT[label]!);
-        expect(sql, `${field} on ${label} must not be a pattern match`).not.toMatch(/LIKE|GLOB/);
+        // [#20024] The SQLite substring emitter spells `contains` as `instr(`
+        // and `ends` as `substr(CAST(`; only `starts` and `$like` keep `GLOB`.
+        expect(sql, `${field} on ${label} must not be a pattern match`).not.toMatch(
+          /LIKE|GLOB|instr\(|substr\(CAST\(/,
+        );
         expect(sql, `${field} on ${label} must not be a declared constant`).not.toMatch(/1 = 0|1 = 1/);
       }
     });
@@ -265,7 +269,7 @@ describe('[#17590] the per-dialect membership construct, compiled', () => {
     it(`${label}: the SCALAR string column still compiles the PATTERN match`, () => {
       const d = new CompilerProbeDriver(config).declare();
       const sql = d.compileWhere({ label: { $contains: 'red' } } as FilterCondition);
-      expect(sql, `label on ${label}`).toMatch(/LIKE|GLOB/);
+      expect(sql, `label on ${label}`).toMatch(/LIKE|GLOB|instr\(/);
       expect(sql, `label on ${label}`).not.toMatch(CONSTRUCT[label]!);
     });
 
@@ -279,14 +283,16 @@ describe('[#17590] the per-dialect membership construct, compiled', () => {
 
     /**
      * The other text operators are NOT membership spellings and this card does
-     * not rule on them — they keep the lowering they had. Pinned so a later
-     * widening is a deliberate edit here rather than a silent side effect.
+     * not rule on them — they keep the text emitter's lowering (on SQLite, since
+     * #20024, `instr(` for `$icontains` and `substr(CAST(` for `$endsWith`).
+     * Pinned so a later widening is a deliberate edit here rather than a silent
+     * side effect.
      */
     it(`${label}: the rest of the text family is UNMOVED on a JSON column`, () => {
       const d = new CompilerProbeDriver(config).declare();
       for (const op of ['$startsWith', '$endsWith', '$icontains', '$like', '$ilike']) {
         const sql = d.compileWhere({ tags_: { [op]: 'red' } } as FilterCondition);
-        expect(sql, `${op} on ${label}`).toMatch(/LIKE|GLOB/);
+        expect(sql, `${op} on ${label}`).toMatch(/LIKE|GLOB|instr\(|substr\(CAST\(/);
         expect(sql, `${op} on ${label}`).not.toMatch(CONSTRUCT[label]!);
       }
     });
@@ -340,7 +346,8 @@ describe('[#17590] the per-dialect membership construct, compiled', () => {
       expect(d.compileWhere({ [field]: { $contains: 'x' } } as FilterCondition), field)
         .toMatch(CONSTRUCT.sqlite!);
     }
-    // …while the scalar string column of the same sweep still gets the pattern.
-    expect(d.compileWhere({ one_str: { $contains: 'x' } })).toMatch(/GLOB/);
+    // …while the scalar string column of the same sweep still gets the
+    // substring emitter (`instr(` on SQLite since #20024).
+    expect(d.compileWhere({ one_str: { $contains: 'x' } })).toMatch(/instr\(/);
   });
 });
