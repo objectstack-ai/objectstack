@@ -800,15 +800,15 @@ describe('AutomationApiContracts', () => {
   });
 
   it('should define correct paths', () => {
-    expect(AutomationApiContracts.listFlows.path).toBe('/api/automation');
-    expect(AutomationApiContracts.getFlow.path).toBe('/api/automation/:name');
-    expect(AutomationApiContracts.createFlow.path).toBe('/api/automation');
-    expect(AutomationApiContracts.updateFlow.path).toBe('/api/automation/:name');
-    expect(AutomationApiContracts.deleteFlow.path).toBe('/api/automation/:name');
-    expect(AutomationApiContracts.triggerFlow.path).toBe('/api/automation/:name/trigger');
-    expect(AutomationApiContracts.toggleFlow.path).toBe('/api/automation/:name/toggle');
-    expect(AutomationApiContracts.listRuns.path).toBe('/api/automation/:name/runs');
-    expect(AutomationApiContracts.getRun.path).toBe('/api/automation/:name/runs/:runId');
+    expect(AutomationApiContracts.listFlows.path).toBe('/api/v1/automation');
+    expect(AutomationApiContracts.getFlow.path).toBe('/api/v1/automation/:name');
+    expect(AutomationApiContracts.createFlow.path).toBe('/api/v1/automation');
+    expect(AutomationApiContracts.updateFlow.path).toBe('/api/v1/automation/:name');
+    expect(AutomationApiContracts.deleteFlow.path).toBe('/api/v1/automation/:name');
+    expect(AutomationApiContracts.triggerFlow.path).toBe('/api/v1/automation/:name/trigger');
+    expect(AutomationApiContracts.toggleFlow.path).toBe('/api/v1/automation/:name/toggle');
+    expect(AutomationApiContracts.listRuns.path).toBe('/api/v1/automation/:name/runs');
+    expect(AutomationApiContracts.getRun.path).toBe('/api/v1/automation/:name/runs/:runId');
   });
 
   it('should have input and output schemas for all endpoints', () => {
