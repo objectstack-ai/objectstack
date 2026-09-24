@@ -3278,20 +3278,24 @@ const FormFieldBaseSchema = lazySchema(() => {
    * face refuses the per-option `default` key the object-field face enforces —
    * see the narrowed schema's docblock for the ruling and the census.
    *
-   * [#19678] Enum members come from the schema, never hand-listed (ruling
-   * 不动 + 声明, 2026-09-23). An option `value` keeps the system-identifier
-   * bound it shares by reference with the object-field face, so an enum member
-   * carrying a hyphen or a capital (`system-data`, `new-tab`, `perRecord`)
-   * cannot be written as one at all. On a metadata form — schema-bound,
-   * built by {@link defineForm} — a row whose key is a spec enum therefore
-   * omits `options`: the control derives the members from the served JSON
+   * [#19678] Derive only where a member cannot be spelled (ruling 乙 on
+   * #19907, record 5805845085, which narrows item 1 of ruling 不动 + 声明,
+   * record 5793380467). An option `value` keeps the system-identifier bound it
+   * shares by reference with the object-field face, so an enum member carrying
+   * a hyphen or a capital (`system-data`, `new-tab`, `perRecord`) cannot be
+   * written as one at all. On a metadata form — schema-bound, built by
+   * {@link defineForm} — an enum-typed row MAY carry an inline `options` list,
+   * for human labels or a deliberate subset (the #19331 `object.ownership` /
+   * `sharingModel` rows and the master_detail `deleteBehavior` rows are the
+   * reference shapes). A row whose members cannot be spelled as option values
+   * OMITS `options`: the control derives the members from the served JSON
    * Schema, and their meanings go in `helpText` (the `object.managedBy` /
    * `action.openIn` / `action.execution` rows are the reference shape). The
    * describe below states the rule where an author meets it, and
-   * `defineForm`'s module-load refusal of an unspellable value names the same
-   * path as its remedy.
+   * `defineForm`'s module-load refusal of an unspellable value names the
+   * derive path as its remedy.
    */
-  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), a row whose key is a spec enum omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. An option `value` is a lowercase system identifier, so an enum member carrying a hyphen or a capital cannot be listed here at all.'),
+  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`.'),
   
   /** Reference object for lookup/master_detail fields */
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
@@ -6328,10 +6332,12 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  * and pulls field metadata from the resolved JSON Schema instead of from
  * ObjectQL.
  *
- * A row whose key is a spec enum omits `options` — the control derives the
- * members from that JSON Schema, and their meanings go in `helpText`. An
- * inline option `value` that fails the system-identifier grammar is refused
- * here, at module load, and the refusal names that path as its remedy.
+ * An enum-typed row may carry an inline `options` list, for human labels or a
+ * deliberate subset. A row whose members cannot be spelled as option values
+ * omits `options` — the control derives the members from that JSON Schema,
+ * and their meanings go in `helpText`. An inline option `value` that fails
+ * the system-identifier grammar is refused here, at module load, and the
+ * refusal names that path as its remedy.
  *
  * @example
  * ```ts
@@ -6368,8 +6374,10 @@ export function defineForm(
 
 /**
  * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
- * option `value` carries — ruling 不动 + 声明 (2026-09-23): the bound stays,
- * and the wall says what to do.
+ * option `value` carries — ruling 乙 (record 5805845085, narrowing ruling
+ * 不动 + 声明): the bound stays, an enum-typed row may still list spellable
+ * members inline, and the wall names the derive path for a row whose members
+ * cannot be spelled.
  *
  * The refusal itself is `SystemIdentifierSchema`'s grammar message
  * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
@@ -6383,9 +6391,9 @@ export function defineForm(
  */
 const FORM_OPTION_VALUE_DERIVE_REMEDY =
   'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
-  + '`value`, which is a lowercase system identifier. When this row edits a spec enum, omit '
-  + '`options`: the control derives the members from the served JSON Schema, and their '
-  + 'meanings go in `helpText`.';
+  + '`value`, which is a lowercase system identifier. When this row edits a spec enum whose '
+  + 'members cannot be spelled as option values, omit `options`: the control derives the '
+  + 'members from the served JSON Schema, and their meanings go in `helpText`.';
 
 /**
  * The two issue codes the system-identifier grammar raises on a string: the
