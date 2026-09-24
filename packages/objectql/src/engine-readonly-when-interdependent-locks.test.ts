@@ -13,12 +13,14 @@
 // another field locked it, though the row never took that value.
 //
 // The strip now settles its drops (`settleReadonlyWhenDrops`): a monotone
-// fixpoint, which never opens a lock, then one release step, kept only when
-// every dropped key is locked and every kept key unlocked on the row the write
-// stores. When that one step does not settle the set — a cycle, or a cascade
-// where releasing one key moves another's verdict (#19927) — the fixpoint's
-// larger, fail-safe drop set stands. Every expected row below was checked
-// against a brute-force enumeration of the drop sets that agree with the row.
+// fixpoint, which never opens a lock, then a release, kept only when every
+// dropped key is locked and every kept key unlocked on the row the write
+// stores. Since #19927 the release repeats until a set gives back itself
+// (`engine-readonly-when-exact-drop-set.test.ts`); when none does within its
+// bound — always on a cycle with no drop set that agrees with the row — the
+// fixpoint's larger, fail-safe drop set stands. Every expected row below was
+// checked against a brute-force enumeration of the drop sets that agree with
+// the row.
 //
 // #19887's `stored` view (`engine-readonly-when-stored-view.test.ts`) and
 // #19853's master-detail settlement (`engine-readonly-when-parent.test.ts`)

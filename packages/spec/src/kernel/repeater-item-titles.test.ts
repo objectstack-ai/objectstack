@@ -30,10 +30,10 @@
 //     and forgetting to delete its entry is also red, and the ledger can only
 //     shrink.
 //
-// ⛔ Never add an entry to LEDGER to make this file green. An entry is a debt
-// record for a carrier that predates this pin (and, for the five below, one
-// held open by another PR's fence at the time it was written). A NEW untitled
-// repeater is the defect this file exists to catch.
+// ⛔ Never add an entry to LEDGER to make this file green. An entry was a debt
+// record for a carrier that predated this pin (and, for the last ones paid,
+// one held open by another PR's fence at the time it was written). A NEW
+// untitled repeater is the defect this file exists to catch.
 
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
@@ -81,26 +81,20 @@ const FORMS: ReadonlyArray<readonly [string, unknown]> = [
 ];
 
 /**
- * Carriers still owed titles, as measured on `origin/main` at
- * e758131b3900eb13260f03643e295ca6d625c42b. SHRINK-ONLY — see the header.
- *
- * The remaining `view.*` entries were fenced out of #17232's round by an
- * in-flight PR on their carrier file (#17360 `view.zod.ts`). This pin
- * OBSERVES them without editing them, which is why the set below is the rest
- * of the class and not the slice one PR could reach.
+ * Carriers still owed titles. SHRINK-ONLY — see the header. EMPTY is its
+ * steady state: every repeater a form declares is fully titled, so a new
+ * untitled one is red on the day it lands.
  *
  * `dashboard:widgets` and `dashboard:globalFilters` were paid by #17505,
  * `field:options` and `object:fields.options` by #17506 — one edit for both,
  * because the two carriers resolve to the SAME `SelectOptionSchema` object
  * (`FieldSchema.options` is `z.array(SelectOptionSchema)` and `object.fields`
- * is a record of that same `FieldSchema`). All four are DELETED from this set
- * — a paid debt leaves no entry behind.
+ * is a record of that same `FieldSchema`). `view:columns`, `view:sort` and
+ * `view:tabs` were paid by #17507 — `view:sort` through the list arm's INLINE
+ * `{ field, order }` entry, which is not the shared `SortItemSchema`. All
+ * seven are DELETED from this set — a paid debt leaves no entry behind.
  */
-const LEDGER: ReadonlySet<string> = new Set([
-  'view:columns',
-  'view:sort',
-  'view:tabs',
-]);
+const LEDGER: ReadonlySet<string> = new Set<string>([]);
 
 /** `z.never().optional().describe('[REMOVED] …')` — `shared/retired-key.ts`. */
 const RETIRED_PREFIX = '[REMOVED] ';

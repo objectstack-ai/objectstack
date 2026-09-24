@@ -5489,6 +5489,70 @@ const step18: MigrationStep = {
         + 'exportable by nobody, which is the point of the change; confirm that is what you want '
         + 'before granting it back.',
     },
+    // The delegated-admin scope's one required key, required NON-BLANK. Stored
+    // scopes are deliberately not rewritten: the root of a subtree cannot be
+    // inferred from a blank, so the stored row is refused on its next write and
+    // named by the boot reconciliation's existing durability error instead.
+    {
+      id: 'admin-scope-business-unit-blank-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'security.permission.adminScope.businessUnit (AdminScopeSchema, ADR-0090 D12) authored or stored '
+        + 'BLANK: the empty string, or a value that is nothing but whitespace (spaces, a tab, a newline). '
+        + 'The key is the scope\'s only required one and names the root business unit of the delegated '
+        + 'subtree; a blank value satisfied the requirement while naming no unit',
+      replacement:
+        'the sys_business_unit.name (machine name) of the business unit at the root of the subtree the '
+        + 'delegate administers, written out: `businessUnit: \'north_america\'`. If the permission set '
+        + 'should not delegate administration at all, remove `adminScope` from it. ⛔ There is no '
+        + 'replacement that can be DERIVED from what was written: a blank names no unit, so the root the '
+        + 'author meant is not recoverable, and the platform must not pick one.',
+      reason:
+        'Maintainer ruling A on #19461 (decision batch #217 item 1, 2026-09-23 「217 同意」). '
+        + '`AdminScopeSchema` declared `businessUnit` as a bare string with no minimum, so '
+        + '`{ businessUnit: \'\' }` and `{ businessUnit: \'   \' }` parsed green — measured against the '
+        + 'published spec 17.4.0 and re-measured on `main` before the change. This narrows a published '
+        + 'face: every other key of the scope is scoped TO this one, and ADR-0090 D12 declares the scope\'s '
+        + 'WHERE as a business-unit subtree, which a blank does not name. The delegated-admin gate '
+        + 'resolves the anchor by exact name, so a blank anchor resolves to an empty subtree and approves '
+        + 'nothing on the subtree axes — no escalation was measured; the defect is a declaration that '
+        + 'does not enforce what it declares, satisfied most readily by an author (an AI author above '
+        + 'all) that knew the key was required and did not yet know the unit. The refusal is a '
+        + 'NON-TRANSFORMING refinement at the key\'s own path, deliberately not a trim: the metadata save '
+        + 'path persists the submitted body verbatim rather than the parsed value, so a trimming schema '
+        + 'would validate one string and store another that the gate\'s exact lookup cannot resolve. A '
+        + 'real name therefore parses byte-identical. Scope is blankness only: a real name with '
+        + 'surrounding whitespace is not judged by this entry. ⚠️ STORED ROWS ARE NOT REWRITTEN and there '
+        + 'is no D2 conversion (no lossless rewrite exists — the root cannot be inferred, and dropping '
+        + 'the scope would silently change who is a delegate). The read path does not re-validate stored '
+        + 'rows, so no stored permission set becomes unreadable. A stored blank-anchored scope is refused '
+        + 'on its NEXT WRITE instead: a Setup or data-door edit of that permission set answers 422 '
+        + 'INVALID_METADATA naming adminScope.businessUnit, and the boot reconciliation backfill of a '
+        + 'legacy record with no metadata definition reports it through its existing durability ERROR '
+        + '(ADR-0094 D4), whose own prescription is to make the record body spec-valid; restoring a '
+        + 'trashed blank-anchored set brings the record back and reports the missing definition at ERROR '
+        + 'the same way. ⛔ No path skips the row. Ships at once, no grace window and no dual spelling '
+        + '(2026-08-27 maintainer ruling 「短期不考虑渐进」). ADR-0049 / ADR-0087 / ADR-0090.',
+      acceptanceCriteria:
+        'Search every authored and stored permission set for an `adminScope` whose `businessUnit` is '
+        + 'empty or whitespace-only — metadata files, `sys_metadata` permission rows, and the '
+        + '`admin_scope` column of `sys_permission_set` — and write the root unit\'s machine name, or '
+        + 'remove `adminScope` where the set should not delegate. The sweep is mechanical for authored '
+        + 'metadata: `AdminScopeSchema.safeParse` and `PermissionSetSchema.safeParse` answer exactly one '
+        + '`custom` issue at `businessUnit` (or `adminScope.businessUnit` when the set is parsed whole) '
+        + 'naming `sys_business_unit.name` as the valid anchor. For STORED rows the search above is the '
+        + 'catch-all, because reads never refuse: a definition already stored in `sys_metadata` with a '
+        + 'blank anchor loads and resolves exactly as before and says nothing until it is written again. '
+        + 'Two write paths then name it: a re-save of the set (refused 422 at adminScope.businessUnit), '
+        + 'and — for a legacy `sys_permission_set` record with no metadata definition only — the boot '
+        + 'log, where the ADR-0094 D4 backfill\'s first-failure ERROR names the record and carries the '
+        + 'offending key and its summary ERROR counts and names the failed records. ⛔ A clean boot is '
+        + 'therefore NOT a completed sweep. An absent `businessUnit` is refused exactly as before, with its own invalid_type issue. Nothing is '
+        + 'normalised on the way through: an accepted anchor arrives byte-identical to what was written. '
+        + 'The repo and example apps carried zero blank anchors at the time of the change, so no fixture '
+        + 'had to be rewritten.',
+    },
     {
       id: 'advanced-plugin-lifecycle-config-retired',
       surface:
@@ -8994,6 +9058,80 @@ const step18: MigrationStep = {
         + "slot phrase. A flow that boots without that warn is unaffected; every structural "
         + 'condition carrying a non-blank `source` parses byte-identically to before.',
     },
+    // The ledger `predicate` slots' half of the blank-predicate rule. A SEPARATE
+    // entry from `flow-edge-condition-evaluated-slot-source-required` on purpose:
+    // that one carries the structural slots (`edges[].condition`,
+    // `config.condition`), refused by the evaluated-slot rule under
+    // EVALUATED_EXPRESSION_SOURCE_REQUIRED, where removing a blank condition
+    // INVERTS the edge. These slots are declared `z.string()`, are refused under
+    // PREDICATE_SLOT_STRING_REFUSAL, and keep their run with `'false'` or no
+    // `visibleWhen` — a different prescription, which one entry cannot carry for both.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-predicate-slot-blank-string-refused',
+      surface:
+        'the two ledger predicate slots on a flow node — config.conditions[].expression on a decision '
+        + 'node (a branch predicate) and config.fields[].visibleWhen on a screen node (a field visibility '
+        + 'predicate) — authored as a string that is blank after trimming (\'\', \'   \', a tab or a '
+        + 'newline), at any depth including an ADR-0031 region body. Reachable wherever a flow is '
+        + 'authored or stored: defineStack({ flows }) sources, defineFlow(), an exported stack passed to '
+        + 'objectstack validate, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the predicate the branch or field was meant to test, as non-blank bare CEL text '
+        + '(`expression: \'record.amount > 10\'`, `visibleWhen: \'amount > 0\'`); or KEEP what the blank did. '
+        + 'On a screen field, drop the `visibleWhen` key: an absent `visibleWhen` shows the field '
+        + 'unconditionally, which is what a blank one already did at run time (the resume contract '
+        + 'treated it as absent, and the renderer fell back to showing the field). On a decision '
+        + 'branch, write `expression: \'false\'`: the evaluator answered the blank `false`, so the branch '
+        + 'keeps its label and is still never taken. ⚠️ Not by dropping a decision\'s only branch: with '
+        + 'no `conditions` the node routes by its out-edges alone, so the out-edge that branch labelled '
+        + 'is no longer held back. On a structural condition removal differs again: dropping a blank '
+        + '`condition` turns a never-firing edge into an always-firing one '
+        + '(`flow-edge-condition-evaluated-slot-source-required`)',
+      reason:
+        'Card #17493, ruling A (5651023407). Both slots are declared bare CEL text (`z.string()`) '
+        + 'and both admitted a blank string at every door: the expression ledger resolver skipped it '
+        + 'as "not authored", and `AutomationEngine.evaluateCondition` answered it `false` — so a '
+        + 'decision branch carrying it was never taken, with nothing said at any layer, and a screen '
+        + 'field carrying it was shown with its predicate ignored. #15572 had pinned that '
+        + 'admission as correct because the two sides agreed. The ruling is that self-consistency '
+        + 'between parser and evaluator is not a defence when the author\'s intent is silently '
+        + 'dropped — the third instance of one rule, after #17322 (the structural `config.condition`) '
+        + 'and #15811 (a blank evaluated `source`). The blank is now refused at `FlowSchema.parse`, '
+        + 'at `AutomationEngine.registerFlow` (which parses first) and at `objectstack validate`, all '
+        + 'three through `predicateSlotRefusal`, leading with `PREDICATE_SLOT_STRING_REFUSAL`. '
+        + '⚠️ No D2 conversion, and the reason is the judgment this entry delegates: the blank is '
+        + 'where an author meant to write a rule, and the platform cannot tell a predicate somebody '
+        + 'forgot from one they meant to delete. Keeping what ran is mechanical; writing the predicate '
+        + 'is what the author intended; only the author knows which. '
+        + '⚠️ Where such a blank already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0032.',
+      acceptanceCriteria:
+        'Grep every flow node in `defineStack({ flows })` sources, exported stacks and every flow '
+        + 'row in `sys_metadata` — including nodes inside a `loop` / '
+        + '`parallel` / `try_catch` region body — for a `decision` node whose '
+        + '`config.conditions[i].expression`, or a `screen` node whose `config.fields[i].visibleWhen`, '
+        + 'is a string that is empty after trimming. Each refusal names the node and the branch or '
+        + 'field, which is the TODO\'s locator: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.conditions.I.expression` (or `…config.fields.I.visibleWhen`, or the region '
+        + 'path `nodes.N.config.body.nodes.M.config…`), and `objectstack validate` prints the same '
+        + 'path; `validateStackExpressions` phrases it as '
+        + '`node \'check\' (decision) decision branch expression at config.conditions[0].expression`. '
+        + 'For each hit decide, per the `replacement` note, whether to write the predicate or to '
+        + 'keep what the blank did. Two proofs. (1) For a stack authored in config files, '
+        + '`objectstack validate` is clean. (2) Boot the stack and '
+        + 'confirm each flow REGISTERS: no `failed to register flow` warn for it (the three boot '
+        + 'paths spell it `[Automation] failed to register flow`, `[Automation] flow re-sync: failed '
+        + 'to register flow` and `[Automation] cold-boot flow bind: failed to register flow`) — that '
+        + 'warn line is the locator for a row that exists only in `sys_metadata`. A non-blank '
+        + 'predicate parses and registers byte-identically to before, and a non-string in these '
+        + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
+    },
     {
       id: 'hook-register-undispatched-lifecycle-event-refused',
       surface:
@@ -10551,6 +10689,54 @@ const step18: MigrationStep = {
         + 'and adds none.',
     },
     {
+      id: 'package-api-contracts-unmounted-entries-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span.
+      surface:
+        'api.PackageApiContracts.upgradePackage / api.PackageApiContracts.resolveDependencies / '
+        + 'api.PackageApiContracts.uploadArtifact — the three contract-map entries that bound '
+        + 'POST /api/v1/packages/upgrade, POST /api/v1/packages/resolve-dependencies and '
+        + 'POST /api/v1/packages/upload',
+      replacement:
+        'nothing — no route serves any of the three paths, so there is no entry to read instead. '
+        + 'Delete every read of `PackageApiContracts.upgradePackage`, '
+        + '`PackageApiContracts.resolveDependencies` and `PackageApiContracts.uploadArtifact`, and every '
+        + 'URL built from them or from the three hard-coded paths: a request to any of them was never '
+        + 'answered. The per-route request/response schemas (`PackageUpgradeRequestSchema`, '
+        + '`PackageUpgradeResponseSchema`, `ResolveDependenciesRequestSchema`, '
+        + '`ResolveDependenciesResponseSchema`, `UploadArtifactRequestSchema`, '
+        + '`UploadArtifactResponseSchema`) stay published, bound to no route. The four surviving entries '
+        + '(`listPackages`, `getPackage`, `installPackage`, `uninstallPackage`) are unchanged. If the '
+        + 'platform later serves a package upgrade, dependency-resolution or upload route, its entry '
+        + 'arrives in the same change that mounts it.',
+      reason:
+        'Maintainer ruling 2026-09-23 on #19116 (director seat, decision batch #217 item 4, letter A, '
+        + '「217 同意」). The contract map is the declaration SDKs, codegen and AI clients are entitled to '
+        + 'trust, and three of its seven entries named paths the composed runtime mounts nowhere: the '
+        + 'package dispatcher has no branch for a single-segment POST under /packages and '
+        + '`@objectstack/rest` mounts only /packages/publish there, so all three answered handled=false '
+        + 'while the four surviving entries answer 200/201 (measured on one HttpDispatcher over a real '
+        + 'SchemaRegistry, #18604) — and the generated reference page printed '
+        + 'all three as live endpoints. Unlike `installPackage` (#18058, rebound onto the serving '
+        + 'POST /api/v1/packages), no serving door existed to rebind them onto, and mounting three '
+        + 'capabilities with zero measured pull was ruled out (ADR-0049 enforce-or-remove). Zero '
+        + 'consumers measured at the retiring PR\'s base: across this repository the three paths occur '
+        + 'only in the declaring file, its unit test and the generated page, and the pinned objectui '
+        + 'checkout names none of the three keys, none of the paths and not `PackageApiContracts` '
+        + 'itself. A contract-map entry is not metadata — nothing authors, stores or parses it — so '
+        + 'there is no source a D2 conversion could rewrite, and the removal is recorded here.',
+      acceptanceCriteria:
+        'No code reads `PackageApiContracts.upgradePackage`, `.resolveDependencies` or '
+        + '`.uploadArtifact` from `@objectstack/spec` or `@objectstack/spec/api` — each is a TS2339 '
+        + 'property error after upgrade, and at runtime the key is absent (pinned in '
+        + 'api/package-api.test.ts together with the rule that no surviving entry is bound to any of the '
+        + 'three paths). No client, route table or generated artefact of yours still names '
+        + 'POST /api/v1/packages/upgrade, /resolve-dependencies or /upload. No metadata document needs '
+        + 'editing. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing ever mounted the three paths '
+        + 'or built a route from the entries, so every request answers exactly as before — the removal '
+        + 'retracts a false claim, not a capability.',
+    },
+    {
       id: 'package-rollback-response-retired',
       surface:
         'api.packageRollbackResponse (`PackageRollbackResponseSchema` in '
@@ -11403,6 +11589,56 @@ const step18: MigrationStep = {
         + 'their defaults and their mounts. The mounted REST surface is byte-identical before and after — none '
         + 'of the ten keys ever reached it. No code imports `CrudEndpointPattern(Schema)` from '
         + '`@objectstack/spec/api` (TS2305 after upgrade).',
+    },
+    // The row-level-security face of ruling A on #19886 (stage 2a): the formula
+    // evaluator plugin-security runs a policy's check against. Recorded as its own
+    // entry because the surface an author rewrites is the RLS predicate, a CEL
+    // string, not a filter object they wrote by hand.
+    {
+      id: 'rls-predicate-array-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].check (and .using, where the explain engine '
+        + 'attributes a record) — a CEL predicate comparing a field with != or == against a list, '
+        + 'a list literal or a current_user membership array, and the negation of such an ==. They '
+        + 'lower to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
+        + 'the @objectstack/formula evaluator matchesFilterCondition now refuses, together with '
+        + '{ field: { $eq: [...] } }, at any depth under $and / $or / $not, the empty array included',
+      replacement:
+        'the list operator the comparison was standing in for. "One of these values" is in: '
+        + 'record.status in ["open", "pending"]. "None of these values" is the negated in: '
+        + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands and '
+        + '{ $field } references evaluate exactly as before',
+      reason:
+        'Ruling A on #19886 refuses an array comparand under $ne, and the equality slot is ruling '
+        + '乙 on #19757; stage 2a of #19886 lands both on the formula face, the evaluator '
+        + 'plugin-security runs against the post-image of an insert or update to enforce a '
+        + 'row-level check. It compared strictly, and no stored value ever equals an array, so a '
+        + 'check written record.status != ["closed", "archived"], or != against a current_user '
+        + 'membership array, matched EVERY post-image, and a check written '
+        + '!(record.status == ["closed", "archived"]) did the same: every write such a policy was '
+        + 'written to refuse was admitted and stored. The positive record.status == ["open", '
+        + '"pending"] refused every write (403). All of these shapes now fail the write with '
+        + 'INVALID_FILTER / 400 before any record is judged, the envelope driver-sql and '
+        + 'driver-memory already give the same shape on the read side, and the explain engine\'s '
+        + 'record attribution refuses too. The message withholds the field, the operator and the '
+        + 'value, because the filter is usually an access policy the caller did not write and the '
+        + 'comparand may be a resolved membership set. Metadata AT REST is not rewritten and this '
+        + 'entry adds no D2 conversion: the platform cannot tell which list operator a list '
+        + 'comparison was standing in for, and a policy rewritten on the author\'s behalf would '
+        + 'change which writes it admits (the negated forms would start refusing writes they '
+        + 'admitted, the positive form would start admitting writes it refused), which is the '
+        + 'policy author\'s decision. ADR-0058 D4 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity check and using predicates of your permission sets for != or == '
+        + 'whose right-hand side is a list literal or a current_user membership array, and for the '
+        + 'negation of such an ==, then rewrite each with in or !(... in ...). A check that still '
+        + 'carries the shape refuses every write it governs with INVALID_FILTER / 400, allowed '
+        + 'values included, so one allowed write under each policy finds every such check left. '
+        + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
+        + 'admitted before were right: before this change a != or a negated == against a list '
+        + 'admitted every write.',
     },
     {
       id: 'schedule-flow-acting-organization-required',

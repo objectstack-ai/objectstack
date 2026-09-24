@@ -182,13 +182,24 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
     expect(found.every((f) => f.entry.role === 'predicate')).toBe(true);
   });
 
-  it('absent and empty values in a string-role slot are skipped', () => {
+  it('absent values in a string-role slot are skipped; a blank one is skipped only where no refusal applies', () => {
     expect(resolveFlowNodeExpressions('screen', {})).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: [] })).toEqual([]);
-    // A whitespace-only STRING is "not authored", on this side and at the
-    // evaluator alike — consistent on both sides, and deliberately left alone
-    // (#15572 changed the non-string rule, never the string one).
-    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })).toEqual([]);
+    // RE-JUDGED IN PLACE (#17493, ruling A 5651023407), not deleted. This line
+    // pinned `[]`: a whitespace-only STRING was "not authored", on this side
+    // and at the evaluator alike, and #15572 left the string rule alone on
+    // that ground — consistent on both sides. The ground is still true and was
+    // ruled no defence: a blank predicate is an author's rule that was never
+    // written, so the resolver now EMITS it for the `predicate` role and every
+    // door refuses it through `predicateSlotRefusal`.
+    expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: '   ' }] })
+      .map((f) => [f.path, f.value, f.entry.role])).toEqual([['fields[0].visibleWhen', '   ', 'predicate']]);
+    expect(resolveFlowNodeExpressions('decision', { conditions: [{ label: 'x', expression: '' }] })
+      .map((f) => [f.path, f.value])).toEqual([['conditions[0].expression', '']]);
+    // …and ONLY for that role: a `flow-template` slot's blank is still skipped,
+    // because no validator implements that dialect and the ruling did not
+    // reach it.
+    expect(resolveFlowNodeExpressions('loop', { collection: '   ' })).toEqual([]);
     expect(resolveFlowNodeExpressions('screen', { fields: 'nope' })).toEqual([]);
     // A `flow-template` slot keeps the old rule: no validator implements that
     // dialect, so emitting a non-string there would hand every consumer a
@@ -219,12 +230,24 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
   });
 
   describe('predicateSlotRefusal (#15572)', () => {
-    it('says nothing about a string — what it SAYS is validateExpression\'s business', () => {
+    it('says nothing about a non-blank string — what it SAYS is validateExpression\'s business', () => {
       expect(predicateSlotRefusal('record.rating >= 4')).toBeUndefined();
       // Including a string that is itself malformed: the shape is right, so
       // this function is done and the CEL parse issues the verdict.
       expect(predicateSlotRefusal('{record.rating} >= 4')).toBeUndefined();
-      expect(predicateSlotRefusal('')).toBeUndefined();
+    });
+
+    it('REFUSES a string that is blank after trimming, under the same sentence (#17493)', () => {
+      // RE-JUDGED IN PLACE (#17493, ruling A 5651023407), not deleted: the
+      // test above used to end `expect(predicateSlotRefusal('')).toBeUndefined()`
+      // on #15572's ground that the blank was treated the same on both sides.
+      // That ground was ruled insufficient, so the blank moved here.
+      for (const blank of ['', '   ', '\t\n ']) {
+        const refusal = predicateSlotRefusal(blank);
+        expect(refusal?.message.startsWith(PREDICATE_SLOT_STRING_REFUSAL), JSON.stringify(blank)).toBe(true);
+        // Attributed to what the author wrote, whitespace and all.
+        expect(refusal?.source).toBe(blank);
+      }
     });
 
     it('refuses an envelope and attributes it to the envelope\'s own source', () => {

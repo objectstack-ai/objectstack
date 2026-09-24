@@ -8,15 +8,15 @@
 - ✓ 按席位类别限定:每个 ✓ = 会话门开着的席位实调通过,⛔ 无 ✓ 不当已验证事实。
 - 403 后 `/rate_limit` 判凭据形态:15000/时 = 凭据活被 repo-scoping 拒;60/时或 auth 错 = 无凭据。
 - 两只桶:MCP 记链接用户 5000/时,兄弟会话共享同桶;REST/CCR 记 App 安装 15000/时。
-- `objectstack-fleet[bot]` 经 `fleet-write` 中继:四个写工具与 `with-fleet.sh --via auto` 共一选择器。
+- `objectstack-fleet[bot]` 经 `fleet-write` 中继:五个写工具与 `with-fleet.sh --via auto` 共一选择器。
 - 三条件全立才 `dispatch`:`CCR_AGENT_PROXY_ENABLED=1`、会话 id、中继活着;否则 `direct`,印一行。
 - 会话 id 由容器 `CLAUDE_CODE_REMOTE_SESSION_ID` 派生;`OS_FLEET_SESSION` 只覆盖本地检出与测试。
-- ⛔ 永不把它前缀在命令前:允许规则是字面前缀,带前缀的写落到分类器,席位就此卡死。
+- ⛔ 它、赋值与 `cd … &&` 前缀都落分类器;多仓云会话首调单独裸 `cd /home/user/objectstack`。
 - 活着 = 工作流文件在 `main` 且 Actions 状态 `active`;维护者在 Actions UI 停用即整队回 `direct`。
 - dispatch 带会话令牌发往 objectstack;run 在 runner 上以逐次铸造、窄到目标仓的 App 令牌执行。
-- 闭合 op 表住 `scripts/pm/fleet-write/ops.mjs`;读侧不走中继。
+- 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具,`dispatch.mjs` 无 allow 行。
 - 正文超 60,000 字节的那一笔 `post-stamped` 写走 `direct` 并印一行,身份是席位自己的用户。
-- run 失败(post-stamped/close-cards 4,label-write/issue-create 5)与 UNCONFIRMED(6)只读,⛔ 永不重试。
+- run 失败记 5(post-stamped 4,close-cards 有步落地或读不回 4),UNCONFIRMED 6:只读,⛔ 永不重试。
 
 ## 读侧 —— 全部可迁移
 

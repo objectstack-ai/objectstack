@@ -32,6 +32,11 @@ import {
   type RemoteCanonicalBackfillOptions,
   type RemoteCanonicalBackfillReport,
 } from './remote-canonical-backfill.js';
+import {
+  backfillRemoteCodecResidueColumns,
+  type RemoteCodecResidueColumn,
+  type RemoteCodecResidueReport,
+} from './remote-codec-residue-backfill.js';
 
 // ── Transport Mode ───────────────────────────────────────────────────────────
 
@@ -851,6 +856,15 @@ export class TursoDriver extends SqlDriver {
    * remote mode. Same question, same answer, different place to look it up.
    */
   private readonly remoteManagedObjects = new Set<string>();
+
+  /**
+   * [#19868] Remote `date` / json columns whose storage backfill found nothing
+   * left to do in THIS process, so later schema syncs skip them. In memory
+   * only: the next process probes again, at one round-trip for all columns.
+   * Nothing reads it but {@link backfillRemoteCodecResidue}; unlike the
+   * temporal marks, it switches no read-side repair.
+   */
+  private readonly remoteCodecResidueConverged: Record<string, Set<string>> = {};
 
   constructor(config: TursoDriverConfig) {
     const mode = TursoDriver.detectMode(config);
@@ -1784,7 +1798,8 @@ export class TursoDriver extends SqlDriver {
   /**
    * The post-DDL half every REMOTE schema door owes, in its one order: register
    * each synced object's field metadata, then run the canonical temporal
-   * backfill ONCE for the whole call.
+   * backfill and the `date` / `json` storage backfill, each ONCE for the whole
+   * call.
    *
    * All three remote doors (`syncSchema`, `initObjects`, `syncSchemasBatch`)
    * send their DDL through `RemoteTransport` and so never reach
@@ -1800,11 +1815,11 @@ export class TursoDriver extends SqlDriver {
    *
    * Callers reach here only after their DDL resolved, so a DDL failure throws
    * before anything is registered and no object is recorded as a table this
-   * driver created unless it exists. Registration precedes the backfill because
-   * the backfill reads it to learn which columns are temporal. The backfill
-   * probes every column it finds in one round-trip, so calling it once per call
-   * rather than once per object is what keeps a boot's steady state at a single
-   * round-trip.
+   * driver created unless it exists. Registration precedes the backfills
+   * because they read it to learn which columns are temporal, `date` or json.
+   * Each backfill probes every column it finds in one round-trip, so calling
+   * them once per call rather than once per object is what keeps a boot's
+   * steady state at one round-trip per backfill.
    */
   private async completeRemoteSchemaSync(
     objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
@@ -1812,6 +1827,76 @@ export class TursoDriver extends SqlDriver {
     if (objects.length === 0) return;
     for (const obj of objects) this.registerRemoteFieldMetadata(obj);
     await this.backfillRemoteCanonicalTemporalQuietly();
+    // [#19868] Then the `date` / `json` cells the pre-#19844 batch door stored
+    // without the write codec. Same registration, one probe round-trip of its own.
+    await this.backfillRemoteCodecResidueQuietly();
+  }
+
+  /**
+   * [#19868] Converge the REMOTE `Field.date` and `Field.json` cells that the
+   * pre-#19844 `syncSchemasBatch` door stored without `formatInput`: a `date`
+   * stored as a full timestamp, and a json string stored bare. See
+   * `remote-codec-residue-backfill.ts` for which cells are rewritten, which are
+   * left alone because their original value cannot be told from their bytes,
+   * and why no converted cell reads differently afterwards.
+   *
+   * Private on purpose: it needs no operator surface, because a budget-stopped
+   * column resumes on the next schema sync by itself.
+   */
+  private async backfillRemoteCodecResidue(
+    options?: RemoteCanonicalBackfillOptions,
+  ): Promise<RemoteCodecResidueReport> {
+    if (!this.isRemote) return { columns: [] };
+    const client = this.remoteTransport?.getClient() as RemoteBackfillClient | null | undefined;
+    if (!client) return { columns: [] };
+
+    const columns: RemoteCodecResidueColumn[] = [];
+    for (const table of this.remoteManagedObjects) {
+      const done = this.remoteCodecResidueConverged[table];
+      for (const field of this.dateFields[table] ?? []) {
+        if (!done?.has(field)) columns.push({ table, field, kind: 'date' });
+      }
+      // A single-value media column's canonical form (a quoted or a bare id) is
+      // an ADR-0104 deployment fact these remote doors never resolve, so it is
+      // not ours to rewrite. Both forms read the same.
+      const media = new Set(this.mediaFields[table] ?? []);
+      for (const field of this.jsonFields[table] ?? []) {
+        if (!media.has(field) && !done?.has(field)) columns.push({ table, field, kind: 'json' });
+      }
+    }
+    if (columns.length === 0) return { columns: [] };
+
+    const report = await backfillRemoteCodecResidueColumns(
+      client,
+      columns,
+      // The driver's OWN `Field.date` write conversion, handed over rather than
+      // copied, so what the backfill writes is what `formatInput` writes.
+      { toDateOnly: (value) => this.toDateOnly(value) },
+      options,
+      this.logger,
+    );
+    for (const column of report.columns) {
+      if (column.done) (this.remoteCodecResidueConverged[column.table] ??= new Set<string>()).add(column.field);
+    }
+    return report;
+  }
+
+  /**
+   * Run {@link backfillRemoteCodecResidue} after a remote schema sync and
+   * swallow everything, for the reason
+   * {@link backfillRemoteCanonicalTemporalQuietly} gives: a migration must
+   * never fail a boot. The module already reports instead of throwing; this
+   * catch covers a client lost between the sync and here.
+   */
+  private async backfillRemoteCodecResidueQuietly(): Promise<void> {
+    try {
+      await this.backfillRemoteCodecResidue();
+    } catch (err) {
+      this.logger.warn(
+        `[driver-turso] remote date/json storage backfill failed; the cells stay as they were`,
+        { error: err instanceof Error ? err.message : String(err) },
+      );
+    }
   }
 
   /**

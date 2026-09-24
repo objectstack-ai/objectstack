@@ -72,6 +72,10 @@
  * implements that dialect are checked.
  */
 
+// The repo's one notion of "blank" (`source.trim()`), shared with the evaluated
+// slots — never a second hand-written one here.
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
+
 /**
  * The dialect a declared expression slot takes — and therefore what, if
  * anything, can validate it today.
@@ -279,20 +283,28 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *
  * What counts as "an authored expression" depends on the role:
  *
- *  - `predicate`: the slot IS the expression, so a non-empty string is emitted.
- *    Absent and `null` are skipped — "not authored" is not a malformed
- *    expression — and so is a whitespace-only string, which both validators and
- *    the evaluator already agree means the same thing. A **non-string** is
- *    emitted too (#15572), for the consumer to refuse through
+ *  - `predicate`: the slot IS the expression, so every string is emitted —
+ *    including one that is blank after trimming (#17493). Absent and `null`
+ *    are skipped: "not authored" is not a malformed expression. A **non-string**
+ *    is emitted too (#15572), for the consumer to refuse through
  *    {@link predicateSlotRefusal}: it used to be skipped as "a type violation
  *    for the schema pass to report", and for a schemaless node type there is no
  *    schema pass — `decision` publishes no descriptor `configSchema`, and
  *    `DecisionConditionSchema` is never parsed against a node's open
  *    `z.record` config — so nothing reported it and the value ran anyway.
- *  - `flow-template`: same string rule, minus the refusal. No validator
- *    implements that dialect (see {@link FlowNodeExpressionRole}), so emitting a
- *    non-string there would hand every consumer a finding none of them can
- *    judge.
+ *
+ *    ⚠️ The blank string used to be SKIPPED here as "not authored", on the
+ *    ground that both validators and the evaluator treated it the same way.
+ *    That ground was true and was ruled insufficient (#17493, ruling A): a
+ *    blank predicate is an author who meant to write a rule, and a parser and
+ *    an evaluator agreeing to ignore it only proves the platform did not crash.
+ *    It is now emitted so the consumer can refuse it, by the same
+ *    {@link predicateSlotRefusal} every other unauthorable value meets.
+ *  - `flow-template`: the pre-#17493 string rule — a non-blank string only —
+ *    minus the refusal. No validator implements that dialect (see
+ *    {@link FlowNodeExpressionRole}), so emitting a blank or a non-string there
+ *    would hand every consumer a finding none of them can judge; that ruling
+ *    reached the `predicate` slots and nothing else.
  *  - `value`: the slot holds a VALUE that may be spelled as an expression, so
  *    only envelope-shaped objects ({@link isExpressionEnvelopeShaped}) are
  *    emitted. A string there is `{token}` interpolation — the `flow-template`
@@ -312,7 +324,10 @@ export function resolveFlowNodeExpressions(
       if (entry.role === 'value') {
         if (isExpressionEnvelopeShaped(value)) out.push({ entry, path, value });
       } else if (typeof value === 'string') {
-        if (value.trim()) out.push({ entry, path, value });
+        // #17493 — a BLANK string in a `predicate` slot is emitted, for the
+        // consumer to refuse (see `predicateSlotRefusal`); a `flow-template`
+        // slot keeps skipping it.
+        if (entry.role === 'predicate' || NON_BLANK_STRING(value)) out.push({ entry, path, value });
       } else if (entry.role === 'predicate' && value != null) {
         // #15572 — a non-string in a predicate slot. Emitted so a consumer can
         // REFUSE it (see `predicateSlotRefusal`), never so it can be parsed.
@@ -328,19 +343,37 @@ export function resolveFlowNodeExpressions(
  * words however the value is wrong, so an author (or an agent reading the
  * failure) learns the rule before the detail. Mirrors
  * `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL`, the `value` role's equivalent.
+ *
+ * #17493 widened the sentence rather than adding a second one: a string that is
+ * blank after trimming is refused by the same rule, so the sentence names it.
+ * Every refusal of a `predicate` slot — at `FlowSchema.parse`,
+ * `AutomationEngine.registerFlow` and `objectstack validate` — leads with it.
  */
 export const PREDICATE_SLOT_STRING_REFUSAL =
-  'A predicate slot holds BARE CEL TEXT — it is declared `z.string()` — so an expression envelope, or any other '
-  + 'non-string, is not authorable there.';
+  'A predicate slot holds BARE CEL TEXT that states a rule — it is declared `z.string()` — so an expression '
+  + 'envelope, any other non-string, or a string that is blank after trimming is not authorable there.';
 
 /**
  * Why a value sitting in a `predicate`-role slot is not authorable at all —
- * the SINGLE notion both consumers apply, derived once (#15572).
+ * the SINGLE notion every door applies, derived once (#15572, #17493).
  *
- * `undefined` for every string: what a string *says* is judged by
- * `validateExpression('predicate', …)`, unchanged, and a whitespace-only string
- * never reaches here (the resolver treats it as "not authored", the same way
- * the evaluator does — deliberately, and not a defect on either side).
+ * `undefined` for every NON-BLANK string: what such a string *says* is judged
+ * by `validateExpression('predicate', …)`, unchanged.
+ *
+ * ## The blank string — refused since #17493
+ *
+ * A string that is blank after trimming (`''`, `'   '`, `'\t\n'`) is refused
+ * here, with the sentence above. This function used to return `undefined` for
+ * it too, and its docblock called that deliberate: the resolver skipped the
+ * blank as "not authored" and the evaluator answered it the same way, so the
+ * two sides agreed and neither was ruled a defect. #17493's ruling A
+ * (5651023407) superseded that ground — self-consistency between parser and
+ * evaluator is not a defence when the author's intent is silently dropped:
+ * a `decision` branch whose `expression` is blank is never taken, and nothing
+ * said so at any layer. The ruling is the third of one rule, after #17322 (the
+ * structural `config.condition`) and #15811 (the evaluated `source`), so the
+ * blank is refused by the SAME notion of blank those use (`NON_BLANK_STRING`,
+ * i.e. `trim()`), under this slot's own sentence.
  *
  * ## Why this is a refusal and not a parse
  *
@@ -359,10 +392,22 @@ export const PREDICATE_SLOT_STRING_REFUSAL =
  * on a predicate no validator ever read.
  *
  * @returns the refusal and the source to attribute it to, or `undefined` when
- *   the value is a string and therefore this function's business is done.
+ *   the value is a non-blank string and therefore this function's business is
+ *   done.
  */
 export function predicateSlotRefusal(value: unknown): { message: string; source: string } | undefined {
-  if (typeof value === 'string') return undefined;
+  if (typeof value === 'string') {
+    if (NON_BLANK_STRING(value)) return undefined;
+    return {
+      message:
+        `${PREDICATE_SLOT_STRING_REFUSAL} Found a string that is blank after trimming, which states no rule. `
+        + 'Write the predicate the branch or field was meant to test (e.g. `record.rating >= 4`), or keep what '
+        + 'the blank did: on a screen field, drop the `visibleWhen` key; on a decision branch, write '
+        + '`expression: \'false\'`, the value the blank evaluated to. Not by dropping a decision\'s only branch: '
+        + 'the node then routes by its out-edges alone, and the out-edge that branch labelled is no longer held back.',
+      source: value,
+    };
+  }
   const envelope = isExpressionEnvelopeShaped(value);
   const found = envelope
     ? 'an expression envelope (an object naming a `dialect`)'
@@ -433,8 +478,14 @@ export const STRUCTURAL_CONDITION_SHAPE_REFUSAL =
  *    `FlowSchema.parse`. #17322 then ruled on the disagreement that left
  *    (一个操作两个实现且行为不一致 ⇒ 带治理的一侧胜出,另一侧改绑) and rebound the node
  *    door at `AutomationEngine.registerFlow`; #17495 followed at
- *    `objectstack validate`. A blank structural condition is a defect today,
- *    refused at all three doors.
+ *    `objectstack validate`. A blank structural condition is a defect today:
+ *    on an edge it is refused at `FlowSchema.parse` (and so at the two doors
+ *    that parse first), and on a node at `registerFlow` and
+ *    `objectstack validate`. ⚠️ Not at `FlowSchema.parse` on a node — its
+ *    `config` is an open record the flow parse passes a blank
+ *    `config.condition` through, which is why this sentence used to read "all
+ *    three doors" and no longer does (#17493 measured it while giving the
+ *    sibling `predicate` slots below a flow-parse refusal of their own).
  *
  *    It is refused there by the EVALUATED-SLOT rule, not by this one. Both
  *    consumers ask `EvaluatedExpressionInputSchema` — the edge door's own
@@ -471,22 +522,35 @@ export const STRUCTURAL_CONDITION_SHAPE_REFUSAL =
  * `EvaluatedExpressionSchema` is the one place to relax, and this clause
  * follows it.
  *
- * ## The sibling `predicate` slots — an OPEN question, not answered here
+ * ## The sibling `predicate` slots — ruled, and refused by THEIR rule, not this one
  *
- * The blank rule reached the two STRUCTURAL slots only. The ledger `predicate`
- * slots — `config.conditions[].expression`, a `decision` node's branch list, and
- * `screen.fields[].visibleWhen` — are judged by {@link predicateSlotRefusal},
- * not by this function, and they still ADMIT a whitespace-only string:
- * registration takes it and `evaluateCondition` answers `false`, the same silent
- * dead branch #17322 closed one slot over. Recorded here rather than fixed,
- * because it is a RULING and not a refactor: #15572 pinned that admission as
- * correct on the very ground #15807 removed — that the blank is treated the same
- * way on both sides — so narrowing those slots re-judges a pin and moves a
- * published accept-set. #17493 carries the question (does the ledger predicate
- * slot follow the structural one?) and it is open at the time of writing. ⛔ Do
- * not answer it by widening this refusal: those slots do not pass through this
- * door, and a second notion of "blank" is what the shared refusal exists to
- * prevent.
+ * The blank rule first reached the two STRUCTURAL slots only. The ledger
+ * `predicate` slots — `config.conditions[].expression`, a `decision` node's
+ * branch list, and `screen.fields[].visibleWhen` — are judged by
+ * {@link predicateSlotRefusal}, not by this function, and they went on
+ * admitting a blank string after #17322: registration took it, and a `decision`
+ * branch carrying it was never taken — the same silent dead branch #17322
+ * closed one slot over.
+ *
+ * This paragraph used to record that as an OPEN question, and said why it was
+ * not fixed here: it was a RULING and not a refactor, because #15572 had pinned
+ * that admission as correct on the ground that the blank was treated the same
+ * way on both sides (the resolver skipped it, the evaluator answered it), so
+ * narrowing those slots re-judged a pin and moved a published accept set.
+ * #17493 carried the question — does the ledger predicate slot follow the
+ * structural one? — and its ruling A (5651023407) answered YES, on a ground
+ * wider than this card: self-consistency between parser and evaluator is not a
+ * defence when the author's intent is silently dropped. What changed this
+ * paragraph is that ruling, not a new measurement — the two sides still agree
+ * with each other, and that agreement no longer suffices.
+ *
+ * So both slots now REFUSE a blank string, at `FlowSchema.parse`,
+ * `AutomationEngine.registerFlow` and `objectstack validate`, leading with
+ * {@link PREDICATE_SLOT_STRING_REFUSAL}. ⛔ Still not by widening THIS
+ * refusal: those slots do not pass through this door, a string is still a
+ * well-shaped structural condition, and ONE notion of "blank" — the shared
+ * `NON_BLANK_STRING`, which the evaluated-slot rule refusing the structural
+ * blank also composes — is what keeps the doors from drifting.
  *
  * ## What it refuses, and what that was doing before
  *

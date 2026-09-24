@@ -20,11 +20,15 @@ affected too (a `readonlyWhen` lock binds them).
 **What happens now.** A value one `readonlyWhen` lock drops can no longer
 unlock another: no field is written while its `readonlyWhen` is TRUE on the row
 the update stores. The locks are judged together, again with each dropped
-value put back to the row's stored one, until no further field locks; then a
-field that was held only by a value that was later put back is released, if
-the result agrees with the stored row. In the example above `amount` is
-dropped as locked, exactly as `update(c1, { amount: 999 })` on its own always
-was. Values a `beforeUpdate` hook wrote are still stored and read as before.
+value put back to the row's stored one, until no further field locks. Then the
+fields held only by a value that was later put back are released, and every
+lock is judged again against what that release stores, round after round,
+until the dropped fields are exactly the ones locked on the row the update
+stores; after one round more than the caller sent fields carrying a
+`readonlyWhen`, the first, larger set of drops stands instead. In the example
+above `amount` is dropped as locked, exactly as `update(c1, { amount: 999 })`
+on its own always was. Values a `beforeUpdate` hook wrote are still stored and
+read as before.
 
 **What else you may see move:**
 
@@ -39,16 +43,21 @@ was. Values a `beforeUpdate` hook wrote are still stored and read as before.
   the amount the row keeps: a requirement only the let-through amount raised
   no longer refuses the write, and clearing a field the kept amount requires is
   now refused (`VALIDATION_FAILED`).
-- The release is one step, not a search. When it does not settle the drops,
-  every lock involved holds and the field is dropped, never written — so a
-  field whose own lock is FALSE on the stored row can still be dropped. That
-  happens when locks read each other in a cycle (no set of drops agrees with
-  the stored row), and in a cascade where releasing one field changes another's
-  verdict: with `c` locked by `previous.c == 'L'`, `x` by `record.c == 'open'`
-  and `y` by `record.x == 'xv'`, `update(r, { c: 'open', x: 'xv', y: 'yv' })`
-  on a row with `c: 'L'` drops all three, although `x` is unlocked on the
-  stored row. That was dropped before this change too; it is tracked as
-  #19927.
+- A field whose own lock is FALSE on the stored row can still be dropped, but
+  only where locks read each other in a cycle (a `parent`-scoped lock counts
+  as reading the master-detail field, which picks the header). Without such a
+  cycle the update drops exactly the caller's fields whose lock is TRUE on the
+  row it stores (on a bulk update, on at least one matched row). In a cycle,
+  no set of drops may agree with the stored row: with `a` locked by `record.b
+  == 'x'` and `b` by `record.a == 'old_a'`, `update(r, { a: 'new_a', b: 'x'
+  })` on a row `{ a: 'old_a', b: 'y' }` drops both, although `a` is unlocked
+  on the row it stores. A cycle can also have more than one set that agrees:
+  with `a` locked by `record.b == 'new_b'` and `b` by `record.a == 'new_a'`,
+  `update(r, { a: 'new_a', b: 'new_b' })` on a row holding neither new value
+  would agree with the row by dropping either one, and it drops both. Some
+  other updates with two such sets store one of them. Where the drops do not
+  settle, the first, larger set stands: a lock the update cannot settle is
+  not waived.
 - A master-detail repoint that the field's own `record`-scoped lock used to
   hold can now land. Its lock is judged together with the other locks on the
   header the update names, so when the value that lock reads is itself locked

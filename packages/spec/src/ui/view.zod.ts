@@ -1015,29 +1015,35 @@ export const ListColumnSchema = lazySchema(() => strictObject({
   surface: 'this list column',
   history: VIEW_HISTORY,
 }, {
-  field: z.string().describe('Field name (snake_case)'),
-  label: I18nLabelSchema.optional().describe('Display label override'),
-  width: z.number().positive().optional().describe('Column width in pixels'),
-  align: z.enum(['left', 'center', 'right']).optional().describe('Text alignment'),
-  hidden: z.boolean().optional().describe('Hide column by default'),
-  sortable: z.boolean().optional().describe('Allow sorting by this column'),
-  resizable: z.boolean().optional().describe('Allow resizing this column'),
-  wrap: z.boolean().optional().describe('Allow text wrapping'),
-  type: z.string().optional().describe('Renderer type override (e.g., "currency", "date")'),
+  field: z.string().describe('Field name (snake_case)').meta({ title: 'Field' }),
+  label: I18nLabelSchema.optional().describe('Display label override').meta({ title: 'Label' }),
+  width: z.number().positive().optional().describe('Column width in pixels').meta({ title: 'Width (px)' }),
+  align: z.enum(['left', 'center', 'right']).optional().describe('Text alignment').meta({ title: 'Alignment' }),
+  hidden: z.boolean().optional().describe('Hide column by default').meta({ title: 'Hidden' }),
+  sortable: z.boolean().optional().describe('Allow sorting by this column').meta({ title: 'Sortable' }),
+  resizable: z.boolean().optional().describe('Allow resizing this column').meta({ title: 'Resizable' }),
+  wrap: z.boolean().optional().describe('Allow text wrapping').meta({ title: 'Wrap Text' }),
+  type: z.string().optional().describe('Renderer type override (e.g., "currency", "date")')
+    .meta({ title: 'Renderer Type' }),
 
   /** Pinning (Airtable-style frozen columns) */
-  pinned: z.enum(['left', 'right']).optional().describe('Pin/freeze column to left or right side'),
+  pinned: z.enum(['left', 'right']).optional().describe('Pin/freeze column to left or right side')
+    .meta({ title: 'Pinned' }),
 
   /** Column Footer Summary (Airtable-style aggregation) */
   summary: z.union([ColumnSummarySchema, ColumnSummaryConfigSchema]).optional()
-    .describe('Footer aggregation for this column — the function alone, or { type, field } to aggregate another field'),
+    .describe('Footer aggregation for this column — the function alone, or { type, field } to aggregate another field')
+    .meta({ title: 'Summary' }),
 
   /** Compound cell (Airtable-style): render another field inline before the value */
-  prefix: ColumnPrefixSchema.optional().describe('Field rendered inline before this cell value'),
+  prefix: ColumnPrefixSchema.optional().describe('Field rendered inline before this cell value')
+    .meta({ title: 'Prefix' }),
 
   /** Interaction */
-  link: z.boolean().optional().describe('Functions as the primary navigation link (triggers View navigation)'),
-  action: z.string().optional().describe('Registered Action ID to execute when clicked'),
+  link: z.boolean().optional().describe('Functions as the primary navigation link (triggers View navigation)')
+    .meta({ title: 'Primary Link' }),
+  action: z.string().optional().describe('Registered Action ID to execute when clicked')
+    .meta({ title: 'Click Action' }),
 }));
 
 /**
@@ -1664,15 +1670,15 @@ export const ViewTabSchema = lazySchema(() => strictObject({
   surface: 'this view tab',
   history: VIEW_HISTORY,
 }, {
-  name: SnakeCaseIdentifierSchema.describe('Tab identifier (snake_case)'),
-  label: I18nLabelSchema.optional().describe('Display label'),
-  icon: z.string().optional().describe('Tab icon name'),
-  view: z.string().optional().describe('Referenced list view name from listViews'),
-  filter: z.array(ViewFilterRuleSchema).optional().describe('Tab-specific filter criteria'),
-  order: z.number().int().min(0).optional().describe('Tab display order'),
-  pinned: z.boolean().default(false).describe('Pin tab (cannot be removed by users)'),
-  isDefault: z.boolean().default(false).describe('Set as the default active tab'),
-  visible: z.boolean().default(true).describe('Tab visibility'),
+  name: SnakeCaseIdentifierSchema.describe('Tab identifier (snake_case)').meta({ title: 'Name' }),
+  label: I18nLabelSchema.optional().describe('Display label').meta({ title: 'Label' }),
+  icon: z.string().optional().describe('Tab icon name').meta({ title: 'Icon' }),
+  view: z.string().optional().describe('Referenced list view name from listViews').meta({ title: 'List View' }),
+  filter: z.array(ViewFilterRuleSchema).optional().describe('Tab-specific filter criteria').meta({ title: 'Filter' }),
+  order: z.number().int().min(0).optional().describe('Tab display order').meta({ title: 'Display Order' }),
+  pinned: z.boolean().default(false).describe('Pin tab (cannot be removed by users)').meta({ title: 'Pinned' }),
+  isDefault: z.boolean().default(false).describe('Set as the default active tab').meta({ title: 'Default Tab' }),
+  visible: z.boolean().default(true).describe('Tab visibility').meta({ title: 'Visible' }),
 }).describe('Tab configuration for multi-tab view interface'));
 
 /**
@@ -2706,8 +2712,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
       id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
     },
   }, {
-    field: z.string(),
-    order: z.enum(['asc', 'desc'])
+    // Titles mirror the shared `SortItemSchema` (`shared/enums.zod.ts`): this
+    // entry is an INLINE shape, so titling that schema never reached it.
+    field: z.string().meta({ title: 'Field' }),
+    order: z.enum(['asc', 'desc']).meta({ title: 'Direction' }),
   }), {
     // Only the spelling that used to be legal gets the retirement message; a
     // number, an object, anything else keeps zod's default `invalid_type`.
