@@ -139,11 +139,14 @@ on:
   # until the next sweep.
   #
   # On a `pull_request` run everything executes — selection, download,
-  # regeneration, the coverage check, the byte comparison and the partitioner's
-  # verdict — so the transport and the flags are proven on a real runner rather
-  # than argued about. The WRITE is what is skipped: no branch is pushed, no PR
-  # is opened, no label is written, and the body that would have been posted is
-  # rendered to the run's step summary instead.
+  # regeneration, the coverage check, the byte comparison, the partitioner's
+  # verdict, and the write step's own script with the write step's own `env:`,
+  # up to and including the local commit — so the transport, the flags and the
+  # write step's variables are proven on a real runner rather than argued
+  # about. Only the acts that leave the runner are switched off, behind the one
+  # `DRY_RUN` switch in that step: no branch is pushed, no PR is opened, no
+  # label is written, and the body that would have been posted is rendered to
+  # the run's step summary instead.
   pull_request:
     paths:
       - '.github/workflows/shard-timings-refresh.yml'
@@ -517,8 +520,9 @@ jobs:
 
       # Composition is separated from the WRITE on purpose: a `pull_request` run
       # of this lane must exercise the body-building — the shard durations, the
-      # bins, the conditional blocks — without pushing anything. Both the write
-      # step and the dry-run step below consume this file.
+      # bins, the conditional blocks — without pushing anything. The write step
+      # below consumes this file on every event: as the PR body when it writes,
+      # and as the step summary on a `pull_request` dry run.
       - name: Compose the pull request body
         if: steps.compare.outputs.changed == 'true'
         env:
@@ -631,16 +635,81 @@ jobs:
           } > "$RUNNER_TEMP/pr-body.md"
           echo "Composed a $(wc -l < "$RUNNER_TEMP/pr-body.md")-line pull request body."
 
-      # The WRITE. Skipped on a `pull_request` run of this lane: a PR that only
-      # edits this workflow must never push a bot branch or open a second PR.
-      - name: Push the refresh branch and open the pull request
-        if: steps.compare.outputs.changed == 'true' && github.event_name != 'pull_request'
+      # The WRITE — and, on a `pull_request` run of this lane, its rehearsal.
+      #
+      # ONE STEP, ONE `env:`, ONE SCRIPT, ON EVERY EVENT (#18341). The write and
+      # its dry run used to be two steps behind mutually exclusive `if:`s
+      # (`github.event_name != 'pull_request'` and `== 'pull_request'`), so no
+      # pull request ever executed the script that writes. Its first execution
+      # was scheduled run 34810389734: the dataset was computed, and the step
+      # then died at `git commit` with `RUN_COUNT: unbound variable`, because
+      # this step's `env:` exported three of the five variables its script
+      # expands. Under `set -u` a key missing from `env:` blows up only on the
+      # leg that runs, and the rehearsal ran the other leg.
+      #
+      # So a `pull_request` run now executes THIS script with THIS `env:`. The
+      # branch, the `git add` and the commit — whose message expands every
+      # provenance variable — happen for real on the runner, with the repo's own
+      # commit hook, so a variable missing from the block below reds the pull
+      # request that dropped it. Only the acts that leave the runner are
+      # switched, and all of them are switched in ONE place: `outward`, which on
+      # a dry run prints the command instead of running it. The shell expands a
+      # command's arguments before `outward` is entered, so `set -u` judges every
+      # argument on both legs alike.
+      #
+      # ⛔ Never call `git push`, `gh` or any other network act outside
+      # `outward`, and never split this step back into an event-gated pair:
+      # either one reopens a leg that no pull request can exercise.
+      - name: Push the refresh branch and open the pull request (dry run on pull_request)
+        if: steps.compare.outputs.changed == 'true'
         env:
+          # The switch: 'true' on a `pull_request` run and only there. The script
+          # refuses any other spelling, and refuses 'false' on a `pull_request`
+          # run, so no edit to this line can make a pull request push.
+          DRY_RUN: ${{ github.event_name == 'pull_request' }}
           GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+          # Every variable the script expands that the runner does not provide.
+          # The commit message is the dataset's provenance and names all four:
+          # ⛔ never drop one from the message to get a green run.
           RUN_ID: ${{ steps.generate.outputs.run_id }}
+          RUNS: ${{ steps.generate.outputs.runs }}
+          RUN_COUNT: ${{ steps.generate.outputs.run_count }}
           HEAD_SHA: ${{ steps.generate.outputs.head_sha }}
         run: |
           set -euo pipefail
+
+          case "$DRY_RUN" in
+            true) DRY_TAG='(dry run, not executed) ' ;;
+            false) DRY_TAG='' ;;
+            *)
+              echo "::error::DRY_RUN must be 'true' or 'false', got '$DRY_RUN'. Nothing was pushed."
+              exit 1
+              ;;
+          esac
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ] && [ "$DRY_RUN" != 'true' ]; then
+            echo "::error::DRY_RUN is '$DRY_RUN' on a pull_request run. A pull_request run of this lane never pushes a branch, opens a PR or writes a label. Nothing was pushed."
+            exit 1
+          fi
+
+          # outward [--stand-in TEXT] COMMAND...
+          # The one dry-run switch. Live, it runs COMMAND. Dry, it prints COMMAND
+          # to the log instead, and prints TEXT on stdout where the live call's
+          # output would have been, so every line after it runs on a value of
+          # the same shape.
+          outward() {
+            local stand_in=''
+            if [ "$1" = '--stand-in' ]; then
+              stand_in="$2"
+              shift 2
+            fi
+            if [ "$DRY_RUN" = 'true' ]; then
+              { printf 'DRY RUN, not executed:'; printf ' %q' "$@"; printf '\n'; } >&2
+              if [ -n "$stand_in" ]; then printf '%s\n' "$stand_in"; fi
+              return 0
+            fi
+            "$@"
+          }
+
           BRANCH="claude/shard-timings-refresh-$RUN_ID"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -651,19 +720,20 @@ jobs:
           git commit \
             -m "chore(ci): refresh the Test Core shard-timings dataset" \
             -m "Regenerated by .github/workflows/shard-timings-refresh.yml from the test-core-run-summary artifacts of $RUN_COUNT accumulated run(s) ($RUNS), newest $RUN_ID at $HEAD_SHA. Generated, never hand-edited."
-          git push origin "$BRANCH"
+          outward git push origin "$BRANCH"
 
-          PR_URL=$(gh pr create --base main --head "$BRANCH" \
+          PR_URL=$(outward --stand-in "https://github.com/$GITHUB_REPOSITORY/pull/0" \
+            gh pr create --base main --head "$BRANCH" \
             --title "chore(ci): refresh the Test Core shard-timings dataset" \
             --body-file "$RUNNER_TEMP/pr-body.md")
-          echo "Opened $PR_URL" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "${DRY_TAG}Opened $PR_URL" | tee -a "$GITHUB_STEP_SUMMARY"
 
           # ADDITIVE label write only. A whole-set PUT replaces the PR's labels
           # and destroys any that land in between — measured on this repo, one
           # second wide (see pr-automation.yml's header). POST names only what it
           # adds, so no interleaving can lose another writer's label.
-          PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq .number)
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
+          PR_NUMBER=$(outward --stand-in 0 gh pr view "$PR_URL" --json number --jq .number)
+          outward gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
             -f "labels[]=skip-changeset" > /dev/null
 
           # Read back, because an additive write is necessary and not sufficient:
@@ -671,37 +741,36 @@ jobs:
           # label after a successful POST. `skip-changeset` is this PR's exemption
           # from the changeset gate — it publishes nothing — so losing it turns
           # the gate red on a PR that legitimately has no changeset.
-          if gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
+          if outward --stand-in skip-changeset gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
              | grep -qxF 'skip-changeset'; then
-            echo "skip-changeset confirmed on PR #$PR_NUMBER."
+            echo "${DRY_TAG}skip-changeset confirmed on PR #$PR_NUMBER."
           else
             echo "::warning::skip-changeset did not survive the write on PR #$PR_NUMBER (a concurrent whole-set label PUT strips it). Re-applying once."
-            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
+            outward gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
               -f "labels[]=skip-changeset" > /dev/null
-            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
+            outward gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
               | grep -qxF 'skip-changeset' \
               || echo "::error::skip-changeset is still absent from PR #$PR_NUMBER; the changeset gate will demand a changeset this PR legitimately has none of. Apply the label by hand."
           fi
 
-      # The dry-run half of the `pull_request` posture. Everything above ran for
-      # real; this renders the body that WOULD have been posted, so a reviewer of
-      # a change to this lane sees the actual output rather than the diff of the
-      # code that produces it.
-      - name: Dry run — the pull request this would have opened
-        if: steps.compare.outputs.changed == 'true' && github.event_name == 'pull_request'
-        run: |
-          {
-            echo "### Shard timings: dry run (no branch pushed, no PR opened, no label written)"
-            echo
-            echo "This is a \`pull_request\` run of the refresh lane itself. The run selection, the"
-            echo "artifact download, the regeneration, the coverage check and the partitioner's verdict"
-            echo "all executed for real; only the write was skipped. The body below is what a scheduled"
-            echo "run would have posted."
-            echo
-            echo "---"
-            echo
-            cat "$RUNNER_TEMP/pr-body.md"
-          } >> "$GITHUB_STEP_SUMMARY"
+          # The dry-run half of the `pull_request` posture: render the body that
+          # WOULD have been posted, so a reviewer of a change to this lane sees the
+          # actual output rather than the diff of the code that produces it.
+          if [ "$DRY_RUN" = 'true' ]; then
+            {
+              echo "### Shard timings: dry run (no branch pushed, no PR opened, no label written)"
+              echo
+              echo "This is a \`pull_request\` run of the refresh lane itself. The run selection, the"
+              echo "artifact download, the regeneration, the coverage check, the partitioner's verdict"
+              echo "and the write step's own script, up to and including its local commit, all"
+              echo "executed for real; only the push, the PR and the label write were skipped. The body"
+              echo "below is what a scheduled run would have posted."
+              echo
+              echo "---"
+              echo
+              cat "$RUNNER_TEMP/pr-body.md"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Say what happened when nothing changed
         if: steps.compare.outputs.changed == 'false'
