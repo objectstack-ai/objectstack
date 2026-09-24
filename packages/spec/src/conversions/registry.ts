@@ -7152,7 +7152,11 @@ const elementFormRemoved: MetadataConversion = {
  * replays this chain over each stored row before merging it
  * (`applyConversionsToStoredItem`), so a row written before the item door
  * closed stops overriding at the next sync, with this entry's notice logged,
- * rather than at the next re-save.
+ * rather than at the next re-save. That needed the stored pass itself to
+ * reach `translation` rows at all — it had no collection for the type and
+ * returned every one untouched (`STORED_ONLY_COLLECTIONS` in `./stored.ts`) —
+ * which also puts the metadata API's reads and `os migrate meta --stored`
+ * on this entry.
  *
  * Two shapes, told apart structurally rather than by key spelling:
  *
