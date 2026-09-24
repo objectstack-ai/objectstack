@@ -3,7 +3,8 @@
 /**
  * [#19150] `declaresCollection` reads a `pipe` on the side the AUTHOR writes.
  *
- * The walker behind `objectCollectionKeys()` — the key set
+ * The walker behind `objectUnmergeableKeys()` (named `objectCollectionKeys()`
+ * until #16075 added config objects to it) — the key set
  * `objectConflict: 'merge'` refuses to combine (#14848) — read only `def.in`
  * on its `pipe` arm. `z.preprocess(fn, schema)` puts a transform STAGE in `in`
  * and the real, validated schema in `out`, the opposite of `a.transform(fn)`,
@@ -63,7 +64,7 @@ const NAMES = vi.hoisted(() => ({
 }));
 
 // The probe keys ride on `ObjectSchema.shape` because that shape is the ONLY
-// input `objectCollectionKeys()` reads. Nothing else in the module graph is
+// input `objectUnmergeableKeys()` reads. Nothing else in the module graph is
 // replaced: the factory spreads the real module and the real shape.
 vi.mock('./data/object.zod', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./data/object.zod')>();
