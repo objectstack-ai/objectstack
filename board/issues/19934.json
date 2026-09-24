@@ -2,7 +2,7 @@
   "number": 19934,
   "kind": "pull_request",
   "title": "fix(spec): a lazySchema reference keeps its authored description in z.toJSONSchema",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T00:57:17Z",
-  "updated_at": "2026-09-24T02:12:16Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-24T02:32:28Z",
+  "closed_at": "2026-09-24T02:32:26Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-24T02:32:26Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19934",

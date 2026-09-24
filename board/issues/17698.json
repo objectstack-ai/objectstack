@@ -2,8 +2,8 @@
   "number": 17698,
   "kind": "issue",
   "title": "finding: issues #16714 and #16715 return 404, and shipped source cites both — including inside a refusal message printed at an author",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,16 +13,19 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-11T15:11:18Z",
-  "updated_at": "2026-09-20T03:07:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-24T03:42:05Z",
+  "closed_at": "2026-09-24T03:42:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

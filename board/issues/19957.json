@@ -1,0 +1,31 @@
+{
+  "number": 19957,
+  "kind": "pull_request",
+  "title": "feat(spec)!: retire CONCURRENT_LIMIT_EXCEEDED from StandardErrorCode",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T07:39:28Z",
+  "updated_at": "2026-09-24T08:06:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19957",
+  "body": "Fixes #17707\n\nClause-②: no\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-24T07:48Z). Ruling A `5651023241`, narrowed by `5807013768`; the dev report is on #17158 (`5809956647`). #17158 did not ride: the objectui pin imports three of its types, so it went back to the decision box (`5810005336`).</sub>\n\n`CONCURRENT_LIMIT_EXCEEDED` leaves `StandardErrorCode`. The retired spelling is refused, with its prescription, at the three catalogue doors:\n- `StandardErrorCode` / `EnhancedApiErrorSchema.code`;\n- `ErrorCode` / `ApiErrorSchema.code`;\n- `makeApiErrorSchema`.\n\n`QUOTA_EXCEEDED` is unchanged.\n\n## What changed\n\n- `errors.zod.ts`, `error-code-ledger.zod.ts` and `contract.zod.ts` pass one error map, taken from the package-internal `api/retired-error-codes.ts`.\n- `content/docs/api/error-catalog.mdx` loses the entry. The reference pages and `scripts/error-status-unpinned-baseline.json` were regenerated.\n- `scripts/check-error-status-conformance.mjs`: its vocabulary parse now stops at the enum array's own bracket. Without that, the new options object made it misread. The fix is pinned in the script's self-test.\n- ADR-0087 D3 entry `standard-error-code-concurrent-limit-exceeded-retired`; `registry.ts` regenerated.\n- Changeset: `@objectstack/spec` at `minor`, with a **BREAKING** banner, FROM → TO, and out-of-repo consumers marked NOT MEASURED.\n\n## Verification (the dev's, at `e9f9b060f3`)\n\n- The spec build, typecheck and suites are green, and so are the suites of the vocabulary's consumers.\n- Ablations:\n  - removing any door's map turns that door's refusal pins red;\n  - re-planting the member turns the refusal pins red;\n  - reverting the parser fix reddens its self-test case and the error-catalog doc tests.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

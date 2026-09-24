@@ -1,0 +1,31 @@
+{
+  "number": 19947,
+  "kind": "pull_request",
+  "title": "fix(formula, driver-mongodb): refuse == / != against a list literal at the CEL lowering and $ne arrays at the mongodb face",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T03:18:09Z",
+  "updated_at": "2026-09-24T08:12:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19947",
+  "body": "Refs #19886\n\nClause-②: no (narrowing)\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-24T07:02Z; round 4 after record `5808690296`). Stage 2c of #19886. Seat rulings: `5806391955`, `5806943154`, `5807743099`, `5808108434`. Dev reports on the card: `5806886759`, `5807587023`, `5808082032`, `5808419047`, `5809358163`.</sub>\n\nSome row-level or sharing CEL predicates no longer lower: those comparing a field with `==` / `!=` against a list, whether a list literal or a `current_user` membership array. Every consumer fails closed:\n- the RLS compiler drops the policy;\n- the sharing bootstrap skips the rule;\n- the authoring lint reports the literal forms.\n\ndriver-mongodb's `translateFilter` refuses `$ne` with an array comparand (`INVALID_FILTER` / 400).\n\n## What changed\n\n- `packages/formula/src/cel-to-filter.ts` adds the refusal, covering list literals and resolved arrays, both orientations, and forms under `!`.\n- `packages/drivers/driver-mongodb/src/mongodb-filter.ts` adds the `$ne` array refusal at any depth.\n- `packages/lint/src/validate-rls-predicate-enforceability.ts`: the reference pass probes each kernel `current_user` key with its runtime type (scalar keys as scalars, membership keys as arrays).\n- Brought in line with the merged stage 2a (PR #19946): a CEL-authored `check` carrying the shape is now dropped at compile (403 when no other policy applies), so `matchesFilterCondition`'s 400 remains for a filter passed to it directly. Its ADR-0087 entry, its plugin-security pin and the docblock spans made false by this are corrected by cuts. So are three spans of its PENDING changeset: a #17712 DELIBERATE CORRECTION, so `Check Changeset` is red by design and landing waits on the maintainer's confirmation (see the gate comment).\n- Changeset: BREAKING, at `minor` for formula, driver-mongodb, plugin-security, plugin-sharing and lint, and at `patch` for spec, which carries the ADR-0087 entry `cel-predicate-list-comparand-refused`.\n\n## Compile faces\n\nThis PR changes one compile face, driver-mongodb `translateFilter` (`$ne` with an array → 400). The equality-slot array is left to the shared face (PR #19882). For the other faces, see PR #19946's table.\n\n## Verification (the dev's, at `3bf405b501`; round 4 re-measured at the merged head)\n\n- The suites of every touched package are green, and CI is green.\n- End to end on driver-mongodb (mingo proxy; live `mongod` NOT MEASURED) and driver-sql, every probe fails closed: reads return no rows, and a `check` gets 403 with nothing stored. That includes `!(record.x == current_user.org_user_ids)`, which read every row on driver-mongodb before.\n- The controls are unchanged: `in`, `not in`, scalar `==` / `!=`, `null` and `{ $field }`.\n- Ablating the lowering refusal turns the refusal pins red, including the re-judged 2a pin (which then receives 2a's 400).\n\n## Not in this PR\n\n- #19951: the lint is silent on `==` / `!=` against a membership key.\n- #19949: driver-mongodb `{ $field }`.\n- Stage 2b: the shared face, after PR #19882.\n- Stage 2d.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

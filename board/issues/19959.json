@@ -1,0 +1,32 @@
+{
+  "number": 19959,
+  "kind": "issue",
+  "title": "[finding] A CEL row-level predicate comparing a field to the bare `current_user` root lowers against the whole caller object; a `check` written `!= current_user` admits every write",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T08:14:30Z",
+  "updated_at": "2026-09-24T08:22:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19959",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the at-tier re-review record `5810400326` on PR #19947 (#19886 stage 2c), ③ non-blocking item 1. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The defect\n\nA CEL row-level predicate can compare a field against the variable ROOT itself: `record.f != current_user`, `record.f == current_user`, or `!(record.f == current_user)`. Each lowers to a filter whose comparand is the whole caller context object.\n\n**Read by this seat** at `f49e075189` (the PR #19947 head):\n- `resolveValue` (`packages/formula/src/cel-to-filter.ts:568-586`) walks `leaf.path` from `ctx.variables`, so a leaf naming the root alone returns the whole object.\n- `comparandOf` (`:491-495`) refuses only `Array.isArray(value)` under `==` / `!=`, so an object passes to `emit`.\n\n**Measured by the reviewer** (record `5810400326`) at that head:\n- The shape check and both lint rules are silent.\n- Through the real `SecurityPlugin` on driver-sql, a `check` written `!= current_user` or `!(== current_user)` admits and stores every forbidden insert and by-id update. 2a's evaluator refuses arrays only, and `$ne` with an object answers `true`.\n- A USING-only such policy admits every insert on the #19952 write pass, while its read is 400.\n- Explain reports `narrows` / `visible: true`, and its `readFilter` echoes the caller's `org_user_ids`.\n- driver-mongodb `translateFilter` passes it, and mingo selects every row.\n\nLive mongod, PG and MySQL are NOT MEASURED.\n\n## Relation to #19886\n\nThis is the class of #19886, one comparand kind over. Ruling A (`5805254639`) names arrays. Stage 2d (`5806608550`) lists three other shapes, and this is not among them. The reviewer calls it p1-grade by #19886's own criterion and names `comparandOf` as the fix site. Grading is triage's.\n\nSeam: `formula:compileCelToFilter` (`comparandOf`) → runtime: `plugin-security` RLS `check` / `using` and explain; `driver-mongodb` `translateFilter`.\n\nDedupe words: `current_user root comparand` · `!= current_user whole context object` · `$ne object comparand admits` · `cel variable root lowered as value` · `check != current_user admits every write`"
+}

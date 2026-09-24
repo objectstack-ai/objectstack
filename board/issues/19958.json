@@ -1,0 +1,31 @@
+{
+  "number": 19958,
+  "kind": "issue",
+  "title": "docs: error-handling.mdx says `QUOTA_EXCEEDED` is \"not emitted today … do not write a client branch against it\", but cloud's AI agent route emits it and objectui branches on it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T07:51:33Z",
+  "updated_at": "2026-09-24T08:22:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19958",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #17707 dev (report `5809956647` on #17158, class a). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The published text\n\n`content/docs/protocol/kernel/error-handling.mdx`, the `QUOTA_EXCEEDED` section (the seat read it on `origin/main` `f5a7250b7a`), says:\n- \"**Envelope:** none — no producer emits it\";\n- \"**Not emitted today.** … no ObjectStack producer emits it. No response carries this code … — do not write a client branch against it.\"\n\nThe section was written under #17187 (closed), when no producer was known.\n\n## The counter-fact\n\n- **cloud:** the director's reading in `5807013768` on #17707, `origin/main` `b524051`, reads `packages/service-ai/src/routes/agent-routes.ts:572` returning `sendError(429, 'QUOTA_EXCEEDED', …)` when a user's per-turn AI quota is spent. This seat cannot read cloud: the reading is the director's.\n- **objectui:** at the pinned `.objectui-sha` `62597c5880`, `packages/plugin-chatbot/src/tool-display.ts:314-321` branches on it (`error.details.resetAt`, `category: 'rate_limit'`), and its test pins that path.\n- Ruling A on #17707 was narrowed on exactly this counter-fact: `QUOTA_EXCEEDED` stays in `StandardErrorCode` (`5807013768`).\n\n## Why it matters\n\nA reader who follows the page drops a client branch that a live route needs, and it is precisely the branch objectui ships. The page tells readers not to write code the product depends on.\n\nSeam: spec:`StandardErrorCode.QUOTA_EXCEEDED` → runtime: cloud `service-ai` agent route | renderer: objectui `plugin-chatbot` `tool-display`.\n\nDedupe words: `QUOTA_EXCEEDED not emitted today` · `error-handling.mdx QUOTA_EXCEEDED` · `QUOTA_EXCEEDED producer agent route docs`"
+}

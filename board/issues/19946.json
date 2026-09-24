@@ -2,9 +2,9 @@
   "number": 19946,
   "kind": "pull_request",
   "title": "fix(formula): refuse an array comparand under $ne and in the equality slot (write-check bypass)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,8 +12,7 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
-    "size/m",
+    "size/l",
     "tests",
     "tooling"
   ],
@@ -21,12 +20,16 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T02:21:07Z",
-  "updated_at": "2026-09-24T02:28:35Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-09-24T04:26:02Z",
+  "closed_at": "2026-09-24T04:26:01Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-24T04:26:01Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19946",
-  "body": "Refs #19886\n\nClause-②: no\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-24T02:27Z). Stage 2a of ruling `5805254639` (A) under seat ruling `5805921577`; stage 2b closes the card. The dev reports are on #19886 (`5805865119` stage 1, `5806337850` stage 2a).</sub>\n\n`matchesFilterCondition` (`@objectstack/formula`, compile face 5) now refuses an array comparand under `$ne` and in the equality slot (a bare-array field spec, or `$eq`). It throws `INVALID_FILTER` / 400 before any record is judged, at any depth under `$and` / `$or` / `$not`. This face is the one `plugin-security` runs a row-level `check` on. Stage 1 measured `check`s written `record.f != [list]`, `!= current_user.<membership array>` and `!(record.f == [list])` admitting the forbidden writes and storing them. `$in` / `$nin`, scalars, `null`, `Date` and `{ $field }` references are unchanged.\n\n## Compile faces, both shapes (measured at this head; locations re-verified with the compile-surfaces grep)\n\n| face | `$ne: [..]` | `{ f: [..] }` / `$eq: [..]` | `$not { f: [..] }` |\n|:--|:--|:--|:--|\n| 1 driver-sql `applyFilterCondition` (`sql-driver.ts:15311`; sqlite-wasm and turso local inherit) | 400 INVALID_FILTER | 400 / 400 | 400 |\n| 2 turso `RemoteTransport.buildWhereSQL` (`remote-transport.ts:2632`) | 400 INVALID_FILTER | 400 / 400 | 400 |\n| 3 service-analytics `compileScopedFilterToSql` (`read-scope-sql.ts:503`) | answers: emits a NULL-or-not-equal comparison and binds the array as its one parameter (better-sqlite3 then throws a TypeError at bind; PG NOT MEASURED) | 500 READ_SCOPE_COMPILE_FAILED / answers an equality comparison with the array bound | 500 READ_SCOPE_COMPILE_FAILED |\n| 4 service-analytics `lowerAnalyticsWhere` (`filter-normalizer.ts:1508`) | passes through unchanged | passes through / passes through | passes through |\n| **5 formula `matchesFilterCondition`** (`matches-filter.ts:212`), **this PR** | **400 INVALID_FILTER** (was: true for every record) | **400 / 400** (was: false) | **400** (was: true for every record) |\n| half: objectql having `matchesHaving` (`having-filter.ts:292`) | answers true for every row | answers false / false | answers true for every row |\n| driver-memory: live find (mingo) and `memory-matcher.ts` `match` | 400 INVALID_FILTER | 400 / 400 | 400 |\n| driver-mongodb `translateFilter` (`mongodb-filter.ts:568`) | passes `$ne: [..]` through; mingo proxy selects every scalar row | passes through; mingo proxy selects none | lowers to `$nor`; mingo proxy selects every row |\n\nA live `mongod` was NOT MEASURED; mingo is named as the proxy. Faces 3, 4, the half face and driver-mongodb are outside 2a's surface: they are reported on the card, not changed here.\nFaces 3, 4, the half face and driver-mongodb are outside 2a: they are carried on #19886, not changed here.\n\n## Verification (the dev's, at `58ce4f1b16`)\n\n- formula, plugin-security and lint suites green; typecheck green for formula and plugin-security.\n- Ablating the refusal turns the refusal pins and both plugin-security write-check pins red; the neighbour pins stay green.\n- A policy carrying either shape now refuses every write it governs, allowed values included, until it is rewritten with `in` (fail-closed). The positive `record.f == [list]` keeps its verdict (every write refused); its envelope moves from 403 to 400.\n- No ADR-0087 entry: the changeset is a non-breaking patch.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+  "body": "Refs #19886\n\nClause-②: no (narrowing)\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-24T03:43Z; round 2 after record `5806589396`). Stage 2a of ruling `5805254639` (A) under seat ruling `5805921577`; stage 2b closes the card. The dev reports are on #19886 (`5805865119` stage 1, `5806337850` stage 2a, `5807134185` round 2).</sub>\n\n`matchesFilterCondition` (`@objectstack/formula`, compile face 5) now refuses an array comparand under `$ne` and in the equality slot (a bare-array field spec, or `$eq`). It throws `INVALID_FILTER` / 400 before any record is judged, at any depth under `$and` / `$or` / `$not`. This face is the one `plugin-security` runs a row-level `check` on. Stage 1 measured `check`s written `record.f != [list]`, `!= current_user.<membership array>` and `!(record.f == [list])` admitting the forbidden writes and storing them. `$in` / `$nin`, scalars, `null`, `Date` and `{ $field }` references are unchanged.\n\n## Compile faces, both shapes (measured at this head; locations re-verified with the compile-surfaces grep)\n\n| face | `$ne: [..]` | `{ f: [..] }` / `$eq: [..]` | `$not { f: [..] }` |\n|:--|:--|:--|:--|\n| 1 driver-sql `applyFilterCondition` (`sql-driver.ts:15311`; sqlite-wasm and turso local inherit) | 400 INVALID_FILTER | 400 / 400 | 400 |\n| 2 turso `RemoteTransport.buildWhereSQL` (`remote-transport.ts:2632`) | 400 INVALID_FILTER | 400 / 400 | 400 |\n| 3 service-analytics `compileScopedFilterToSql` (`read-scope-sql.ts:503`) | answers: emits a NULL-or-not-equal comparison and binds the array as its one parameter | 500 READ_SCOPE_COMPILE_FAILED / answers an equality comparison with the array bound | 500 READ_SCOPE_COMPILE_FAILED |\n| 4 service-analytics `lowerAnalyticsWhere` (`filter-normalizer.ts:1508`) | passes through unchanged | passes through / passes through | passes through |\n| **5 formula `matchesFilterCondition`** (`matches-filter.ts:212`), **this PR** | **400 INVALID_FILTER** (was: true for every record) | **400 / 400** (was: false) | **400** (was: true for every record) |\n| half: objectql having `matchesHaving` (`having-filter.ts:292`) | answers true for every row | answers false / false | answers true for every row |\n| driver-memory: live find (mingo) and `memory-matcher.ts` `match` | 400 INVALID_FILTER | 400 / 400 | 400 |\n| driver-mongodb `translateFilter` (`mongodb-filter.ts:568`) | passes `$ne: [..]` through; mingo proxy selects every scalar row | passes through | lowers to `$nor`; mingo proxy selects every row |\n\nA live `mongod` was NOT MEASURED; mingo is named as the proxy. Faces 3, 4, the half face and driver-mongodb are outside 2a's surface: they are reported on the card, not changed here.\n\n## Verification (the dev's, at `58ce4f1b16`)\n\n- formula, plugin-security and lint suites green; typecheck green for formula and plugin-security.\n- Ablating the refusal turns the refusal pins and both plugin-security write-check pins red; the neighbour pins stay green.\n- A policy carrying either shape now refuses every write it governs, allowed values included, until it is rewritten with `in` (fail-closed). The positive `record.f == [list]` keeps its verdict (every write refused); its envelope moves from 403 to 400.\n- BREAKING: `@objectstack/formula` and `@objectstack/plugin-security` at `minor`, `@objectstack/spec` at `patch` for the ADR-0087 entry `rls-predicate-array-comparand-refused` (step 18).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
 }

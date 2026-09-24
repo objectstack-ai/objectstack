@@ -2,8 +2,8 @@
   "number": 19101,
   "kind": "issue",
   "title": "[finding] gen:openapi and gen:schema disagree about OS_EAGER_SCHEMAS, so a published artifact's bytes depend on which generator ran — and it already made a measuring instrument lie",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T19:14:01Z",
-  "updated_at": "2026-09-24T02:11:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-24T02:32:27Z",
+  "closed_at": "2026-09-24T02:32:27Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

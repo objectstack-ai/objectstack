@@ -2,8 +2,8 @@
   "number": 19942,
   "kind": "issue",
   "title": "security: `RowLevelSecurityPolicySchema.check` is published as \"defaults to USING clause if not specified\", but the write check runs only policies that declare `check`, so a USING-only policy never gates an INSERT",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "bug",
     "domain:services",
-    "pm:queue",
     "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T01:39:37Z",
-  "updated_at": "2026-09-24T02:19:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-24T05:46:48Z",
+  "closed_at": "2026-09-24T05:45:22Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19942",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #19886 stage-1 dev (report `5805865119`, class b). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The declared contract\n\n- `packages/spec/src/security/rls.zod.ts:418`, the published describe on `check`: \"Validation condition for INSERT/UPDATE (defaults to USING clause if not specified - enforced at application level)\".\n- Its TSDoc at `:403` says implementations should use the USING clause as the CHECK clause when none is given.\n- The same sentence ships in `content/docs/references/security/rls.mdx:175` and `content/docs/references/security/permission.mdx:171`.\n\n## The runtime\n\n- `packages/plugins/plugin-security/src/security-plugin.ts:6493` builds the post-image write check from `collectRLSPolicies(...).filter((p) => policyDeclaresClause(p, 'check'))`.\n- If no applicable policy declares `check`, it returns `null`, and no write check runs.\n\nThe seat read both sides on `origin/main` `fdeeea0cc9`.\n\n**Measured by the #19886 dev** on driver-sql at `fdeeea0cc9`, through the real `SecurityPlugin` and engine: a policy with only `using: \"record.status != 'closed'\"` did not stop an INSERT of `status = 'closed'`. The insert was admitted and stored. The dev also notes that the comment in `RLSCompiler.compileFilter` about \"defaulting to using when omitted\" is not reachable from this caller.\n\n## Why it matters\n\nAn author who relies on the published default writes a USING-only policy and expects inserts to be held to it. They are not. The published contract promises a write-side guarantee that the runtime does not give (ADR-0049 enforce-or-remove). Either direction moves something:\n- enforcing the default refuses writes that are admitted today;\n- dropping the claim changes a published describe and two docs pages.\n\nSeam: `spec:RowLevelSecurityPolicySchema.check` (describe) → runtime: `plugin-security` `computeWriteCheckFilter` (the `policyDeclaresClause(p, 'check')` filter).\n\nDedupe words: `rls check defaults to using` · `using-only policy insert not checked` · `computeWriteCheckFilter policyDeclaresClause` · `RowLevelSecurityPolicySchema check describe`"
