@@ -32,10 +32,13 @@ const SYS = { context: { isSystem: true } } as any;
 /**
  * The H1 a `titleFormat`-first renderer draws: each `{field}` placeholder
  * substituted with the row's value. It is the reference the formula has to
- * reproduce, not a second title resolver.
+ * reproduce, not a second title resolver. The parsed schema carries
+ * `titleFormat` as a `{ dialect: 'template', source }` envelope.
  */
-function renderTitleFormat(template: string, row: Record<string, unknown>): string {
-  return template.replace(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g, (_m, key: string) => String(row[key] ?? ''));
+function renderTitleFormat(titleFormat: unknown, row: Record<string, unknown>): string {
+  const source = typeof titleFormat === 'string' ? titleFormat : (titleFormat as { source?: unknown })?.source;
+  if (typeof source !== 'string') throw new Error(`titleFormat carries no template source: ${JSON.stringify(titleFormat)}`);
+  return source.replace(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g, (_m, key: string) => String(row[key] ?? ''));
 }
 
 /** The H1 under ADR-0079's order: the value at the resolved title field. */
@@ -88,7 +91,7 @@ describe('[#20015] sys_automation_run resolves a real record title under ADR-007
 
     expect(h1Of(row!)).toBe('quote_approval · manager_gate');
     expect(h1Of(row!)).not.toBe(row!.id);
-    expect(h1Of(row!)).toBe(renderTitleFormat(SysAutomationRun.titleFormat as string, row!));
+    expect(h1Of(row!)).toBe(renderTitleFormat(SysAutomationRun.titleFormat, row!));
     expect(resolveRecordTitle(SysAutomationRun, storedOnly(row!))).toBe('quote_approval · manager_gate');
   });
 
