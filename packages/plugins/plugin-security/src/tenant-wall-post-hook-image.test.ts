@@ -29,8 +29,9 @@
  *   organization scope is refused on a by-id update, an insert, an array
  *   insert and a predicate update, with step 3.7's own refusal
  *   (`PERMISSION_DENIED` / 403), and the driver's table is unchanged; the
- *   same when a business `check` is installed beside it (one composed seam),
- *   and under the `group` posture against the membership set;
+ *   same when a business `check` is installed beside it (one composed seam,
+ *   which still runs the check), and under the `group` posture against the
+ *   membership set;
  * - fail-closed: a host that never runs the installed judgement is refused
  *   rather than vouched for;
  * - the controls: an in-scope hook write is admitted; a supplied
@@ -311,6 +312,20 @@ for (const [driverName, makeDriver] of DRIVERS) {
       const insertOutcome = await attempt(() => insert(b, 'qa_checked', { id: 'r3', name: 'allowed', target_org: OTHER_ORG }));
       expectTenantRefusal(insertOutcome, 'insert', 'qa_checked');
 
+      expect(await b.table('qa_checked')).toEqual(SEEDED);
+    });
+
+    it('the composed seam still runs the business `check`: an in-scope insert the check refuses is refused, and no row is stored', async () => {
+      const b = await boot(makeDriver);
+
+      // An insert's `check` has no payload half: only the seam judges it, so
+      // this cell holds the check's half of the composed judgement.
+      const outcome = await attempt(() => insert(b, 'qa_checked', { id: 'r3', name: 'forbidden', target_org: OWN_ORG }));
+
+      expect(outcome.ok, 'expected a refusal, got a completed write').toBe(false);
+      expect(outcome.code).toBe('PERMISSION_DENIED');
+      expect(outcome.status).toBe(403);
+      expect(outcome.developerMessage).toContain('the insert would violate a row-level CHECK');
       expect(await b.table('qa_checked')).toEqual(SEEDED);
     });
 
