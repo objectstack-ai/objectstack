@@ -7,15 +7,16 @@
 - fork PR = 提案,席位永不放行;采纳 diff 内部落地,见 `references/external-contributions.md`。
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
-- 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
+- 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 交付后复核按面欠 ⛔ 不按车道(五面见 `references/contract-review.md`);双肢命中即 spec 车道。
-- 子代理起不来 ⇒ 复核缺席,PR 留 draft 队列外等档;唯一旁路是维护者亲审,逐次为准。
+- 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
+- DELIBERATE CORRECTION 红(`check-empty-changeset`):同 head 达档复核 PASS 记录即确认,⛔ 不等维护者。
+- 记录须点名被改 note、逐句判改写句,缺一不算;算即按 SKILL.md 三条件带红入队,门禁不改。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
 - 契约复核的适用面、资格与归属见 `references/contract-review.md`。
-- 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
 - 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
 - 验证层 = 部署以 CI 为闸、发布后探测线上面、失败自动回滚并立卡。
 - 该类仓的落地判据是已发布且探测通过,⛔ 不是 MERGED;跟到发布为止。
@@ -28,10 +29,9 @@
 - 疑似新 flaky 只留提请,⛔ 不自行加表;纯计数不追记,只有改变修法作用域时才记。
 - 四分支:已知 flaky ⇒ 原样重投;已修签名再现 ⇒ ⛔ 不重投,判新问题重新诊断。
 - 基上缺已合修复 ⇒ merge main 推新提交,重跑无效。
-- 新签名 ⇒ ⛔ 不重投,在 PR 与其 `Fixes` 卡各留完整签名与初判。
-- 每次处置留审计评论,重投写签名与台账依据。
-- 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单 + 解除条件,见 landing-operations C。
-- 多个已实现 PR 全碰生成物 ⇒ 串行接力一次只放行一个,每棒一整圈,见 landing-operations D。
+- 新签名 ⇒ ⛔ 不重投,PR 与其 `Fixes` 卡各留完整签名与初判;下条三事实全立可重投一次。
+- 三事实:失败文件 import 闭包与 diff 不相交、队列基座同 shard 绿、首错是超时非断言。
+- 每次处置留审计评论,重投写签名与台账依据或三行回执;同签名再弹即停,交下一席重诊。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成
 
@@ -46,11 +46,12 @@
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
-- 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED。
+- 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
-- 绿即转 ready + 挂 auto-merge;未绿按阶梯重挂定点。
+- 绿即转 ready + 挂 auto-merge,只走 `settings.json` allow 行的 ccr 两命令;未绿按阶梯重挂定点。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
+- 落地中遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法或改走中继绕过。
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
@@ -73,8 +74,7 @@
 - 取 open 卡清单对照预期 diff:预期之外从 open 消失的,就是被闭合关键词静默误关的卡。
 - 落地后再核一次落地判据本身:队列的合并同样走 os-regen,A 的静默吞并一样能发生。
 - MERGED 不是终点:发版后义务见 `release-aftercare.md`。
-- 落地窗口给关键 PR 挂 `subscribe_pr_activity`,会话型座位专用;Routine 座位维持轮询。
-- ⛔ 不订阅 dev 交报告前的 PR;订阅是感知补充,⛔ 不替代 flip 定点。
+- 会话席窗口内 PR 须在挂 `subscribe_pr_activity`,缺即补;⛔ 不早于报告,Routine 座位轮询。
 - MERGED 或关闭即退订,同刻把 `mode:cloud` 派的会话 `archive_session`。
 - 触发条件是卡终局且报告已收复核;⛔ 合并前不归档,误归档可 unarchive 但容器现场已失。
 - 暂停或交接时把在挂订阅清点进座位贴,⛔ 不留孤儿订阅。

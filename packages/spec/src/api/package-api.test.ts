@@ -505,9 +505,6 @@ describe('PackageApiContracts', () => {
     expect(PackageApiContracts.listPackages).toBeDefined();
     expect(PackageApiContracts.getPackage).toBeDefined();
     expect(PackageApiContracts.installPackage).toBeDefined();
-    expect(PackageApiContracts.upgradePackage).toBeDefined();
-    expect(PackageApiContracts.resolveDependencies).toBeDefined();
-    expect(PackageApiContracts.uploadArtifact).toBeDefined();
     expect(PackageApiContracts.uninstallPackage).toBeDefined();
   });
 
@@ -515,9 +512,6 @@ describe('PackageApiContracts', () => {
     expect(PackageApiContracts.listPackages.method).toBe('GET');
     expect(PackageApiContracts.getPackage.method).toBe('GET');
     expect(PackageApiContracts.installPackage.method).toBe('POST');
-    expect(PackageApiContracts.upgradePackage.method).toBe('POST');
-    expect(PackageApiContracts.resolveDependencies.method).toBe('POST');
-    expect(PackageApiContracts.uploadArtifact.method).toBe('POST');
     expect(PackageApiContracts.uninstallPackage.method).toBe('DELETE');
   });
 
@@ -530,9 +524,6 @@ describe('PackageApiContracts', () => {
     // distinguished from `listPackages` by method, not by path.
     expect(PackageApiContracts.installPackage.path).toBe('/api/v1/packages');
     expect(PackageApiContracts.installPackage.path).not.toContain('install');
-    expect(PackageApiContracts.upgradePackage.path).toBe('/api/v1/packages/upgrade');
-    expect(PackageApiContracts.resolveDependencies.path).toBe('/api/v1/packages/resolve-dependencies');
-    expect(PackageApiContracts.uploadArtifact.path).toBe('/api/v1/packages/upload');
     expect(PackageApiContracts.uninstallPackage.path).toBe('/api/v1/packages/:packageId');
   });
 
@@ -543,6 +534,61 @@ describe('PackageApiContracts', () => {
       expect(contract.method).toBeDefined();
       expect(contract.path).toBeDefined();
     });
+  });
+});
+
+// ==========================================
+// Unmounted contract-map entries removed (#19116)
+// ==========================================
+
+describe('the three unmounted `PackageApiContracts` entries are removed (#19116)', () => {
+  // The paths the removed entries bound. Nothing in the composed runtime
+  // mounts any of them, and no serving door existed to rebind them onto.
+  const UNMOUNTED_PATHS = [
+    '/api/v1/packages/upgrade',
+    '/api/v1/packages/resolve-dependencies',
+    '/api/v1/packages/upload',
+  ];
+
+  it('no longer carries the `upgradePackage`, `resolveDependencies` or `uploadArtifact` keys', () => {
+    for (const key of ['upgradePackage', 'resolveDependencies', 'uploadArtifact']) {
+      expect(Object.prototype.hasOwnProperty.call(PackageApiContracts, key)).toBe(false);
+    }
+  });
+
+  it('binds no entry, under any key, to one of the three unmounted paths', () => {
+    // The whole map, so a phantom cannot come back under a different key.
+    const claimants = Object.entries(PackageApiContracts)
+      .filter(([, c]) => UNMOUNTED_PATHS.includes(c.path))
+      .map(([key]) => key);
+    expect(claimants).toEqual([]);
+  });
+
+  it('keeps exactly the four entries whose doors serve', () => {
+    // Anti-vacuity for the two absence pins above, and the declare-with-mount
+    // rule made visible: a new entry lands here only with the mount it names.
+    expect(Object.keys(PackageApiContracts).sort()).toEqual([
+      'getPackage',
+      'installPackage',
+      'listPackages',
+      'uninstallPackage',
+    ]);
+  });
+
+  it('leaves the request/response schemas published, bound to no route', async () => {
+    // The ruling removed the map entries only; the per-route schemas are a
+    // separate question and still resolve from the namespace.
+    const ns = (await import('./index')) as unknown as Record<string, unknown>;
+    for (const name of [
+      'PackageUpgradeRequestSchema',
+      'PackageUpgradeResponseSchema',
+      'ResolveDependenciesRequestSchema',
+      'ResolveDependenciesResponseSchema',
+      'UploadArtifactRequestSchema',
+      'UploadArtifactResponseSchema',
+    ]) {
+      expect(Object.prototype.hasOwnProperty.call(ns, name)).toBe(true);
+    }
   });
 });
 
@@ -919,52 +965,80 @@ describe('#18058 — install contract bound to the live door', () => {
   describe('the measured bare-form senders are the RESIDUAL, not green fixtures', () => {
     /** The `manifest` helper in `packages/runtime/src/package-door-namespace-conflict-code.test.ts` — no `type`. */
     const DOOR_DRIVE_CONFLICT = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0' };
-    /** The duplicate-id drive in `packages/runtime/src/domain-handler-registry.test.ts` — no `type`, no `version`. */
-    const DOOR_DRIVE_REGISTRY = { id: 'pkg-a', name: 'A' };
+    /**
+     * The duplicate-id drive in `packages/runtime/src/domain-handler-registry.test.ts` — no `type`.
+     * Two of its keys were repaired, each by the PR that made the door parse that leg: PR #19326
+     * gave it the `version` it lacked (the docblock's clause 1a, CLOSED), and PR #19473 replaced its
+     * id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The old body is the REVERSED pin beside the
+     * drive, answered `400`, so ⛔ it is no residual and is not transcribed here. This is the body
+     * the drive posts: `409` first, then `201` on `?overwrite=true`.
+     */
+    const DOOR_DRIVE_REGISTRY = { id: 'com.example.pkg-a', name: 'A', version: '1.0.0' };
 
     it('the namespace-conflict drive is REFUSED — it carries no `type`', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_CONFLICT).success).toBe(false);
     });
 
-    it('the domain-handler-registry drive is REFUSED — no `type`, no `version`', () => {
+    it('the domain-handler-registry drive is REFUSED — it carries no `type`', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(false);
     });
 
-    it('the missing keys are what decide it — and since #17534 the registry drive needs its id repaired too', () => {
+    it('the missing `type` is what decides it, for BOTH drives — the registry drive\'s old id is refused on its own', () => {
       // The control that makes the two refusals above a measurement of the
       // MANIFEST's required keys rather than of the bare branch existing at all.
       expect(PackageInstallBodySchema.safeParse({ ...DOOR_DRIVE_CONFLICT, type: 'app' }).success).toBe(true);
-      // ⭐ #17534 moved this half. `ManifestSchema.id` carries
-      // `MANIFEST_ID_PATTERN` now, and `pkg-a` is not reverse-domain notation,
-      // so completing the missing keys is no longer sufficient for THIS drive —
-      // it stays refused, on the id's shape rather than on an absent key.
-      // ⛔ The remedy is to say that, not to relax the pattern: the drive posts
-      // an id the registry face has always refused to publish.
-      const registryKeysCompleted = { ...DOOR_DRIVE_REGISTRY, version: '1.0.0', type: 'app' };
-      expect(PackageInstallBodySchema.safeParse(registryKeysCompleted).success).toBe(false);
-      // Lit control — the id is what decides it now: the same body with a
-      // reverse-domain id parses green, so the refusal above is not the missing
-      // keys coming back.
-      expect(PackageInstallBodySchema.safeParse({
-        ...registryKeysCompleted, id: 'com.acme.pkg-a',
-      }).success).toBe(true);
+      const registryKeysCompleted = { ...DOOR_DRIVE_REGISTRY, type: 'app' };
+      expect(PackageInstallBodySchema.safeParse(registryKeysCompleted).success).toBe(true);
+      // ⭐ Until PR #19473 this half ran the other way. The drive posted `pkg-a`,
+      // which `MANIFEST_ID_PATTERN` has refused since #17534 (PR #18319), so
+      // completing its keys was not sufficient and this case pinned the
+      // refusal. PR #19473 made the door parse the id leg as well, so the door
+      // answers that body `400` (the REVERSED pin beside the drive), and it
+      // repaired the drive's id. ⛔ The old reading is kept, pointed at the old
+      // body: refused on the id alone (the lit control is the green parse just
+      // above, the same body with the drive's current id), so it is no part of
+      // the `201` residual.
+      expect(PackageInstallBodySchema.safeParse({ ...registryKeysCompleted, id: 'pkg-a' }).success).toBe(false);
     });
+
+    /** Bodies the door still answers `201` to while this declaration refuses them — the live residual. */
+    const DOOR_201_RESIDUALS: ReadonlyArray<Record<string, unknown>> = [
+      DOOR_DRIVE_CONFLICT,
+      DOOR_DRIVE_REGISTRY,
+      { ...SDK_MANIFEST, label: 'an unknown key on the bare form' },
+      { ...SDK_MANIFEST, enableOnInstall: false },
+      { manifest: SDK_MANIFEST, enableOnInstall: 'false' },
+      { manifest: SDK_MANIFEST, overwrite: 'true' },
+    ];
 
     it('the door answers 201 to all of them anyway — so this declaration is a SUBSET of the door', () => {
       // Pinned as prose-with-a-parse rather than a live HTTP drive: the door
       // lives in `@objectstack/runtime`, which this package cannot import.
       // `packages/runtime/src/domains/packages-install-enable-on-install.test.ts`
       // and the two drive files above are where the 201s are measured.
-      for (const residual of [
-        DOOR_DRIVE_CONFLICT,
-        DOOR_DRIVE_REGISTRY,
-        { ...SDK_MANIFEST, label: 'an unknown key on the bare form' },
-        { ...SDK_MANIFEST, enableOnInstall: false },
-        { manifest: SDK_MANIFEST, enableOnInstall: 'false' },
-        { manifest: SDK_MANIFEST, overwrite: 'true' },
-      ]) {
+      for (const residual of DOOR_201_RESIDUALS) {
         expect(PackageInstallBodySchema.safeParse(residual).success).toBe(false);
       }
+    });
+
+    it('✅ clause 1a is CLOSED — every body in the live residual carries a `version` the declaration accepts', () => {
+      // PR #19326 made the door parse `ManifestSchema.shape.version` by
+      // reference: a manifest missing `version` answers `400` /
+      // `VALIDATION_ERROR` there now and installs nothing. The door-side pin is
+      // §1 of `packages/runtime/src/domains/packages-install-manifest-version.test.ts`,
+      // cited rather than repeated — this package cannot import the door. On
+      // that key the declaration and the door agree, so a versionless body in
+      // the list above would record a `201` the door no longer answers, which
+      // is what the registry drive's first transcription, `{ id: 'pkg-a',
+      // name: 'A' }`, did.
+      // ⛔ Clause 1b stays open: both drives above still carry no `type`.
+      for (const residual of DOOR_201_RESIDUALS) {
+        const manifest = ('manifest' in residual ? residual.manifest : residual) as { version?: unknown };
+        expect(ManifestSchema.shape.version.safeParse(manifest.version).success).toBe(true);
+      }
+      // Lit control — the check bites: a manifest with no `version` key reads
+      // `undefined` above, and the declaration refuses that.
+      expect(ManifestSchema.shape.version.safeParse(undefined).success).toBe(false);
     });
 
     it('⭐ #17534 closed the one spelling that ran the OTHER way — a whitespace-only `id` is refused HERE now, not only by the door', () => {

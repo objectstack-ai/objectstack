@@ -506,7 +506,6 @@ One locale of translations — the `translation` metadata type
 | **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
-| **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
 | **name** | `string` | optional | Item name — conventionally the locale code (`zh-CN`); the runtime sync falls back to it when `locale` is absent |
 | **label** | `string` | optional | Human-readable label shown in metadata lists |
@@ -603,16 +602,6 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **sourceLabels** | `{ env?: string; global?: string; tenant?: string; user?: string; … }` | optional | Source badge labels by resolution layer |
-
-### Nested Shape: `TranslationItem.settings[string]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **title** | `string` | optional | Translated settings manifest title |
-| **description** | `string` | optional | Translated settings manifest description |
-| **groups** | `Record<string, { title?: string; description?: string }>` | optional | Group translations keyed by group key |
-| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Per-setting field translations keyed by setting key |
-| **actions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string }>` | optional | Action button translations keyed by action id |
 
 
 ---

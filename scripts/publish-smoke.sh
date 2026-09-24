@@ -320,12 +320,11 @@ const owner = Number(process.argv[4]);
 // not override this. The override exists for tests of the protocol itself.
 //
 // The name is deliberately NOT script-specific. scripts/gen-sdui-manifest.sh
-// runs the same protocol against its own directory today; the two draw from
-// disjoint bases (3210 here, 5180 there), so they cannot collide with each
-// other and nothing is lost by that split right now. Converging both onto this
-// neutral default — and then onto one shared helper — is the follow-up, and it
-// is a pure rename on that side because the on-disk format is identical:
-// filename is the port, contents are the owner pid.
+// ran the same protocol against its own directory until it retired (the SDUI
+// manifest now has one producer that spawns no server); the two drew from
+// disjoint bases (3210 here, 5180 there), so they never collided. The
+// on-disk format stays generic for the next caller: filename is the port,
+// contents are the owner pid.
 const dir =
   process.env.SMOKE_PORT_RESERVATION_DIR ||
   path.join(process.env.TMPDIR || os.tmpdir(), 'objectstack-port-reservations');

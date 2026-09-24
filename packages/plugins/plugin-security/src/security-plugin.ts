@@ -204,9 +204,12 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
 }
 
 /**
- * [#16608] The insert-side write `check`, installed on the operation context
- * for the engine to run once the `beforeInsert` chain has produced the row that
- * will be stored.
+ * [insert-check commit a016f08b8a] (the original card no longer resolves)
+ * The write `check` for the writes this middleware cannot judge on
+ * its own, installed on the operation context for the engine to run on the
+ * rows that will be stored: every row of an insert, single or array, once the
+ * `beforeInsert` chain has produced it, and [#19950] every row a predicate
+ * (`multi`) update selects, merged with the final payload.
  *
  * Structurally identical to `OperationContext.postHookWriteImageCheck` in
  * `@objectstack/objectql`, and deliberately declared here rather than imported:
@@ -216,8 +219,8 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
  * `.d.ts`. The two spellings are welded by a test that runs BOTH packages, not
  * by the type system — see `insert-check-post-image.test.ts`.
  */
-interface InsertCheckSeam {
-  /** Refuses by throwing. Receives the rows as `beforeInsert` left them. */
+interface WriteImageCheckSeam {
+  /** Refuses by throwing. Receives the images the driver is about to store. */
   evaluate(rows: readonly Record<string, unknown>[]): void;
   /** Set by the engine immediately before `evaluate` runs. */
   honoured?: boolean;
@@ -829,6 +832,65 @@ function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any
   return rows;
 }
 
+/**
+ * [ADR-0058 D4] The policies whose predicate the write post-image check
+ * compiles, out of the policies that apply to this principal, object and write
+ * operation (`insert` / `update`, `all` included).
+ *
+ * The published contract is `RowLevelSecurityPolicySchema.check`: "defaults to
+ * USING clause if not specified". That is also PostgreSQL's rule: a policy
+ * without `WITH CHECK` holds new rows to its `USING`. Before this selector the
+ * runtime compiled only policies that declared `check`, so a USING-only policy
+ * never gated an INSERT or an UPDATE's new row. An author writing
+ * `record.status != 'closed'` could store a closed row they could then not see.
+ *
+ * The composition, stated exactly:
+ *
+ * 1. **Some applicable policy declares `check`** → only those policies take
+ *    part, OR-combined by `compileFilter`. That is today's result, byte for
+ *    byte. A USING-only sibling in the same set does NOT add its `using` to
+ *    the OR. Under PostgreSQL's permissive-OR composition it would, and that
+ *    could only WIDEN the check. A grant spelled `id != null` would then erase
+ *    every declared `check` beside it. Taking the narrower of the two readings
+ *    is the fail-closed choice: a declared check never admits more than it did.
+ * 2. **No applicable policy declares `check`** → every applicable policy with a
+ *    `using` takes part, its `using` compiled as its check (`compileFilter`
+ *    with `clause: 'check'` reads `using` for a policy that declares no
+ *    `check`), OR-combined. This is the half that changed: those writes were
+ *    unchecked, and a row outside every applicable `using` is now refused.
+ * 3. **The platform's ownership floor takes part in case 2 exactly when the
+ *    pre-image gate kept it** (`owner_only_writes`, recognised by provenance
+ *    through {@link isPlatformOwnershipFloorPolicy}; `keepOwnershipFloor`).
+ *    The by-id write gate lets a declared write authority replace the floor
+ *    (an `allow` from the sharing service, a `public_read_write` OWD, a
+ *    covering controlled-by-parent master gate). Each of those writes targets
+ *    a row whose `created_by` is someone else, so the floor's `using` on the
+ *    post-image would refuse them again one step later; there it stays out.
+ *    Where the pre-image kept it, it stays in: an app-authored USING-only
+ *    update policy is a WIDENER OR-ed with the floor at the pre-image
+ *    (`stage == 'prospecting'`: anyone may edit an open deal), and leaving
+ *    the floor out of the check would turn that widener into a restriction on
+ *    the creator's own rows. With the floor in, the check is the pre-image's
+ *    write-class OR applied to the new row — PostgreSQL's reading. An
+ *    app-authored policy with the floor's predicate is not the floor; it
+ *    always takes part.
+ *
+ * Layers compose as before: this is one principal's check. The delegator's
+ * check (ADR-0090 D10) and the Layer 0 tenant post-image check are AND-ed with
+ * it by the caller. The `modifyAllRecords` bypass on private / platform-global
+ * objects still returns before this selector runs.
+ */
+function writeCheckPolicies(
+  applicable: RowLevelSecurityPolicy[],
+  opts: { keepOwnershipFloor: boolean },
+): RowLevelSecurityPolicy[] {
+  const declared = applicable.filter((p) => policyDeclaresClause(p, 'check'));
+  if (declared.length > 0) return declared;
+  return applicable.filter(
+    (p) => policyDeclaresClause(p, 'using') && (opts.keepOwnershipFloor || !isPlatformOwnershipFloorPolicy(p)),
+  );
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -1225,6 +1287,42 @@ export class SecurityPlugin implements Plugin {
     // engine middleware AND the public getReadFilter service method.
     this.metadata = metadata;
     this.ql = ql;
+
+    // [#18682] Answer the engine's create/update gate question for `validate()`.
+    //
+    // `validate()` runs no middleware for its target object, so without this the
+    // dry run would answer for callers the write path refuses. Same evaluator
+    // and same permission sets the CRUD gate itself uses — ⛔ not a second
+    // decision about who may write.
+    //
+    // The PAYLOAD is passed straight through, because the write decision is not
+    // object-level: the middleware's field-level write gate (step 2.5 below)
+    // refuses a caller who holds the CRUD grant but may not edit a field the
+    // payload names, before any rule runs. A probe that dropped the payload
+    // would answer the preview for exactly that caller.
+    //
+    // Fails CLOSED: any resolution error denies, and the engine treats a denial
+    // as "resolve nothing", which makes a traversing rule refuse in preview.
+    if (typeof (ql as any).registerWriteGateProbe === 'function') {
+      (ql as any).registerWriteGateProbe(
+        (object: string, operation: 'insert' | 'update', context: any, data: unknown): Promise<boolean> =>
+          this.canWriteObject(object, operation, context, data),
+      );
+    } else {
+      // Absence must be loud. This engine takes middleware — so its write path
+      // IS gated — but exposes no seam for the preview to ask the same
+      // question, which means `validate()` there answers a traversing rule for
+      // callers the write path would refuse. Functional degradation, not
+      // durability: the deployment is visibly older than this plugin, and the
+      // remedy is the version bump.
+      ctx.logger.warn(
+        '[security] this ObjectQL exposes no write-gate seam (registerWriteGateProbe), so the '
+        + 'write PREVIEW (validate() / the dryRun import) cannot ask whether the caller could '
+        + 'perform the write. A validation rule that reads through a reference field will be '
+        + 'answered there for callers the real write path refuses. Upgrade @objectstack/objectql '
+        + 'to a version that offers the seam.',
+      );
+    }
 
     // [#11968] Bind the invalidation epoch to the ENGINE's seam when the wired
     // engine exposes one. Resolved here, once, rather than probed per request:
@@ -1753,13 +1851,15 @@ export class SecurityPlugin implements Plugin {
 
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-      // [#16608] The insert-side write `check`, once step 3.6 has installed it
-      // on the operation context for the engine to run after `beforeInsert`.
+      // [insert-check commit a016f08b8a] (the original card no longer resolves)
+      // The write `check` step 3.6 installs on the operation context
+      // for the engine to run: on an insert, after `beforeInsert`; [#19950] on
+      // a predicate update, over every matched row once the payload is final.
       // Held here so the post-`next()` assertion below can read whether the
       // seam was honoured — an installed judgement that never ran is a write
       // this middleware did not gate, and it fails CLOSED and loudly rather
       // than passing for an allowed one.
-      let insertCheckSeam: InsertCheckSeam | null = null;
+      let writeImageCheckSeam: WriteImageCheckSeam | null = null;
       // [#10757] Retire every memoized permission-set resolution the moment a
       // WRITE passes through the engine. Deliberately the FIRST statement in
       // the middleware — ahead of the `isSystem` bypass immediately below —
@@ -1986,6 +2086,16 @@ export class SecurityPlugin implements Plugin {
       // additive baseline would resurrect access for a non-existent user).
       let delegatorSets: PermissionSet[] | null = null;
       let delegatorContext: any = null;
+      // [ADR-0058 D4] What the by-id pre-image gate (step 2.7) decided about the
+      // platform ownership floor for THIS write. The post-image check (step
+      // 3.6) reads it so that a USING-only policy set is held, on the new row,
+      // to the same write-class policies the pre-image admitted the caller by.
+      // Null until step 2.7 runs. A by-id update post-image is judged on a path
+      // where it did (same single id, same guard triple). A predicate update
+      // never reaches 2.7, so its per-row check (step 3.6, [#19950]) keeps the
+      // floor on exactly the terms its `where` scope does: step 3 composes the
+      // bulk scope with no floor options either.
+      let preImageFloorOpts: RlsFilterOptions | null = null;
       if (permissionSets.length > 0 && opCtx.context?.onBehalfOf?.userId) {
         const del = await resolveDelegatorContext(this.ql, opCtx.context);
         if (del.kind === 'missing') {
@@ -2439,33 +2549,17 @@ export class SecurityPlugin implements Plugin {
             opCtx.operation === 'purge' ? 'delete'
             : opCtx.operation === 'transfer' || opCtx.operation === 'restore' ? 'update'
             : opCtx.operation;
-          // [#5492] Ask the write authority ONLY when the platform floor is
-          // actually in play for this (principal, object, operation) — no floor,
-          // nothing to replace, and no reason to spend a sharing probe.
-          //
-          // [ADR-0090 D10] The on-behalf-of path is deliberately EXCLUDED. The
-          // bypass predicate the verdict folds through already fails closed for a
-          // delegated context (`hasWriteBypass`: "no D10 delegator intersection
-          // on this path", ADR-0111 D2), so composing here could only produce a
-          // verdict resolved against the wrong identity. The delegated write
-          // keeps both principals' floors, exactly as before.
-          const floorApplies =
-            !delegatorSets &&
-            this.collectRLSPolicies(
-              permissionSets,
-              opCtx.object,
-              rlsOperation,
-              (opCtx.context?.positions ?? []) as string[],
-            ).some(isPlatformOwnershipFloorPolicy);
-          const dropPlatformOwnershipFloor = floorApplies
-            ? (await this.resolveSharingWriteVerdict(
-                rlsOperation,
-                opCtx.object,
-                String(targetId),
-                opCtx.context,
-                permissionSets,
-              )) === 'allow'
-            : false;
+          // [#5492] The floor decision. Its clauses and their reasons (floor in
+          // play, `allow` only, the on-behalf-of exclusion) live on
+          // {@link resolvePreImageFloorDrop}, which `security/explain` asks too.
+          const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
+            rlsOperation,
+            opCtx.object,
+            String(targetId),
+            opCtx.context,
+            permissionSets,
+            !!delegatorSets,
+          );
           // [#8757] The COVERAGE VOUCH for ADR-0055 details. This gate and the
           // master gate (step 2.8, immediately below) run on the same middleware
           // pass, and 2.8's condition is a strict SUPERSET of this one: the same
@@ -2486,6 +2580,7 @@ export class SecurityPlugin implements Plugin {
           // BOTH floors, exactly as before, and that residual is recorded on the
           // card rather than resolved by a guess.
           const masterGateCoversThisWrite = !delegatorSets;
+          preImageFloorOpts = { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
           const writeFilter = await this.computeRlsFilter(
             permissionSets,
             opCtx.object,
@@ -2886,8 +2981,10 @@ export class SecurityPlugin implements Plugin {
       // match the resolved FilterCondition against the post-image in-memory
       // (the single-record backend for the same filter shape, ADR-0058 D6). A
       // row that fails the check is DENIED (fail closed, D5) — never silently
-      // written. Scoped to policies that EXPLICITLY declare `check`, so an
-      // object governed only by `using` is unaffected.
+      // written. A policy that declares no `check` is held to its `using`
+      // (the published default), except when a sibling declares one — the
+      // exact composition, and the ownership-floor exception, live on
+      // `writeCheckPolicies`.
       //
       // ── [#16608] WHICH IMAGE, on an INSERT ────────────────────────────────
       //
@@ -2924,11 +3021,30 @@ export class SecurityPlugin implements Plugin {
       // checked field must arrive from the caller — is REFUSED, not deferred:
       // it institutionalises the contradiction (the caller sending the value the
       // hook exists to make un-sendable) and needs a permanent lint to keep it.
+      //
+      // ── [#19950 / #19964] EVERY row a write stores ────────────────────────
+      //
+      // The check is a guarantee about each stored row, so a write that stores
+      // several rows is judged once per row, and ONE failing row refuses the
+      // whole write. Two multi-row shapes used to escape it here:
+      //
+      //   • an ARRAY insert was excluded by a non-array guard, so no judgement
+      //     was installed and every row was stored unjudged. The seam already
+      //     receives every live row of an array insert, so the guard now admits
+      //     an array for `insert` (an `update` still takes one payload);
+      //   • a PREDICATE update (no row address) was skipped with a log line,
+      //     on the assumption that a `using`-scoped `where` governed it. That
+      //     assumption fails twice: a policy that declares only `check` scopes
+      //     nothing, and a `where` scoped by `using` still says nothing about
+      //     the NEW row. The rows it changes are the ones the COMPOSED AST
+      //     selects, known only once every middleware has run, so the same
+      //     seam is installed and the engine runs it over each matched row
+      //     merged with the final payload.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
         typeof opCtx.data === 'object' &&
-        !Array.isArray(opCtx.data) &&
+        (opCtx.operation === 'insert' || !Array.isArray(opCtx.data)) &&
         permissionSets.length > 0 &&
         !!opCtx.context?.userId
       ) {
@@ -2937,6 +3053,7 @@ export class SecurityPlugin implements Plugin {
           opCtx.object,
           opCtx.operation,
           opCtx.context,
+          preImageFloorOpts ?? undefined,
         );
         // [ADR-0090 D10] The post-image must satisfy the delegator's CHECK too —
         // an on-behalf-of write may not produce a row the delegator itself
@@ -2946,8 +3063,9 @@ export class SecurityPlugin implements Plugin {
           : null;
         const checkParts = [checkFilter, delCheckFilter].filter(Boolean) as Record<string, unknown>[];
         if (checkParts.length > 0) {
-          // The ONE refusal, shared by both verbs — so an insert judged inside
-          // the engine and an update judged here answer a caller identically.
+          // The ONE refusal, shared by every shape — so a write judged inside
+          // the engine (an insert, a predicate update) and a by-id update
+          // judged here answer a caller identically.
           const denyCheck = (): never => {
             this.logger.warn?.(
               `[Security] RLS check FAILED on ${opCtx.operation} '${opCtx.object}' — write denied (fail-closed)`,
@@ -2979,45 +3097,62 @@ export class SecurityPlugin implements Plugin {
           };
           const satisfiesCheck = (image: Record<string, unknown>): boolean =>
             checkParts.every((f) => matchesFilterCondition(image as any, f as any));
+          // [insert-check commit a016f08b8a] (the original card no longer resolves)
+          // The judgement the engine runs: every image it hands over
+          // must pass, and the first that fails refuses the whole write. The
+          // compiled filter is captured HERE — while the caller's permission
+          // sets, the delegator's, the staged membership and this request's
+          // context are all resolved — and only the IMAGES are deferred.
+          // Deferring the compilation too would move authorization inputs into
+          // the engine's timeline for no gain.
+          const newWriteImageCheck = (): WriteImageCheckSeam => ({
+            evaluate: (rows) => {
+              for (const row of rows) {
+                if (!row || typeof row !== 'object') continue;
+                if (!satisfiesCheck(row)) denyCheck();
+              }
+            },
+          });
 
           if (opCtx.operation === 'insert') {
-            // [#16608] Install the judgement; the engine runs it on the row the
-            // `beforeInsert` chain produced. The compiled filter is captured
-            // HERE — while the caller's permission sets, the delegator's, the
-            // staged membership and this request's context are all resolved —
-            // and only the IMAGE is deferred. Deferring the compilation too
-            // would move authorization inputs into the engine's timeline for no
-            // gain.
-            insertCheckSeam = {
-              evaluate: (rows) => {
-                for (const row of rows) {
-                  if (!row || typeof row !== 'object') continue;
-                  if (!satisfiesCheck(row)) denyCheck();
-                }
-              },
-            };
-            opCtx.postHookWriteImageCheck = insertCheckSeam;
+            // [insert-check commit a016f08b8a] (the original card no longer resolves)
+            // The engine runs it on the rows the `beforeInsert` chain
+            // produced — [#19964] every row of an array insert.
+            writeImageCheckSeam = newWriteImageCheck();
+            opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           } else {
-            // UPDATE — unchanged. Build the post-image: the caller's pre-image
-            // merged with the change set (so a check on an unchanged field
-            // still sees its value). A bulk update (no single id) cannot form a
-            // post-image here — it is governed by the using-based AST scoping
-            // (step 3); we log and skip rather than guess.
-            let postImage: Record<string, unknown> | null = { ...(opCtx.data as Record<string, unknown>) };
             const targetId = this.extractSingleId(opCtx);
-            if (targetId == null) {
-              this.logger.warn?.(
-                `[Security] RLS check on bulk update '${opCtx.object}' is not post-image validated ` +
-                  `(governed by the using-scoped where); single-id writes are checked.`,
-              );
-              postImage = null;
-            } else if (this.ql) {
-              // Shares the memoized caller pre-image with the step-3.5 owner
-              // echo check — the identical (object, id, caller-context) row.
-              const pre = await this.getCallerPreImage(opCtx, targetId);
-              if (pre) postImage = { ...pre, ...(opCtx.data as Record<string, unknown>) };
+            if (targetId != null) {
+              // BY-ID UPDATE — unchanged. Build the post-image: the caller's
+              // pre-image merged with the change set (so a check on an
+              // unchanged field still sees its value).
+              let postImage: Record<string, unknown> = { ...(opCtx.data as Record<string, unknown>) };
+              if (this.ql) {
+                // Shares the memoized caller pre-image with the step-3.5 owner
+                // echo check — the identical (object, id, caller-context) row.
+                const pre = await this.getCallerPreImage(opCtx, targetId);
+                if (pre) postImage = { ...pre, ...(opCtx.data as Record<string, unknown>) };
+              }
+              if (!satisfiesCheck(postImage)) denyCheck();
             }
-            if (postImage && !satisfiesCheck(postImage)) denyCheck();
+            // [#19950] PREDICATE UPDATE — the engine runs the judgement over
+            // every row the composed AST selects, each merged with the final
+            // payload (see the block note above). Installed whenever the ENGINE
+            // will not treat the write as addressing one row, which is wider
+            // than `targetId == null`: the engine reads a FALSY scalar id
+            // (`''`, `0`) as no row address at all
+            // (`resolveEngineUpdateDispatch`) and routes the write to its
+            // predicate path, so a falsy id is judged BOTH ways — its by-id
+            // image above, exactly as before, and every matched row here.
+            // Neither judgement alone would do: without the seam a falsy id
+            // would carry a bulk update past the per-row check on the strength
+            // of a change-set-only image. If no image can be formed the write
+            // is not admitted: the engine refuses a predicate update it cannot
+            // route, and a seam it never runs fails CLOSED after `next()`.
+            if (!targetId) {
+              writeImageCheckSeam = newWriteImageCheck();
+              opCtx.postHookWriteImageCheck = writeImageCheckSeam;
+            }
           }
         }
       }
@@ -3037,8 +3172,8 @@ export class SecurityPlugin implements Plugin {
       //   • UPDATE (Finding 1 / BLOCKER): the pre-image check (step 2.7) validates
       //     only that the caller may touch the EXISTING row (old org == A); it
       //     never sees the NEW value. `organization_id` is auto-stamp-insert-only,
-      //     FLS doesn't protect it, server-side `readonly` isn't enforced, and the
-      //     RLS `check` fires only for explicit policies — so a member owning a
+      //     FLS doesn't protect it, server-side `readonly` isn't enforced, and
+      //     business RLS may not govern the column at all — so a member owning a
       //     row R in org A could `update` R with `{organization_id: victim org B}`
       //     and MOVE the row into another tenant, where it becomes visible. This
       //     is a cross-tenant write by any member.
@@ -3125,7 +3260,8 @@ export class SecurityPlugin implements Plugin {
         //
         // The cheap posture/context pre-test comes first on purpose: the common
         // deployment is `single` (Layer 0 inert), and the common caller HAS an
-        // active organization. Neither pays for the layered compile below.
+        // active organization. Neither pays for the layered compile inside
+        // `organizationWallRefusal` — the one verdict `canWriteObject` asks too.
         //
         // Ordered AHEAD of the forge guard deliberately. A caller with no
         // organization scope at all who also supplies a foreign `organization_id`
@@ -3135,49 +3271,32 @@ export class SecurityPlugin implements Plugin {
         // tenant, so its target is selected through the Layer 0 ROW wall, which
         // already resolves to nothing (ADR-0123 D2, stated there as a boundary
         // rather than left as an omission).
-        if (this.orgScopingEnabled && !callerHasOrganizationScope(opCtx.context, this.tenancyPosture)) {
-          const callerWall = await this.computeWriteTenantCheckFilter(
-            permissionSets,
-            opCtx.object,
-            opCtx.operation,
-            opCtx.context,
+        const denied = await this.organizationWallRefusal(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx.context,
+          delegatorSets,
+          delegatorContext,
+        );
+        if (denied) {
+          const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
+          this.logger.warn?.(
+            `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
+              `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
           );
-          // [ADR-0090 D10] The delegator is walled on its own context, exactly as
-          // the forge guard walls it — an on-behalf-of write may not land a row
-          // the delegator itself could not place.
-          const delegatorWall =
-            delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
-              ? await this.computeWriteTenantCheckFilter(
-                  delegatorSets,
-                  opCtx.object,
-                  opCtx.operation,
-                  delegatorContext,
-                )
-              : null;
-          const denied = isTenantWallDenial(callerWall)
-            ? 'caller'
-            : isTenantWallDenial(delegatorWall)
-              ? 'delegator'
-              : null;
-          if (denied) {
-            const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
-            this.logger.warn?.(
-              `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
-                `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
-            );
-            throw new PermissionDeniedError(
-              `[Security] Access denied: '${opCtx.object}' is scoped to an organization, and ` +
-                `${principal} has no active organization — so this ${opCtx.operation} has no ` +
-                `organization to place the record in. Join or select an active organization and retry.`,
-              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
-              `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
-                `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
-                `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
-                `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
-                `writes are refused rather than landing a row with a NULL organization that no reader — ` +
-                `including its own author — could ever see. System contexts and platform operators are unaffected.`,
-            );
-          }
+          throw new PermissionDeniedError(
+            `[Security] Access denied: '${opCtx.object}' is scoped to an organization, and ` +
+              `${principal} has no active organization — so this ${opCtx.operation} has no ` +
+              `organization to place the record in. Join or select an active organization and retry.`,
+            { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
+              `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
+              `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
+              `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
+              `writes are refused rather than landing a row with a NULL organization that no reader — ` +
+              `including its own author — could ever see. System contexts and platform operators are unaffected.`,
+          );
         }
 
         const suppliedRows = writeRows.filter(
@@ -3397,9 +3516,9 @@ export class SecurityPlugin implements Plugin {
       // that silently stops gating and a deployment that never finds out.
       // ⛔ Do not soften this into a warning: a middleware that cannot say a
       // write was checked must not report that it was.
-      if (insertCheckSeam && insertCheckSeam.honoured !== true) {
+      if (writeImageCheckSeam && writeImageCheckSeam.honoured !== true) {
         const developerMessage =
-          `[Security] Access denied: the insert on '${opCtx.object}' was executed without the row-level CHECK ` +
+          `[Security] Access denied: the ${opCtx.operation} on '${opCtx.object}' was executed without the row-level CHECK ` +
           `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +
           `The write is NOT vouched for by this gate.`;
         // Contract arg order (#5637): `error(message, error?: Error, meta?)` —
@@ -4293,6 +4412,49 @@ export class SecurityPlugin implements Plugin {
     // record path still works, the sharing layer simply reports not_evaluated.
     const sharing = recordId ? (this.resolveKernelService?.('sharing') as any) : undefined;
 
+    // [#19963] A record-grained WRITE verdict is computed from the by-id write
+    // path's own inputs, so `record.visible` for `update` / `delete` is the
+    // answer the by-id PATCH / DELETE gives:
+    //  - Layer 1 carries the pre-image gate's floor decision (step 2.7,
+    //    {@link resolvePreImageFloorDrop}). Not `masterGateCoversThisWrite`:
+    //    that knob VOUCHES that ADR-0055's master gate runs after the filter,
+    //    and explain runs no master gate, so it has nothing to vouch with.
+    //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
+    //    as the middleware stamps it (step 2.6), always overwritten, so an
+    //    `org` / unit writer is not judged owner-only.
+    // [#19986] The READ verdict's twin: plugin-sharing's read filter is asked
+    // with `__readScope` stamped as step 2.6 stamps it for a find, so
+    // `record.visible` for `read` is what the caller's find returns.
+    // The on-behalf-of path keeps its previous inputs on every half. The gate
+    // itself excludes it from the floor decision, and the middleware's
+    // delegated depths (the agent-leg intersection, plus a second gate call or
+    // filter as the delegator) are not modelled on explain's record path.
+    const actsOnBehalfOf = (c: any): boolean => !!c?.onBehalfOf?.userId;
+    const recordWriteFloorOptions = async (
+      sets: PermissionSet[],
+      o: string,
+      engineOp: string,
+      c: any,
+    ): Promise<RlsFilterOptions | undefined> => {
+      if (!recordId || (engineOp !== 'update' && engineOp !== 'delete')) return undefined;
+      // Fail toward the floor: an unanswerable decision keeps it standing,
+      // which is what the gate's own verdict does on a failed probe.
+      const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
+        engineOp, o, recordId, c, sets, actsOnBehalfOf(c),
+      ).catch(() => false);
+      return { dropPlatformOwnershipFloor };
+    };
+    const withWriteScope = async (o: string, c: any): Promise<any> =>
+      actsOnBehalfOf(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
+    // {@link resolveSharingReadFilter} IS the read-depth stamp step 2.6 makes
+    // (the same two inputs to the same evaluator call); the analytics path
+    // already asks it. The caller's own key is cleared first, so the depth
+    // is always the computed one — never one the context brought — even
+    // where resolution fails and the helper stamps nothing (`own`, the safe
+    // direction).
+    const readFilterWithReadScope = (o: string, c: any): Promise<unknown | null> =>
+      this.resolveSharingReadFilter(o, { ...c, __readScope: undefined });
+
     return explainAccess(
       {
         ql: this.ql,
@@ -4320,7 +4482,10 @@ export class SecurityPlugin implements Plugin {
         },
         baselinePermissionSets: this.baselinePermissionSets,
         // ── record-grained deps (only consulted when recordId is present) ──
-        computeLayeredRlsFilter: (sets, o, engineOp, c) => this.computeLayeredRlsFilter(sets as any, o, engineOp, c),
+        computeLayeredRlsFilter: async (sets, o, engineOp, c) =>
+          this.computeLayeredRlsFilter(
+            sets as any, o, engineOp, c, await recordWriteFloorOptions(sets as any, o, engineOp, c),
+          ),
         fetchRecord: async (o: string, rid: string) => {
           try {
             const finder = this.ql?.findOne
@@ -4334,7 +4499,10 @@ export class SecurityPlugin implements Plugin {
           }
         },
         ...(sharing && typeof sharing.buildReadFilter === 'function'
-          ? { sharingReadFilter: (o: string, c: any) => sharing.buildReadFilter(o, c) }
+          ? {
+              sharingReadFilter: (o: string, c: any) =>
+                actsOnBehalfOf(c) ? sharing.buildReadFilter(o, c) : readFilterWithReadScope(o, c),
+            }
           : {}),
         ...(sharing && typeof sharing.listShares === 'function'
           // [ADR-0111 D5] listShares is now management-gated in the sharing
@@ -4346,12 +4514,12 @@ export class SecurityPlugin implements Plugin {
           ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
           : {}),
         ...(sharing && typeof sharing.canEdit === 'function'
-          ? { canEditRecord: (o: string, rid: string, c: any) => sharing.canEdit(o, rid, c) }
+          ? { canEditRecord: async (o: string, rid: string, c: any) => sharing.canEdit(o, rid, await withWriteScope(o, c)) }
           : {}),
         // [ADR-0111 D3] The narrower delete gate — an edit share opens update
         // but not delete, so a delete explanation must consult this.
         ...(sharing && typeof sharing.canDelete === 'function'
-          ? { canDeleteRecord: (o: string, rid: string, c: any) => sharing.canDelete(o, rid, c) }
+          ? { canDeleteRecord: async (o: string, rid: string, c: any) => sharing.canDelete(o, rid, await withWriteScope(o, c)) }
           : {}),
       },
       { object, operation, context: targetContext, recordId },
@@ -4564,6 +4732,52 @@ export class SecurityPlugin implements Plugin {
       );
       return 'deny';
     }
+  }
+
+  /**
+   * [#5492] The by-id write pre-image gate's floor decision (step 2.7): does
+   * the platform ownership floor yield to the declared write authority for
+   * THIS principal, row and write class? It is the value of
+   * {@link RlsFilterOptions.dropPlatformOwnershipFloor} on that path.
+   *
+   * One method, two readers: the gate, and `security/explain`'s record-grained
+   * Layer 1 for `update` / `delete` (#19963). Explain used to compose Layer 1
+   * with the floor always standing, so it answered `record.visible: false`
+   * (`decidedBy: 'rls'`) on every row the caller did not CREATE, while the gate
+   * dropped the floor and the by-id PATCH admitted the same row.
+   *
+   *  - The write authority is asked ONLY when the floor is actually in play for
+   *    this (principal, object, operation): no floor, nothing to replace, and
+   *    no reason to spend a sharing probe.
+   *  - `allow` alone drops it; `abstain` and `deny` leave it standing
+   *    ({@link resolveSharingWriteVerdict} has the reasons).
+   *  - [ADR-0090 D10] The on-behalf-of path is deliberately EXCLUDED. The
+   *    bypass predicate the verdict folds through already fails closed for a
+   *    delegated context (`hasWriteBypass`: "no D10 delegator intersection on
+   *    this path", ADR-0111 D2), so composing here could only produce a verdict
+   *    resolved against the wrong identity. The delegated write keeps both
+   *    principals' floors, exactly as before.
+   */
+  private async resolvePreImageFloorDrop(
+    rlsOperation: string,
+    object: string,
+    recordId: string,
+    context: any,
+    permissionSets: PermissionSet[],
+    delegated: boolean,
+  ): Promise<boolean> {
+    if (delegated) return false;
+    const floorApplies = this.collectRLSPolicies(
+      permissionSets,
+      object,
+      rlsOperation,
+      (context?.positions ?? []) as string[],
+    ).some(isPlatformOwnershipFloorPolicy);
+    if (!floorApplies) return false;
+    return (
+      (await this.resolveSharingWriteVerdict(rlsOperation, object, recordId, context, permissionSets)) ===
+      'allow'
+    );
   }
 
   /**
@@ -5066,6 +5280,315 @@ export class SecurityPlugin implements Plugin {
     } catch (e) {
       this.logger.error?.(
         `[security] canReadObject could not resolve the object-level read admission for ` +
+          `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return false;
+    }
+  }
+
+  /**
+   * [#18682] Whether `context` may CREATE or UPDATE `object` under the arms
+   * enumerated below — the WRITE admission the preview asks for, and the
+   * exact sibling of {@link canReadObject}.
+   *
+   * ## Why it exists
+   *
+   * `ObjectQL.validate()` is a write PREVIEW that runs no middleware for its
+   * target object, by design. A validation rule that reads
+   * one hop through a reference field is evaluated there against a related row
+   * fetched under SYSTEM authority, and the accepted cost of that elevation is
+   * an inference channel — so the preview asks this before it reads. What this
+   * method restores is the arms enumerated below and nothing beyond them — the
+   * closing paragraph names the refusals that stay ahead of it.
+   *
+   * ## The arms, in the middleware's own order — ⛔ the CRUD grant is not the gate
+   *
+   * A probe that checked only `isSystem`, a principal and the CRUD grant admits
+   * classes the write path refuses: a caller holding `allowCreate` but not a D3
+   * `requiredPermissions` capability; an `onBehalfOf` context naming a delegator
+   * that does not exist; and — earlier than either, before anything resolves —
+   * a caller asking about an object whose writes a platform service owns, or
+   * about an RBAC link table on the strength of a plain CRUD grant. All were
+   * measured reaching the preview while `insert()` refused them. So the arms
+   * are the middleware's, in its order:
+   *
+   *   1. `isSystem` → admit (the total bypass);
+   *   2. ADR-0103 `assertEngineOwnedWriteAllowed` over the registered schema —
+   *      the middleware's own primitive, ⛔ never a second reading of
+   *      `resolveCrudAffordances`: a user-context write to an `engine-owned` /
+   *      `append-only` object whose `userActions` do not open the verb DENIES,
+   *      ahead of the fall-open below and of every resolution;
+   *   3. ADR-0090 D12 `delegatedAdminGate.assert` — the same gate object the
+   *      middleware calls, handed `object`, `operation`, `context` and the rows
+   *      of `data`. A plain-CRUD holder on an RBAC link table DENIES; a tenant
+   *      admin passes to the arms below;
+   *   4. no permission sets resolved → arm 10 decides (the middleware guards its
+   *      whole CRUD gate with `if (permissionSets.length > 0)`, not that wall);
+   *   5. `secMeta.unresolved` → DENY (#3545);
+   *   6. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the WRITE
+   *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
+   *      delegator;
+   *   7. the `allowCreate` / `allowEdit` CRUD grant for the operation asked;
+   *   8. ADR-0090 D10 — the delegator must independently hold the same grant;
+   *      a dangling delegator denies.
+   *
+   * Arms 2 and 3 refuse a CALLER CLASS: the same caller cannot reach the write
+   * by omitting a value or by naming a different row, so a preview that
+   * answered them would hand the elevated read to someone who cannot write the
+   * object at all, for that verb, under any payload. Arms 6 and 8 were added on
+   * that same ground one gate later.
+   *
+   * ## …and the arm that needs the PAYLOAD
+   *
+   * The arms above are not the whole write decision either. The middleware
+   * also refuses payload-dependent writes, and the first of them is the
+   * field-level-security write gate (step 2.5): a caller holding the object's
+   * CRUD grant but not `editable` on a field the payload names is refused
+   * `PERMISSION_DENIED` there. A probe carrying no payload cannot ask it — so
+   * an editor of the child object who is FLS-locked out of the lookup column
+   * was refused by `insert()` and answered by the preview, the same divergence
+   * arms 6 and 8 close one gate earlier.
+   *
+   *   9. step 2.5's own primitives over `data`, in the middleware's order —
+   *      `getFieldPermissions` folded through `foldFieldRequiredPermissions`
+   *      (ADR-0066 D3), intersected under D10 with the delegator's mask via
+   *      `intersectFieldMasks`, then `detectForbiddenWrites`. Skipped when no
+   *      payload is supplied, exactly as the middleware skips it on `!opCtx.data`.
+   *
+   * `data` is the caller's RAW payload — one row or an array, the shape
+   * `detectForbiddenWrites` already normalises and the shape `opCtx.data`
+   * carries. ⛔ Not a post-default image: a key the runtime filled is not a
+   * field the caller wrote.
+   *
+   * ## …and the organization wall
+   *
+   *  10. ADR-0123 D2 `organizationWallRefusal` — the method the middleware's
+   *      step 3.7 throws on, asked under that step's guard (a payload is
+   *      supplied, the context names a user) at that step's point, after arm
+   *      9; arm 4 asks it too, as the middleware does with no set resolved. It
+   *      is handed no row — the payload decides only whether it is asked — so
+   *      it refuses a CALLER CLASS, as arms 2 and 3 do.
+   *
+   * `can-write-object-admission.test.ts` pins this method's answer equal to the
+   * registered middleware's on its equivalence block's cases, and pins one
+   * arm-3 UPDATE case as a direction: this method `false`, the middleware `true`.
+   *
+   * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
+   * denial too.
+   *
+   * ⭐ What it answers, POSITIVELY — stated by NAMING WHAT IT RUNS, ⛔ never by
+   * naming a category of the write decision: a `true` here means this caller
+   * passed the ADR-0103 engine-owned affordance gate and the ADR-0090 D12
+   * delegated-admin gate (arms 2 and 3, the middleware's own primitives, at the
+   * middleware's own point in its order), the fail-closed postures (#3545's
+   * unresolvable posture and the D10 dangling delegator), the ADR-0066 D3
+   * capability AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD
+   * grant, the D10 delegator's independent grant, the step 2.5 FLS write gate
+   * over the keys THIS payload names, and the ADR-0123 D2 organization wall. It
+   * means nothing about any refusal not in that list.
+   *
+   * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
+   * an enumeration of the distance to success: the middleware refuses both
+   * before and after `next()` for reasons this method is never asked. The
+   * families nearest to hand, named so the arms above are not read as the whole
+   * write decision:
+   *
+   *  - **The remaining PRE-RESOLUTION gates, which run beside arms 2 and 3 and
+   *    are not asked here.** Two judge a row's PROVENANCE, which a preview
+   *    holds no row to carry: the ADR-0086/0094 package-managed write gate and
+   *    the ADR-0066 system-row write gate. Two judge a payload VALUE: the
+   *    ADR-0066 D1 curated-capability-name refusal and the ADR-0090 D5/D9
+   *    audience-anchor binding guard. And the ADR-0056 `publicFormGrant` scope,
+   *    which admits create plus read-back on exactly the granted object and
+   *    refuses everything else pre-resolution — not asked because no wire
+   *    caller and no constructor in the tree presents the grant here (it is
+   *    constructed only by the public form-submit route, whose context goes to
+   *    the real write, and the key is not in the inbound
+   *    `ENTRY_EXECUTION_CONTEXT_FIELDS` set) and because it has no
+   *    extracted primitive, so an arm would be a SECOND SPELLING of its scope —
+   *    the drift this method exists to avoid.
+   *  - **Row-level and post-image refusals — the preview names no stored row.**
+   *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent master
+   *    edit (2.8), the RLS `check` post-image (3.6) and the Layer 0 tenant
+   *    post-image (3.7), none of which this method can judge because it is
+   *    asked about no ROW.
+   *  - **Payload-VALUE refusals the same caller passes by not sending the
+   *    value** — the masked echo (2.5a) and the `owner_id` forge (3.5), which
+   *    therefore widen the caller class by nothing.
+   *  - **The caller's own PREDICATE** — the anti-filter-oracle guard (2.9),
+   *    which this method is handed none of.
+   *  - **After `next()`** — the fail-closed assertion that the engine honoured
+   *    `OperationContext.postHookWriteImageCheck`, i.e. that the insert `check`
+   *    seam really ran, which judges an executed write.
+   *  - **Outside the middleware entirely** — `readonlyWhen`, the static
+   *    `readonly` strip and the validation rules themselves.
+   *
+   * Nothing here may be used to widen.
+   */
+  async canWriteObject(
+    object: string,
+    operation: 'insert' | 'update',
+    context?: any,
+    data?: unknown,
+  ): Promise<boolean> {
+    const objectName = String(object ?? '');
+    if (!objectName) return false;
+    // 1. System operations bypass.
+    if (context?.isSystem) return true;
+
+    try {
+      // 2-3. The middleware's two PRE-RESOLUTION caller-class refusals, called
+      //      as the middleware calls them and at the same point in its order:
+      //      after the `isSystem` bypass, BEFORE the principal-less fall-open
+      //      (arm 4) and before any permission set resolves. Both answer about
+      //      the CALLER and the OBJECT, so a caller they refuse cannot reach
+      //      the write by omitting a value or naming a different row — which
+      //      is exactly the class this method exists to keep out of the
+      //      preview.
+      try {
+        // 2. [ADR-0103] Engine-owned write affordance. ⛔ Not a re-derivation:
+        //    this is the middleware's own primitive over the same registered
+        //    schema, so the `userActions` members that reopen a verb pass here
+        //    for the one reason they pass there.
+        assertEngineOwnedWriteAllowed(
+          typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(objectName) : undefined,
+          operation,
+          context,
+        );
+        // 3. [ADR-0090 D12] Delegated administration on the RBAC link tables.
+        //    The middleware hands its whole `opCtx`; a preview names no stored
+        //    row, so this hands `object`, `operation`, `context` and the rows
+        //    of `data` and NOTHING else — leaving the gate's delegate branch
+        //    refusing an id-less mutation it cannot boundary-check, pinned as a
+        //    direction in `can-write-object-admission.test.ts`.
+        //
+        //    ⭐ And the rows it supplies are SHALLOW COPIES, never the caller's
+        //    own objects. The gate stamps `granted_by` onto the rows it
+        //    materialises (its dual audit), and on an insert it materialises
+        //    the payload rows BY REFERENCE — while `validate()` hands this
+        //    method the caller's RAW payload, so passing it straight through
+        //    would let a PREVIEW write into the caller's own objects. The
+        //    decision cannot notice the copy: nothing reads `granted_by` back,
+        //    it is only ever written — so its pin reads the caller's rows
+        //    instead (`can-write-object-admission.test.ts`, the copy block).
+        if (this.delegatedAdminGate) {
+          const shallow = (row: unknown) =>
+            row && typeof row === 'object' && !Array.isArray(row)
+              ? { ...(row as Record<string, unknown>) }
+              : row;
+          await this.delegatedAdminGate.assert({
+            object: objectName,
+            operation,
+            context,
+            data: Array.isArray(data) ? data.map(shallow) : shallow(data),
+          });
+        }
+      } catch (e) {
+        // A refusal from either gate IS the admission answer — the write path's
+        // own denial, not a failure to resolve one. Anything else is a
+        // subsystem failure and belongs to the outer catch, which logs it and
+        // still denies.
+        if (e instanceof PermissionDeniedError) return false;
+        throw e;
+      }
+
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      // 10. [ADR-0123 D2] The no-active-organization write wall — the
+      //     middleware's own verdict, `organizationWallRefusal`, under its step
+      //     3.7 guard: a payload is supplied and the context names a user. Its
+      //     point is last, after the field gate; it is spelled here because
+      //     arm 4 returns through it — the middleware asks it with no set
+      //     resolved as well.
+      const organizationWallAdmits = async (
+        delegatorSets: PermissionSet[] | null,
+        delegatorContext: unknown,
+      ): Promise<boolean> =>
+        !(data && typeof data === 'object' && context?.userId
+          && (await this.organizationWallRefusal(
+            permissionSets, objectName, operation, context, delegatorSets, delegatorContext,
+          )));
+      // 4. No sets resolved → no permission-set restriction applies (the
+      //    middleware guards its whole CRUD gate with `if (permissionSets.length > 0)`),
+      //    and arm 10 is not behind that guard.
+      if (permissionSets.length === 0) return await organizationWallAdmits(null, null);
+
+      const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
+        await this.getObjectSecurityMeta(objectName);
+      // 5. [#3545] Posture unresolvable → deny.
+      if (unresolved) return false;
+
+      // [ADR-0090 D10] Resolve the delegator ONCE — the arms below need it,
+      // and a dangling link denies before any of them runs.
+      let delegatorSets: PermissionSet[] | null = null;
+      let delegatorContext: unknown = null;
+      if (context?.onBehalfOf?.userId) {
+        const del = await resolveDelegatorContext(this.ql, context);
+        if (del.kind === 'missing') return false;
+        if (del.kind === 'resolved') {
+          delegatorContext = del.context;
+          delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        }
+      }
+
+      // 6. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+      //    principals.
+      const required = requiredCapsForOperation(requiredPermissions, operation);
+      if (required.length > 0) {
+        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+        if (required.some((cap) => !held.has(cap))) return false;
+        if (delegatorSets && delegatorSets.length > 0) {
+          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+          if (required.some((cap) => !delHeld.has(cap))) return false;
+        }
+      }
+
+      // 7. The object-level CRUD grant for the operation asked.
+      if (!this.permissionEvaluator.checkObjectPermission(operation, objectName, permissionSets, { isPrivate })) {
+        return false;
+      }
+
+      // 8. [ADR-0090 D10] The delegator must independently grant the same write.
+      if (
+        delegatorSets &&
+        delegatorSets.length > 0 &&
+        !this.permissionEvaluator.checkObjectPermission(operation, objectName, delegatorSets, { isPrivate })
+      ) {
+        return false;
+      }
+
+      // 9. The field-level-security WRITE gate — the middleware's step 2.5,
+      //    over the payload the caller supplied. Same primitives, same order,
+      //    same guards: the middleware runs this only for an `insert`/`update`
+      //    carrying `opCtx.data` with permission sets resolved, and both of the
+      //    latter already hold here (arm 4 returned for the empty resolution).
+      //    ⛔ Not a re-derivation — a second spelling of "which fields may this
+      //    caller write" is the drift this whole method exists to avoid.
+      if (data) {
+        let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
+        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the map.
+        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, fieldRequiredPermissions, permissionSets);
+        // [ADR-0090 D10] Intersect with the delegator's field perms — a field
+        // the agent may edit but the delegator may not becomes forbidden.
+        if (delegatorSets) {
+          let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
+          delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, fieldRequiredPermissions, delegatorSets);
+          fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+        }
+        if (Object.keys(fieldPerms).length > 0) {
+          const forbidden = this.fieldMasker.detectForbiddenWrites(
+            data as Record<string, any> | Record<string, any>[],
+            fieldPerms,
+          );
+          if (forbidden.length > 0) return false;
+        }
+      }
+
+      // 10. [ADR-0123 D2] At the middleware's point — see above.
+      return await organizationWallAdmits(delegatorSets, delegatorContext);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] canWriteObject could not resolve the write admission for ` +
           `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
         e instanceof Error ? e : new Error(String(e)),
       );
@@ -5945,6 +6468,35 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * Does the object's own write model replace the platform ownership floor
+   * for this operation? True for a `public_read_write` OWD on `update` (#8023)
+   * and for a `controlled_by_parent` detail whose master gate the caller
+   * vouches covers this write. That ruling landed in commit 6feac910b6
+   * ("the master gate is the sole row-write authority for a
+   * controlled_by_parent detail"); the card number cited for it elsewhere in
+   * this file no longer resolves on the board, and that commit is the live
+   * record. The reasons are recorded where {@link computeLayeredRlsFilter}
+   * applies the drop.
+   *
+   * One predicate, two readers: the pre-image Layer 1 composition and the
+   * post-image check's floor decision (`computeWriteCheckFilter`). Keeping it
+   * in one place keeps the two from disagreeing about when the floor applies.
+   */
+  private platformFloorYieldsToObjectWriteModel(
+    meta: { owdOpensRowWrites?: boolean },
+    object: string,
+    operation: string,
+    opts?: RlsFilterOptions,
+  ): boolean {
+    if (meta.owdOpensRowWrites && owdOpenWritesCoversOperation(operation)) return true;
+    return (
+      !!opts?.masterGateCoversThisWrite &&
+      masterGateCoversOperation(operation) &&
+      this.declaresControlledByParent(object)
+    );
+  }
+
+  /**
    * [ADR-0095 D1] Compute the effective row filter for (object, operation) as
    * `Layer0(tenant) AND Layer1(business RLS)`.
    *
@@ -6101,9 +6653,12 @@ export class SecurityPlugin implements Plugin {
       //     that also meant delete was removed for being wider than it.
       // Layer 0 (the tenant wall) is untouched — a `public_read_write` object is
       // org-wide open, never cross-tenant open.
-      if (meta.owdOpensRowWrites && owdOpenWritesCoversOperation(operation)) {
-        collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
-      }
+      //
+      // Both drops below ask ONE predicate,
+      // {@link platformFloorYieldsToObjectWriteModel}, which the post-image
+      // check (`computeWriteCheckFilter`) asks too, so the floor a defaulted
+      // check composes is the floor this pre-image composed.
+      //
       // [#8757] An ADR-0055 `controlled_by_parent` detail does not inherit the
       // platform's wildcard write ownership floor either — for a DIFFERENT
       // reason from the OWD above, and under one extra condition.
@@ -6144,11 +6699,7 @@ export class SecurityPlugin implements Plugin {
       //     (`masterGateCoversOperation`), which is every class the floor ships.
       // Layer 0 (the tenant wall) is untouched, and so is the read path: the
       // floor is a write-side construct that never applied to `select`.
-      if (
-        opts?.masterGateCoversThisWrite &&
-        masterGateCoversOperation(operation) &&
-        this.declaresControlledByParent(object)
-      ) {
+      if (this.platformFloorYieldsToObjectWriteModel(meta, object, operation, opts)) {
         collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
       }
       // [#7665] The write-visibility floor: a write target must be inside the
@@ -6452,16 +7003,19 @@ export class SecurityPlugin implements Plugin {
 
   /**
    * [ADR-0058 D4] Compile the WRITE `check` predicate for a post-image
-   * validation. Scoped to applicable policies that EXPLICITLY declare a `check`
-   * clause — an object governed only by `using` (the pre-image path) yields no
-   * check filter and is unaffected. The compiled FilterCondition is matched
-   * against the post-image record by the caller (fail closed).
+   * validation. Which applicable policies take part is decided by
+   * {@link writeCheckPolicies}: the ones that declare `check` when any does,
+   * otherwise every applicable policy's `using` standing in as its check — the
+   * published `RowLevelSecurityPolicySchema.check` default. The compiled
+   * FilterCondition is matched against the post-image record by the caller
+   * (fail closed).
    */
   private async computeWriteCheckFilter(
     permissionSets: PermissionSet[],
     object: string,
     operation: string,
     context: any,
+    preImageOpts?: RlsFilterOptions,
   ): Promise<Record<string, unknown> | null> {
     // [ADR-0066 ①] modifyAllRecords bypasses write-side RLS (incl. the post-image
     // check) on private/platform-global objects.
@@ -6485,12 +7039,22 @@ export class SecurityPlugin implements Plugin {
     // either once site 1 had let it past the row gate. The domain still
     // decides: a non-holder is outside it and the policy still does not apply
     // to them.
-    const withCheck = this.collectRLSPolicies(
-      permissionSets,
-      object,
-      operation,
-      (context?.positions ?? []) as string[],
-    ).filter((p) => policyDeclaresClause(p, 'check'));
+    // The platform ownership floor takes part in a defaulted check exactly
+    // when the pre-image gate kept it: the same three replacements drop it here
+    // (an `allow` from the declared write authority, a `public_read_write` OWD,
+    // a covering master gate), and nothing else does.
+    const floorReplaced =
+      !!preImageOpts?.dropPlatformOwnershipFloor ||
+      this.platformFloorYieldsToObjectWriteModel(meta, object, operation, preImageOpts);
+    const withCheck = writeCheckPolicies(
+      this.collectRLSPolicies(
+        permissionSets,
+        object,
+        operation,
+        (context?.positions ?? []) as string[],
+      ),
+      { keepOwnershipFloor: !floorReplaced },
+    );
     if (withCheck.length === 0) return null;
     // [ADR-0105 D11 / #16607] Stage the app-resolved membership sets on THIS
     // context before the `check` clause compiles — the same staging the read
@@ -6540,8 +7104,8 @@ export class SecurityPlugin implements Plugin {
    * "is this a tenant object?" field/posture test, same platform-admin posture
    * exemption, same fail-closed deny sentinel when the context has no active
    * organization. Only `layer0` is returned — business RLS (`layer1`) is NOT
-   * applied to the write post-image (that path is governed by explicit `check`
-   * clauses via {@link computeWriteCheckFilter}).
+   * applied to the write post-image by this method (that path is governed by
+   * {@link computeWriteCheckFilter}).
    */
   /**
    * [ADR-0105 D11] Populate `context.rlsMembership` from the registered
@@ -6616,6 +7180,36 @@ export class SecurityPlugin implements Plugin {
   ): Promise<Record<string, unknown> | null> {
     const { layer0 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
     return layer0;
+  }
+
+  /**
+   * [ADR-0123 D2] Which principal the no-active-organization write wall
+   * refuses, or `null` — the verdict the middleware's step 3.7 throws on.
+   * {@link canWriteObject} asks this same method, so the two doors share one
+   * spelling of the wall. It is handed no row, stored or written.
+   */
+  private async organizationWallRefusal(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+    delegatorSets: PermissionSet[] | null,
+    delegatorContext: any,
+  ): Promise<'caller' | 'delegator' | null> {
+    if (!this.orgScopingEnabled || callerHasOrganizationScope(context, this.tenancyPosture)) return null;
+    const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
+    // [ADR-0090 D10] The delegator is walled on its own context, exactly as
+    // the forge guard walls it — an on-behalf-of write may not land a row
+    // the delegator itself could not place.
+    const delegatorWall =
+      delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
+        ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
+        : null;
+    return isTenantWallDenial(callerWall)
+      ? 'caller'
+      : isTenantWallDenial(delegatorWall)
+        ? 'delegator'
+        : null;
   }
 
   /**

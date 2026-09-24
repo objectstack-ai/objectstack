@@ -173,8 +173,13 @@ export interface AutomationContext {
      * a client that mirrors the row id into `params.recordId` is addressing the
      * row, not answering a question the flow asks.
      *
+     * One producer with no caller at all states the empty list: the schedule
+     * trigger (`ScheduleTrigger` in `@objectstack/trigger-schedule`, #19900).
+     * Its `jobId`, `flowName` and `schedule` keys in {@link params} are its own
+     * seeds, so none of them answers a question the flow asks.
+     *
      * Absent means the producer does not state provenance: a record-change,
-     * schedule, time-relative or webhook trigger, a `subflow` or `map` child run
+     * time-relative or webhook trigger, a `subflow` or `map` child run
      * (those two nodes drop the parent's list from the child context, because it
      * describes the PARENT's bag), or code calling `execute` directly. Its
      * consumer, the `screen` node's headless verdict in

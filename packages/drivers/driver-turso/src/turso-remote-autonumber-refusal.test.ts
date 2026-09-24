@@ -131,10 +131,15 @@
  *    correct warning from a wolf-crying one, and the controls are what do.
  */
 
-import { describe, it, expect, afterEach, vi, assert } from 'vitest';
+import { describe, it, expect, afterAll, afterEach, vi, assert } from 'vitest';
 import { TursoDriver } from './index.js';
 import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { replicaFiles } from './replica-file.testkit.js';
+
+// A replica is a local FILE: the constructor refuses one on `:memory:`.
+const replicaFileUrls = replicaFiles();
+afterAll(() => replicaFileUrls.removeAll());
 
 interface WireBearingError extends Error {
   code?: string;
@@ -193,7 +198,7 @@ async function makeLocal() {
 async function makeReplica() {
   const stub = makeLibsqlSqliteStub();
   const driver = new TursoDriver({
-    url: ':memory:',
+    url: replicaFileUrls.next(),
     syncUrl: 'libsql://probe.turso.io',
     client: stub as never,
     sync: { onConnect: false, intervalSeconds: 0 },

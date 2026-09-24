@@ -9,6 +9,7 @@ import { strictObject, type StrictObjectOptions } from '../shared/strict-object'
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
+import { requiredOneOf } from '../shared/refinement-projection';
 
 /*
  * ── Unknown-key strictness (#4001 app step, PR B) ───────────────────────────
@@ -104,7 +105,7 @@ const NAV_EXPANDED_ALIASES_ELSEWHERE: Readonly<Record<string, string>> = {
 /** Every `type` a navigation item can carry — one strict branch each. */
 type NavItemVariant =
   | 'object' | 'dashboard' | 'page' | 'url' | 'report'
-  | 'action' | 'component' | 'group' | 'separator';
+  | 'action' | 'component' | 'doc' | 'group' | 'separator';
 
 /**
  * The two variants that ACCEPT `children`.
@@ -207,6 +208,12 @@ const navItemSurface = (variant: NavItemVariant): StrictObjectOptions => ({
     ...(variant !== 'dashboard' ? { dashboardname: 'type: \'dashboard\' (with dashboardName)' } : {}),
     ...(variant !== 'report' ? { reportname: 'type: \'report\' (with reportName)' } : {}),
     ...(variant !== 'component' ? { componentref: 'type: \'component\' (with componentRef)' } : {}),
+    ...(variant !== 'doc' ? { book: 'type: \'doc\' (with book)', doc: 'type: \'doc\' (with doc)' } : {}),
+    // Every sibling target key is spelled `<thing>Name` (`pageName`,
+    // `dashboardName`, `reportName`), so that is the spelling an author — or
+    // an AI — reaches for here by analogy. The `doc` item's targets are the bare
+    // `book` / `doc`, as the ruling that added it spells them.
+    ...(variant === 'doc' ? { docname: 'doc', bookname: 'book', page: 'doc', docs: 'doc', books: 'book' } : {}),
     // `expanded` is a cross-variant key too — it just looks shared because
     // "start expanded" is a sidebar-wide idea. It exists on `group` alone, so
     // only `group` may answer with the bare key name (#5555).
@@ -629,7 +636,80 @@ export const ComponentNavItemSchema = lazySchema(() => strictObject(navItemSurfa
 }));
 
 /**
- * 8. Group Navigation Item
+ * The name rule a `doc` target shares with the doc it names — `DocSchema.name`
+ * (`system/doc.zod.ts`): the source filename stem, lowercase snake_case. Stated
+ * here so a path or a filename (`guides/intro.md`, `crm_guide.md`) is refused at
+ * the nav item instead of shipping an entry that opens nothing.
+ */
+const DOC_NAV_TARGET_NAME = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * 8. Doc Navigation Item — a documentation entry on the app menu (ADR-0046).
+ *
+ * ONE variant with two targets, at least one of which is required:
+ *
+ * - `{ type: 'doc', book }` opens the BOOK — rendered as its first readable
+ *   page with the book sidebar. The primary menu use (a "Help centre" /
+ *   "Manual" entry): book membership is derived by rule (ADR-0046 §6.2.1), so a
+ *   doc added later that matches a group rule appears under this entry with no
+ *   navigation edit.
+ * - `{ type: 'doc', doc }` opens that PAGE; its book context is the doc's own
+ *   book, else the package's implicit book (§6.4).
+ * - Both: that page, in that book's context.
+ * - Neither: refused, with a remedy naming both keys ({@link requiredOneOf},
+ *   which also publishes the rule to the JSON Schema as `anyOf` of `required`).
+ *
+ * **Audience.** The entry carries no gate of its own — it INHERITS the docs
+ * audience gate (ADR-0046 §6.7, the rule `platform-core.docs-audience-gate`
+ * pins for the book tree): a `book` entry renders the member's pruned subset of
+ * the book's readable pages and is not rendered at all for a member with no
+ * readable page in it; a `doc` entry the member may not read is not rendered.
+ * The base `visible` / `requiredPermissions` keys still apply on top — they can
+ * only narrow further.
+ *
+ * Whether the named book / doc EXISTS is a package-level question, not a shape
+ * one: docs enter the artifact from `src/docs/*.md` at `os build`, after
+ * `defineStack` has run, so the reference is checked by the CLI's docs publish
+ * lint (`docs/nav-target`), the one step that holds the complete doc set.
+ *
+ * @example A help-centre entry opening a book
+ * ```ts
+ * { id: 'nav_help', type: 'doc', label: 'Help Centre', icon: 'book-open', book: 'crm_manual' }
+ * ```
+ *
+ * @example One page, in its book's context
+ * ```ts
+ * { id: 'nav_lead_guide', type: 'doc', book: 'crm_manual', doc: 'crm_lead_guide' }
+ * ```
+ */
+export const DocNavItemSchema = lazySchema(() => strictObject(navItemSurface('doc'), {
+  ...BaseNavItemSchema.shape,
+  type: z.literal('doc'),
+  book: z.string().min(1).optional().describe(
+    'Book to open (a declared `book` name, or the package id for the package\'s implicit book). Alone: opens the '
+    + 'book at its first readable page with the book sidebar; membership is derived by rule, so docs added later '
+    + 'appear under this entry with no navigation edit. With `doc`: that page in this book\'s context. At least '
+    + 'one of `book` / `doc` is required.',
+  ),
+  doc: z.string().regex(DOC_NAV_TARGET_NAME, {
+    message: 'A doc target is a doc NAME — the source filename stem in lowercase snake_case '
+      + '(`crm_lead_guide`, not `crm_lead_guide.md` or `docs/crm_lead_guide`).',
+  }).optional().describe(
+    'Doc to open (the doc name = its source filename stem, lowercase snake_case). Alone: its book context is the '
+    + 'doc\'s own book, else the package\'s implicit book. At least one of `book` / `doc` is required.',
+  ),
+}).refine(requiredOneOf(['book', 'doc']), {
+  message: 'A `doc` navigation item needs a target: set `book` (opens that book at its first readable page), '
+    + '`doc` (opens that page), or both (that page in that book\'s context).',
+}).describe(
+  'Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` — at least one is required. '
+  + 'The entry inherits the docs audience gate (ADR-0046 §6.7): a `book` entry renders the member\'s pruned '
+  + 'subset of the book\'s readable pages and is not rendered for a member with no readable page in it; a `doc` '
+  + 'entry the member may not read is not rendered. `visible` / `requiredPermissions` can only narrow further.',
+));
+
+/**
+ * 9. Group Navigation Item
  * A container for child navigation items (Sub-menu).
  * Does not perform navigation itself.
  */
@@ -641,7 +721,7 @@ export const GroupNavItemSchema = lazySchema(() => strictObject(navItemSurface('
 }));
 
 /**
- * 9. Separator Navigation Item
+ * 10. Separator Navigation Item
  * A visual divider in the navigation list. Renders no target; declared to
  * match the objectui renderer's `item.type === 'separator'` branch
  * (inverse-drift fix, liveness audit #1878/#1891/#1894).
@@ -679,6 +759,7 @@ export type NavigationItem =
   | ReportNavItem
   | ActionNavItem
   | ComponentNavItem
+  | DocNavItem
   | SeparatorNavItem
   | GroupNavItem;
 
@@ -716,6 +797,7 @@ export type NavigationItemInput =
   | z.input<typeof ReportNavItemSchema>
   | z.input<typeof ActionNavItemSchema>
   | z.input<typeof ComponentNavItemSchema>
+  | z.input<typeof DocNavItemSchema>
   | z.input<typeof SeparatorNavItemSchema>
   | (z.input<typeof GroupNavItemSchema> & { children: NavigationItemInput[] });
 
@@ -758,6 +840,7 @@ export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput
     ReportNavItemSchema,
     ActionNavItemSchema,
     ComponentNavItemSchema,
+    DocNavItemSchema,
     SeparatorNavItemSchema,
     GroupNavItemSchema.extend({
       children: z.array(NavigationItemSchema).describe('Child navigation items'),
@@ -1674,4 +1757,7 @@ export type ActionNavItemParsed = z.infer<typeof ActionNavItemSchema>;
 export type ComponentNavItem = z.input<typeof ComponentNavItemSchema>;
 /** Post-parse shape of {@link ComponentNavItem} — defaults applied, transforms run (ADR-0122). */
 export type ComponentNavItemParsed = z.infer<typeof ComponentNavItemSchema>;
+export type DocNavItem = z.input<typeof DocNavItemSchema>;
+/** Post-parse shape of {@link DocNavItem} (ADR-0122). */
+export type DocNavItemParsed = z.infer<typeof DocNavItemSchema>;
 export type GroupNavItem = z.infer<typeof GroupNavItemSchema> & { children: NavigationItem[] };

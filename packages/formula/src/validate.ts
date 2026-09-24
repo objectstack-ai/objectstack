@@ -26,6 +26,8 @@ import {
   type FieldCelType,
 } from './cel-engine';
 import { templateEngine } from './template-engine';
+import { analyzeRelationshipTraversals, findTraversalConflicts } from './relationship-traversal';
+import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 // #13594 — the one reader of cel-js's `found no matching overload for '…'`
 // template. Both this module (which asks whether the name is ADVERTISED, to word
 // a hint) and `firstUnknownFunctionCall` (which asks whether the environment
@@ -139,6 +141,26 @@ export interface ExprSchemaHint {
    * role that then silently never matches. Absent => role checks are skipped.
    */
   roleCatalog?: readonly string[];
+  /**
+   * [#18682] Opt IN to the relationship-traversal conflict checks.
+   *
+   * ⭐ Deliberately opt-in rather than derived from `fieldTypes`, because the
+   * prescription these checks hand out is only TRUE where something hydrates.
+   * `record.<reference field>.<field>` resolves the related record at exactly
+   * one seam — the object validation rules (`script` / `cross_field`) evaluated
+   * by ObjectQL's `checkPredicate`. Nothing hydrates at a field `requiredWhen` /
+   * `readonlyWhen`, an option `visibleWhen`, an action's `visible` / `disabled`,
+   * a sharing-rule (RLS) condition, a hook condition, a flow node or edge
+   * condition, or a formula `value`. Telling an author at one of those sites to
+   * "write `record.account.id` instead" produces an expression that faults at
+   * evaluation — and on the fail-OPEN seams among them, a faulting predicate
+   * stops enforcing altogether. So the refusal would trade a working rule for a
+   * dead one, at nine seams the traversal capability never covered.
+   *
+   * Set it only where the traversal is actually served. Absent ⇒ the checks do
+   * not run, which is every caller's behaviour until it opts in.
+   */
+  traversalHydration?: boolean;
 }
 
 export interface ExprValidationError {
@@ -851,6 +873,29 @@ export function validateExpression(
         const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened');
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
+    }
+  }
+  // [#18682] Relationship traversal: refuse the shapes that cannot be served
+  // as written — but ONLY where they are served. Three conditions, all
+  // required: the caller opted in (`traversalHydration`, see its docblock for
+  // why this is not derived from `fieldTypes`), the slot is a PREDICATE (a
+  // formula `value` never hydrates), and `fieldTypes` is present to tell a
+  // REFERENCE field from an object-valued one — `record.address.city` traverses
+  // today and must keep traversing.
+  //
+  // ⛔ This arm is the AUTHOR-side half only. ADR-0124: a client-side direction
+  // is never the whole answer, and no runtime package imports this one, so the
+  // same conflict is refused independently by ObjectQL's `checkPredicate`.
+  // Metadata authored through Studio, written straight to `sys_metadata` or
+  // produced by an agent never reaches this check.
+  if (schema?.fieldTypes && schema.traversalHydration === true && role === 'predicate') {
+    const analysis = analyzeRelationshipTraversals(source);
+    if (analysis) {
+      const conflicts = findTraversalConflicts(
+        analysis,
+        (field) => REFERENCE_VALUE_TYPES.has(schema.fieldTypes![field] ?? ''),
+      );
+      for (const conflict of conflicts) errors.push({ source, message: conflict.message });
     }
   }
   return { ok: errors.length === 0, errors, warnings };

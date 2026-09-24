@@ -160,10 +160,12 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   //   A table pin, not a door reading. ⛔ Do not delete that assertion as
   //   redundant with the door cases — for these two rows it is the only proof.
   //
-  // ⛔ `skill` is deliberately NOT here, and its absence is a measured reading
-  // rather than an omission — see the `validateAiToolReferences` member in
-  // `reference-integrity-suite.ts`, which carries the measurement and the
-  // reason, and the DARK pin that holds this row absent.
+  // ⛔ `skill` is NOT here, BY DESIGN: cross-item reference resolution belongs
+  // to the whole-stack rule (ruling `5791822697` on #19527, letter B), so no
+  // rule declares `skill` in `runtimeTypes` and a row here would be the inert
+  // mapping-ahead-of-its-rules shape the `seed: 'data'` note refuses. See the
+  // `validateAiToolReferences` member in `reference-integrity-suite.ts`, which
+  // carries the reason, and the DARK pin that holds this row absent.
   report: 'reports',
   email_template: 'emailTemplates',
   mapping: 'mappings',
