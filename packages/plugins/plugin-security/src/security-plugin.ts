@@ -204,7 +204,7 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
 }
 
 /**
- * [#16608] (no longer resolves; the live record is commit a016f08b8a)
+ * [insert-check commit a016f08b8a] (the original card no longer resolves)
  * The write `check` for the writes this middleware cannot judge on
  * its own, installed on the operation context for the engine to run on the
  * rows that will be stored: every row of an insert, single or array, once the
@@ -1815,7 +1815,7 @@ export class SecurityPlugin implements Plugin {
 
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-      // [#16608] (no longer resolves; the live record is commit a016f08b8a)
+      // [insert-check commit a016f08b8a] (the original card no longer resolves)
       // The write `check` step 3.6 installs on the operation context
       // for the engine to run: on an insert, after `beforeInsert`; [#19950] on
       // a predicate update, over every matched row once the payload is final.
@@ -3077,7 +3077,7 @@ export class SecurityPlugin implements Plugin {
           };
           const satisfiesCheck = (image: Record<string, unknown>): boolean =>
             checkParts.every((f) => matchesFilterCondition(image as any, f as any));
-          // [#16608] (no longer resolves; the live record is commit a016f08b8a)
+          // [insert-check commit a016f08b8a] (the original card no longer resolves)
           // The judgement the engine runs: every image it hands over
           // must pass, and the first that fails refuses the whole write. The
           // compiled filter is captured HERE — while the caller's permission
@@ -3095,7 +3095,7 @@ export class SecurityPlugin implements Plugin {
           });
 
           if (opCtx.operation === 'insert') {
-            // [#16608] (no longer resolves; the live record is commit a016f08b8a)
+            // [insert-check commit a016f08b8a] (the original card no longer resolves)
             // The engine runs it on the rows the `beforeInsert` chain
             // produced — [#19964] every row of an array insert.
             writeImageCheckSeam = newWriteImageCheck();
