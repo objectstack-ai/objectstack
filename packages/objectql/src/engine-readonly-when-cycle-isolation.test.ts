@@ -173,13 +173,14 @@ describe('a readonlyWhen cycle no longer over-locks the rest of the update (#199
     } as any);
     // Locks that READ the cycle: judged after it, against the values its
     // fail-safe drops keep on the row. `z` is unlocked there and lands; `w`
-    // is locked there and drops.
+    // is locked there and drops. Declared AHEAD of the cycle, so only what
+    // their predicates read can put them after it.
     engine.registry.registerObject({
       name: 'out_of_cycle',
       fields: {
-        ...CYCLE_NONE,
         z: { type: 'text', readonlyWhen: "record.a == 'new_a'" },
         w: { type: 'text', readonlyWhen: "record.a == 'old_a'" },
+        ...CYCLE_NONE,
         tag: { type: 'text' },
       },
     } as any);
@@ -191,9 +192,9 @@ describe('a readonlyWhen cycle no longer over-locks the rest of the update (#199
     engine.registry.registerObject({
       name: 'index_read',
       fields: {
-        ...CYCLE_NONE,
         z: { type: 'text', readonlyWhen: "record['a'] == 'new_a'" },
         w: { type: 'text', readonlyWhen: "record['a'] == 'old_a'" },
+        ...CYCLE_NONE,
         tag: { type: 'text' },
       },
     } as any);
