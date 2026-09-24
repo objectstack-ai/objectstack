@@ -31,6 +31,6 @@
 
 - 只作等复核标记,⛔ 不是闸门;单载体 = PR,卡上副本在规则外、不是要求。
 - 挂:ACCEPT 时条款②任一肢命中而现 head 无同形 PASS 在案 ⇒ 派发席同笔挂于 PR。
-- 摘:现 head 同形 PASS 在案 ⇒ 写记录的席同笔摘;PR 合并或关闭 ⇒ 派发席摘。
+- 摘:现 head 同形 PASS 在案 ⇒ 写记录的席同笔摘;PR 合并或关闭 ⇒ 派发席摘;FAIL 不摘。
 - 读者 = 维护者过滤 `is:pr is:open label:needs:contract-review` 与席位巡查、交接。
 - ⛔ 无 check、workflow、队列守卫或巡查脚本读它;入队只认同形记录,标记有无不改判。

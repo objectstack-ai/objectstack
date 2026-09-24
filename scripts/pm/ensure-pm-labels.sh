@@ -329,10 +329,11 @@ gh label create needs:pack-smoke -R objectstack-ai/objectstack -c 006b75 -d "Opt
 # .claude/skills/pm-dispatch/references/contract-review.md 〈等复核标记〉. The
 # dispatching seat hangs it on the PR at ACCEPT when either clause-② limb hits
 # and no same-form PASS is on the current head; the seat posting that PASS, or
-# the dispatching seat at merge/close, clears it. Named readers: the
-# maintainer's PR-list filter `is:pr is:open label:needs:contract-review` and
-# each seat's patrol and handover. ⛔ No check, workflow, queue guard or patrol
-# script reads it — the queue releases on the `## Contract review` record alone.
+# the dispatching seat at merge/close, clears it (a FAIL leaves it on). Named
+# readers: the maintainer's PR-list filter
+# `is:pr is:open label:needs:contract-review` and each seat's patrol and
+# handover. ⛔ No check, workflow, queue guard or patrol script reads it — the
+# queue releases on the `## Contract review` record alone.
 # Restored by the maintainer's instruction recorded on #19973, verbatim:
 # 「恢复 needs:contract-review，把这句原话写进一张 skills 车道的卡」 — answering a
 # question that proposed a marker, not a gate. The gate role, `--pair`, the
