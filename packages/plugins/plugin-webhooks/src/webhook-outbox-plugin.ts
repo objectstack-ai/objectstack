@@ -18,6 +18,10 @@ import {
     bindWebhookHeadersShapeGate,
     unbindWebhookHeadersShapeGate,
 } from './webhook-headers-gate.js';
+import {
+    bindWebhookLegacyCleartextGate,
+    unbindWebhookLegacyCleartextGate,
+} from './webhook-legacy-cleartext.js';
 
 /**
  * Structural view of `@objectstack/service-messaging`'s HTTP-outbox surface
@@ -199,6 +203,7 @@ export class WebhookOutboxPlugin implements Plugin {
         if (this.boundEngine) {
             try { unbindWebhookProvenanceStamp(this.boundEngine); } catch { /* best effort */ }
             try { unbindWebhookHeadersShapeGate(this.boundEngine); } catch { /* best effort */ }
+            try { unbindWebhookLegacyCleartextGate(this.boundEngine); } catch { /* best effort */ }
             this.boundEngine = undefined;
         }
     }
@@ -246,6 +251,11 @@ export class WebhookOutboxPlugin implements Plugin {
         // trigger), so the plugin's own writers deliberately carry no second
         // check of their own.
         bindWebhookHeadersShapeGate(engine as any, ctx.logger as any);
+        // And the retired credential location: a write that puts `secret` or
+        // `headers` back into `definition_json` is refused at the door, since
+        // the delivery path refuses such a row too. Bound before the seeder and
+        // the sweep for the same reason — both pass it by construction.
+        bindWebhookLegacyCleartextGate(engine as any, ctx.logger as any);
         let metadataService: IMetadataService | undefined;
         try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
         try {
