@@ -7275,7 +7275,7 @@ export class ObjectQL implements IObjectQLEngine {
    * What bounds the elevation is the PROJECTION: only the
    * columns the predicate names, intersected with the related object's declared
    * fields. ⛔ Never the whole row. On a related object no organization wall
-   * scopes, a user caller's own read of it also bounds the ROWS.
+   * scopes, the own read of any caller that is not SYSTEM also bounds the ROWS.
    *
    * ## An unresolved row is left UNAVAILABLE, and it says which kind
    *
@@ -7310,9 +7310,12 @@ export class ObjectQL implements IObjectQLEngine {
     if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) return unbound;
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
-    // ⛔ Walled posture: a USER caller with no `tenantId` cannot be scoped here, so it reads nothing.
+    // ⛔ Every bound below keys on "not SYSTEM", never on `userId`: a public-form
+    // submitter or a principal-less caller is bound exactly like a user. Walled
+    // posture: such a caller with no `tenantId` cannot be scoped here, so it reads nothing.
     const caller = context as ExecutionContext | undefined;
-    const readsNothing = !!caller?.userId && !carriesOrganization(caller?.tenantId)
+    const bound = !caller?.isSystem;
+    const readsNothing = bound && !carriesOrganization(caller?.tenantId)
       && postureEnforcesWall(this.resolveEnginePosture());
 
     const fields = (schema?.fields ?? {}) as Record<string, unknown>;
@@ -7393,10 +7396,10 @@ export class ObjectQL implements IObjectQLEngine {
         //
         // ⛔ No organization wall scopes a related object with no tenant column
         // (e.g. `sys_user`), `tenancy.enabled: false` or `external`, so for a
-        // USER caller its rows are the ones the caller's OWN read returns, through
-        // every enforcement layer; any other id is 'unreadable', stored or not.
+        // caller that is not SYSTEM its rows are the ones its OWN read returns,
+        // through every enforcement layer; any other id is 'unreadable', stored or not.
         let ownRead: Set<string> | undefined;
-        if (caller?.userId && (targetSchema?.external != null || resolveTenantFieldName(targetSchema) === null)) {
+        if (bound && (targetSchema?.external != null || resolveTenantFieldName(targetSchema) === null)) {
           const own = await this.find(target, {
             where: { id: { $in: [...ids] } }, fields: ['id'], context: caller as EngineQueryOptions['context'],
           }) as Array<Record<string, unknown>>;

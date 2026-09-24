@@ -118,7 +118,7 @@ afterEach(async () => {
 });
 
 /** `kind` is org Y's row's value; org X holds one `secret` line of its own. */
-async function boot(kind: 'secret' | 'public', posture?: 'group' | 'isolated') {
+async function boot(kind: 'secret' | 'public', posture?: 'single' | 'group' | 'isolated') {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   const engine = new ObjectQL();
   engine.registerDriver(driver as never, true);
@@ -185,7 +185,7 @@ async function boot(kind: 'secret' | 'public', posture?: 'group' | 'isolated') {
 /** Everything the caller sees of one write and one preview naming `line`. */
 async function observe(
   kind: 'secret' | 'public', line: string, caller: object = CALLER,
-  posture?: 'group' | 'isolated', object = 'qa_inspection',
+  posture?: 'single' | 'group' | 'isolated', object = 'qa_inspection',
 ) {
   const h = await boot(kind, posture);
   const ref = object === 'qa_review' ? 'reviewer' : 'line';
@@ -341,5 +341,46 @@ describe('#18682 — a related user the caller cannot read makes the rule fault 
     expect(self.seen).toEqual({
       refusal: null, committed: 1, preview: { valid: true, errors: [] }, update: 'committed',
     });
+  });
+});
+
+/**
+ * A caller that is not SYSTEM is bound whether or not it carries a `userId`: the
+ * public-form submitter (the grant the REST form route builds) and a
+ * principal-less context (the middleware's fall-open) included.
+ */
+describe('#18682 — a caller with no userId that is not system is bound like a user', () => {
+  const PUBLIC_FORM = (object: string) => ({ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true });
+
+  it('org Y’s line: every door refuses identically, whatever that row holds', async () => {
+    for (const caller of [PUBLIC_FORM('qa_note'), { positions: [], permissions: [] }]) {
+      const secret = await observe('secret', 'line_y', caller, 'isolated', 'qa_note');
+      const open = await observe('public', 'line_y', caller, 'isolated', 'qa_note');
+
+      expect(open.seen).toEqual(secret.seen);
+      expect(secret.seen.refusal?.code).toBe('VALIDATION_FAILED');
+      expect(secret.seen.committed).toBe(0);
+      expect(secret.seen.preview.valid).toBe(false);
+      expect(secret.readsOfLine).toEqual([]);
+    }
+  });
+
+  it('a user only org Y holds, under no wall: every door refuses as not readable, whatever its value', async () => {
+    const banned = await observe('secret', 'u_y', PUBLIC_FORM('qa_review'), 'single', 'qa_review');
+    const clear = await observe('public', 'u_y', PUBLIC_FORM('qa_review'), 'single', 'qa_review');
+
+    expect(clear.seen).toEqual(banned.seen);
+    expect(banned.seen.refusal).toMatchObject({ code: 'VALIDATION_FAILED', message: expect.stringContaining("could not read 'sys_user'") });
+    expect(banned.seen.committed).toBe(0);
+    expect(banned.seen.preview).toEqual({ valid: false, errors: [expect.stringContaining("could not read 'sys_user'")] });
+    expect(banned.userColumnsRead).not.toContain('banned');
+  });
+
+  it('CONTROL: a system caller still evaluates the rule on org Y’s line, in both directions', async () => {
+    const secret = await observe('secret', 'line_y', { isSystem: true }, 'isolated', 'qa_note');
+    const open = await observe('public', 'line_y', { isSystem: true }, 'isolated', 'qa_note');
+
+    expect(secret.seen).toMatchObject({ refusal: { message: RULE_MESSAGE }, committed: 0, update: { message: RULE_MESSAGE } });
+    expect(open.seen).toMatchObject({ refusal: null, committed: 1, preview: { valid: true }, update: 'committed' });
   });
 });
