@@ -19,8 +19,10 @@
  * and the flow parse refuses these values itself since this card — so the
  * refusal this door hands back is the PARSE's: a Zod issue with code `custom`,
  * anchored at the slot. That is what these pins assert, because it is what a
- * caller receives (the `/automation` write doors map exactly that issue to a
- * `VALIDATION_ERROR` field). The engine's own ledger pass refuses the same
+ * caller receives: the `/automation` write doors (`flowDefinitionRefusal` in
+ * `runtime/src/domains/automation.ts`) answer a Zod refusal from
+ * `registerFlow` as `400` `VALIDATION_FAILED`, one `details.fields[]` entry
+ * per issue, keyed by the issue's path. The engine's own ledger pass refuses the same
  * value through the same `predicateSlotRefusal`, one step later — the same
  * two-layer shape a blank `edge.condition` has had since #15807.
  */
