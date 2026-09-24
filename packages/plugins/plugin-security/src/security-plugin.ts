@@ -2505,33 +2505,17 @@ export class SecurityPlugin implements Plugin {
             opCtx.operation === 'purge' ? 'delete'
             : opCtx.operation === 'transfer' || opCtx.operation === 'restore' ? 'update'
             : opCtx.operation;
-          // [#5492] Ask the write authority ONLY when the platform floor is
-          // actually in play for this (principal, object, operation) — no floor,
-          // nothing to replace, and no reason to spend a sharing probe.
-          //
-          // [ADR-0090 D10] The on-behalf-of path is deliberately EXCLUDED. The
-          // bypass predicate the verdict folds through already fails closed for a
-          // delegated context (`hasWriteBypass`: "no D10 delegator intersection
-          // on this path", ADR-0111 D2), so composing here could only produce a
-          // verdict resolved against the wrong identity. The delegated write
-          // keeps both principals' floors, exactly as before.
-          const floorApplies =
-            !delegatorSets &&
-            this.collectRLSPolicies(
-              permissionSets,
-              opCtx.object,
-              rlsOperation,
-              (opCtx.context?.positions ?? []) as string[],
-            ).some(isPlatformOwnershipFloorPolicy);
-          const dropPlatformOwnershipFloor = floorApplies
-            ? (await this.resolveSharingWriteVerdict(
-                rlsOperation,
-                opCtx.object,
-                String(targetId),
-                opCtx.context,
-                permissionSets,
-              )) === 'allow'
-            : false;
+          // [#5492] The floor decision. Its clauses and their reasons (floor in
+          // play, `allow` only, the on-behalf-of exclusion) live on
+          // {@link resolvePreImageFloorDrop}, which `security/explain` asks too.
+          const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
+            rlsOperation,
+            opCtx.object,
+            String(targetId),
+            opCtx.context,
+            permissionSets,
+            !!delegatorSets,
+          );
           // [#8757] The COVERAGE VOUCH for ADR-0055 details. This gate and the
           // master gate (step 2.8, immediately below) run on the same middleware
           // pass, and 2.8's condition is a strict SUPERSET of this one: the same
@@ -4363,6 +4347,38 @@ export class SecurityPlugin implements Plugin {
     // record path still works, the sharing layer simply reports not_evaluated.
     const sharing = recordId ? (this.resolveKernelService?.('sharing') as any) : undefined;
 
+    // [#19963] A record-grained WRITE verdict is computed from the by-id write
+    // path's own inputs, so `record.visible` for `update` / `delete` is the
+    // answer the by-id PATCH / DELETE gives:
+    //  - Layer 1 carries the pre-image gate's floor decision (step 2.7,
+    //    {@link resolvePreImageFloorDrop}). Not `masterGateCoversThisWrite`:
+    //    that knob VOUCHES that ADR-0055's master gate runs after the filter,
+    //    and explain runs no master gate, so it has nothing to vouch with.
+    //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
+    //    as the middleware stamps it (step 2.6), always overwritten, so an
+    //    `org` / unit writer is not judged owner-only.
+    // The on-behalf-of path keeps its previous inputs on both halves. The gate
+    // itself excludes it from the floor decision, and the middleware's
+    // delegated write depth (the agent-leg intersection, plus a second gate
+    // call as the delegator) is not modelled on explain's record path.
+    const delegatedWrite = (c: any): boolean => !!c?.onBehalfOf?.userId;
+    const recordWriteFloorOptions = async (
+      sets: PermissionSet[],
+      o: string,
+      engineOp: string,
+      c: any,
+    ): Promise<RlsFilterOptions | undefined> => {
+      if (!recordId || (engineOp !== 'update' && engineOp !== 'delete')) return undefined;
+      // Fail toward the floor: an unanswerable decision keeps it standing,
+      // which is what the gate's own verdict does on a failed probe.
+      const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
+        engineOp, o, recordId, c, sets, delegatedWrite(c),
+      ).catch(() => false);
+      return { dropPlatformOwnershipFloor };
+    };
+    const withWriteScope = async (o: string, c: any): Promise<any> =>
+      delegatedWrite(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
+
     return explainAccess(
       {
         ql: this.ql,
@@ -4390,7 +4406,10 @@ export class SecurityPlugin implements Plugin {
         },
         baselinePermissionSets: this.baselinePermissionSets,
         // ── record-grained deps (only consulted when recordId is present) ──
-        computeLayeredRlsFilter: (sets, o, engineOp, c) => this.computeLayeredRlsFilter(sets as any, o, engineOp, c),
+        computeLayeredRlsFilter: async (sets, o, engineOp, c) =>
+          this.computeLayeredRlsFilter(
+            sets as any, o, engineOp, c, await recordWriteFloorOptions(sets as any, o, engineOp, c),
+          ),
         fetchRecord: async (o: string, rid: string) => {
           try {
             const finder = this.ql?.findOne
@@ -4416,12 +4435,12 @@ export class SecurityPlugin implements Plugin {
           ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
           : {}),
         ...(sharing && typeof sharing.canEdit === 'function'
-          ? { canEditRecord: (o: string, rid: string, c: any) => sharing.canEdit(o, rid, c) }
+          ? { canEditRecord: async (o: string, rid: string, c: any) => sharing.canEdit(o, rid, await withWriteScope(o, c)) }
           : {}),
         // [ADR-0111 D3] The narrower delete gate — an edit share opens update
         // but not delete, so a delete explanation must consult this.
         ...(sharing && typeof sharing.canDelete === 'function'
-          ? { canDeleteRecord: (o: string, rid: string, c: any) => sharing.canDelete(o, rid, c) }
+          ? { canDeleteRecord: async (o: string, rid: string, c: any) => sharing.canDelete(o, rid, await withWriteScope(o, c)) }
           : {}),
       },
       { object, operation, context: targetContext, recordId },
@@ -4634,6 +4653,52 @@ export class SecurityPlugin implements Plugin {
       );
       return 'deny';
     }
+  }
+
+  /**
+   * [#5492] The by-id write pre-image gate's floor decision (step 2.7): does
+   * the platform ownership floor yield to the declared write authority for
+   * THIS principal, row and write class? It is the value of
+   * {@link RlsFilterOptions.dropPlatformOwnershipFloor} on that path.
+   *
+   * One method, two readers: the gate, and `security/explain`'s record-grained
+   * Layer 1 for `update` / `delete` (#19963). Explain used to compose Layer 1
+   * with the floor always standing, so it answered `record.visible: false`
+   * (`decidedBy: 'rls'`) on every row the caller did not CREATE, while the gate
+   * dropped the floor and the by-id PATCH admitted the same row.
+   *
+   *  - The write authority is asked ONLY when the floor is actually in play for
+   *    this (principal, object, operation): no floor, nothing to replace, and
+   *    no reason to spend a sharing probe.
+   *  - `allow` alone drops it; `abstain` and `deny` leave it standing
+   *    ({@link resolveSharingWriteVerdict} has the reasons).
+   *  - [ADR-0090 D10] The on-behalf-of path is deliberately EXCLUDED. The
+   *    bypass predicate the verdict folds through already fails closed for a
+   *    delegated context (`hasWriteBypass`: "no D10 delegator intersection on
+   *    this path", ADR-0111 D2), so composing here could only produce a verdict
+   *    resolved against the wrong identity. The delegated write keeps both
+   *    principals' floors, exactly as before.
+   */
+  private async resolvePreImageFloorDrop(
+    rlsOperation: string,
+    object: string,
+    recordId: string,
+    context: any,
+    permissionSets: PermissionSet[],
+    delegated: boolean,
+  ): Promise<boolean> {
+    if (delegated) return false;
+    const floorApplies = this.collectRLSPolicies(
+      permissionSets,
+      object,
+      rlsOperation,
+      (context?.positions ?? []) as string[],
+    ).some(isPlatformOwnershipFloorPolicy);
+    if (!floorApplies) return false;
+    return (
+      (await this.resolveSharingWriteVerdict(rlsOperation, object, recordId, context, permissionSets)) ===
+      'allow'
+    );
   }
 
   /**
