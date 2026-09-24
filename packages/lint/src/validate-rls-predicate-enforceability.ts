@@ -30,12 +30,13 @@
  *     this one is simply dropped out of the OR and the access it was written to
  *     grant does not exist.
  *  4. **Write path (`check`, ADR-0058 D4).** `computeWriteCheckFilter` takes
- *     its set from `writeCheckPolicies`, per insert / update and per caller:
- *     the applicable policies that declare a `check` when any does (a
- *     USING-only sibling then adds nothing), otherwise every applicable policy
- *     with a `using`, that `using` compiled as its check. So an unlowerable
- *     `check` always reaches this path, and an unlowerable `using` on an
- *     `insert` / `update` / `all` policy reaches it whenever no applicable
+ *     its set from `writeCheckPolicies`, per single-record insert / by-id
+ *     update and per caller (an array insert and a `multi: true` update never
+ *     reach it): the applicable policies that declare a `check` when any does
+ *     (a USING-only sibling then adds nothing), otherwise every applicable
+ *     policy with a `using`, that `using` compiled as its check. So an
+ *     unlowerable `check` on an `insert` / `update` / `all` policy reaches this
+ *     path, and so does an unlowerable `using` on one whenever no applicable
  *     policy for that operation declares a `check`. When nothing else in the
  *     set compiles, the same drop makes the post-image predicate the deny
  *     sentinel, `matchesFilterCondition` fails, and the write raises
@@ -257,27 +258,28 @@ function quote(source: string): string {
  * The INSERT half of a dropped `using`, appended to every `using` consequence
  * below. The ADR-0058 D4 write check takes its set from `writeCheckPolicies`:
  * when no applicable policy for the insert declares a `check`, every applicable
- * policy's `using` is compiled as its check, so the same drop reaches the insert
- * too. Measured through the real `SecurityPlugin` on an `insert` and an `all`
- * policy, for all three kinds of drop (an unlowerable shape, an unresolved
+ * policy's `using` is compiled as its check, so the same drop reaches the
+ * single-record insert too. Measured through the real `SecurityPlugin` on an
+ * `insert` and an `all` policy, for all three kinds of drop (an unlowerable shape, an unresolved
  * `current_user.*`, an undeclared column): with nothing else compiling in that
  * set, every single-record insert is refused (403); with another applicable
  * policy's `using` compiling, that one alone decides; with a declared `check`
  * beside it, the declared check alone decides and this `using` takes no part.
  */
 const USING_INSERT_CONSEQUENCE =
-  ' On an `insert` or `all` policy the same `using` is also the INSERT check whenever no applicable ' +
-  'policy for the insert declares a `check` (ADR-0058 D4): when nothing else in that set compiles, ' +
-  'every single-record insert it governs fails with `PermissionDeniedError`; when another ' +
-  "policy's `using` compiles, that one alone decides the insert.";
+  ' On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
+  'whenever no applicable policy for the insert declares a `check` (ADR-0058 D4): when nothing ' +
+  'else in that set compiles, every single-record insert it governs fails with ' +
+  "`PermissionDeniedError`; when another policy's `using` compiles, that one alone decides the insert.";
 
 /**
  * Qualifies every `check` consequence below. The write check OR-combines the
  * declared checks of all the applicable policies for the operation, so a
  * dropped `check` is a blanket refusal only when no other declared `check` in
  * that set compiles (measured: beside a compiling declared `check`, that one
- * alone decided; beside a USING-only sibling, every write was refused, because
- * a USING-only sibling takes no part once any policy declares a `check`).
+ * alone decided; beside a USING-only sibling, every single-record insert was
+ * refused, because a USING-only sibling takes no part once any policy declares
+ * a `check`).
  */
 const CHECK_SET_QUALIFIER =
   ' That holds when no other applicable policy for the operation declares a `check` that compiles; ' +

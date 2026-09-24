@@ -60,7 +60,7 @@ export const ContributorAccess = definePermissionSet({
 | `object` | `string` | Target object — or `'*'` to apply to every object |
 | `operation` | `'select' \| 'insert' \| 'update' \| 'delete' \| 'all'` | Which operation the policy guards. A `select` policy also bounds writes when no write-class policy applies — see below |
 | `using` | `string` | Predicate for rows the user may **see / act on** (compiled into the query filter) |
-| `check` | `string` | Predicate the new row must satisfy **after an insert or update**. Omit it and `using` stands in, unless another applicable policy for the same operation declares a `check` — see [the fail-closed contract](#the-fail-closed-contract) |
+| `check` | `string` | Predicate the new row must satisfy **after a single-record insert or a by-id update**; an array insert and a `multi: true` update are not checked. Omit it and `using` stands in, unless another applicable policy for the same operation declares a `check` — see [the fail-closed contract](#the-fail-closed-contract) |
 | `positions` | `string[]` | Which positions the policy applies to. Omit = everyone |
 | `enabled` | `boolean` | Default `true`. `false` switches the policy off — a disabled policy is not evaluated |
 
@@ -182,8 +182,9 @@ Layer 1 (business RLS)       ─┘
 
 - **Tenant isolation is a separate layer that always applies first** and is
   never OR-ed away by a business policy.
-- **Multiple policies on the same object are OR-ed** — a row is admitted if it
-  matches *any* applicable policy. This is the intended way to express
+- **Multiple policies on the same object are OR-ed** — on a read, a row is
+  admitted if it matches *any* applicable policy (for writes, see item 4 of
+  the fail-closed contract below). This is the intended way to express
   alternatives.
 - The full evaluation pipeline around RLS is: object CRUD → FLS → OWD baseline →
   depth → sharing → RLS. RLS narrows what the earlier layers already allowed;
@@ -202,10 +203,10 @@ Four ways a policy denies rather than leaks:
 2. A referenced context variable is missing, null, or an empty array → that
    policy drops out (it cannot match).
 3. A policy references a column the object doesn't have → deny.
-4. `check` is omitted → `using` stands in as the write check. The choice is
+4. `check` is omitted → `using` stands in as the `check`. The choice is
    made per operation across all the applicable policies, not policy by
    policy: when any of them declares a `check`, only the declared checks
-   decide, and a USING-only sibling's `using` is not part of the write check.
+   decide, and a USING-only sibling's `using` is not part of the check.
 
 <Callout type="warn">
 **The one non-obvious case: no applicable policy means *no restriction*, not

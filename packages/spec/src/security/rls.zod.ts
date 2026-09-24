@@ -78,7 +78,7 @@ import { strictObject } from '../shared/strict-object';
  * ObjectStack RLS:
  * - A constrained CEL predicate grammar: comparisons and set-membership against literals or `current_user.*` values, composable with `&&` / `||`; anything that does not lower to a filter fails closed
  * - Subquery-shaped needs are pre-resolved by the runtime (§7.3.1)
- * - Multiple policies OR-combine for union (any-match-allows) semantics
+ * - Multiple policies OR-combine on reads (any match allows); for writes see `check`
  * 
  * ## Best Practices
  * 
@@ -92,8 +92,7 @@ import { strictObject } from '../shared/strict-object';
  * 
  * 1. **Defense in Depth**: RLS is one layer; use with object permissions
  * 2. **Default Deny**: If no policy matches, access is denied
- * 3. **Policy Precedence**: More permissive policy wins (OR logic)
- * 4. **Context Variables**: Ensure current_user context is always set
+ * 3. **Context Variables**: Ensure current_user context is always set
  * 
  * @see https://www.postgresql.org/docs/current/ddl-rowsecurity.html
  * @see https://help.salesforce.com/s/articleView?id=sf.security_sharing_rules.htm
@@ -394,10 +393,9 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
     .describe('Filter condition for SELECT/UPDATE/DELETE, authored in canonical CEL (ADR-0058 D1). It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in [\'draft\', \'pending\']); these combined with `&&` / `||`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Optional for INSERT-only policies.'),
 
   /**
-   * CHECK clause - Validation for INSERT/UPDATE operations.
-   * 
-   * Similar to USING but applies to new/modified rows.
-   * Prevents users from creating/updating rows they wouldn't be able to see.
+   * CHECK clause - Validation of the new row of a single-record INSERT or a
+   * by-id UPDATE. An array insert and a `multi: true` update are not
+   * post-image checked (#19964, #19950).
    * 
    * **Default Behavior**: the `using` → `check` default is decided per write
    * operation across the applicable policies, not policy by policy. A policy
@@ -408,7 +406,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    *
    * - When any applicable policy declares `check`, only the declared checks
    *   decide, OR-combined. A USING-only sibling adds nothing: its `using` is
-   *   not part of the write check.
+   *   not part of the check.
    * - When none declares `check`, each applicable policy's `using` stands in as
    *   its check, OR-combined. The platform's own ownership floor
    *   (`owner_only_writes`) takes part only where the by-id pre-image gate
@@ -431,7 +429,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    */
   check: z.string()
     .optional()
-    .describe('Validation condition for INSERT/UPDATE, matched against the new row (enforced at application level). The default to `using` is decided per operation across the applicable policies, not per policy: when any applicable policy for that operation declares `check`, only the declared checks decide (OR-combined) and a USING-only sibling adds nothing; only when none declares `check` does each applicable policy\'s `using` stand in as its check (OR-combined). Applicable = not `enabled: false`, `object` matches or is \'*\', `operation` matches or is \'all\', and the caller holds one of its `positions` when it lists any. A `check` on a `select` or `delete` policy is never evaluated.'),
+    .describe('Validation condition matched against the new row of a single-record INSERT or a by-id UPDATE (enforced at application level); an array insert and a `multi: true` update are not post-image checked. The default to `using` is decided per operation across the applicable policies, not per policy: when any applicable policy for that operation declares `check`, only the declared checks decide (OR-combined) and a USING-only sibling adds nothing; only when none declares `check` does each applicable policy\'s `using` stand in as its check (OR-combined). Applicable = not `enabled: false`, `object` matches or is \'*\', `operation` matches or is \'all\', and the caller holds one of its `positions` when it lists any. A `check` on a `select` or `delete` policy is never evaluated.'),
 
   /**
    * Restrict this policy to specific positions (ADR-0090 D3; formerly
@@ -477,8 +475,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    */
   priority: retiredKey(
     '`rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0. ' +
-    'It never had an effect and could not: applicable policies OR-combine (most permissive wins), ' +
-    'so there is no conflict to order. Delete the key — policy outcomes are unchanged. ' +
+    'It never had an effect. Delete the key — policy outcomes are unchanged. ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 
