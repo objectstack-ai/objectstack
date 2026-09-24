@@ -2993,11 +2993,21 @@ export class SecurityPlugin implements Plugin {
       // checked field must arrive from the caller — is REFUSED, not deferred:
       // it institutionalises the contradiction (the caller sending the value the
       // hook exists to make un-sendable) and needs a permanent lint to keep it.
+      //
+      // ── [#19964] EVERY row an insert stores ───────────────────────────────
+      //
+      // The check is a guarantee about each stored row, so an insert that
+      // stores several rows is judged once per row, and ONE failing row
+      // refuses the whole write. An ARRAY insert used to be excluded by a
+      // non-array guard here, so no judgement was installed and every row was
+      // stored unjudged. The seam already receives every live row of an array
+      // insert, so the guard now admits an array for `insert` (an `update`
+      // still takes one payload).
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
         typeof opCtx.data === 'object' &&
-        !Array.isArray(opCtx.data) &&
+        (opCtx.operation === 'insert' || !Array.isArray(opCtx.data)) &&
         permissionSets.length > 0 &&
         !!opCtx.context?.userId
       ) {
@@ -3051,8 +3061,10 @@ export class SecurityPlugin implements Plugin {
             checkParts.every((f) => matchesFilterCondition(image as any, f as any));
 
           if (opCtx.operation === 'insert') {
-            // [#16608] Install the judgement; the engine runs it on the row the
-            // `beforeInsert` chain produced. The compiled filter is captured
+            // [#16608] Install the judgement; the engine runs it on the rows the
+            // `beforeInsert` chain produced — [#19964] every row of an array
+            // insert, and the first that fails refuses the whole write. The
+            // compiled filter is captured
             // HERE — while the caller's permission sets, the delegator's, the
             // staged membership and this request's context are all resolved —
             // and only the IMAGE is deferred. Deferring the compilation too

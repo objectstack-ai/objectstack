@@ -30,13 +30,14 @@ import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
  *
  * So the executor honours the seam the way the engine does: the flag first (it
  * answers "did the seam run", never "did the write pass"), then the judgement.
- * These doubles run no hooks, so the row that would be stored IS `opCtx.data`.
+ * These doubles run no hooks, so the rows an insert would store ARE
+ * `opCtx.data` — each element of an array insert ([#19964]).
  */
 const runEngineWriteBody = async (opCtx: any): Promise<void> => {
   const seam = opCtx?.postHookWriteImageCheck;
   if (!seam) return;
   seam.honoured = true;
-  await seam.evaluate([opCtx.data]);
+  await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
 };
 
 // ---------------------------------------------------------------------------
