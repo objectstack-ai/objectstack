@@ -6352,8 +6352,25 @@ export type ViewParsed = z.infer<typeof ViewSchema>;
 export type ViewItem = z.input<typeof ViewItemSchema>;
 /** A ViewItem record as it travels the WIRE — the authoring shape plus Studio's round-trip keys (#5074). */
 export type ViewItemWire = z.input<typeof ViewItemWireSchema>;
-/** Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095). */
-export type ViewMetadata = z.input<typeof ViewMetadataSchema>;
+/**
+ * Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095) —
+ * the union of the INPUT types of the members {@link ViewMetadataSchema}'s union runs, read off
+ * {@link VIEW_METADATA_MEMBERS} (the union's member list by construction).
+ *
+ * [#19871] Deliberately NOT `z.input<typeof ViewMetadataSchema>`. That schema is a `z.preprocess`,
+ * whose input type is `unknown`, and its union's members are cast to `z.ZodTypeAny` where the
+ * union is built — so every type derived from the schema itself is `unknown`, and this name used to
+ * type-check any body at all. `view-metadata-type.test.ts` pins that `unknown` and an undeclared
+ * key are refused here, and that a body of each member still type-checks.
+ *
+ * A static type, not the door's verdict, in both directions: the door accepts bodies this type
+ * refuses (the preprocess removes the console's row `id`s, and three members strip undeclared
+ * top-level keys), and refuses bodies it admits — the identity precondition, the members'
+ * refinements, and a body that mixes keys of different members, because TypeScript checks an
+ * object literal's keys against the union as a whole and the container member's keys are all
+ * optional. `ViewMetadataSchema` remains the only judge.
+ */
+export type ViewMetadata = z.input<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
 /** Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122). */
 export type ViewMetadataParsed = z.infer<typeof ViewMetadataSchema>;
 export type ViewScope = z.input<typeof ViewScopeSchema>;
