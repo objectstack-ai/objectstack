@@ -32,4 +32,9 @@ member shapes. Correct the body, or type a value that is still unvalidated as `u
 
 `ViewMetadataParsed` is not changed by this release: it is still `unknown`.
 
+The `@objectstack/metadata` changelog entry for #19852 gives `ViewMetadata` being `unknown` as the
+reason a saved `view` file is written with no annotation; that reason is superseded here, and the
+outcome stands for another one: `ViewMetadata` is no longer the `z.input` type of
+`ViewMetadataSchema`, the schema `getMetadataTypeSchema('view')` binds.
+
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-typed at runtime: no spec key, no export, no stored row moves, and every view body parses byte-identically, so `objectstack migrate meta` has nothing to reach. The only thing that moved is a TypeScript annotation, whose channel is the consumer's compiler. `type-surface-only` does not apply because this diff touches `packages/spec/**` (its predicate 2). -->
