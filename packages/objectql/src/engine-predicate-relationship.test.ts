@@ -560,18 +560,35 @@ describe('#20006 — a cascade reference clear refused by a traversing rule says
     expect(message).toContain('clears `account` on the crm_deal records');
     expect(message).toContain("validation rule 'no_secret_region' on crm_deal");
     expect(message).toContain("reads 'kind' through `region`");
-    expect(message).toContain('`when` is `record.account != null`');
     expect(message).toContain('`deleteBehavior` on crm_deal.account');
+    // ⛔ No guard: on a rule reading ANOTHER reference it costs enforcement (next pin).
+    expect(message).not.toContain('conditional');
     expect(message).not.toContain('declare the field');
     expect(accountStored).toBe(true);
     expect(deal?.account).toBe('acc_1');
   });
 
-  it('ACCEPTS that delete too once the rule is guarded on the cleared reference', async () => {
-    const { err, accountStored, deal } = await deleteAccount([guarded(readsOther)]);
-    expect(err).toBe(null);
-    expect(accountStored).toBe(false);
-    expect(deal).toMatchObject({ account: null, region: 'reg_1' });
+  it('keeps a rule on ANOTHER reference judged on account-less records — why the guard is not offered for it', async () => {
+    // An ordinary insert of a deal with NO account, in a secret region.
+    const insertAccountless = async (validations: unknown[], deleteBehavior?: string) => {
+      const { engine } = await boot(validations);
+      if (deleteBehavior) {
+        const deal = engine.registry.getObject('crm_deal') as any;
+        engine.registry.registerObject({
+          ...deal,
+          fields: { ...deal.fields, account: { ...deal.fields.account, deleteBehavior } },
+        }, 'test-package');
+      }
+      return engine
+        .insert('crm_deal', { id: 'deal_2', name: 'E', amount: 5, region: 'reg_1' }, { context: { isSystem: true } } as any)
+        .then(() => null, (e: any) => e?.message as string);
+    };
+    // What the refusal offers — `deleteBehavior` — leaves the rule judging such a deal.
+    expect(await insertAccountless([readsOther])).toBe(SECRET_MESSAGE);
+    expect(await insertAccountless([readsOther], 'restrict')).toBe(SECRET_MESSAGE);
+    expect(await insertAccountless([readsOther], 'cascade')).toBe(SECRET_MESSAGE);
+    // What it does NOT offer: a guard on `account` stops judging it there at all.
+    expect(await insertAccountless([guarded(readsOther)])).toBe(null);
   });
 
   it("ACCEPTS the delete when the reference's deleteBehavior is 'cascade' — the other named repair", async () => {
@@ -614,6 +631,20 @@ describe('#20006 — a cascade reference clear refused by a traversing rule says
     expect(err?.message).toBe(
       "Validation rule 'broken' could not be evaluated (runtime: No such key: nope) — write rejected."
       + " The predicate reads 'nope', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
+  it('CONTROL: a fault on a bare column of the rule\'s own object keeps its text, though a reference reads the same name', async () => {
+    // crm_deal declares no `status`, so `record.status` faults on EVERY write —
+    // the rule is broken by its author, not by the cleanup. `account` also
+    // reads a `status`, and the attribution must not confuse the two.
+    const { err } = await deleteAccount([{
+      ...readsCleared, condition: "record.status == 'x' && record.account.status == 'closed'",
+    }]);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'closed_account_frozen' could not be evaluated (runtime: No such key: status) — write rejected."
+      + " The predicate reads 'status', which this object does not declare — fix the rule's condition, or declare the field.",
     );
   });
 

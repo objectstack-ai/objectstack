@@ -356,10 +356,12 @@ describe('#20006 — the reference-cleanup binding changes a text, never a verdi
     object: 'crm_account', id: 'acc_1', referencingObject: 'crm_deal', field,
   });
   /** The refusal message, or `null` when the write is accepted. */
-  const refusal = (condition: string, data: Record<string, unknown>, field: string): string | null => {
+  const refusal = (
+    condition: string, data: Record<string, unknown>, field: string, fields: Record<string, unknown> = deal.fields,
+  ): string | null => {
     try {
       evaluateValidationRules(
-        { ...deal, validations: [{ name: 'r', type: 'script', severity: 'error', message: 'fired', condition }] } as any,
+        { fields, validations: [{ name: 'r', type: 'script', severity: 'error', message: 'fired', condition }] } as any,
         data, 'update', { previous: { id: 'deal_1', ...data }, related: cleanupOf(field) },
       );
       return null;
@@ -369,10 +371,30 @@ describe('#20006 — the reference-cleanup binding changes a text, never a verdi
     }
   };
 
-  it('offers the guard only where it skips the rule: a single reference the cleanup EMPTIES', () => {
-    const message = refusal("record.region.kind == 'secret'", { account: null, region: 'reg_1' }, 'account');
-    expect(message).toContain('Cannot delete crm_account (acc_1): the delete clears `account`');
-    expect(message).toContain('`when` is `record.account != null`');
+  it('offers the guard only to a rule reading through the reference the cleanup EMPTIES', () => {
+    const reads = refusal("record.account.status == 'closed'", { account: null, region: 'reg_1' }, 'account');
+    expect(reads).toContain('Cannot delete crm_account (acc_1): the delete clears `account`');
+    expect(reads).toContain('`when` is `record.account != null`');
+    // A rule reading only ANOTHER reference would stop being judged wherever
+    // `account` is empty, so it is offered `deleteBehavior` alone.
+    const other = refusal("record.region.kind == 'secret'", { account: null, region: 'reg_1' }, 'account');
+    expect(other).toContain('Cannot delete crm_account (acc_1): the delete clears `account`');
+    expect(other).toContain('Change `deleteBehavior` on crm_deal.account');
+    expect(other).not.toContain('conditional');
+  });
+
+  it('attributes a key read both ways to the traversal only when the traversal is what faults', () => {
+    // `status` is DECLARED here, so `record.status` reads null and cannot fault:
+    // the `No such key: status` is the traversal's, and the cleanup text is right.
+    const declared = refusal("record.status == 'x' || record.account.status == 'closed'",
+      { account: null, status: null }, 'account', { ...deal.fields, status: { type: 'text' } });
+    expect(declared).toContain('Cannot delete crm_account (acc_1)');
+    // `previous.kind` faults on a deal that declares no `kind`, whatever `region`
+    // holds — a root the rule's traversal analysis does not describe.
+    const previous = refusal("previous.kind == 'x' && record.region.kind == 'secret'",
+      { account: null, region: 'reg_1' }, 'account');
+    expect(previous).toMatch(/^Validation rule 'r' could not be evaluated \(runtime: No such key: kind\)/);
+    expect(previous).not.toContain('Cannot delete');
   });
 
   it('offers only deleteBehavior on a multi-value reference, where the guard would still run the rule', () => {
