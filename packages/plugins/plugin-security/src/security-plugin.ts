@@ -204,7 +204,8 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
 }
 
 /**
- * [#16608] The write `check` for the writes this middleware cannot judge on
+ * [#16608] (no longer resolves; the live record is commit a016f08b8a)
+ * The write `check` for the writes this middleware cannot judge on
  * its own, installed on the operation context for the engine to run on the
  * rows that will be stored: every row of an insert, single or array, once the
  * `beforeInsert` chain has produced it, and [#19950] every row a predicate
@@ -1814,7 +1815,8 @@ export class SecurityPlugin implements Plugin {
 
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-      // [#16608] The write `check` step 3.6 installs on the operation context
+      // [#16608] (no longer resolves; the live record is commit a016f08b8a)
+      // The write `check` step 3.6 installs on the operation context
       // for the engine to run: on an insert, after `beforeInsert`; [#19950] on
       // a predicate update, over every matched row once the payload is final.
       // Held here so the post-`next()` assertion below can read whether the
@@ -3075,7 +3077,8 @@ export class SecurityPlugin implements Plugin {
           };
           const satisfiesCheck = (image: Record<string, unknown>): boolean =>
             checkParts.every((f) => matchesFilterCondition(image as any, f as any));
-          // [#16608] The judgement the engine runs: every image it hands over
+          // [#16608] (no longer resolves; the live record is commit a016f08b8a)
+          // The judgement the engine runs: every image it hands over
           // must pass, and the first that fails refuses the whole write. The
           // compiled filter is captured HERE — while the caller's permission
           // sets, the delegator's, the staged membership and this request's
@@ -3092,7 +3095,8 @@ export class SecurityPlugin implements Plugin {
           });
 
           if (opCtx.operation === 'insert') {
-            // [#16608] The engine runs it on the rows the `beforeInsert` chain
+            // [#16608] (no longer resolves; the live record is commit a016f08b8a)
+            // The engine runs it on the rows the `beforeInsert` chain
             // produced — [#19964] every row of an array insert.
             writeImageCheckSeam = newWriteImageCheck();
             opCtx.postHookWriteImageCheck = writeImageCheckSeam;
