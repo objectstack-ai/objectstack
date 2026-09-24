@@ -735,3 +735,131 @@ describe('#20006 — a cascade reference clear refused by a traversing rule says
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#20007] An OPTIONAL lookup a traversing rule must skip while it is empty.
+//
+// The intent: refuse an order whose line is secret, and say nothing about an
+// order with no line. Both refusals on the way used to send the author in a
+// circle. The natural spelling, `record.line != null && record.line.kind ==
+// 'secret'`, is refused as a reference read both through the relationship and
+// as a value, and that refusal prescribed `record.line.id` — which is no null
+// guard: with `line` empty the engine refuses the rule before evaluation as
+// "no single related record", whose own prescription named no spelling at all.
+// The repairs that work are a `conditional` wrapper whose `when` is
+// `record.line != null`, or `required: true` on the lookup. Both refusals now
+// name them, in the ONE guard spelling the delete-cleanup refusal above uses,
+// and the wrapped rule is driven end to end here.
+// ---------------------------------------------------------------------------
+
+describe('#20007 — an optional lookup guarded in a traversing rule', () => {
+  const SECRET_MESSAGE = 'An order may not carry a secret line.';
+  /** The guard spelling every prescription names, byte for byte. */
+  const GUARD = 'make it the `then` of a `conditional` rule whose `when` is `record.line != null`';
+  const script = (condition: string) => ({
+    name: 'no_secret_line', type: 'script', severity: 'error', message: SECRET_MESSAGE, condition,
+  });
+  /** The natural spelling: a null test and a traversal in one expression. */
+  const natural = script("record.line != null && record.line.kind == 'secret'");
+  /** The spelling the mixed-shape refusal used to prescribe. */
+  const idTest = script("record.line.id != null && record.line.kind == 'secret'");
+  /** The repair, as an author writes it from the prescription. */
+  const wrapped = {
+    name: 'no_secret_line_when_set', type: 'conditional', severity: 'error',
+    message: 'Only checked while the order names a line.',
+    when: 'record.line != null', then: script("record.line.kind == 'secret'"),
+  };
+
+  async function boot(validations: unknown[], line: Record<string, unknown> = {}) {
+    const engine = new ObjectQL();
+    const d = makeDriver();
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'qa_line', fields: { name: { type: 'text' }, kind: { type: 'text' } },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'qa_order',
+      fields: {
+        name: { type: 'text' },
+        // OPTIONAL unless a case says otherwise.
+        line: { type: 'lookup', reference: 'qa_line', ...line },
+      },
+      validations,
+    } as any, 'test-package');
+    d.storeFor('qa_line').set('line_secret', { id: 'line_secret', name: 'S', kind: 'secret' });
+    d.storeFor('qa_line').set('line_public', { id: 'line_public', name: 'P', kind: 'public' });
+    const insert = (data: Record<string, unknown>) => engine
+      .insert('qa_order', { name: 'O', ...data }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e as any);
+    return { engine, d, insert };
+  }
+
+  it('THE CIRCLE, step 1: the natural spelling is refused, and the refusal names the guard and `required`', async () => {
+    const { insert } = await boot([natural]);
+    const err = await insert({ line: 'line_public' });
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: '_record', code: 'rule_violation' });
+    expect(err.fields[0].constraint).toEqual({
+      rule: 'no_secret_line', reason: 'unevaluable',
+      fault: 'reads a reference field both through the relationship and as a value',
+    });
+    const message: string = err.message;
+    expect(message).toContain('`record.line.id`');     // still the id comparison
+    expect(message).toContain('not a null guard');     // …which it says is no guard
+    expect(message).toContain(GUARD);                  // repair 1
+    expect(message).toContain('make `line` required'); // repair 2
+    // ⛔ never the rule's own verdict: the rule was not evaluated.
+    expect(message).not.toContain(SECRET_MESSAGE);
+  });
+
+  it('THE CIRCLE, step 2: the `.id` spelling is no guard — an empty line is refused before evaluation, and that refusal names the guard too', async () => {
+    const { insert } = await boot([idTest]);
+    const err = await insert({});
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ field: '_record', code: 'rule_violation' });
+    expect(err.fields[0].constraint).toEqual({
+      rule: 'no_secret_line', reason: 'unevaluable',
+      fault: "cannot read 'id', 'kind' through `line` (object 'qa_line'): no single related record",
+    });
+    const message: string = err.message;
+    expect(message).toContain(GUARD);
+    expect(message).toContain('make `line` required');
+    expect(message).toContain('`record.line.id != null` inside the rule is no guard');
+    // CONTROL: the same rule is judged normally once the line is set.
+    expect(await insert({ line: 'line_public' })).toBe(null);
+    expect((await insert({ line: 'line_secret' }))?.message).toBe(SECRET_MESSAGE);
+  });
+
+  it('THE REPAIR: the wrapped rule ACCEPTS an empty line and a public one, and REFUSES a secret one with its own message', async () => {
+    const { insert, engine, d } = await boot([wrapped]);
+    expect(await insert({ id: 'o_empty' })).toBe(null);
+    expect(await insert({ id: 'o_null', line: null })).toBe(null);
+    expect(await insert({ id: 'o_public', line: 'line_public' })).toBe(null);
+    const err = await insert({ id: 'o_secret', line: 'line_secret' });
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0]).toMatchObject({ code: 'rule_violation' });
+    expect(err.message).toBe(SECRET_MESSAGE);
+    expect(d.storeFor('qa_order').has('o_secret')).toBe(false);
+    // The UPDATE door: repointing an empty order at a secret line is refused,
+    // and emptying a set one is accepted.
+    const update = (id: string, patch: Record<string, unknown>) => engine
+      .update('qa_order', { id, ...patch }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e as any);
+    expect((await update('o_empty', { line: 'line_secret' }))?.message).toBe(SECRET_MESSAGE);
+    expect(await update('o_public', { line: null })).toBe(null);
+    expect(d.storeFor('qa_order').get('o_public')?.line).toBe(null);
+  });
+
+  it('THE OTHER REPAIR: with `required: true` an empty line is refused at the FIELD, and a set one is judged by the rule', async () => {
+    const { insert } = await boot([script("record.line.kind == 'secret'")], { required: true });
+    const empty = await insert({});
+    expect(empty?.code).toBe('VALIDATION_FAILED');
+    expect(empty.fields.map((f: any) => [f.field, f.code])).toContainEqual(['line', 'required']);
+    expect(await insert({ line: 'line_public' })).toBe(null);
+    expect((await insert({ line: 'line_secret' }))?.message).toBe(SECRET_MESSAGE);
+  });
+});
