@@ -286,6 +286,13 @@ const RANGE_SQL_OPERATOR: Record<string, string> = {
 const SQL_FALSE = '1 = 0';
 
 /**
+ * [#19999] U+0000, spelled by its code point so no raw control byte sits in this
+ * file — the one character a text comparand cannot carry through `GLOB`
+ * ({@link RemoteTransport.pushLike}).
+ */
+const NUL_CHARACTER = String.fromCharCode(0x00);
+
+/**
  * Is this comparand the spec's cross-field marker, `{ $field: 'other_column' }`?
  *
  * Recognised only to give it a message of its own — it is refused either way
@@ -3261,6 +3268,24 @@ export class RemoteTransport {
    * function with no reusable export), so the two must be read together; the
    * row-level suite in `remote-transport-text-predicates.test.ts` is what pins
    * them to the same answers.
+   *
+   * # [#19999] A comparand holding U+0000 does not reach `GLOB`
+   *
+   * SQLite's `glob()` reads its pattern and the stored value as C strings, so
+   * each is cut at its first U+0000 — measured on this transport before the fix
+   * (on `makeLibsqlSqliteStub` and on a local libSQL engine, SQLite 3.45.1):
+   * `$contains` / `$endsWith` of a comparand starting with U+0000 matched every
+   * row. Such a comparand is compared whole instead, by the length-aware
+   * constructs `SqlDriver`'s `sqliteLengthAwareTextMatch` emits locally, each
+   * measured NUL-safe first: `instr(col, ?) > 0` for `contains`,
+   * `instr(col, ?) = 1` for `starts`, and a byte suffix over BLOB for `ends`
+   * (`length()` and `substr()` over TEXT stop at U+0000; over BLOB they count
+   * bytes), which falls back to the value itself through `coalesce()` because
+   * `substr()` over a zero-length BLOB is NULL — so `''` answers false, not
+   * NULL, and a `$not` over it keeps the row. None has a pattern language, so
+   * nothing is escaped and the comparand is bound as written. Every other
+   * comparand keeps `GLOB`, byte for byte. `turso-19999-glob-nul-comparand.test.ts`
+   * holds this emitter and the local one to the same rows.
    */
   private pushLike(
     clauses: string[],
@@ -3272,10 +3297,22 @@ export class RemoteTransport {
     nullSafe = false,
     fold = false,
   ): void {
-    const escaped = String(value).replace(/[*?[]/g, '[$&]');
-    const pattern = shape === 'starts' ? `${escaped}*` : shape === 'ends' ? `*${escaped}` : `*${escaped}*`;
     const lhs = fold ? `lower(${column})` : column;
     const rhs = fold ? 'lower(?)' : '?';
+    const text = String(value);
+    if (text.includes(NUL_CHARACTER)) {
+      const positive =
+        shape === 'ends'
+          ? `coalesce(substr(CAST(${lhs} AS BLOB), -length(CAST(${rhs} AS BLOB))), CAST(${lhs} AS BLOB))`
+            + ` = CAST(${rhs} AS BLOB)`
+          : `instr(${lhs}, ${rhs}) ${shape === 'starts' ? '= 1' : '> 0'}`;
+      const predicate = negate ? `NOT (${positive})` : positive;
+      clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
+      args.push(...(shape === 'ends' ? [text, text] : [text]));
+      return;
+    }
+    const escaped = text.replace(/[*?[]/g, '[$&]');
+    const pattern = shape === 'starts' ? `${escaped}*` : shape === 'ends' ? `*${escaped}` : `*${escaped}*`;
     const predicate = `${lhs} ${negate ? 'NOT GLOB' : 'GLOB'} ${rhs}`;
     clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
     args.push(pattern);
