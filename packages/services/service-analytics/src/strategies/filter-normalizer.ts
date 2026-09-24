@@ -1520,8 +1520,8 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
  * slot is refused at the shared face, for every driver at once」. The shared
  * face is `assertListComparandShapes` (`@objectstack/spec/data`). This door
  * met it for the `FilterArray` spelling only, inside `parseFilterAST`; the
- * object spelling went straight to {@link buildNode}, which read the same
- * condition three ways, measured on a real engine before this gate:
+ * object spelling went straight to {@link buildNode}, which compiled it four
+ * ways, measured on a real engine before this gate:
  *
  *   | `where`                    | compiled to                         | rows |
  *   |---|---|---|
@@ -1553,9 +1553,9 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
  * neither: {@link fieldLeaves} flattens it to the dotted member `acct.region`,
  * whose implicit-equality slot is the one the list sits in.
  *
- * It runs before every other gate of this module, so a list is diagnosed as
- * the list and not by one of its members (`{ f: [1, undefined] }`), the order
- * the face and `read-scope-sql.ts`'s twin use.
+ * It runs before every gate {@link buildNode} reaches, so a list is diagnosed
+ * as the list and not by one of its members (`{ f: [1, undefined] }`), the
+ * order the face and `read-scope-sql.ts`'s twin use.
  *
  * ⛔ `$ne` is not judged: the ruling names equality, and `$ne` with a list is
  * #19886's ruling A, carried on that card. The list operators keep their
