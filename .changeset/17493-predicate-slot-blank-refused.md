@@ -1,5 +1,7 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/service-automation': minor
+'@objectstack/lint': minor
 ---
 
 fix(spec)!: a blank string in a flow node's predicate slot — a `decision` branch `expression`, a screen field `visibleWhen` — is refused at authoring (#17493)
@@ -23,26 +25,26 @@ so. It is now refused at those doors — by `FlowSchema.parse` with a `custom` i
 anchored at the slot (for example `nodes.1.config.conditions.0.expression`), and
 by `registerFlow` and `objectstack validate` through that same parse — with a
 message that leads with the published `PREDICATE_SLOT_STRING_REFUSAL` sentence,
-the one these slots already answered with for a non-string value. A flow stored
-with such a value no longer registers: the boot log carries a
-`failed to register flow` warn naming it, and its trigger is not armed.
+the one these slots already answered with for a non-string value. Where such a
+value already sits, the whole flow is refused: registered from the metadata
+registry or `sys_metadata` at boot, it is skipped with a `failed to register
+flow` warn naming it while the flows beside it register; a `defineStack({ flows })`
+source throws `StackSchemaInvalidError` for the whole stack; an artifact file is
+refused whole at load.
 
 ## FROM → TO
 
 | you wrote | write instead |
 |:--|:--|
-| `conditions: [{ label: 'high', expression: '   ' }]` on a `decision` node | the predicate you meant — `{ label: 'high', expression: 'record.amount > 10000' }` — or drop that branch |
-| `fields: [{ name: 'reason', visibleWhen: '' }]` on a `screen` node | the predicate you meant — `visibleWhen: "status == 'rejected'"` — or drop the `visibleWhen` key |
+| `conditions: [{ label: 'high', expression: '   ' }]` on a `decision` node | the predicate you meant — `{ label: 'high', expression: 'record.amount > 10000' }` — or, to keep what the blank did, `expression: 'false'` |
+| `fields: [{ name: 'reason', visibleWhen: '' }]` on a `screen` node | the predicate you meant — `visibleWhen: "status == 'rejected'"` — or, to keep what the blank did, drop the `visibleWhen` key |
 
-**One-line fix:** write the predicate, or remove it — drop `visibleWhen` to show
-the field unconditionally, or drop the whole decision branch (a branch requires
-its `expression`).
-
-Removing is behaviour-preserving on these two slots: a blank `visibleWhen` was
-already read as absent at run time, and a branch with a blank predicate was not
-taken. That is not true of a blank structural `condition` on an edge or a node,
-where removing the key makes the step unconditional — see the separate
-`flow-edge-condition-evaluated-slot-source-required` migration entry.
+**One-line fix:** write the predicate, or keep what the blank did — `'false'` on
+a decision branch (the value the blank evaluated to), no `visibleWhen` on a
+screen field (a blank one was read as absent). ⚠️ Do not drop a decision's only
+branch: the node then routes by its out-edges alone, and the out-edge that branch
+labelled is no longer held back. A blank structural `condition` is another case —
+see the `flow-edge-condition-evaluated-slot-source-required` migration entry.
 
 **Unchanged.** A non-blank predicate parses, registers and validates as before;
 a non-string in these slots keeps its existing refusal at `registerFlow` and

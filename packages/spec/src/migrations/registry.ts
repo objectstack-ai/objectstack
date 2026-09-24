@@ -9064,8 +9064,8 @@ const step18: MigrationStep = {
     // `config.condition`), refused by the evaluated-slot rule under
     // EVALUATED_EXPRESSION_SOURCE_REQUIRED, where removing a blank condition
     // INVERTS the edge. These slots are declared `z.string()`, are refused under
-    // PREDICATE_SLOT_STRING_REFUSAL, and removing the blank is behaviour-
-    // preserving — a different prescription, which one entry cannot carry for both.
+    // PREDICATE_SLOT_STRING_REFUSAL, and keep their run with `'false'` or no
+    // `visibleWhen` — a different prescription, which one entry cannot carry for both.
     //
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
@@ -9077,17 +9077,17 @@ const step18: MigrationStep = {
         + 'predicate) — authored as a string that is blank after trimming (\'\', \'   \', a tab or a '
         + 'newline), at any depth including an ADR-0031 region body. Reachable wherever a flow is '
         + 'authored or stored: defineStack({ flows }) sources, defineFlow(), an exported stack passed to '
-        + 'objectstack validate, a POST /flows body, and a flow row already sitting in sys_metadata',
+        + 'objectstack validate, and a flow row already sitting in sys_metadata',
       replacement:
         'the predicate the branch or field was meant to test, as non-blank bare CEL text '
-        + '(`expression: \'record.amount > 10\'`, `visibleWhen: \'amount > 0\'`); or REMOVE the blank. '
+        + '(`expression: \'record.amount > 10\'`, `visibleWhen: \'amount > 0\'`); or KEEP what the blank did. '
         + 'On a screen field, drop the `visibleWhen` key: an absent `visibleWhen` shows the field '
         + 'unconditionally, which is what a blank one already did at run time (the resume contract '
         + 'treated it as absent, and the renderer fell back to showing the field). On a decision '
-        + 'branch, drop the whole `conditions[i]` element: `expression` is required by '
-        + '`DecisionConditionSchema`, so a branch cannot keep its label without it, and a branch whose '
-        + 'predicate was blank was never taken, so dropping it changes no run. ⚠️ Removal is '
-        + 'behaviour-preserving HERE, unlike on a structural condition, where dropping a blank '
+        + 'branch, write `expression: \'false\'`: the evaluator answered the blank `false`, so the branch '
+        + 'keeps its label and is still never taken. ⚠️ Not by dropping a decision\'s only branch: with '
+        + 'no `conditions` the node routes by its out-edges alone, so the out-edge that branch labelled '
+        + 'is no longer held back. On a structural condition removal differs again: dropping a blank '
         + '`condition` turns a never-firing edge into an always-firing one '
         + '(`flow-edge-condition-evaluated-slot-source-required`)',
       reason:
@@ -9104,16 +9104,16 @@ const step18: MigrationStep = {
         + 'three through `predicateSlotRefusal`, leading with `PREDICATE_SLOT_STRING_REFUSAL`. '
         + '⚠️ No D2 conversion, and the reason is the judgment this entry delegates: the blank is '
         + 'where an author meant to write a rule, and the platform cannot tell a predicate somebody '
-        + 'forgot from one they meant to delete. Removing it preserves what ran; writing it is what '
-        + 'the author intended; only the author knows which. '
-        + '⚠️ A flow ALREADY STORED with such a blank no longer registers at all, not just that '
-        + 'branch or field: `registerFlow` parses through `canonicalizeStoredFlow` → '
-        + '`FlowSchema.parse`, and each boot path in `service-automation/src/plugin.ts` logs one '
-        + '`warn` naming the flow and continues — its trigger is never armed. '
+        + 'forgot from one they meant to delete. Keeping what ran is mechanical; writing the predicate '
+        + 'is what the author intended; only the author knows which. '
+        + '⚠️ Where such a blank already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
         + 'ADR-0087, ADR-0032.',
       acceptanceCriteria:
-        'Grep every flow node in `defineStack({ flows })` sources, exported stacks, `POST /flows` '
-        + 'bodies and every flow row in `sys_metadata` — including nodes inside a `loop` / '
+        'Grep every flow node in `defineStack({ flows })` sources, exported stacks and every flow '
+        + 'row in `sys_metadata` — including nodes inside a `loop` / '
         + '`parallel` / `try_catch` region body — for a `decision` node whose '
         + '`config.conditions[i].expression`, or a `screen` node whose `config.fields[i].visibleWhen`, '
         + 'is a string that is empty after trimming. Each refusal names the node and the branch or '
@@ -9123,8 +9123,8 @@ const step18: MigrationStep = {
         + 'path; `validateStackExpressions` phrases it as '
         + '`node \'check\' (decision) decision branch expression at config.conditions[0].expression`. '
         + 'For each hit decide, per the `replacement` note, whether to write the predicate or to '
-        + 'remove it — and on a decision branch removing means the whole branch. Two proofs. (1) For '
-        + 'a stack authored in config files, `objectstack validate` is clean. (2) Boot the stack and '
+        + 'keep what the blank did. Two proofs. (1) For a stack authored in config files, '
+        + '`objectstack validate` is clean. (2) Boot the stack and '
         + 'confirm each flow REGISTERS: no `failed to register flow` warn for it (the three boot '
         + 'paths spell it `[Automation] failed to register flow`, `[Automation] flow re-sync: failed '
         + 'to register flow` and `[Automation] cold-boot flow bind: failed to register flow`) — that '

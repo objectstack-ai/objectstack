@@ -401,10 +401,10 @@ export function predicateSlotRefusal(value: unknown): { message: string; source:
     return {
       message:
         `${PREDICATE_SLOT_STRING_REFUSAL} Found a string that is blank after trimming, which states no rule. `
-        + 'Write the predicate the branch or field was meant to test (e.g. `record.rating >= 4`), or remove it: '
-        + 'on a screen field, drop the `visibleWhen` key to show the field unconditionally; on a decision '
-        + 'branch, `expression` is required, so drop that branch from `conditions` — a branch whose predicate '
-        + 'is blank is never taken.',
+        + 'Write the predicate the branch or field was meant to test (e.g. `record.rating >= 4`), or keep what '
+        + 'the blank did: on a screen field, drop the `visibleWhen` key; on a decision branch, write '
+        + '`expression: \'false\'`, the value the blank evaluated to. Not by dropping a decision\'s only branch: '
+        + 'the node then routes by its out-edges alone, and the out-edge that branch labelled is no longer held back.',
       source: value,
     };
   }

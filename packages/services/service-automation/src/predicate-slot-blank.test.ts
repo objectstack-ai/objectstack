@@ -31,6 +31,7 @@ import { PREDICATE_SLOT_STRING_REFUSAL } from '@objectstack/spec/automation';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 
 import { AutomationEngine } from './engine.js';
+import { registerLogicNodes } from './builtin/logic-nodes.js';
 
 const silentLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any;
 
@@ -132,5 +133,95 @@ describe('registerFlow refuses a blank string in a ledger predicate slot (#17493
             const engine = new AutomationEngine(silentLogger);
             expect(engine.evaluateCondition({ dialect: 'cel', source: '   ' } as never, new Map())).toBe(false);
         });
+    });
+});
+
+/**
+ * The run-preserving fix the refusal, the ADR-0087 entry and the changeset
+ * prescribe for a blank decision branch — keep the branch, write
+ * `expression: 'false'` — measured on the real decision executor against the
+ * run the blank made. The blank can no longer register, so the "before" run
+ * registers a placeholder and rewrites the stored branch to the blank.
+ *
+ * Dropping the branch is NOT that fix: a decision left with no branch is a
+ * plain gateway (`logic-nodes.ts`), so every out-edge no `condition` or
+ * `isDefault` gates runs — pinned last, because the prescription warns of it.
+ */
+describe('a blank decision branch rewritten to `false` runs what the blank ran (#17493)', () => {
+    type Out = { target: string; label?: string; isDefault?: boolean };
+    type Branch = { label: string; expression: string };
+
+    /** `blankAt` names the branch that carries the blank in the "before" run. */
+    const CASES: Record<string, { branches: Branch[]; blankAt: number; out: Out[]; ran: string[] }> = {
+        'its only branch, beside an `isDefault` out-edge': {
+            branches: [{ label: 'b0', expression: 'false' }], blankAt: 0,
+            out: [{ target: 'x', label: 'b0' }, { target: 'y', isDefault: true }],
+            ran: ['start', 'd', 'y'],
+        },
+        'a branch that is not the last': {
+            branches: [{ label: 'b0', expression: 'false' }, { label: 'b1', expression: 'true' }], blankAt: 0,
+            out: [{ target: 'x', label: 'b0' }, { target: 'y', label: 'b1' }, { target: 'z', isDefault: true }],
+            ran: ['start', 'd', 'y'],
+        },
+        'its only branch, with no default out-edge': {
+            branches: [{ label: 'b0', expression: 'false' }], blankAt: 0,
+            out: [{ target: 'x', label: 'b0' }, { target: 'y' }],
+            ran: ['start', 'd', 'x', 'y'],
+        },
+    };
+
+    /**
+     * With `blankAt`, the branch registers as `'true'` — a placeholder that
+     * routes differently in every case — and is rewritten to the blank before
+     * the run; `ran` below proves the rewrite held.
+     */
+    async function runOf(branches: Branch[] | undefined, out: Out[], blankAt?: number) {
+        const warned: string[] = [];
+        const logger = { ...silentLogger, warn: (msg: string) => { warned.push(String(msg)); } };
+        const engine = new AutomationEngine(logger);
+        registerLogicNodes(engine, { logger, getService: () => undefined } as never);
+        engine.registerNodeExecutor({ type: 'mark', async execute() { return { success: true }; } });
+        engine.sealNodeTypeVocabulary();
+        const parsed = engine.registerFlow('route', {
+            name: 'route', label: 'Route', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'd', type: 'decision', label: 'D',
+                    ...(branches ? {
+                        config: { conditions: branches.map((b, i) => ({ ...b, ...(i === blankAt ? { expression: 'true' } : {}) })) },
+                    } : {}),
+                },
+                ...out.map((o) => ({ id: o.target, type: 'mark', label: o.target })),
+            ],
+            edges: [
+                { id: 'e0', source: 'start', target: 'd' },
+                ...out.map((o, i) => ({ id: `e${i + 1}`, source: 'd', ...o })),
+            ],
+        });
+        if (blankAt !== undefined) {
+            const stored = (parsed.nodes[1].config as { conditions: Branch[] }).conditions[blankAt];
+            stored.expression = '   ';
+        }
+        await engine.execute('route', { params: {} } as never);
+        const [log] = await engine.listRuns('route');
+        return {
+            ran: (log?.steps ?? []).filter((s) => s.status === 'success').map((s) => s.nodeId),
+            unclaimedWarns: warned.filter((w) => w.includes('no out-edge carries that label')).length,
+        };
+    }
+
+    it.each(Object.entries(CASES))('%s', async (_name, c) => {
+        const before = await runOf(c.branches, c.out, c.blankAt);
+        const after = await runOf(c.branches, c.out);
+        expect(before.ran).toEqual(c.ran);
+        expect(after).toEqual(before);
+    });
+
+    it('dropping a decision\'s only branch is not that fix: every ungated out-edge then runs', async () => {
+        const c = CASES['its only branch, beside an `isDefault` out-edge'];
+        expect((await runOf(c.branches, c.out, c.blankAt)).ran).toEqual(['start', 'd', 'y']);
+        expect((await runOf([], c.out)).ran).toEqual(['start', 'd', 'y', 'x']);
+        expect((await runOf(undefined, c.out)).ran).toEqual(['start', 'd', 'y', 'x']);
     });
 });
