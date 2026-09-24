@@ -15,10 +15,13 @@
 //
 // The maintainer ruled A+C (2026-08-06): bind the scope, keep the evaluation
 // semantics FAIL-OPEN, and catch the unbindable declaration at build time
-// instead (`@objectstack/lint`). Option B — 422 on an unresolvable header — was
-// explicitly NOT taken, so the "header cannot be read" case below asserts the
-// write is ACCEPTED. That is the deliberate asymmetry with #4889's fail-CLOSED
-// twin, and it is pinned here so nobody "fixes" one into the other by accident.
+// instead (`@objectstack/lint`). Option B — refuse the write on an unresolvable
+// header — was NOT taken then and was left to the next review of ADR-0058 D5.
+// ADR-0137 is that review: its D2 refuses the SUBMIT of a field-rule predicate
+// that cannot be evaluated, naming the field and the rule, so the "header
+// cannot be read" cases below now assert the write is REFUSED and nothing is
+// stored. `readonlyWhen`'s #4889 twin still LOCKS instead — the two slots still
+// answer an unbound header differently, and both answers are loud.
 //
 // Driven end-to-end through the real engine + a real driver, not through the
 // evaluator in isolation (PD #10: a `case` label is not enforcement — check the
@@ -199,34 +202,42 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
     expect(row).toMatchObject({ description: 'seat' });
   });
 
-  // ── parent MISSING — fail-OPEN (the deliberate asymmetry with #4889) ──────
+  // ── parent MISSING — REFUSED (ADR-0137 D2; #4889's twin LOCKS instead) ────
 
-  it('is FAIL-OPEN when the header cannot be resolved (option B was NOT taken)', async () => {
+  it('REFUSES the write when the header cannot be resolved (ADR-0137 D2 — option B, taken)', async () => {
     // A stored row whose header is gone — #4889's own orphan fixture, and the
     // only spelling that reaches this branch (a DANGLING FK in an insert
     // payload is refused earlier by the #4441 reference guard, so the header
     // can only go missing under a row that already exists).
     //
-    // #4889's `readonlyWhen` twin treats an unbound `parent` as LOCKED. The
-    // ruling on #4977 explicitly declined the symmetric answer (reject the
-    // write), so here the requirement is skipped and the write lands — even
-    // though `description` is empty and the predicate, could it have been
-    // evaluated, might well have said it is required.
+    // #4977 left this arm fail-open (the requirement skipped, the write
+    // landed with `description` empty). The predicate has no verdict — it
+    // might well have said the field is required — so D2 refuses the write
+    // instead, and the stored row does not move.
     storeFor('showcase_invoice_line').set('orphan', { id: 'orphan', invoice: 'GONE', description: '', quantity: 1 });
-    await engine.update('showcase_invoice_line', { id: 'orphan', quantity: 9 });
-    expect(line('orphan')).toMatchObject({ quantity: 9, description: '' });
+    const err = await rejectionOf(() => engine.update('showcase_invoice_line', { id: 'orphan', quantity: 9 }));
+    expect(err.name).toBe('ValidationError');
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toContainEqual(expect.objectContaining({
+      field: 'description',
+      code: 'rule_violation',
+      constraint: expect.objectContaining({ rule: 'requiredWhen', reason: 'unevaluable' }),
+    }));
+    expect(line('orphan')).toMatchObject({ quantity: 1, description: '' });
   });
 
-  it('names the unbound ROOT in the skip diagnostic (fail-open, but not silent)', async () => {
+  it('names the unbound HEADER in the refusal and in the log (loud, never skipped)', async () => {
     const warns: string[] = [];
     const base = (engine as any).logger;
     (engine as any).logger = new Proxy(base, {
       get: (t: any, k: string) => (k === 'warn' ? (m: string) => warns.push(String(m)) : t[k]),
     });
     storeFor('showcase_invoice_line').set('orphan', { id: 'orphan', invoice: 'GONE', description: '', quantity: 1 });
-    await engine.update('showcase_invoice_line', { id: 'orphan', quantity: 9 });
-    expect(warns.some((w) => /requiredWhen for 'description' reads 'parent'/.test(w))).toBe(true);
-    expect(warns.some((w) => /NOT enforced/.test(w))).toBe(true);
+    const err = await rejectionOf(() => engine.update('showcase_invoice_line', { id: 'orphan', quantity: 9 }));
+    const entry = (err.fields as any[]).find((f) => f.field === 'description');
+    expect(entry.message).toContain("reads 'parent', the master-detail header");
+    expect(warns.some((w) => /requiredWhen for 'description' failed to evaluate/.test(w) && /write rejected/.test(w))).toBe(true);
+    expect(warns.some((w) => /NOT enforced/.test(w))).toBe(false);
   });
 
   // ── repoint ───────────────────────────────────────────────────────────────
@@ -357,13 +368,13 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
   // The `requiredWhen` half of the same change. #4977 bound the scope; what it
   // could not fix from here is what the bound header CONTAINS — a driver that
   // returns only the columns it stored hands over a header missing the very key
-  // the predicate reads, and a `requiredWhen` that faults is fail-OPEN, so the
-  // requirement silently enforces nothing.
+  // the predicate reads, and a `requiredWhen` that faulted was fail-OPEN then, so
+  // the requirement silently enforced nothing.
   //
   // Note which line moves and which does not. The middle row (header RESOLVED
   // but sparse) becomes evaluable and therefore ENFORCED. The bottom row (header
-  // UNRESOLVABLE) keeps #4977's deliberate fail-OPEN asymmetry with #4889 —
-  // option B was not taken here and is not taken here now either.
+  // UNRESOLVABLE) was not moved by #6457 — option B was not taken there. It was
+  // moved later, by ADR-0137 D2: an unevaluable requirement refuses the write.
 
   /** Every warning the engine emitted during one write. */
   async function warningsDuring(run: () => Promise<unknown>): Promise<string[]> {
@@ -422,15 +433,15 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
     expect(warns.some((w) => /requiredWhen for 'reason' failed to evaluate/.test(w))).toBe(false);
   });
 
-  it('ROW 3 (unresolvable header): still FAIL-OPEN, still names the unbound root (#4977 asymmetry)', async () => {
-    // The line #4977 drew and this issue does NOT move: a header that resolves
-    // to nothing leaves `parent` unbound, the predicate is skipped, and the
-    // write lands with the field empty. Option B (422) stays not taken.
+  it('ROW 3 (unresolvable header): REFUSED, naming the rule (ADR-0137 D2 moved it; #6457 did not)', async () => {
+    // The line #4977 drew and #6457 did NOT move: a header that resolves to
+    // nothing leaves `parent` unbound. ADR-0137 D2 is what moved it — the
+    // predicate has no verdict, so the write is refused and nothing is stored.
     storeFor('showcase_invoice_line').set('orphan', { id: 'orphan', invoice: 'GONE', reason: '', quantity: 1 });
     const warns = await warningsDuring(() =>
       engine.update('showcase_invoice_line', { id: 'orphan', quantity: 9 }));
-    expect(line('orphan')).toMatchObject({ quantity: 9, reason: '' });
-    expect(warns.some((w) => /requiredWhen for 'reason' reads 'parent'/.test(w) && /NOT enforced/.test(w))).toBe(true);
+    expect(line('orphan')).toMatchObject({ quantity: 1, reason: '' });
+    expect(warns.some((w) => /requiredWhen for 'reason' failed to evaluate/.test(w) && /write rejected/.test(w))).toBe(true);
   });
 
   it('ADR-0113 still holds on the newly-evaluable predicate: a legacy row may rest', async () => {
