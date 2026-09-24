@@ -241,6 +241,26 @@ export interface McpActionBridge {
     name: string,
     input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
   ): Promise<unknown>;
+  /**
+   * [#15705] Continue a run that `runAction` answered with `status: 'paused'`
+   * and a `screen`, submitting that screen's field values as `values`.
+   *
+   * The host admits the call only where `runAction` would admit starting the
+   * same flow on the same record for this caller. That means the run was
+   * started by this caller, an AI-exposed flow action the caller may run
+   * targets the run's flow, the subject record is still readable by the
+   * caller, and the run is parked on a screen. Resolves to `runAction`'s
+   * envelope (`{ ok, action, objectName, recordId?, result }`). A run that
+   * pauses on its next screen comes back paused again. Throws on refusal, with
+   * the ADR-0112 `code` / `status` on the thrown value.
+   *
+   * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
+   * runs omits it, and `resume_run` is then not registered.
+   */
+  resumeRun?(
+    runId: string,
+    input: { values?: Record<string, unknown> } & AIActionConfirmation,
+  ): Promise<unknown>;
 }
 
 export interface RegisterActionToolsOptions {
@@ -469,7 +489,8 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  *
  * Object CRUD always; the business-action pair only when the bridge implements
  * `listActions` + `runAction` (graceful degradation — a host with no action
- * mechanism keeps serving object tools unchanged). Whoever owns the server
+ * mechanism keeps serving object tools unchanged), and `resume_run` beside
+ * them when it also implements `resumeRun` (#15705). Whoever owns the server
  * decides nothing else: the tool set is a function of the BRIDGE, so the same
  * bridge yields the same tools on stdio and over HTTP, which is the property
  * `transport-parity` pins.
@@ -976,7 +997,8 @@ export function registerObjectTools(
 }
 
 /**
- * Register the business-action tool set (`list_actions`, `run_action`) on an
+ * Register the business-action tool set (`list_actions`, `run_action`, and
+ * `resume_run` when the bridge implements `resumeRun`) on an
  * {@link McpServer}. This is the action analogue of
  * {@link registerObjectTools}: it owns the tool *shape* and delegates all
  * resolution + dispatch + security to `bridge`, which the runtime binds to the
@@ -1009,6 +1031,9 @@ export function registerActionTools(
   if (options.grantedScopes && !options.grantedScopes.includes(MCP_OAUTH_SCOPE_ACTIONS)) {
     return registered;
   }
+  // [#15705] `resume_run` is registered only when the bridge can resume. The
+  // same test decides whether `run_action`'s description mentions it.
+  const canResume = typeof bridge.resumeRun === 'function';
 
   server.registerTool(
     note('list_actions'),
@@ -1043,7 +1068,14 @@ export function registerActionTools(
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
         'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
-        'send confirm: true — ask the human first, then retry; nothing runs on a refused call.',
+        'send confirm: true — ask the human first, then retry; nothing runs on a refused call.' +
+        // [#15705] Named only where `resume_run` is actually registered below,
+        // so this description never points an agent at a tool it cannot call.
+        (canResume
+          ? ' A flow action can answer result.status "paused" with a runId and a screen (a form to fill ' +
+            'in): the run has stopped to wait for that form, and resume_run submits its field values to ' +
+            'continue it.'
+          : ''),
       inputSchema: strictToolInput(
         {
           surface: 'this run_action call',
@@ -1133,6 +1165,101 @@ export function registerActionTools(
       }
     },
   );
+
+  // [#15705] `resume_run`: the other half of a screen flow. `run_action` on a
+  // flow whose screen still needs input answers `status: 'paused'` with a
+  // `runId` and the `screen` to fill in. Before this tool, nothing on this
+  // surface could submit that screen, so the run stayed parked and the agent
+  // could start the action but never finish it.
+  //
+  // This tool owns the SHAPE only, like `run_action`. The bridge decides
+  // whether the call is allowed, and it applies `run_action`'s own gates to the
+  // run (see `McpActionBridge.resumeRun`). Registered in this family on
+  // purpose: the same `actions:execute` scope grants both, and both transports
+  // get it through `wireBridgeTools`, as they get `run_action`.
+  if (canResume) {
+    const resumeRun = bridge.resumeRun!.bind(bridge);
+    server.registerTool(
+      note('resume_run'),
+      {
+        description:
+          'Continue a flow run that run_action (or an earlier resume_run) answered with result.status ' +
+          '"paused" and a screen: submit the screen\'s field values, keyed by each screen.fields[].name. ' +
+          'The run continues from that screen. The result has run_action\'s shape: the run completes, or ' +
+          'pauses again on its NEXT screen with a new screen to fill (call resume_run again for it). Only ' +
+          'the user whose call started the run can resume it, and it is gated exactly as run_action is ' +
+          '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
+          'the app\'s business logic and can mutate data. When list_actions reports requiresConfirmation for ' +
+          'the action that started the run, send confirm: true (ask the human first); without it the call ' +
+          'is refused and the run stays paused.',
+        inputSchema: strictToolInput(
+          {
+            surface: 'this resume_run call',
+            // The spellings a caller who knows the REST resume door (`inputs`
+            // / `variables`) or the other tools (`params`, `data`) reaches
+            // for. Each is named in the refusal so the caller can resend with
+            // `values`; none is accepted.
+            aliases: {
+              id: 'runId',
+              run_id: 'runId',
+              run: 'runId',
+              inputs: 'values',
+              variables: 'values',
+              params: 'values',
+              data: 'values',
+              fields: 'values',
+              answers: 'values',
+            },
+          },
+          {
+            runId: z
+              .string()
+              .describe('The runId from a result whose status is "paused" and that carries a screen.'),
+            values: z
+              .record(z.string(), z.unknown())
+              .optional()
+              .describe(
+                'The screen\'s field values, keyed by field name (the names in screen.fields). Omit only when '
+                + 'every field on the screen is optional.',
+              ),
+            // The confirmation member, keyed off the contract's constant exactly
+            // as `run_action` declares it, for the same reason: a member this
+            // shape did not declare would be refused, and the gate that asks
+            // for it could never be satisfied.
+            [AI_ACTION_CONFIRMATION_MEMBER]: z
+              .boolean()
+              .optional()
+              .describe(
+                'Set to true to confirm resuming a run of an action the app author gated with '
+                + 'ai.requiresConfirmation (list_actions reports requiresConfirmation). Assert this only when '
+                + 'the human in the loop has approved THIS call; without it the call is refused and the run '
+                + 'stays paused.',
+              ),
+          },
+        ),
+        // The rest of the flow runs here, so this carries the same annotations
+        // as `run_action`: the client should confirm before calling it.
+        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      },
+      async (args) => {
+        const { runId, values } = args;
+        const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
+        if (!runId || typeof runId !== 'string') {
+          return errorResult('runId is required');
+        }
+        try {
+          const result = await resumeRun(runId, {
+            values,
+            // Forwarded, never rebuilt without it: see `run_action` above.
+            [AI_ACTION_CONFIRMATION_MEMBER]: confirm,
+          });
+          return textResult(result);
+        } catch (err) {
+          return errorResultFromThrown(err);
+        }
+      },
+    );
+  }
 
   return registered;
 }
