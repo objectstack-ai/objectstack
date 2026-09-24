@@ -130,24 +130,33 @@ Transport mode is automatically detected from the URL:
 | `libsql://...` | `remote` | @libsql/client only |
 | `https://...` | `remote` | @libsql/client only |
 
+`http://`, `wss://` and `ws://` are remote too. A scheme matches in any letter
+case, as it does in `@libsql/client`: `LIBSQL://...` is remote and `FILE:...` is
+a local file. A path to a local database file needs the `file:` prefix. A bare
+path such as `./data/app.db` is not a url, and `@libsql/client` refuses it too.
+
 An embedded replica is a local **file** kept in sync with a remote. The local and
 replica modes run every read and write through the local SQLite engine, which
-cannot open a remote url, and a replica needs a file for the sync to land in.
-The constructor therefore refuses (`VALIDATION_ERROR` / 400):
+can open only a `file:` url or `:memory:`, and a replica needs a file for the
+sync to land in. The constructor therefore refuses (`VALIDATION_ERROR` / 400):
 
-- a remote url (the lowercase `libsql://`, `https://`, `http://`, `wss://`,
-  `ws://` that auto-detection matches) beside `syncUrl`, or under a forced
-  `mode: 'local'` / `'replica'`;
+- in a local or replica mode (auto-detected, with or without `syncUrl`, or
+  forced), a `url` that is none of `file:`, `:memory:` or a remote url, such as
+  a bare path or an unsupported scheme. The fix for a local database file is
+  `url: 'file:./data/app.db'`;
+- a remote url (`libsql://`, `https://`, `http://`, `wss://`, `ws://`, in any
+  letter case) beside `syncUrl`, or under a forced `mode: 'local'` / `'replica'`;
 - a replica on an in-memory url (`:memory:`, `file::memory:`). That covers a
   replica auto-detected from a `:memory:` or `file:` url beside `syncUrl`, and
-  one forced with `mode: 'replica'`;
-- under a forced `mode: 'replica'`, any `url` that is not a local `file:` path.
+  one forced with `mode: 'replica'`.
 
 In each case the engine would otherwise run on a private in-memory database
 whose writes read back and then vanish on restart, and `@libsql/client` builds
 no embedded replica for a remote url anyway. For a remote database, drop
 `syncUrl` and any forced `mode`. For an embedded replica, use
-`url: 'file:./data/replica.db'` beside `syncUrl`.
+`url: 'file:./data/replica.db'` beside `syncUrl`. A forced `mode: 'remote'` runs
+no local engine, so its url is not judged here: `@libsql/client` refuses a
+url it cannot open when the driver connects.
 
 You can also force a specific mode:
 
@@ -216,6 +225,9 @@ interface TursoDriverConfig {
    * - :memory: → local mode (ephemeral)
    * - libsql://my-db.turso.io → remote mode
    * - https://my-db.turso.io → remote mode
+   * Schemes match in any letter case. In a local or replica mode any other
+   * url (a bare path, an unsupported scheme) is refused at construction
+   * (VALIDATION_ERROR / 400): spell a local file as file:./data/app.db.
    */
   url: string;
 
