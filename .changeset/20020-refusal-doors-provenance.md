@@ -16,7 +16,7 @@ A read scope is the RLS, sharing or tenant predicate that `plugin-security` (ord
 
 Each of these doors now reads the mark on the node it refused, the same way the cross-field and target-field refusals already did:
 
-- **`'policy'`, unmarked or ambiguous:** same `INVALID_FILTER` / 400. The message says which kind of refusal fired and what the driver accepts, but names no field, operator, comparand or filter path. Those go to the server log. For the unresolvable column, the message is the unnamed wording the driver already used when it could not parse the dialect's message.
+- **`'policy'`, unmarked or ambiguous:** same `INVALID_FILTER` / 400. The message says which kind of refusal fired, but names no field, operator, comparand or filter path. Those go to the server log. For the unresolvable column, the message is the unnamed wording the driver already used when it could not parse the dialect's message.
 - **`'author'`:** the full message, the same text the door answered before.
 
 To find the node, the unresolvable-column door looks up the column name the database reported. It discloses only when every node that names that column is marked `'author'`. A `$and` / `$or` with a primitive operand is judged by the node that carries the key.
