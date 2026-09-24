@@ -690,6 +690,10 @@ jobs:
             echo "::error::DRY_RUN is '$DRY_RUN' on a pull_request run. A pull_request run of this lane never pushes a branch, opens a PR or writes a label. Nothing was pushed."
             exit 1
           fi
+          # `gh` reads GH_TOKEN from the environment, not from an argument, so no
+          # expansion below would notice it missing and a dry run never starts
+          # `gh`. Named here, it is judged on both legs like every other key.
+          : "${GH_TOKEN:?is not set; gh would run unauthenticated. Nothing was pushed.}"
 
           # outward [--stand-in TEXT] COMMAND...
           # The one dry-run switch. Live, it runs COMMAND. Dry, it prints COMMAND
