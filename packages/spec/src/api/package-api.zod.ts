@@ -478,12 +478,15 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *
  * ⚠️ What those two drives post is NOT covered by this branch, and saying so
  * is the point. Measured: `{ id, name: id, namespace, version: '1.0.0' }` and
- * `{ id: 'pkg-a', name: 'A', version: '1.0.0' }` are both refused here
- * (`invalid_union`) because neither carries `type`. The second carried no
- * `version` either until PR #19326, which made the door refuse that half and
- * gave the drive the `version` it lacked (clause 1a below). They are bare in
- * FORM and incomplete in CONTENT — the form is declared, the content is part
- * of the residual below, and they are pinned as REFUSED in
+ * `{ id: 'com.example.pkg-a', name: 'A', version: '1.0.0' }` are both refused
+ * here (`invalid_union`) on `type` alone, and the door answers both `201` (the
+ * second on the `?overwrite=true` limb of its duplicate-id case). The second
+ * was repaired twice, each time by the PR that made the door parse the leg it
+ * broke: PR #19326 gave it the `version` it lacked (clause 1a below), and
+ * PR #19473 replaced its id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The
+ * door answers that old body `400` now, so it is no part of the residual. They
+ * are bare in FORM and incomplete in CONTENT — the form is declared, the
+ * content is part of the residual below, and they are pinned as REFUSED in
  * `package-api.test.ts` rather than dressed up as green fixtures.
  *
  * ## The two branches are disjoint — but only ONE of them is closed

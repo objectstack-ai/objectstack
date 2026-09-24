@@ -17,8 +17,12 @@ The clause is now split: **1a** (missing `version`) is marked CLOSED by #19326
 and names the door-side pin, and **1b** (missing `type`) stays an open residual.
 The count of five classes is unchanged and still true, because class 1 stays
 open through its `type` half; the count sentence now says so. The paragraph
-that quotes the runtime's two door drives is updated too: the duplicate-id
-drive has posted a `version` since #19326, and the docblock now quotes that body.
+that quotes the runtime's two door drives is updated too. It quoted the
+duplicate-id drive as `{ id: 'pkg-a', name: 'A' }`, but that drive has posted a
+`version` since #19326 and the reverse-domain id `com.example.pkg-a` since
+#19473, and the door answers `400` to `pkg-a`. The docblock now quotes the body
+the drive posts, `{ id: 'com.example.pkg-a', name: 'A', version: '1.0.0' }`,
+which the declaration refuses on `type` alone and the door answers `201`.
 
 ⛔ No behaviour changes. No schema, accept set, export or runtime code moves,
 and the other four residual classes are untouched.

@@ -921,10 +921,13 @@ describe('#18058 — install contract bound to the live door', () => {
     const DOOR_DRIVE_CONFLICT = { id: 'com.acme.crm', name: 'com.acme.crm', namespace: 'crm', version: '1.0.0' };
     /**
      * The duplicate-id drive in `packages/runtime/src/domain-handler-registry.test.ts` — no `type`.
-     * It posted no `version` either until PR #19326 made the door refuse that half (the docblock's
-     * clause 1a, CLOSED) and gave the drive a `version`; this is the body it posts now.
+     * Two of its keys were repaired, each by the PR that made the door parse that leg: PR #19326
+     * gave it the `version` it lacked (the docblock's clause 1a, CLOSED), and PR #19473 replaced its
+     * id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The old body is the REVERSED pin beside the
+     * drive, answered `400`, so ⛔ it is no residual and is not transcribed here. This is the body
+     * the drive posts: `409` first, then `201` on `?overwrite=true`.
      */
-    const DOOR_DRIVE_REGISTRY = { id: 'pkg-a', name: 'A', version: '1.0.0' };
+    const DOOR_DRIVE_REGISTRY = { id: 'com.example.pkg-a', name: 'A', version: '1.0.0' };
 
     it('the namespace-conflict drive is REFUSED — it carries no `type`', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_CONFLICT).success).toBe(false);
@@ -934,24 +937,22 @@ describe('#18058 — install contract bound to the live door', () => {
       expect(PackageInstallBodySchema.safeParse(DOOR_DRIVE_REGISTRY).success).toBe(false);
     });
 
-    it('the missing keys are what decide it — and since #17534 the registry drive needs its id repaired too', () => {
+    it('the missing `type` is what decides it, for BOTH drives — the registry drive\'s old id is refused on its own', () => {
       // The control that makes the two refusals above a measurement of the
       // MANIFEST's required keys rather than of the bare branch existing at all.
       expect(PackageInstallBodySchema.safeParse({ ...DOOR_DRIVE_CONFLICT, type: 'app' }).success).toBe(true);
-      // ⭐ #17534 moved this half. `ManifestSchema.id` carries
-      // `MANIFEST_ID_PATTERN` now, and `pkg-a` is not reverse-domain notation,
-      // so completing the missing `type` is no longer sufficient for THIS drive —
-      // it stays refused, on the id's shape rather than on an absent key.
-      // ⛔ The remedy is to say that, not to relax the pattern: the drive posts
-      // an id the registry face has always refused to publish.
       const registryKeysCompleted = { ...DOOR_DRIVE_REGISTRY, type: 'app' };
-      expect(PackageInstallBodySchema.safeParse(registryKeysCompleted).success).toBe(false);
-      // Lit control — the id is what decides it now: the same body with a
-      // reverse-domain id parses green, so the refusal above is not the missing
-      // keys coming back.
-      expect(PackageInstallBodySchema.safeParse({
-        ...registryKeysCompleted, id: 'com.acme.pkg-a',
-      }).success).toBe(true);
+      expect(PackageInstallBodySchema.safeParse(registryKeysCompleted).success).toBe(true);
+      // ⭐ Until PR #19473 this half ran the other way. The drive posted `pkg-a`,
+      // which `MANIFEST_ID_PATTERN` has refused since #17534 (PR #18319), so
+      // completing its keys was not sufficient and this case pinned the
+      // refusal. PR #19473 made the door parse the id leg as well, so the door
+      // answers that body `400` (the REVERSED pin beside the drive), and it
+      // repaired the drive's id. ⛔ The old reading is kept, pointed at the old
+      // body: refused on the id alone (the lit control is the green parse just
+      // above, the same body with the drive's current id), so it is no part of
+      // the `201` residual.
+      expect(PackageInstallBodySchema.safeParse({ ...registryKeysCompleted, id: 'pkg-a' }).success).toBe(false);
     });
 
     /** Bodies the door still answers `201` to while this declaration refuses them — the live residual. */
@@ -982,7 +983,8 @@ describe('#18058 — install contract bound to the live door', () => {
       // cited rather than repeated — this package cannot import the door. On
       // that key the declaration and the door agree, so a versionless body in
       // the list above would record a `201` the door no longer answers, which
-      // is what the registry drive's old transcription did.
+      // is what the registry drive's first transcription, `{ id: 'pkg-a',
+      // name: 'A' }`, did.
       // ⛔ Clause 1b stays open: both drives above still carry no `type`.
       for (const residual of DOOR_201_RESIDUALS) {
         const manifest = ('manifest' in residual ? residual.manifest : residual) as { version?: unknown };
