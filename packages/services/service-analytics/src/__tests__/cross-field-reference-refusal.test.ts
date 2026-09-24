@@ -417,8 +417,9 @@ describe('[#7598] the field-reference shape is read exactly as `driver-sql` read
   it('a NON-STRING `$field` is not a reference — it stays the object account', () => {
     // `driver-sql`'s `fieldReferenceOf` requires `typeof ref === 'string'`, and
     // this package mirrors that spelling rather than inventing a third reading.
-    // It is therefore NOT routed either: it binds as JSON, exactly as any other
-    // object comparand does, which is the account #5234 left open on purpose.
+    // It is therefore NOT routed either: on the `where` door it binds as JSON,
+    // exactly as any other object comparand does, which is the account #5234
+    // left open on purpose there.
     expect(findCrossFieldComparand({ amount: { $gt: { $field: 5 } } })).toBeNull();
     expect(tree({ amount: { $gt: { $field: 5 } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'gt', values: [{ $field: 5 }],
