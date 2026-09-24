@@ -47,6 +47,11 @@
  *   refusal's; the client refuses a bare path there itself, at `connect()`.
  * - PRESERVATION, beside this file's neighbours: `file:` local and replica,
  *   `:memory:` local, a lowercase remote url, `mode: 'remote'`.
+ * - The one WIDENED cell: an uppercase `FILE:` url naming a file under a
+ *   forced `mode: 'replica'`, with or without `syncUrl`. At `a7581b326` the
+ *   constructor refused it (a forced replica had to start with a lowercase
+ *   `file:`); it is now a `file:` url, so the replica runs on that file and
+ *   keeps its rows across a restart.
  *
  * # Reverse verification: direction predicted before it was run
  *
@@ -54,7 +59,8 @@
  * case and every uppercase-classification case goes RED (the constructor
  * returns a `'local'` driver on `:memory:`, with no envelope to read, and the
  * `FILE:` rows do not survive the restart) and every preservation and scope
- * case stays GREEN. Measured; see the PR.
+ * case stays GREEN, except the WIDENED cell's cases, which go RED the other
+ * way: there the constructor refuses. Measured; see the PR.
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
@@ -281,7 +287,7 @@ describe('SCOPE: a forced remote mode has no local engine, so this refusal does 
   });
 });
 
-describe('PRESERVATION: the recognised spellings construct exactly as before', () => {
+describe('PRESERVATION: the recognised spellings construct, and the one cell this change widens', () => {
   it.each<[string, TursoDriverConfig, string]>([
     ['file: local', { url: 'file:./data/app.db' }, 'local'],
     [':memory: local (ephemeral by declaration)', { url: ':memory:' }, 'local'],
@@ -292,8 +298,40 @@ describe('PRESERVATION: the recognised spellings construct exactly as before', (
     ['lowercase https:// remote', { url: `https://${HOST}`, authToken: 't' }, 'remote'],
     ["libsql:// + mode 'remote'", { url: `libsql://${HOST}`, mode: 'remote' }, 'remote'],
     ["file: + mode 'remote'", { url: 'file:./data/app.db', mode: 'remote' }, 'remote'],
+    // WIDENED: refused at a7581b326, where a forced replica had to start with a
+    // lowercase `file:`. An uppercase `FILE:` url is a `file:` url now.
+    ["WIDENED: FILE: + mode 'replica', no syncUrl", { url: 'FILE:./data/replica.db', mode: 'replica' }, 'replica'],
+    ["WIDENED: FILE: + mode 'replica' + syncUrl", { url: 'FILE:./data/replica.db', syncUrl: PRIMARY, mode: 'replica' }, 'replica'],
   ])('%s', (_label, config, mode) => {
     // Knex opens its connection lazily, so constructing never touches the file.
     expect(new TursoDriver(config).transportMode).toBe(mode);
+  });
+
+  it.each<[string, boolean]>([
+    ['no syncUrl', false],
+    ['with syncUrl', true],
+  ])("WIDENED: FILE: + mode 'replica', %s, runs on the named file and keeps its rows across a restart", async (_label, withSync) => {
+    const url = upperFile(files.next());
+    const stub = makeLibsqlSqliteStub();
+    const make = () =>
+      new TursoDriver({
+        url,
+        mode: 'replica',
+        ...(withSync ? { syncUrl: PRIMARY, client: stub as never, sync: { onConnect: false } } : {}),
+      });
+
+    const first = make();
+    expect(first.transportMode).toBe('replica');
+    await first.connect();
+    await first.initObjects([NOTE as never]);
+    await first.create('note', { id: 'n1', title: 'kept' });
+    await first.disconnect();
+
+    const second = make();
+    await second.connect();
+    await second.initObjects([NOTE as never]);
+    expect((await second.find('note', {})).map((r: { title?: unknown }) => r.title)).toEqual(['kept']);
+    await second.disconnect();
+    stub.close();
   });
 });

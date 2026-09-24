@@ -28,11 +28,13 @@ file:<path> (unchanged)             -> local, 1 row back, 1 row after restart
 
 The unrecognised-url refusal names the `file:` spelling (`url: 'file:./data/app.db'`, or `url: 'file:./data/replica.db'` beside `syncUrl`) and never echoes the url, which may carry a token. `TursoDriver.detectMode()` now answers `'replica'` for such a url beside `syncUrl` (it answered `'local'`), which is what the declaration asks for. The refusal sits in the constructor, not in a re-classification.
 
+**Newly accepted:** an uppercase or mixed-case `FILE:` url naming a file, under a forced `mode: 'replica'`, with or without `syncUrl`. The #19893 change refused it, because under a forced `mode: 'replica'` it refused every url that did not start with a lowercase `file:`. With this change it is a `file:` url: the replica runs on that file, and its rows survive a restart (pinned). It is the one configuration the #19893 change refused that this change accepts.
+
 **What stays accepted**, pinned by preservation tests: a lowercase `file:` url, alone or with `syncUrl`; `:memory:` as a local database; a lowercase remote url on its own or with `mode: 'remote'`. A forced `mode: 'remote'` runs no local engine, so this change does not judge its url: a bare path there still constructs, and `@libsql/client` refuses it at `connect()` as `URL_INVALID`.
 
 **What an affected author does.** A local database file needs the `file:` prefix: `url: 'file:./data/app.db'`. For a throwaway in-memory database, `url: ':memory:'`. An uppercase remote url with no `mode` and no `syncUrl` now reaches the remote database and needs no change. Beside `syncUrl` or under a forced local or replica mode it is refused with the same ways out as the lowercase spelling.
 
-This closes the fall-through that the changelog entry for #19893 (the constructor refusal of a remote url in a local or replica mode) lists as "not refused, unchanged here".
+The #19893 entry in this same version (the constructor refusal of a remote url in a local or replica mode) describes this fall-through as not refused by that change, and names this entry as the one that removes it.
 
 Blast radius, measured on this tree: no example, template, hand-written doc, published skill or factory default, and no test fixture outside this package's own tests, spells a turso url with an uppercase scheme or as a bare path. Neither host url sniffer selects this driver for a bare path (both select it only for `libsql://` or an `http(s)://` url naming a `.turso.` host); only an explicit `OS_DATABASE_DRIVER=turso` or a datasource declaring `driver: 'turso'` hands it one. Whether any out-of-repo deployment declares such a url is NOT measured and is not claimed to be zero.
 
