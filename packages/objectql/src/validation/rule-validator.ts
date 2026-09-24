@@ -94,7 +94,9 @@
  * thrown exception is an engine fault the author has no remedy for (rejecting
  * on it would brick every write with nothing to fix). Step 1 makes the
  * field-level predicates evaluate far more often anyway, since their fault mode
- * was the same missing key.
+ * was the same missing key. (ADR-0137 D2 has since moved `requiredWhen` and
+ * `readonlyWhen` off that list — see the section of that name below. Option
+ * `visibleWhen`, `format` and `json_schema` stay on it.)
  *
  * ## `readonlyWhen`: the UNBOUND-ROOT case is fail-CLOSED (#4889)
  *
@@ -104,9 +106,10 @@
  * header in hand — is not a broken predicate; it is a supported construct the
  * evaluation site could not answer, and answering "not locked" writes a field
  * the author declared frozen. That single case now resolves to LOCKED. Every
- * OTHER `readonlyWhen` fault (undeclared key, null overload, parse error) keeps
- * the fail-open policy this section describes, and `requiredWhen` / option
- * `visibleWhen` are untouched. See {@link isReadonlyWhenLocked}.
+ * OTHER `readonlyWhen` fault (undeclared key, null overload, parse error) kept
+ * the fail-open policy this section describes until ADR-0137 D2, which REFUSES
+ * the write instead; this carve-out is unchanged by D2 and still LOCKS. See
+ * {@link isReadonlyWhenLocked}.
  *
  * This is a NARROWING of ADR-0058 D5's "non-security predicate ⇒ fail soft"
  * line, recorded as an addendum on that ADR alongside the same narrowing #4649
@@ -143,7 +146,7 @@
  *    at that moment) is a louder failure than the `readonlyWhen` case, where the
  *    cost of the conservative answer is one refused field. That is option B of
  *    #4977 and it was explicitly NOT taken; it is reserved for the next review
- *    of ADR-0058 D5.
+ *    of ADR-0058 D5. **Superseded by ADR-0137 D2** — that review, below.
  *  - **Catch it at BUILD time instead.** `@objectstack/lint`'s
  *    `validate-expressions` rejects a `parent`-scoped `requiredWhen` on an object
  *    that declares no single `master_detail`, so the unbindable declaration —
@@ -162,10 +165,33 @@
  * `record.x == null`. Pinned by test so the app-side `has(...)` idiom cannot be
  * broken silently from under it.
  *
+ * ## ADR-0137 D2 — a field-rule predicate that FAULTS refuses the submit
+ *
+ * ADR-0137 writes the field-rule row of ADR-0058 D5's failure table — the
+ * review the #4977 ruling reserved option B for — and its Context measured the
+ * two server arms above as the defect it rules on. Its D2: "At submit time, a
+ * field-rule predicate that cannot be evaluated refuses the write and names the
+ * field and the rule. Nothing is persisted." So both arms now refuse:
+ *
+ *  - `requiredWhen` — every fault, an unbound `parent` included, adds a
+ *    refusal to this call's `ValidationError` instead of `continue`-ing.
+ *  - `readonlyWhen` — every fault EXCEPT the unbound-root carve-out above
+ *    (which still LOCKS) throws a `ValidationError` from the strip, before
+ *    anything is written.
+ *
+ * Both refusals are {@link unevaluableRuleError}'s envelope, the one a broken
+ * validation rule has carried since #4649, with the field as `field` and the
+ * slot as `constraint.rule`. What D2 does NOT reach: option `visibleWhen`
+ * ({@link evaluateOptionVisibility}) — D2 names a FIELD-rule predicate, an
+ * option's visibility is not one, and it stays fail-open; and the RENDER side,
+ * which D3 keeps fail-open for display. The consequence ADR-0137 names is
+ * deliberate: a stored predicate that silently did nothing now refuses writes,
+ * and that loud state is what reveals it.
+ *
  * ## `readonlyWhen` sees a TOTAL record too (#4953)
  *
  * The paragraph above ("Deliberately NOT changed here") is about the fail-open
- * POLICY, and that policy is still what the field-level predicates use. What
+ * POLICY, which the field-level predicates kept until ADR-0137 D2. What
  * changed in #4953 is the other half — what the predicate is evaluated
  * AGAINST. `materializeDeclaredFields` was wired into two seams and not the
  * third: the strip functions on the write path merged `{ ...previous, ...data }`
@@ -220,7 +246,7 @@ import {
 // that evaluate CEL against "the record" cannot drift apart on what that record
 // contains — see the module's own doc comment.
 import { materializeDeclaredFields } from '../declared-fields.js';
-import { describeCelFault, unknownVariableOf } from '../cel-fault.js';
+import { describeCelFault, missingKeyOf, unknownVariableOf } from '../cel-fault.js';
 // [#19929] Which `record` fields a `readonlyWhen` predicate reads, from the
 // AST of the canonical parse — see `recordFieldsRead`.
 import { parseCelToAst } from '@objectstack/formula';
@@ -471,9 +497,11 @@ export function needsPriorRecord(
  * (#4649) — the one policy under which a rule that cannot be evaluated refuses
  * the write instead of waving it through. The field-level `requiredWhen` /
  * `readonlyWhen` / option `visibleWhen` predicates are deliberately NOT
- * collected here: they fail OPEN, so a rule that could not be evaluated would
- * silently not enforce their gate — the opposite of what this capability's
- * refusal is for. They are their own card.
+ * collected here: this capability hydrates for a rule whose refusal is the
+ * point, and the field level is not hydrated at all — a field predicate that
+ * reads through a reference faults, and since ADR-0137 D2 that fault REFUSES
+ * the write with a sentence saying so ({@link unevaluableFieldRuleError}).
+ * Hydrating them is a capability of its own, not a consequence of D2.
  *
  * ## Only REFERENCE-typed fields
  *
@@ -619,8 +647,8 @@ export type RelatedRecordBinding = Readonly<Record<string, RelatedFieldBinding>>
  * predicates disagreed about what "the record" contains: ``requiredWhen:
  * P`record.b != null` `` was a working guard while ``readonlyWhen:
  * P`record.b != null` `` on the same field faulted whenever the driver did not
- * return `b` — and a faulting `readonlyWhen` is fail-OPEN, so the field the
- * author declared frozen was written. Whether it was written depended on which
+ * return `b` — and a faulting `readonlyWhen` was fail-OPEN then, so the field
+ * the author declared frozen was written. Whether it was written depended on which
  * columns a driver happened to echo back, which is not something an author can
  * see or control (#4953; maintainer ruling 2026-08-06: the SERVER seams are
  * unified, the cross-process ones are deferred).
@@ -638,8 +666,9 @@ export type RelatedRecordBinding = Readonly<Record<string, RelatedFieldBinding>>
  * the only place holding both the master's schema and the just-read header:
  * `ObjectQL.resolveMasterDetailParent(s)` (`engine.ts#materializeParentHeader`),
  * which serves this seam and the `requiredWhen` one below from one resolution.
- * This function's own contract is unchanged — hand it a sparse header and it
- * still fails open — and the ABSENT-parent signal above is untouched, because
+ * This function's own contract is unchanged — hand it a sparse header and its
+ * predicate still faults (which, since ADR-0137 D2, refuses the write) — and
+ * the ABSENT-parent signal above is untouched, because
  * materialisation is only ever applied to a header row that EXISTS.
  *
  * ## Consequences, both directions (measured, not asserted)
@@ -663,8 +692,9 @@ export type RelatedRecordBinding = Readonly<Record<string, RelatedFieldBinding>>
  *    consequence rather than a discovery.
  *
  * Ordering comparisons still fault over a total record (`null < null` is `no
- * such overload`), so the fail-open branch is not dead — the very reason
- * `@objectstack/lint`'s null-guard gate exists.
+ * such overload`), so the fault branch is not dead — the very reason
+ * `@objectstack/lint`'s null-guard gate exists. Since ADR-0137 D2 that branch
+ * refuses the write rather than letting the change through.
  *
  * ## Only materialise when the persisted state is IN HAND
  *
@@ -867,8 +897,10 @@ function isCallerSuppliedValue(
  * `undefined` when the object is not a detail or the payload's predicates never
  * name `parent`, and the binding is simply absent.
  *
- * A predicate that faults is fail-open (the change is allowed through) EXCEPT
- * when the fault is an unbound scope root — see {@link isReadonlyWhenLocked}.
+ * A predicate that faults REFUSES the write — a `ValidationError` naming the
+ * field and the rule, thrown before anything is persisted (ADR-0137 D2) —
+ * EXCEPT when the fault is an unbound scope root, which holds the lock (#4889).
+ * See {@link isReadonlyWhenLocked}.
  *
  * The `record` / `previous` bindings are TOTAL over the object's declared
  * fields (#4953) — see {@link readonlyWhenBindings}. `record` is the payload
@@ -892,11 +924,11 @@ export function stripReadonlyWhenFields(
   const stored = options?.stored ?? data;
   const judged = judgedReadonlyWhenKeys(fields, data, supplied);
   if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
-  const settled = settleReadonlyWhenDrops(
+  const settled = settleOrRefuse(logger, () => settleReadonlyWhenDrops(
     readonlyWhenLockGroups(fields, judged),
     (dropped) => readonlyWhenBindings(withoutKeys(stored, dropped), previous, fields),
-    (name, view, warn) => isReadonlyWhenLocked(fields[name]!, view.merged, view.previous, name, { warn }, parent),
-  );
+    (name, view, warn) => isReadonlyWhenLocked(fields[name]!, view.merged, view.previous, name, { warn }, parent, fields),
+  ));
   return applyReadonlyWhenDrops(data, judged, settled, options?.only, logger, (name) =>
     `Field '${name}' is read-only (readonlyWhen) — ignoring incoming change`,
   );
@@ -1290,16 +1322,27 @@ function applyReadonlyWhenDrops(
  * dropped. Shared by the single-id ({@link stripReadonlyWhenFields}) and bulk
  * ({@link stripReadonlyWhenFieldsMulti}) strips.
  *
- * ## Two faults, two answers (#4889)
+ * ## Two faults, two answers (#4889, ADR-0137 D2)
  *
  * Until #4889 every fault took one exit — WARN and `false`, "not locked" — and
  * that single answer had to serve two very different situations:
  *
  *  - **The predicate is broken on this record.** A typo'd key, a `null`
- *    ordering overload, a parse error. The author has a bug; the field is not
- *    demonstrably locked; the historical (and deliberate, documented) policy is
- *    fail-OPEN. Unchanged here — an engine fault the author cannot act on must
- *    not brick every write to the object.
+ *    ordering overload, a parse error, a column read through a reference the
+ *    field level never hydrates. The author has a bug and the lock has no
+ *    verdict. This arm was fail-OPEN — WARN, `false`, the change allowed
+ *    through — which wrote a field the author declared frozen whenever the
+ *    predicate could not run. **ADR-0137 D2 closes it: the write is REFUSED**,
+ *    naming the field and the rule, before anything is persisted. It THROWS
+ *    the {@link ValidationError} rather than answering a boolean, because
+ *    neither boolean is true: `false` invents "unlocked", and `true` would
+ *    silently drop a value nobody showed to be locked. The refusal is what the
+ *    author can act on — the message says which key or which overload.
+ *
+ *    Thrown from INSIDE the settlement ({@link settleReadonlyWhenDrops}) on
+ *    purpose: a lock whose verdict is unknown on any view the settlement asks
+ *    about cannot be settled, and a partial settlement is the thing the
+ *    settlement exists to prevent.
  *
  *  - **The predicate names a ROOT this operation did not bind.** `parent.status
  *    == 'paid'` where no master-detail header was resolved. The expression is
@@ -1328,13 +1371,15 @@ function isReadonlyWhenLocked(
   name: string,
   logger?: EvaluateRulesOptions['logger'],
   parent?: ParentBinding,
+  fields?: Record<string, ConditionalFieldDef>,
 ): boolean {
   const res = ExpressionEngine.evaluate<boolean>(toExpression(def.readonlyWhen!), {
     record: merged,
     previous,
     // Bound ONLY when resolved. An absent binding is what makes the unbound-root
     // fault below reachable, and that fault is the signal — binding `null` here
-    // would turn it into a `No such key` and re-open the fail-open hole.
+    // would turn it into a `No such key`, which the arm after it REFUSES
+    // (ADR-0137 D2) instead of holding the lock.
     ...(parent != null ? { extra: { parent } } : {}),
   });
   if (!res.ok) {
@@ -1347,10 +1392,31 @@ function isReadonlyWhenLocked(
       );
       return true;
     }
-    logger?.warn?.(`readonlyWhen for '${name}' failed to evaluate — change allowed through`);
-    return false;
+    // [ADR-0137 D2] Every OTHER fault refuses the write — see the docblock.
+    throw new ValidationError([
+      unevaluableFieldRuleError('readonlyWhen', name, res.error, def.readonlyWhen!, fields),
+    ]);
   }
   return res.value === true;
+}
+
+/**
+ * [ADR-0137 D2] Run a `readonlyWhen` settlement, and say a refusal in the log
+ * before handing it to the caller — the operator needs the fault in the log even
+ * though the caller gets it in the response, as a broken validation rule's
+ * refusal is (#4649). Logged HERE rather than where the fault is read, because
+ * {@link settleReadonlyWhenDrops} defers every warning until a verdict is
+ * settled, and a refusal settles none.
+ */
+function settleOrRefuse<T>(logger: EvaluateRulesOptions['logger'] | undefined, settle: () => T): T {
+  try {
+    return settle();
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      for (const field of err.fields) logger?.warn?.(field.message);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -1506,9 +1572,12 @@ export function hasReadonlyWhenInPayload(
  * lock the field for some rows and write it for others, so a field locked in any
  * target row is fail-safe-dropped for all (narrow the `where` to reach the rows
  * where it is unlocked). A field NO matched row locks is written normally — a
- * legitimate bulk edit of an unlocked conditional field is unaffected. A broken
- * predicate is fail-open for that row. INSERT is exempt (update path only),
- * symmetric with the single-id strip.
+ * legitimate bulk edit of an unlocked conditional field is unaffected. A
+ * predicate that faults on ANY matched row refuses the whole write, naming the
+ * field, the rule and the row (ADR-0137 D2) — so every row is judged, not only
+ * the rows up to the first that locks: stopping there would let the refusal
+ * depend on the order the driver returned the rows in. INSERT is exempt (update
+ * path only), symmetric with the single-id strip.
  *
  * `parentForRow` (#4889) supplies each matched row's master-detail header, since
  * N rows can hang off N different masters — the bulk counterpart of the
@@ -1559,26 +1628,52 @@ export function stripReadonlyWhenFieldsMulti(
   // in every row against THAT row's view with the other drops reverted, and is
   // locked when it locks in ≥1 row — so an exact set drops only keys locked in
   // some row and keeps only keys unlocked in every row.
-  const settled = settleReadonlyWhenDrops(
+  const settled = settleOrRefuse(logger, () => settleReadonlyWhenDrops(
     readonlyWhenLockGroups(fields, judged),
     (dropped) => {
       const payload = withoutKeys(stored, dropped);
       return rows.map((row) => readonlyWhenBindings(payload, row, fields));
     },
-    (name, views, warn) =>
-      views.some((view, i) =>
-        isReadonlyWhenLocked(
-          fields[name]!,
-          view.merged,
-          view.previous,
-          name,
-          { warn },
-          // Resolved per (field, row) exactly as before — the header lookup is
-          // the caller's, and its call pattern is not this change's business.
-          parentForRow?.(rows[i] ?? undefined),
-        ),
-      ),
-  );
+    (name, views, warn) => {
+      // [ADR-0137 D2] EVERY row, never `some`: a row that faults refuses the
+      // write wherever it sits among the matched rows. The rows' warnings are
+      // said once each — N rows under one unbound header word one line N times.
+      const said = new Set<string>();
+      const once = (message: string): void => {
+        if (said.has(message)) return;
+        said.add(message);
+        warn(message);
+      };
+      let locked = false;
+      views.forEach((view, i) => {
+        const row = rows[i] ?? undefined;
+        try {
+          if (
+            isReadonlyWhenLocked(
+              fields[name]!,
+              view.merged,
+              view.previous,
+              name,
+              { warn: once },
+              // Resolved per (field, row) exactly as before — the header lookup is
+              // the caller's, and its call pattern is not this change's business.
+              parentForRow?.(row),
+              fields,
+            )
+          ) {
+            locked = true;
+          }
+        } catch (err) {
+          // Name the row, as the bulk validation refusal does (`engine.ts`).
+          if (err instanceof ValidationError && row?.id != null) {
+            throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
+          }
+          throw err;
+        }
+      });
+      return locked;
+    },
+  ));
   return applyReadonlyWhenDrops(data, judged, settled, options?.only, logger, (name) =>
     `Field '${name}' is read-only (readonlyWhen) in ≥1 matched row — ignoring incoming change on bulk update`,
   );
@@ -2997,8 +3092,9 @@ export function evaluateValidationRules(
   // Field-level conditional rules (B2): a field whose `requiredWhen`
   // predicate is TRUE over the merged record must have a value — enforced
   // server-side so the rule can't be bypassed. (`readonlyWhen` is handled by
-  // stripReadonlyWhenFields on the write path, not here.) A broken predicate
-  // is fail-open (logged, skipped).
+  // stripReadonlyWhenFields on the write path, not here.) A predicate that
+  // cannot be evaluated REFUSES the write, naming the field and the rule
+  // (ADR-0137 D2) — see the fault arm below.
   //
   // ADR-0113 non-regression: reject iff the MERGED state violates AND the
   // PRE state complied. A write may not take the record from compliant to
@@ -3024,22 +3120,27 @@ export function evaluateValidationRules(
       if (!pred) continue;
       const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: merged, previous, ...parentScope });
       if (!res.ok) {
-        // Fail-OPEN, unchanged (#4977 ruling: bind the scope, keep the
-        // evaluation semantics). An unevaluable `requiredWhen` — including one
-        // whose `parent` the engine could not resolve — is logged and skipped,
-        // NOT turned into a rejection: that is option B, deliberately not taken
-        // here and left to the next review of ADR-0058 D5. All that changes is
-        // the diagnostic: an unbound ROOT is named, because "the header could
-        // not be read" and "the author typo'd a key" are different faults with
-        // different remedies and only one line of signal to tell them apart.
-        const unbound = unknownVariableOf(res.error);
+        // [ADR-0137 D2] A `requiredWhen` that cannot be evaluated REFUSES the
+        // write and names the field and the rule; nothing is persisted (the
+        // caller throws below, before any driver call). Until D2 this arm
+        // logged and `continue`d — #4977 kept it fail-OPEN and left the
+        // rejection ("option B") to the next review of ADR-0058 D5. ADR-0137 is
+        // that review: it writes the field-rule row of D5's table, and its own
+        // Context measured this arm ("A record saves with the field empty") as
+        // the defect it rules on. A rule that could not run has no verdict, and
+        // reading "no verdict" as "not required" is the whole defect.
+        //
+        // Every fault takes this arm, an unbound `parent` included — a header
+        // that could not be resolved for this write is exactly the relationship
+        // read #18682's ruling says must fail loudly, never silently true.
+        // Refused whatever the write does to the field: D2 refuses the SUBMIT,
+        // and a supplied value does not supply the missing verdict. The
+        // ADR-0113 pre-check below is not consulted either — it asks whether a
+        // legacy row may rest under a verdict, and there is none to rest under.
         opts.logger?.warn?.(
-          unbound
-            ? `requiredWhen for '${name}' reads '${unbound}', which is not bound for this operation — ` +
-              `skipped (the requirement is NOT enforced for this write). ` +
-              `A 'parent'-scoped predicate needs the object to declare exactly one master_detail relationship.`
-            : `requiredWhen for '${name}' failed to evaluate — skipped`,
+          `requiredWhen for '${name}' failed to evaluate (${res.error.kind}: ${String(res.error.message).split('\n')[0]}) — write rejected`,
         );
+        errors.push(unevaluableFieldRuleError('requiredWhen', name, res.error, pred, fields));
         continue;
       }
       if (res.value === true && isMissing(merged[name])) {
@@ -3321,22 +3422,35 @@ function checkStateMachine(
  * evaluators that reject a write for the same reason must not describe it in
  * two dialects — the same argument that made `materializeDeclaredFields`
  * shared.
+ *
+ * [ADR-0137 D2] The field-rule predicates (`requiredWhen` / `readonlyWhen`)
+ * refuse through this SAME builder — {@link unevaluableFieldRuleError} passes
+ * the `subject` that names the field and the slot instead of a rule name, and
+ * nothing else about the envelope moves: one refusal shape for every predicate
+ * the server could not run.
  */
 function unevaluableRuleError(
   ruleName: string,
   field: string,
   error: { kind: string; message: string },
   what: 'predicate' | 'when-predicate',
+  subject: { prose: string; detail?: string } = { prose: `Validation rule '${ruleName}'` },
 ): FieldValidationError {
-  const { summary, missingKey, nullOverload, detail } = describeCelFault(error, {
+  const described = describeCelFault(error, {
     what,
     undeclaredKeyFix: "fix the rule's condition, or declare the field",
   });
+  const { summary, nullOverload } = described;
+  // A subject that words its own detail has read the fault more precisely than
+  // the generic sentence can (a key read THROUGH a reference is not a key this
+  // object fails to declare), so the generic `missingKey` does not travel with it.
+  const detail = subject.detail ?? described.detail;
+  const missingKey = subject.detail === undefined ? described.missingKey : undefined;
   return {
     field,
     code: 'rule_violation',
     message:
-      `Validation rule '${ruleName}' could not be evaluated (${summary}) — write rejected.${detail}`,
+      `${subject.prose} could not be evaluated (${summary}) — write rejected.${detail}`,
     constraint: {
       rule: ruleName,
       reason: 'unevaluable',
@@ -3345,6 +3459,69 @@ function unevaluableRuleError(
       ...(nullOverload ? { hint: 'null-comparison' } : {}),
     },
   };
+}
+
+/** The two field-rule slots the server evaluates on a write (ADR-0137 D2). */
+type FieldRuleSlot = 'requiredWhen' | 'readonlyWhen';
+
+/**
+ * [ADR-0137 D2] The refusal a field-rule predicate that CANNOT BE EVALUATED at
+ * submit produces: it names the field and the rule, and the write is rejected
+ * with nothing persisted.
+ *
+ * Built by {@link unevaluableRuleError}, so the envelope is the one a broken
+ * validation rule has produced since #4649 — `code: 'rule_violation'`, and
+ * `constraint.reason: 'unevaluable'` — with `constraint.rule` naming the SLOT
+ * (`requiredWhen` / `readonlyWhen`). A slot name cannot collide with a
+ * validation rule's name: a rule name is a snake_case machine name, and both
+ * slot names are camelCase.
+ *
+ * Two faults get their own sentence, because the generic one would send the
+ * author to the wrong repair:
+ *
+ *  - **A column read THROUGH a reference field** (`record.account.tier`). The
+ *    related record is never read for a field-level predicate — only a
+ *    validation rule's condition is hydrated one hop — so the reference holds a
+ *    bare id and CEL reports `No such key: tier`. "Declare the field" would have
+ *    the author add `tier` to the wrong object.
+ *  - **An unbound `parent`**: the master-detail header could not be resolved for
+ *    this write. The generic sentence lists only `record` / `previous` as
+ *    roots, which is the wrong half of the story for a `parent`-scoped rule.
+ */
+function unevaluableFieldRuleError(
+  slot: FieldRuleSlot,
+  name: string,
+  error: { kind: string; message: string },
+  pred: string | Expression,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): FieldValidationError {
+  const expr = toExpression(pred);
+  const source = expr.dialect === 'cel' && typeof expr.source === 'string' ? expr.source : '';
+  let detail: string | undefined;
+  const missing = missingKeyOf(error);
+  if (missing && source && fields) {
+    for (const [ref, related] of analysisFor(source)?.traversals ?? []) {
+      const target = referenceTargetOf(fields[ref]);
+      if (!target || !related.has(missing)) continue;
+      detail =
+        ` The predicate reads '${missing}' through '${ref}', a reference to '${target}'. A field-level`
+        + ` \`${slot}\` is evaluated against this record alone and never reads the related record`
+        + ' (only a `validations[]` rule\'s condition reads one hop through a reference), so the'
+        + ` reference holds a bare id there. Express the check as a \`validations[]\` \`script\` rule,`
+        + ' or read a column this object declares.';
+      break;
+    }
+  }
+  if (detail === undefined && unknownVariableOf(error) === PARENT_ROOT) {
+    detail =
+      ` The predicate reads 'parent', the master-detail header, and no header could be resolved for`
+      + ' this write — the record names none, or it was not found or could not be read. The rule has'
+      + ' no verdict, so the write is rejected rather than allowed on an unchecked rule.';
+  }
+  return unevaluableRuleError(slot, name, error, 'predicate', {
+    prose: `Field '${name}' ${slot}`,
+    ...(detail !== undefined ? { detail } : {}),
+  });
 }
 
 /**
