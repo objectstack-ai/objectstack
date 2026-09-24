@@ -247,7 +247,6 @@ const result = ErrorCode.parse(data);
 * `PRECONDITION_REQUIRED`
 * `RATE_LIMIT_EXCEEDED`
 * `QUOTA_EXCEEDED`
-* `CONCURRENT_LIMIT_EXCEEDED`
 * `INTERNAL_ERROR`
 * `DATABASE_ERROR`
 * `TIMEOUT`
@@ -569,7 +568,7 @@ const result = ErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **code** | `string` | ✅ | The registered extension code the waiver keeps admissible |
-| **shadows** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +43 more>` | ✅ | The standard-catalog member whose condition the code re-spells |
+| **shadows** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +42 more>` | ✅ | The standard-catalog member whose condition the code re-spells |
 | **reason** | `string` | ✅ | Why the synonym stays registered — recorded so admission is a decision, not drift |
 
 ### Allowed Values: `StandardSynonymWaiver.shadows`
@@ -615,7 +614,6 @@ const result = ErrorCode.parse(data);
 * `PRECONDITION_REQUIRED`
 * `RATE_LIMIT_EXCEEDED`
 * `QUOTA_EXCEEDED`
-* `CONCURRENT_LIMIT_EXCEEDED`
 * `INTERNAL_ERROR`
 * `DATABASE_ERROR`
 * `TIMEOUT`
