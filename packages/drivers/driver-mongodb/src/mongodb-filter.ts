@@ -318,6 +318,29 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     throw malformedBetweenError(key, value.$between, `${here}.$between`);
   }
 
+  // [#19886] `$ne`'s comparand is ONE value, gated on the WALK for the reason
+  // the three gates above give: `{ $or: [ {}, { s: { $ne: [...] } } ] }`
+  // reduces to TRUE on its first disjunct, so an emitter-side gate would refuse
+  // or ignore it depending on its siblings. Before this gate the shape was
+  // emitted unchanged, and MongoDB reads `$ne` against an array operand as
+  // "not equal to that array and not holding it as an element" — every scalar
+  // row. On an RLS read that is a widening: the `using` clause is AND-composed
+  // AFTER the engine's comparand-shape seam, so this driver was the only face
+  // left between it and the server. `driver-sql` (unbindable comparand) and
+  // `driver-memory` (array comparand) already refuse it with this envelope.
+  //
+  // ⚠️ Deliberately `$ne` ONLY. The equality position (`{ f: [...] }`,
+  // `$eq: [...]`) is ruled to the shared face, and that ruling's own pin keeps
+  // this translator passing it through unchanged — a driver-local copy there
+  // would be a second implementation of the shared rule.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$ne') &&
+    Array.isArray(value.$ne)
+  ) {
+    throw arrayNotEqualComparandError();
+  }
+
   // A field key always contributes a predicate — `'clause'`, exactly as #5239
   // classified it. The refusals above do not change that verdict for any shape
   // that survives them.
@@ -368,6 +391,26 @@ function unsupportedFilterError(message: string): Error {
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
   return err;
+}
+
+/**
+ * [#19886] `$ne` whose comparand is an array.
+ *
+ * The field, the value and the position are withheld from the message:
+ * this translator receives the RLS `using` predicate AND-composed into the
+ * caller's `where`, and the caller who reads the 400 is not the author of that
+ * predicate, whose comparand may be a resolved membership set (other users'
+ * ids). That is the posture `driver-sql`'s withheld refusals took for the
+ * same reason. The message carries the refusal's identity and the remedy.
+ */
+function arrayNotEqualComparandError(): Error {
+  return unsupportedFilterError(
+    'A "$ne" comparison in this filter received an array as its comparand. "$ne" compares one ' +
+      'value; for "none of these values" use "$nin". It is refused rather than translated because ' +
+      'MongoDB reads "$ne" against an array operand as "not equal to that array and not holding it ' +
+      'as an element", which every scalar value satisfies. The field and the value are withheld ' +
+      'from this message because the filter may be an access policy the caller did not write.',
+  );
 }
 
 /**

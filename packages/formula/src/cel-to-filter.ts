@@ -417,8 +417,46 @@ function lowerStringMethod(args: [string, ASTNode, ASTNode[]], ctx: Ctx): Filter
   return { [(recv as { path: string }).path]: { [mapped]: arg } } as FilterCondition;
 }
 
+/**
+ * [#19886] `==` / `!=` compare ONE value, and a list is not one value.
+ *
+ * Until this refusal `record.status != ['closed', 'archived']` lowered to
+ * `{ status: { $ne: [...] } }` and `record.status == [...]` to the bare-array
+ * `{ status: [...] }`, and so did the same comparison against a `current_user`
+ * membership ARRAY (`record.reviewer_id != current_user.org_user_ids`). The
+ * backends that received them disagreed, and two of the answers widened:
+ *
+ * | lowered shape                  | driver-sql / memory / turso | formula `matchesFilterCondition` (RLS `check`), before its own refusal | driver-mongodb (mingo proxy) |
+ * |:-------------------------------|:----------------------------|:----------------------|:-----------------------------|
+ * | `{ f: { $ne: [...] } }`        | 400                         | every row             | every scalar row             |
+ * | `{ $not: { f: [...] } }`       | 400                         | every row             | every row (`$nor`)           |
+ *
+ * The RLS `using` clause is AND-composed into the query AFTER the engine's
+ * comparand-shape seam, so no shared face stood between that lowering and a
+ * driver that answered it. Refusing HERE closes it at the one point every
+ * consumer compiles through — the RLS `using` / `check` compiler, the
+ * sharing-rule bootstrap, and the authoring lint — and it fails closed the way
+ * every other `unsupported` shape does: the RLS compiler drops the policy
+ * (`RLS_DENY_FILTER` when nothing else applies), and the sharing seeder skips
+ * the rule.
+ *
+ * A literal list is caught by the shape check too (`isPushdownableCel`), so the
+ * authoring gate sees it; a variable that RESOLVES to an array can only be
+ * caught when it resolves, at request time. "One of these values" is `in`;
+ * "none of these values" is `!(… in …)`.
+ */
+function arrayComparandRefusal(op: string): CompileError {
+  return new CompileError(
+    'unsupported',
+    `\`${op}\` compares one value, but its comparand is a list (a list literal, or a ` +
+      '`current_user` membership set) — spell "one of these" as `record.f in [...]` and ' +
+      '"none of these" as `!(record.f in [...])`',
+  );
+}
+
 /** Build `{ field: <op> value }`. `isRef` true → value is a `{ $field }` reference. */
 function emit(field: string, op: string, value: unknown, isRef: boolean): FilterCondition {
+  if ((op === '==' || op === '!=') && !isRef && Array.isArray(value)) throw arrayComparandRefusal(op);
   if (op === '==') {
     if (!isRef && value === null) return { [field]: { $null: true } } as FilterCondition;
     if (isRef) return { [field]: { $eq: value } } as FilterCondition;
