@@ -5832,7 +5832,9 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'No code imports any of the five names, their types or their Parsed twins from '
         + '`@objectstack/spec/api` — each such import is a TS2305 "has no exported member" error after '
-        + 'upgrade, and at runtime the binding is undefined. The same names import cleanly from '
+        + 'upgrade (TS2724 with a did-you-mean when a similarly named export exists; the suggested name is '
+        + 'a different schema, not the replacement), and at runtime the binding is undefined. The same '
+        + 'names import cleanly from '
         + '`@objectstack/spec/api-assembled`. No metadata document, stored row or JSON Schema reference '
         + 'needs editing: the schemas and their published ids did not change.',
     },
