@@ -58,6 +58,12 @@ fields. A column the related object does not declare never enters the query, and
 is refused as the authoring fault it is — distinct from a column that exists and
 is empty, which evaluates as `null`.
 
+A related object no organization wall scopes — no tenant column (`sys_user`
+behind a `user` field), `tenancy.enabled: false`, or `external` — is bounded by
+row as well: for a user caller, only a row the caller's own read of that object
+returns. A reference to any other row refuses the write as not readable,
+whatever that row holds.
+
 ⚠️ **The accepted cost, stated plainly.** A caller can *infer* a related value
 they cannot see by observing which writes are refused. The value itself never
 appears — the refusal names the field and the rule, never the value — and the
