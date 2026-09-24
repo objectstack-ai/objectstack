@@ -2235,10 +2235,18 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(atSlot(['a > 1'])[0].message).toContain('Found an array');
       });
 
-      it('leaves string predicates alone — including the whitespace-only one', () => {
-        // The card states this boundary explicitly so nobody "fixes" it: a
-        // whitespace-only STRING is "not authored" on both sides and stays so.
-        expect(atSlot('   ')).toHaveLength(0);
+      it('leaves non-blank string predicates alone — and refuses the whitespace-only one (#17493)', () => {
+        // RE-JUDGED IN PLACE (#17493, ruling A 5651023407), not deleted. This
+        // pinned `atSlot('   ')` at ZERO findings: "The card states this
+        // boundary explicitly so nobody 'fixes' it: a whitespace-only STRING
+        // is 'not authored' on both sides and stays so." Both sides do still
+        // agree; the ruling is that the agreement is no defence when the
+        // author's rule is silently dropped, so the blank is refused here — on
+        // the same rule and sentence as the envelope above.
+        const blank = atSlot('   ');
+        expect(blank).toHaveLength(1);
+        expect(blank[0].severity).toBe('error');
+        expect(blank[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
         expect(atSlot("lead_record.status == 'converted'")).toHaveLength(0);
       });
     });
@@ -4291,5 +4299,93 @@ describe('masterDetailCount — an unreadable `reference` carrier is refused (#1
     const parentScope = issues.filter((i) => /reads `parent`/.test(i.message));
     expect(parentScope).toHaveLength(1);
     expect(parentScope[0]!.message).toMatch(/declares no `master_detail` relationships/);
+  });
+});
+
+/**
+ * [#17493] (ruling A, 5651023407) — a blank string in a ledger `predicate`
+ * slot, at the THIRD door: `objectstack validate`'s expression pass.
+ *
+ * `decision`'s `config.conditions[].expression` and `screen`'s
+ * `config.fields[].visibleWhen` reported NOTHING for `''` / `'   '`: the
+ * resolver skipped the blank as "not authored", so `validateStackExpressions`
+ * never saw it, and a branch carrying it was never taken at run time. The
+ * refusal is `predicateSlotRefusal`'s — the spec's one notion, shared with
+ * `FlowSchema.parse` and `registerFlow` — so the finding leads with the same
+ * published sentence the other two doors answer with.
+ *
+ * ⚠️ Through the CLI, `objectstack validate` meets these values first at its
+ * schema step (`FlowSchema.parse` refuses them there). This pass is what
+ * answers for a stack handed to `validateStackExpressions` directly, and it is
+ * what these pins drive.
+ */
+describe('a blank string in a ledger predicate slot (#17493)', () => {
+  const flowStack = (...middle: Record<string, unknown>[]) => ({
+    flows: [{
+      name: 'blank_flow',
+      nodes: [{ id: 'start', type: 'start' }, ...middle],
+      edges: [],
+    }],
+  });
+  const decision = (expression: unknown) =>
+    ({ id: 'check', type: 'decision', config: { conditions: [{ label: 'Yes', expression }] } });
+  const screen = (visibleWhen: unknown) =>
+    ({ id: 'form', type: 'screen', config: { fields: [{ name: 'amount', type: 'number', visibleWhen }] } });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+
+  describe.each(['', '   ', '\t\n '])('the blank %j', (blank) => {
+    it('decision branch `config.conditions[].expression` — one error, located at node and branch', () => {
+      const found = errorsOf(flowStack(decision(blank)));
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe('error');
+      expect(found[0].where).toBe("flow 'blank_flow' · node 'check' (decision) decision branch expression at config.conditions[0].expression");
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+      expect(found[0].source).toBe(blank);
+    });
+
+    it('screen field `config.fields[].visibleWhen` — one error, located at node and field', () => {
+      const found = errorsOf(flowStack(screen(blank)));
+      expect(found).toHaveLength(1);
+      expect(found[0].severity).toBe('error');
+      expect(found[0].where).toBe("flow 'blank_flow' · node 'form' (screen) screen field visibleWhen at config.fields[0].visibleWhen");
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+    });
+  });
+
+  it('reaches a `decision` inside an ADR-0031 region body', () => {
+    const found = errorsOf(flowStack({
+      id: 'sweep', type: 'loop',
+      config: { collection: '{items}', itemVariable: 'item', body: { nodes: [decision('   ')], edges: [] } },
+    }));
+    expect(found).toHaveLength(1);
+    expect(found[0].where).toContain("loop 'sweep' body");
+    expect(found[0].where).toContain('config.conditions[0].expression');
+    expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+  });
+
+  describe('CONTROLS — what this must NOT move', () => {
+    it('RED CONTROL — the brace trap on the same slot still earns its own verdict, not the blank one', () => {
+      const found = errorsOf(flowStack(decision('{amount} > 1')));
+      expect(found).toHaveLength(1);
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(false);
+    });
+
+    it('a non-blank predicate and an absent one report nothing', () => {
+      expect(errorsOf(flowStack(decision('amount > 1')))).toHaveLength(0);
+      expect(errorsOf(flowStack(screen('amount > 0')))).toHaveLength(0);
+      expect(errorsOf(flowStack(screen(undefined)))).toHaveLength(0);
+    });
+
+    it('the structural `config.condition` keeps its own rule and sentence', () => {
+      const found = errorsOf(flowStack({ id: 'gate', type: 'decision', config: { condition: '   ' } }));
+      expect(found).toHaveLength(1);
+      expect(found[0].message).toContain(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+      expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(false);
+    });
+
+    it("a `flow-template` slot's blank is untouched", () => {
+      expect(errorsOf(flowStack({ id: 'sweep', type: 'loop', config: { collection: '   ' } }))).toHaveLength(0);
+    });
   });
 });

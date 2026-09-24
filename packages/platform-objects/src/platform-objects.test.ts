@@ -318,6 +318,13 @@ describe('@objectstack/platform-objects', () => {
       expect(role.description).not.toContain('Set Platform Role');
       expect(role.description).toContain('sys_user_permission_set');
       expect(role.description).toContain('admin_full_access');
+      // #19875 — which route exists depends on the tenancy posture. Under a
+      // walled posture (`group` / `isolated`) the unscoped grant confers no
+      // platform-admin standing (#11663 L5), so the text must name the anchor
+      // that confers on EVERY posture and keep the grant clause `single`-only;
+      // an unqualified grant prescription silently does nothing on a walled rig.
+      expect(role.description).toContain('OS_PLATFORM_OWNER_EMAIL');
+      expect(role.description).toContain('`single`');
     });
   });
 

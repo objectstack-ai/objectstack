@@ -730,6 +730,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Table options",
         description: "Grid-only display options."
       },
+      pagination: {
+        label: "Pagination",
+        description: "Page size and page-size options — every view type accepts them, not only grids."
+      },
       kanban: {
         label: "Kanban",
         description: "Kanban-specific board configuration."

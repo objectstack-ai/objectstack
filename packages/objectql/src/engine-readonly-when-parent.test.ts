@@ -402,3 +402,239 @@ describe('parent-scoped readonlyWhen is enforced server-side (#4889)', () => {
     expect(reads.filter((r) => r === 'showcase_invoice')).toHaveLength(1);
   });
 });
+
+// ── #19853 — `parent` is the header the write STORES, not the one it NAMES ──
+//
+// Every block above resolves `parent` payload-FK-first (#4889: a repoint is
+// judged against the master it lands on). That rule is only as good as the
+// repoint's LANDING. Two strips can take the FK back out after `parent` was
+// resolved from it — the static `readonly` strip (a non-system caller's
+// forged FK) and the FK's own `readonlyWhen` lock — and then the row stays
+// under the header it had while every other parent-scoped lock was judged
+// against a header it never reached. Measured on `origin/main` 2bbb462335
+// before the fix, the card's own write: `update(l1, { amount: 999, invoice:
+// 'inv_b' })` against a line of the PAID `inv_a` committed `{ amount: 999,
+// invoice: 'inv_a' }` — the frozen line rewritten, still under the paid
+// invoice. The header these cases expect is always the one the stored row
+// hangs off afterwards.
+describe('parent-scoped readonlyWhen reads the header the write STORES (#19853)', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({ name: 'inv', fields: { status: { type: 'text' } } } as any);
+    // The card's shape: a line can never be moved to another invoice.
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        invoice: { type: 'master_detail', reference: 'inv', readonly: true },
+        amount: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+        note: { type: 'text' },
+      },
+    } as any);
+    // The legitimate repoint: the same lock, the FK writable.
+    engine.registry.registerObject({
+      name: 'inv_line_free',
+      fields: {
+        invoice: { type: 'master_detail', reference: 'inv' },
+        amount: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+      },
+    } as any);
+    // The FK's OWN lock, record-scoped: a submitted line stays where it is.
+    engine.registry.registerObject({
+      name: 'inv_line_moored',
+      fields: {
+        stage: { type: 'text' },
+        invoice: { type: 'master_detail', reference: 'inv', readonlyWhen: "record.stage == 'submitted'" },
+        amount: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+      },
+    } as any);
+    // The FK's OWN lock, parent-scoped: no line lands on a void invoice. Its
+    // verdict is #4889's and stays so — judged against the header it NAMES.
+    engine.registry.registerObject({
+      name: 'inv_line_void_guard',
+      fields: {
+        invoice: { type: 'master_detail', reference: 'inv', readonlyWhen: "parent.status == 'void'" },
+        amount: { type: 'number', readonlyWhen: "parent.status == 'paid'" },
+      },
+    } as any);
+    // `requiredWhen` shares the binding (#4977), so it moves with it.
+    engine.registry.registerObject({
+      name: 'inv_line_po',
+      fields: {
+        invoice: { type: 'master_detail', reference: 'inv', readonly: true },
+        po_ref: { type: 'text', requiredWhen: "parent.status == 'paid'" },
+        note: { type: 'text' },
+      },
+    } as any);
+
+    storeFor('inv').set('inv_a', { id: 'inv_a', status: 'paid' });
+    storeFor('inv').set('inv_b', { id: 'inv_b', status: 'open' });
+    storeFor('inv').set('inv_v', { id: 'inv_v', status: 'void' });
+    storeFor('inv_line').set('l1', { id: 'l1', invoice: 'inv_a', amount: 100, note: 'paid' });
+    storeFor('inv_line').set('l2', { id: 'l2', invoice: 'inv_b', amount: 200, note: 'open' });
+    storeFor('inv_line_free').set('f1', { id: 'f1', invoice: 'inv_a', amount: 100 });
+    storeFor('inv_line_free').set('f2', { id: 'f2', invoice: 'inv_b', amount: 200 });
+    storeFor('inv_line_moored').set('m1', { id: 'm1', stage: 'submitted', invoice: 'inv_a', amount: 100 });
+    storeFor('inv_line_void_guard').set('v1', { id: 'v1', invoice: 'inv_a', amount: 100 });
+    storeFor('inv_line_po').set('p1', { id: 'p1', invoice: 'inv_b', po_ref: null, note: 'n0' });
+  });
+
+  const row = (object: string, id: string) => storeFor(object).get(id);
+
+  async function rejection(p: Promise<unknown>): Promise<any> {
+    try {
+      await p;
+    } catch (err) {
+      return err;
+    }
+    throw new Error('expected the write to be refused, but it resolved');
+  }
+
+  it('THE CARD: naming another invoice beside a read-only FK no longer unlocks the paid line', async () => {
+    await engine.update('inv_line', { id: 'l1', amount: 999, invoice: 'inv_b' });
+    expect(row('inv_line', 'l1')).toMatchObject({ invoice: 'inv_a', amount: 100 });
+  });
+
+  it('CONTROL: the same lock without the repoint, unchanged', async () => {
+    await engine.update('inv_line', { id: 'l1', amount: 555 });
+    expect(row('inv_line', 'l1')).toMatchObject({ invoice: 'inv_a', amount: 100 });
+  });
+
+  it('reports both strips, each under its own reason', async () => {
+    const events: any[] = [];
+    await engine.update(
+      'inv_line',
+      { id: 'l1', amount: 999, invoice: 'inv_b' },
+      { onFieldsDropped: (e: any) => events.push(e) } as any,
+    );
+    expect(events).toEqual([
+      { object: 'inv_line', fields: ['amount'], reason: 'readonly_when' },
+      { object: 'inv_line', fields: ['invoice'], reason: 'readonly' },
+    ]);
+  });
+
+  it('under strictReadonlyWrites the stripped repoint is refused naming BOTH fields, and nothing lands', async () => {
+    const err = await rejection(engine.update(
+      'inv_line',
+      { id: 'l1', amount: 999, invoice: 'inv_b', note: 'edited' },
+      { strictReadonlyWrites: true } as any,
+    ));
+    expect(err.code).toBe('ERR_READONLY_FIELD_REJECTED');
+    expect(err.name).toBe('ReadonlyFieldRejectedError');
+    expect(err.fields).toEqual(['amount', 'invoice']);
+    expect(err.drops).toEqual([
+      { object: 'inv_line', fields: ['amount'], reason: 'readonly_when' },
+      { object: 'inv_line', fields: ['invoice'], reason: 'readonly' },
+    ]);
+    expect(row('inv_line', 'l1')).toMatchObject({ invoice: 'inv_a', amount: 100, note: 'paid' });
+  });
+
+  it('REVERSE: naming a PAID invoice beside a read-only FK no longer locks an open line', async () => {
+    // The over-lock twin: the row stays under the OPEN `inv_b`, so its amount
+    // is writable, whatever header the payload named.
+    await engine.update('inv_line', { id: 'l2', amount: 999, invoice: 'inv_a' });
+    expect(row('inv_line', 'l2')).toMatchObject({ invoice: 'inv_b', amount: 999 });
+  });
+
+  it('reads ONE header for the stripped repoint — the one the row keeps', async () => {
+    const reads: unknown[] = [];
+    const original = (engine as any).findOne.bind(engine);
+    (engine as any).findOne = async (name: string, q: any, o?: any) => {
+      if (name === 'inv') reads.push(q?.where?.id);
+      return original(name, q, o);
+    };
+    await engine.update('inv_line', { id: 'l1', amount: 999, invoice: 'inv_b' });
+    expect(reads).toEqual(['inv_a']);
+  });
+
+  it('isSystem: the static strip does not run, the FK lands, and the lock reads the header it lands on', async () => {
+    await engine.update(
+      'inv_line',
+      { id: 'l1', amount: 999, invoice: 'inv_b' },
+      { context: { isSystem: true } } as any,
+    );
+    expect(row('inv_line', 'l1')).toMatchObject({ invoice: 'inv_b', amount: 999 });
+  });
+
+  it('preserveAudit: the static strip keeps the FK, so the lock reads the header it lands on', async () => {
+    await engine.update(
+      'inv_line',
+      { id: 'l1', amount: 999, invoice: 'inv_b' },
+      { context: { preserveAudit: true } } as any,
+    );
+    expect(row('inv_line', 'l1')).toMatchObject({ invoice: 'inv_b', amount: 999 });
+  });
+
+  it('LEGITIMATE REPOINT paid → open: judged against the open header it lands on, both fields commit', async () => {
+    await engine.update('inv_line_free', { id: 'f1', invoice: 'inv_b', amount: 999 });
+    expect(row('inv_line_free', 'f1')).toMatchObject({ invoice: 'inv_b', amount: 999 });
+  });
+
+  it('LEGITIMATE REPOINT open → paid: judged against the paid header it lands on, the amount is locked', async () => {
+    await engine.update('inv_line_free', { id: 'f2', invoice: 'inv_a', amount: 999 });
+    expect(row('inv_line_free', 'f2')).toMatchObject({ invoice: 'inv_a', amount: 200 });
+  });
+
+  it('the FK\'s own record-scoped lock keeps the row home, and the amount is judged against that home', async () => {
+    const events: any[] = [];
+    await engine.update(
+      'inv_line_moored',
+      { id: 'm1', invoice: 'inv_b', amount: 999 },
+      { onFieldsDropped: (e: any) => events.push(e) } as any,
+    );
+    expect(row('inv_line_moored', 'm1')).toMatchObject({ invoice: 'inv_a', amount: 100 });
+    expect(events).toEqual([
+      { object: 'inv_line_moored', fields: ['invoice', 'amount'], reason: 'readonly_when' },
+    ]);
+  });
+
+  it('the FK\'s own parent-scoped lock is judged against the header it names; the rest against the one it keeps', async () => {
+    // `inv_v` is void, so the FK's own lock refuses the landing (#4889's rule,
+    // unchanged for the FK itself). The row stays under the PAID `inv_a`, and
+    // that is the header the amount's lock reads.
+    await engine.update('inv_line_void_guard', { id: 'v1', invoice: 'inv_v', amount: 999 });
+    expect(row('inv_line_void_guard', 'v1')).toMatchObject({ invoice: 'inv_a', amount: 100 });
+  });
+
+  it('requiredWhen shares the binding (#4977): a requirement is judged against the header the row keeps', async () => {
+    // `p1` stays under the OPEN `inv_b` (its FK is read-only), so the paid-only
+    // requirement does not apply to it — the named `inv_a` never becomes its
+    // header.
+    await engine.update('inv_line_po', { id: 'p1', invoice: 'inv_a', note: 'n1' });
+    expect(row('inv_line_po', 'p1')).toMatchObject({ invoice: 'inv_b', po_ref: null, note: 'n1' });
+  });
+
+  it('requiredWhen: naming an open invoice beside a read-only FK no longer lets a paid line drop its requirement', async () => {
+    // The requirement's half of the card: `p2` stays under the PAID `inv_a`, so
+    // clearing `po_ref` takes it from compliant to violating (ADR-0113).
+    storeFor('inv_line_po').set('p2', { id: 'p2', invoice: 'inv_a', po_ref: 'PO-7', note: 'n0' });
+    const err = await rejection(engine.update('inv_line_po', { id: 'p2', invoice: 'inv_b', po_ref: null }));
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toEqual([expect.objectContaining({ field: 'po_ref', code: 'required' })]);
+    expect(row('inv_line_po', 'p2')).toMatchObject({ invoice: 'inv_a', po_ref: 'PO-7' });
+  });
+
+  it('BULK: a stripped repoint does not unlock the matched rows under a paid header', async () => {
+    await engine.update(
+      'inv_line',
+      { amount: 999, invoice: 'inv_b' },
+      { where: { note: 'paid' }, multi: true } as any,
+    );
+    expect(row('inv_line', 'l1')).toMatchObject({ invoice: 'inv_a', amount: 100 });
+  });
+
+  it('BULK REVERSE: naming a paid header beside a read-only FK does not lock rows under an open one', async () => {
+    await engine.update(
+      'inv_line',
+      { amount: 999, invoice: 'inv_a' },
+      { where: { note: 'open' }, multi: true } as any,
+    );
+    expect(row('inv_line', 'l2')).toMatchObject({ invoice: 'inv_b', amount: 999 });
+  });
+});

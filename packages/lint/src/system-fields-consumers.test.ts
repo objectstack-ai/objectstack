@@ -84,7 +84,7 @@ import { fileURLToPath } from 'node:url';
 // (`lint-startup-registry-verdict.ts`). A test never ships — `tsup.config.ts`
 // builds only `src/index.ts` and `src/runtime.ts` — so it can import it plainly.
 import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 
@@ -523,6 +523,19 @@ const FIXTURES = new Map<string, string>([
 const fileOf = (c: Census): string[] => c.consumers.map((x) => x.file);
 
 describe('SYSTEM_FIELDS consumer census (#8999)', () => {
+  // ── The live census, computed ONCE per file. `liveSources()` reads every
+  //    `.ts` under `src/` and `censusUnionConsumers` parses each one with the
+  //    TypeScript compiler (`setParentNodes: true`); recomputing that inside
+  //    each of the six live tests put the cold run under vitest's default
+  //    5,000 ms per-test wall, which a loaded CI shard crossed. The hook
+  //    carries its own explicit timeout, sized from the measured cold run
+  //    (~1 s on a quiet box) with headroom for a contended one; the tests read
+  //    the one result. The walk and the analyzer are unchanged.
+  let live: Census;
+  beforeAll(() => {
+    live = censusUnionConsumers(liveSources());
+  }, 60_000);
+
   // ── Positive controls. These run FIRST and on synthetic input, because a
   //    matcher that stopped matching produces the same clean green as a clean
   //    tree, and this whole card exists because an instrument could not see
@@ -585,14 +598,14 @@ describe('SYSTEM_FIELDS consumer census (#8999)', () => {
   describe('the live population', () => {
     it('is anchored to a real export, so an empty answer cannot be a false green', () => {
       expect(
-        censusUnionConsumers(liveSources()).seeded,
+        live.seeded,
         `${ORIGIN} no longer exports ${ORIGIN_EXPORT}. Every assertion below judges a population seeded from ` +
           'that name; unseeded, they would all pass on an empty set. Repoint the seed, do not delete this file.',
       ).toBe(true);
     });
 
     it('matches the ledger', () => {
-      const found = censusUnionConsumers(liveSources());
+      const found = live;
       const undeclared = found.consumers.filter((c) => !(c.file in LEDGER));
       expect(
         undeclared.map((c) => `${c.file} [${c.reach.join('+')}] via ${c.bindings.map((b) => `${b.name}@${b.line} <- ${b.via}`).join('; ')}`),
@@ -607,7 +620,7 @@ describe('SYSTEM_FIELDS consumer census (#8999)', () => {
     });
 
     it('records how each consumer reaches the union', () => {
-      for (const c of censusUnionConsumers(liveSources()).consumers) {
+      for (const c of live.consumers) {
         // An un-ledgered file is already named, with its full path to the
         // union, by `matches the ledger`. Skipping it here keeps that one
         // actionable message from being buried under TypeErrors from the
@@ -624,14 +637,14 @@ describe('SYSTEM_FIELDS consumer census (#8999)', () => {
       // token. If this file ever stops being in-scope, the census is broken —
       // not fixed.
       const control = 'validate-flow-node-writes.ts';
-      const found = censusUnionConsumers(liveSources()).consumers.find((c) => c.file === control);
+      const found = live.consumers.find((c) => c.file === control);
       expect(found, `${control} is the #8999 positive control and must be in scope`).toBeDefined();
       expect(found?.reach).toEqual(['transitive']);
       expect(readFileSync(join(srcDir, control), 'utf8')).not.toContain(ORIGIN_EXPORT);
     });
 
     it('covers all three laundering shapes, so a half-broken analyzer cannot pass', () => {
-      const reaches = new Set(censusUnionConsumers(liveSources()).consumers.flatMap((c) => c.reach));
+      const reaches = new Set(live.consumers.flatMap((c) => c.reach));
       for (const shape of ['direct', 'derived', 'transitive'] as const) {
         expect(reaches, `no consumer reached the union by '${shape}' — the analyzer lost a propagation path`).toContain(shape);
       }
@@ -650,7 +663,7 @@ describe('SYSTEM_FIELDS consumer census (#8999)', () => {
     });
 
     it('each consumer asks it, or the ledger says why not', () => {
-      for (const c of censusUnionConsumers(liveSources()).consumers) {
+      for (const c of live.consumers) {
         const row = LEDGER[c.file]; // see `records how each consumer reaches the union`
         if (!row) continue;
         const src = readFileSync(join(srcDir, c.file), 'utf8');

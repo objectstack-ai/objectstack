@@ -32,6 +32,11 @@ import {
   type RemoteCanonicalBackfillOptions,
   type RemoteCanonicalBackfillReport,
 } from './remote-canonical-backfill.js';
+import {
+  backfillRemoteCodecResidueColumns,
+  type RemoteCodecResidueColumn,
+  type RemoteCodecResidueReport,
+} from './remote-codec-residue-backfill.js';
 
 // ── Transport Mode ───────────────────────────────────────────────────────────
 
@@ -336,6 +341,135 @@ function refuseRemoteTransaction(door: string, detail: string): never {
     // no tracker to resolve one against (`check:doc-authoring`). The card id is
     // in the docblock above, where the reader who CAN resolve it is reading.
     `(ADR-0119 D1). Implementing transactions on this transport is a separate piece of work.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+// ── Remote deferred schema DDL: refused, never decorative ────────────────────
+
+/**
+ * [#19823] The Turso REMOTE face cannot defer schema DDL, and now says so when
+ * a caller tries to arm the deferral instead of accepting it and ignoring it.
+ *
+ * # The defect this replaces
+ *
+ * `SqlDriver.setDeferredDdl(true)` is how `os migrate plan` / `apply` /
+ * `duplicates` / `account-issuer` / `multi-value-columns` keep their dry-run or
+ * confirm-before-change promise: the Knex `initObjects` records the work in
+ * `deferredSchemaObjects` instead of performing it, `previewDeferredSchemaWork`
+ * renders it and `flushDeferredSchemaDdl` performs it after the operator says
+ * yes. This class inherited the setter, so the CLI's own loud refusal (it fires
+ * only when the method is absent) never fired — while every remote schema door
+ * (`syncSchemasBatch`, the engine's boot sync; `syncSchema` / `initObjects`)
+ * routes through `RemoteTransport`, which performs the DDL immediately, and the
+ * latter two also ran the #5770 canonical temporal backfill, which rewrites
+ * stored rows (the batch door runs it too since #19844). Measured
+ * (`turso-remote-deferred-ddl.test.ts`, before this refusal existed): the deferral was
+ * accepted, CREATE/ALTER ran on every door, the backfill rewrote rows on two of
+ * them, and preview and flush both answered `[]` — a dry run that changed the
+ * database and then reported no pending work.
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * Honouring the deferral remotely means recording the objects and building a
+ * remote preview/flush — new capability with no measured pull. The refusal keeps
+ * every promise those commands make true today, in the envelope and for the
+ * reason {@link refuseRemoteTransaction} and {@link refuseRemoteAutonumber}
+ * record for their sibling gaps on this transport: the call is spelled correctly
+ * and the base class declares it, so the gap is the backend's —
+ * `NOT_IMPLEMENTED`/501, a {@link StandardErrorCode} member, no new code.
+ *
+ * # Why at the setter
+ *
+ * It is the one door every deferring caller passes through, and it runs before
+ * any schema work: a refused arm has sent nothing to the database, and the
+ * driver is left un-armed, so an ordinary boot sync on it is unchanged.
+ */
+function refuseRemoteDeferredDdl(): never {
+  const err = new Error(
+    'Deferred schema DDL is not supported by the Turso REMOTE transport (this datasource\'s ' +
+    'transport mode is `remote`), so a command that promises a dry run or a confirmation before ' +
+    'any schema change cannot keep that promise against it. Remote mode sends every CREATE TABLE ' +
+    'and ALTER TABLE through `RemoteTransport`, which performs it immediately and records nothing ' +
+    'a plan could preview, and a remote schema sync also rewrites stored datetime/time values to ' +
+    'their canonical spelling in place. Until this change arming the deferral was accepted: the ' +
+    'database was altered during the boot and the plan then reported no pending work. The call is ' +
+    'spelled correctly and `SqlDriver` declares it, so this is a capability gap of the remote ' +
+    'transport rather than a mistake in the request — which is why it answers NOT_IMPLEMENTED/501 ' +
+    'and not a 400. To preview schema work, run the command against a local SQLite copy of this ' +
+    'database (a `file:` URL) — the local and embedded-replica faces defer DDL; to apply it, an ' +
+    'ordinary boot against this datasource (`os serve` / `os start`) performs the additive schema ' +
+    'sync directly.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+// ── Remote schema drift detection: refused, never "no drift" ─────────────────
+
+/**
+ * [#19845] The Turso REMOTE face cannot detect schema drift, and now says so
+ * instead of answering that there is none.
+ *
+ * # The defect this replaces
+ *
+ * `SqlDriver.detectManagedDrift` reads the physical schema through Knex: a
+ * `hasTable` probe per table, then column and index introspection fed to the
+ * shared differ. In remote mode that Knex instance is the placeholder
+ * `:memory:` database {@link TursoDriver.toKnexConfig} hands the base
+ * constructor. It holds none of this datasource's tables, so every table was
+ * skipped as absent and the answer was `[]` whatever the remote database held.
+ * The no-argument call had a second reason to answer `[]`: it iterates
+ * `managedObjectFields`, which only the Knex `initObjects` fills and no remote
+ * schema door reaches. Measured on the transport's SQLite-backed double
+ * (`turso-remote-drift-detection-refusal.test.ts`): a synced table carrying an
+ * extra physical column the declaration omits reads `unmapped_column` /
+ * `drop_column` on the local face and `[]` on the remote one, with or without
+ * explicit objects. The artifact-pinned boot gate of `os serve`, whose job is
+ * to refuse a boot on destructive drift, therefore let every remote-Turso boot
+ * through as never drifted.
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * The shared differ would serve a remote table: a clean remote-synced table,
+ * judged through a local Knex connection to the same SQLite file, reports no
+ * entries, as the local face does. But every read that feeds the differ goes
+ * through `this.knex` (table existence, column facts and order, the index set,
+ * the NULL-safe duplicate probe), so a remote implementation is a second copy
+ * of each of those SQLite arms. It also needs a remote answer for
+ * `applyMigrationEntries`, which the gate calls on whatever it finds and which
+ * runs on the same placeholder. Until that exists the refusal is the honest
+ * answer, in the envelope and for the reason {@link refuseRemoteDeferredDdl}
+ * records for its sibling gap on this transport: the call is spelled correctly
+ * and the base class declares it, so the gap is the backend's.
+ * `NOT_IMPLEMENTED`/501 is a {@link StandardErrorCode} member, so there is no
+ * new code.
+ *
+ * # What a caller sees
+ *
+ * The boot gate already has a channel for "the check did not run": a throw
+ * from `detectManagedDrift` becomes a warning carrying this message, and the
+ * boot continues. That is the right reading of a driver that cannot judge. It
+ * is neither a drift verdict that would refuse every remote boot nor a
+ * silence. The `os migrate` commands that read drift never get this far on a
+ * remote datasource, because they arm deferred DDL first and that is refused.
+ */
+function refuseRemoteDriftDetection(): never {
+  const err = new Error(
+    'Schema drift detection is not supported by the Turso REMOTE transport (this datasource\'s ' +
+    'transport mode is `remote`), so this driver cannot say whether the database\'s physical ' +
+    'schema matches the declared objects. Drift detection reads the physical schema through the ' +
+    'SQL driver\'s Knex connection, and in remote mode that connection is a placeholder in-memory ' +
+    'database holding none of this datasource\'s tables. Answering from it would report "no drift" ' +
+    'for every remote database, whatever its tables hold, so the call refuses. The call is spelled ' +
+    'correctly and `SqlDriver` declares it, so this is a capability gap of the remote transport ' +
+    'rather than a mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a ' +
+    '400. To check this database for drift, run `os migrate plan` against a local SQLite copy of it ' +
+    '(a `file:` URL), where the physical schema is introspected. Pointed at the remote URL, ' +
+    '`os migrate plan` refuses, because the remote transport cannot defer schema DDL.',
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -722,6 +856,15 @@ export class TursoDriver extends SqlDriver {
    * remote mode. Same question, same answer, different place to look it up.
    */
   private readonly remoteManagedObjects = new Set<string>();
+
+  /**
+   * [#19868] Remote `date` / json columns whose storage backfill found nothing
+   * left to do in THIS process, so later schema syncs skip them. In memory
+   * only: the next process probes again, at one round-trip for all columns.
+   * Nothing reads it but {@link backfillRemoteCodecResidue}; unlike the
+   * temporal marks, it switches no read-side repair.
+   */
+  private readonly remoteCodecResidueConverged: Record<string, Set<string>> = {};
 
   constructor(config: TursoDriverConfig) {
     const mode = TursoDriver.detectMode(config);
@@ -1638,9 +1781,10 @@ export class TursoDriver extends SqlDriver {
    *
    * It also records the object as one whose table this driver created, which is
    * the whole input to {@link paginationTieBreaker} in remote mode. That goes
-   * FIRST and outside the `try`: both callers reach here only after the DDL has
-   * already succeeded, so the table exists with its `id` primary key whether or
-   * not the best-effort coercion registration below does.
+   * FIRST and outside the `try`: its only caller, {@link completeRemoteSchemaSync},
+   * runs only after the DDL has already succeeded, so the table exists with its
+   * `id` primary key whether or not the best-effort coercion registration below
+   * does.
    */
   private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any>; tenancy?: any }): void {
     this.remoteManagedObjects.add(obj.name);
@@ -1648,6 +1792,110 @@ export class TursoDriver extends SqlDriver {
       this.registerExternalObject({ name: obj.name, fields: obj.fields, tenancy: obj.tenancy });
     } catch {
       /* metadata registration is best-effort; never block schema sync on it */
+    }
+  }
+
+  /**
+   * The post-DDL half every REMOTE schema door owes, in its one order: register
+   * each synced object's field metadata, then run the canonical temporal
+   * backfill and the `date` / `json` storage backfill, each ONCE for the whole
+   * call.
+   *
+   * All three remote doors (`syncSchema`, `initObjects`, `syncSchemasBatch`)
+   * send their DDL through `RemoteTransport` and so never reach
+   * `SqlDriver.initObjects`, which is what fills the read-coercion registries
+   * and runs the Knex backfill on the local faces. Each door has to finish the
+   * job itself, and they drifted apart once: `syncSchemasBatch` — the door
+   * `ObjectQLPlugin`'s boot sync takes whenever `supports.batchSchemaSync`
+   * holds, so every remote-Turso boot — returned straight after its DDL. A
+   * booted remote app then read a boolean back as `1` and JSON as a string, got
+   * no `id` tie-breaker on a paged read, and never converged its temporal
+   * columns (#19844). One helper called by all three is what keeps them from
+   * drifting again.
+   *
+   * Callers reach here only after their DDL resolved, so a DDL failure throws
+   * before anything is registered and no object is recorded as a table this
+   * driver created unless it exists. Registration precedes the backfills
+   * because they read it to learn which columns are temporal, `date` or json.
+   * Each backfill probes every column it finds in one round-trip, so calling
+   * them once per call rather than once per object is what keeps a boot's
+   * steady state at one round-trip per backfill.
+   */
+  private async completeRemoteSchemaSync(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+  ): Promise<void> {
+    if (objects.length === 0) return;
+    for (const obj of objects) this.registerRemoteFieldMetadata(obj);
+    await this.backfillRemoteCanonicalTemporalQuietly();
+    // [#19868] Then the `date` / `json` cells the pre-#19844 batch door stored
+    // without the write codec. Same registration, one probe round-trip of its own.
+    await this.backfillRemoteCodecResidueQuietly();
+  }
+
+  /**
+   * [#19868] Converge the REMOTE `Field.date` and `Field.json` cells that the
+   * pre-#19844 `syncSchemasBatch` door stored without `formatInput`: a `date`
+   * stored as a full timestamp, and a json string stored bare. See
+   * `remote-codec-residue-backfill.ts` for which cells are rewritten, which are
+   * left alone because their original value cannot be told from their bytes,
+   * and why no converted cell reads differently afterwards.
+   *
+   * Private on purpose: it needs no operator surface, because a budget-stopped
+   * column resumes on the next schema sync by itself.
+   */
+  private async backfillRemoteCodecResidue(
+    options?: RemoteCanonicalBackfillOptions,
+  ): Promise<RemoteCodecResidueReport> {
+    if (!this.isRemote) return { columns: [] };
+    const client = this.remoteTransport?.getClient() as RemoteBackfillClient | null | undefined;
+    if (!client) return { columns: [] };
+
+    const columns: RemoteCodecResidueColumn[] = [];
+    for (const table of this.remoteManagedObjects) {
+      const done = this.remoteCodecResidueConverged[table];
+      for (const field of this.dateFields[table] ?? []) {
+        if (!done?.has(field)) columns.push({ table, field, kind: 'date' });
+      }
+      // A single-value media column's canonical form (a quoted or a bare id) is
+      // an ADR-0104 deployment fact these remote doors never resolve, so it is
+      // not ours to rewrite. Both forms read the same.
+      const media = new Set(this.mediaFields[table] ?? []);
+      for (const field of this.jsonFields[table] ?? []) {
+        if (!media.has(field) && !done?.has(field)) columns.push({ table, field, kind: 'json' });
+      }
+    }
+    if (columns.length === 0) return { columns: [] };
+
+    const report = await backfillRemoteCodecResidueColumns(
+      client,
+      columns,
+      // The driver's OWN `Field.date` write conversion, handed over rather than
+      // copied, so what the backfill writes is what `formatInput` writes.
+      { toDateOnly: (value) => this.toDateOnly(value) },
+      options,
+      this.logger,
+    );
+    for (const column of report.columns) {
+      if (column.done) (this.remoteCodecResidueConverged[column.table] ??= new Set<string>()).add(column.field);
+    }
+    return report;
+  }
+
+  /**
+   * Run {@link backfillRemoteCodecResidue} after a remote schema sync and
+   * swallow everything, for the reason
+   * {@link backfillRemoteCanonicalTemporalQuietly} gives: a migration must
+   * never fail a boot. The module already reports instead of throwing; this
+   * catch covers a client lost between the sync and here.
+   */
+  private async backfillRemoteCodecResidueQuietly(): Promise<void> {
+    try {
+      await this.backfillRemoteCodecResidue();
+    } catch (err) {
+      this.logger.warn(
+        `[driver-turso] remote date/json storage backfill failed; the cells stay as they were`,
+        { error: err instanceof Error ? err.message : String(err) },
+      );
     }
   }
 
@@ -1938,18 +2186,45 @@ export class TursoDriver extends SqlDriver {
   // Schema Management (remote mode overrides)
   // ===================================
 
+  /**
+   * Arm/disarm DDL deferral — refused on the REMOTE face when arming, see
+   * {@link refuseRemoteDeferredDdl}. None of the remote schema doors below reads
+   * the flag, so accepting it here would promise a dry run nothing keeps.
+   * Disarming is accepted (it is what the flag already is), and local / replica
+   * modes inherit the Knex deferral unchanged.
+   */
+  override setDeferredDdl(deferred: boolean): void {
+    if (deferred && this.isRemote) refuseRemoteDeferredDdl();
+    super.setDeferredDdl(deferred);
+  }
+
+  /**
+   * Detect managed-schema drift — refused on the REMOTE face, see
+   * {@link refuseRemoteDriftDetection}. The inherited detector reads the
+   * physical schema through the placeholder Knex connection remote mode is
+   * built with, so its remote answer was always `[]`. Refused with or without
+   * explicit `objects`, because both read the same placeholder. Local and
+   * replica modes inherit the Knex detector unchanged.
+   *
+   * The parameter repeats the base's declared shape key for key rather than
+   * deriving it (`check:object-def-param-keys` arm C), so the keys a caller may
+   * pass stay visible on this override's own declaration.
+   */
+  override async detectManagedDrift(
+    objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
+  ): ReturnType<SqlDriver['detectManagedDrift']> {
+    if (this.isRemote) refuseRemoteDriftDetection();
+    return super.detectManagedDrift(objects);
+  }
+
   override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchema');
     if (this.isRemote) {
       await this.remoteTransport!.syncSchema(object, schema);
-      // See initObjects(): populate the read-coercion registries for remote mode.
-      // Key strictly by `object` (what find()/formatOutput look up) — never let a
+      // Registration + canonical backfill, see completeRemoteSchemaSync(). Key
+      // strictly by `object` (what find()/formatOutput look up) — never let a
       // stray `schema.name` shadow it.
-      this.registerRemoteFieldMetadata({ ...(schema as Record<string, any>), name: object });
-      // #5770: the remote twin of the `backfillCanonicalDatetimes` call
-      // `SqlDriver.initObjects` makes at exactly this point. Must run AFTER the
-      // registration above — that is what tells it which columns are temporal.
-      await this.backfillRemoteCanonicalTemporalQuietly();
+      await this.completeRemoteSchemaSync([{ ...(schema as Record<string, any>), name: object }]);
       return;
     }
     return super.syncSchema(object, schema, options);
@@ -1992,17 +2267,11 @@ export class TursoDriver extends SqlDriver {
         objects.map((obj) => ({ object: obj.name, schema: obj })),
       );
       // Remote DDL bypasses SqlDriver.initObjects, which is what normally
-      // populates the boolean/json/date/numeric read-coercion registries.
-      // Register the field-type metadata explicitly (no DDL) so remote reads
-      // run the same formatOutput() coercion as local/replica mode — otherwise
-      // a boolean reads back as raw 0/1, JSON as a string, dates as raw text.
+      // populates the boolean/json/date/numeric read-coercion registries and
+      // runs the canonical temporal backfill. Without the registration a
+      // boolean reads back as raw 0/1, JSON as a string, dates as raw text.
       // (Root cause of the 2026-07-06 case_escalation `1 != true` incident.)
-      for (const obj of objects) this.registerRemoteFieldMetadata(obj);
-      // #5770: the remote twin of the `backfillCanonicalDatetimes` /
-      // `backfillCanonicalTimes` calls `SqlDriver.initObjects` makes per table.
-      // One batched probe covers every column synced here, so the steady state
-      // (nothing to converge) costs a single round-trip for the whole boot.
-      await this.backfillRemoteCanonicalTemporalQuietly();
+      await this.completeRemoteSchemaSync(objects);
       return;
     }
     return super.initObjects(objects);
@@ -2012,14 +2281,24 @@ export class TursoDriver extends SqlDriver {
    * Batch-synchronize multiple schemas in a single round-trip.
    *
    * In remote mode, delegates to `RemoteTransport.syncSchemasBatch()` which
-   * uses `client.batch()` to submit all DDL as one network call.
+   * uses `client.batch()` to submit all DDL as one network call, then finishes
+   * exactly as the other two remote doors do (see
+   * {@link completeRemoteSchemaSync}). This is the door `ObjectQLPlugin`'s boot
+   * sync takes on this driver, so it is the one that decides what a booted
+   * remote app reads back.
    * In local/replica mode, falls back to sequential `syncSchema()` calls
    * (Knex + better-sqlite3 is already local, so batching has no benefit).
    */
   async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchemasBatch');
     if (this.isRemote) {
-      return this.remoteTransport!.syncSchemasBatch(schemas);
+      await this.remoteTransport!.syncSchemasBatch(schemas);
+      // Key strictly by `object`, as syncSchema() does: it is the name the
+      // engine hands every later read and write for this table.
+      await this.completeRemoteSchemaSync(
+        schemas.map(({ object, schema }) => ({ ...(schema as Record<string, any>), name: object })),
+      );
+      return;
     }
     // Local/replica fallback: sequential sync (already fast with local SQLite)
     for (const { object, schema } of schemas) {

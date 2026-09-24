@@ -77,7 +77,7 @@ A UI plugin is an `.osplugin` with:
 {
   "id": "com.acme.signature-field",
   "version": "1.0.0",
-  "type": "ui-plugin",
+  "type": "ui",
   "runtime": "ui",                       // new tier (ADR-0025 §3.6)
   "engines": { "objectui": ">=1.0 <2", "react": "^19" },  // protocol + shared singletons
   "ui": {
@@ -97,6 +97,12 @@ A UI plugin is an `.osplugin` with:
   "integrity": { "dist/plugin.mjs": "sha256-..." }
 }
 ```
+
+> **Note (2026-09-07, #16140).** This proposal originally spelled the package
+> type `ui-plugin`. The closed set of plugin types (`CORE_PLUGIN_TYPES`,
+> `packages/spec/src/kernel/plugin.zod.ts`) adopted `ui`, and both
+> `ManifestSchema` and `PluginSchema` refuse `ui-plugin`; the example above and
+> §3.7 use `ui`.
 
 `extends` reuses the existing `capabilities.extensionPoints`/`extensions` seam;
 `ui.shared` lists singletons the host injects (never bundled — same externalize
@@ -167,7 +173,7 @@ client analog of ADR-0025 §3.8 protocol-first gating.
 
 ### 3.7 Audience & relation to ADR-0019
 
-As in ADR-0025 §3.11, a UI plugin (`type: ui-plugin`) is an **internal
+As in ADR-0025 §3.11, a UI plugin (`type: ui`) is an **internal
 contribution**, not a consumer-installable unit (ADR-0019 D2:
 `isConsumerInstallable` = `type: app` only). It reaches a tenant by the same two
 routes:

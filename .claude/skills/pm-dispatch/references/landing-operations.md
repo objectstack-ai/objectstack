@@ -7,7 +7,7 @@
 - fork PR = 提案,席位永不放行;采纳 diff 内部落地,见 `references/external-contributions.md`。
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
-- 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
+- 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 交付后复核按面欠 ⛔ 不按车道(五面见 `references/contract-review.md`);双肢命中即 spec 车道。
 - 子代理起不来 ⇒ 复核缺席,PR 留 draft 队列外等档;唯一旁路是维护者亲审,逐次为准。
@@ -16,7 +16,6 @@
 - 外部评审链降为可选事后审计,非放行前提。
 - 契约复核的适用面、资格与归属见 `references/contract-review.md`。
 - 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
-- 跟到 MERGED 为止,入队后的看护归车道 PM 的落地窗口:每轮同时读队列分支与 `origin/main`。
 - 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
 - 验证层 = 部署以 CI 为闸、发布后探测线上面、失败自动回滚并立卡。
 - 该类仓的落地判据是已发布且探测通过,⛔ 不是 MERGED;跟到发布为止。
@@ -55,7 +54,7 @@
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
-- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>5000 行(含生成物)照规则层。
+- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>5000 行(含生成物)照 Tier H。
 - 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检三条即转正式入队。
 - Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
@@ -66,6 +65,7 @@
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
 - ③ PR 碰 `.github/workflows/**` 而 token 缺 workflows 权限。
 - 确认 MERGED 同一动作里给 `Part of` 卡收口、`Fixes` 卡代关但标也须摘,⛔ 不拆到下轮巡检。
+- 卡以 completed 关闭且带 `Adopts:` 行 ⇒ 同一动作在所指 fork PR 贴致谢与落地链接并关闭它。
 - `Part of` 卡开着不摘 `pm:dispatched`,无在飞物的卡就永远算进 `label:pm:dispatched is:open`。
 - 摘标换回 `pm:queue` 或按剩余物定级,加一条写清交付了什么、剩下归谁的评论。
 - 同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关。

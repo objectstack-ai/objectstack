@@ -173,14 +173,19 @@ Complete, production-grade integration with external systems. Includes authentic
 > advice above is unchanged: throttle at the connector provider or upstream
 > gateway.
 >
-> ⛔ **Two keys on this surface are still inert, and both are still `dead` in
-> `packages/spec/liveness/connector.json`.** `health.circuitBreaker`: every
-> sub-key is unread and no breaker ever opens — implement circuit breaking in
-> the connector provider. `connectionTimeoutMs`: it is carried to a provider
-> factory, but the platform does not enforce it, because a WHATWG `fetch`
+> ⛔ **One key on this surface is still inert, and still `dead` in
+> `packages/spec/liveness/connector.json`:** `health.circuitBreaker` — every
+> sub-key is unread and no breaker ever opens; implement circuit breaking in the
+> connector provider.
+>
+> `connectionTimeoutMs` was the second and is **removed** (ADR-0049, the
+> narrower second decision it was owed). It was carried to a provider factory
+> and echoed back onto the reported def, but never applied as a deadline
+> anywhere, and it is not implementable where it was declared: a WHATWG `fetch`
 > exposes one `AbortSignal` over the whole operation and never the connection
-> phase alone — `requestTimeoutMs` is the bound the platform can keep, and
-> ADR-0049 owes this one key a narrower decision.
+> phase alone. Use `requestTimeoutMs`, the bound the platform can keep, and put
+> a connect-only bound in a provider or gateway on a transport that can separate
+> the phases.
 
 > **Field mapping does not transform values.** The ticked line above used to read
 > "With transformations and data type conversion". Only the second half was ever
@@ -214,7 +219,7 @@ Complete, production-grade integration with external systems. Includes authentic
 
 > **The bare `Connector` is the AUTHOR shape.** It is `z.input` of
 > `ConnectorSchema`, so every key carrying a `.default()` — `enabled`,
-> `status`, `connectionTimeoutMs`, `requestTimeoutMs`, all of `syncConfig`'s
+> `status`, `requestTimeoutMs`, all of `syncConfig`'s
 > `strategy` / `direction` / `realtimeSync` / `conflictResolution` /
 > `batchSize` / `deleteMode`, a mapping's `required` / `syncMode`, a webhook's
 > `method` / `timeoutMs` / `isActive` / `signatureAlgorithm` — is optional when
@@ -338,12 +343,11 @@ const sapConnector: Connector = {
   },
 
   // `requestTimeoutMs` is each attempt's deadline and is enforced.
-  // ⛔ `connectionTimeoutMs` is NOT: it is carried to a provider factory, but a
-  // WHATWG `fetch` exposes one `AbortSignal` over the whole operation and never
-  // the connection phase alone, so the platform has nowhere to apply it. It
-  // stays `dead` in `packages/spec/liveness/connector.json` and is owed a
-  // narrower ADR-0049 decision.
-  connectionTimeoutMs: 30000,
+  // ⛔ `connectionTimeoutMs` was here and is REMOVED (ADR-0049): a WHATWG
+  // `fetch` exposes one `AbortSignal` over the whole operation and never the
+  // connection phase alone, so the platform had nowhere to apply it and never
+  // did. Authoring it is now a tsc error and a parse error carrying the
+  // prescription; bound the connect phase at a provider or gateway.
   requestTimeoutMs: 60000,
   status: 'active',
   enabled: true

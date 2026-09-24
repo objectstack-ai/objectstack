@@ -125,7 +125,16 @@ interface RouteResult {
   error: any;
   /** The payload as it stands after every layer ran (the guard strips in place). */
   data: Record<string, unknown>;
-  /** Every `where` the pre-image re-read was called with, in order. */
+  /**
+   * Every `where` the engine was asked to read with, in order. On an admitted
+   * own-row update there are two: the by-id pre-image re-read (step 2.7, the
+   * `{id}` address AND-ed with the compiled write-RLS filter) and then the
+   * caller's own-row read (step 3.6, a bare `{id}`) that the post-image check
+   * merges the change set onto. That second read exists because
+   * `sys_user_self` (`operation: 'all'`, `using: id == current_user.id`)
+   * declares no `check`, so its `using` is the write check (ADR-0058 D4
+   * default, `RowLevelSecurityPolicySchema.check`).
+   */
   preImageWheres: unknown[];
   /** The secondary-storage writes the ADR-0092 D6 companion hook performed. */
   snapshotWrites: Array<{ key: string; value: any }>;
@@ -269,8 +278,15 @@ describe('sys_user self-service — the row scope the write actually composes', 
     // the compiled RLS parts. Asserted verbatim because every other assertion in
     // this file leans on `matchesFilter` reading it correctly, and because it is
     // the security property in one line: the caller's id, and nothing wider.
-    expect(r.preImageWheres).toHaveLength(1);
+    //
+    // Then exactly one more read: the caller's OWN row by id, which step 3.6
+    // merges the change set onto to judge the post-image against the defaulted
+    // `sys_user_self` check (`id == current_user.id`). It is a read of the row
+    // already admitted above, never a scope: it cannot widen what the member may
+    // write, and the check it feeds can only refuse more.
+    expect(r.preImageWheres).toHaveLength(2);
     expect(r.preImageWheres[0]).toEqual({ $and: [{ id: ME }, { id: ME }] });
+    expect(r.preImageWheres[1]).toEqual({ id: ME });
   });
 
   it('the org-peer READ scope does not appear in the write filter', async () => {
@@ -285,7 +301,9 @@ describe('sys_user self-service — the row scope the write actually composes', 
     // an object-gate refusal produces exactly that. Pin the write got as far as
     // composing a filter before asserting what is not in it.
     expect(r.refusedBy).toBeNull();
-    expect(r.preImageWheres).toHaveLength(1);
+    // The pre-image re-read plus the post-image check's own-row read (see the
+    // `preImageWheres` field). The absences below hold over BOTH.
+    expect(r.preImageWheres).toHaveLength(2);
     expect(JSON.stringify(r.preImageWheres)).not.toContain('$in');
     expect(JSON.stringify(r.preImageWheres)).not.toContain(PEER);
   });
@@ -354,9 +372,10 @@ describe('sys_user self-service — the four pins, each attributed to a layer', 
     // while the guard was dead code.
     const r = await route(ME, { email: 'attacker@example.com' });
     expect(r.refusedBy).toBe('identity-guard');
-    // The pre-image re-read ran and SUCCEEDED (the row was visible) — proof the
-    // first two layers admitted the write before the guard refused it.
-    expect(r.preImageWheres).toEqual([{ $and: [{ id: ME }, { id: ME }] }]);
+    // The pre-image re-read ran and SUCCEEDED (the row was visible), and the
+    // post-image check read the caller's own row and passed — proof the first
+    // two layers admitted the write before the guard refused it.
+    expect(r.preImageWheres).toEqual([{ $and: [{ id: ME }, { id: ME }] }, { id: ME }]);
     // ADR-0112 envelope, both discriminators (the REST boundary derives 403 from
     // `status`, and `mapDataError` keys on `code`).
     expect(r.error?.code).toBe('PERMISSION_DENIED');

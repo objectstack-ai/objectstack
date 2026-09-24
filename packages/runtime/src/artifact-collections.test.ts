@@ -80,7 +80,7 @@ describe('packageOwnedCollectionKeys', () => {
 });
 
 describe('resolveArtifactCollections', () => {
-    it('returns the ARGUMENT ITSELF for anything without `packages[]`', () => {
+    it('returns the ARGUMENT ITSELF for a non-object and for an ABSENT `packages`', () => {
         // The D7 branch: every single-package artifact and every `defineStack()`
         // config the platform has ever booted takes it, and identity is the only
         // way to say "this cannot have moved" rather than to hope so.
@@ -89,10 +89,45 @@ describe('resolveArtifactCollections', () => {
         expect(resolveArtifactCollections(null)).toBe(null);
         expect(resolveArtifactCollections(undefined)).toBe(undefined);
         expect(resolveArtifactCollections('not an object')).toBe('not an object');
-        // `packages` present but not an array is not a shape this walks; the
-        // artifact's own loader refuses it.
-        const odd = { packages: 'nope', objects: [obj('o')] };
-        expect(resolveArtifactCollections(odd)).toBe(odd);
+        // An explicit `undefined`, and `null`, read as absent too. `null` is read
+        // this way by every reader today; the schema's `.optional()` refuses it,
+        // and that disagreement is recorded beside `AssembledPackageBodySchema`
+        // rather than decided here.
+        const explicitUndefined = { packages: undefined, objects: [obj('o')] };
+        expect(resolveArtifactCollections(explicitUndefined)).toBe(explicitUndefined);
+        const nullPackages = { packages: null, objects: [obj('o')] };
+        expect(resolveArtifactCollections(nullPackages)).toBe(nullPackages);
+    });
+
+    // A `packages` that is present but is not an array is MALFORMED, not absent
+    // (the rule beside `AssembledPackageBodySchema`). This reader used to hand
+    // such an artifact back by identity, answering about its top level while
+    // the loader refused the same bytes.
+    it.each([
+        ['{}', {}],
+        ['0', 0],
+        ["'x'", 'x'],
+    ])('refuses `packages: %s` with the resolver\'s INVALID_ARTIFACT_PACKAGES envelope', (_label, packages) => {
+        let raised: any;
+        try {
+            resolveArtifactCollections({ manifest: { id: 'com.example.a', name: 'A' }, objects: [obj('o')], packages });
+        } catch (err) {
+            raised = err;
+        }
+        expect(raised?.code).toBe('INVALID_ARTIFACT_PACKAGES');
+        expect(raised?.status).toBe(422);
+    });
+
+    it('lit controls for the refusal above: a well-formed `packages[]` resolves, and an absent key takes the single-package branch', () => {
+        // Without these two, an instrument that always threw would pin the
+        // three rows above just as green.
+        const wellFormed = resolveArtifactCollections({
+            packages: packagesOf({ objects: [obj('account')] }, { objects: [obj('order')] }),
+        }) as Record<string, any>;
+        expect(wellFormed.objects.map((o: any) => o.name)).toEqual(['account', 'order']);
+
+        const absent = { manifest: { id: 'com.example.a', name: 'A' }, objects: [obj('o')] };
+        expect(resolveArtifactCollections(absent)).toBe(absent);
     });
 
     it('returns the ARGUMENT ITSELF for an EMPTY `packages: []` too', () => {

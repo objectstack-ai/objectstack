@@ -276,7 +276,16 @@ export function resolveBindingOrganization(binding: FlowTriggerBinding): string 
 }
 
 /**
- * [#17396] The deployment's scheduled-work policy, read once per bind.
+ * [#19834] A per-kernel scheduled-work policy: a value, or a resolver called at
+ * each bind. What both schedule triggers and their plugins accept.
+ */
+export type ScheduledWorkPolicySource = ScheduledWorkPolicy | (() => ScheduledWorkPolicy);
+
+/**
+ * [#17396] The scheduled-work policy, read once per bind.
+ *
+ * [#19834] The per-kernel `source` when a host gave one; else the zero-argument
+ * deployment resolver, exactly as before.
  *
  * ⛔ Not memoised at module scope on purpose. {@link resolveScheduledWorkPolicy}
  * reads `process.env` live, and a host that rebinds its flows after changing
@@ -284,8 +293,29 @@ export function resolveBindingOrganization(binding: FlowTriggerBinding): string 
  * between kernels in one process) must get the value that is current at the
  * bind, not the one the first import happened to see.
  */
-function readScheduledWorkPolicy(): ScheduledWorkPolicy {
-    return resolveScheduledWorkPolicy();
+export function readScheduledWorkPolicy(source?: ScheduledWorkPolicySource): ScheduledWorkPolicy {
+    if (source === undefined) return resolveScheduledWorkPolicy();
+    return typeof source === 'function' ? source() : source;
+}
+
+/**
+ * [#19834] Construction options shared by {@link ScheduleTrigger}, the
+ * time-relative trigger and both of their plugins.
+ */
+export interface ScheduledWorkTriggerOptions {
+    /**
+     * THIS kernel's scheduled-work policy. Absent (the default), the trigger
+     * reads the zero-argument deployment resolver — `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`
+     * keeps its meaning. Give the automation engine of the same kernel the
+     * same policy (`AutomationServicePlugin` / `AutomationEngineOptions`
+     * `scheduledWorkPolicy`): the engine gates first and reports a refusal by
+     * its policy; this gate refusing what the engine let through reads as a
+     * binding failure.
+     *
+     * ⚠️ A hand-built value owes the resolver's invariant:
+     * `requiresActingOrganization === enabled && runOwnership === 'declared'`.
+     */
+    scheduledWorkPolicy?: ScheduledWorkPolicySource;
 }
 
 /**
@@ -627,17 +657,21 @@ export class ScheduleTrigger implements FlowTrigger {
     private claimDegradationWarned = false;
     /** Whether the "no replay guard could be installed" degradation has been said (once). */
     private replayGuardDegradationWarned = false;
+    /** [#19834] Per-kernel policy; absent ⇒ the deployment resolver. */
+    private readonly scheduledWorkPolicy: ScheduledWorkPolicySource | undefined;
 
     constructor(
         getJobService: () => JobServiceSurface | null,
         logger: TriggerLogger,
         getLedger: () => ScheduleDispatchLedger | null = () => null,
         now: () => Date = () => new Date(),
+        options: ScheduledWorkTriggerOptions = {},
     ) {
         this.getJobService = getJobService;
         this.logger = logger;
         this.getLedger = getLedger;
         this.now = now;
+        this.scheduledWorkPolicy = options.scheduledWorkPolicy;
     }
 
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void {
@@ -648,7 +682,7 @@ export class ScheduleTrigger implements FlowTrigger {
         // not reached and must not be reported: an operator told that a flow
         // has "no recognizable schedule descriptor" would go and fix a
         // descriptor that was never going to be read.
-        const policy = readScheduledWorkPolicy();
+        const policy = readScheduledWorkPolicy(this.scheduledWorkPolicy);
         if (!policy.enabled) {
             // Same ordering reason as the declaration refusal below: drop any
             // prior binding before throwing, so a rebind under a switch that

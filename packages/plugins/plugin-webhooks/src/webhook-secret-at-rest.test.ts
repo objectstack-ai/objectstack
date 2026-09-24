@@ -47,6 +47,7 @@ import {
     resolveWebhookSecret,
 } from './webhook-secret.js';
 import { WEBHOOK_HEADERS_FIELD, resolveWebhookHeaders } from './webhook-headers.js';
+import { bindWebhookLegacyCleartextGate } from './webhook-legacy-cleartext.js';
 
 /**
  * [#8069] The PRODUCTION enqueue wiring, as one helper.
@@ -282,6 +283,49 @@ async function deliverOnce(engine: any) {
     return { calls, outbox };
 }
 
+/**
+ * Drive one create event through the PRODUCTION enqueue wiring
+ * ({@link enqueueVia}, so a parked event reaches `recordUndeliverable`) and
+ * collect what an operator would see: the wire, the parked rows, the `error`s.
+ */
+async function driveUnsweptRow(engine: any) {
+    const realtime = new FakeRealtime();
+    const outbox = new MemoryHttpOutbox();
+    const errors: Array<{ msg: string; meta: any }> = [];
+    const enqueuer = new AutoEnqueuer(engine, realtime, enqueueVia(outbox), {
+        refreshIntervalMs: 0,
+        logger: {
+            error: (msg: string, _e?: unknown, meta?: unknown) => { errors.push({ msg, meta: meta as any }); },
+            warn: () => {}, debug: () => {},
+        },
+    });
+    await enqueuer.start();
+    // A cache rebuild must not say it twice (the say-once rule).
+    await enqueuer.refresh();
+    await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    const { impl, calls } = makeFetch();
+    await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+    await enqueuer.stop();
+    const parked = (await outbox.list()).filter((r: any) => r.status === 'dead') as any[];
+    return { calls, parked, errors };
+}
+
+/**
+ * What the refusal owes its reader, per the retirement ruling: the DATE, the
+ * sweep that converts the row, and the remedy — and ⛔ never the credential.
+ */
+function assertLegacyRefusalProse(text: string, credential: string) {
+    expect(text).toContain('2026-09-23');
+    expect(text).toContain('migrateLegacyWebhookSecrets');
+    expect(text).toMatch(/Fix: write the .* into (signing_secret|headers_secret)/);
+    expect(text).toContain('CryptoProvider');
+    expect(text).not.toContain(credential);
+    // Runtime strings carry the lesson, not a tracker number.
+    expect(text).not.toMatch(/#\d{3,}/);
+}
+
 // ---------------------------------------------------------------------------
 
 describe('webhook signing secret at rest (#7799)', () => {
@@ -452,26 +496,32 @@ describe('legacy cleartext migration (#7799)', () => {
         expect(await migrateLegacyWebhookSecrets(engine)).toEqual({ found: 0, migrated: 0, failed: 0 });
     });
 
-    it('an un-swept row keeps signing — the enqueuer reads the legacy blob and says so', async () => {
+    it('an un-swept row is REFUSED, not signed from the blob — parked, dated, and said once', async () => {
         const { engine } = await buildEngine();
         await seedLegacyRow(engine);
 
-        const warnings: string[] = [];
-        const realtime = new FakeRealtime();
-        const outbox = new MemoryHttpOutbox();
-        const enqueuer = new AutoEnqueuer(engine, realtime, (i) => outbox.enqueue(i), {
-            logger: { warn: (m: string) => { warnings.push(m); } },
-        });
-        await enqueuer.start();
-        await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
-        await new Promise((r) => setTimeout(r, 0));
-        const { impl, calls } = makeFetch();
-        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
-        await enqueuer.stop();
+        const { calls, parked, errors } = await driveUnsweptRow(engine);
 
-        const expected = createHmac('sha256', SECRET).update(calls[0].body).digest('hex');
-        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
-        expect(warnings.join('\n')).toMatch(/CLEARTEXT in definition_json/);
+        // Nothing reached the receiver: the cleartext key is not honoured.
+        expect(calls).toHaveLength(0);
+        // ADR-0112 — the refusal carries the pair a consumer branches on, and
+        // names the retired key it refused (the signing half runs first).
+        expect(errors).toHaveLength(1);
+        expect(errors[0].meta).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            status: 400,
+            field: 'definition_json',
+            keys: ['secret'],
+        });
+        assertLegacyRefusalProse(errors[0].msg, SECRET);
+        // …and the event is recorded, parked and unsendable, carrying the same
+        // refusal rather than vanishing.
+        expect(parked).toHaveLength(1);
+        expect(parked[0]).toMatchObject({ status: 'dead', attempts: 0 });
+        expect(parked[0].signature).toBeUndefined();
+        expect(parked[0].headers).toBeUndefined();
+        expect(String(parked[0].error)).toMatch(/^\[VALIDATION_ERROR\/400\] /);
+        assertLegacyRefusalProse(String(parked[0].error), SECRET);
     });
 });
 
@@ -845,25 +895,43 @@ describe('legacy cleartext headers migration (#7986)', () => {
         expect(stores.get('sys_secret')!.size).toBe(1);
     });
 
-    it('an un-swept row keeps delivering — the enqueuer reads the legacy blob and says so', async () => {
+    it('an un-swept row is REFUSED, not delivered with the blob\'s headers — parked, dated, said once', async () => {
         const { engine } = await buildEngine();
         await seedLegacyHeaderRow(engine);
 
-        const warnings: string[] = [];
-        const realtime = new FakeRealtime();
-        const outbox = new MemoryHttpOutbox();
-        const enqueuer = new AutoEnqueuer(engine, realtime, (i) => outbox.enqueue(i), {
-            logger: { warn: (m: string) => { warnings.push(m); } },
-        });
-        await enqueuer.start();
-        await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
-        await new Promise((r) => setTimeout(r, 0));
-        const { impl, calls } = makeFetch();
-        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
-        await enqueuer.stop();
+        const { calls, parked, errors } = await driveUnsweptRow(engine);
 
+        expect(calls).toHaveLength(0);
+        expect(errors).toHaveLength(1);
+        expect(errors[0].meta).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            status: 400,
+            field: 'definition_json',
+            keys: ['headers'],
+        });
+        assertLegacyRefusalProse(errors[0].msg, BEARER);
+        expect(parked).toHaveLength(1);
+        expect(parked[0]).toMatchObject({ status: 'dead', attempts: 0 });
+        // The parked row must not carry the header map it refused.
+        expect(parked[0].headers).toBeUndefined();
+        expect(String(parked[0].error)).toMatch(/^\[VALIDATION_ERROR\/400\] /);
+        assertLegacyRefusalProse(String(parked[0].error), BEARER);
+    });
+
+    it('a row whose headers were swept delivers them — the refusal is only for the un-swept shape', async () => {
+        // The control leg for the refusal above, on the SAME seeded row: after
+        // the sweep the credential lives in headers_secret and the subscription
+        // arms normally. Without it, a refusal that fired on every row would
+        // pass the test above.
+        const { engine } = await buildEngine();
+        await seedLegacyHeaderRow(engine);
+        await migrateLegacyWebhookSecrets(engine);
+
+        const { calls, parked, errors } = await driveUnsweptRow(engine);
+        expect(errors).toHaveLength(0);
+        expect(parked).toHaveLength(0);
+        expect(calls).toHaveLength(1);
         expect(calls[0].headers.Authorization).toBe(BEARER);
-        expect(warnings.join('\n')).toMatch(/CLEARTEXT in definition_json/);
     });
 });
 
@@ -1425,5 +1493,150 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
         expect(calls[0].headers['X-Team']).toBe('crm');
         expect(rows[0].status).toBe('success');
         expect(errors).toHaveLength(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The retired `definition_json` credential location — the WRITE door.
+//
+// The delivery door above refuses a row whose only copy of a credential is the
+// legacy cleartext key. Left alone, a raw data-API write could still create
+// such a row, and the author would learn at the next record change, in a
+// different surface. So the same verdict is taken where the author is standing.
+// Rows are seeded BEFORE the gate is bound where a test needs pre-existing
+// legacy data: that is the only way such a row exists from now on.
+// ---------------------------------------------------------------------------
+
+describe('the retired definition_json credential location — refused at the write door', () => {
+    const cleanDefinition = (extra: Record<string, unknown> = {}) =>
+        JSON.stringify({ name: 'door_hook', url: 'https://receiver.example/hook', timeoutMs: 30000, ...extra });
+
+    const doorRow = (overrides: Record<string, unknown> = {}) => ({
+        name: 'door_hook',
+        object_name: 'contact',
+        triggers: ['create'],
+        url: 'https://receiver.example/hook',
+        method: 'post',
+        active: true,
+        definition_json: cleanDefinition(),
+        ...overrides,
+    });
+
+    async function gatedEngine() {
+        const built = await buildEngine();
+        bindWebhookLegacyCleartextGate(built.engine as any);
+        return built;
+    }
+
+    const rowsAtRest = (stores: Map<string, Map<string, Record<string, unknown>>>) =>
+        Array.from(stores.get('sys_webhook')?.values() ?? []);
+
+    it.each([
+        ['headers', { headers: { Authorization: BEARER } }, BEARER, ['headers']],
+        ['secret', { secret: SECRET }, SECRET, ['secret']],
+        ['both keys at once', { secret: SECRET, headers: { Authorization: BEARER } }, BEARER, ['secret', 'headers']],
+    ] as const)(
+        'a raw data-API update putting %s into definition_json is refused with the ADR-0112 envelope',
+        async (_label, extra, credential, keys) => {
+            const { engine, stores } = await gatedEngine();
+            const created = await engine.insert('sys_webhook', doorRow(), { context: SYSTEM_CTX } as any);
+
+            // The engine form of `PATCH /api/v1/data/sys_webhook/:id`.
+            const write = engine.update(
+                'sys_webhook',
+                { definition_json: cleanDefinition(extra) },
+                { where: { id: created.id }, context: SYSTEM_CTX } as any,
+            );
+
+            await expect(write).rejects.toMatchObject({
+                code: 'VALIDATION_ERROR',
+                status: 400,
+                object: 'sys_webhook',
+                field: 'definition_json',
+                keys: [...keys],
+            });
+            const err = await write.catch((e: Error) => e);
+            assertLegacyRefusalProse((err as Error).message, credential);
+            expect((err as Error).message).toMatch(/^Webhook write refused/);
+
+            // Nothing landed: the stored blob is the clean one it was.
+            expect(JSON.stringify(rowsAtRest(stores))).not.toContain(credential);
+        },
+    );
+
+    it('an insert carrying the legacy shape is refused whole — no row is written', async () => {
+        const { engine, stores } = await gatedEngine();
+        const write = engine.insert(
+            'sys_webhook',
+            doorRow({ definition_json: cleanDefinition({ headers: { Authorization: BEARER } }) }),
+            { context: SYSTEM_CTX } as any,
+        );
+        await expect(write).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400, keys: ['headers'] });
+        expect(rowsAtRest(stores)).toHaveLength(0);
+    });
+
+    it('judges key PRESENCE — an emptied key still teaches the wrong location, and is refused', async () => {
+        const { engine } = await gatedEngine();
+        const created = await engine.insert('sys_webhook', doorRow(), { context: SYSTEM_CTX } as any);
+        await expect(
+            engine.update(
+                'sys_webhook',
+                { definition_json: cleanDefinition({ headers: {}, secret: '' }) },
+                { where: { id: created.id }, context: SYSTEM_CTX } as any,
+            ),
+        ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400, keys: ['secret', 'headers'] });
+    });
+
+    it('lets everything else through: a clean blob, an omitted blob, and a blob that is not JSON', async () => {
+        const { engine, stores } = await gatedEngine();
+        const created = await engine.insert('sys_webhook', doorRow(), { context: SYSTEM_CTX } as any);
+        const byId = { where: { id: created.id }, context: SYSTEM_CTX } as any;
+
+        await engine.update('sys_webhook', { definition_json: cleanDefinition({ timeoutMs: 5000 }) }, byId);
+        await engine.update('sys_webhook', { label: 'Renamed' }, byId);
+        // Not this gate's verdict: a malformed envelope carries no credential key.
+        await engine.update('sys_webhook', { definition_json: '{not json' }, byId);
+
+        const row = rowsAtRest(stores)[0] as any;
+        expect(row.label).toBe('Renamed');
+        expect(row.definition_json).toBe('{not json');
+    });
+
+    it('the refusal is the GATE\'s — unbound, the same write still lands (counterfactual)', async () => {
+        const { engine, stores } = await buildEngine();
+        const created = await engine.insert('sys_webhook', doorRow(), { context: SYSTEM_CTX } as any);
+        await engine.update(
+            'sys_webhook',
+            { definition_json: cleanDefinition({ headers: { Authorization: BEARER } }) },
+            { where: { id: created.id }, context: SYSTEM_CTX } as any,
+        );
+        expect(JSON.stringify(rowsAtRest(stores))).toContain(BEARER);
+    });
+
+    it('the boot sweep still converts a pre-existing legacy row with the gate bound', async () => {
+        // Its write strips both keys in the same update that stores the
+        // encrypted copies, so it passes the door by construction — pinned,
+        // because the sweep is the remedy every refusal names.
+        const { engine, stores } = await buildEngine();
+        await engine.insert('sys_webhook', doorRow({
+            id: 'whk_pre_gate',
+            definition_json: cleanDefinition({ secret: SECRET, headers: { Authorization: BEARER } }),
+        }), { context: SYSTEM_CTX } as any);
+        bindWebhookLegacyCleartextGate(engine as any);
+
+        expect(await migrateLegacyWebhookSecrets(engine)).toEqual({ found: 1, migrated: 1, failed: 0 });
+        expect(JSON.stringify(rowsAtRest(stores))).not.toContain(BEARER);
+        expect(JSON.stringify(rowsAtRest(stores))).not.toContain(SECRET);
+
+        const { calls } = await deliverOnce(engine);
+        expect(calls).toHaveLength(1);
+        expect(calls[0].headers.Authorization).toBe(BEARER);
+    });
+
+    it('the declared-webhook seeder still materializes secret + headers through the bound gate', async () => {
+        const { engine, stores } = await gatedEngine();
+        const result = await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        expect(result).toMatchObject({ seeded: 1 });
+        expect(JSON.stringify(rowsAtRest(stores))).not.toContain(BEARER);
     });
 });

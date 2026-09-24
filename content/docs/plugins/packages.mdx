@@ -400,6 +400,9 @@ metadata it names.
   one step later, when the app's own `init()` hands the stack to the kernel's
   `manifest` service and its package list is parsed; it reports as
   `INVALID_ARTIFACT_PACKAGE_ENTRY` (422) on the `error` line naming the app plugin.
+  A `packages` value that is not an array at all, such as `{}`, takes the same
+  branch and reports as `INVALID_ARTIFACT_PACKAGES` (422). It is malformed, not
+  absent: for a single-package app, leave the key out.
 
   The two differ at the production doors as well. The malformed `packages[]` fails
   the protocol schema, so both `os validate` and `os build` exit 1 on it. The missing

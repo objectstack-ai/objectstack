@@ -251,8 +251,13 @@ export const ReportSchema = lazySchema(() => strictObject({
     'Until this shape was closed these were dropped silently — the item still registered, minus whatever the key was meant to configure.',
   // Kept deliberately parallel to `JoinedReportBlockSchema` above: a block is a
   // sub-report, so an author who learns one vocabulary must not be corrected
-  // differently on the other. The scope-filter entries are that table's,
-  // verbatim.
+  // differently on the other. Every block entry whose target this schema also
+  // declares is carried here, to the same target — today, every one of them —
+  // and `report.test.ts` derives that parity from the two tables at runtime. A
+  // key that must NOT route here gets a `guidance` line saying why, never
+  // silence. The `guidance` tables do differ, on purpose: the block's three are
+  // wrong-layer pointers to keys this schema declares, and `drillDown` below
+  // disambiguates this schema's own `drilldown` boolean, which a block lacks.
   //
   // #5013 — `filter` used to point at `filters`, a key `ReportSchema` does not
   // declare either, so taking the advice earned a SECOND rejection and that one
@@ -262,15 +267,41 @@ export const ReportSchema = lazySchema(() => strictObject({
   // only from the `unrecognized_keys` path — and `chartConfig` was not a key
   // either. `alias-integrity.test.ts` now proves both halves for every table in
   // the package.
+  //
+  // The parallel claim above was not true when it was first written: the ten
+  // selection and ordering spellings below existed only on the block, so
+  // `measures:` on a plain report was refused with no suggestion while the
+  // same key one level down was told `values`. Of the ten, only `orderBy`
+  // reached its target by edit distance alone.
   aliases: {
-    dataSet: 'dataset', source: 'dataset',
+    // ADR-0021 single-form: the legacy inline query was removed in the cutover.
+    // These are the spellings that cutover retired, aimed at their successors.
+    objectName: 'dataset',
+    object: 'dataset',
+    dataSet: 'dataset',
+    source: 'dataset',
+    // A report selects measures by name; `columns` is a real key here (the
+    // matrix across-axis), so the value list cannot borrow it — hence the
+    // explicit map.
     fields: 'values',
+    measures: 'values',
+    metrics: 'values',
+    groupings: 'rows',
+    groupBy: 'rows',
+    dimensions: 'rows',
     // Scope filter. `runtimeFilter` is camelCase, so the edit-distance fallback
     // under-reaches every one of these (#4990) — same as on a block.
     filter: 'runtimeFilter',
     filters: 'runtimeFilter',
     where: 'runtimeFilter',
     criteria: 'runtimeFilter',
+    // Ordering, spelled as the objectql/dashboard surfaces spell it. On a
+    // `joined` report the prescribed `order` is itself refused, with the
+    // pointer onto `blocks[]` — the same answer the author would get for
+    // writing `order` directly.
+    sort: 'order',
+    orderBy: 'order',
+    sortBy: 'order',
   },
   guidance: {
     // #5022 — the reverse half of a two-way disambiguation. The forward half

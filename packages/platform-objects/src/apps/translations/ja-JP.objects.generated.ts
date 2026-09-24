@@ -35,7 +35,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "プラットフォームロール",
-        help: "プラットフォームレベルのロール（admin、user など）。「プラットフォームロールを設定」アクションから設定します。"
+        help: "レガシーな better-auth ロールスカラー値（admin、user など）。ObjectStack はもはやこの値を書き込みません（ADR-0068 D2）。プラットフォーム管理者権限を付与するには、そのユーザーの確認済みメールアドレスを `OS_PLATFORM_OWNER_EMAIL` に列挙してください。`single` テナンシー態勢では、`sys_user_permission_set` 内のスコープ指定なしの `admin_full_access` 割り当てでも同様にこの権限が付与されます。"
       },
       banned: {
         label: "利用停止",

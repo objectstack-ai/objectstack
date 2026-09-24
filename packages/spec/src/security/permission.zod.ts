@@ -7,6 +7,7 @@ import { ApiOperationSchema } from '../data/object.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 
@@ -617,6 +618,23 @@ export const EffectiveObjectPermissionSchema = lazySchema(() =>
 export type EffectiveObjectPermission = z.input<typeof EffectiveObjectPermissionSchema>;
 
 /**
+ * [#19461] The one sentence a blank {@link AdminScopeSchema} `businessUnit`
+ * is refused with. It names what a valid anchor IS, because the author most
+ * likely to write a blank one is an agent that knew the key was required and
+ * did not yet know the unit.
+ *
+ * Module-private, like {@link checkScopeAgainstSuperUserBits}: its one
+ * consumer is the refinement below, and exporting it would add a constant to
+ * the published API surface for no caller.
+ */
+const ADMIN_SCOPE_BUSINESS_UNIT_BLANK =
+  'A blank businessUnit is not a delegation boundary: businessUnit is the sys_business_unit.name '
+  + '(machine name) of the business unit at the root of the subtree this scope delegates, and an '
+  + 'empty or whitespace-only value names no unit, so the scope anchors no subtree. Write the root '
+  + 'unit\'s machine name, e.g. businessUnit: \'north_america\', or remove adminScope if this '
+  + 'permission set should not delegate administration.';
+
+/**
  * [ADR-0090 D12] Delegated-administration scope.
  *
  * Attaches to a permission set (and is therefore distributed via positions,
@@ -641,8 +659,31 @@ export const AdminScopeSchema = lazySchema(() => strictObject(
       'boundary the author intended was never enforced.',
   },
   {
-  /** Root of the delegated subtree — `sys_business_unit.name` (machine name, portable across environments). */
-  businessUnit: z.string().describe('[ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root'),
+  /**
+   * Root of the delegated subtree — `sys_business_unit.name` (machine name,
+   * portable across environments). Required, and required NON-BLANK.
+   *
+   * [#19461] The key is the scope's only required one, and every other key is
+   * scoped TO it, so an empty or whitespace-only value satisfied the
+   * requirement while naming no subtree. Refused here with a NON-TRANSFORMING
+   * refinement, deliberately never `.trim()`: `saveMetaItem` persists the
+   * submitted body verbatim rather than the parsed value, so a transform would
+   * validate one string and store another — and the delegated-admin gate looks
+   * the anchor up by exact name. A real name therefore parses byte-identical,
+   * padding included. The absent key keeps its own `invalid_type` refusal: the
+   * refinement never runs on a non-string.
+   *
+   * Stored scopes are not rewritten (no lossless rewrite exists — the root
+   * cannot be inferred): a stored blank anchor is refused on its next write,
+   * and the ADR-0087 semantic entry `admin-scope-business-unit-blank-refused`
+   * records it.
+   */
+  businessUnit: z.string()
+    .refine(NON_BLANK_STRING, { message: ADMIN_SCOPE_BUSINESS_UNIT_BLANK })
+    .describe(
+      '[ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root. Required and '
+      + 'non-blank: an empty or whitespace-only value names no business unit and is refused.',
+    ),
   /** Whether the scope covers the whole subtree under `businessUnit` (default) or that single unit only. */
   includeSubtree: z.boolean().default(true).describe('Cover descendant business units too (default true)'),
   /** May create/update/delete `sys_user_position` assignments (and direct `sys_user_permission_set` grants) within the boundary. */

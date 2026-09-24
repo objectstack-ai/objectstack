@@ -248,13 +248,15 @@ jobs:
       # over the ten merge-group runs measured for #16496; the PM dispatch-gates
       # self-test alone 597 s), and none of its expensive steps read a
       # merge group's file surface: a docs-only group paid the full battery.
-      # So on `merge_group` and `pull_request` the NINE scoped families below
+      # So on `merge_group` and `pull_request` the TEN scoped families below
       # -- each step carrying `if: steps.gate-families.outputs.<id> != 'skip'`
       # -- run only when the changed paths touch the files that family reads.
+      # One of the ten, `migration_registry` (#19753), is a gate this job did
+      # not run before at all; the other nine were scoped away from it.
       # `push` on main and the scheduled full run keep the whole battery: the
       # script runs everything for any event it does not scope.
       #
-      # #19498 added four of those nine (`entry_guard`,
+      # #19498 added four of the nine (`entry_guard`,
       # `declared_population_live`, `bare_root_worklist`,
       # `self_test_workflow_commands`) and narrowed `pm_dispatch_gates`, on
       # ruling #208 on #19491 (R4) and the maintainer's sentence quoted in the
@@ -361,6 +363,25 @@ jobs:
       # would otherwise see the gate fail before it mattered.
       - name: ADR anchors + number uniqueness (governed code names its decision)
         run: pnpm check:adr-anchors
+
+      # Migration registry matches its entry files (#19753). `registry.ts` is
+      # the generated concatenation of `packages/spec/src/migrations/entries/`,
+      # it ships in the spec package's `dist`, and this check is the only
+      # proof the two agree -- `check:generated --reconcile-only` (in the
+      # `Type Check · source gates` job) proves the script is classified,
+      # never that the artifact is current. It ran
+      # in no CI step, so an entry edited without `gen:migration-registry`
+      # shipped the old text with every required check green.
+      #
+      # Scoped, on the maintainer's ruling for that card: a step in THIS
+      # required job, run when the change touches what the check reads
+      # (`migration_registry` in the selector above). ⛔ Not a separate
+      # `paths:`-filtered job: one that never reports on an unrelated PR
+      # leaves a required context pending forever. Cheap -- tsx over one
+      # directory, no build (~1.4 s measured locally) -- so it sits early.
+      - name: Migration registry matches its entry files
+        if: steps.gate-families.outputs.migration_registry != 'skip'
+        run: pnpm --filter @objectstack/spec check:migration-registry
 
       # Enforces the no-restricted-imports guard against @objectstack/spec root
       # namespace imports (the dormant rule was never run in CI). Syntactic

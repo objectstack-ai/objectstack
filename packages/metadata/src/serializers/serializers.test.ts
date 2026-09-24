@@ -1,7 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { NodeMetadataManager } from '../node-metadata-manager.js';
 import { JSONSerializer } from '../serializers/json-serializer.js';
 import { YAMLSerializer } from '../serializers/yaml-serializer.js';
-import { TypeScriptSerializer } from '../serializers/typescript-serializer.js';
+import { TypeScriptSerializer, serializeTypeScriptForMetadataType } from '../serializers/typescript-serializer.js';
+import type { MetadataFormat } from '@objectstack/spec/system';
+import type { MetadataSerializer, SerializeOptions } from '../serializers/serializer-interface.js';
+import { FilesystemLoader } from '../loaders/filesystem-loader.js';
 
 describe('Serializers', () => {
   describe('JSONSerializer', () => {
@@ -55,12 +62,141 @@ describe('Serializers', () => {
   describe('TypeScriptSerializer', () => {
     const serializer = new TypeScriptSerializer('typescript');
 
+    // The saved-view repro: a view used to be annotated `ServiceObject`, which
+    // has no top-level `type` or `columns` key, so `tsc` refused the file (TS2353).
+    const view = { name: 'all_accounts', type: 'grid', object: 'account', columns: ['name'] };
+    const object = { name: 'account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+    const plain = (item: unknown) =>
+      `export const metadata = ${JSON.stringify(item, null, 2)};\n\nexport default metadata;\n`;
+    // Exactly what `FilesystemLoader.save('object', …)` wrote before this fix, and still writes.
+    const annotatedObject =
+      `import type { ServiceObject } from '@objectstack/spec/data';\n\n` +
+      `export const metadata: ServiceObject = ${JSON.stringify(object, null, 2)};\n\n` +
+      `export default metadata;\n`;
+
     it('should serialize to TypeScript module', () => {
       const data = { name: 'test', value: 42 };
       const result = serializer.serialize(data);
-      expect(result).toContain('import type');
       expect(result).toContain('export const metadata');
       expect(result).toContain('export default metadata');
+    });
+
+    it('the public serialize() writes no annotation, even for an object: it does not know the metadata type', () => {
+      expect(serializer.serialize(object)).toBe(plain(object));
+      expect(serializer.serialize(view)).toBe(plain(view));
+    });
+
+    it('writes a view with no annotation: no ServiceObject, no import type', () => {
+      const result = serializeTypeScriptForMetadataType(view, 'view');
+      expect(result).not.toContain('ServiceObject');
+      expect(result).toBe(plain(view));
+    });
+
+    it('still annotates an object ServiceObject, byte-identical to the earlier output', () => {
+      expect(serializeTypeScriptForMetadataType(object, 'object')).toBe(annotatedObject);
+    });
+
+    it.each([
+      ['a metadata type the spec has no type for', 'external_catalog'],
+      ['a metadata type whose spec type is narrower than its schema', 'book'],
+      ['a plugin-registered metadata type', 'acme_widget'],
+      ['a plural spelling', 'objects'],
+    ])('writes no annotation for %s', (_label, metadataType) => {
+      expect(serializeTypeScriptForMetadataType({ name: 'x' }, metadataType)).toBe(plain({ name: 'x' }));
+    });
+
+    it('the javascript format never annotates', () => {
+      expect(new TypeScriptSerializer('javascript').serialize(object)).toBe(plain(object));
+    });
+
+    it('reads back a file written before this fix: a view annotated ServiceObject', () => {
+      const legacy =
+        `import type { ServiceObject } from '@objectstack/spec/data';\n\n` +
+        `export const metadata: ServiceObject = ${JSON.stringify(view, null, 2)};\n\n` +
+        `export default metadata;\n`;
+      expect(serializer.deserialize(legacy)).toEqual(view);
+    });
+
+    it('round-trips a view and an object through serialize and deserialize', () => {
+      for (const [metadataType, item] of [['view', view], ['object', object]] as const) {
+        expect(serializer.deserialize(serializeTypeScriptForMetadataType(item, metadataType))).toEqual(item);
+        expect(serializer.deserialize(serializer.serialize(item))).toEqual(item);
+      }
+    });
+
+    it('FilesystemLoader.save() annotates by metadata type: the view file is unannotated, the object file is ServiceObject', async () => {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-'));
+      try {
+        const manager = new NodeMetadataManager({ rootDir, watch: false });
+        await manager.save('view', 'all_accounts', view);
+        await manager.save('object', 'account', object);
+        const viewFile = await fs.readFile(path.join(rootDir, 'view', 'all_accounts.ts'), 'utf-8');
+        const objectFile = await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+        expect(viewFile).not.toContain('ServiceObject');
+        expect(viewFile).toBe(plain(view));
+        expect(objectFile).toBe(annotatedObject);
+      } finally {
+        await fs.rm(rootDir, { recursive: true, force: true });
+      }
+    });
+
+    it('FilesystemLoader.save() calls a custom serializer registered for typescript as it always did', async () => {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-custom-'));
+      try {
+        const seen: unknown[] = [];
+        const custom: MetadataSerializer = {
+          serialize: (item, options) => {
+            seen.push(options);
+            return `// custom\nexport const metadata = ${JSON.stringify(item)};\n`;
+          },
+          deserialize: (content) => serializer.deserialize(content),
+          getExtension: () => '.ts',
+          canHandle: (format) => format === 'typescript',
+          getFormat: () => 'typescript',
+        };
+        const loader = new FilesystemLoader(rootDir, new Map<MetadataFormat, MetadataSerializer>([['typescript', custom]]));
+        await loader.save('object', 'account', object);
+        const file = await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+        expect(file).toBe(`// custom\nexport const metadata = ${JSON.stringify(object)};\n`);
+        expect(seen).toEqual([{ prettify: true, indent: 2, sortKeys: false }]);
+      } finally {
+        await fs.rm(rootDir, { recursive: true, force: true });
+      }
+    });
+
+    // A FilesystemLoader wired by hand with one `typescript` serializer, saving `object`.
+    const saveObjectWith = async (tsSerializer: MetadataSerializer): Promise<string> => {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-wired-'));
+      try {
+        const loader = new FilesystemLoader(rootDir, new Map<MetadataFormat, MetadataSerializer>([['typescript', tsSerializer]]));
+        await loader.save('object', 'account', object);
+        return await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+      } finally {
+        await fs.rm(rootDir, { recursive: true, force: true });
+      }
+    };
+
+    it('FilesystemLoader.save() calls a subclass that overrides serialize(), as it always did', async () => {
+      class HeaderSerializer extends TypeScriptSerializer {
+        override serialize<T>(item: T, options?: SerializeOptions): string {
+          return '// header\n' + super.serialize(item, options);
+        }
+      }
+      expect(await saveObjectWith(new HeaderSerializer('typescript'))).toBe('// header\n' + plain(object));
+    });
+
+    it('FilesystemLoader.save() annotates through the built-in serialize(), inherited by a subclass or not', async () => {
+      class KeepsSerialize extends TypeScriptSerializer {}
+      expect(await saveObjectWith(new TypeScriptSerializer('typescript'))).toBe(annotatedObject);
+      expect(await saveObjectWith(new KeepsSerialize('typescript'))).toBe(annotatedObject);
+    });
+
+    it('FilesystemLoader.save() calls a TypeScriptSerializer from another module copy through its own serialize(): no annotation', async () => {
+      // The published `.` and `./node` entries are separate bundles, each with its own class copy.
+      vi.resetModules();
+      const other = await import('../serializers/typescript-serializer.js');
+      expect(other.TypeScriptSerializer).not.toBe(TypeScriptSerializer);
+      expect(await saveObjectWith(new other.TypeScriptSerializer('typescript'))).toBe(plain(object));
     });
 
     it('should get correct extension', () => {
@@ -69,6 +205,97 @@ describe('Serializers', () => {
 
       const js = new TypeScriptSerializer('javascript');
       expect(js.getExtension()).toBe('.js');
+    });
+
+    // #19872: `sortKeys` was declared (`MetadataSaveOptionsSchema`), honoured
+    // by `json`/`yaml`, and silently ignored by `typescript` (the default
+    // format `FilesystemLoader.save()` routes to) — and by `javascript`, the
+    // same class on the same `renderModule()` code path.
+    describe('sortKeys (#19872)', () => {
+      // Deliberately unsorted at BOTH levels, so a top-level-only sort would
+      // pass while a deep one is the only one this can't fake: the nested
+      // `fields` object's own keys are unsorted too.
+      const unsortedObject = {
+        name: 'account',
+        label: 'Account',
+        fields: {
+          zeta_field: { type: 'text', label: 'Zeta' },
+          alpha_field: { type: 'text', label: 'Alpha' },
+        },
+      };
+      const jsonSerializer = new JSONSerializer();
+
+      it('the public serialize() sorts the JSON body deep, byte-identical to JSONSerializer\'s own sort — reused, not reimplemented', () => {
+        const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+        expect(serializer.serialize(unsortedObject, { sortKeys: true })).toBe(
+          `export const metadata = ${sortedBody};\n\nexport default metadata;\n`
+        );
+      });
+
+      it('serializeTypeScriptForMetadataType() sorts the JSON body deep too, annotated', () => {
+        const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+        expect(serializeTypeScriptForMetadataType(unsortedObject, 'object', { sortKeys: true })).toBe(
+          `import type { ServiceObject } from '@objectstack/spec/data';\n\n` +
+          `export const metadata: ServiceObject = ${sortedBody};\n\n` +
+          `export default metadata;\n`
+        );
+      });
+
+      it('the javascript format honours it too — A1: same TypeScriptSerializer class, same renderModule() path', () => {
+        const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+        expect(new TypeScriptSerializer('javascript').serialize(unsortedObject, { sortKeys: true })).toBe(
+          `export const metadata = ${sortedBody};\n\nexport default metadata;\n`
+        );
+      });
+
+      it('sortKeys absent or false: byte-identical to origin/main, through both serialize() and serializeTypeScriptForMetadataType()', () => {
+        expect(serializer.serialize(object)).toBe(plain(object));
+        expect(serializer.serialize(object, { sortKeys: false })).toBe(plain(object));
+        expect(serializeTypeScriptForMetadataType(object, 'object')).toBe(annotatedObject);
+        expect(serializeTypeScriptForMetadataType(object, 'object', { sortKeys: false })).toBe(annotatedObject);
+      });
+
+      it('round-trips a view and an object with sortKeys: true, through both paths', () => {
+        for (const [metadataType, item] of [['view', view], ['object', object]] as const) {
+          expect(
+            serializer.deserialize(serializeTypeScriptForMetadataType(item, metadataType, { sortKeys: true }))
+          ).toEqual(item);
+          expect(serializer.deserialize(serializer.serialize(item, { sortKeys: true }))).toEqual(item);
+        }
+      });
+
+      it('FilesystemLoader.save() honours sortKeys: true for object, through the loader path (A3)', async () => {
+        const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-sortkeys-on-'));
+        try {
+          const manager = new NodeMetadataManager({ rootDir, watch: false });
+          await manager.save('object', 'account', unsortedObject, { sortKeys: true });
+          const objectFile = await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+          const sortedBody = jsonSerializer.serialize(unsortedObject, { sortKeys: true });
+          expect(objectFile).toBe(
+            `import type { ServiceObject } from '@objectstack/spec/data';\n\n` +
+            `export const metadata: ServiceObject = ${sortedBody};\n\n` +
+            `export default metadata;\n`
+          );
+        } finally {
+          await fs.rm(rootDir, { recursive: true, force: true });
+        }
+      });
+
+      it('FilesystemLoader.save() with sortKeys absent or explicitly false is byte-identical to origin/main, for object, through the loader path (A3)', async () => {
+        const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'objectstack-ts-serializer-sortkeys-off-'));
+        try {
+          const manager = new NodeMetadataManager({ rootDir, watch: false });
+          await manager.save('object', 'account', object);
+          const noOptionFile = await fs.readFile(path.join(rootDir, 'object', 'account.ts'), 'utf-8');
+          expect(noOptionFile).toBe(annotatedObject);
+
+          await manager.save('object', 'account2', object, { sortKeys: false });
+          const explicitFalseFile = await fs.readFile(path.join(rootDir, 'object', 'account2.ts'), 'utf-8');
+          expect(explicitFalseFile).toBe(annotatedObject);
+        } finally {
+          await fs.rm(rootDir, { recursive: true, force: true });
+        }
+      });
     });
   });
 });
