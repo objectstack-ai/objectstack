@@ -399,10 +399,26 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    * Similar to USING but applies to new/modified rows.
    * Prevents users from creating/updating rows they wouldn't be able to see.
    * 
-   * **Default Behavior**: If not specified, implementations should use the
-   * USING clause as the CHECK clause. This ensures data integrity by preventing
-   * users from creating records they cannot view.
-   * 
+   * **Default Behavior**: the `using` → `check` default is decided per write
+   * operation across the applicable policies, not policy by policy. A policy
+   * is applicable to a write when it is not `enabled: false`, its `object` is
+   * the written object or `'*'`, its `operation` is the write's own (`insert`
+   * or `update`) or `'all'`, and, when it lists `positions`, the caller holds
+   * one of them.
+   *
+   * - When any applicable policy declares `check`, only the declared checks
+   *   decide, OR-combined. A USING-only sibling adds nothing: its `using` is
+   *   not part of the write check.
+   * - When none declares `check`, each applicable policy's `using` stands in as
+   *   its check, OR-combined. The platform's own ownership floor
+   *   (`owner_only_writes`) takes part only where the by-id pre-image gate
+   *   kept it.
+   *
+   * So declaring `check` on one policy replaces, for the callers that policy
+   * applies to, the `using` its USING-only siblings would otherwise have
+   * contributed to the check. A `check` on a `select` or `delete` policy is
+   * never evaluated and takes no part in this choice.
+   *
    * Use cases:
    * - Prevent cross-tenant data creation
    * - Enforce mandatory field values
@@ -415,7 +431,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    */
   check: z.string()
     .optional()
-    .describe('Validation condition for INSERT/UPDATE (defaults to USING clause if not specified - enforced at application level)'),
+    .describe('Validation condition for INSERT/UPDATE, matched against the new row (enforced at application level). The default to `using` is decided per operation across the applicable policies, not per policy: when any applicable policy for that operation declares `check`, only the declared checks decide (OR-combined) and a USING-only sibling adds nothing; only when none declares `check` does each applicable policy\'s `using` stand in as its check (OR-combined). Applicable = not `enabled: false`, `object` matches or is \'*\', `operation` matches or is \'all\', and the caller holds one of its `positions` when it lists any. A `check` on a `select` or `delete` policy is never evaluated.'),
 
   /**
    * Restrict this policy to specific positions (ADR-0090 D3; formerly
