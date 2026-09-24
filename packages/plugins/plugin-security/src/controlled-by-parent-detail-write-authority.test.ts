@@ -387,9 +387,18 @@ function makeStore(rows: Record<string, Row[]>) {
      * the payload, before the statement; a terminal that skipped it would be
      * refused fail-closed by the security middleware. Only the by-id path is
      * modelled, through the producer's own dispatch predicate.
+     *
+     * [#20013] …and the INSERT path: the Layer 0 tenant wall installs the same
+     * seam on every walled insert, and `ObjectQL.insert` runs it on the rows
+     * its `beforeInsert` chain produced — here (no hooks) the rows as sent.
      */
     async runByIdWriteImageCheck(opCtx: any) {
       const seam = opCtx?.postHookWriteImageCheck;
+      if (seam && opCtx.operation === 'insert') {
+        seam.honoured = true;
+        await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
+        return;
+      }
       if (!seam || opCtx.operation !== 'update') return;
       const dispatch = assertEngineUpdateDispatch(opCtx.data, opCtx.options);
       if (dispatch.kind !== 'by-id') return;
