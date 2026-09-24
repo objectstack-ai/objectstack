@@ -209,10 +209,9 @@ describe('the refusal describes this face: the JSON encoding, and no column-move
 
       await driver.create('m', { id: 'r1', title: 't', doc: 'file_abc', pic: 'file_def' });
 
-      expect(stub.raw.prepare('select doc, pic from "m" where id = ?').get('r1')).toEqual({
-        doc: '"file_abc"',
-        pic: '"file_def"',
-      });
+      expect(stub.raw.prepare('select doc, pic from "m" where id = ?').all('r1')).toEqual([
+        { doc: '"file_abc"', pic: '"file_def"' },
+      ]);
       expect(await driver.findOne('m', { where: { id: 'r1' } })).toEqual(
         expect.objectContaining({ doc: 'file_abc', pic: 'file_def' }),
       );
