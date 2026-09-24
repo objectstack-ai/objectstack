@@ -45,6 +45,11 @@
  *   - **binary** binds but has no faithful text rendering, so it is accepted in
  *     a bind position and refused by the LIKE family. That asymmetry is the
  *     reason the package carries two predicates rather than one with a flag.
+ *     [#20035] At the PREDICATE level it still is. At the `where` DOOR it is
+ *     now refused in every position: the door runs the shared comparand-TYPE
+ *     face before any predicate is asked, and that face does not admit binary
+ *     (see the binary row's note for the evidence the call rests on). The
+ *     read-scope door keeps the admission.
  *
  * @see comparand-shape.ts — the predicates and the messages this pins
  * @see https://github.com/objectstack-ai/objectstack/issues/8186
@@ -146,16 +151,31 @@ const MATRIX: readonly Row[] = [
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // binary: binds, does not render — accepted where it binds, refused by LIKE.
+  // [#20035] RE-JUDGED: the two `where` bind cells moved from accept to
+  // refused, on purpose and with the evidence stated, because the type face's
+  // docblock lets a door keep binary only as a DECLARED local extra and #8186
+  // asked for an explicit keep-or-reconcile call. Reconciled: the maintainer's
+  // ruling on #7872 (2026-08-12) 「refuses everything else loudly at the
+  // compile face」, and this door never delivered the extra — measured on a
+  // real engine before the change, the native path bound the buffer as the
+  // JSON TEXT '{"0":1,"1":2}' (no row; `$ne` served every row), the engine
+  // path and the FilterArray spelling refused it, and no producer can send one
+  // over JSON. The predicate columns and the read-scope cells are unchanged.
   { label: 'binary', value: new Uint8Array([1, 2]),
     bindable: true, renderable: false,
-    whereLike: REFUSED_WHERE, whereIn: OK, whereEq: OK,
+    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: OK, scopeEq: OK },
 
   // ── shapes outside the fence ──────────────────────────────────────────────
-  // `$eq` accepts them on purpose: #5234 left the `{$eq: {…}}` account alone.
+  // `$eq` accepted them on purpose: #5234 left the `{$eq: {…}}` account alone.
+  // [#20035] RE-JUDGED: the `where` door's `$eq` cell moved to refused. The
+  // #7872 ruling (2026-08-12) closes that account at the shared comparand-TYPE
+  // face (「refuses everything else loudly at the compile face」), which the
+  // door now runs on the object spelling, as `parseFilterAST` and the engine
+  // seam always did. The read-scope cell is that door's own and is not moved.
   { label: 'plain object', value: { foo: 1 },
     bindable: false, renderable: false,
-    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: OK,
+    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: OK },
   // [#19975] One cell of this row moved AFTER the #8186 measurement, on
   // purpose: ruling 乙 (#19757) refuses a list in the equality slot, and the
@@ -257,6 +277,9 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
     });
 
     it('binary stays a package-local extra the door does not admit', () => {
+      // [#20035] At the predicate level, which is what this case reads. The
+      // `where` door refuses binary before this predicate is asked (the matrix
+      // row above); the read-scope door still asks it.
       const buf = new Uint8Array([1, 2]);
       expect(isAcceptedFilterComparand(buf)).toBe(false);
       expect(isBindableComparand(buf)).toBe(true);
