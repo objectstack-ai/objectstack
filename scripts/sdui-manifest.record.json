@@ -1,18 +1,22 @@
 {
   "//": [
     "Provenance record for the repo-root `sdui.manifest.json` (ADR-0080; #12924 wiring ruling 2026-08-29).",
-    "The artefact is objectui's public-tier component manifest, generated from the PUBLISHED",
-    "@object-ui/* packages at the version `.objectui-sha` ships, via scripts/gen-sdui-manifest-node.mjs",
-    "(same enumeration as objectui's apps/console/dev/manifest-dump.tsx: eager-import the 16 registry",
-    "modules, ComponentRegistry.getPublicConfigs(), manifestFromConfigs from @objectstack/sdui-parser).",
+    "The artefact is objectui's public-tier component manifest, generated from objectui's BUILT tree at the",
+    "commit `.objectui-sha` pins (`modulesRoot` below, materialised by `pnpm objectui:build`) by",
+    "scripts/gen-sdui-manifest-node.mjs, the one producer (ruling 丙 on #17735). Same enumeration as objectui's",
+    "apps/console/dev/manifest-dump.tsx: eager-import the 16 registry modules, ComponentRegistry.getPublicConfigs(),",
+    "manifestFromConfigs from @objectstack/sdui-parser. `objectuiWorkspaceVersion` is read from that tree's",
+    "@object-ui/core/package.json — the pinned commit's own declaration, never an npm tarball's.",
     "`scripts/check-sdui-manifest.mjs` holds this record equal to the artefact and to the live pin:",
     "a pin bump without regeneration goes RED there — that is the anti-rot half of the freshness gate.",
-    "Regenerate + re-record: node scripts/gen-sdui-manifest-node.mjs (see its header for the offline mode)."
+    "Regenerate + re-record: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs"
   ],
   "objectuiSha": "62597c588072636e9c30ea35b3d89b1e46fd765d",
-  "objectuiPackagesVersion": "17.6.0",
+  "source": "built-tree",
+  "modulesRoot": ".cache/objectui-62597c588072/apps/console",
+  "objectuiWorkspaceVersion": "17.6.0",
   "generator": "scripts/gen-sdui-manifest-node.mjs",
   "generatedAt": "2026-09-23",
-  "sha256": "49211fee7792cf51174930dc2c1be2169d5175f77a83491f68f90b3f0c19e69d",
-  "components": 57
+  "sha256": "22c83c9ec70163559c2bd8f7b1613174d8660ad9949d15ed483a4189b7857c9a",
+  "components": 59
 }
