@@ -26,6 +26,7 @@ import { createRequire } from 'node:module';
 
 import type { SqlJsStatic } from 'sql.js';
 
+import { exactTextBindings, readExactRow } from './sqljs-exact-text.js';
 import {
   WasmSqliteConnection,
   type PersistMode,
@@ -229,7 +230,11 @@ export function getClient_WasmSqlite(): any {
       if (!connection) throw new Error('No connection provided');
 
       const db = connection.raw;
-      const bindings = formatBindings(obj.bindings);
+      // A text binding holding U+0000 is rebound so sql.js's text bind cannot
+      // cut it at the NUL; `sql` is then the statement actually run. Every
+      // other statement comes back unchanged. The classification below keeps
+      // reading `obj.sql` — the rewrite never touches a statement's keyword.
+      const { sql, bindings } = exactTextBindings(obj.sql, formatBindings(obj.bindings));
 
       // ── 1. EXECUTE ────────────────────────────────────────────────────────
       // Three execution shapes. None of them decides persistence: that is
@@ -244,7 +249,7 @@ export function getClient_WasmSqlite(): any {
       // return rows used by Knex's schema introspection/columnInfo, and
       // `db.run` discards those rows.
       if (DDL_RE.test(obj.sql)) {
-        db.run(obj.sql, bindings as any);
+        db.run(sql, bindings as any);
         obj.response = [];
       } else if (
         isRowReturningExecution(obj.method, obj.returning) ||
@@ -252,12 +257,16 @@ export function getClient_WasmSqlite(): any {
       ) {
         // Row-returning branch. NOTE this is also where `INSERT … RETURNING *`
         // and `UPDATE … RETURNING *` land — statements that very much write.
-        const stmt = db.prepare(obj.sql);
+        const stmt = db.prepare(sql);
         try {
           if (bindings.length) stmt.bind(bindings as any);
           const rows: Record<string, unknown>[] = [];
+          let columns: string[] | undefined;
           while (stmt.step()) {
-            rows.push(stmt.getAsObject());
+            // Not `getAsObject()`: its text decode stops at U+0000 and drops a
+            // leading U+FEFF (see `sqljs-exact-text.ts`).
+            columns ??= stmt.getColumnNames();
+            rows.push(readExactRow(stmt, columns));
           }
           obj.response = rows;
         } finally {
@@ -266,7 +275,7 @@ export function getClient_WasmSqlite(): any {
       } else {
         // Row-less write path: execute via `run` and capture SQLite's
         // per-connection lastID / changes counters.
-        db.run(obj.sql, bindings as any);
+        db.run(sql, bindings as any);
         const changes = db.getRowsModified();
         let lastID: number | bigint = 0;
         if (obj.method === 'insert') {

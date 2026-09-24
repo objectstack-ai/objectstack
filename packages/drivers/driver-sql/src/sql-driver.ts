@@ -11308,8 +11308,8 @@ export class SqlDriver implements IDataDriver {
    * the page read and the write is never overwritten. A page's writes commit as
    * one transaction. Because the new text is a function of the old text alone,
    * the compare-and-set also withholds, in the safe direction, a cell whose
-   * stored bytes the engine does not read back verbatim (sql.js drops an
-   * embedded NUL and a leading U+FEFF; any engine replaces invalid UTF-8): its
+   * stored bytes the engine does not read back verbatim (better-sqlite3 and
+   * sql.js, the engines measured, read invalid UTF-8 back as U+FFFD): its
    * bytes are not what was read, so it is not written, and it keeps reading as
    * it did. On better-sqlite3 every other text round-trips byte-for-byte, and
    * `JSON.stringify` of it is byte-identical to the `json_quote()` this method
