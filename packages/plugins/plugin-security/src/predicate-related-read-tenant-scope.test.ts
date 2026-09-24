@@ -21,7 +21,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { SysUser } from '@objectstack/platform-objects/identity';
 import { SecurityPlugin } from './security-plugin.js';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 const RULE_MESSAGE = 'Inspections on a secret line are frozen.';
 
@@ -65,7 +67,26 @@ const OBJECTS = [
       message: RULE_MESSAGE, condition: "record.line.kind == 'secret'",
     }],
   },
+  SysUser,
+  {
+    // A rule reading through a `user` field into `sys_user`, which has no tenant column.
+    name: 'qa_review',
+    label: 'Review',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      name: { name: 'name', type: 'text' },
+      reviewer: { name: 'reviewer', type: 'user' },
+    },
+    validations: [{
+      name: 'no_banned_reviewer', type: 'script', severity: 'error',
+      message: RULE_MESSAGE, condition: 'record.reviewer.banned == true',
+    }],
+  },
 ];
+
+/** The shipped `sys_user` wall: `member_default`'s grant and row-level security. */
+const SHIPPED_MEMBER = defaultPermissionSets.find((s) => s.name === 'member_default')!;
 
 const MEMBER: PermissionSet = {
   name: 'member_default',
@@ -74,7 +95,10 @@ const MEMBER: PermissionSet = {
     qa_inspection: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_note: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_line: { allowRead: true },
+    qa_review: { allowRead: true, allowCreate: true, allowEdit: true },
+    sys_user: SHIPPED_MEMBER.objects.sys_user,
   },
+  rowLevelSecurity: SHIPPED_MEMBER.rowLevelSecurity?.filter((p) => p.object === 'sys_user'),
 } as unknown as PermissionSet;
 
 /** The driver's own query builder, reached past its `protected` modifier. */
@@ -136,18 +160,26 @@ async function boot(kind: 'secret' | 'public', posture?: 'group' | 'isolated') {
     { id: 'line_x', kind: 'secret', organization_id: 'org_x' },
     { id: 'line_y', kind, organization_id: 'org_y' },
   ]);
+  // The caller u_x and its peer u_x2 (org X); u_y belongs to org Y only.
+  await table('sys_user').insert([
+    { id: 'u_x', name: 'X', email: 'x@x.test', banned: false },
+    { id: 'u_x2', name: 'X2', email: 'x2@x.test', banned: true },
+    { id: 'u_y', name: 'Y', email: 'y@y.test', banned: kind === 'secret' },
+  ]);
 
   // What the driver hands back for every read of the related object.
   const readsOfLine: unknown[][] = [];
+  const userColumnsRead: unknown[] = [];
   const find = driver.find.bind(driver);
   vi.spyOn(driver, 'find').mockImplementation(async (object, ast, options) => {
     const rows = await find(object, ast, options);
     if (object === 'qa_line') readsOfLine.push(rows as unknown[]);
+    if (object === 'sys_user') userColumnsRead.push(...((ast as { fields?: unknown[] }).fields ?? ['*']));
     return rows;
   });
 
   const stored = async (object: string, name: string) => (await table(object).where({ name }).select('id')).length;
-  return { engine, readsOfLine, stored, table };
+  return { engine, readsOfLine, userColumnsRead, stored, table };
 }
 
 /** Everything the caller sees of one write and one preview naming `line`. */
@@ -156,18 +188,19 @@ async function observe(
   posture?: 'group' | 'isolated', object = 'qa_inspection',
 ) {
   const h = await boot(kind, posture);
+  const ref = object === 'qa_review' ? 'reviewer' : 'line';
   const refusal = await h.engine
-    .insert(object, { name: 'probe', line }, { context: caller } as never)
+    .insert(object, { name: 'probe', [ref]: line }, { context: caller } as never)
     .then(() => null, (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }));
   const preview = await h.engine.validate(
-    object, { name: 'probe', line }, { mode: 'insert', context: caller } as never,
+    object, { name: 'probe', [ref]: line }, { mode: 'insert', context: caller } as never,
   );
   // Given a posture, the by-id UPDATE door too: a seeded row the caller may edit, repointed at `line`.
   let update: unknown;
   if (posture) {
-    await h.table(object).insert([{ id: 'row_x', name: 'seed', ...(object === 'qa_inspection' ? { organization_id: 'org_x' } : {}) }]);
+    await h.table(object).insert([{ id: 'row_x', name: 'seed', ...(object !== 'qa_note' ? { organization_id: 'org_x' } : {}) }]);
     update = await h.engine
-      .update(object, { line }, { where: { id: 'row_x' }, context: caller } as never)
+      .update(object, { [ref]: line }, { where: { id: 'row_x' }, context: caller } as never)
       .then(() => 'committed', (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }));
   }
   return {
@@ -178,6 +211,7 @@ async function observe(
       update,
     },
     readsOfLine: h.readsOfLine,
+    userColumnsRead: h.userColumnsRead,
   };
 }
 
@@ -263,5 +297,49 @@ describe('#18682 — under `isolated`, an org-less writer of an unwalled object 
     expect(own.seen.preview).toEqual({ valid: false, errors: [RULE_MESSAGE] });
     expect(own.seen.update).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
     expect(own.readsOfLine.map((rows) => rows.length)).toEqual([1, 1, 1]);
+  });
+});
+
+/**
+ * `sys_user` has no tenant column, so no organization wall scopes the related
+ * read; its own wall is the shipped `member_default` row-level security. A user
+ * the caller's own read of `sys_user` does not return is NOT READABLE: the rule
+ * faults loudly, is never evaluated on that user, and never reads its columns.
+ */
+describe('#18682 — a related user the caller cannot read makes the rule fault loudly', () => {
+  const PEERS = { ...CALLER, org_user_ids: ['u_x', 'u_x2'] };
+  const NOT_READABLE = "could not read 'sys_user'";
+
+  it('CONTROL: the caller’s own read of sys_user returns org X’s users, never org Y’s', async () => {
+    const h = await boot('secret', 'isolated');
+    const own = await h.engine.find('sys_user', { where: { id: { $in: ['u_x2', 'u_y'] } }, context: PEERS } as never);
+
+    expect((own as Array<{ id: string }>).map((row) => row.id)).toEqual(['u_x2']);
+  });
+
+  it('a user only org Y holds: every door refuses identically, whatever that user’s value', async () => {
+    const banned = await observe('secret', 'u_y', PEERS, 'isolated', 'qa_review');
+    const clear = await observe('public', 'u_y', PEERS, 'isolated', 'qa_review');
+
+    expect(clear.seen).toEqual(banned.seen);
+    for (const door of [banned.seen.refusal, banned.seen.update]) {
+      expect(door).toMatchObject({ code: 'VALIDATION_FAILED', message: expect.stringContaining(NOT_READABLE) });
+    }
+    expect(banned.seen.committed).toBe(0);
+    expect(banned.seen.preview).toEqual({ valid: false, errors: [expect.stringContaining(NOT_READABLE)] });
+    expect(banned.userColumnsRead).not.toContain('banned');
+  });
+
+  it('CONTROL: a user in org X — the rule evaluates on every door, in both directions', async () => {
+    const peer = await observe('public', 'u_x2', PEERS, 'isolated', 'qa_review');
+    const self = await observe('public', 'u_x', PEERS, 'isolated', 'qa_review');
+
+    expect(peer.seen.refusal).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
+    expect(peer.seen.preview).toEqual({ valid: false, errors: [RULE_MESSAGE] });
+    expect(peer.seen.update).toEqual({ code: 'VALIDATION_FAILED', message: RULE_MESSAGE });
+    expect(peer.userColumnsRead).toContain('banned');
+    expect(self.seen).toEqual({
+      refusal: null, committed: 1, preview: { valid: true, errors: [] }, update: 'committed',
+    });
   });
 });

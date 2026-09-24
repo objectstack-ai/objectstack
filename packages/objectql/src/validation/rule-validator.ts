@@ -543,7 +543,7 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
 export type RelatedUnavailableReason =
   /** The record stores no reference — the FK is null/empty, so there is no row. */
   | 'no-reference'
-  /** The related read failed outright. */
+  /** The related read failed, or — for a related object no organization wall scopes — the caller's own read does not return the row. */
   | 'unreadable'
   /**
    * The predicate names a column the RELATED object does not declare. A real
@@ -3343,7 +3343,7 @@ function traversalRefusal(
       return {
         summary: `could not read '${binding.object}'`,
         detail:
-          ` The rule reads ${columns} through ${on}, and that read failed. The rule has no`
+          ` The rule reads ${columns} through ${on}, and that row could not be read. The rule has no`
           + ' verdict, so the write is rejected rather than allowed on an unchecked rule.',
       };
   }

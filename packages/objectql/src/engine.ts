@@ -7274,12 +7274,13 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * What bounds the elevation is the PROJECTION: only the
    * columns the predicate names, intersected with the related object's declared
-   * fields. ⛔ Never the whole row.
+   * fields. ⛔ Never the whole row. On a related object no organization wall
+   * scopes, a user caller's own read of it also bounds the ROWS.
    *
    * ## An unresolved row is left UNAVAILABLE, and it says which kind
    *
    * No reference stored, the related record not found, the related object
-   * declares no such column, or the read failed: each is its own reason, and
+   * declares no such column, or the row could not be read: each is its own reason, and
    * {@link checkPredicate} turns it into a refusal naming the related object and
    * column. The write is REJECTED rather than judged on a rule that produced no
    * verdict. ⛔ Never silently true, and never silently false.
@@ -7322,6 +7323,8 @@ export class ObjectQL implements IObjectQLEngine {
       undeclared?: string[];
       /** Set when the read itself failed, whatever the id. */
       blocked?: boolean;
+      /** The ids the caller's OWN read returned, when that read decides (below). */
+      ownRead?: ReadonlySet<string>;
     };
     const resolved = new Map<string, Resolved>();
 
@@ -7336,7 +7339,7 @@ export class ObjectQL implements IObjectQLEngine {
       // object does not declare must not put that name into a system-authority
       // query: the read is elevated. An undeclared name is also a real
       // authoring fault and is reported as one rather than silently dropped.
-      const targetSchema = this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined;
+      const targetSchema = this._registry.getObject(target) as { fields?: Record<string, unknown>; external?: unknown } | undefined;
       const declared = targetSchema?.fields;
       // [#8215] The PRIMARY KEY is declared by the platform, not by the author,
       // so it is absent from every object's field map — the map carries the
@@ -7387,8 +7390,21 @@ export class ObjectQL implements IObjectQLEngine {
         // The value itself never appears — not in the row handed to CEL beyond
         // the predicate's own use of it, and not in the refusal text, which
         // names the field and the rule and never the value.
+        //
+        // ⛔ No organization wall scopes a related object with no tenant column
+        // (e.g. `sys_user`), `tenancy.enabled: false` or `external`, so for a
+        // USER caller its rows are the ones the caller's OWN read returns, through
+        // every enforcement layer; any other id is 'unreadable', stored or not.
+        let ownRead: Set<string> | undefined;
+        if (caller?.userId && (targetSchema?.external != null || resolveTenantFieldName(targetSchema) === null)) {
+          const own = await this.find(target, {
+            where: { id: { $in: [...ids] } }, fields: ['id'], context: caller as EngineQueryOptions['context'],
+          }) as Array<Record<string, unknown>>;
+          ownRead = new Set((Array.isArray(own) ? own : []).flatMap((r) => (r?.id == null ? [] : [String(r.id)])));
+          if (ownRead.size === 0) { resolved.set(fk, { object: target, byId: new Map(), ownRead }); continue; }
+        }
         const query: EngineQueryOptions = {
-          where: { id: { $in: [...ids] } },
+          where: { id: { $in: [...(ownRead ?? ids)] } },
           fields: [...new Set(['id', ...named])],
           context: { ...(context as Record<string, unknown> ?? {}), isSystem: true } as EngineQueryOptions['context'],
         };
@@ -7406,7 +7422,7 @@ export class ObjectQL implements IObjectQLEngine {
           for (const name of named) if (!(name in copy)) copy[name] = null;
           byId.set(String(row.id), copy);
         }
-        resolved.set(fk, { object: target, byId });
+        resolved.set(fk, { object: target, byId, ownRead });
       } catch (err) {
         this.logger?.warn?.('predicate relationship read failed — the rule will reject the write', {
           object: target, field: fk, error: err,
@@ -7433,7 +7449,7 @@ export class ObjectQL implements IObjectQLEngine {
         const found = entry.byId.get(String(value));
         binding[fk] = found
           ? { object: entry.object, row: found }
-          : { object: entry.object, unavailable: 'unresolved' };
+          : { object: entry.object, unavailable: entry.ownRead ? 'unreadable' : 'unresolved' };
       }
       return binding;
     };
