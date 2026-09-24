@@ -464,6 +464,11 @@ import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 // The human-merge line threshold is declared ONCE, in the landing gate; this
 // tool prints the same reading at dispatch time and never carries a second copy.
 import { HUMAN_MERGE_LINE_THRESHOLD, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
+// The test-file predicate the clause-② suspect table EXCEPTS by, read from the
+// gate whose whole question is which files under a package's `src/` are
+// published source and which are its tests — never respelled here (#19936). See
+// SUSPECT_TIER_GLOBS for why this predicate and not one of the repo's others.
+import { isTestPath } from '../check-undeclared-dep-imports.mjs';
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
 // runs, not copies of them. They used to be written twice — see the shared
@@ -12347,9 +12352,10 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
- *     SUSPECT_TIER_GLOBS below marks the contract surface itself, and `--tier`
- *     prints a hint for it — never a verdict. The enforcement lives one step
- *     later, in the PM skill's enqueue gate over the PR's ACTUAL diff.
+ *     SUSPECT_TIER_GLOBS below marks the contract surface itself — its test
+ *     files excepted, because tests do not ship — and `--tier` prints a hint
+ *     for it — never a verdict. The enforcement lives one step later, in the
+ *     PM skill's enqueue gate over the PR's ACTUAL diff.
  *
  * A path derivation that pretended to cover clause ② would produce the failure
  * this whole file is written against, one level up: a "no mandate" line read as
@@ -12476,11 +12482,48 @@ export const MANDATORY_TIER_GLOBS = [
  * enqueue gate before the card may enqueue — the diff is a fact; the card's
  * semantics were a prediction. The gate itself lives in the PM skill
  * (入队与落地); this output only points at it.
+ *
+ * ## Test files are EXCEPTED, by a predicate this file imports (#19936)
+ *
+ * The enqueue gate's path limb reads this surface, and the review rule it
+ * guards (the skill's contract-review reference) owes an at-tier review for
+ * `packages/spec/src/**` NON-TEST files only. Without an exception the two
+ * disagreed on a test-only diff: the limb demanded an at-tier record that the
+ * review rule forbade spawning an agent to write, so an off-tier seat's
+ * test-only spec PR could never enqueue. The maintainer's ruling (director
+ * batch #219 item 1, letter A, comment 5805897677) settled it toward the review
+ * rule: a published-contract change owes the record; a test-only change does
+ * not, because tests do not ship.
+ *
+ * So an entry may carry `except`, a predicate over a path its glob covers, and
+ * `deriveTier` drops a path it answers true for BEFORE recording a suspicion.
+ * The predicate is `isTestPath`, imported from `check-undeclared-dep-imports.mjs`
+ * and never respelled, as the ruling orders ("the repo's own test-file
+ * predicate, not a new spelling"). Chosen over the repo's other test predicates
+ * on measurement, not taste: that gate's own question is which files under a
+ * package's `src/` are published source and which are its tests — the ruling's
+ * question exactly; it covers the four shapes the ruling names (`*.test.ts`,
+ * `*.pin.test.ts`, anything under `__tests__/`, fixtures under a test
+ * directory); and it excepts no directory word a contract domain carries. A
+ * census predicate that treats `qa/` as a test directory would drop
+ * `packages/spec/src/qa/testing.zod.ts`, a real contract schema — pinned.
+ *
+ * A subtraction fails SILENT, so this one is held live: the self-test reds if
+ * the exception drops any tracked `*.zod.ts` (the package's `files[]` ships
+ * every `*.zod.ts` under `src/` verbatim), and if the predicate stops being
+ * the imported one. The call hands it the repo-relative path although it was
+ * written for package-relative ones; for this glob that is exact, because no
+ * segment of `packages/spec/src/` is a test-directory name. ⛔ The exception
+ * narrows the SUSPICION only: MANDATORY_TIER_GLOBS carries none, and an input
+ * that CONTAINS the contract surface (a directory surface such as
+ * `packages/spec`) is still a suspect, since the predicate answers no for it.
  */
 export const SUSPECT_TIER_GLOBS = [
   {
     glob: 'packages/spec/src/**',
     why: 'the contract surface (error-code ledger, *.zod.ts contract schemas) — the normal landing zone of a clause-② card',
+    except: isTestPath,
+    exceptWhy: 'a test file ships nothing, so a test-only diff changes no published contract and owes no at-tier record (the review rule already reads non-test files only)',
   },
 ];
 
@@ -12548,6 +12591,10 @@ export const RETIRED_TIER_WORDS = Object.freeze([]);
  * Throws when two globs covering the same surface mandate DIFFERENT tiers:
  * this file encodes no ordering over tiers, so choosing between them would be a
  * guess printed as a derivation.
+ *
+ * A suspect glob's `except` is applied per PATH, before the suspicion is
+ * recorded (SUSPECT_TIER_GLOBS says why test files are excepted): a mixed diff
+ * keeps every non-excepted path's suspicion, and a mandate is never excepted.
  */
 export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = SUSPECT_TIER_GLOBS) {
   const hits = [];
@@ -12557,7 +12604,9 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = S
       if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why, oneLineExit: g.oneLineExit !== false });
     }
     for (const g of suspectGlobs) {
-      if (hintCovers(g.glob, p)) suspects.push({ path: p, glob: g.glob, why: g.why });
+      if (hintCovers(g.glob, p) && !(typeof g.except === 'function' && g.except(p))) {
+        suspects.push({ path: p, glob: g.glob, why: g.why });
+      }
     }
   }
   const tiers = [...new Set(hits.map((h) => h.tier))];
