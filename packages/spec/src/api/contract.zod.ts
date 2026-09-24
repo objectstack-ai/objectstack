@@ -5,6 +5,7 @@ import { QuerySchema } from '../data/query.zod';
 import { DurationMs } from '../shared/duration.zod';
 import { ErrorCode } from './error-code-ledger.zod';
 import { StandardErrorCode } from './errors.zod';
+import { retiredStandardErrorCodeMessage } from './retired-error-codes';
 
 // ==========================================
 // 1. Base Envelopes
@@ -281,7 +282,9 @@ export const ApiErrorSchema = lazySchema(() => z.object({
 export function makeApiErrorSchema<const TExtra extends readonly string[]>(extraCodes: TExtra) {
   const vocabulary: string[] = [...StandardErrorCode.options, ...extraCodes];
   return ApiErrorSchema.extend({
-    code: (z.enum(vocabulary as [string, ...string[]]) as z.ZodType<StandardErrorCode | TExtra[number]>)
+    // The retired-spelling prescription rides this door too: `.options` above
+    // carries the catalogue's members, not its error map (`retired-error-codes.ts`).
+    code: (z.enum(vocabulary as [string, ...string[]], { error: retiredStandardErrorCodeMessage }) as z.ZodType<StandardErrorCode | TExtra[number]>)
       .describe('Error code (StandardErrorCode ∪ the ledger this consumer registered)'),
   });
 }

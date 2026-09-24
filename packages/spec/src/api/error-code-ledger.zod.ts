@@ -185,6 +185,7 @@
 
 import { z } from 'zod';
 import { StandardErrorCode, HttpStatusErrorCodeMap } from './errors.zod';
+import { retiredStandardErrorCodeMessage } from './retired-error-codes';
 
 export const ERROR_CODE_LEDGER = {
   '@objectstack/rest': [
@@ -1379,7 +1380,11 @@ export const REGISTERED_ERROR_CODES: readonly RegisteredErrorCode[] = Object.fre
  * failure, not a new dialect.
  */
 export const ErrorCode = z.enum(
-  [...StandardErrorCode.options, ...REGISTERED_ERROR_CODES] as [string, ...string[]]
+  [...StandardErrorCode.options, ...REGISTERED_ERROR_CODES] as [string, ...string[]],
+  // `.options` carries the catalogue's members, not its error map — so a retired
+  // standard spelling would answer here with zod's bare enum message unless this
+  // door passes the same prescription (`retired-error-codes.ts`).
+  { error: retiredStandardErrorCodeMessage },
 ) as z.ZodType<StandardErrorCode | RegisteredErrorCode>;
 
 export type ErrorCode = StandardErrorCode | RegisteredErrorCode;
