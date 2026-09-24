@@ -79,7 +79,7 @@
 import type { Knex } from 'knex';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { dialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -140,6 +140,16 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
     if (!err) throw new Error(`expected the driver to refuse ${JSON.stringify(where)}, but it compiled`);
     return err;
   };
+
+  /**
+   * [#20020] The caller's own predicate, marked as a read-scope merge boundary
+   * marks it — on a shallow COPY, so a shared case constant is never marked.
+   * The retired-operator refusal names the operator and its replacement only
+   * for a predicate the caller is known to have written (the #8220 contract);
+   * the withheld wording is pinned in `sql-driver-refusal-door-provenance.test.ts`.
+   */
+  const authored = (where: FilterCondition): FilterCondition =>
+    markFilterSubtreeProvenance({ ...where }, 'author');
 
   it('seeded the fixture (the premise)', async () => {
     expect(await ids({})).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
@@ -232,7 +242,7 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
     ],
   ] as const) {
     it(`REFUSES ${label}, naming the replacement`, async () => {
-      const err = await refusalOf(where);
+      const err = await refusalOf(authored(where));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('RETIRED');
@@ -339,7 +349,7 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
     for (const testCase of FILTER_TEXT_CASES) {
       it(testCase.name, async () => {
         if (testCase.expectRejection) {
-          const err = await refusalOf(testCase.filter);
+          const err = await refusalOf(authored(testCase.filter));
           expect(err.code).toBe(testCase.code);
           expect(err.status).toBe(400);
           for (const mention of testCase.mustMention) expect(err.message).toContain(mention);
