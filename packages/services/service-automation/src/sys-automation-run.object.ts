@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * sys_automation_run — Durable state of a **suspended** automation flow run.
@@ -67,8 +68,14 @@ export const SysAutomationRun = ObjectSchema.create({
     },
   },
   description: 'Durable automation run state: live suspended runs (resumable, ADR-0019) and terminal run history (completed / failed / cancelled / timed_out / refused, for observability).',
-  displayNameField: 'id',
-  nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. The pointer used to be `id`: once a
+  // renderer honours ADR-0079's order (an explicit `nameField` wins over
+  // `titleFormat`), that made the record page's H1 the raw run id.
+  // `titleFormat` stays for renderers that still read it first;
+  // `sys-automation-run-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{flow_name} · {node_id}',
   // `selected_count`/`acted_count` sit in the highlight set on purpose (#4354):
   // "selected 30, acted 0" has to be visible on the run row itself, not one
@@ -77,6 +84,17 @@ export const SysAutomationRun = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'Run ID', required: true, readonly: true, group: 'System' }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. `node_id` is nullable, so a row without
+    // one is titled by its flow alone rather than failing to evaluate.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.node_id != null ? record.flow_name + ' · ' + record.node_id : record.flow_name`,
+      description: 'Record title: the flow and, when recorded, its node (computed on read)',
+      group: 'Identity',
+    }),
 
     // [#10101, the cloud#1395 Option A ruling] The SUBJECT record's
     // organization, with the acting context as fallback — resolved by the
@@ -249,10 +267,11 @@ export const SysAutomationRun = ObjectSchema.create({
     //    contract (`class: 'telemetry'`, 30d sweep scoped to
     //    completed/failed), so seeded run history deletes itself on the first
     //    Reaper pass that reaches its age.
-    //  - the row has no natural key to be addressed BY: `nameField: 'id'`,
-    //    the id is the engine's raw `runId`, and the object declares no `name`
-    //    field at all — the seed loader's default externalId does not exist
-    //    here.
+    //  - the row has no natural key to be addressed BY: the id is the
+    //    engine's raw `runId`, the title (`nameField: 'display_title'`) is a
+    //    formula with no stored column to match against, and the object
+    //    declares no `name` field at all — the seed loader's default
+    //    externalId does not exist here.
     // Declaring would therefore not make a real corpus resolvable; it would
     // advertise run rows as authorable seed content — precisely the wrong
     // signal for a metadata author (human or AI) reading the declaration as
