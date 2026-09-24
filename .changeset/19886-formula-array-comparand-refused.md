@@ -15,7 +15,7 @@ Clause-②: no (narrowing)
 - a `check` written `record.status != ['closed', 'archived']`, or `!=` against a `current_user` membership array, lowered to `{ status: { $ne: [...] } }` and matched **every** post-image;
 - a `check` written `!(record.status == ['closed', 'archived'])` lowered to `{ $not: { status: [...] } }` and did the same.
 
-Every write such a policy was written to refuse was admitted and stored. Both shapes now fail the write. The positive `record.status == ['open', 'pending']` already refused every write (403).
+Every write such a policy was written to refuse was admitted and stored. The positive `record.status == ['open', 'pending']` already refused every write (403).
 
 The message withholds the field, the operator and the value, because the filter is usually an access policy the caller did not write, and the comparand may be a resolved membership set.
 

@@ -11603,9 +11603,7 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Grep the rowLevelSecurity check and using predicates of your permission sets for != or == '
         + 'whose right-hand side is a list literal or a current_user membership array, and for the '
-        + 'negation of such an ==, then rewrite each with in or !(... in ...). A check that still '
-        + 'carries the shape refuses every write it governs, allowed '
-        + 'values included, so one allowed write under each policy finds every such check left. '
+        + 'negation of such an ==, then rewrite each with in or !(... in ...). '
         + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
