@@ -25619,6 +25619,51 @@ function selfTest() {
   t('a mandated surface still prints its suspect paths — the enqueue gate reads diffs, not dispatch tiers', mandatedAndSuspect.mandatory && mandatedAndSuspect.suspects.length === 1 && tierLines(mandatedAndSuspect).join('\n').includes('SUSPECT'));
   t('a verdict built without a suspects field still renders (suspicion defaults empty)', tierLines({ mandatory: false, tier: null, hits: [], declared: 1 }).length === 3);
 
+  // ── Test files under the contract surface are EXCEPTED (#19936) ──────────
+  //
+  // The path limb must read what the review rule reads — non-test contract
+  // files — or a test-only spec PR from an off-tier seat can never enqueue.
+  // Ruling 5805897677 (letter A) names the pins: a test-only spec diff shows
+  // no SUSPECT line, a `*.zod.ts` diff still does, and PR #19932's one file is
+  // the lit case. The shapes are the four the ruling lists; the paths are
+  // judged by the pure function, so a hypothetical one decides as well as a
+  // tracked one does.
+  const LIT_TEST_ONLY = 'packages/spec/src/type-alias-convention.pin.test.ts';
+  const litTestOnly = fableOf([LIT_TEST_ONLY]);
+  const litRendered = tierLines(litTestOnly).join('\n');
+  t('⭐ the lit case — a test-only spec diff, PR #19932\'s one file — raises NO suspicion', litTestOnly.suspects.length === 0 && !litTestOnly.mandatory, litTestOnly.suspects);
+  t('…renders no SUSPECT line, and still prints the clause-② note, so the silence is not a clearance', !litRendered.includes('SUSPECT') && litRendered.includes('Clause ② is NOT reachable from paths'), litRendered);
+  const zodStill = fableOf(['packages/spec/src/ui/view.zod.ts']);
+  t('⭐ a *.zod.ts contract schema is STILL a suspect and still renders the SUSPECT line', zodStill.suspects.length === 1 && tierLines(zodStill).join('\n').includes('SUSPECT'));
+  for (const [shape, path] of [
+    ['a plain *.test.ts', 'packages/spec/src/stack.test.ts'],
+    ['a *.pin.test.ts', LIT_TEST_ONLY],
+    ['a helper under __tests__/', 'packages/spec/src/data/__tests__/filter-helpers.ts'],
+    ['a fixture under a __tests__/ directory', 'packages/spec/src/data/__tests__/fixtures/filter.fixture.json'],
+    ['a fixture under a test/ directory', 'packages/spec/src/ui/test/fixtures/view-fixture.ts'],
+  ]) {
+    t(`${shape} on the contract surface is excepted — no suspicion`, fableOf([path]).suspects.length === 0, path);
+  }
+  const mixedDiff = fableOf([LIT_TEST_ONLY, 'packages/spec/src/ui/view.zod.ts']);
+  t('a MIXED diff keeps its contract file\'s suspicion — the exception is per path, never per diff', mixedDiff.suspects.length === 1 && mixedDiff.suspects[0].path === 'packages/spec/src/ui/view.zod.ts', mixedDiff.suspects);
+  t('⛔ a contract domain whose NAME reads test-flavoured is no test: qa/testing.zod.ts stays a suspect', fableOf(['packages/spec/src/qa/testing.zod.ts']).suspects.length === 1);
+  t('…while the test file beside it is excepted', fableOf(['packages/spec/src/qa/testing.test.ts']).suspects.length === 0);
+  t('an input that CONTAINS the contract surface is still a suspect — the exception narrows files, never the reverse match', fableOf(['packages/spec']).suspects.length === 1);
+  t('a mandate is never excepted: a test-named file under a mandated root keeps its mandate', fableOf(['skills/objectstack-data/x.test.ts']).mandatory === true);
+  const contractEntry = SUSPECT_TIER_GLOBS.find((g) => g.glob === 'packages/spec/src/**');
+  t('the exception is the IMPORTED test-file predicate — the repo\'s own, never a respelling here', contractEntry?.except === isTestPath);
+  t('…whose home is a gate script, so a card editing it derives this gate by gate-script identity', isGateScriptPath('scripts/check-undeclared-dep-imports.mjs', gateFamilyFiles()));
+  t('every suspect entry that excepts carries a predicate and the reason for it', SUSPECT_TIER_GLOBS.every((g) => g.except === undefined || (typeof g.except === 'function' && typeof g.exceptWhy === 'string' && g.exceptWhy.length > 0)));
+  // The subtraction held LIVE, because a subtraction fails silent: the
+  // package's files[] ships every `*.zod.ts` under `src/` verbatim, so an
+  // exception that dropped one would take a shipped contract off the limb.
+  const specSrcTracked = trackedFiles().filter((f) => f.startsWith('packages/spec/src/'));
+  const specSrcZod = specSrcTracked.filter((f) => f.endsWith('.zod.ts'));
+  const exceptedZod = specSrcZod.filter((f) => fableOf([f]).suspects.length === 0);
+  t(`no tracked *.zod.ts on the contract surface is excepted (${specSrcZod.length} read; excepted: ${exceptedZod.join(', ') || 'none'})`, specSrcZod.length > 0 && exceptedZod.length === 0);
+  const exceptedTracked = specSrcTracked.filter((f) => fableOf([f]).suspects.length === 0);
+  t('the exception is live, not vacuous: it drops tracked test files on this tree, and only what the predicate names', exceptedTracked.length > 0 && exceptedTracked.every((f) => isTestPath(f)), `${exceptedTracked.length} of ${specSrcTracked.length}`);
+
   // ── The changed-line reading beside the tier verdict (2026-09-18 ruling) ──
   const overLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 }).join('\n');
   t('over the threshold, the line says HUMAN MERGE, names the governed terminal and the landing pre-check',
@@ -26556,6 +26601,14 @@ function selfTest() {
   t('⭐ a second catalog SKILL.md prints the same mandate', catalogAiCli.status === 0 && (catalogAiCli.stdout ?? '').includes('MANDATORY') && (catalogAiCli.stdout ?? '').includes("'skills/**'"));
   const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/state-machine.md']);
   t('⭐ --tier on an internal pm-dispatch references file still prints NO mandate', internalRefsCli.status === 0 && (internalRefsCli.stdout ?? '').includes('no path-derived mandate') && !(internalRefsCli.stdout ?? '').includes('MANDATORY'));
+  // The clause-② test exception on the real CLI (#19936): the ruling's pins are
+  // on `--tier` OUTPUT, so both acceptance paths are measured end to end. The
+  // lit case goes through the asserted helper, so a later rename of that file
+  // leaves the pin deciding rather than refusing as an absent path.
+  const litTierCli = runCliHypothetical(['--tier', 'packages/spec/src/type-alias-convention.pin.test.ts']);
+  t('⭐ --tier on the lit case (a test-only spec diff) derives, and prints NO SUSPECT line', litTierCli.status === 0 && (litTierCli.stdout ?? '').includes('no path-derived mandate') && !(litTierCli.stdout ?? '').includes('SUSPECT'), litTierCli.stdout);
+  const zodTierCli = runCliHypothetical(['--tier', 'packages/spec/src/ui/view.zod.ts']);
+  t('⭐ --tier on a *.zod.ts contract schema still prints the SUSPECT line naming it', zodTierCli.status === 0 && (zodTierCli.stdout ?? '').includes('SUSPECT') && (zodTierCli.stdout ?? '').includes('packages/spec/src/ui/view.zod.ts'), zodTierCli.stdout);
 
   // ── The entry guard (#9757) ───────────────────────────────────────────────
   //
