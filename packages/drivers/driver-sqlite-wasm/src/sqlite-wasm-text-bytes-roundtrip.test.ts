@@ -27,6 +27,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverOptions } from '@objectstack/spec/data';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SqliteWasmDriver } from './index.js';
 import { exactTextBindings, readExactRow } from './sqljs-exact-text.js';
 
@@ -61,8 +62,8 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
     return rows[0].h;
   };
 
-  const labelsWhere = async (where: Record<string, unknown>) => {
-    const rows = (await driver.find(TABLE, { where } as any, BYPASS)) as Array<{ label: string }>;
+  const labelsWhere = async (where: DriverQuery['where']) => {
+    const rows = (await driver.find(TABLE, { where }, BYPASS)) as Array<{ label: string }>;
     return rows.map((r) => r.label).sort();
   };
 
@@ -87,7 +88,7 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
       });
 
       it(`${label}: reads back as the string written`, async () => {
-        const row = (await driver.findOne(TABLE, { where: { label } } as any, BYPASS)) as {
+        const row = (await driver.findOne(TABLE, { where: { label } }, BYPASS)) as {
           v: unknown;
         } | null;
         expect(typeof row?.v).toBe('string');
@@ -100,7 +101,7 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
     it('an update to a value holding U+0000 and a leading U+FEFF stores and reads it whole', async () => {
       const wrote = BOM + 'x' + NUL + 'y' + NUL;
       await driver.create(TABLE, { label: 'upd', v: 'before' }, BYPASS);
-      const [{ id }] = (await driver.find(TABLE, { where: { label: 'upd' } } as any, BYPASS)) as Array<{
+      const [{ id }] = (await driver.find(TABLE, { where: { label: 'upd' } }, BYPASS)) as Array<{
         id: string;
       }>;
       // Removed whatever the verdict: a row left behind would answer the
@@ -109,7 +110,7 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
         const returned = (await driver.update(TABLE, id, { v: wrote }, BYPASS)) as { v: unknown };
         expect(returned.v).toStrictEqual(wrote);
         expect(await storedHex('upd')).toBe(utf8Hex(wrote));
-        const read = (await driver.findOne(TABLE, { where: { label: 'upd' } } as any, BYPASS)) as {
+        const read = (await driver.findOne(TABLE, { where: { label: 'upd' } }, BYPASS)) as {
           v: unknown;
         };
         expect(read.v).toStrictEqual(wrote);
@@ -141,7 +142,7 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
     });
 
     it('$contains U+FEFF selects every row holding one, and reads each back whole', async () => {
-      const rows = (await driver.find(TABLE, { where: { v: { $contains: BOM } } } as any, BYPASS)) as Array<{
+      const rows = (await driver.find(TABLE, { where: { v: { $contains: BOM } } }, BYPASS)) as Array<{
         label: string;
         v: string;
       }>;
@@ -176,7 +177,7 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
     for (const [label, { hex, reads }] of Object.entries(PLANTED)) {
       it(`a stored ${hex} reads back as its exact text`, async () => {
         expect(await storedHex(label)).toBe(hex);
-        const row = (await driver.findOne(TABLE, { where: { label } } as any, BYPASS)) as { v: unknown };
+        const row = (await driver.findOne(TABLE, { where: { label } }, BYPASS)) as { v: unknown };
         expect(row.v).toStrictEqual(reads);
       });
     }
