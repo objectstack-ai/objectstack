@@ -27,10 +27,10 @@ by `registerFlow` and `objectstack validate` through that same parse — with a
 message that leads with the published `PREDICATE_SLOT_STRING_REFUSAL` sentence,
 the one these slots already answered with for a non-string value. Where such a
 value already sits, the whole flow is refused: registered from the metadata
-registry or `sys_metadata` at boot, it is skipped with a `failed to register
-flow` warn naming it while the flows beside it register; a `defineStack({ flows })`
-source throws `StackSchemaInvalidError` for the whole stack; an artifact file is
-refused whole at load.
+registry or `sys_metadata` at boot, it is skipped with a
+`failed to register flow` warn naming it while the flows beside it register; a
+`defineStack({ flows })` source throws `StackSchemaInvalidError` for the whole
+stack; an artifact file is refused whole at load.
 
 ## FROM → TO
 
