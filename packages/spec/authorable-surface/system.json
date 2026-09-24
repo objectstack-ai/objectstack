@@ -1314,7 +1314,6 @@
     "system/TranslationItem:name",
     "system/TranslationItem:objects",
     "system/TranslationItem:pages",
-    "system/TranslationItem:settings",
     "system/TranslationItem:settingsCommon",
     "system/VectorClock:clock",
     "system/WorkerStats:active",
