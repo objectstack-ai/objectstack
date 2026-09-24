@@ -40,20 +40,26 @@
  *   absence is refused loudly rather than read around.
  * - **Write** ({@link exactTextBindings}): a string that holds U+0000 — the
  *   only text the `-1` bind truncates — is bound as its UTF-8 bytes, which
- *   sql.js binds as a BLOB with an explicit length, and its placeholder is
- *   rewritten to `+CAST(? AS TEXT)`, so SQLite turns those bytes back into a
- *   TEXT value unchanged. The unary `+` matters: `CAST(… AS TEXT)` alone
- *   carries TEXT affinity and changes a comparison a bare bound text does not
- *   (`5 < ' x'` is 1 bound, 0 through a bare CAST); `+CAST(…)` has no affinity,
- *   like the bound text it stands in for. Every other binding, and every
- *   statement that binds no such string, is left exactly as it was.
+ *   sql.js binds as a BLOB with an explicit length, and every parameter that
+ *   receives it is wrapped as `+CAST(<parameter> AS TEXT)`, so SQLite turns
+ *   those bytes back into a TEXT value unchanged. The unary `+` matters:
+ *   `CAST(… AS TEXT)` alone carries TEXT affinity and changes a comparison a
+ *   bare bound text does not (`5 < ' x'` is 1 bound, 0 through a bare CAST);
+ *   `+CAST(…)` has no affinity, like the bound text it stands in for. Every
+ *   other binding, and every statement that binds no such string, is left
+ *   exactly as it was.
  *
- * The rewrite needs the positional `?` a binding belongs to, so it reads the
- * statement with SQLite's own tokenizer rules (quoted strings and identifiers,
- * comments). When it cannot match placeholders to bindings one-for-one, it
- * refuses the statement ({@link cannotPlaceExactTextError}) instead of guessing
- * — a value bound to the wrong placeholder would be a worse defect than the
- * truncation it replaces.
+ * ## Which parameter receives which binding
+ *
+ * sql.js binds an array positionally: `bindings[i]` goes to parameter index
+ * `i + 1`. Which tokens carry that index is SQLite's rule, applied here as
+ * SQLite applies it: a bare `?` takes the largest index so far plus one; `?NNN`
+ * takes `NNN` (and raises the largest to it); a named parameter (`:name`,
+ * `@name`, `#name`, `$name`) takes the index of its first occurrence, or the
+ * largest plus one when new. Tokens inside quoted strings and identifiers and
+ * inside comments are not parameters. Wrapping a parameter in `+CAST(… AS
+ * TEXT)` adds and removes no parameter token, so every index — the wrapped
+ * ones' and all the others' — is the one SQLite assigned before the rewrite.
  */
 
 import type { Statement } from 'sql.js';
@@ -63,9 +69,6 @@ const NUL = String.fromCharCode(0x00);
 /** UTF-8 in; the leading U+FEFF, when present, is content — never a signature. */
 const EXACT_UTF8_DECODER = new TextDecoder('utf-8', { ignoreBOM: true });
 const UTF8_ENCODER = new TextEncoder();
-
-/** The placeholder a U+0000-bearing text binding is moved into. */
-const EXACT_TEXT_PLACEHOLDER = '+CAST(? AS TEXT)';
 
 /** Decode stored UTF-8 bytes exactly as better-sqlite3 hands them back. */
 export function decodeExactText(bytes: Uint8Array): string {
@@ -110,26 +113,38 @@ function storedBytes(stmt: ExactReadStatement, index: number): Uint8Array {
   return stmt.getBlob(index);
 }
 
-/** The positional parameters of a statement, located by SQLite's tokenizer rules. */
-interface ParameterScan {
-  /** Offsets of every bare `?` outside quotes and comments, in order. */
-  readonly positional: readonly number[];
-  /** A `?NNN`, `:name`, `@name` or `$name` parameter was seen as well. */
-  readonly otherForms: boolean;
+/** One parameter token of a statement, with the index SQLite assigns it. */
+interface ParameterToken {
+  readonly start: number;
+  readonly end: number;
+  /** 1-based, as SQLite numbers parameters and sql.js binds an array. */
+  readonly index: number;
 }
 
+/** SQLite's `IdChar`: ASCII letters and digits, `_`, `$`, and every non-ASCII code unit. */
+const ID_CHAR_RE = /[A-Za-z0-9_$\u0080-￿]/;
 const DIGIT_RE = /[0-9]/;
-const IDENT_CHAR_RE = /[A-Za-z0-9_$]/;
+const WHITESPACE_RE = /\s/;
 
-function scanParameters(sql: string): ParameterScan {
-  const positional: number[] = [];
-  let otherForms = false;
+const isIdChar = (c: string | undefined) => c !== undefined && ID_CHAR_RE.test(c);
+
+/**
+ * Every parameter token in `sql`, numbered by SQLite's rule (see the module
+ * docblock). Mirrors SQLite's tokenizer for the three things that decide it:
+ * quoted strings and identifiers (`'…'`, `"…"`, `` `…` `` with a doubled quote
+ * as an escape, and `[…]`), comments (`--` to end of line, `/* … *\/`), and the
+ * variable forms, including the Tcl `::` and `(…)` suffixes a named parameter
+ * may carry.
+ */
+function scanParameters(sql: string): ParameterToken[] {
+  const tokens: ParameterToken[] = [];
+  const named = new Map<string, number>();
+  let largest = 0;
   const n = sql.length;
   let i = 0;
   while (i < n) {
     const ch = sql[i];
     if (ch === "'" || ch === '"' || ch === '`') {
-      // A quoted string or identifier; a doubled quote is an escaped quote.
       i += 1;
       while (i < n) {
         if (sql[i] === ch) {
@@ -157,42 +172,57 @@ function scanParameters(sql: string): ParameterScan {
       continue;
     }
     if (ch === '?') {
-      if (DIGIT_RE.test(sql[i + 1] ?? '')) otherForms = true;
-      else positional.push(i);
-    } else if (
-      (ch === ':' || ch === '@' || ch === '$') &&
-      IDENT_CHAR_RE.test(sql[i + 1] ?? '') &&
-      !IDENT_CHAR_RE.test(sql[i - 1] ?? '')
-    ) {
-      otherForms = true;
+      let end = i + 1;
+      while (end < n && DIGIT_RE.test(sql[end])) end += 1;
+      let index: number;
+      if (end === i + 1) {
+        largest += 1;
+        index = largest;
+      } else {
+        index = Number(sql.slice(i + 1, end));
+        if (index > largest) largest = index;
+      }
+      tokens.push({ start: i, end, index });
+      i = end;
+      continue;
+    }
+    // `$` is itself an identifier character, so it opens a parameter only where
+    // a token starts; `:`, `@` and `#` never belong to an identifier.
+    if ((ch === ':' || ch === '@' || ch === '#' || ch === '$') && !(ch === '$' && isIdChar(sql[i - 1]))) {
+      let end = i + 1;
+      let nameChars = 0;
+      while (end < n) {
+        const c = sql[end];
+        if (isIdChar(c)) {
+          nameChars += 1;
+          end += 1;
+        } else if (c === '(' && nameChars > 0) {
+          let close = end + 1;
+          while (close < n && !WHITESPACE_RE.test(sql[close]) && sql[close] !== ')') close += 1;
+          end = sql[close] === ')' ? close + 1 : close;
+          break;
+        } else if (c === ':' && sql[end + 1] === ':') {
+          end += 2;
+        } else {
+          break;
+        }
+      }
+      if (nameChars > 0) {
+        const name = sql.slice(i, end);
+        let index = named.get(name);
+        if (index === undefined) {
+          largest += 1;
+          index = largest;
+          named.set(name, index);
+        }
+        tokens.push({ start: i, end, index });
+        i = end;
+        continue;
+      }
     }
     i += 1;
   }
-  return { positional, otherForms };
-}
-
-/**
- * The located refusal for a statement whose placeholders cannot be matched to
- * its bindings while one of them is a text holding U+0000. ADR-0112 envelope:
- * `code` + `status` at the throw site.
- */
-export function cannotPlaceExactTextError(
-  positional: number,
-  bindings: number,
-  otherForms: boolean,
-): Error & { code: string; status: number } {
-  const found =
-    `${positional} positional "?" parameter(s) for ${bindings} binding(s)` +
-    (otherForms ? ', plus a numbered or named parameter' : '');
-  return Object.assign(
-    new Error(
-      `driver-sqlite-wasm cannot write a text value holding U+0000 through this statement: ` +
-        `it binds such a value exactly only through positional "?" parameters matched ` +
-        `one-for-one to the bindings, and this statement has ${found}. The statement was not ` +
-        `run, because sql.js's own text bind would have cut the value at the U+0000.`,
-    ),
-    { code: 'NOT_IMPLEMENTED', status: 501 },
-  );
+  return tokens;
 }
 
 /**
@@ -200,33 +230,33 @@ export function cannotPlaceExactTextError(
  *
  * Returns `sql` and `bindings` unchanged — the same array — when no binding is
  * such a string, which is every statement that does not carry one. Otherwise
- * each such binding becomes its UTF-8 bytes and its `?` becomes
- * `+CAST(? AS TEXT)`; see the module docblock for why that pair is exact.
+ * each such binding becomes its UTF-8 bytes and every parameter token that
+ * receives it becomes `+CAST(<token> AS TEXT)`; see the module docblock for why
+ * that pair is exact and why no other index moves.
+ *
+ * A binding no parameter receives is left as the string it was: sql.js then
+ * answers exactly what it answered before — a range error for an index past
+ * the statement's parameters, nothing at all for an index no token reads.
  */
 export function exactTextBindings(
   sql: string,
   bindings: unknown[],
 ): { sql: string; bindings: unknown[] } {
-  const truncatable: number[] = [];
+  const truncatable = new Set<number>();
   for (let i = 0; i < bindings.length; i += 1) {
     const b = bindings[i];
-    if (typeof b === 'string' && b.includes(NUL)) truncatable.push(i);
+    if (typeof b === 'string' && b.includes(NUL)) truncatable.add(i + 1);
   }
-  if (truncatable.length === 0) return { sql, bindings };
-
-  const scan = scanParameters(sql);
-  if (scan.otherForms || scan.positional.length !== bindings.length) {
-    throw cannotPlaceExactTextError(scan.positional.length, bindings.length, scan.otherForms);
-  }
+  if (truncatable.size === 0) return { sql, bindings };
 
   const rebound = bindings.slice();
   let out = '';
   let from = 0;
-  for (const i of truncatable) {
-    const at = scan.positional[i];
-    out += sql.slice(from, at) + EXACT_TEXT_PLACEHOLDER;
-    from = at + 1;
-    rebound[i] = UTF8_ENCODER.encode(bindings[i] as string);
+  for (const token of scanParameters(sql)) {
+    if (!truncatable.has(token.index)) continue;
+    out += `${sql.slice(from, token.start)}+CAST(${sql.slice(token.start, token.end)} AS TEXT)`;
+    from = token.end;
+    rebound[token.index - 1] = UTF8_ENCODER.encode(bindings[token.index - 1] as string);
   }
   out += sql.slice(from);
   return { sql: out, bindings: rebound };

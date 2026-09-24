@@ -50,11 +50,6 @@ const CASES: Readonly<Record<string, string>> = {
 
 const utf8Hex = (s: string) => Buffer.from(s, 'utf8').toString('hex').toUpperCase();
 
-interface WireBearingError extends Error {
-  code?: string;
-  status?: number;
-}
-
 describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte', () => {
   let driver: SqliteWasmDriver;
 
@@ -206,11 +201,13 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
     });
 
     it('only the NUL-bearing binding is moved, into its own placeholder, past quoted and commented ?', () => {
+      // None of `'it''s ?'`, `` `a?` ``, `[b?]`, `"?"`, the two comments or the
+      // identifier `c$d` holds a parameter, as SQLite tokenizes them.
       const sql =
-        "select '?' as q, `a?` from t /* ? */ where a = ? -- ?\n and b = ? and c = \"?\" and d = ?";
+        "select 'it''s ?' as q, `a?`, [b?], c$d from t /* ? :x */ where a = ? -- ? @y\n and b = ? and c = \"?\" and d = ?";
       const out = exactTextBindings(sql, ['x', 'y' + NUL, 'z']);
       expect(out.sql).toBe(
-        "select '?' as q, `a?` from t /* ? */ where a = ? -- ?\n and b = +CAST(? AS TEXT) and c = \"?\" and d = ?",
+        "select 'it''s ?' as q, `a?`, [b?], c$d from t /* ? :x */ where a = ? -- ? @y\n and b = +CAST(? AS TEXT) and c = \"?\" and d = ?",
       );
       expect(out.bindings[0]).toBe('x');
       expect(Array.from(out.bindings[1] as Uint8Array)).toEqual([0x79, 0x00]);
@@ -218,29 +215,48 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
     });
   });
 
-  describe('refusals — a NUL-bearing text the rewrite cannot place is never bound truncated', () => {
-    it('a numbered parameter is refused with NOT_IMPLEMENTED / 501, through the driver', async () => {
-      let caught: WireBearingError | undefined;
-      try {
-        await driver.execute(`select ?1 as v`, ['a' + NUL + 'b']);
-      } catch (e) {
-        caught = e as WireBearingError;
-      }
-      expect(caught?.code).toBe('NOT_IMPLEMENTED');
-      expect(caught?.status).toBe(501);
+  describe('parameters numbered or named — the binding lands where SQLite numbers it', () => {
+    it('?NNN: the value bound to index 2 reaches ?2, whatever its position in the text', async () => {
+      const wrote = 'a' + NUL + 'b';
+      const rows = (await driver.execute('select ?2 as first, ?1 as second', ['plain', wrote])) as Array<{
+        first: unknown;
+        second: unknown;
+      }>;
+      expect(rows).toEqual([{ first: wrote, second: 'plain' }]);
     });
 
-    it('placeholders that do not match the bindings one-for-one are refused with NOT_IMPLEMENTED / 501', () => {
-      let caught: WireBearingError | undefined;
-      try {
-        exactTextBindings('select ? as a', ['a' + NUL, 'extra']);
-      } catch (e) {
-        caught = e as WireBearingError;
-      }
-      expect(caught?.code).toBe('NOT_IMPLEMENTED');
-      expect(caught?.status).toBe(501);
+    it(':name: the value bound to a named parameter reaches it', async () => {
+      const wrote = BOM + 'x' + NUL;
+      // knex counts `?` against the array, so the named parameter takes index
+      // 1 and the trailing `?` index 2, which nothing binds (SQL NULL).
+      const rows = (await driver.execute('select :v as named, ? as unbound', [wrote])) as Array<{
+        named: unknown;
+        unbound: unknown;
+      }>;
+      expect(rows).toEqual([{ named: wrote, unbound: null }]);
     });
 
+    it('every form is numbered as SQLite numbers it, and each occurrence of a NUL-bearing index is wrapped', () => {
+      // SQLite: ?2 → 2 (largest 2), ? → 3, :n → 4, ?1 → 1, :n → 4 again.
+      const sql = 'select ?2 as a, ? as b, :n as c, ?1 as d, :n as e';
+      const out = exactTextBindings(sql, ['p', 'q' + NUL, 'r', 's' + NUL]);
+      expect(out.sql).toBe(
+        'select +CAST(?2 AS TEXT) as a, ? as b, +CAST(:n AS TEXT) as c, ?1 as d, +CAST(:n AS TEXT) as e',
+      );
+      expect(out.bindings[0]).toBe('p');
+      expect(Array.from(out.bindings[1] as Uint8Array)).toEqual([0x71, 0x00]);
+      expect(out.bindings[2]).toBe('r');
+      expect(Array.from(out.bindings[3] as Uint8Array)).toEqual([0x73, 0x00]);
+    });
+
+    it('a NUL-bearing binding no parameter receives is left for sql.js to answer as before', () => {
+      const out = exactTextBindings('select ? as a', ['x', 'y' + NUL]);
+      expect(out.sql).toBe('select ? as a');
+      expect(out.bindings).toEqual(['x', 'y' + NUL]);
+    });
+  });
+
+  describe('the read refuses rather than falls back', () => {
     it('a sql.js build without Statement.getBlob refuses the read instead of decoding through getString', () => {
       const withoutGetBlob = { get: () => ['a'] };
       expect(() => readExactRow(withoutGetBlob as any, ['v'])).toThrow(/getBlob/);
