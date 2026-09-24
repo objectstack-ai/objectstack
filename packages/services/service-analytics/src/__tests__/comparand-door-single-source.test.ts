@@ -45,6 +45,9 @@
  *   - **binary** binds but has no faithful text rendering, so it is accepted in
  *     a bind position and refused by the LIKE family. That asymmetry is the
  *     reason the package carries two predicates rather than one with a flag.
+ *     [#20018] On the READ-SCOPE door it is now refused in every position: the
+ *     lowering runs the shared comparand-type face after its own gates, as the
+ *     ObjectQL execute face does. The predicate's own answer is unchanged.
  *
  * @see comparand-shape.ts — the predicates and the messages this pins
  * @see https://github.com/objectstack-ai/objectstack/issues/8186
@@ -124,9 +127,15 @@ const MATRIX: readonly Row[] = [
   { label: 'boolean', value: true,
     bindable: true, renderable: true,
     whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
+  // [#20018] One cell moved AFTER the #8186 measurement, on purpose: the
+  // read-scope lowering now runs the shared list-shape face after its own
+  // gates, so a `null` MEMBER of `$in` is refused there by the null-member
+  // ruling (2026-08-31), as the ObjectQL execute face already refused it
+  // (`read-scope-comparand-three-faces.test.ts`). `null` as a scalar or LIKE
+  // comparand is not a list member and does not move.
   { label: 'null', value: null,
     bindable: true, renderable: true,
-    whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
+    whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: REFUSED_SCOPE, scopeEq: OK },
   { label: 'Date', value: new Date('2026-01-01T00:00:00.000Z'),
     bindable: true, renderable: true,
     whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
@@ -139,17 +148,27 @@ const MATRIX: readonly Row[] = [
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // binary: binds, does not render — accepted where it binds, refused by LIKE.
+  // [#20018] Two cells moved AFTER the #8186 measurement, on purpose: the
+  // read-scope lowering now runs the shared comparand-type face after its own
+  // gates, and that face does not admit binary (the predicate above it still
+  // does — the `where` door keeps the extra, the read scope no longer reaches
+  // it). The ObjectQL execute face already refused a binary read-scope
+  // comparand.
   { label: 'binary', value: new Uint8Array([1, 2]),
     bindable: true, renderable: false,
     whereLike: REFUSED_WHERE, whereIn: OK, whereEq: OK,
-    scopeLike: REFUSED_SCOPE, scopeIn: OK, scopeEq: OK },
+    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
 
   // ── shapes outside the fence ──────────────────────────────────────────────
   // `$eq` accepts them on purpose: #5234 left the `{$eq: {…}}` account alone.
+  // [#20018] …on the `where` door. On the read-scope lowering the shared
+  // comparand-type face now closes that account (#7872's set), the answer the
+  // ObjectQL execute face already gave: a plain object bound as a scalar was
+  // refused by the database at execution, not by this package.
   { label: 'plain object', value: { foo: 1 },
     bindable: false, renderable: false,
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: OK,
-    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: OK },
+    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // [#19975] One cell of this row moved AFTER the #8186 measurement, on
   // purpose: ruling 乙 (#19757) refuses a list in the equality slot, and the
   // read-scope lowering now refuses it under `$eq` instead of binding the list
