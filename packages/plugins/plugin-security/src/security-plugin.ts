@@ -6015,25 +6015,13 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [ADR-0095 D1] Compute the effective row filter for (object, operation) as
-   * `Layer0(tenant) AND Layer1(business RLS)`.
-   *
-   * - **Layer 0** (tenant isolation) is computed by {@link computeTenantLayer0Filter}
-   *   from the tenancy mode + the object's field set/posture — independent of the
-   *   RLS compiler, always first, unconditionally AND-composed.
-   * - **Layer 1** (business RLS) is the applicable per-policy compile (ownership,
-   *   depth, sharing, `_self` carve-outs), with the field-existence safety net and
-   *   the posture-gated superuser bypass — which now governs BUSINESS RLS only.
-   *
-   * Shared by the engine middleware (read + by-id write pre-image) and
-   * {@link getReadFilter}. Returns `null` when neither layer contributes.
-   */
-  /**
    * Does the object's own write model replace the platform ownership floor
    * for this operation? True for a `public_read_write` OWD on `update` (#8023)
    * and for a `controlled_by_parent` detail whose master gate the caller
-   * vouches covers this write (#8757). The reasons are recorded where
-   * {@link computeLayeredRlsFilter} applies the drop.
+   * vouches covers this write. That ruling landed in PR #8869 (commit
+   * 6feac910b6); its card number, cited elsewhere in this file, no longer
+   * resolves. The reasons are recorded where {@link computeLayeredRlsFilter}
+   * applies the drop.
    *
    * One predicate, two readers: the pre-image Layer 1 composition and the
    * post-image check's floor decision (`computeWriteCheckFilter`). Keeping it
@@ -6053,6 +6041,20 @@ export class SecurityPlugin implements Plugin {
     );
   }
 
+  /**
+   * [ADR-0095 D1] Compute the effective row filter for (object, operation) as
+   * `Layer0(tenant) AND Layer1(business RLS)`.
+   *
+   * - **Layer 0** (tenant isolation) is computed by {@link computeTenantLayer0Filter}
+   *   from the tenancy mode + the object's field set/posture — independent of the
+   *   RLS compiler, always first, unconditionally AND-composed.
+   * - **Layer 1** (business RLS) is the applicable per-policy compile (ownership,
+   *   depth, sharing, `_self` carve-outs), with the field-existence safety net and
+   *   the posture-gated superuser bypass — which now governs BUSINESS RLS only.
+   *
+   * Shared by the engine middleware (read + by-id write pre-image) and
+   * {@link getReadFilter}. Returns `null` when neither layer contributes.
+   */
   private async computeRlsFilter(
     permissionSets: PermissionSet[],
     object: string,
