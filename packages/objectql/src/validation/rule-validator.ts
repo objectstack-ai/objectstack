@@ -220,6 +220,9 @@ import {
 // contains — see the module's own doc comment.
 import { materializeDeclaredFields } from '../declared-fields.js';
 import { describeCelFault, unknownVariableOf } from '../cel-fault.js';
+// [#19929] Which `record` fields a `readonlyWhen` predicate reads, from the
+// AST of the canonical parse — see `recordFieldsRead`.
+import { parseCelToAst } from '@objectstack/formula';
 
 type Mode = 'insert' | 'update';
 
@@ -713,7 +716,7 @@ export function stripReadonlyWhenFields(
   const judged = judgedReadonlyWhenKeys(fields, data, supplied);
   if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
   const settled = settleReadonlyWhenDrops(
-    judged,
+    readonlyWhenLockGroups(fields, judged),
     (dropped) => readonlyWhenBindings(withoutKeys(stored, dropped), previous, fields),
     (name, view, warn) => isReadonlyWhenLocked(fields[name]!, view.merged, view.previous, name, { warn }, parent),
   );
@@ -769,8 +772,8 @@ function withoutKeys(
 /**
  * [#19911] Which judged keys the conditional strip drops — so that a value
  * another lock in the same strip takes back out can never unlock a lock, and,
- * [#19927] wherever the locks' reads of one another form no cycle, no key is
- * dropped that is unlocked on the row the write stores.
+ * [#19927] [#19929] so that no key outside a cycle of the locks' reads of one
+ * another is dropped while it is unlocked on the row the write stores.
  *
  * ## Why one pass was not enough
  *
@@ -792,46 +795,63 @@ function withoutKeys(
  * judges the write) and every OTHER dropped key reverted to the prior row's
  * value. A drop set is EXACT when every key it drops is locked, and every key
  * it keeps is unlocked, on that view: judging every key against an exact set
- * gives back the set itself. Reached in two steps:
+ * gives back the set itself.
  *
- *  ① A monotone fixpoint. Judge every key; drop the ones that lock; re-judge
- *    the rest with those reverted; repeat until a pass locks nothing new.
- *    Drops only grow, so it ends (one pass per key at most), and every key it
- *    keeps is unlocked on the row it stores: it never opens a lock. Its first
- *    pass IS the single pass it replaced, so a write whose drops move no
- *    other lock's verdict is judged exactly as before.
- *  ② A release iteration. A key ① dropped but that is unlocked on ①'s row was
- *    locked by a value a later pass reverted. Every such key is released at
- *    once; then every key is judged against that set, the keys that lock are
- *    the next set, and so on until a set gives back itself. That set is exact
- *    and is the answer. After n + 1 sets (n keys judged) the iteration stops,
- *    and ①'s answer stands.
+ * A key's verdict moves only with the drops of the keys its predicate reads
+ * through `record`, so the keys are settled in `groups`
+ * ({@link readonlyWhenLockGroups}): the keys that read each other in a cycle
+ * form one group, every other key is a group of its own, and each group comes
+ * after every group whose keys it reads. A group is judged against the drops
+ * of the groups before it, which by then are final:
+ *
+ *  - A group of one key is judged once.
+ *  - A cycle's group is settled in two steps.
+ *    ① A monotone fixpoint. Judge every key of the group; drop the ones that
+ *      lock; re-judge the rest with those reverted; repeat until a pass locks
+ *      nothing new. Drops only grow, so it ends (one pass per key at most),
+ *      and every key it keeps is unlocked on the row it stores: it never
+ *      opens a lock.
+ *    ② A release iteration. A key ① dropped but that is unlocked on ①'s row
+ *      was locked by a value a later pass reverted. Every such key is
+ *      released at once; then every key of the group is judged against that
+ *      set, the keys that lock are the next set, and so on until a set gives
+ *      back itself. That set is exact and is the group's answer. After m + 1
+ *      sets (m keys in the group) the iteration stops, and ①'s answer stands
+ *      for the group.
+ *
+ * [#19929] Until the groups, ① and ② ran once over EVERY judged key, so a
+ * cycle whose ② did not settle made ①'s larger set stand for the whole
+ * update: the #19927 cascade below, written in the same update as the first
+ * cycle below, lost `x`, which is in no cycle and unlocked on the row the
+ * write stores.
  *
  * What that guarantees:
- *  - No lock opens. The answer is ①'s set, or a set that gave back itself,
- *    which is exact; both keep only keys unlocked on the row they store.
- *  - Without a cycle the exact set is unique, and ② reaches it. A key's
- *    verdict then depends only on the keys its `record` reads name, so after
- *    t sets every key at depth below t in that read graph holds its final
- *    verdict: the n-th set is exact and the (n + 1)-th gives it back. The
+ *  - No lock opens. A group's answer is ①'s set or a set that gave back
+ *    itself; either keeps only keys unlocked on the view it was judged
+ *    against, and every key a group reads is decided before it, so on the
+ *    fields its keys read that view is the row the write stores.
+ *  - A key in no cycle is dropped exactly when its lock is TRUE on the row
+ *    the write stores: it is judged once, after every key it reads. The
  *    #19927 cascade — `c` locked by `previous.c == 'L'`, `x` by `record.c ==
  *    'open'`, `y` by `record.x == 'xv'`, a write setting all three on a row
- *    with `c: 'L'` — releases `x` and `y` to `{c}`, locks `y` again in the
- *    second set `{c, y}`, and the third gives that back: its exact set, where
- *    the single release step this replaced stopped at `{c}`'s failed check.
+ *    with `c: 'L'` — judges `c` (locked), then `x` against the `c` the row
+ *    keeps (unlocked), then `y` against the `x` it takes (locked): `{c, y}`.
  *  - A cycle can have no exact set, one, or several. With none, no set gives
- *    back itself and ①'s larger drop set stands: the fail-safe direction, where
- *    a lock that cannot be settled is not waived (#4889's frozen lines depend
- *    on that). `a` locked by `record.b == 'x'`, `b` by `record.a == 'old'`, a
- *    write setting both, is one. With several, the answer is the one ②
- *    reaches, or ①'s when it reaches none: `a` locked by `record.b ==
- *    'new_b'` and `b` by `record.a == 'new_a'`, a write setting both, has
- *    `{a}` and `{b}`; ② alternates between `{}` and `{a, b}`, and ①'s `{a, b}`
- *    stands.
- *  - No order matters: each step judges every key against one set, so field
+ *    back itself and ①'s larger drop set stands for the cycle's keys: the
+ *    fail-safe direction, where a lock that cannot be settled is not waived
+ *    (#4889's frozen lines depend on that). `a` locked by `record.b == 'x'`,
+ *    `b` by `record.a == 'old_a'`, a write setting both, is one. With
+ *    several, the answer is the one ② reaches, or ①'s when it reaches none:
+ *    `a` locked by `record.b == 'new_b'` and `b` by `record.a == 'new_a'`, a
+ *    write setting both, has `{a}` and `{b}`; ② alternates between `{}` and
+ *    `{a, b}`, and ①'s `{a, b}` stands. Only the cycle's own keys fall back:
+ *    a key the cycle reads was settled before it, and a key that reads the
+ *    cycle is judged after it, against the drops the row then keeps.
+ *  - No order matters: the groups and their order follow from the reads, and
+ *    each step judges every key of a group against one set, so field
  *    declaration order and payload key order cannot move the answer.
- *  - The exact set need not lie inside ①'s: a key ① kept can lock once
- *    another key is released, and the exact set drops it.
+ *  - A cycle's exact set need not lie inside its ①'s: a key ① kept can lock
+ *    once another key is released, and the exact set drops it.
  *  - Each claim is about the views this function is handed. The engine's
  *    master-detail settlement judges the FK here against the header it NAMES
  *    and, when the FK does not land, judges the rest against the header the
@@ -839,22 +859,23 @@ function withoutKeys(
  *    write stores, as it could before #19927.
  *
  * Cost, counted in key judgements (a bulk write judges each over its matched
- * rows): at most n(n + 1) / 2 in ①, at most n + n² in ②. When ① or its first
- * release settles the set, ② judges exactly what it did before #19927.
+ * rows): one per key in no cycle; for a cycle of m keys, at most m(m + 1) / 2
+ * in ① and at most m + m² in ②.
  *
  * Each key's warnings come from the evaluation that decided it and are handed
  * back rather than logged, so a key judged more than once still warns once.
  */
 function settleReadonlyWhenDrops<V>(
-  judged: readonly string[],
+  groups: readonly (readonly string[])[],
   viewFor: (dropped: ReadonlySet<string>) => V,
   isLocked: (name: string, view: V, warn: (message: string) => void) => boolean,
 ): { dropped: Set<string>; warnings: Map<string, string[]> } {
-  // Views are memoised per set of OTHER dropped keys: ① and ② ask for the
-  // same few again and again.
+  // Views are memoised per set of OTHER dropped keys: the groups, ① and ② ask
+  // for the same few again and again.
+  const order = groups.flat();
   const views = new Map<string, V>();
   const judge = (name: string, dropped: ReadonlySet<string>): { locked: boolean; said: string[] } => {
-    const others = judged.filter((key) => key !== name && dropped.has(key));
+    const others = order.filter((key) => key !== name && dropped.has(key));
     const signature = others.join(',');
     let view = views.get(signature);
     if (view === undefined) {
@@ -864,15 +885,45 @@ function settleReadonlyWhenDrops<V>(
     const said: string[] = [];
     return { locked: isLocked(name, view, (message) => said.push(message)), said };
   };
+  const dropped = new Set<string>();
+  const warnings = new Map<string, string[]>();
+  for (const group of groups) {
+    const settled = settleLockGroup(group, dropped, judge);
+    for (const name of group) {
+      warnings.set(name, settled.warnings.get(name) ?? []);
+      if (settled.dropped.has(name)) dropped.add(name);
+    }
+  }
+  return { dropped, warnings };
+}
+
+/**
+ * [#19929] Settle ONE group of {@link settleReadonlyWhenDrops}, every key
+ * judged against `settled` (the final drops of the groups before it) plus the
+ * group's own drops. Answers the group's drops and each key's warnings.
+ */
+function settleLockGroup(
+  group: readonly string[],
+  settled: ReadonlySet<string>,
+  judge: (name: string, dropped: ReadonlySet<string>) => { locked: boolean; said: string[] },
+): { dropped: Set<string>; warnings: Map<string, string[]> } {
+  const against = (own: ReadonlySet<string>): ReadonlySet<string> => new Set([...settled, ...own]);
+  if (group.length === 1) {
+    // A key in no cycle: every key it reads is already decided.
+    const name = group[0]!;
+    const verdict = judge(name, settled);
+    return { dropped: new Set(verdict.locked ? [name] : []), warnings: new Map([[name, verdict.said]]) };
+  }
   // ① Every standing key is judged against the same drop set, and a drop
   // found in this pass reaches the others in the next one.
   const dropped = new Set<string>();
   const warnings = new Map<string, string[]>();
-  let standing: readonly string[] = judged;
+  let standing: readonly string[] = group;
   for (;;) {
+    const view = against(dropped);
     const locked: string[] = [];
     for (const name of standing) {
-      const verdict = judge(name, dropped);
+      const verdict = judge(name, view);
       warnings.set(name, verdict.said);
       if (verdict.locked) locked.push(name);
     }
@@ -883,15 +934,17 @@ function settleReadonlyWhenDrops<V>(
   // ② Every standing key is unlocked on ①'s row; a dropped key unlocked there
   // too is over-locked. The first set releases them all at once; each later
   // set is every key that locks when judged against the one before, until a
-  // set gives back itself — n more sets at most. The answer's warnings are
+  // set gives back itself — m more sets at most. The answer's warnings are
   // those of the judgements that gave it back.
-  let current = new Set([...dropped].filter((name) => judge(name, dropped).locked));
+  const fixpoint = against(dropped);
+  let current = new Set([...dropped].filter((name) => judge(name, fixpoint).locked));
   if (current.size === dropped.size) return { dropped, warnings };
-  for (let step = 0; step < judged.length; step++) {
+  for (let step = 0; step < group.length; step++) {
+    const view = against(current);
     const next = new Set<string>();
     const nextWarnings = new Map<string, string[]>();
-    for (const name of judged) {
-      const verdict = judge(name, current);
+    for (const name of group) {
+      const verdict = judge(name, view);
       nextWarnings.set(name, verdict.said);
       if (verdict.locked) next.add(name);
     }
@@ -901,6 +954,127 @@ function settleReadonlyWhenDrops<V>(
     current = next;
   }
   return { dropped, warnings };
+}
+
+/**
+ * [#19929] The judged keys in the groups {@link settleReadonlyWhenDrops}
+ * settles: the strongly connected components of "`k`'s predicate reads `j`
+ * through `record`" ({@link recordFieldsRead}), a key's read of its own field
+ * aside. Each group lists its keys in declaration order, and the groups come
+ * in an order where every group follows the groups whose keys it reads.
+ *
+ * The edges are read off the predicate's source, never its value on a row, so
+ * the grouping is the same for every row of a bulk write, and a read the
+ * source cannot place (see {@link recordFieldsRead}) counts as a read of
+ * every other judged key: that can only merge groups or order a key later,
+ * which settles no key on a view that lacks a drop it reads.
+ *
+ * `previous` and `parent` do not move with the drops, so they add no edge.
+ * The master-detail FK's pick of `parent` is the engine's to settle
+ * (`settleMasterDetailLanding`), which judges the FK before the header it
+ * picks is bound for the rest.
+ */
+function readonlyWhenLockGroups(
+  fields: Record<string, ConditionalFieldDef>,
+  judged: readonly string[],
+): string[][] {
+  const reads = new Map<string, string[]>();
+  for (const name of judged) {
+    const read = recordFieldsRead(fields[name]!.readonlyWhen!);
+    reads.set(name, judged.filter((other) => other !== name && (read === 'every' || read.has(other))));
+  }
+  // Tarjan's strongly connected components. A component is complete only
+  // once every component it reaches is, so they come out in dependency order.
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const groups: string[][] = [];
+  const visit = (name: string): void => {
+    index.set(name, index.size);
+    low.set(name, index.get(name)!);
+    stack.push(name);
+    onStack.add(name);
+    for (const next of reads.get(name)!) {
+      if (!index.has(next)) {
+        visit(next);
+        low.set(name, Math.min(low.get(name)!, low.get(next)!));
+      } else if (onStack.has(next)) {
+        low.set(name, Math.min(low.get(name)!, index.get(next)!));
+      }
+    }
+    if (low.get(name) !== index.get(name)) return;
+    const members = new Set<string>();
+    for (;;) {
+      const member = stack.pop()!;
+      onStack.delete(member);
+      members.add(member);
+      if (member === name) break;
+    }
+    groups.push(judged.filter((key) => members.has(key)));
+  };
+  for (const name of judged) if (!index.has(name)) visit(name);
+  return groups;
+}
+
+/** What a predicate reads through `record`: named fields, or `'every'`. */
+type RecordFieldsRead = ReadonlySet<string> | 'every';
+
+/** Parsed-read memo — metadata predicates are a small, fixed set of sources. */
+const recordFieldsReadCache = new Map<string, RecordFieldsRead>();
+
+/**
+ * [#19929] The fields a `readonlyWhen` predicate reads through `record`,
+ * decided from the AST of the canonical parse (`parseCelToAst`, the same
+ * front end the evaluator's rewrites leave the reads of alone).
+ *
+ * A read is a field select on the bare `record` root: `record.x`,
+ * `record.?x`, and anything built on one (`record.x.y`, `has(record.x)`,
+ * `record.x.size()`). Every other use of the root — `record['x']`, `'x' in
+ * record`, `size(record)`, `record` bound by a macro — answers `'every'`, and
+ * so does a predicate that is not CEL or does not parse. Only a missed read
+ * could open a lock (a key judged before a drop its predicate reads), and
+ * this reader misses none: it names a field only where the source spells it.
+ */
+function recordFieldsRead(cond: string | Expression): RecordFieldsRead {
+  const expr = toExpression(cond);
+  const source = expr.dialect === 'cel' && typeof expr.source === 'string' ? expr.source : '';
+  if (!source) return 'every';
+  const cached = recordFieldsReadCache.get(source);
+  if (cached !== undefined) return cached;
+  const ast = parseCelToAst(source);
+  let read: RecordFieldsRead = 'every';
+  if (ast !== null) {
+    const named = new Set<string>();
+    let every = false;
+    const isNode = (node: unknown): node is { op: string; args: unknown } =>
+      !!node && typeof node === 'object' && typeof (node as { op?: unknown }).op === 'string';
+    const isRecordRoot = (node: unknown): boolean =>
+      isNode(node) && node.op === 'id' && node.args === RECORD_ROOT;
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const child of node) walk(child);
+        return;
+      }
+      if (!isNode(node)) return;
+      if ((node.op === '.' || node.op === '.?') && Array.isArray(node.args)) {
+        const [receiver, member] = node.args;
+        if (isRecordRoot(receiver) && typeof member === 'string') {
+          named.add(member);
+          return;
+        }
+      }
+      if (isRecordRoot(node)) {
+        every = true;
+        return;
+      }
+      walk(node.args);
+    };
+    walk(ast);
+    if (!every) read = named;
+  }
+  recordFieldsReadCache.set(source, read);
+  return read;
 }
 
 /**
@@ -1209,7 +1383,7 @@ export function stripReadonlyWhenFieldsMulti(
   // locked when it locks in ≥1 row — so an exact set drops only keys locked in
   // some row and keeps only keys unlocked in every row.
   const settled = settleReadonlyWhenDrops(
-    judged,
+    readonlyWhenLockGroups(fields, judged),
     (dropped) => {
       const payload = withoutKeys(stored, dropped);
       return rows.map((row) => readonlyWhenBindings(payload, row, fields));
