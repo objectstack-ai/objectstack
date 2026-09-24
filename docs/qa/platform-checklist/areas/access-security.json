@@ -1780,7 +1780,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1813,9 +1813,9 @@
           "evidence": "the baseline trace"
         },
         {
-          "clause": "the matrix edit saves and takes effect: flipping the verb in the console answers 2xx on PUT /api/v1/meta/permission/S and the published set carries the new verb. The publish CALL is 2xx only when the save was staged as a draft (?mode=draft); a plain PUT — which is what the console editor issues — lands state:'active' directly, and POST .../publish then answers 404 [no_draft] because nothing is pending. Record WHICH path the console took",
+          "clause": "the matrix edit saves and takes effect: flipping the verb in the console answers 2xx on PUT /api/v1/meta/permission/S and the published set carries the new verb. The publish CALL is 2xx only when the save was staged as a draft (?mode=draft); a plain PUT — which is what the console editor issues — lands state:'active' directly, and POST .../publish then answers 404 with code NO_DRAFT because nothing is pending — judge that refusal on the status and the code field, never on the message text, which is human language and free to change. Record WHICH path the console took",
           "oracle": "api",
-          "verify": "PUT 2xx and GET /api/v1/meta/permission/S (published) shows delete:true on showcase_task. The publish call is 2xx after a ?mode=draft save, or 404 [no_draft] after a plain active-state PUT (rest-server.ts mounts POST /meta/:type/:name/publish for every type and answers 404 [no_draft] when there is nothing to promote) — either is a pass provided the published set carries the verb",
+          "verify": "PUT 2xx and GET /api/v1/meta/permission/S (published) shows delete:true on showcase_task. The publish call is 2xx after a ?mode=draft save, or HTTP 404 whose body carries code: 'NO_DRAFT' after a plain active-state PUT (rest-server.ts mounts POST /meta/:type/:name/publish for every type; SysMetadataRepository.promoteDraft throws status 404 / code NO_DRAFT when there is nothing to promote) — either is a pass provided the published set carries the verb. Read the code field, not the error message: the message is prose, and a quoted message spelling goes stale without the refusal changing",
           "evidence": "PUT + publish + GET"
         },
         {
@@ -1862,6 +1862,7 @@
         "objectui packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx (type=permission editor; client.save → PUT /api/v1/meta/permission/<name>; object CRUD+VAMA+lifecycle + field R/W)",
         "packages/spec/src/security/permission.zod.ts#PermissionSetSchema (PermissionSetSchema)",
         "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (PUT /api/v1/meta/:type/:name saveItem; POST .../publish publishItem — re-pointed #18104: saveItem is a CLIENT METHOD name, carried in this file only inside a string value)",
+        "packages/metadata-protocol/src/sys-metadata-repository.ts#promoteDraft (the publish-with-nothing-pending refusal: status 404, code NO_DRAFT)",
         "examples/app-showcase/src/security/permission-sets.ts",
         "cross-ref access-security.crud-permission-matrix + access-security.readonly-package-locks-studio, ADR-0090 D1/D5, ADR-0033"
       ],
@@ -1872,7 +1873,8 @@
           "change": "new — permission-matrix WRITE/edit loop: flip a verb in the console matrix → publish → affected persona's live API access flips, revoke flips back, assign/unassign moves access (enforcement + lock covered by sibling items)",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected clause 1, which demanded a 2xx from POST /api/v1/meta/permission/S/publish. That route is mounted type-generically, but it answers 404 [no_draft] when no pending draft exists — and the console's permission save is a plain PUT that lands state:'active' directly, so there is nothing to promote. As written the clause was unsatisfiable on the path the item's own fixture block describes (#9453 CF-5). The clause now keys on the published set carrying the verb and records which save path was taken", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "corrected clause 1, which demanded a 2xx from POST /api/v1/meta/permission/S/publish. That route is mounted type-generically, but it answers 404 [no_draft] when no pending draft exists — and the console's permission save is a plain PUT that lands state:'active' directly, so there is nothing to promote. As written the clause was unsatisfiable on the path the item's own fixture block describes (#9453 CF-5). The clause now keys on the published set carrying the verb and records which save path was taken", "ref": "#9386" },
+        { "revision": 3, "date": "2026-09-23", "change": "re-keyed clause 2 and its verify on the refusal's code axis: the nothing-to-publish answer is now stated as HTTP 404 with code NO_DRAFT instead of quoting a bracketed lowercase opener inside the message. That opener was retired from every metadata-protocol refusal in 7a25a3ee9c (error is human language, code is the machine token), so a checker matching the old quoted spelling against a live answer recorded a false failure. Pass/fail semantics are unchanged; the producer is now cited in source", "ref": "#19705" }
       ]
     },
     {
