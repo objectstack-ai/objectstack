@@ -8,6 +8,7 @@
  *   node scripts/check-spec-docblock-symbol-anchors.mjs
  *   node scripts/check-spec-docblock-symbol-anchors.mjs --list
  *   node scripts/check-spec-docblock-symbol-anchors.mjs --list-unresolvable
+ *   node scripts/check-spec-docblock-symbol-anchors.mjs --present-tense
  *   node scripts/check-spec-docblock-symbol-anchors.mjs --self-test
  *
  * ⚠️ THE MECHANISM IS NOT HERE. The grammar, the extractor, the comment-prose
@@ -158,12 +159,58 @@
  * is the correct disposition -- they are reported and never red -- but the rows
  * are noise rather than signal, and the next author to read this report should
  * know why they are there.
+ *
+ * ## The present-tense report -- REPORT-ONLY, and it never touches the exit code
+ *
+ * A second, separate reading rides this corpus, ruled on #19017 (ruling record
+ * `5805901449`, letter 甲 「只报告」). A doc block that states the repository's
+ * own state in the PRESENT TENSE -- "always `true` this phase", "the real bit
+ * is a follow-up" -- turns false the day the thing it describes lands, and no
+ * reader reds. The shape recurred three times (#18991, #17487, #16208); on
+ * #18991 the rotted sentence read as a licence to delete a live parameter.
+ *
+ * ⛔ REPORT-ONLY. Each hit prints as a `📝 [present-tense]` line naming the
+ * file, the line and the phrase, under one summary line. Nothing in that pass
+ * can exit: it runs inside a catch that prints NOT MEASURED instead of
+ * throwing, and it runs BEFORE the anchor verdict, so it prints on a red run
+ * too and moves neither verdict. ⛔ It is never a required check, and ⛔ no dev
+ * is dispatched on its output: a seat that reads a hit it judges still true
+ * dismisses it in one line. Promoting it to a failing gate needs the
+ * maintainer's own word, not an edit here.
+ *
+ * WHAT IT READS is this corpus's own population and projection: the files
+ * `sweepCorpus` walked (its `byDoc`), through `commentProse`, so "doc block"
+ * means what it means for the anchor gate -- EVERY comment, line and block,
+ * and never code or a string literal. Minus test sources, which this family
+ * never excluded before; the definition is borrowed from the package's own
+ * test runner, whose `local` project includes every `.test.ts` under `src/`
+ * (`packages/spec/vitest.config.ts`). Comment delimiters and the JSDoc gutter
+ * are blanked and whitespace is folded across lines, so a phrase wrapped over
+ * two lines is one hit, reported at the line it starts on. Matching is
+ * case-insensitive and whole-word.
+ *
+ * THE LIST is `PRESENT_TENSE_PHRASES`, exactly the four the ruling names, and
+ * it GROWS ONLY BY A MEASURED NEAR-ZERO FALSE-POSITIVE READING: a new phrase
+ * arrives with its own count in `PRESENT_TENSE_CENSUS`, taken with this
+ * instrument at a named sha, and the self-test reds on a listed phrase that
+ * carries no reading. ⛔ Wide phrases stay out: `there is no` alone reads 320
+ * comment-prose hits today (`PRESENT_TENSE_REFUSED_WIDE`).
+ *
+ * TODAY'S READING (`PRESENT_TENSE_CENSUS.measuredOn`; 1,046 non-test sources
+ * read, 504 test sources skipped), per phrase: `this phase` 0,
+ * `is a follow-up` 0, `not yet implemented` 1, `currently no` 0. The one hit
+ * is a trailing line comment glossing what the `NOT_IMPLEMENTED` error code
+ * means, and it is still true. The same instrument on the card's own tree
+ * reads 2, 1, 1, 0: the three #18991 sites, found -- the positive control. The
+ * card's own probe also counted one `currently no`; that one sits in a string
+ * literal, outside this projection.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -635,8 +682,204 @@ export function triage(findings, residual = CENSUS_RESIDUAL) {
   return { hard, soft, pinned, stale };
 }
 
+/* ── The present-tense report (REPORT-ONLY; see the header) ─────────────────── */
+
+/**
+ * The phrases the report prints. Exactly the four the ruling names. ⛔ A phrase
+ * joins only with a measured near-zero false-positive reading recorded in
+ * `PRESENT_TENSE_CENSUS`; the self-test reds on a listed phrase without one.
+ */
+export const PRESENT_TENSE_PHRASES = Object.freeze(['this phase', 'is a follow-up', 'not yet implemented', 'currently no']);
+
+/**
+ * ⛔ Wide phrases the ruling keeps OUT, with the comment-prose reading that
+ * keeps them out, taken with this instrument at `PRESENT_TENSE_CENSUS.measuredOn`.
+ * The self-test holds this set disjoint from the list.
+ */
+export const PRESENT_TENSE_REFUSED_WIDE = Object.freeze({ 'there is no': 320 });
+
+/**
+ * A test source, by the package's own test runner's definition: the `local`
+ * project in `packages/spec/vitest.config.ts` includes every `.test.ts` under
+ * `src/`. The anchor gate above has no test exclusion, so this is the report's
+ * alone.
+ */
+export const PRESENT_TENSE_TEST_SOURCE = /\.test\.ts$/;
+
+/** The CLOSED judgement vocabulary a census row may carry. */
+export const PRESENT_TENSE_JUDGEMENTS = Object.freeze(['still-true', 'rotted']);
+
+/**
+ * The readings the list was admitted on. ⛔ Historical measurements, frozen at
+ * their shas and held only by the self-test's internal pins, never against the
+ * live tree: pinning a reading to the tree would turn a report into a ratchet.
+ * `line` is a COORDINATE into `measuredOn`, never an anchor. `judgement` was
+ * read by hand, one row at a time.
+ */
+export const PRESENT_TENSE_CENSUS = Object.freeze({
+  measuredOn: '5581d3000f27daa19991cf9d13d5ad1ed8cf8913',
+  nonTestSources: 1046,
+  testSourcesSkipped: 504,
+  hits: Object.freeze({ 'this phase': 0, 'is a follow-up': 0, 'not yet implemented': 1, 'currently no': 0 }),
+  rows: Object.freeze([
+    {
+      doc: 'packages/spec/src/api/errors.zod.ts',
+      line: 114,
+      phrase: 'not yet implemented',
+      judgement: 'still-true',
+      why: 'a trailing line comment glossing what the NOT_IMPLEMENTED error code means: a definition, not a claim about the repository',
+    },
+  ]),
+  /* The same instrument on the tree the card's own census was taken on: the
+   * positive control. The three `api-derivation.ts` rows are the sites #18991
+   * repaired; the card's probe also counted one `currently no`, a string
+   * literal this projection never reads. */
+  cardTree: Object.freeze({
+    measuredOn: '43f4766889e39d7a4590c5787d38e5956d0b4cb6',
+    nonTestSources: 1000,
+    hits: Object.freeze({ 'this phase': 2, 'is a follow-up': 1, 'not yet implemented': 1, 'currently no': 0 }),
+    rows: Object.freeze([
+      {
+        doc: 'packages/spec/src/data/api-derivation.ts',
+        line: 129,
+        phrase: 'this phase',
+        judgement: 'rotted',
+        why: 'the user-level export bit this sentence called always true had already been wired',
+      },
+      {
+        doc: 'packages/spec/src/data/api-derivation.ts',
+        line: 130,
+        phrase: 'is a follow-up',
+        judgement: 'rotted',
+        why: 'the same sentence, calling that already-landed wiring a follow-up',
+      },
+      {
+        doc: 'packages/spec/src/data/api-derivation.ts',
+        line: 196,
+        phrase: 'this phase',
+        judgement: 'rotted',
+        why: 'the second copy of the always-true claim, on the option declaration itself',
+      },
+      {
+        doc: 'packages/spec/src/api/errors.zod.ts',
+        line: 114,
+        phrase: 'not yet implemented',
+        judgement: 'still-true',
+        why: 'the same error-code gloss today reading still carries',
+      },
+    ]),
+    refusedWide: Object.freeze({ 'there is no': 286 }),
+  }),
+});
+
+/**
+ * The comment prose of `source` folded to ONE line: `commentProse` first, then
+ * comment delimiters and the JSDoc gutter blanked, then every whitespace run
+ * (newlines included) collapsed to a single space. `offsets[i]` is the source
+ * offset of `text[i]`, which is what lets a phrase wrapped over two lines be
+ * reported at the line it starts on. The projection blanks and never deletes,
+ * so every offset is an offset into the real file.
+ */
+export function foldCommentProse(source) {
+  const prose = CORPUS.docProjection(source)
+    .replace(/\/\*+|\*+\/|\/{2,}/g, (m) => ' '.repeat(m.length))
+    .replace(/^([ \t]*)\*+/gm, (m, indent) => indent + ' '.repeat(m.length - indent.length));
+  const parts = [];
+  const offsets = [];
+  for (const m of prose.matchAll(/\S+/g)) {
+    if (parts.length > 0) { parts.push(' '); offsets.push(m.index - 1); }
+    parts.push(m[0]);
+    for (let k = 0; k < m[0].length; k += 1) offsets.push(m.index + k);
+  }
+  return { text: parts.join(''), offsets };
+}
+
+/** Case-insensitive, whole-word, global: `currently no` must not match `currently none`. */
+function phrasePattern(phrase) {
+  return new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+}
+
+/**
+ * Every hit of `phrases` in the non-test members of `docs` (paths relative to
+ * `root`). Returns the hits sorted by file and line, plus how many sources
+ * were read and how many test sources were skipped -- a skip is counted, so
+ * "skipped" is told apart from "never handed over". Throws on an unreadable
+ * source; `reportPresentTense` is the only caller that prints, and it catches.
+ */
+export function presentTenseHits(root, docs, phrases = PRESENT_TENSE_PHRASES) {
+  const hits = [];
+  let scanned = 0;
+  let skippedTests = 0;
+  for (const doc of docs) {
+    if (PRESENT_TENSE_TEST_SOURCE.test(doc)) { skippedTests += 1; continue; }
+    scanned += 1;
+    const source = readFileSync(join(root, doc), 'utf8');
+    const { text, offsets } = foldCommentProse(source);
+    for (const phrase of phrases) {
+      for (const m of text.matchAll(phrasePattern(phrase))) {
+        const at = offsets[m.index];
+        hits.push({
+          doc,
+          line: source.slice(0, at).split('\n').length,
+          phrase,
+          excerpt: text.slice(Math.max(0, m.index - 48), m.index + m[0].length + 48),
+        });
+      }
+    }
+  }
+  hits.sort((a, b) => (a.doc === b.doc ? a.line - b.line : a.doc < b.doc ? -1 : 1));
+  return { hits, scanned, skippedTests };
+}
+
+/**
+ * Print the report. ⛔ REPORT-ONLY BY CONSTRUCTION: it has no exit path, sets
+ * no exit code, and turns any throw into a NOT MEASURED line -- so it cannot
+ * move the anchor gate's verdict in either direction. Returns the reading, or
+ * `null` when none was taken.
+ */
+export function reportPresentTense(root, docs) {
+  const notMeasured = (why) => console.log(
+    `⚠️  present-tense report NOT MEASURED: ${why} — this report never fails the gate, so read a missing `
+      + 'reading as missing, never as zero hits.',
+  );
+  try {
+    const reading = presentTenseHits(root, docs);
+    for (const h of reading.hits) {
+      console.log(`📝 [present-tense] ${h.doc}:${h.line}  "${h.phrase}"\n      …${h.excerpt}…`);
+    }
+    if (reading.scanned === 0) {
+      notMeasured(`0 non-test spec sources were read (${reading.skippedTests} test sources skipped), `
+        + 'so the instrument is blind rather than the corpus clean');
+      return reading;
+    }
+    const perPhrase = PRESENT_TENSE_PHRASES
+      .map((p) => `"${p}" ${reading.hits.filter((h) => h.phrase === p).length}`).join(', ');
+    console.log(
+      `ℹ️  present-tense report (REPORT-ONLY, never fails): ${reading.hits.length} hit(s) over `
+        + `${reading.scanned} non-test spec sources, ${reading.skippedTests} test sources skipped — ${perPhrase}. `
+        + 'A hit judged still true is dismissed in one line; no hit is a failure.',
+    );
+    return reading;
+  } catch (e) {
+    notMeasured(e?.message ?? String(e));
+    return null;
+  }
+}
+
+/** `--present-tense`: the report alone, over the same population. Exits 0 whatever it reads. */
+function presentTenseOnly(root = process.cwd()) {
+  let docs;
+  try {
+    docs = [...sweepCorpus(CORPUS, root).byDoc.keys()];
+  } catch (e) {
+    console.log(`⚠️  present-tense report NOT MEASURED: the corpus sweep failed — ${e?.message ?? String(e)}`);
+    return;
+  }
+  reportPresentTense(root, docs);
+}
+
 export function runCheck(root = process.cwd()) {
-  const { findings, counts } = sweepCorpus(CORPUS, root);
+  const { findings, counts, byDoc } = sweepCorpus(CORPUS, root);
   const { hard, soft, pinned, stale } = triage(findings);
 
   if (counts.anchors === 0) {
@@ -655,6 +898,11 @@ export function runCheck(root = process.cwd()) {
         + '      Delete its CENSUS_RESIDUAL row in the same PR that repairs it.',
     );
   }
+
+  // ⛔ REPORT-ONLY: printed before the verdict so a red run carries it too, and
+  // `reportPresentTense` can neither exit nor throw, so `failed` below reads
+  // exactly what it read before this line existed.
+  reportPresentTense(root, [...byDoc.keys()]);
 
   const failed = hard.length > 0 || stale.length > 0;
   if (hard.length > 0) {
@@ -824,13 +1072,21 @@ function gitReportsShallow() {
 // ⛔ The number is READ OFF A PROBE, never derived from a diff: run the self-test
 // with this entry raised to something unreachable and take the count its own floor
 // message prints. 120 -> 124 was read that way.
+//
+// The present-tense report is its OWN battery, registered after every case
+// above, so it cannot inflate the 124. Read off the same kind of probe: 38.
+// None of its cases reads the live tree's hits, so no docblock edit anywhere
+// can move this floor. A phrase added to the list adds cases here (its planted
+// hit, its spawned line, and its row count in each of the two readings) — read
+// the new number off the probe rather than adding it up.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-spec-docblock-symbol-anchors self-test': 124,
+  'present-tense report': 38,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1287,6 +1543,149 @@ export function selfTest() {
   // this battery — so it stays prose, and the battery stays honest about what it
   // pins.
 
+  // 9. ⭐ THE PRESENT-TENSE REPORT, its own battery so the 124 above stay exactly
+  //    the cases they were. ⛔ Nothing here reads the LIVE tree's hits: a case
+  //    holding today's reading would make a report-only instrument fail CI on an
+  //    unrelated doc edit. Every case below reds only when the MECHANISM breaks.
+  battery('present-tense report');
+  const ptTmp = mkdtempSync(join(tmpdir(), 'check-spec-docblock-present-tense-'));
+  try {
+    const write = (rel, body) => { mkdirSync(dirname(join(ptTmp, rel)), { recursive: true }); writeFileSync(join(ptTmp, rel), body); };
+    // The sentence #18991 repaired, verbatim and wrapped as it was: `this phase`
+    // starts on line 3 and ends on line 4, so a matcher that does not fold
+    // across the JSDoc gutter misses it.
+    write('packages/spec/src/pt/rotted.ts', [
+      '/**',
+      ' * - `export` derives from `list` and the caller\'s export slot',
+      ' *   (`ResolveApiOptions.userExportAllowed`, always `true` this',
+      ' *   phase — the real permission bit is a follow-up, wiring it',
+      ' *   changes no contract here).',
+      ' */',
+      'export const rotted = 1;',
+    ].join('\n'));
+    // The other two phrases, in the other two comment forms and in upper case.
+    write('packages/spec/src/pt/more.ts', [
+      '// Feature not yet implemented.',
+      '/* Currently NO reader holds it. */',
+      'export const more = 1;',
+    ].join('\n'));
+    // ⛔ What must NOT print: the wide phrase, whole-word near misses, and the
+    // listed phrases inside a string literal, which is code, not prose.
+    write('packages/spec/src/pt/refused.ts', [
+      '// there is no reader for it yet, for now.',
+      '// currently none; currently nothing; this phased rollout; it is a follow-upper.',
+      "export const message = 'not yet implemented, currently no reader, this phase';",
+    ].join('\n'));
+    // ⛔ A test source carrying all four: skipped, and counted as skipped.
+    write('packages/spec/src/pt/skipped.test.ts',
+      '// this phase: the bit is a follow-up, not yet implemented, currently no reader.\n');
+    execFileSync('git', ['init', '-q'], { cwd: ptTmp, env: gitFreeEnv() });
+    execFileSync('git', ['add', '-A'], { cwd: ptTmp, env: gitFreeEnv() });
+
+    // The population is the anchor corpus's own walk, the same call `runCheck` makes.
+    const docs = [...sweepCorpus(CORPUS, ptTmp).byDoc.keys()];
+    check(docs.includes('packages/spec/src/pt/skipped.test.ts'),
+      'the test source must be IN the population the report is handed, or "skipped" cannot be told from "never seen"');
+    const reading = presentTenseHits(ptTmp, docs);
+    check(reading.skippedTests === 1 && reading.scanned === docs.length - 1,
+      `exactly the one test source must be skipped and every other source read, got ${reading.skippedTests} skipped, `
+        + `${reading.scanned} read of ${docs.length}`);
+    const expected = [
+      ['this phase', 'packages/spec/src/pt/rotted.ts', 3],
+      ['is a follow-up', 'packages/spec/src/pt/rotted.ts', 4],
+      ['not yet implemented', 'packages/spec/src/pt/more.ts', 1],
+      ['currently no', 'packages/spec/src/pt/more.ts', 2],
+    ];
+    check(expected.map(([p]) => p).join('|') === PRESENT_TENSE_PHRASES.join('|'),
+      'the fixture must plant exactly one hit per listed phrase — a phrase added to the list needs a planted hit here');
+    for (const [phrase, doc, line] of expected) {
+      const got = reading.hits.filter((h) => h.phrase === phrase);
+      check(got.length === 1 && got[0].doc === doc && got[0].line === line,
+        `the planted "${phrase}" must be ONE hit at ${doc} line ${line}, got `
+          + `${JSON.stringify(got.map((h) => [h.doc, h.line]))}`);
+    }
+    check(reading.hits.length === expected.length,
+      `the fixture must yield exactly its ${expected.length} planted hits, got ${reading.hits.length}: `
+        + `${reading.hits.map((h) => `${h.doc} ${h.line} ${h.phrase}`).join(', ')}`);
+    check(!reading.hits.some((h) => h.doc.endsWith('refused.ts')),
+      'the wide phrase, the whole-word near misses and a string literal must print nothing');
+    check(!reading.hits.some((h) => h.doc.endsWith('.test.ts')), 'a test source must print nothing');
+    // ⛔ The wide phrase is kept out by the LIST, not by a blind matcher: asked
+    // for it directly, the same instrument finds it.
+    check(Object.keys(PRESENT_TENSE_REFUSED_WIDE).every((w) => !PRESENT_TENSE_PHRASES.includes(w)),
+      'a refused wide phrase must never be on the list');
+    check(presentTenseHits(ptTmp, docs, ['there is no']).hits.length === 1,
+      'the instrument must SEE `there is no` when asked, so its absence from the report is the list, not blindness');
+
+    // ⭐ REPORT-ONLY, measured as an exit status: the CLI arm, spawned over a tree
+    // carrying hits, must exit 0 and print each one as file:line plus phrase.
+    const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--present-tense'], {
+      cwd: ptTmp, env: gitFreeEnv(), encoding: 'utf8',
+    });
+    check(run.status === 0, `the report arm must exit 0 WITH hits, got ${run.status}: ${run.stderr}`);
+    for (const [phrase, doc, line] of expected) {
+      check(run.stdout.includes(`📝 [present-tense] ${doc}:${line}  "${phrase}"`),
+        `the spawned report must print ${doc}:${line} "${phrase}"`);
+    }
+    check(!/refused\.ts|skipped\.test\.ts/.test(run.stdout),
+      'the spawned report must print nothing for the refused file or the test source');
+    check(run.stdout.includes(`ℹ️  present-tense report (REPORT-ONLY, never fails): ${expected.length} hit(s)`),
+      'the spawned report must print its summary line with the hit count');
+
+    // ⛔ ...and in-process it cannot move an exit code or throw, even when the
+    // read fails or reads nothing. Its output is captured, not printed.
+    const captured = [];
+    const realLog = console.log;
+    const exitCodeBefore = process.exitCode;
+    let unreadable;
+    let blind;
+    let withHits;
+    console.log = (...args) => { captured.push(args.join(' ')); };
+    try {
+      withHits = reportPresentTense(ptTmp, docs);
+      unreadable = reportPresentTense(ptTmp, [...docs, 'packages/spec/src/pt/vanished.ts']);
+      blind = reportPresentTense(ptTmp, ['packages/spec/src/pt/skipped.test.ts']);
+    } finally {
+      console.log = realLog;
+    }
+    check(withHits?.hits.length === expected.length && process.exitCode === exitCodeBefore,
+      'reporting hits must leave `process.exitCode` exactly as it found it');
+    check(unreadable === null && captured.some((l) => l.includes('NOT MEASURED')),
+      'an unreadable source must turn into a NOT MEASURED line and a null reading, never a throw');
+    check(blind?.scanned === 0 && captured.filter((l) => l.includes('NOT MEASURED')).length === 2,
+      'a population with no non-test source must say NOT MEASURED, never report zero hits');
+    // A presence pin, not behaviour — the behaviour is the spawned arm above. It
+    // catches the call being deleted from the gate run, which nothing else would.
+    check(String(runCheck).includes('reportPresentTense(root, [...byDoc.keys()])'),
+      'runCheck must print the report over its own sweep\'s population');
+  } finally {
+    rmSync(ptTmp, { recursive: true, force: true });
+  }
+
+  // The admission record, held INTERNALLY: every listed phrase carries a reading
+  // at a named sha, every enumerated row adds up to its cell, and no row carries
+  // a judgement outside the closed vocabulary.
+  for (const [label, census] of [['today', PRESENT_TENSE_CENSUS], ['card tree', PRESENT_TENSE_CENSUS.cardTree]]) {
+    check(Object.keys(census.hits).join('|') === PRESENT_TENSE_PHRASES.join('|'),
+      `the ${label} reading must count exactly the listed phrases, in order — a phrase joins the list only with a `
+        + `measured reading: ${Object.keys(census.hits).join(', ')}`);
+    check(/^[0-9a-f]{40}$/.test(census.measuredOn), `the ${label} reading must name a full sha, got \`${census.measuredOn}\``);
+    for (const phrase of PRESENT_TENSE_PHRASES) {
+      check(census.rows.filter((r) => r.phrase === phrase).length === census.hits[phrase],
+        `the ${label} rows for "${phrase}" must enumerate its count of ${census.hits[phrase]}`);
+    }
+    check(census.rows.every((r) => PRESENT_TENSE_JUDGEMENTS.includes(r.judgement) && r.why.length > 20
+      && Number.isInteger(r.line) && r.doc.startsWith(`${SPEC_SRC_DIR}/`) && !PRESENT_TENSE_TEST_SOURCE.test(r.doc)),
+    `every ${label} row must be a non-test spec source with a line, a closed-vocabulary judgement and a reason`);
+  }
+  check(Object.keys(PRESENT_TENSE_CENSUS.cardTree.refusedWide).join('|')
+    === Object.keys(PRESENT_TENSE_REFUSED_WIDE).join('|'),
+  'both readings must record the same refused wide phrases');
+  console.log(
+    `   ✓ present-tense report: ${PRESENT_TENSE_PHRASES.length} listed phrases provoked, wide phrase refused, `
+      + 'test source skipped, exit 0 with hits (spawned)',
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   const floorMessages = [];
   const floorFailure = (message) => { floorMessages.push(message); };
@@ -1351,6 +1750,7 @@ if (isEntrypoint(import.meta.url)) {
       process.exit(1);
     }
   } else if (process.argv.includes('--list-unresolvable')) listUnresolvable();
+  else if (process.argv.includes('--present-tense')) presentTenseOnly();
   else if (process.argv.includes('--list')) list();
   else runCheck();
 }
