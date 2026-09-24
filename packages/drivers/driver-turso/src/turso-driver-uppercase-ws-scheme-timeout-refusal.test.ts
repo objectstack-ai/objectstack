@@ -43,10 +43,16 @@
  *
  * And the three controls the refusal must not eat:
  *
- * 1. `detectMode` is untouched — an uppercase url with NO explicit mode still
- *    falls through to `'local'`, the pre-existing behaviour this card
- *    deliberately does not change. (No pin held this before; the scope ruling
- *    on this card requires one, so it is written here rather than assumed.)
+ * 1. FLIPPED, deliberately. This control first pinned that an uppercase url
+ *    with NO explicit mode fell through `detectMode` to `'local'`, the
+ *    behaviour the window refusal was scoped not to change. That fall-through
+ *    ran the local engine on a private `:memory:` database (writes read back,
+ *    then vanished on restart), and it was then argued and removed on its own:
+ *    `detectMode` now reads the scheme through the same case fold as
+ *    `ridesWebSocketTransport`, the way `@libsql/client` routes it
+ *    (`turso-driver-unrecognised-url-refusal.test.ts` is the primary pin). So
+ *    an uppercase remote url with no mode is REMOTE, and an uppercase `WSS://`
+ *    with a window and no mode meets this file's refusal like the lowercase one.
  * 2. The existing lowercase `wss://` / `ws://` refusals still fire
  *    (`turso-driver-ws-timeout-refusal.test.ts` is the primary pin; repeated
  *    here as the immediate neighbour of the widened predicate).
@@ -58,9 +64,11 @@
  *
  * Restore `ridesWebSocketTransport` to its literal-prefix form and the refusal
  * cases go RED (the constructor returns a driver with `transportMode:
- * 'remote'`, and there is no envelope to read); all three controls stay GREEN,
+ * 'remote'`, and there is no envelope to read); controls 2 and 3 stay GREEN,
  * because each describes behaviour that is identical before and after.
- * Measured both ways — see the PR.
+ * Measured both ways — see the PR. Since control 1 was flipped, its
+ * `WSS://` + window case reads the same predicate and goes RED with the
+ * refusal cases; its classification cases read `detectMode` and stay GREEN.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -122,22 +130,26 @@ describe('timeout beside an UPPERCASE WebSocket url in forced remote mode — re
   });
 });
 
-describe('CONTROL 1 — detectMode is untouched: an uppercase url with no explicit mode is still local', () => {
+describe('CONTROL 1 (FLIPPED) — an uppercase url with no explicit mode is detected as remote, as @libsql/client routes it', () => {
   it.each([`WSS://${HOST}`, 'Ws://127.0.0.1:8080', `HTTPS://${HOST}`, `LIBSQL://${HOST}`])(
-    '%s with no `mode` falls through to local, exactly as before this change',
+    '%s with no `mode` is remote, no longer a local database on a private :memory: engine',
     (url) => {
       const driver = new TursoDriver({ url });
 
-      expect(driver.transportMode).toBe('local');
-      expect(driver.isRemote).toBe(false);
+      expect(driver.transportMode).toBe('remote');
+      expect(driver.isRemote).toBe(true);
     },
   );
 
-  it('and it stays local WITH a timeout — the refusal is scoped to remote mode, so it cannot reach here', () => {
-    const driver = new TursoDriver({ url: `WSS://${HOST}`, timeout: WINDOW_MS });
+  it('so an uppercase WebSocket url WITH a timeout and no mode meets the refusal, exactly as the lowercase one does', () => {
+    const upper = refusalOf(() => new TursoDriver({ url: `WSS://${HOST}`, timeout: WINDOW_MS }));
+    const lower = refusalOf(() => new TursoDriver({ url: `wss://${HOST}`, timeout: WINDOW_MS }));
 
-    expect(driver.transportMode).toBe('local');
-    expect(driver.getTursoConfig().timeout).toBe(WINDOW_MS);
+    expect(lower).not.toBeNull();
+    expect(upper).not.toBeNull();
+    expect(upper!.code).toBe('VALIDATION_ERROR');
+    expect(upper!.status).toBe(400);
+    expect(upper!.message).toBe(lower!.message.split('`wss://`').join('`WSS://`'));
   });
 });
 
