@@ -103,6 +103,96 @@ const denyWritesOnManagedObjects = (): Record<string, {
 );
 
 /**
+ * [#20001] The row scope of the seven `@better-auth/scim` projection tables —
+ * one more instance of the blanket class the header above describes, closed
+ * with the instrument the header names (the per-object row scope, never an edit
+ * of the blanket).
+ *
+ * Why the blanket was wider here than anywhere else on the list: NONE of these
+ * tables carries a tenant column (`scripts/platform-object-tenancy-census.json`
+ * records all seven `reach: out`, `tenantField: null`), so the organization wall
+ * (Layer 0) is inert on them and the engine scopes nothing by organization. The
+ * header's "org-wide readable" therefore meant EVERY organization's rows: an
+ * ordinary member of one organization read the users, groups and memberships
+ * another organization's identity provider had provisioned.
+ *
+ * The scope, per table:
+ *   - `_self` (`user_id == current_user.id`) on the four tables that name the
+ *     platform user a row is about — `sys_scim_user`, `sys_scim_subject`,
+ *     `sys_scim_projection_grant`, `sys_scim_identity_tombstone`. A principal
+ *     reads what the provisioning says about THEM, the same shape as every other
+ *     `_self` carve-out in this file;
+ *   - `_none` (`id == null`) on the three that name no user —
+ *     `sys_scim_group`, `sys_scim_group_member`, `sys_scim_connection_binding`.
+ *     `id` is required on every row, so this admits no row: said plainly, it is
+ *     the mirror of the `id != null` spelling `sys_invitation_org_admin` uses for
+ *     "every row". A policy rather than dropping `allowRead`, because the header
+ *     rules out editing the blanket and a per-object `allowRead: false` would
+ *     be undone by any other set that names the object.
+ * The platform admin (`admin_full_access`) keeps every row: its wildcard carries
+ * the superuser read bypass, which skips Layer 1 on a better-auth-managed object.
+ * That is the audience SCIM is administered by — the connection store
+ * (`sys_scim_connection_credential`) is gated on `manage_platform_settings`.
+ *
+ * ⚠️ There is deliberately NO organization-scoped read here, for members or for
+ * org admins, because none is expressible without a schema change:
+ *   - an `_org` predicate needs a column to compare, and the only table that
+ *     knows a connection's organization is `sys_scim_connection_credential` — a
+ *     predicate cannot traverse `connection_id` to it (ADR-0055);
+ *   - an admin admission spelled like `sys_invitation_org_admin` (`id != null`,
+ *     bounded by Layer 0) is bounded by NOTHING here — Layer 0 is inert — so it
+ *     would hand an org admin every organization's rows again;
+ *   - `user_id in current_user.org_user_ids` is not an organization scope for
+ *     this data: a projection belongs to the CONNECTION that wrote it, so a
+ *     user who belongs to two organizations would expose one organization's
+ *     identity-provider record of them to the other.
+ * An organization-scoped SCIM directory is therefore a capability to decide and
+ * build (a tenant column on the projection, or a resolved connection set), not a
+ * predicate to add here.
+ *
+ * `select` (not `all`): every write on these tables is denied at the object
+ * layer by `denyWritesOnManagedObjects()` and answered 405 by
+ * `apiMethods: ['get', 'list']`; the writer is the SCIM protocol endpoint,
+ * through better-auth's adapter under system context, which no row policy
+ * reaches.
+ *
+ * Spread into EVERY shipped set that spreads the blanket and carries row-level
+ * security — `organization_admin` (and so its derived no-bypass variant),
+ * `member_default` and `viewer_readonly` — rather than into the baseline alone:
+ * a deployment that composes no platform baseline (`fallbackPermissionSet: null`)
+ * resolves an org admin's sets without `member_default`, and a set with no
+ * policy for an object leaves that object unfiltered. The MCP write ceiling
+ * holds the blanket too and carries no row-level security by design (ADR-0090
+ * D10): its bound is the delegating user's own sets, which carry this scope.
+ * A fresh array per set, like `denyWritesOnManagedObjects()`, so no two sets
+ * share one policy object.
+ */
+const scimProjectionRowScope = () => [
+  { name: 'sys_scim_user_self', object: 'sys_scim_user', operation: 'select', using: 'user_id == current_user.id' },
+  { name: 'sys_scim_subject_self', object: 'sys_scim_subject', operation: 'select', using: 'user_id == current_user.id' },
+  {
+    name: 'sys_scim_projection_grant_self',
+    object: 'sys_scim_projection_grant',
+    operation: 'select',
+    using: 'user_id == current_user.id',
+  },
+  {
+    name: 'sys_scim_identity_tombstone_self',
+    object: 'sys_scim_identity_tombstone',
+    operation: 'select',
+    using: 'user_id == current_user.id',
+  },
+  { name: 'sys_scim_group_none', object: 'sys_scim_group', operation: 'select', using: 'id == null' },
+  { name: 'sys_scim_group_member_none', object: 'sys_scim_group_member', operation: 'select', using: 'id == null' },
+  {
+    name: 'sys_scim_connection_binding_none',
+    object: 'sys_scim_connection_binding',
+    operation: 'select',
+    using: 'id == null',
+  },
+];
+
+/**
  * Default permission sets seeded by the platform.
  *
  * These are referenced by name (`admin_full_access`, `member_default`,
@@ -385,6 +475,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         operation: 'select',
         using: 'organization_id == current_user.organization_id',
       },
+      // [#20001] The SCIM projection tables: self-only / no row, and deliberately
+      // no org-admin admission — Layer 0 is inert on them, so an `id != null`
+      // admission shaped like `sys_invitation_org_admin` would read every
+      // organization's rows. See `scimProjectionRowScope` above.
+      ...scimProjectionRowScope(),
     ],
   }),
   PermissionSetSchema.parse({
@@ -926,6 +1021,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         using: 'id != null',
         positions: ['org_member'],
       },
+      // [#20001] The SCIM projection tables: a member reads the rows about
+      // themselves and no other — see `scimProjectionRowScope` above.
+      ...scimProjectionRowScope(),
     ],
   }),
   PermissionSetSchema.parse({
@@ -1045,6 +1143,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         operation: 'select',
         using: 'email == current_user.email',
       },
+      // [#20001] Repeated here rather than inherited from `member_default`: this
+      // set names the SCIM projection tables through the blanket, and wherever
+      // the platform baseline is not composed a set with no policy for them
+      // leaves them unfiltered. See `scimProjectionRowScope` above.
+      ...scimProjectionRowScope(),
     ],
   }),
 
@@ -1148,7 +1251,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
  * ({@link ORGANIZATION_ADMIN_NO_BYPASS}) from `organization_admin` by dropping
  * the wildcard `viewAllRecords`/`modifyAllRecords` bits — everything else
  * (object grants, managed-write denies, anti-escalation RBAC read-only rules,
- * system permissions, the 15 identity RLS carve-outs) is carried over verbatim.
+ * system permissions, the identity RLS carve-outs) is carried over verbatim.
  *
  * DERIVED, never a second literal: two hand-maintained copies of a
  * high-privilege set are a drift waiting to happen, and the drift would be a
