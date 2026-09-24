@@ -209,6 +209,7 @@ import {
   PM_RESIDUE_LABELS,
   PM_STATE_CLAIM,
   PROXY_FLAG,
+  protocolStamps,
   proxyRearmPlan,
   proxyRoute,
   resolveSweepRepo,
@@ -418,10 +419,14 @@ export function planCommentRefusalText({ refused = [], repeated = [] } = {}) {
  * the closed-card sweep would otherwise have to clear with writes of its own.
  * Identity stickers (`pm:seat`, `pm:epic`) are not residue, so they stay.
  * Imported, never restated. Pure.
+ *
+ * Under `--stateless` there is no expected state (`expectState` is null) and
+ * the list is the residue alone — usually empty, which is what makes the
+ * strip a step the card does not owe rather than a step that failed.
  */
 export function stripLabels(card, expectState) {
   const labels = labelNamesOf(card?.labels);
-  const out = [expectState];
+  const out = expectState ? [expectState] : [];
   for (const l of labels) if (PM_RESIDUE_LABELS.includes(l) && !out.includes(l)) out.push(l);
   return out;
 }
@@ -443,9 +448,11 @@ export function parseCliOptions(argv) {
     repo: null,
     plan: null,
     expectState: DEFAULT_EXPECT_STATE,
+    stateless: false,
     skipPrReferenced: true,
     dryRun: false,
   };
+  let expectStateGiven = false;
   const args = argv ?? [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -456,8 +463,20 @@ export function parseCliOptions(argv) {
 
     if (flag === '--repo') opts.repo = value();
     else if (flag === '--plan') opts.plan = value();
-    else if (flag === '--expect-state') opts.expectState = value();
-    else if (flag === '--skip-pr-referenced') opts.skipPrReferenced = true;
+    else if (flag === '--expect-state') {
+      opts.expectState = value();
+      expectStateGiven = true;
+    } else if (flag === '--stateless') {
+      if (inline !== null) {
+        return {
+          ok: false,
+          error:
+            `\`--stateless\` takes no value, got \`${arg}\`. It is a mode, not a setting: \`--stateless=false\` read as ON ` +
+            'would close stateless cards on a run that asked not to. Pass the bare flag, or leave it out.',
+        };
+      }
+      opts.stateless = true;
+    } else if (flag === '--skip-pr-referenced') opts.skipPrReferenced = true;
     else if (flag === '--no-skip-pr-referenced') opts.skipPrReferenced = false;
     else if (flag === '--dry-run') opts.dryRun = true;
     else if (RETIRED_FLAGS.includes(flag)) {
@@ -472,15 +491,33 @@ export function parseCliOptions(argv) {
   }
 
   if (!opts.plan) return { ok: false, error: '--plan FILE is required — one row per card, `N|REASON|COMMENT-FILE`' };
-  if (typeof opts.expectState !== 'string' || opts.expectState.length === 0) {
+  if (opts.stateless) {
+    // ⛔ Two modes, never both: `--expect-state` names the ONE state a card
+    // must carry, `--stateless` acts only on a card carrying none. Given
+    // together, one of them is a mistake, and picking which is a ruling.
+    if (expectStateGiven) {
+      return {
+        ok: false,
+        error:
+          '`--stateless` and `--expect-state` are two modes, and a run takes ONE: `--stateless` acts only on a card carrying NO ' +
+          'pm-state label, `--expect-state L` only on a card carrying exactly `L`. Split the plan into two runs.',
+      };
+    }
+    // The default `pm:queue` means nothing here, so it is CLEARED rather than
+    // left beside the flag for some later line to read as a state to strip.
+    opts.expectState = null;
+  } else if (typeof opts.expectState !== 'string' || opts.expectState.length === 0) {
     return { ok: false, error: '--expect-state takes the pm-state label a card must carry, e.g. `pm:queue`' };
-  }
-  if (!PM_EXCLUSIVE_STATE_LABELS.includes(opts.expectState)) {
+  } else if (!PM_EXCLUSIVE_STATE_LABELS.includes(opts.expectState)) {
+    // ⛔ And no `none` spelling joins the vocabulary: the accepted set is the
+    // imported state list and nothing else, so a typo can never come to mean
+    // "no state" — the card that carries none is `--stateless`'s, by name.
     return {
       ok: false,
       error:
         `\`${opts.expectState}\` is not a pm-state label. The states are ${render(PM_EXCLUSIVE_STATE_LABELS)}. ` +
-        'A typo here matches no card, skips every one of them, and prints a confident run that closed nothing.',
+        'A typo here matches no card, skips every one of them, and prints a confident run that closed nothing. ' +
+        'A card carrying NO pm-state is closed by `--stateless`, never by an `--expect-state` value.',
     };
   }
 
@@ -497,7 +534,7 @@ const USAGE = [
   'and under the fleet-write relay as ONE dispatch — ONE write — per card.',
   '',
   '  node scripts/pm/close-cards.mjs --repo OWNER/NAME --plan FILE',
-  '                                  [--expect-state pm:queue] [--no-skip-pr-referenced] [--dry-run]',
+  '                                  [--expect-state pm:queue | --stateless] [--no-skip-pr-referenced] [--dry-run]',
   '  node scripts/pm/close-cards.mjs --self-test',
   '',
   '  ⛔ Invoke it from the REPO ROOT with nothing in front of `node` — no `cd … &&` compound. A session',
@@ -510,14 +547,19 @@ const USAGE = [
   '                   ⛔ Never the same comment text on many cards: a shared file, or two files whose text',
   '                   is identical once whitespace is collapsed and numbers masked, refuses the whole plan.',
   '  --expect-state L the pm-state label a card must carry, EXACTLY and alone (default `pm:queue`).',
+  '  --stateless      act ONLY on a card carrying NO pm-state label; a card carrying any is skipped. Takes',
+  '                   no value, and ⛔ is refused beside --expect-state: a run is one mode or the other.',
   '  --no-skip-pr-referenced  act on a card an open PR references (the skip is ON by default).',
-  '  --dry-run        re-read every card and print what would be sent — under the relay, each card\'s ONE',
-  '                   payload (comment → labels_remove → issue_patch). Writes NOTHING, on any card.',
+  '  --dry-run        re-read every card and its thread and print what would be sent — under the relay,',
+  '                   each card\'s ONE payload: the steps still owed, in the order comment → labels_remove →',
+  '                   issue_patch. Writes NOTHING, on any card.',
   '',
   '  Per card, re-read live first, then SKIP + log on: not open · has an assignee · carries',
-  `  \`${RETRIAGE_LABEL}\` · pm-state is not exactly the expected label · an open PR references it.`,
-  '  Otherwise: post the comment, strip the pm-state and its residue labels, close with the row\'s reason,',
-  '  and read all three back — under the relay as ONE dispatch per card, never two cards in one.',
+  `  \`${RETRIAGE_LABEL}\` · pm-state is not exactly the expected label (under --stateless: carries any) ·`,
+  '  an open PR references it. Otherwise read the card\'s thread and send only what the BOARD still owes:',
+  '  the comment unless this row\'s closing comment is already there (a RESUME — ⛔ never a second one),',
+  '  the strip of the pm-state and its residue labels unless nothing is left to strip, and the close with',
+  '  the row\'s reason — then read all three back. Under the relay: ONE dispatch per card, never two cards.',
   '',
   `  Exits: ${EXIT_OK} every non-skipped card landed and read back · ${EXIT_USAGE} usage, or refused before any write ·`,
   `         ${EXIT_PREREQUISITE} PREREQUISITE NOT MET, nothing measured · ${EXIT_HALF_WRITE} HALF-WRITE / read-back mismatch, a card is`,
@@ -638,21 +680,98 @@ export async function readCommentsSince(call, base, sinceMs, opts = {}) {
  * the order the order was written in, and the FIRST reason is the one reported:
  * a closed card with an assignee is reported as closed, which is what a reader
  * needs to know.
+ *
+ * The state row is the only one the mode moves. An ordinary run acts on a card
+ * carrying EXACTLY `expectState`; a `--stateless` run (`stateless: true`) acts
+ * only on a card carrying NO pm-state and skips one carrying any — one state or
+ * two. Every other row stands in both modes.
  */
-export function skipReason(card, { expectState, openPrs = [] } = {}) {
+export function skipReason(card, { expectState, stateless = false, openPrs = [] } = {}) {
   if (card?.state !== 'open') return `not open (state ${card?.state ?? 'unknown'}${card?.state_reason ? `/${card.state_reason}` : ''})`;
   const assignees = loginsOf(card?.assignees).concat(card?.assignee?.login ? [card.assignee.login] : []);
   if (assignees.length > 0) return `has an assignee (${render([...new Set(assignees)])}) — somebody owns it`;
   const labels = labelNamesOf(card?.labels);
   if (labels.includes(RETRIAGE_LABEL)) return `carries \`${RETRIAGE_LABEL}\` — a summons is outstanding`;
   const states = labels.filter((l) => PM_EXCLUSIVE_STATE_LABELS.includes(l));
-  if (states.length === 0) return `carries no pm-state label, and this run acts only on \`${expectState}\``;
-  if (states.length > 1) return `carries ${states.length} pm-state labels (${render(states)}) — two claims, and this run acts only on exactly \`${expectState}\``;
-  if (states[0] !== expectState) {
-    return `pm-state is \`${states[0]}\` (${PM_STATE_CLAIM[states[0]] ?? 'a state this run does not act on'}), not \`${expectState}\``;
+  if (stateless) {
+    if (states.length > 0) {
+      return (
+        `carries ${states.length === 1 ? 'the pm-state' : `${states.length} pm-state labels`} ${render(states)} — a \`--stateless\` run acts only ` +
+        'on a card carrying NONE; a stateful card is closed under `--expect-state`, where its state is stripped'
+      );
+    }
+  } else {
+    if (states.length === 0) return `carries no pm-state label, and this run acts only on \`${expectState}\` (a card carrying none closes under \`--stateless\`)`;
+    if (states.length > 1) return `carries ${states.length} pm-state labels (${render(states)}) — two claims, and this run acts only on exactly \`${expectState}\``;
+    if (states[0] !== expectState) {
+      return `pm-state is \`${states[0]}\` (${PM_STATE_CLAIM[states[0]] ?? 'a state this run does not act on'}), not \`${expectState}\``;
+    }
   }
   if (openPrs.length > 0) return `an open PR references it (${openPrs.map((n) => `#${n}`).join(', ')})`;
   return null;
+}
+
+/**
+ * Every comment on a card — the whole thread, paged by number like the
+ * timeline. What the resume reading below judges, bought only for a card that
+ * would otherwise be acted on.
+ */
+export async function readThread(call, base, opts = {}) {
+  const pageSize = opts.pageSize ?? 100;
+  return walkPages(call, (page) => `${base}/comments?per_page=${pageSize}&page=${page}`, { pageSize, cap: opts.cap ?? TIMELINE_PAGE_CAP });
+}
+
+/**
+ * Is THIS row's closing comment already on the card — left there by an
+ * earlier act on the same row whose strip or close did not land (a
+ * half-written close)? Returns `{ comment, body, rendered }` for the newest
+ * such comment, or `null`. Pure.
+ *
+ * "This row's closing comment" is judged by the readings that already own the
+ * question, ⛔ never a similarity of this file's own: the row's text is
+ * RE-RENDERED by post-stamped's `renderBody` on the clock of every stamp the
+ * stored comment spells (`protocolStamps` — the earlier act substituted ITS
+ * clock, so the stored body can only equal a render on that clock), and each
+ * render is judged against the stored bytes by post-stamped's
+ * `pickRelayComment` — the same footer and newline tolerance the relay's own
+ * read-back grants, and nothing wider. A comment that differs in one byte
+ * outside a measured normalisation is not this row's comment, and the run
+ * posts the row's comment as usual.
+ *
+ * ⛔ Not `burstKey`: masking every digit run would read "folded into #100"
+ * and "folded into #101" as one comment, and a resume taken on that reading
+ * leaves a card closed under a comment that is not its ruling.
+ */
+export function priorClosingComment(comments, text) {
+  const list = Array.isArray(comments) ? comments : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const comment = list[i];
+    for (const stamp of new Set(protocolStamps(comment?.body))) {
+      const at = Date.parse(stamp);
+      if (!Number.isFinite(at)) continue;
+      const rendered = renderBody(text, at);
+      // A seconds-grained stamp is not one `renderBody` writes, and a render
+      // whose stamp is not the one tried was not the earlier act's.
+      if (!rendered.ok || rendered.stamp !== stamp) continue;
+      if (pickRelayComment([comment], rendered.body, Number.NEGATIVE_INFINITY)) return { comment, body: rendered.body, rendered };
+    }
+  }
+  return null;
+}
+
+/**
+ * The relay ops ONE card still owes, read off the board: `PACK_ORDER` minus
+ * the effects already there. Pure.
+ *
+ *   comment        — owed unless this row's closing comment is on the card
+ *                    (`priorClosingComment`) — ⛔ never a second one;
+ *   labels_remove  — owed while any label the close strips is still on the
+ *                    card (`removeCalls` is label-write's own arithmetic over
+ *                    the live read, so a label already gone is no call);
+ *   issue_patch    — always: a closed card is skipped before it gets here.
+ */
+export function residualOps({ commentOnBoard = false, removeCalls = [] } = {}) {
+  return PACK_ORDER.filter((op) => (op === 'comment' ? !commentOnBoard : op === 'labels_remove' ? removeCalls.length > 0 : true));
 }
 
 // ---------------------------------------------------------------------------
@@ -743,38 +862,55 @@ export function parsePostStampedJson(stdout) {
 // The run
 // ---------------------------------------------------------------------------
 
-/** The half-write refusal: the card, and exactly which of the three writes landed. */
-export function halfWriteText({ issue, repo, landed = [], failedStep, detail = '' }) {
+/**
+ * The half-write refusal: the card, and exactly which of the three steps are
+ * on the board. `already` names the steps that were there BEFORE this run (a
+ * resume) — landed, but not by this run, and the line says so.
+ */
+export function halfWriteText({ issue, repo, landed = [], already = [], failedStep, detail = '' }) {
   const outstanding = STEPS.filter((s) => !landed.includes(s));
+  const said = (s) => `\`${s}\`${already.includes(s) ? ' (on the board before this run)' : ''}`;
   return (
     `⛔ HALF-WRITE on ${repo}#${issue} — the \`${failedStep}\` step did not land${detail ? ` (${detail})` : ''}.\n` +
-    `  LANDED: ${landed.length ? landed.map((s) => `\`${s}\``).join(', ') : 'nothing'} · ` +
+    `  LANDED: ${landed.length ? landed.map(said).join(', ') : 'nothing'} · ` +
     `OUTSTANDING: ${outstanding.map((s) => `\`${s}\``).join(', ')}.\n` +
     '  This card is now in a state nobody asked for: go READ it and finish or undo the steps above by hand.\n' +
     '  ⛔ The run STOPS here and does not touch the remaining cards — continuing would turn one half-state\n' +
-    '  into a page of them, and ⛔ re-running blind would post the closing comment a second time.'
+    '  into a page of them. ⛔ Not retried here. A later run of the same row reads the thread and RESUMES —\n' +
+    '  only the steps still owed, never a second closing comment; once the pm-state is gone, under `--stateless`.'
   );
 }
 
 /**
  * ONE card's ONE dispatch: post-stamped's own comment action, label-write's
- * `relayActions` for the ② target, and the close — in `PACK_ORDER` and in no
- * other shape, judged by the relay's own validator (the op table, the body
- * cap, the platform's 64KB `client_payload` ceiling). Pure but for the
- * request id. ⛔ One card per payload, never two: the executor stops at its
- * first failure, and a second card in the same payload would be stopped by
- * the first one's.
+ * `relayActions` for the ② target, and the close — the steps the card still
+ * OWES (`residualOps`), in `PACK_ORDER` and in no other shape, judged by the
+ * relay's own validator (the op table, the body cap, the platform's 64KB
+ * `client_payload` ceiling). Pure but for the request id.
+ *
+ *   commentOnBoard — this row's closing comment is already on the card (a
+ *                    RESUME): the pack carries no comment, ⛔ never a second;
+ *   expectState    — the state an ordinary run acts on: the strip MUST take
+ *                    it, because the skip matrix let the card through only
+ *                    while it carried it. Null under `--stateless`, where a
+ *                    card with nothing to strip packs no strip at all.
+ *
+ * ⛔ One card per payload, never two: the executor stops at its first failure,
+ * and a second card in the same payload would be stopped by the first one's.
+ * A residual pack is still ONE dispatch — fewer actions, the same one write.
  */
-export function packCard({ repo, session, issue, body, labels, reason, requestId = null, now = Date.now } = {}) {
+export function packCard({ repo, session, issue, body, labels, reason, commentOnBoard = false, expectState = null, requestId = null, now = Date.now } = {}) {
   const actions = [
-    relayAction({ mode: 'comment', number: issue }, body),
+    ...(commentOnBoard ? [] : [relayAction({ mode: 'comment', number: issue }, body)]),
     ...relayActions({ issue, labels }),
     { op: 'issue_patch', issue, state: 'closed', state_reason: reason },
   ];
   const ops = actions.map((a) => a.op);
-  if (ops.join(',') !== PACK_ORDER.join(',')) {
-    const why = labels?.addCalls?.length ? 'the label plan ADDS labels, which a close never does' : 'the label plan strips nothing, so the pm-state this run acts on is not on the card';
-    return { ok: false, payload: null, actions, errors: [`card #${issue} packs ${render(ops)}; ONE card's dispatch is exactly ${render(PACK_ORDER)}, in that order — ${why}`] };
+  const owed = residualOps({ commentOnBoard, removeCalls: labels?.removeCalls ?? [] });
+  const refuse = (why) => ({ ok: false, payload: null, actions, errors: [`card #${issue} packs ${render(ops)}; ONE card's dispatch is exactly the steps it still owes, ${render(owed)}, in the order ${render(PACK_ORDER)} — ${why}`] });
+  if (ops.join(',') !== owed.join(',')) return refuse(labels?.addCalls?.length ? 'the label plan ADDS labels, which a close never does' : 'the actions are not the residue of that order');
+  if (expectState && !(labels?.removeCalls ?? []).includes(expectState)) {
+    return refuse(`the label plan does not strip \`${expectState}\`, so the pm-state this run acts on is not on the card`);
   }
   const packed = packRequest({ repo, session, actions, requestId, now });
   return { ...packed, actions };
@@ -786,15 +922,21 @@ export function packCard({ repo, session, issue, body, labels, reason, requestId
  *
  *   comment — a comment created since the dispatch stores the body sent
  *             (post-stamped's `pickRelayComment`: the platform's footer and
- *             newline handling tolerated, anything else not);
+ *             newline handling tolerated, anything else not); on a RESUME
+ *             (`prior`, from `priorClosingComment`), that SAME comment, by id,
+ *             still storing the body its own act sent;
  *   label   — no label the ② plan removed is still on the card;
  *   close   — the card reads `closed` under the row's reason.
  *
  * `matches` is step ④'s verdict: all three landed AND label-write's
- * `verdictIsClean` over its own `readBackVerdict` of the ② target.
+ * `verdictIsClean` over its own `readBackVerdict` of the ② target. A residual
+ * pack is read back on all three exactly the same way: a step the run did not
+ * send is still a step the card must SHOW.
  */
-export function landedFromBoard({ card, comments, body, dispatchedAt, labels, reason } = {}) {
-  const hit = pickRelayComment(comments, body, dispatchedAt);
+export function landedFromBoard({ card, comments, body, dispatchedAt, labels, reason, prior = null } = {}) {
+  const hit = prior
+    ? pickRelayComment((Array.isArray(comments) ? comments : []).filter((c) => c?.id === prior.comment?.id), prior.body, Number.NEGATIVE_INFINITY)
+    : pickRelayComment(comments, body, dispatchedAt);
   const backLabels = labelNamesOf(card?.labels);
   const labelVerdict = labelReadBackVerdict({ target: labels?.target ?? [], removeCalls: labels?.removeCalls ?? [], readBack: backLabels });
   const closed = card?.state === 'closed' && card?.state_reason === reason;
@@ -807,7 +949,7 @@ export function landedFromBoard({ card, comments, body, dispatchedAt, labels, re
  * the ones a live board cannot be made to produce on demand (a comment that
  * lands whose label write is then refused, a relay run that fails half-way).
  *
- * @param {{repo:string, rows:{issue:number, reason:string, commentFile:string, text:string}[], expectState:string, skipPrReferenced:boolean, dryRun:boolean}} options
+ * @param {{repo:string, rows:{issue:number, reason:string, commentFile:string, text:string}[], expectState:string|null, stateless?:boolean, skipPrReferenced:boolean, dryRun:boolean}} options
  * @param {{call?:Function, postComment?:Function, labelWrite?:Function, send?:Function, route?:object, now?:Function, log?:Function}} [deps]
  */
 export async function runCloseCards(options, deps = {}) {
@@ -821,6 +963,8 @@ export async function runCloseCards(options, deps = {}) {
   };
 
   const { repo, rows, expectState, skipPrReferenced, dryRun } = options;
+  const stateless = options.stateless === true;
+  const stripOf = (state) => (state ? [state] : []);
   const route = deps.route ?? (await resolveRoute(process.env));
   const send = deps.send ?? sendFleetWrite;
 
@@ -852,7 +996,7 @@ export async function runCloseCards(options, deps = {}) {
       return { exit: res.exit, detail: '' };
     });
 
-  const counts = { read: 0, skipped: 0, actionable: 0, closed: 0, dispatched: 0 };
+  const counts = { read: 0, skipped: 0, actionable: 0, resumed: 0, closed: 0, dispatched: 0 };
   const skips = [];
   const closed = [];
   const payloads = [];
@@ -861,7 +1005,8 @@ export async function runCloseCards(options, deps = {}) {
 
   record(
     `close-cards: ${dryRun ? 'DRY RUN — nothing will be written. ' : ''}${repo} · ${rows.length} card(s) · ` +
-      `reasons ${render([...new Set(rows.map((r) => r.reason))])} · expect-state \`${expectState}\` · open-PR skip ${skipPrReferenced ? 'ON' : 'OFF'}` +
+      `reasons ${render([...new Set(rows.map((r) => r.reason))])} · ` +
+      `${stateless ? 'STATELESS — acts only on a card carrying NO pm-state' : `expect-state \`${expectState}\``} · open-PR skip ${skipPrReferenced ? 'ON' : 'OFF'}` +
       `${skipPrReferenced ? '' : ' (⛔ declared off: a card an open PR references will be closed under it)'}`,
   );
   if (route.error) {
@@ -875,7 +1020,9 @@ export async function runCloseCards(options, deps = {}) {
   // A payload the relay's validator refuses (the 64KB ceiling, the body cap) is
   // refused here with ZERO writes on every card, never discovered on card 40.
   if (route.transport === 'dispatch') {
-    record('close-cards: ONE dispatch per card — comment → labels_remove → issue_patch — so each card is ONE write on the throttle.');
+    record(
+      'close-cards: ONE dispatch per card — the steps it still owes, in the order comment → labels_remove → issue_patch — so each card is ONE write on the throttle.',
+    );
     const refused = [];
     for (const row of rows) {
       const pre = preflightComment(row.text, now());
@@ -883,7 +1030,16 @@ export async function runCloseCards(options, deps = {}) {
         refused.push(`#${row.issue} (${row.commentFile}) [${pre.kind}]: ${pre.error}`);
         continue;
       }
-      const preview = packCard({ repo, session: route.session, issue: row.issue, body: pre.rendered.body, labels: computeLabelTarget({ current: [expectState], remove: [expectState] }), reason: row.reason, now });
+      const preview = packCard({
+        repo,
+        session: route.session,
+        issue: row.issue,
+        body: pre.rendered.body,
+        labels: computeLabelTarget({ current: stripOf(expectState), remove: stripOf(expectState) }),
+        reason: row.reason,
+        expectState,
+        now,
+      });
       if (!preview.ok) refused.push(`#${row.issue} (${row.commentFile}): ${preview.errors.join(' · ')}`);
     }
     if (refused.length > 0) {
@@ -914,7 +1070,7 @@ export async function runCloseCards(options, deps = {}) {
     // The cheap rows first: the timeline is bought ONLY for a card that would
     // otherwise be acted on, so a plan of 90 mostly-skipped cards costs 90
     // requests rather than 180.
-    let why = skipReason(card, { expectState, openPrs: [] });
+    let why = skipReason(card, { expectState, stateless, openPrs: [] });
     if (!why && skipPrReferenced) {
       const timeline = await readTimeline(call, base);
       if (!timeline.ok) {
@@ -931,7 +1087,7 @@ export async function runCloseCards(options, deps = {}) {
         );
         return result(timeline.verdict === 'refusal' ? EXIT_PLATFORM_REFUSAL : EXIT_PREREQUISITE, { stoppedAt: issue });
       }
-      why = skipReason(card, { expectState, openPrs: openPrReferences(timeline.events) });
+      why = skipReason(card, { expectState, stateless, openPrs: openPrReferences(timeline.events) });
     }
 
     if (why) {
@@ -954,14 +1110,50 @@ export async function runCloseCards(options, deps = {}) {
     }
     const body = pre.rendered.body;
 
+    // The THREAD, read before anything is sent: is this row's closing comment
+    // already on the card — an earlier act's, whose strip or close did not
+    // land? ⛔ An unread thread is not an empty one: sending the comment on it
+    // may post a SECOND closing comment, and not sending it may close the card
+    // under none — so a thread that cannot be read STOPS the run, exactly as
+    // an unread timeline does, with zero writes on this card.
+    const thread = await readThread(call, base);
+    if (!thread.ok) {
+      record(
+        thread.reason === 'not-exhausted'
+          ? `#${issue} THREAD NOT EXHAUSTED — still full pages at the ${thread.pages}-page cap (${thread.events.length} comments read).`
+          : `#${issue} COULD NOT READ THE THREAD — ${thread.res.call} -> HTTP ${thread.res.status}${thread.res.detail ? ` (${thread.res.detail})` : ''}`,
+      );
+      record(
+        '⛔ STOPPING. Whether this row\'s closing comment is already on the card cannot be told from a thread\n' +
+          '  nobody finished reading: sending the comment on it may post a SECOND closing comment, and leaving it\n' +
+          `  out may close the card under none. ⛔ ZERO writes on #${issue}. ${stopNote()}`,
+      );
+      return result(thread.verdict === 'refusal' ? EXIT_PLATFORM_REFUSAL : EXIT_PREREQUISITE, { stoppedAt: issue, landed: [] });
+    }
+    const prior = priorClosingComment(thread.events, row.text);
+
     // ② label-write's own arithmetic: target = current − (pm-state + residue).
     const current = labelNamesOf(card.labels);
     const labels = computeLabelTarget({ current, remove: stripLabels(card, expectState) });
+    // The steps the BOARD already shows: this row's comment an earlier act
+    // left, and a strip with nothing left to take. What remains is owed.
+    const already = STEPS.filter((st) => (st === 'comment' ? prior !== null : st === 'label' ? labels.removeCalls.length === 0 : false));
+    const owed = residualOps({ commentOnBoard: prior !== null, removeCalls: labels.removeCalls });
     record(`#${issue} ① 取现集 ${render(current)} → ② target ${render(labels.target)} · strip ${render(labels.removeCalls)}`);
+    if (prior) {
+      counts.resumed += 1;
+      record(
+        `#${issue} RESUME — this row's closing comment is already on the board: comment ${prior.comment.id} ` +
+          `(posted ${prior.comment.created_at}, stamped ${prior.rendered.stamp} by its own act)` +
+          `${labels.removeCalls.length === 0 ? ', and nothing is left to strip' : ''}. ` +
+          `Still owed: ${owed.join(' → ')}. ⛔ No second closing comment.`,
+      );
+    }
+    const resumeTag = prior ? ` (RESUME — comment ${prior.comment.id} already on the board)` : '';
 
     if (route.transport === 'dispatch') {
-      // ③ ONE card, ONE dispatch, ONE write.
-      const packed = packCard({ repo, session: route.session, issue, body, labels, reason, now });
+      // ③ ONE card, ONE dispatch, ONE write — carrying only the steps owed.
+      const packed = packCard({ repo, session: route.session, issue, body, labels, reason, commentOnBoard: prior !== null, expectState, now });
       if (!packed.ok) {
         record(relayRefusalText(packed.errors));
         record(`⛔ ZERO writes on #${issue} — the payload was refused before it was sent. Stopping — ${stopNote()}`);
@@ -972,7 +1164,7 @@ export async function runCloseCards(options, deps = {}) {
       payloads.push(packed.payload);
       if (dryRun) {
         record(`#${issue} payload ${JSON.stringify(packed.payload)}`);
-        record(`#${issue} → WOULD CLOSE \`${reason}\` — ⛔ nothing sent`);
+        record(`#${issue} → WOULD CLOSE \`${reason}\`${resumeTag} — ⛔ nothing sent`);
         continue;
       }
 
@@ -994,11 +1186,14 @@ export async function runCloseCards(options, deps = {}) {
         return result(EXIT_UNCONFIRMED, { stoppedAt: issue, relay: sent });
       }
 
-      // ④ 回读 — the BOARD, after a run that completed either way.
+      // ④ 回读 — the BOARD, after a run that completed either way. On a
+      // RESUME the window reaches back to the earlier act's comment, so the
+      // comment leg is read off the board too rather than taken from ①.
       const dispatchedAt = Number.isFinite(sent.dispatchedAt) ? sent.dispatchedAt : sentAt;
       const back = await call(base, {});
       const backVerdict = classifyHttp({ status: back.status, op: 'card-read', rateRemaining: back.rateRemaining });
-      const tail = backVerdict === 'ok' ? await readCommentsSince(call, base, dispatchedAt - 60_000) : null;
+      const sinceMs = prior ? Math.min(dispatchedAt - 60_000, Date.parse(prior.comment.created_at)) : dispatchedAt - 60_000;
+      const tail = backVerdict === 'ok' ? await readCommentsSince(call, base, sinceMs) : null;
       if (backVerdict !== 'ok' || !tail.ok) {
         const what =
           backVerdict !== 'ok'
@@ -1013,22 +1208,29 @@ export async function runCloseCards(options, deps = {}) {
           );
           return result(EXIT_PREREQUISITE, { stoppedAt: issue, relay: sent });
         }
-        record(halfWriteText({ issue, repo, landed: [], failedStep: 'comment', detail: `relay run FAILED ${runRef}, and the card could not be read back (${what}) — which steps landed is NOT MEASURED; treat it as a half-write until read` }));
+        const failedStep = STEPS.find((st) => !already.includes(st));
+        record(halfWriteText({ issue, repo, landed: already, already, failedStep, detail: `relay run FAILED ${runRef}, and the card could not be read back (${what}) — which steps landed is NOT MEASURED; treat it as a half-write until read` }));
         return result(EXIT_HALF_WRITE, { stoppedAt: issue, relay: sent });
       }
-      const board = landedFromBoard({ card: back.json, comments: tail.events, body, dispatchedAt, labels, reason });
+      const board = landedFromBoard({ card: back.json, comments: tail.events, body, dispatchedAt, labels, reason, prior });
       record(
         `#${issue} ④ 回读 — ${back.json?.state ?? '?'}${back.json?.state_reason ? `/${back.json.state_reason}` : ''} · ${board.backLabels.length} label(s): ${render(board.backLabels)} · ` +
-          `comment ${board.hit ? board.hit.id : 'NOT FOUND storing the body sent'}`,
+          `comment ${board.hit ? `${board.hit.id}${prior ? ' (on the board before this run)' : ''}` : `NOT FOUND storing the body ${prior ? 'its own act' : 'this run'} sent`}`,
       );
 
       if (!sent.ok) {
-        if (board.landed.length === 0) {
-          record(`#${issue} the relay run FAILED (${runRef}) at its first action, and the board shows NONE of the three steps.`);
+        // "Nothing landed" is judged on the steps THIS pack carried: a step
+        // that was on the board before the run is not something it wrote.
+        const landedNow = board.landed.filter((st) => !already.includes(st));
+        if (landedNow.length === 0) {
+          record(
+            `#${issue} the relay run FAILED (${runRef}) at its first action, and the board shows NONE of the ${packed.actions.length === PACK_ORDER.length ? 'three steps' : 'steps it carried'}` +
+              `${already.length ? ` — the card is as the run found it (${already.map((st) => `\`${st}\``).join(', ')} on the board before this run)` : ''}.`,
+          );
           record(`⛔ NOTHING landed on #${issue}. Stopping — ${stopNote()}`);
           return result(EXIT_PLATFORM_REFUSAL, { stoppedAt: issue, landed: [], relay: sent });
         }
-        record(halfWriteText({ issue, repo, landed: board.landed, failedStep: STEPS.find((s) => !board.landed.includes(s)), detail: `relay run FAILED ${runRef}; the steps above are what the BOARD shows` }));
+        record(halfWriteText({ issue, repo, landed: board.landed, already, failedStep: STEPS.find((st) => !board.landed.includes(st)), detail: `relay run FAILED ${runRef}; the steps above are what the BOARD shows` }));
         return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: board.landed, relay: sent });
       }
 
@@ -1037,7 +1239,7 @@ export async function runCloseCards(options, deps = {}) {
       }
       if (!board.matches) {
         if (board.landed.length < STEPS.length) {
-          record(halfWriteText({ issue, repo, landed: board.landed, failedStep: STEPS.find((s) => !board.landed.includes(s)), detail: `the relay run ${runRef} reported success and the BOARD does not show it` }));
+          record(halfWriteText({ issue, repo, landed: board.landed, already, failedStep: STEPS.find((st) => !board.landed.includes(st)), detail: `the relay run ${runRef} reported success and the BOARD does not show it` }));
         } else {
           record(
             `⛔ READ-BACK MISMATCH on ${repo}#${issue} — labels missing ${render(board.labelVerdict.missing)} (in the ② target, gone from the card: ` +
@@ -1048,47 +1250,61 @@ export async function runCloseCards(options, deps = {}) {
         }
         return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: board.landed, relay: sent });
       }
-      const said = commentReadBackVerdict({
-        stamp: pre.rendered.stamp,
-        writtenAt: board.hit.created_at,
-        sent: body,
-        stored: board.hit.body,
-        substituted: pre.rendered.substituted,
-        quoted: pre.rendered.quoted,
-        verbatim: pre.rendered.verbatim,
-        verbatimTokens: pre.rendered.verbatimTokens,
-      });
-      for (const l of said.lines) record(`    ${l.trim()}`);
-      record(`#${issue} ④ MATCHES — closed \`${reason}\` · labels ${render(board.backLabels)} · comment ${board.hit.id} (via the relay run ${runRef})`);
+      if (prior) {
+        // The stamp verdict describes the act that WROTE the comment, which
+        // was not this one — so it is not re-judged against this run's clock.
+        record(`    comment ${board.hit.id} was on the board before this run, stamped ${prior.rendered.stamp} by its own act — ⛔ not re-sent.`);
+      } else {
+        const said = commentReadBackVerdict({
+          stamp: pre.rendered.stamp,
+          writtenAt: board.hit.created_at,
+          sent: body,
+          stored: board.hit.body,
+          substituted: pre.rendered.substituted,
+          quoted: pre.rendered.quoted,
+          verbatim: pre.rendered.verbatim,
+          verbatimTokens: pre.rendered.verbatimTokens,
+        });
+        for (const l of said.lines) record(`    ${l.trim()}`);
+      }
+      record(`#${issue} ④ MATCHES — closed \`${reason}\` · labels ${render(board.backLabels)} · comment ${board.hit.id}${prior ? ' (on the board before this run)' : ''} (via the relay run ${runRef})`);
       counts.closed += 1;
-      closed.push({ issue, reason, comment: board.hit.id });
-      record(`#${issue} → closed ${reason} ${board.hit.id}`);
+      closed.push({ issue, reason, comment: board.hit.id, resumed: prior !== null });
+      record(`#${issue} → closed ${reason} ${board.hit.id}${prior ? ' (RESUME)' : ''}`);
       continue;
     }
 
-    // ── DIRECT: three writes, each by the tool that owns it ───────────────
+    // ── DIRECT: the steps still owed, each by the tool that owns it ──────
     if (dryRun) {
-      record(`#${issue} → WOULD CLOSE \`${reason}\` — direct: comment · strip ${render(labels.removeCalls)} · close — ⛔ nothing written`);
+      const steps = [...(prior ? [] : ['comment']), ...(labels.removeCalls.length ? [`strip ${render(labels.removeCalls)}`] : []), 'close'];
+      record(`#${issue} → WOULD CLOSE \`${reason}\`${resumeTag} — direct: ${steps.join(' · ')} — ⛔ nothing written`);
       continue;
     }
 
-    // ② comment
-    const posted = await postComment({ repo, issue, file: row.commentFile });
-    if (posted.exit === POST_STAMPED_EXIT_NOT_STORED) {
-      record(halfWriteText({ issue, repo, landed: ['comment'], failedStep: 'comment', detail: 'post-stamped exit 4 — WRITTEN BUT NOT STORED as sent' }));
-      return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: ['comment'] });
-    }
-    if (posted.exit !== 0) {
-      record(`#${issue} comment REFUSED — post-stamped exit ${posted.exit}${posted.detail ? ` — ${posted.detail}` : ''}`);
-      record(`⛔ NOTHING was written to #${issue}: post-stamped refuses BEFORE the write on every exit but 4. Stopping — ${stopNote()}`);
-      return result(posted.exit === EXIT_PREREQUISITE ? EXIT_PREREQUISITE : EXIT_PLATFORM_REFUSAL, { stoppedAt: issue, landed: [] });
+    // ② comment — unless this row's is already on the board. ⛔ Never a second.
+    let commentId = prior?.comment.id ?? null;
+    if (!prior) {
+      const posted = await postComment({ repo, issue, file: row.commentFile });
+      if (posted.exit === POST_STAMPED_EXIT_NOT_STORED) {
+        record(halfWriteText({ issue, repo, landed: ['comment'], failedStep: 'comment', detail: 'post-stamped exit 4 — WRITTEN BUT NOT STORED as sent' }));
+        return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: ['comment'] });
+      }
+      if (posted.exit !== 0) {
+        record(`#${issue} comment REFUSED — post-stamped exit ${posted.exit}${posted.detail ? ` — ${posted.detail}` : ''}`);
+        record(`⛔ NOTHING was written to #${issue}: post-stamped refuses BEFORE the write on every exit but 4. Stopping — ${stopNote()}`);
+        return result(posted.exit === EXIT_PREREQUISITE ? EXIT_PREREQUISITE : EXIT_PLATFORM_REFUSAL, { stoppedAt: issue, landed: [] });
+      }
+      commentId = posted.id;
     }
 
-    // ③ label — the four-step write, read back by the tool that owns it.
-    const wrote = await labelWrite({ repo, issue, remove: labels.removeCalls });
-    if (wrote.exit !== 0) {
-      record(halfWriteText({ issue, repo, landed: ['comment'], failedStep: 'label', detail: `label-write exit ${wrote.exit}${wrote.detail ? ` — ${wrote.detail}` : ''}` }));
-      return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: ['comment'] });
+    // ③ label — the four-step write, read back by the tool that owns it;
+    // unless nothing is left to strip, when there is no write to make.
+    if (labels.removeCalls.length > 0) {
+      const wrote = await labelWrite({ repo, issue, remove: labels.removeCalls });
+      if (wrote.exit !== 0) {
+        record(halfWriteText({ issue, repo, landed: ['comment'], already, failedStep: 'label', detail: `label-write exit ${wrote.exit}${wrote.detail ? ` — ${wrote.detail}` : ''}` }));
+        return result(EXIT_HALF_WRITE, { stoppedAt: issue, landed: ['comment'] });
+      }
     }
 
     // ④ close — and READ THE ANSWER BACK. A 200 whose body does not say
@@ -1102,6 +1318,7 @@ export async function runCloseCards(options, deps = {}) {
           issue,
           repo,
           landed: ['comment', 'label'],
+          already,
           failedStep: 'close',
           detail:
             patchVerdict === 'ok'
@@ -1113,14 +1330,14 @@ export async function runCloseCards(options, deps = {}) {
     }
 
     counts.closed += 1;
-    closed.push({ issue, reason, comment: posted.id });
-    record(`#${issue} → closed ${reason} ${posted.id ?? '(no comment id returned)'}`);
+    closed.push({ issue, reason, comment: commentId, resumed: prior !== null });
+    record(`#${issue} → closed ${reason} ${commentId ?? '(no comment id returned)'}${prior ? ' (RESUME)' : ''}`);
   }
 
   const byReason = closed.reduce((acc, c) => ({ ...acc, [c.reason]: (acc[c.reason] ?? 0) + 1 }), {});
   record(
     `close-cards: ${dryRun ? 'DRY RUN — nothing was written. ' : ''}${counts.read} read · ` +
-      `${counts.actionable} actionable · ${counts.skipped} skipped` +
+      `${counts.actionable} actionable${counts.resumed ? ` (${counts.resumed} RESUMED — closing comment already on the board)` : ''} · ${counts.skipped} skipped` +
       `${dryRun ? '' : ` · ${counts.closed} closed${counts.closed ? ` (${Object.entries(byReason).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`}` +
       `${route.transport === 'dispatch' ? ` · ${dryRun ? `${payloads.length} payload(s) packed, 0 sent` : `${counts.dispatched} dispatch(es) sent — ${counts.dispatched} write(s) on the throttle`}` : ''}`,
   );
@@ -1212,10 +1429,13 @@ export function fakeApi(initial = {}) {
     const kind = match?.[2] === '/timeline' ? 'timeline' : match?.[2] === '/comments' ? 'comments' : method === 'PATCH' ? 'patch' : 'read';
     calls.push({ kind, number, method, path, body: init.body ?? null });
 
+    // A `null` in a hook queue is a PASS-THROUGH: that call is served by the
+    // board, so a case can aim its canned answer at the SECOND read of a kind
+    // (the read-back's comments, not the thread read before the pack).
     const queued = hooks.get(`${kind}:${number}`) ?? hooks.get(kind);
     if (queued?.length) {
       const canned = queued.shift();
-      return wrap(canned.status, canned.json ?? { message: 'canned' }, canned.rateRemaining ?? 5000);
+      if (canned !== null) return wrap(canned.status, canned.json ?? { message: 'canned' }, canned.rateRemaining ?? 5000);
     }
 
     const card = cards.get(number);
@@ -1373,6 +1593,26 @@ export async function selfTest() {
   t('⛔ an --expect-state that is not a pm state is refused, never silently matched against nothing', parseCliOptions([...MIN, '--expect-state', 'pm:queued']).ok, false);
   t('…and the refusal names the states there are', /pm:dispatched/.test(parseCliOptions([...MIN, '--expect-state', 'pm:queued']).error ?? ''));
   t('⛔ an unrecognised option is refused rather than ignored', parseCliOptions([...MIN, '--force']).ok, false);
+  t('…and a run is NOT stateless unless it says so', parseCliOptions(MIN).options?.stateless, false);
+  t('`--stateless` parses, and CLEARS the default expected state rather than leaving `pm:queue` beside it', [parseCliOptions([...MIN, '--stateless']).options?.stateless, parseCliOptions([...MIN, '--stateless']).options?.expectState], [true, null]);
+  t('⛔ `--stateless` beside `--expect-state` is refused — two modes, one run', parseCliOptions([...MIN, '--stateless', '--expect-state', 'pm:queue']).ok, false);
+  t('…in either order, naming both flags', ((r) => [r.ok, /--stateless/.test(r.error ?? '') && /--expect-state/.test(r.error ?? '')])(parseCliOptions([...MIN, '--expect-state=pm:queue', '--stateless'])), [false, true]);
+  t('⛔ `--stateless=false` is refused, never read as ON', parseCliOptions([...MIN, '--stateless=false']).ok, false);
+  t('⛔ there is no `none` state: `--expect-state none` is refused and points at `--stateless`', ((r) => [r.ok, /--stateless/.test(r.error ?? '')])(parseCliOptions([...MIN, '--expect-state', 'none'])), [false, true]);
+  {
+    // The whole door, not the parser alone: `main` answers the mode clash with
+    // the usage exit before any plan is read or any request is made.
+    const errors = [];
+    const saved = console.error;
+    console.error = (...a) => errors.push(a.join(' '));
+    let code;
+    try {
+      code = await main([...REPO, '--plan', '/nonexistent/plan.txt', '--stateless', '--expect-state', 'pm:queue']);
+    } finally {
+      console.error = saved;
+    }
+    t('`main` answers `--stateless` + `--expect-state` with the USAGE exit (2), before reading the plan', [code, errors.some((e) => /two modes/.test(e)), errors.some((e) => /could not read --plan/.test(e))], [EXIT_USAGE, true, false]);
+  }
 
   // ── the plan file ─────────────────────────────────────────────────────────
   battery('the plan file: one card, one reason, one comment file of its own');
@@ -1448,6 +1688,18 @@ export async function selfTest() {
   t('…and the reason names the PR', /#123/.test(skipReason(cardJson({ number: 1, labels: ['pm:queue'] }), { ...EXPECT, openPrs: [123] }) ?? ''));
   t('the FIRST reason wins — a closed, assigned card reads as closed', /not open/.test(skipReason(cardJson({ number: 1, state: 'closed', labels: ['pm:queue'], assignees: ['x'] }), EXPECT) ?? ''));
   t('a different --expect-state moves the whole matrix with it', skipReason(cardJson({ number: 1, labels: ['pm:on-hold'] }), { expectState: 'pm:on-hold' }), null);
+  t('…and the no-state skip of an ordinary run names the mode that closes such a card', /--stateless/.test(skipReason(cardJson({ number: 1, labels: ['tooling'] }), EXPECT) ?? ''));
+  const STATELESS_RUN = { expectState: null, stateless: true };
+  t('under `--stateless` a card carrying NO pm-state is ACTIONABLE', skipReason(cardJson({ number: 1, labels: ['tracking', 'domain:spec'] }), STATELESS_RUN), null);
+  t('⛔ under `--stateless` a card carrying a pm-state is skipped, naming it', /the pm-state `pm:queue`.*--stateless/.test(skipReason(cardJson({ number: 1, labels: ['pm:queue'] }), STATELESS_RUN) ?? ''));
+  t('⛔ …and one carrying TWO is skipped too, naming both', /2 pm-state labels `pm:queue`, `pm:blocked`/.test(skipReason(cardJson({ number: 1, labels: ['pm:queue', 'pm:blocked'] }), STATELESS_RUN) ?? ''));
+  t('⛔ …and `needs-user-decision` IS a state: a card owed a ruling is never closed stateless', /needs-user-decision/.test(skipReason(cardJson({ number: 1, labels: ['needs-user-decision'] }), STATELESS_RUN) ?? ''));
+  t('⛔ under `--stateless` an assignee still skips', /assignee/.test(skipReason(cardJson({ number: 1, labels: ['tracking'], assignees: ['os-zhuang'] }), STATELESS_RUN) ?? ''));
+  t('⛔ …and so do `pm:retriage`, a closed card and an open PR', [
+    /pm:retriage/.test(skipReason(cardJson({ number: 1, labels: ['pm:retriage'] }), STATELESS_RUN) ?? ''),
+    /not open/.test(skipReason(cardJson({ number: 1, state: 'closed', labels: [] }), STATELESS_RUN) ?? ''),
+    /open PR/.test(skipReason(cardJson({ number: 1, labels: [] }), { ...STATELESS_RUN, openPrs: [5] }) ?? ''),
+  ], [true, true, true]);
 
   // ── the skip log ──────────────────────────────────────────────────────────
   battery('the skip log: a skipped card gets no payload, and the output names why');
@@ -1592,7 +1844,7 @@ export async function selfTest() {
     t('…the comment is the card`s own text, stamped on the act`s clock', ok.sent[0].actions[0], { op: 'comment', issue: 61, body: 'Closed #61 2026-09-23T12:00Z — ruling for this card.' });
     t('…the strip is the pm-state, the close carries the row`s reason', [ok.sent[0].actions[1], ok.sent[0].actions[2]], [{ op: 'labels_remove', issue: 61, labels: ['pm:queue'] }, { op: 'issue_patch', issue: 61, state: 'closed', state_reason: 'not_planned' }]);
     t('…the envelope carries the session and the target', [ok.sent[0].session, ok.sent[0].repo], [SELF_TEST_SESSION, 'objectstack-ai/objectstack']);
-    t('⛔ no write verb left this process — the reads, then the read-back reads', ok.api.calls.map((c) => c.kind), ['read', 'timeline', 'read', 'comments']);
+    t('⛔ no write verb left this process — the reads (card, timeline, thread), then the read-back reads', ok.api.calls.map((c) => c.kind), ['read', 'timeline', 'comments', 'read', 'comments']);
     t('the summary counts one dispatch — one throttle write — per closed card', /1 closed \(not_planned 1\) · 1 dispatch\(es\) sent — 1 write\(s\) on the throttle/.test(ok.text));
     const two = await driveOffline({ rows: [ROW(62), ROW(63, { reason: 'completed' })] }, { cards: { ...QUEUED(62), ...QUEUED(63) } }, { route: dispatchRoute(), relay: 'success' });
     t('⛔ never two cards in one dispatch: two cards are two payloads, one card each', two.sent.map((p) => [...new Set(p.actions.map((a) => a.issue))]), [[62], [63]]);
@@ -1632,7 +1884,7 @@ export async function selfTest() {
   // ── the read-back ─────────────────────────────────────────────────────────
   battery('the read-back: step ④ reads the BOARD — comment, labels and close — and must MATCH');
   {
-    t('④ reads the card back AND the comments since the dispatch', [ok.api.calls.filter((c) => c.kind === 'comments').length, /since=2026-09-23T11%3A59%3A00/.test(ok.api.calls.find((c) => c.kind === 'comments')?.path ?? '')], [1, true]);
+    t('④ reads the card back AND the comments since the dispatch', [ok.api.calls.filter((c) => c.kind === 'comments' && /since=/.test(c.path)).length, /since=2026-09-23T11%3A59%3A00/.test(ok.api.calls.find((c) => c.kind === 'comments' && /since=/.test(c.path))?.path ?? '')], [1, true]);
     t('④ MATCHES is printed only once all three effects read back from the board', /#61 ④ MATCHES — closed `not_planned`/.test(ok.text));
     t('…the comment is FOUND on the board through the platform`s footer, and its id is what the run reports', ok.res.closed[0]?.comment, 5001);
     t('…with post-stamped`s own stamp verdict: drift 0, one clock', /drift 0/.test(ok.text));
@@ -1645,8 +1897,9 @@ export async function selfTest() {
     t('…and ⛔ it is NOT re-added: no write of any kind left for it — the one dispatch was the only one', [stripped.sent.length, stripped.api.calls.some((c) => c.method !== 'GET')], [1, false]);
     const added = await driveOffline({ numbers: [75] }, { cards: QUEUED(75) }, { route: dispatchRoute(), relay: 'add:hotfix' });
     t('another seat`s additive label is a NOTE, never a mismatch — the card still closes', [added.res.exit, /④ note — `hotfix`/.test(added.text)], [EXIT_OK, true]);
-    const unread = await driveOffline({ numbers: [76] }, { cards: QUEUED(76), hooks: { 'comments:76': [{ status: 502, json: { message: 'Bad gateway' } }] } }, { route: dispatchRoute(), relay: 'success' });
-    t('⛔ a read-back that cannot be read after a successful run is NOT MEASURED (exit 3), never counted as a close', [unread.res.exit, unread.res.counts.closed, /NOT MEASURED/.test(unread.text)], [EXIT_PREREQUISITE, 0, true]);
+    // The first comments read is the THREAD (served), the second the read-back (refused).
+    const unread = await driveOffline({ numbers: [76] }, { cards: QUEUED(76), hooks: { 'comments:76': [null, { status: 502, json: { message: 'Bad gateway' } }] } }, { route: dispatchRoute(), relay: 'success' });
+    t('⛔ a read-back that cannot be read after a successful run is NOT MEASURED (exit 3), never counted as a close', [unread.res.exit, unread.res.counts.closed, unread.sent.length, /④ read-back — COULD NOT READ/.test(unread.text)], [EXIT_PREREQUISITE, 0, 1, true]);
   }
 
   // ── the relay miss ────────────────────────────────────────────────────────
@@ -1814,6 +2067,7 @@ export async function main(argv) {
       repo: options.repo,
       rows: plan.rows,
       expectState: options.expectState,
+      stateless: options.stateless,
       skipPrReferenced: options.skipPrReferenced,
       dryRun: options.dryRun,
     },
