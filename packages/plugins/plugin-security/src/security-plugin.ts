@@ -4422,11 +4422,14 @@ export class SecurityPlugin implements Plugin {
     //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
     //    as the middleware stamps it (step 2.6), always overwritten, so an
     //    `org` / unit writer is not judged owner-only.
-    // The on-behalf-of path keeps its previous inputs on both halves. The gate
+    // [#19986] The READ verdict's twin: plugin-sharing's read filter is asked
+    // with `__readScope` stamped as step 2.6 stamps it for a find, so
+    // `record.visible` for `read` is what the caller's find returns.
+    // The on-behalf-of path keeps its previous inputs on every half. The gate
     // itself excludes it from the floor decision, and the middleware's
-    // delegated write depth (the agent-leg intersection, plus a second gate
-    // call as the delegator) is not modelled on explain's record path.
-    const delegatedWrite = (c: any): boolean => !!c?.onBehalfOf?.userId;
+    // delegated depths (the agent-leg intersection, plus a second gate call or
+    // filter as the delegator) are not modelled on explain's record path.
+    const actsOnBehalfOf = (c: any): boolean => !!c?.onBehalfOf?.userId;
     const recordWriteFloorOptions = async (
       sets: PermissionSet[],
       o: string,
@@ -4437,12 +4440,20 @@ export class SecurityPlugin implements Plugin {
       // Fail toward the floor: an unanswerable decision keeps it standing,
       // which is what the gate's own verdict does on a failed probe.
       const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
-        engineOp, o, recordId, c, sets, delegatedWrite(c),
+        engineOp, o, recordId, c, sets, actsOnBehalfOf(c),
       ).catch(() => false);
       return { dropPlatformOwnershipFloor };
     };
     const withWriteScope = async (o: string, c: any): Promise<any> =>
-      delegatedWrite(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
+      actsOnBehalfOf(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
+    // {@link resolveSharingReadFilter} IS the read-depth stamp step 2.6 makes
+    // (the same two inputs to the same evaluator call); the analytics path
+    // already asks it. The caller's own key is cleared first, so the depth
+    // is always the computed one — never one the context brought — even
+    // where resolution fails and the helper stamps nothing (`own`, the safe
+    // direction).
+    const readFilterWithReadScope = (o: string, c: any): Promise<unknown | null> =>
+      this.resolveSharingReadFilter(o, { ...c, __readScope: undefined });
 
     return explainAccess(
       {
@@ -4488,7 +4499,10 @@ export class SecurityPlugin implements Plugin {
           }
         },
         ...(sharing && typeof sharing.buildReadFilter === 'function'
-          ? { sharingReadFilter: (o: string, c: any) => sharing.buildReadFilter(o, c) }
+          ? {
+              sharingReadFilter: (o: string, c: any) =>
+                actsOnBehalfOf(c) ? sharing.buildReadFilter(o, c) : readFilterWithReadScope(o, c),
+            }
           : {}),
         ...(sharing && typeof sharing.listShares === 'function'
           // [ADR-0111 D5] listShares is now management-gated in the sharing
