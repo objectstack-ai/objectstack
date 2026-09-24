@@ -6,8 +6,11 @@
  *
  * Two faces hold a json value that reached disk WITHOUT its JSON encoding:
  *
- * - local SQLite (this package's `SqlDriver.backfillCanonicalJsonEncoding`,
- *   #12380): a string the pre-#12380 `formatInput` stored raw;
+ * - local SQLite (this package's `SqlDriver.backfillCanonicalJsonEncoding`): a
+ *   string an older `formatInput` stored raw, before the SQLite write path
+ *   JSON-encoded every json value. The issue number that change cites no
+ *   longer resolves; its live record is that method's doc block and
+ *   `sql-driver-12380-json-roundtrip.test.ts`;
  * - Turso remote (`remote-codec-residue-backfill.ts` in
  *   `@objectstack/driver-turso`, #19868): a scalar the pre-#19844 remote batch
  *   door stored raw.
@@ -26,8 +29,9 @@
  *   `s`.
  * - **`JSON.parse` accepts it** ⇒ it reads back as what it parses to, and it is
  *   never rewritten. Either it already is the stored form of that value, or it
- *   is one of the collisions the #12380 ruling accepts as unrecoverable (the
- *   string `'{"a":1}'` and the object `{a:1}` were the same bytes).
+ *   is one of the collisions the ruling on that storage format accepts as
+ *   unrecoverable (the string `'{"a":1}'` and the object `{a:1}` were the same
+ *   bytes; recorded in the same doc block and test).
  *
  * ⛔ SQL may PRE-FILTER candidates (`json_valid(col) = 0`) but never decides.
  * SQLite's JSON parser and the driver's disagree, and the disagreement runs the
