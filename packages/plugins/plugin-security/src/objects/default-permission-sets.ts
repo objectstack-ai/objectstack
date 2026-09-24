@@ -193,6 +193,58 @@ const scimProjectionRowScope = () => [
 ];
 
 /**
+ * [#20027] The row scope of the two better-auth tables whose rows ARE
+ * credentials: `sys_verification` (one-time verification and password-reset
+ * tokens) and `sys_jwks` (the environment's JWT signing keys). Both declare
+ * `access: { default: 'private' }`, and the contract this file has always
+ * stated for them is "DENY for non-admins by design" — see the note above the
+ * `_self` carve-outs in `member_default`.
+ *
+ * Why the declaration alone did not hold: `private` keeps a plain `'*'`
+ * wildcard off an object (`resolveObjectPermission`), but the blanket above
+ * gives these objects an EXPLICIT per-object read entry, and an explicit entry
+ * is not the wildcard. The object-level read therefore resolved `true` for
+ * every set holding the blanket, and neither object had a row policy. The
+ * retired wildcard `tenant_isolation` policy was what used to deny their rows;
+ * ADR-0095 D1 moved the tenant wall to Layer 0, which is inert on an object
+ * with no tenant column. One more instance of the class this file's header
+ * describes, closed with the instrument the header names: the per-object row
+ * scope, ⛔ never an edit of the blanket.
+ *
+ * `_none` (`id == null`, i.e. no row), the shape `scimProjectionRowScope`
+ * uses. There is no `_self` form: neither table names a user
+ * (`sys_verification` keys on an address, `sys_jwks` on nothing), and no
+ * principal needs to read even their OWN live token — better-auth reads it.
+ *
+ * Who keeps every row, and why this does not reach them:
+ *   - the platform admin (`admin_full_access`): its wildcard carries the
+ *     superuser read bypass, which skips Layer 1, and it names neither object
+ *     explicitly;
+ *   - better-auth itself: it reads through its adapter under system context
+ *     (`withSystemContext`, plugin-auth), which no row policy reaches.
+ *
+ * Why a policy, and not `private` taking precedence over explicit entries in
+ * the evaluator: three OTHER `private` objects on the blanket —
+ * `sys_device_code`, `sys_oauth_access_token`, `sys_oauth_refresh_token` — are
+ * deliberately readable by their owner through that same explicit entry plus
+ * a `_self` policy. An evaluator rule would retire those reads too; this scope
+ * touches only the two objects the contract names.
+ *
+ * `select` (not `all`): every write on these tables is already denied at the
+ * object layer by the blanket. Spread into EVERY shipped set that spreads the
+ * blanket and carries row-level security (`organization_admin`, and so its
+ * derived no-bypass variant, `member_default`, `viewer_readonly`), for the
+ * reason `scimProjectionRowScope` gives: where no platform baseline is
+ * composed, a set with no policy for an object leaves it unfiltered. The MCP
+ * write ceiling holds the blanket too; its bound is the delegating user's own
+ * sets (ADR-0090 D10), which carry this scope. A fresh array per set.
+ */
+const privateCredentialRowScope = () => [
+  { name: 'sys_verification_none', object: 'sys_verification', operation: 'select', using: 'id == null' },
+  { name: 'sys_jwks_none', object: 'sys_jwks', operation: 'select', using: 'id == null' },
+];
+
+/**
  * Default permission sets seeded by the platform.
  *
  * These are referenced by name (`admin_full_access`, `member_default`,
@@ -480,6 +532,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // admission shaped like `sys_invitation_org_admin` would read every
       // organization's rows. See `scimProjectionRowScope` above.
       ...scimProjectionRowScope(),
+      // [#20027] The credential tables: no row. The org admin's `viewAllRecords`
+      // does not reach them — the blanket's explicit entry, not the wildcard,
+      // is what resolves for them. See `privateCredentialRowScope` above.
+      ...privateCredentialRowScope(),
     ],
   }),
   PermissionSetSchema.parse({
@@ -704,6 +760,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // `user_id` (`sys_verification`, `sys_jwks`, empty `sys_passkey`)
       // stay DENY for non-admins by design — only platform admins (via
       // `admin_full_access`, which has no RLS) should inspect them.
+      // [#20027] ⚠️ Since the wildcard policy retired, nothing above denies
+      // them: the blanket's explicit read entry opens the object, so the
+      // deny is held by `privateCredentialRowScope` (spread at the end of this
+      // list and of the two sibling sets). Keep the two together.
       {
         name: 'sys_organization_self',
         object: 'sys_organization',
@@ -1024,6 +1084,8 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // [#20001] The SCIM projection tables: a member reads the rows about
       // themselves and no other — see `scimProjectionRowScope` above.
       ...scimProjectionRowScope(),
+      // [#20027] The credential tables: no row — see `privateCredentialRowScope`.
+      ...privateCredentialRowScope(),
     ],
   }),
   PermissionSetSchema.parse({
@@ -1148,6 +1210,8 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // the platform baseline is not composed a set with no policy for them
       // leaves them unfiltered. See `scimProjectionRowScope` above.
       ...scimProjectionRowScope(),
+      // [#20027] Repeated here for the same reason: the credential tables, no row.
+      ...privateCredentialRowScope(),
     ],
   }),
 
