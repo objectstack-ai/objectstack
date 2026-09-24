@@ -24,6 +24,8 @@
 // `where` door already speaks — and never answered true. See
 // PREVIEW_FIELD_OPERATORS. [#19835] So is a field constraint carrying ZERO
 // operators (`{ name: {} }`), at any depth — see isEmptyFieldConstraint.
+// [#19888] And a list in the equality slot (`{ stage: ['won', 'lost'] }`,
+// `{ stage: { $eq: [...] } }`), through the published door's own gate.
 
 import {
   calendarPartsInTzOrUtc,
@@ -36,8 +38,9 @@ import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // EXPORTED by `filter-normalizer` precisely so a sibling in this package cannot
 // invent a second spelling of it. A draft-preview filter is a `where`-door
 // refusal in every respect that matters: the caller authored the predicate and
-// the repair is theirs.
-import { invalidFilterError } from './strategies/filter-normalizer.js';
+// the repair is theirs. [#19888] So is the equality-slot list gate, for the
+// same reason: one rule, one spelling, on both faces.
+import { assertNoListInEqualitySlot, invalidFilterError } from './strategies/filter-normalizer.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, type Cube } from '@objectstack/spec/data';
 
@@ -629,6 +632,11 @@ export function evaluateAnalyticsQueryOverRows(
   // [#19810] The operator vocabulary is decided BEFORE the rows are read, so an
   // unevaluable predicate refuses over an empty seed draft too — see
   // {@link assertPreviewCanEvaluate}.
+  // [#19888] A list in the equality slot first, through the gate the published
+  // `where` door runs: {@link matchesWhere} would otherwise compare each row
+  // against the list's STRING form (`'won,lost'`) and chart that, for a filter
+  // publish refuses `INVALID_FILTER` / 400 (ruling 乙, #19757).
+  assertNoListInEqualitySlot(query.where);
   assertPreviewCanEvaluate(query.where);
   let filtered = rows.filter((r) => matchesWhere(r, query.where));
   const timeDims = query.timeDimensions ?? [];
