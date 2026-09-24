@@ -12,7 +12,7 @@ A screen whose fields the run's caller already supplied continues without pausin
 
 **What the key says.** The keys of the caller's own `params`, recorded before the door seeds anything. An empty array means the caller supplied nothing; an absent key means the producer does not say.
 
-**Who fills it.** The action door (`dispatchFlowAction`: `POST /api/v1/actions/...` and MCP `run_action`) and the trigger door (`buildAutomationContext`: `POST /api/v1/automation/:name/trigger`, the legacy `POST /api/v1/automation/trigger/:name`, and a declarative `type: 'flow'` endpoint). Record-change, schedule, time-relative and webhook triggers, and code calling `execute` directly, leave it absent. `subflow` and `map` nodes drop the parent's list from the child run's context, because it describes the parent's bag.
+**Who fills it.** The action door (`dispatchFlowAction`: `POST /api/v1/actions/...` and MCP `run_action`) and the trigger door (`buildAutomationContext`: `POST /api/v1/automation/:name/trigger`, the legacy `POST /api/v1/automation/trigger/:name`, and a declarative `type: 'flow'` endpoint). Record-change, time-relative and webhook triggers, and code calling `execute` directly, leave it absent; the schedule trigger, which has no caller, states an empty list (#19900). `subflow` and `map` nodes drop the parent's list from the child run's context, because it describes the parent's bag.
 
 **What the screen does with it.** When the key is present, a field is caller-supplied when its name is in the list and `params` holds a value for it; the inference is not consulted. A present value that is not an array names nothing, so the screen pauses. When the key is absent, the inference from #15787 applies unchanged.
 

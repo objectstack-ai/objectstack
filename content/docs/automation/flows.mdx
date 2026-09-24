@@ -957,9 +957,13 @@ a column named like one of the fields and including when a field is named like
 one of the seeded id keys. ⛔ `waitForInput: false` remains the wrong tool for
 the headless case: it skips the form for interactive users too.
 
-A run started any other way — a record-change, schedule, time-relative or
-webhook trigger, a `subflow` or `map` child, or code calling the engine directly
-— carries no such list, and the screen falls back to inferring the caller's keys
+A scheduled run has no caller, and the schedule trigger states exactly that —
+an empty list — so its own `jobId`, `flowName` and `schedule` params never
+answer a screen field: a screen in a scheduled flow pauses.
+
+A run started any other way — a record-change, time-relative or webhook
+trigger, a `subflow` or `map` child, or code calling the engine directly —
+carries no such list, and the screen falls back to inferring the caller's keys
 from the bag. That inference does not treat a key as the caller's when it is
 named `recordId` or `<object>Id`, when its value equals what the bag carries
 under `recordId` or `<object>Id` or the record's `id`, or when the subject
