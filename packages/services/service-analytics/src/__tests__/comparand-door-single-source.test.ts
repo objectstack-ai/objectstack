@@ -124,9 +124,16 @@ const MATRIX: readonly Row[] = [
   { label: 'boolean', value: true,
     bindable: true, renderable: true,
     whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
+  // [#20010] One cell of this row moved AFTER the #8186 measurement, on
+  // purpose: the `where` door now hands every field entry to the shared
+  // comparand-shape face, whose 2026-08-31 ruling (#13357) refuses "a `null`
+  // member of `$in` / `$nin`" at that door, for every driver. The object
+  // spelling used to compile it to `status IN (NULL)`; the FilterArray
+  // spelling was already refused (`where-face-arms-refusal.test.ts`). The
+  // read-scope cell is that door's own and is not this card's.
   { label: 'null', value: null,
     bindable: true, renderable: true,
-    whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
+    whereLike: OK, whereIn: REFUSED_WHERE, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
   { label: 'Date', value: new Date('2026-01-01T00:00:00.000Z'),
     bindable: true, renderable: true,
     whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
@@ -266,7 +273,13 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
       'string', 'number', 'bigint', 'boolean', 'null', 'Date',
     ]);
     for (const row of doorTypes) {
-      for (const cell of [row.whereLike, row.whereIn, row.whereEq,
+      // [#20010] ONE exception, and it is not a TYPE verdict: `null` is an
+      // accepted comparand type, but not as an `$in` MEMBER — the SHAPE face's
+      // 2026-08-31 carve-out, which this door now runs. Every other position
+      // of every accepted type still accepts.
+      const whereIn = row.label === 'null' ? REFUSED_WHERE : OK;
+      expect(row.whereIn, `${row.label} $in`).toBe(whereIn);
+      for (const cell of [row.whereLike, row.whereEq,
                           row.scopeLike, row.scopeIn, row.scopeEq]) {
         expect(cell, row.label).toBe(OK);
       }
