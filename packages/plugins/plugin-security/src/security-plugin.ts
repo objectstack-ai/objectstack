@@ -6018,9 +6018,11 @@ export class SecurityPlugin implements Plugin {
    * Does the object's own write model replace the platform ownership floor
    * for this operation? True for a `public_read_write` OWD on `update` (#8023)
    * and for a `controlled_by_parent` detail whose master gate the caller
-   * vouches covers this write. That ruling landed in PR #8869 (commit
-   * 6feac910b6); its card number, cited elsewhere in this file, no longer
-   * resolves. The reasons are recorded where {@link computeLayeredRlsFilter}
+   * vouches covers this write. That ruling landed in commit 6feac910b6
+   * ("the master gate is the sole row-write authority for a
+   * controlled_by_parent detail"); the card number cited for it elsewhere in
+   * this file no longer resolves on the board, and that commit is the live
+   * record. The reasons are recorded where {@link computeLayeredRlsFilter}
    * applies the drop.
    *
    * One predicate, two readers: the pre-image Layer 1 composition and the
