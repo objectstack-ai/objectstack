@@ -19,9 +19,9 @@ import {
  *
  * Published from `@objectstack/spec/api-assembled`, never from
  * `@objectstack/spec/api`. Everything here is part of the Package API
- * (`/api/v1/packages`, `./package-api.zod.ts`); what sets these four apart is
+ * (`/api/v1/packages`, `./package-api.zod.ts`); what sets these five apart is
  * that each one embeds the assembled package body, `RecordStagePackageBodySchema`
- * from `../stack.zod`:
+ * from `../stack.zod` — or, for the route map, names a schema that does:
  *
  * - `AssembledInstalledPackageSchema` — the installed row at the assembled stage;
  * - `InstalledPackageAtEitherStageSchema` — the union the read doors serve;

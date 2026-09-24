@@ -26,7 +26,7 @@ import { retiredKey } from '../shared/retired-key';
  * DELETE /api/v1/packages/:packageId           — Uninstall a package
  * ```
  *
- * ## Four declarations of this API live one file over, on purpose
+ * ## Five declarations of this API live one file over, on purpose
  *
  * The two READ responses (`ListInstalledPackagesResponseSchema`,
  * `GetInstalledPackageResponseSchema`), the installed-row stages they are bound
@@ -35,9 +35,10 @@ import { retiredKey } from '../shared/retired-key';
  * `./package-api-assembled.zod.ts` and published from
  * `@objectstack/spec/api-assembled`, not from `@objectstack/spec/api`.
  *
- * The reason is weight, not meaning. Those four carry the ASSEMBLED package
- * body, which is the whole metadata vocabulary (`../stack.zod`) plus the
- * datasource and driver-config validators behind it. While they sat in this
+ * The reason is weight, not meaning. Four of them carry the ASSEMBLED package
+ * body (the fifth, the route map, names two of those four), which is the whole
+ * metadata vocabulary (`../stack.zod`) plus the datasource and driver-config
+ * validators behind it. While they sat in this
  * file, every `@objectstack/spec/api` bundle linked that tree, and a browser
  * consumer that imported two string constants from `./sortability.zod` paid
  * for all of it: measured at about twice the gzipped bundle of the same import
