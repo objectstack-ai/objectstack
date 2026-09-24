@@ -6,12 +6,11 @@ JSON Schemas converted from a `lazySchema()` reference now carry the `descriptio
 
 Clause-②: no
 
-zod reads `.describe()` / `.meta()` from its registry by node identity. A lazily built schema is referenced through a Proxy, while the metadata sits on the real instance behind it, so `z.toJSONSchema` found nothing and dropped the text. The published result depended on the evaluation mode, and every runtime producer runs lazily. The Proxy now answers the real instance's metadata to that lookup, less `id`, which stays on the real instance so that zod's duplicate-id refusal is never triggered.
+zod reads `.describe()` / `.meta()` from its registry by node identity. A lazily built schema is referenced through a Proxy, while the metadata sits on the real instance behind it, so `z.toJSONSchema` found nothing and dropped the text. The published result depended on the evaluation mode. The Proxy now answers the real instance's metadata to that lookup, less `id`, which stays on the real instance so that zod's duplicate-id refusal is never triggered.
 
-What changes: descriptions reappear. Nothing else does. Measured lazy against eager, leaf by leaf, across the four affected surfaces:
+What changes: descriptions reappear. Nothing else does. Measured lazy against eager, leaf by leaf:
 
 - `@objectstack/spec/openapi.json`, and the `GET …/openapi.json` document served from it, gains 2 (`ListRecordResponse.data[]` and `BulkRequest.records[]`);
-- the `/meta/types` JSON Schemas gain 170 across 11 of 26 types;
 - the `os generate` IDE schema gains 445;
 - the approval-node and schemaless node-config schemas are unchanged.
 

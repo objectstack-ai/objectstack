@@ -75,7 +75,7 @@ export function lazySchema<T extends z.ZodTypeAny>(factory: () => T): T {
    * kept it under `OS_EAGER_SCHEMAS=1`, where no Proxy exists. The two modes
    * then published different JSON Schemas from one source: the OpenAPI
    * artifact, `/meta/types` and the `os generate` IDE schema all shipped the
-   * lazy, description-less answer.
+   * lazy answer.
    */
   let zodFacade: object | undefined;
   const makeZodFacade = (real: T): object | undefined => {

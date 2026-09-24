@@ -165,7 +165,7 @@ describe('lazySchema × z.toJSONSchema metadata (#19101)', () => {
  * → suggestions.zod → field.zod cycle filed as #19930.
  *
  * Measured at the fix (lazy before → after, eager unchanged): the nine OpenAPI
- * components gain 2 descriptions, every `/meta/types` schema 170, the
+ * components gain 2 descriptions, the
  * `os generate` IDE schema 445; description is the only key that moved.
  */
 describe('lazy == eager on the real contract (#19101)', () => {
