@@ -27,7 +27,7 @@ const result = AdminScopeSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **businessUnit** | `string` | ✅ | [ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root |
+| **businessUnit** | `string` | ✅ | [ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root. Required and non-blank: an empty or whitespace-only value names no business unit and is refused. |
 | **includeSubtree** | `boolean` | optional (default: `true`) | Cover descendant business units too (default true) |
 | **manageAssignments** | `boolean` | optional (default: `false`) | Manage user↔position assignments within the subtree |
 | **manageBindings** | `boolean` | optional (default: `false`) | Manage position↔permission-set bindings within the subtree |
@@ -178,7 +178,7 @@ const result = AdminScopeSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **businessUnit** | `string` | ✅ | [ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root |
+| **businessUnit** | `string` | ✅ | [ADR-0090 D12] Delegation boundary: sys_business_unit.name of the subtree root. Required and non-blank: an empty or whitespace-only value names no business unit and is refused. |
 | **includeSubtree** | `boolean` | optional (default: `true`) | Cover descendant business units too (default true) |
 | **manageAssignments** | `boolean` | optional (default: `false`) | Manage user↔position assignments within the subtree |
 | **manageBindings** | `boolean` | optional (default: `false`) | Manage position↔permission-set bindings within the subtree |

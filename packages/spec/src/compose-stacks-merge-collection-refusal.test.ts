@@ -11,15 +11,19 @@
  * `[archive]`). Maintainer ruling (2026-09-04, option 4): refuse, in the shape
  * `'error'` uses, naming the object, the colliding collection and both
  * package ids; `fields` keeps its shallow merge; identical declarations pass
- * (as `composeSingleValue` passes identical top-level values); scalars and
- * fixed-shape config objects stay on later-wins.
+ * (as `composeSingleValue` passes identical top-level values); scalars stay on
+ * later-wins. Fixed-shape config objects stayed on later-wins too until
+ * #16075 (ruling 5563452716, option 1) extended this same refusal to them —
+ * pinned in `compose-stacks-merge-config-object-refusal.test.ts`; the message
+ * below enumerates both kinds.
  *
  * The refusal set is DERIVED from `ObjectSchema`'s shape (every array- or
- * record-typed key but `fields`), so the last block pins it against the shape
- * in BOTH directions with an independent walk: every collection key refuses,
- * every other key composes. The literal list beside it is the reviewer's copy
- * — a new collection key on the object schema joins the refusal without an
- * edit to `stack.zod.ts`, and shows up here as a one-line diff.
+ * record-typed key but `fields`, plus every fixed-shape config object), so the
+ * last block pins it against the shape in BOTH directions with an independent
+ * walk: every collection or config-object key refuses, every other key
+ * composes. The literal list beside it is the reviewer's copy — a new
+ * collection key on the object schema joins the refusal without an edit to
+ * `stack.zod.ts`, and shows up here as a one-line diff.
  */
 import { describe, it, expect } from 'vitest';
 import { composeStacks, defineStack, type ObjectStackDefinition } from './stack.zod';
@@ -67,12 +71,29 @@ const COLLECTION_KEYS_IN_SHAPE_ORDER = [
   'actions',
 ] as const;
 
+/**
+ * The fixed-shape config objects the same refusal covers since #16075, in
+ * shape order — the second list the refusal prints. Pinned against the shape
+ * in `compose-stacks-merge-config-object-refusal.test.ts`.
+ */
+const CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER = [
+  'userActions',
+  'external',
+  'tenancy',
+  'access',
+  'lifecycle',
+  'enable',
+  'publicSharing',
+  'protection',
+] as const;
+
 const REFUSED = (key: string, holder: string, later: string) =>
   `composeStacks conflict: object 'shared' is defined in multiple stacks and its '${key}' is declared with ` +
   `different values by ${holder} and ${later}.`;
 const WHY = (holder: string) =>
   "objectConflict: 'merge' shallow-merges 'fields' only. Any other object-level collection " +
-  `(${COLLECTION_KEYS_IN_SHAPE_ORDER.join(', ')}) is not merged: the later declaration would replace the ` +
+  `(${COLLECTION_KEYS_IN_SHAPE_ORDER.join(', ')}) is not merged, and neither is a fixed-shape config ` +
+  `object (${CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER.join(', ')}): the later declaration would replace the ` +
   `earlier one wholesale, silently dropping every entry ${holder} wrote.`;
 const FIX = (key: string) =>
   `Fix: declare '${key}' on 'shared' in exactly one of the two stacks, make the two declarations identical, ` +
@@ -236,11 +257,36 @@ describe('the refusal set is derived from ObjectSchema.shape — pinned in both 
     return false;
   }
 
+  /**
+   * [#16075] Independent walk for the second kind: a fixed-shape config
+   * object — `object` once wrappers are stripped, through lazy/pipe, and
+   * deliberately NOT into a union (a union admitting a non-object form is not
+   * a fixed shape). Asked only of a key that is not a collection.
+   */
+  function isConfigObject(schema: unknown, depth = 0): boolean {
+    if (depth > 8) return false;
+    const def = (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def;
+    const type = def?.type as string | undefined;
+    if (!type) return false;
+    if (type === 'object') return true;
+    if (['optional', 'nullable', 'default', 'prefault', 'readonly', 'nonoptional', 'catch'].includes(type)) return isConfigObject(def!.innerType, depth + 1);
+    if (type === 'lazy') return isConfigObject((def!.getter as () => unknown)(), depth + 1);
+    if (type === 'pipe') return isConfigObject(def!.in, depth + 1) || isConfigObject(def!.out, depth + 1);
+    return false;
+  }
+
   const shapeKeys = Object.keys(ObjectSchema.shape);
   const derived = shapeKeys.filter((k) => k !== 'fields' && isCollection((ObjectSchema.shape as Record<string, unknown>)[k]));
+  const derivedConfigObjects = shapeKeys.filter(
+    (k) => k !== 'fields' && !derived.includes(k) && isConfigObject((ObjectSchema.shape as Record<string, unknown>)[k]),
+  );
 
   it('the literal list equals the shape walk, in shape order (a new collection key on the object schema lands here as a one-line diff)', () => {
     expect(derived).toEqual([...COLLECTION_KEYS_IN_SHAPE_ORDER]);
+  });
+
+  it('the config-object literal list equals the shape walk, in shape order (#16075)', () => {
+    expect(derivedConfigObjects).toEqual([...CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER]);
   });
 
   it("'fields' is a record on the shape and is the one collection excluded by rule", () => {
@@ -257,13 +303,13 @@ describe('the refusal set is derived from ObjectSchema.shape — pinned in both 
   };
 
   it.each(shapeKeys.filter((k) => k !== 'name' && k !== 'fields'))(
-    "'%s': refused under 'merge' iff the shape declares it as a collection",
+    "'%s': refused under 'merge' iff the shape declares it as a collection or a fixed-shape config object",
     (key) => {
       const [left, right] = valuesFor(key);
       const a = defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', { [key]: left })] }, { strict: false });
       const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', { [key]: right })] }, { strict: false });
       const msg = refusal(() => composeStacks([a, b], { objectConflict: 'merge' }));
-      if (derived.includes(key)) {
+      if (derived.includes(key) || derivedConfigObjects.includes(key)) {
         expect(msg).toContain(REFUSED(key, A0, B1));
       } else {
         expect(msg).toBeNull();
