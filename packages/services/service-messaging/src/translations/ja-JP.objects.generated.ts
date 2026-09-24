@@ -313,6 +313,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "Delivery ID",
         help: "UUID — also doubles as the receiver-side idempotency key"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：配信ラベル（設定されている場合）と送信先 URL（読み取り時に計算）"
+      },
       source: {
         label: "Source",
         help: "Provenance domain, e.g. 'webhook' | 'flow'. UNIQUE(source, dedup_key)."

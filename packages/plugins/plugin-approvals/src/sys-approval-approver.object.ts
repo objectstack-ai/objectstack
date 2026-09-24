@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * sys_approval_approver — Pending-approver index (issue #1745).
@@ -32,13 +33,30 @@ export const SysApprovalApprover = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Normalized pending-approver rows for indexed inbox queries',
-  displayNameField: 'id',
-  nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. The pointer used to be `id`: once a
+  // renderer honours ADR-0079's order (an explicit `nameField` wins over
+  // `titleFormat`), that made the record page's H1 the raw id. `titleFormat`
+  // stays for renderers that still read it first;
+  // `sys-approval-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{approver} · {request_id}',
   highlightFields: ['request_id', 'approver', 'created_at'],
 
   fields: {
     id: Field.text({ label: 'Row ID', required: true, readonly: true, group: 'System' }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. Both source columns are required, so the
+    // expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.approver + ' · ' + record.request_id`,
+      description: 'Record title: the approver identity and its request (computed on read)',
+      group: 'Target',
+    }),
 
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',

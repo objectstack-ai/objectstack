@@ -313,6 +313,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Delivery ID",
         help: "UUID — also doubles as the receiver-side idempotency key"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: la etiqueta de la entrega, si existe, y su URL de destino (calculado al leer)"
+      },
       source: {
         label: "Source",
         help: "Provenance domain, e.g. 'webhook' | 'flow'. UNIQUE(source, dedup_key)."
