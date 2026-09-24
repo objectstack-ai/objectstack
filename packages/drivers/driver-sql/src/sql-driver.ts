@@ -1395,6 +1395,61 @@ function refusalSubtree(comparand: unknown, enclosing: unknown): unknown {
 }
 
 /**
+ * [#20020] The provenance of the predicate that named a column the BACKEND could
+ * not resolve — the one refusal on the WHERE path that is raised from a dialect
+ * error after the statement ran, not from a node the compiler held.
+ *
+ * The dialect names a column and nothing else, so the node has to be found by
+ * that name: every plain-object node of `rootFilter` carrying a field key that
+ * resolves to `column` (as written, through {@link SqlDriver.mapSortField}'s
+ * spelling, or through an external object's column map), plus every
+ * `{ $field }` reference naming it. The answer is `'author'` only when there is
+ * at least one such node AND every one of them resolves `'author'` under
+ * `resolveFilterSubtreeProvenance`; anything else is `null`, which withholds.
+ *
+ * The match is deliberately generous — the qualified spelling a dialect may
+ * report (`task.nosuchcol`) matches the key `nosuchcol` too — because a false
+ * match can only ADD a node to the set, and one more node can only turn an
+ * `'author'` verdict into `null`. A column no node names (the tenant-scope wall
+ * the driver adds itself, a mapping this walk does not replicate) finds no
+ * node and is withheld. The walk visits plain objects and arrays only, the
+ * shapes `resolveFilterSubtreeProvenance` itself descends, and stops on a cycle.
+ */
+function unresolvableColumnProvenance(
+  rootFilter: unknown,
+  column: string,
+  namesOf: (key: string) => readonly string[],
+): 'author' | null {
+  const names = (key: string) => namesOf(key).some((n) => n === column || column.endsWith(`.${n}`));
+  const holders: object[] = [];
+  const onPath = new Set<object>();
+  const visit = (node: unknown): void => {
+    if (node === null || typeof node !== 'object' || onPath.has(node)) return;
+    const isArray = Array.isArray(node);
+    if (!isArray && !isFilterNode(node)) return;
+    onPath.add(node);
+    if (isArray) {
+      for (const element of node as unknown[]) visit(element);
+    } else {
+      const record = node as Record<string, unknown>;
+      const ref = record.$field;
+      const namesColumn =
+        (typeof ref === 'string' && names(ref)) ||
+        Object.keys(record).some((key) => !key.startsWith('$') && names(key));
+      if (namesColumn) holders.push(record);
+      for (const value of Object.values(record)) visit(value);
+    }
+    onPath.delete(node);
+  };
+  visit(rootFilter);
+  if (holders.length === 0) return null;
+  for (const holder of holders) {
+    if (resolveFilterSubtreeProvenance(rootFilter, holder) !== 'author') return null;
+  }
+  return 'author';
+}
+
+/**
  * [#6409] How one declared aggregate function lowers into SQL.
  *
  * `sql` is the function NAME; `distinct` decides whether the argument list
@@ -2226,8 +2281,20 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
  *
  * Returns `null` when `op` is not retired, so the caller can fall through to
  * the ordinary unknown-operator refusal with one expression.
+ *
+ * [#20020, the #8220 contract] The operator, the field, the replacement and
+ * the retirement note all derive from the predicate, so a refusal raised from
+ * a read-scope subtree the caller never wrote keeps them in the server log;
+ * `subtree` is the field's operator map, and only a positively
+ * `'author'`-marked one gets the full text back. What stays on the wire is the
+ * class — a RETIRED operator, not an unknown one.
  */
-function retiredFilterOperatorError(op: string, field: string, siblings: readonly string[] = []): Error | null {
+function retiredFilterOperatorError(
+  op: string,
+  field: string,
+  siblings: readonly string[] = [],
+  subtree?: unknown,
+): Error | null {
   const guidance = RETIRED_FILTER_OPERATORS[op];
   if (!guidance) return null;
   const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
@@ -2237,9 +2304,42 @@ function retiredFilterOperatorError(op: string, field: string, siblings: readonl
       `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
       `shape, so this is ONE mistake with ONE fix, not one per key.`
     : '';
-  return unsupportedFilterError(
+  const full =
     `Filter operator "${op}" on field "${field}" is RETIRED and is no longer evaluated by this ` +
-      `driver.${replacement} ${guidance.why}${also}`,
+    `driver.${replacement} ${guidance.why}${also}`;
+  return withheldFilterError(
+    'A filter operator in this filter is RETIRED and is no longer evaluated by this driver. The ' +
+      'operator, the field it was aimed at and the operator that replaces it are withheld from ' +
+      'the message; the full diagnostic is in the server log.',
+    full,
+    subtree,
+  );
+}
+
+/**
+ * The operator vocabulary {@link SqlDriver.applyFilterCondition}'s emitter
+ * compiles, as the refusal below states it. A capability statement, not a
+ * detail of the refused predicate, so it survives the redaction.
+ */
+const SUPPORTED_FILTER_OPERATORS_SENTENCE =
+  'Supported operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, ' +
+  '$notContains, $startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists.';
+
+/**
+ * An operator outside the emitter's vocabulary and outside the retired table.
+ *
+ * [#20020, the #8220 contract] The operator name and the field are the
+ * predicate's, so they go to the server log unless `subtree` — the field's
+ * operator map — is positively marked `'author'`. The supported vocabulary is
+ * the capability statement and stays on the wire either way.
+ */
+function unsupportedFilterOperatorError(op: string, field: string, subtree?: unknown): Error {
+  return withheldFilterError(
+    `A filter operator in this filter is not one this driver evaluates. ` +
+      `${SUPPORTED_FILTER_OPERATORS_SENTENCE} The operator and the field it was aimed at are ` +
+      `withheld from the message; the full diagnostic is in the server log.`,
+    `Unsupported filter operator "${op}" on field "${field}". ${SUPPORTED_FILTER_OPERATORS_SENTENCE}`,
+    subtree,
   );
 }
 
@@ -3743,8 +3843,14 @@ function unknownLogicalOperatorError(key: string, path: string): Error {
  * lenient-vs-strict question #5347 had to answer for `$null` does not arise
  * here, because both spellings agree on the two surviving values.
  */
-function nonBooleanExistsComparandError(field: string, value: unknown, path: string): Error {
-  return unsupportedFilterError(
+function nonBooleanExistsComparandError(
+  field: string,
+  value: unknown,
+  path: string,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    nonBooleanFlagWithheldMessage('$exists'),
     `Operator "$exists" on field "${field}" requires a boolean comparand (true or false). ` +
       `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
       `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
@@ -3753,11 +3859,18 @@ function nonBooleanExistsComparandError(field: string, value: unknown, path: str
       `OPPOSITE directions — this driver's \`=== false\` test compiles IS NOT NULL for anything ` +
       `but false, a \`=== true\` test compiles IS NULL for anything but true. Note "false" the ` +
       `STRING is truthy, so it lands on the side opposite the false it was written to mean (#5369).`,
+    subtree,
   );
 }
 
-function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
-  return unsupportedFilterError(
+function nonBooleanNullComparandError(
+  field: string,
+  value: unknown,
+  path: string,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    nonBooleanFlagWithheldMessage('$null'),
     `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
       `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
       `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather ` +
@@ -3766,6 +3879,24 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
       `the false it was written to mean (#5347).`,
+    subtree,
+  );
+}
+
+/**
+ * [#20020, the #8220 contract] What the two flag refusals above say when the
+ * field's operator map is not positively marked `'author'`. The operator names
+ * the refusal's CLASS (the `$between` precedent in {@link betweenArityError}),
+ * and the declaration is the capability statement; the field, the value and
+ * the filter path are the predicate's, and go to the server log.
+ */
+function nonBooleanFlagWithheldMessage(op: '$null' | '$exists'): string {
+  return (
+    `Operator "${op}" in this filter requires a boolean comparand (true or false). ` +
+    `@objectstack/spec FieldOperatorsSchema declares ${op} as a boolean, and a non-boolean is ` +
+    'refused rather than coerced because the backends read one in OPPOSITE directions. The ' +
+    'field it was aimed at and the value it received are withheld from the message; the full ' +
+    'diagnostic is in the server log.'
   );
 }
 
@@ -3880,13 +4011,32 @@ function assertDefinedComparands(field: string, spec: unknown, path: string): vo
   }
 }
 
-/** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
-function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
+/**
+ * [#5134] `$and`/`$or` take a list; anything else is refused, never coerced.
+ *
+ * [#20020, the #8220 contract] The operand's preview and the combinator's
+ * position are the predicate's, so they go to the server log unless the
+ * refusal's node is positively marked `'author'`. That node is the operand
+ * itself when it is an object (the deepest markable node), and otherwise
+ * `enclosing` — the filter node that carries the combinator key, which a
+ * primitive operand inherits its provenance from.
+ */
+function assertFilterNodeList(
+  value: unknown,
+  key: string,
+  path: string,
+  enclosing?: unknown,
+): asserts value is unknown[] {
   if (Array.isArray(value)) return;
-  throw unsupportedFilterError(
+  throw withheldFilterError(
+    'A filter combinator ("$and" / "$or") in this filter requires an array of filter conditions. ' +
+      '@objectstack/spec FilterConditionSchema declares both as FilterCondition[]. Which one it ' +
+      'was, where it sits and the value it received are withheld from the message; the full ' +
+      'diagnostic is in the server log.',
     `Filter combinator "${key}" at ${path} requires an array of filter conditions, but received a ` +
       `${describeFilterOperand(value)} (${safeShapePreview(value)}). @objectstack/spec FilterConditionSchema ` +
       `declares "${key}" as FilterCondition[].`,
+    refusalSubtree(value, enclosing),
   );
 }
 
@@ -3925,12 +4075,15 @@ function assertFilterNodeList(value: unknown, key: string, path: string): assert
  * conformance case-set is green on both sides of the change.
  */
 function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
-  return reduceFilterVerdict(node, { ...SQL_FILTER_VERDICT_HOOKS, path });
+  return reduceFilterVerdict(node, { ...sqlFilterVerdictHooks(node, path), path });
 }
 
-/** [#5134] The verdict of ONE key of a filter node. */
-function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
-  return reduceFilterKeyVerdict(key, value, { ...SQL_FILTER_VERDICT_HOOKS, path });
+/**
+ * [#5134] The verdict of ONE key of a filter node. `enclosing` is the node the
+ * key belongs to — see {@link sqlFilterVerdictHooks} for what reads it.
+ */
+function reduceFilterKey(key: string, value: unknown, path: string, enclosing?: unknown): FilterVerdict {
+  return reduceFilterKeyVerdict(key, value, { ...sqlFilterVerdictHooks(enclosing, path), path });
 }
 
 /**
@@ -3941,12 +4094,37 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
  * passed by reference because they are TypeScript assertion functions, whose
  * narrowing is meaningless — and whose declaration requirements are a nuisance
  * — through a property reference. Nothing else about the call changes.
+ *
+ * [#20020] Built per reduction rather than shared, because the non-list
+ * combinator refusal needs the NODE that carries the combinator key, and the
+ * shared walk hands `assertNodeList` only the operand, the key and the path.
+ * The node is recovered from the path without widening that spec-declared hook
+ * signature: every node the walk reduces is either `root` (at `rootPath`) or
+ * an element / `$not` operand it announced through `assertNode` at the exact
+ * path it then reduces it under — so recording those announcements is a
+ * complete path-to-node index for the positions `assertNodeList` can name. The
+ * index is keyed only by paths built from combinator keys and list indices,
+ * never by a field name, so a field key containing a dot cannot collide with it.
  */
-const SQL_FILTER_VERDICT_HOOKS: FilterVerdictHooks = {
-  assertNodeList: (value, key, path) => assertFilterNodeList(value, key, path),
-  assertNode: (value, path) => assertFilterNode(value, path),
-  classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
-};
+function sqlFilterVerdictHooks(root: unknown, rootPath: string): FilterVerdictHooks {
+  const nodeAt = new Map<string, unknown>([[rootPath, root]]);
+  return {
+    // The walk names the key's position `${nodePath}.${key}` (bare `key` under
+    // an empty prefix), so stripping the key recovers the node's own path.
+    assertNodeList: (value, key, path) =>
+      assertFilterNodeList(
+        value,
+        key,
+        path,
+        nodeAt.get(path === key ? '' : path.slice(0, path.length - key.length - 1)),
+      ),
+    assertNode: (value, path) => {
+      nodeAt.set(path, value);
+      assertFilterNode(value, path);
+    },
+    classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
+  };
+}
 
 /**
  * [#5134] The verdict of ONE **non-combinator** key — and this driver's gate on
@@ -4055,7 +4233,7 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     Object.prototype.hasOwnProperty.call(value, '$null') &&
     typeof value.$null !== 'boolean'
   ) {
-    throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
+    throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`, value);
   }
 
   // [#5369] `$exists`'s comparand is a boolean by the same declaration, refused
@@ -4069,7 +4247,7 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     Object.prototype.hasOwnProperty.call(value, '$exists') &&
     typeof value.$exists !== 'boolean'
   ) {
-    throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+    throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`, value);
   }
 
   // [#5702] `$icontains`'s comparand is a NON-EMPTY string by declaration,
@@ -6535,7 +6713,7 @@ export class SqlDriver implements IDataDriver {
             lastError = retryError;
           }
         }
-        if (!recovered) throw this.unresolvableFilterColumnRefusal(object, lastError);
+        if (!recovered) throw this.unresolvableFilterColumnRefusal(object, lastError, query.where);
       } else {
         // [#8931] The terminal catch-all — see
         // {@link SqlDriver.backendStatementFault}. This is the `find` half of
@@ -8821,8 +8999,19 @@ export class SqlDriver implements IDataDriver {
    * Returns the error rather than throwing it, the same shape
    * {@link SqlDriver.resolveWithheldFilterRefusal} uses, so each call site
    * spells its own `throw` and no reader has to know whether this returns.
+   *
+   * [#20020, the #8220 contract] The column NAME is the predicate's too. A read
+   * scope naming a column the table lacks — a policy written against a field
+   * that was later renamed, removed or never synced — used to put that column
+   * in front of a caller who never wrote it. `rootFilter` is the query's own
+   * `where` — the tree the read-scope merge boundaries marked — and the name
+   * reaches the wire only when every node naming it is positively marked
+   * `'author'` ({@link unresolvableColumnProvenance}); otherwise the refusal
+   * takes the unnamed wording this method already had for a dialect message
+   * it could not parse, and the name stays in the log line above it. Same
+   * code, same status, whichever wording answers.
    */
-  protected unresolvableFilterColumnRefusal(object: string, error: unknown): Error {
+  protected unresolvableFilterColumnRefusal(object: string, error: unknown, rootFilter?: unknown): Error {
     const column = unresolvableColumnNameOf(error);
     const detail = (error as { message?: unknown } | null | undefined)?.message;
     this.logger.warn(
@@ -8831,7 +9020,13 @@ export class SqlDriver implements IDataDriver {
         '. The dialect message below is kept server-side because it inlines the statement ' +
         `bound literals (#7929, #8790): ${typeof detail === 'string' ? detail : String(error)}`,
     );
-    return unresolvableFilterColumnError(object, column);
+    const disclosed =
+      column !== null &&
+      unresolvableColumnProvenance(rootFilter, column, (key) => {
+        const local = this.mapSortField(key);
+        return [key, local, this.remoteColumn(object, key, local)];
+      }) === 'author';
+    return unresolvableFilterColumnError(object, disclosed ? column : null);
   }
 
   /**
@@ -8924,7 +9119,7 @@ export class SqlDriver implements IDataDriver {
       result = await builder.count<{ count: number }[]>('* as count');
     } catch (error) {
       if (isUnresolvableColumnError(error)) {
-        throw this.unresolvableFilterColumnRefusal(object, error);
+        throw this.unresolvableFilterColumnRefusal(object, error, query?.where);
       }
       // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
       throw this.backendStatementFault(object, error);
@@ -9549,7 +9744,7 @@ export class SqlDriver implements IDataDriver {
         if (inGroupBy || inAggregations) {
           return this.unresolvableAggregateColumnRefusal(object, column, { inGroupBy, inAggregations }, error);
         }
-        return this.unresolvableFilterColumnRefusal(object, error);
+        return this.unresolvableFilterColumnRefusal(object, error, query.where);
       }
       // Arm 3: recognised class, no parsed name — fall through to the terminal.
     }
@@ -9732,7 +9927,7 @@ export class SqlDriver implements IDataDriver {
     try {
       results = await builder;
     } catch (error) {
-      throw this.distinctBackendFault(object, field, error);
+      throw this.distinctBackendFault(object, field, error, filters);
     }
     const values = results.map((row: any) => row[field]);
 
@@ -9830,7 +10025,7 @@ export class SqlDriver implements IDataDriver {
    * Returns the error rather than throwing it, the shape every sibling on this
    * path uses, so the call site spells its own `throw`.
    */
-  protected distinctBackendFault(object: string, field: string, error: unknown): Error {
+  protected distinctBackendFault(object: string, field: string, error: unknown, filters?: unknown): Error {
     if (isUnresolvableColumnError(error)) {
       const column = unresolvableColumnNameOf(error);
       if (column !== null) {
@@ -9841,7 +10036,7 @@ export class SqlDriver implements IDataDriver {
         }
         // Arm 2: not the listed field ⇒ a predicate named it (the caller's
         // `filters`, or the tenant-scope wall this method applied above).
-        return this.unresolvableFilterColumnRefusal(object, error);
+        return this.unresolvableFilterColumnRefusal(object, error, filters);
       }
       // Arm 3: recognised class, no parsed name — fall through to the terminal.
     }
@@ -15439,7 +15634,7 @@ export class SqlDriver implements IDataDriver {
         // #5134 — an all-TRUE `$and` (including `$and: []`) IS the AND identity;
         // emitting nothing for it is now a decision, not an accident. A FALSE
         // member cannot reach here: it would have made the node FALSE above.
-        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
         const branches = value.filter(
           (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
         );
@@ -15458,7 +15653,7 @@ export class SqlDriver implements IDataDriver {
       } else if (key === '$or' && Array.isArray(value)) {
         // #5134 — one TRUE disjunct makes the whole `$or` TRUE, so `{$or:[{a},{}]}`
         // matches every row instead of quietly compiling to just `(a = ?)`.
-        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
         // FALSE disjuncts are the OR identity — dropped. At least one `'clause'`
         // member survives, or the key would have been TRUE/FALSE above.
         const branches = value.filter(
@@ -15491,7 +15686,7 @@ export class SqlDriver implements IDataDriver {
         // #5134 — `$not` of a FALSE group is TRUE: skip it. `$not` of a TRUE
         // group is FALSE and never reaches here (the node reduced to FALSE), and
         // a non-node operand was refused by the reduction, so `value` is a node.
-        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
         // #5146 — negate a TOTAL predicate, so a row whose column is NULL gets
         // the same answer here as it does in driver-memory / formula instead of
         // vanishing into SQL's UNKNOWN. See {@link nullSafeNegationOperand} for
@@ -15750,13 +15945,13 @@ export class SqlDriver implements IDataDriver {
               // [#5702] A RETIRED spelling gets the prescription, not the
               // vocabulary list: the author who wrote `$regex` needs
               // `$icontains`, and a list of fifteen names does not say so.
-              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object));
+              //
+              // [#20020] `value` — this field's operator map — is the node both
+              // refusals hand the provenance seam: an object, so markable, and
+              // held by reference under the query's `where` root.
+              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object), value);
               if (retired) throw retired;
-              throw unsupportedFilterError(
-                `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
-                  `$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, $notContains, ` +
-                  `$startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists.`,
-              );
+              throw unsupportedFilterOperatorError(op, field, value);
             }
           }
         }
