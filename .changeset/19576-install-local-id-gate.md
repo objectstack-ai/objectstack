@@ -4,7 +4,7 @@
 
 fix(cloud-connection): `POST /api/v1/marketplace/install-local` parses the package id it installs through the manifest declaration (#19576)
 
-Clause-②: no
+Clause-②: no (narrowing)
 
 **BREAKING for callers of the install-local door** — a manifest whose `id` is
 not reverse-domain notation is now refused `PLUGIN_MANIFEST_INVALID` (`400` for
