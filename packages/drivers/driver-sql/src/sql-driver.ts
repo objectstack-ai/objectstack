@@ -11413,18 +11413,18 @@ export class SqlDriver implements IDataDriver {
     field: string,
     tally: { converted: number; withheld: number },
   ): Promise<void> {
-    let cursor: unknown;
+    let cursor: number | undefined;
     for (;;) {
       const page = this.knex(table)
         .select(this.knex.raw('rowid as ??', ['rid']), this.knex.raw('?? as ??', [field, 'val']))
         .whereRaw(`typeof(??) = 'text' and json_valid(??) = 0`, [field, field]);
       if (cursor !== undefined) page.andWhereRaw('rowid > ?', [cursor]);
       const rows = (await page.orderByRaw('rowid').limit(SQLITE_JSON_BACKFILL_PAGE_SIZE)) as Array<{
-        rid: unknown;
+        rid: number;
         val: unknown;
       }>;
 
-      const writes: Array<{ rid: unknown; stored: string; next: string }> = [];
+      const writes: Array<{ rid: number; stored: string; next: string }> = [];
       for (const row of rows) {
         const next = typeof row.val === 'string' ? recoverUnencodedJsonText(row.val) : null;
         if (next === null) tally.withheld++;
@@ -11447,7 +11447,7 @@ export class SqlDriver implements IDataDriver {
       // The cursor must advance, or the same page would be read forever. A
       // rowid past 2^53 comes back rounded and can stall it; the rest of the
       // column then stays legacy, which reads the same.
-      if (cursor !== undefined && !((last as number) > (cursor as number))) return;
+      if (cursor !== undefined && !(last > cursor)) return;
       cursor = last;
     }
   }
