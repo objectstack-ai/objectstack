@@ -221,6 +221,25 @@ export type TraversalConflictKind =
   /** Read through more than one hop; one hop is the declared depth. */
   | 'multi-hop';
 
+/**
+ * [#20007] The repair that guards a rule on a reference being set.
+ *
+ * ⭐ The same words as ObjectQL's `referenceGuardRepair` (`rule-validator.ts`),
+ * which its "no single related record" and delete-cleanup refusals carry: an
+ * author meets this sentence at authoring time here and at write time there,
+ * and two spellings of one repair read as two repairs. This package may not
+ * import ObjectQL, and exporting the wording from here would publish a sentence
+ * as API, so the two copies are held equal by a test instead:
+ * `packages/objectql/src/engine-predicate-relationship.test.ts` drives the
+ * engine's refusals from both sources and asserts one literal in each.
+ *
+ * Measured there end to end: the wrapped rule is skipped while the reference is
+ * empty and judged as before once it is set.
+ */
+function referenceGuardRepair(root: string, field: string): string {
+  return `make it the \`then\` of a \`conditional\` rule whose \`when\` is \`${root}.${field} != null\``;
+}
+
 /** One refusal-worthy finding about one field. */
 export interface TraversalConflict {
   readonly field: string;
@@ -250,6 +269,12 @@ export function findTraversalConflicts(
   for (const field of analysis.traversals.keys()) {
     if (!isReferenceField(field)) continue;
     if (!analysis.bareFields.has(field)) continue;
+    // [#20007] The plain value is often a NULL TEST on an optional reference
+    // (`record.line != null && record.line.kind == 'secret'`), and `.id` is no
+    // repair for that intent: it reads through the reference as well, so an
+    // empty reference still leaves the rule nothing to read and the write is
+    // rejected. So the id comparison is named for what it is, and the two
+    // spellings measured to work for the null test are named beside it.
     conflicts.push({
       field,
       kind: 'bare-and-traversed',
@@ -259,8 +284,14 @@ export function findTraversalConflicts(
         + `(\`${root}.${field}\`) in the same expression. Reading through the `
         + `relationship resolves \`${root}.${field}\` to the related RECORD, so the `
         + `plain-value comparison would stop matching the stored id — silently. `
-        + `Compare the id explicitly: write \`${root}.${field}.id\` for the value `
-        + `comparison, and keep \`${root}.${field}.<related field>\` for the traversal.`,
+        + `To compare the id, write \`${root}.${field}.id\` for the value `
+        + `comparison, and keep \`${root}.${field}.<related field>\` for the traversal. `
+        + `\`${root}.${field}.id\` is not a null guard: it reads through \`${field}\` `
+        + `too, and a rule that reads through an empty \`${field}\` rejects the write `
+        + `instead of being skipped. If the plain value tests for empty, take that test `
+        + `out of this expression. To skip the rule while \`${field}\` is empty, guard `
+        + `it on \`${field}\` being set: ${referenceGuardRepair(root, field)}. To refuse `
+        + `an empty \`${field}\`, make \`${field}\` required (\`required: true\`).`,
     });
   }
 

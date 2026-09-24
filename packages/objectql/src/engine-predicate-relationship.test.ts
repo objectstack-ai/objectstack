@@ -754,7 +754,12 @@ describe('#20006 — a cascade reference clear refused by a traversing rule says
 
 describe('#20007 — an optional lookup guarded in a traversing rule', () => {
   const SECRET_MESSAGE = 'An order may not carry a secret line.';
-  /** The guard spelling every prescription names, byte for byte. */
+  /**
+   * The guard spelling every prescription names, byte for byte. ⭐ Step 1's
+   * refusal is worded by `@objectstack/formula` and step 2's by this package's
+   * `referenceGuardRepair`; formula may not import ObjectQL, so the words exist
+   * twice, and THIS literal asserted in both is what holds the copies equal.
+   */
   const GUARD = 'make it the `then` of a `conditional` rule whose `when` is `record.line != null`';
   const script = (condition: string) => ({
     name: 'no_secret_line', type: 'script', severity: 'error', message: SECRET_MESSAGE, condition,
@@ -858,7 +863,8 @@ describe('#20007 — an optional lookup guarded in a traversing rule', () => {
     const { insert } = await boot([script("record.line.kind == 'secret'")], { required: true });
     const empty = await insert({});
     expect(empty?.code).toBe('VALIDATION_FAILED');
-    expect(empty.fields.map((f: any) => [f.field, f.code])).toContainEqual(['line', 'required']);
+    // Only the field's own refusal: the rule is never reached on this write.
+    expect(empty.fields.map((f: any) => [f.field, f.code])).toEqual([['line', 'required']]);
     expect(await insert({ line: 'line_public' })).toBe(null);
     expect((await insert({ line: 'line_secret' }))?.message).toBe(SECRET_MESSAGE);
   });
