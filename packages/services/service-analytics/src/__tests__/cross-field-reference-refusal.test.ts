@@ -288,8 +288,8 @@ describe("[#7598] the #5222 corpus's REFUSAL arm — routed, or refused at this 
       .toContain('cannot be bound as a SQL parameter');
     // [#20010] RE-JUDGED: the `$between` endpoint is now answered one step
     // earlier, by the shared comparand-shape face this door hands every field
-    // entry to, in the face's words (its #7596 endpoint arm, on the face since
-    // #19377). Still a third gate with its own wording, which is this case's
+    // entry to, in the face's words (its #7596 endpoint arm, enforced on the
+    // face itself). Still a third gate with its own wording, which is this case's
     // point; the FilterArray spelling gets the same bytes.
     expect(refusalOf(() => tree({ amount: { $between: [{ $field: 'budget' }, 100] } })).message)
       .toContain('does not accept a { "$field": … } reference as an endpoint');
@@ -307,8 +307,8 @@ describe("[#7598] the #5222 corpus's REFUSAL arm — routed, or refused at this 
     // [#20010] RE-JUDGED. This pinned this door's own sentence, which named the
     // laundering (`index 1`, `#7596`). The door now hands every field entry to
     // the shared comparand-shape face before any leaf is built, and the face's
-    // endpoint arm answers first — the 2026-08-11 ruling (#7596), on the face
-    // since #19377: "The reference stays legal in the four ORDERING slots …
+    // endpoint arm answers first — the 2026-08-11 ruling (#7596), as the face
+    // records it: "The reference stays legal in the four ORDERING slots …
     // the alternative this refusal prescribes". Same verdict, the face's words,
     // which are the words the FilterArray spelling already got on this door.
     // What the case protects is unchanged: the side is named, and the message

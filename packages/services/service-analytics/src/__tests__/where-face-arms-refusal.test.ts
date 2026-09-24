@@ -118,7 +118,7 @@ describe('[#20010] every arm of the shared comparand-shape face refuses the obje
     ['$in: null', { stage: { $in: null } }, NON_LIST('$in', 'stage'), 'where.stage.$in'],
     ['a one-bound $between', { amt: { $between: [1] } }, MALFORMED_RANGE('amt'), 'where.amt.$between'],
     ['a scalar $between', { amt: { $between: 5 } }, MALFORMED_RANGE('amt'), 'where.amt.$between'],
-    // 2026-08-11 (#7596), on the face since #19377 — a { $field } endpoint.
+    // 2026-08-11 (#7596), enforced on the face itself — a { $field } endpoint.
     ['a { $field } $between endpoint', { amt: { $between: [{ $field: 'id' }, 5] } }, FIELD_BOUND('amt'), 'where.amt.$between[0]'],
     // Depth: the face's own traversal.
     ['under $and', { $and: [{ id: 'd3' }, { amt: { $gt: null } }] }, NULL_ORDERING('$gt', 'amt'), 'where.$and[1].amt.$gt'],

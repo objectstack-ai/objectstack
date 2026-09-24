@@ -698,7 +698,7 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
  *
  * [#20010] The `where` door now hands every field entry to the shared
  * comparand-shape face before any leaf is built, and the face refuses this
- * endpoint by the 2026-08-11 ruling (#7596, on the face since #19377) — so the
+ * endpoint by the 2026-08-11 ruling (#7596), which the face now enforces — so the
  * door answers in the face's words, the ones the `FilterArray` spelling always
  * got, and this check is {@link fieldLeaves}' own invariant rather than the
  * door's refusal. The laundering argument above is why the invariant stays.
