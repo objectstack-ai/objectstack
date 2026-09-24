@@ -108,14 +108,19 @@ describe('[#19978] driver-sqlite-wasm — text values round-trip byte-for-byte',
       const [{ id }] = (await driver.find(TABLE, { where: { label: 'upd' } } as any, BYPASS)) as Array<{
         id: string;
       }>;
-      const returned = (await driver.update(TABLE, id, { v: wrote }, BYPASS)) as { v: unknown };
-      expect(returned.v).toStrictEqual(wrote);
-      expect(await storedHex('upd')).toBe(utf8Hex(wrote));
-      const read = (await driver.findOne(TABLE, { where: { label: 'upd' } } as any, BYPASS)) as {
-        v: unknown;
-      };
-      expect(read.v).toStrictEqual(wrote);
-      await driver.delete(TABLE, id, BYPASS);
+      // Removed whatever the verdict: a row left behind would answer the
+      // filter pins below and fail them for a reason that is not theirs.
+      try {
+        const returned = (await driver.update(TABLE, id, { v: wrote }, BYPASS)) as { v: unknown };
+        expect(returned.v).toStrictEqual(wrote);
+        expect(await storedHex('upd')).toBe(utf8Hex(wrote));
+        const read = (await driver.findOne(TABLE, { where: { label: 'upd' } } as any, BYPASS)) as {
+          v: unknown;
+        };
+        expect(read.v).toStrictEqual(wrote);
+      } finally {
+        await driver.delete(TABLE, id, BYPASS);
+      }
     });
   });
 
