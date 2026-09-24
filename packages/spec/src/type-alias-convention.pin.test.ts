@@ -25,7 +25,7 @@
 // tree and this file goes RED with the alias named, and the fix is the one the
 // ADR prescribes: declare `XParsed` next to the bare alias and delete the pin
 // line. The list therefore moves in both directions, and it moves for the right
-// reason — phase 2 grew it by 35 for a reason it records at the block itself.
+// reason — phase 2 grew it by 35 for a reason recorded at the head of the list.
 //
 // ## It is also the gate's registry
 //
@@ -285,6 +285,30 @@ import type * as M188 from './ai/build-progress.zod.js';
 // Iso...` declarations and never the prose sitting beside them.
 // ---------------------------------------------------------------------------
 
+// How a pin is named, and where it goes. A pin is named for the pair that is
+// already unique to it — its module and its schema: `Iso_`, then the module's
+// path below `src/` without `.zod.ts`, each kebab segment camelCased and the
+// segments joined by `_` (`ai/knowledge-document.zod.ts` becomes
+// `ai_knowledgeDocument`), then `__`, then the schema's export name. The block
+// is sorted by that name in code-unit order (the order `LC_ALL=C sort` gives),
+// one heading per module, and a note about a module's pins sits under its
+// heading and names the pins it is about. A new pin's name AND its place are
+// therefore functions of the schema alone: two branches that each pin a
+// different schema write different lines in different places, and git merges
+// them with nobody renumbering anything.
+//
+// The names used to be a dense counter, `Iso0` up to `Iso881`, each new pin
+// taking "the next free number" — so two branches off one base took the SAME
+// number for two different schemas, at insertion points hundreds of lines
+// apart, and git merged the pair cleanly into two declarations of one name
+// (`Iso871`, then `Iso877` / `Iso878`; both are recorded in the history at the
+// bottom of this file). #19665 retired the counter. An `IsoNNN` that a note or
+// that history still cites is the pin's former name, true of the file when it
+// was written. The `Mn` import aliases above keep their positional numbering.
+//
+// Two cohorts used to head blocks of their own; their pins are now filed under
+// their modules like every other pin.
+//
 // Phase 2 (#6083) additions. These 35 schemas were never in phase 1's
 // population: their bare alias already read `z.input` before the flip, so the
 // phase-1 gate — which only looked at bare `z.infer` aliases — never asked
@@ -293,12 +317,11 @@ import type * as M188 from './ai/build-progress.zod.js';
 // assertion, so a vacuous pass could not be mistaken for isomorphism) says
 // these 35 coincide. The other 22 it found got an `XParsed` instead.
 //
-// #4593 — the documented-schema type-alias backfill (2026-08-08).
-//
-// Every schema below already had a published JSON Schema and a reference page,
-// and the page's `import type { X }` line was being dropped because no alias
-// carried the name (`docs-import-surface.baseline.json`, "no type export").
-// The backfill declares the bare alias; each schema here measured isomorphic, so
+// #4593 — the documented-schema type-alias backfill (2026-08-08). Every schema
+// in it already had a published JSON Schema and a reference page, and the
+// page's `import type { X }` line was being dropped because no alias carried
+// the name (`docs-import-surface.baseline.json`, "no type export"). The
+// backfill declares the bare alias; each schema in it measured isomorphic, so
 // it takes a pin rather than an `XParsed` synonym — the (RISE) case, and the
 // largest single rise this file has taken.
 
@@ -374,11 +397,13 @@ export type Iso_ai_usage__AIUsageRecordSchema = Assert<Eq< z.input< typeof M10.A
 export type Iso_ai_usage__TokenUsageSchema = Assert<Eq< z.input< typeof M10.TokenUsageSchema >, z.infer< typeof M10.TokenUsageSchema > >>;
 
 // api/analytics.zod.ts
-// [#17551] The ADR-0021 dataset selection and its two nested directives. Their
-// seven shared members ARE `AnalyticsQuerySchema`'s own declarations (Iso300
-// above pins that schema isomorphic), and the four dataset-only members carry
-// no default, transform, catch or pipe — so the author state and the parsed
-// state coincide and no `XParsed` name would be anything but a synonym.
+// [#17551] The ADR-0021 dataset selection (`DatasetSelectionSchema`) and its two
+// nested directives (`DatasetCompareToSchema`, `DatasetTotalsSchema`). Their
+// seven shared members ARE `AnalyticsQuerySchema`'s own declarations
+// (`Iso_data_analytics__AnalyticsQuerySchema` pins that schema isomorphic), and
+// the four dataset-only members carry no default, transform, catch or pipe — so
+// the author state and the parsed state coincide and no `XParsed` name would be
+// anything but a synonym.
 export type Iso_api_analytics__AnalyticsEndpoint = Assert<Eq< z.input< typeof M11.AnalyticsEndpoint >, z.infer< typeof M11.AnalyticsEndpoint > >>;
 export type Iso_api_analytics__AnalyticsQueryRequestSchema = Assert<Eq< z.input< typeof M11.AnalyticsQueryRequestSchema >, z.infer< typeof M11.AnalyticsQueryRequestSchema > >>;
 export type Iso_api_analytics__DatasetCompareToSchema = Assert<Eq< z.input< typeof M11.DatasetCompareToSchema >, z.infer< typeof M11.DatasetCompareToSchema > >>;
@@ -742,11 +767,11 @@ export type Iso_automation_timeRelativeTrigger__TimeRelativeTriggerSchema = Asse
 export type Iso_automation_webhook__WebhookTriggerType = Assert<Eq< z.input< typeof M44.WebhookTriggerType >, z.infer< typeof M44.WebhookTriggerType > >>;
 
 // data/analytics.zod.ts
-// [#16041] Added after the generated corpus (numbers continue from the file's
-// end, see the #4395 note above). The closed `timeDimensions[].dateRange`
-// vocabulary: a bare `z.enum` derived from `DATE_RANGE_PRESETS`, and the union
-// of that enum with `z.array(z.string())` — no default, no transform on either
-// arm, so author and parsed states coincide.
+// [#16041] The closed `timeDimensions[].dateRange` vocabulary:
+// `AnalyticsDateRangePresetSchema`, a bare `z.enum` derived from
+// `DATE_RANGE_PRESETS`, and `AnalyticsDateRangeSchema`, the union of that enum
+// with `z.array(z.string())` — no default, no transform on either arm, so
+// author and parsed states coincide.
 export type Iso_data_analytics__AggregationMetricType = Assert<Eq< z.input< typeof M55.AggregationMetricType >, z.infer< typeof M55.AggregationMetricType > >>;
 export type Iso_data_analytics__AnalyticsDateRangePresetSchema = Assert<Eq< z.input< typeof M55.AnalyticsDateRangePresetSchema >, z.infer< typeof M55.AnalyticsDateRangePresetSchema > >>;
 export type Iso_data_analytics__AnalyticsDateRangeSchema = Assert<Eq< z.input< typeof M55.AnalyticsDateRangeSchema >, z.infer< typeof M55.AnalyticsDateRangeSchema > >>;
@@ -838,8 +863,9 @@ export type Iso_data_fieldValue__LocationValueSchema = Assert<Eq< z.input< typeo
 export type Iso_data_fieldValue__ReferenceIdValueSchema = Assert<Eq< z.input< typeof M178.ReferenceIdValueSchema >, z.infer< typeof M178.ReferenceIdValueSchema > >>;
 
 // data/field.zod.ts
-// #8993 partial masking: keepHead/keepTail are plain optional-free ints — no
-// transform, no defaults, so input === infer and the bare alias needs no Parsed.
+// #8993 partial masking (`FieldMaskingKeepSchema`): keepHead/keepTail are plain
+// optional-free ints — no transform, no defaults, so input === infer and the
+// bare alias needs no Parsed.
 export type Iso_data_field__AddressSchema = Assert<Eq< z.input< typeof M66.AddressSchema >, z.infer< typeof M66.AddressSchema > >>;
 export type Iso_data_field__CurrencyValueSchema = Assert<Eq< z.input< typeof M66.CurrencyValueSchema >, z.infer< typeof M66.CurrencyValueSchema > >>;
 export type Iso_data_field__FieldMaskingKeepSchema = Assert<Eq< z.input< typeof M66.FieldMaskingKeepSchema >, z.infer< typeof M66.FieldMaskingKeepSchema > >>;
@@ -907,15 +933,10 @@ export type Iso_identity_scim__SCIMNameSchema = Assert<Eq< z.input< typeof M77.S
 export type Iso_identity_scim__SCIMPatchOperationSchema = Assert<Eq< z.input< typeof M77.SCIMPatchOperationSchema >, z.infer< typeof M77.SCIMPatchOperationSchema > >>;
 
 // integration/connector.zod.ts
-// [#4395] Added after the generated corpus, so its number continues from the
-// file's end rather than from its neighbours — the `IsoNNN` label is only a
-// unique name (the gate reads the `z.input< typeof Mn.XSchema >` occurrence,
-// not the label), and renumbering 300+ following lines to close the gap would
-// be a merge-conflict magnet for no reader benefit. Grouped with its siblings
-// here because the FILE heading is what a reader navigates by.
-// A bare `z.enum`, exactly like `ConnectorType` / `ConnectorStatus` two lines
-// up: no default, no transform, so author and parsed states coincide and D5
-// gives it no `XParsed`.
+// [#4395] `ConnectorActionEffectSchema`, added after the generated corpus: a
+// bare `z.enum`, exactly like its `ConnectorType` / `ConnectorStatus` siblings
+// in this module — no default, no transform, so author and parsed states
+// coincide and D5 gives it no `XParsed`.
 export type Iso_integration_connector__ConnectorActionEffectSchema = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
 export type Iso_integration_connector__ConnectorActionSchema = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
 export type Iso_integration_connector__ConnectorConflictResolutionSchema = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionSchema >, z.infer< typeof M78.ConnectorConflictResolutionSchema > >>;
@@ -966,8 +987,7 @@ export type Iso_kernel_manifest__PluginRuntimeSchema = Assert<Eq< z.input< typeo
 // (Iso408 `CustomizationOriginSchema` / Iso409 `FieldChangeSchema` /
 // Iso410 `MergeConflictSchema` / Iso411 `MergeResultSchema` removed with
 // their module — #13135's ADR-0049 retirement of the paper
-// metadata-customization protocol. The Iso numbers are positional and stay
-// vacant.)
+// metadata-customization protocol.)
 
 // kernel/metadata-loader.zod.ts
 export type Iso_kernel_metadataLoader__MetadataFallbackStrategySchema = Assert<Eq< z.input< typeof M87.MetadataFallbackStrategySchema >, z.infer< typeof M87.MetadataFallbackStrategySchema > >>;
@@ -1129,7 +1149,7 @@ export type Iso_shared_connectorAuth__ConnectorInstanceBearerAuthSchema = Assert
 export type Iso_shared_connectorAuth__ConnectorInstanceNoAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceNoAuthSchema >, z.infer< typeof M109.ConnectorInstanceNoAuthSchema > >>;
 
 // shared/duration.zod.ts — the closed DURATION vocabulary (#18122), step ① of
-// ruling A on #18115 and the counterpart of the instant above. Both are
+// ruling A on #18115 and the counterpart of the `shared/epoch` instant. Both are
 // `z.number().int().nonnegative()`: no default, no transform, the (RISE) case.
 // The refinement is deliberate rather than incidental, so these two pins are
 // what goes red the day someone gives a duration type a `.default()` — which
@@ -1177,7 +1197,8 @@ export type Iso_shared_metadataTypes__MetadataFormatSchema = Assert<Eq< z.input<
 export type Iso_shared_protection__ProtectionSchema = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer< typeof M115.ProtectionSchema > >>;
 
 // shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
-// `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
+// `SpecifierValueDomainSchema` is an alias of it, so its pin
+// (`Iso_system_settingsManifest__SpecifierValueDomainSchema`) and this one hold
 // or fall together. A `z.enum` has no default or transform, the (RISE) case.
 export type Iso_shared_valueDomain__ValueDomainSchema = Assert<Eq< z.input< typeof M184.ValueDomainSchema >, z.infer< typeof M184.ValueDomainSchema > >>;
 
@@ -1391,7 +1412,8 @@ export type Iso_system_tracing__TracePropagationFormat = Assert<Eq< z.input< typ
 export type Iso_system_tracing__TraceStateSchema = Assert<Eq< z.input< typeof M150.TraceStateSchema >, z.infer< typeof M150.TraceStateSchema > >>;
 
 // system/translation.zod.ts
-// #15178 split the bundle type in two. The platform face is the per-app shape
+// #15178 split the bundle type in two (`PlatformTranslationDataSchema`,
+// `PlatformTranslationBundleSchema`). The platform face is the per-app shape
 // plus one more optional group, so its two states coincide exactly as the
 // per-app face's do — pinned rather than given a permanent `XParsed` synonym.
 export type Iso_system_translation__ActionResultDialogTranslationSchema = Assert<Eq< z.input< typeof M152.ActionResultDialogTranslationSchema >, z.infer< typeof M152.ActionResultDialogTranslationSchema > >>;
@@ -1438,11 +1460,12 @@ export type Iso_ui_chart__ChartGroupBySchema = Assert<Eq< z.input< typeof M158.C
 export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.ChartTypeSchema >, z.infer< typeof M158.ChartTypeSchema > >>;
 
 // ui/component.zod.ts
-// #5775 — the shared `children` contract for `page:section`/`page:footer`/
-// `page:sidebar`. A lone optional array with no default, transform, catch or
-// pipe anywhere in its tree, so the two shapes coincide and the phase-2 flip of
-// the bare name changes nothing. `check:spec-parsed-alias` sent it here rather
-// than to a `PageContainerPropsParsed`, which would be a permanent synonym.
+// #5775 — `PageContainerProps`, the shared `children` contract for
+// `page:section`/`page:footer`/`page:sidebar`. A lone optional array with no
+// default, transform, catch or pipe anywhere in its tree, so the two shapes
+// coincide and the phase-2 flip of the bare name changes nothing.
+// `check:spec-parsed-alias` sent it here rather than to a
+// `PageContainerPropsParsed`, which would be a permanent synonym.
 // `ElementNumberPropsSchema` (Iso818) left the family on the ui#6206
 // convergence: its `filter` now carries `z.array(ViewFilterRuleSchema)`, whose
 // own input ≠ infer (`operator` is normalized on parse — `ViewFilterRuleParsed`
@@ -1452,21 +1475,25 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // #14406 — the LAST record-form `filter` in `ComponentPropsMap`: its `filter`
 // now carries `z.array(ViewFilterRuleSchema)` too, so `ElementRecordPickerPropsParsed`
 // is declared and this pin deleted.
-// `record:reference_rail` (#8691) — deliberately default-free on the same
-// principle as the object-* family below: the renderer's `limit ?? 3` /
+// `record:reference_rail` (#8691: `ReferenceRailEntrySchema`,
+// `RecordReferenceRailProps`) — deliberately default-free on the same
+// principle as the object-* family: the renderer's `limit ?? 3` /
 // `hideEmpty !== false` fallbacks stay the renderer's facts, so "the author
 // said nothing" survives the parse, and input === infer holds for both shapes.
-// #8744 — the three record types the rail fix left behind, default-free on
-// the same principle. `RecordAlertProps` itself is deliberately NOT pinned:
-// its `visible` carries `ExpressionInputSchema`, whose bare-string arm
-// TRANSFORMS to the canonical `{ dialect, source }` envelope, so
-// input ≠ infer by construction — the alias stays `z.input` (the authoring
+// #8744 — the three record types the rail fix left behind
+// (`RecordAlertActionSchema`, `RecordQuickActionsProps`, `RecordHistoryProps`),
+// default-free on the same principle. `RecordAlertProps` itself is
+// deliberately NOT pinned: its `visible` carries `ExpressionInputSchema`, whose
+// bare-string arm TRANSFORMS to the canonical `{ dialect, source }` envelope,
+// so input ≠ infer by construction — the alias stays `z.input` (the authoring
 // face), per the convention's own rule for Expression-carrying shapes.
-// The object-* block family (#7751) — deliberately default-free in its first,
-// warning-tier step ("the author said nothing" must stay distinguishable from
-// "the author asked for the renderer's fallback"), so input === infer holds.
-// A default added to any of these goes red here, and the fix is the ADR's:
-// declare the XParsed alias and delete the pin line.
+// The object-* block family (#7751; `ObjectFormPropsSchema` and
+// `ObjectMasterDetailFormPropsSchema` are the members still pinned) —
+// deliberately default-free in its first, warning-tier step ("the author said
+// nothing" must stay distinguishable from "the author asked for the renderer's
+// fallback"), so input === infer holds. A default added to any of them goes
+// red here, and the fix is the ADR's: declare the XParsed alias and delete the
+// pin line.
 // `ObjectGridPropsSchema` (Iso839) left the family exactly that way on the
 // ui#6207 convergence: its `data` now carries `ViewDataSchema`, whose own
 // input ≠ infer, so `ObjectGridPropsParsed` is declared and the pin deleted.
@@ -1534,14 +1561,13 @@ export type Iso_ui_report__ReportType = Assert<Eq< z.input< typeof M164.ReportTy
 // ui/responsive.zod.ts
 // (Iso696 `BreakpointName` / Iso697 `ResponsiveConfigSchema` removed with
 // their schemas — #11027's ADR-0049 retirement of the responsive layout
-// vocabulary. The Iso numbers are positional and stay vacant.)
+// vocabulary.)
 // (Iso824 `BreakpointColumnMapSchema` / Iso825 `BreakpointOrderMapSchema`
 // removed with their schemas — #11027, see the Iso696/Iso697 note above.)
 export type Iso_ui_responsive__ResponsiveStylesSchema = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
 export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
 
-// ui/theme.zod.ts (Iso700–Iso704) left with the module at #10485 — the Iso
-// numbers are positional and stay vacant.
+// ui/theme.zod.ts — its five pins (Iso700–Iso704) left with the module at #10485.
 
 // ui/view.zod.ts
 // (Iso829 `KanbanConfigSchema` left this list in #17393: the author-settable
@@ -2242,6 +2268,19 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso877/Iso878; #17551 landed on main first, so its ids stand and this
     // card's pins renumbered to Iso880/Iso881 — ids are claims about pins, not
     // positions, so the renumbering asserts nothing new.
+    //
+    // 789 -> 789 is #19665, which moves no pin in or out: it RENAMES every
+    // pin. The dense counter these receipts allocate from — "the next free id"
+    // — let two branches off one base give one name to two different schemas,
+    // and git merged each pair cleanly because the two insertion points sat far
+    // apart: `Iso871` above, then `Iso877` / `Iso878` — each a duplicate
+    // identifier that no merge flags and only the type-check of this file
+    // reports. So each pin is now named for its module and schema, and the
+    // block is sorted by that name (the rule is written at the head of the
+    // list). Every `IsoNNN` cited above is a pin's former name,
+    // true of the file when its entry was written, like the counts beside it.
+    // The set `check:spec-parsed-alias` reads is identical member for member,
+    // and so is each assertion — only the names moved. +0.
     expect(pins).toHaveLength(789);
 
     // The count is stated in PROSE twice as well — this case's title and the
