@@ -24,6 +24,8 @@
  * - each reproduced shape, failing first: the by-id update is refused on the
  *   ADR-0112 envelope (`PERMISSION_DENIED` / 403), and the stored row, read
  *   under a system context, did not move;
+ * - the STORED row, not the change set: the image carries the fields the
+ *   update leaves unchanged, so a check over one of them still holds;
  * - the controls: an in-scope by-id update is admitted and stored; a hook
  *   that touches no checked field changes nothing; the judgement the
  *   middleware already made on the change set as sent still refuses (the fix
@@ -85,6 +87,19 @@ const OBJECTS = [
       priority: { name: 'priority', type: 'text' },
     },
   },
+  // The ticket's shape again, under a check that also reads a field the update
+  // never carries: judging the change set alone would miss it.
+  {
+    name: 'qa_case',
+    label: 'Case',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      title: { name: 'title', type: 'text' },
+      status: { name: 'status', type: 'text' },
+      priority: { name: 'priority', type: 'text' },
+    },
+  },
 ];
 
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -102,6 +117,7 @@ const WRITER: PermissionSet = PermissionSetSchema.parse({
     qa_employer: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_employer_member: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_ticket: { allowRead: true, allowCreate: true, allowEdit: true },
+    qa_case: { allowRead: true, allowCreate: true, allowEdit: true },
   },
   rowLevelSecurity: [
     {
@@ -116,6 +132,15 @@ const WRITER: PermissionSet = PermissionSetSchema.parse({
       object: 'qa_ticket',
       operation: 'update',
       check: "record.status != 'closed'",
+    },
+    {
+      // A high-priority case may not be closed. `priority` is a field the
+      // update below never carries, so only an image carrying the STORED row's
+      // unchanged fields can see it.
+      name: 'high_cases_stay_open',
+      object: 'qa_case',
+      operation: 'update',
+      check: "record.status != 'closed' || record.priority != 'high'",
     },
   ],
 });
@@ -180,11 +205,13 @@ async function boot(makeDriver: () => unknown): Promise<Booted> {
 
   // The plain shape's hook: it derives a checked field from another one.
   const closings: unknown[] = [];
-  engine.on('beforeUpdate', 'qa_ticket', (async (ctx: { input: { id?: unknown; data: Record<string, unknown> } }) => {
+  const closeOnTitle = (async (ctx: { input: { id?: unknown; data: Record<string, unknown> } }) => {
     if (ctx.input.data.title !== CLOSING_TITLE) return;
     closings.push(ctx.input.id ?? null);
     ctx.input.data.status = 'closed';
-  }) as never);
+  }) as never;
+  engine.on('beforeUpdate', 'qa_ticket', closeOnTitle);
+  engine.on('beforeUpdate', 'qa_case', closeOnTitle);
 
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
@@ -230,6 +257,14 @@ async function boot(makeDriver: () => unknown): Promise<Booted> {
     [
       { id: 't1', title: 'one', status: 'open', priority: 'low' },
       { id: 't2', title: 'two', status: 'open', priority: 'low' },
+    ],
+    { context: SYS_CTX } as never,
+  );
+  await engine.insert(
+    'qa_case',
+    [
+      { id: 'c_high', title: 'high', status: 'open', priority: 'high' },
+      { id: 'c_low', title: 'low', status: 'open', priority: 'low' },
     ],
     { context: SYS_CTX } as never,
   );
@@ -311,6 +346,24 @@ for (const [driverName, makeDriver] of DRIVERS) {
       expectCheckRefusal(outcome);
       expect(b.closings, 'the hook ran and rewrote the checked field').toEqual(['t1']);
       expect(await b.table('qa_ticket', TICKET_COLUMNS)).toEqual(SEEDED_TICKETS);
+    });
+
+    it('the stored row, not the change set: a hook-closed case fails on a field the update never carried, and the same write on a low case lands', async () => {
+      const b = await boot(makeDriver);
+      const SEEDED_CASES = [
+        { id: 'c_high', title: 'high', status: 'open', priority: 'high' },
+        { id: 'c_low', title: 'low', status: 'open', priority: 'low' },
+      ];
+
+      // `priority` is on neither payload; only the stored row carries it.
+      expectCheckRefusal(await attempt(() => byId(b, 'qa_case', { id: 'c_high', title: CLOSING_TITLE })));
+      expect(await b.table('qa_case', TICKET_COLUMNS)).toEqual(SEEDED_CASES);
+
+      const low = await attempt(() => byId(b, 'qa_case', { id: 'c_low', title: CLOSING_TITLE }));
+      expect(low.ok, `expected the low-priority close to be admitted: ${low.developerMessage ?? low.message}`).toBe(true);
+      expect(b.closings).toEqual(['c_high', 'c_low']);
+      expect((await b.table('qa_case', TICKET_COLUMNS))[1])
+        .toEqual({ id: 'c_low', title: CLOSING_TITLE, status: 'closed', priority: 'low' });
     });
   });
 
