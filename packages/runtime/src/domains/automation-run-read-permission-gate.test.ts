@@ -363,7 +363,14 @@ describe('#7900 — /automation run-state reads require the sys_automation_run r
             );
 
             // `resume` answers on the engine's per-run `resumeAuthority` axis
-            // (#3801 / #5561), which this card does not touch.
+            // (#3801 / #5561), which this card does not touch. What this row
+            // pins is that the #7900 grant gate — the one that fires AHEAD of
+            // the service probe — is not applied to it: this harness mounts no
+            // `resume`, so the request reaches the arm and answers its 501.
+            // [#19987] The write now has a caller gate of its own INSIDE the
+            // arm, on the screen read's question (trigger identity OR this
+            // grant), not this gate's grant-alone one; it is pinned in
+            // `automation-resume-caller-gate.test.ts`.
             expect((response as any).status).not.toBe(403);
             expect(h.explainCalls).toHaveLength(0);
         });

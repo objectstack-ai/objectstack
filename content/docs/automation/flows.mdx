@@ -764,7 +764,7 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 | `approval` | a human decision | the approvals service (`POST /api/v1/approvals/requests/:id/approve\|reject`) — resumes down the matching `approve` / `reject` edge. **Decide through the approvals API**; the resume route above **refuses** an approval pause outright (see below). |
 | `screen` | a user submits the form | the UI runner posting the collected `inputs` — **validated server-side against the screen's declared `fields`** (see below); a `paused` response carrying the next `screen` chains multi-step wizards under one stable `runId` |
 | `wait` (timer) | an ISO-8601 duration elapses | **automatically** — a one-shot job resumes the run; after a cold boot the engine re-arms pending timers from the durable store (overdue timers resume immediately) |
-| `wait` (signal) | a named external event | any caller invoking `resume(runId)` |
+| `wait` (signal) | a named external event | the external producer calling the resume route — as the user who started the run, or with read access to `sys_automation_run` (see below); in process, `resume(runId)` on the automation service |
 
 <Callout type="warn">
   **A pause ends the flow's retry-governed segment.** `errorHandling: { strategy:
@@ -807,11 +807,37 @@ change (there is no `FLOW_STRANDED`), and the trigger route's `400` carries
 referent there. The shape is `ResumeFailureDetailsSchema` in
 `@objectstack/spec/api`.
 
-### Who may resume — the gate is the suspended node
+### Who may resume — the caller, then the suspended node
 
-The resume route is generic, so **the node the run is parked on** decides
-whether a raw resume is a legitimate continuation. Every action descriptor
-carries a `resumeAuthority`:
+The route asks two questions, in this order. Both must pass.
+
+**1. Who is resuming.** A resumed run continues under the identity stored on
+the run, so its data nodes run as the user who **started** it, whoever sent the
+values. The route therefore admits only:
+
+- the user who started the run (the run's `trigger.userId`) — no extra
+  permission needed;
+- a caller with **read access to `sys_automation_run`** — the operator
+  override, for support tooling or an integration that feeds a signal `wait` on
+  runs it did not start;
+- a system context.
+
+Anyone else gets **403** `PERMISSION_DENIED` — "Resuming a paused run requires
+being the identity that triggered the run, or read access to
+'sys_automation_run'." — and nothing reaches the engine, so the run stays
+parked for the person it is waiting on. This is the same rule, code and status
+as reading the run's screen (`GET /api/v1/automation/{flow}/runs/{runId}/screen`),
+checked by the same function. The check runs after the body checks, so a
+malformed body is still a `400` for every caller. If the run id does not
+resolve, only an admitted caller (a system context or a `sys_automation_run`
+reader) gets the engine's `404`. Everyone else gets the `403`, because a run
+that is still paused can read as "not found" while the run store is degraded.
+The MCP `resume_run` tool is stricter: only the user who started the run, with
+no operator override (see [actions as tools](/docs/ai/actions-as-tools)).
+
+**2. What the run is parked on.** The resume route is generic, so **the node
+the run is parked on** decides whether a raw resume is a legitimate
+continuation. Every action descriptor carries a `resumeAuthority`:
 
 - **`'any'`** (`screen`, `wait`): the caller supplies the continuation and the
   route is the intended door.
