@@ -7114,9 +7114,10 @@ const elementFormRemoved: MetadataConversion = {
 };
 
 /**
- * `translation.<locale>.settings` on a PER-APP bundle — the platform-only
- * group leaving `stack.translations` with the type split (protocol 18,
- * #15178, ruling batch #132 item 2 letter ②).
+ * `settings` on every APPLICATION-authored translation face — the platform-only
+ * group leaving `stack.translations` with the type split (protocol 18, #15178,
+ * ruling batch #132 item 2 letter ②) and then the registered `translation`
+ * item (#19620, ruling batch #210 item 2 letter B), both faces in one entry.
  *
  * ⛔ NOT a lossless delete, and this entry says so rather than claiming the
  * house phrase. `settings` is keyed by `SettingsManifest.namespace`, and only
@@ -7140,30 +7141,49 @@ const elementFormRemoved: MetadataConversion = {
  * `18.translation-per-app-settings-platform-only.ts` is where an author is
  * told that, because a notice reading "(removed)" does not say it.
  *
- * ⚠️ The BUNDLE shape only. `TranslationItemSchema` still declares `settings`
- * (the registered `translation` metadata type is out of this ruling's scope),
- * so a bare item entry replaying through this seam is left exactly as it is —
- * the opposite of the `translation-component-submit-label-removed` neighbour,
- * which retires its key at both doors and therefore walks both shapes. Getting
- * this backwards would strip a key its own schema still accepts.
+ * The ITEM shape went further, and that is why it is walked too (#19620). A
+ * stored `translation` item is NOT a bundle loaded into the static tree: the
+ * runtime-authored layer is read OVER the shipped bundles
+ * (`deepMerge(static, authored)` in both i18n adapters), so an item's
+ * `settings` did override the platform's own copy for its locale, not merely
+ * fill gaps in it. Dropping it takes those keys back to the platform bundle's
+ * string where it has one and to the manifest literal where it does not. The
+ * seam that matters for an item is the runtime one: `authored-translation-sync`
+ * replays this chain over each stored row before merging it
+ * (`applyConversionsToStoredItem`), so a row written before the item door
+ * closed stops overriding at the next sync, with this entry's notice logged,
+ * rather than at the next re-save. That needed the stored pass itself to
+ * reach `translation` rows at all — it had no collection for the type and
+ * returned every one untouched (`STORED_ONLY_COLLECTIONS` in `./stored.ts`) —
+ * which also puts the metadata API's reads and `os migrate meta --stored`
+ * on this entry.
  *
- * The bundle is told from an item structurally rather than by key spelling:
- * `locale` is REQUIRED on an item and never present on a bundle entry (the
- * bundle's keys ARE the locales), and the candidate value must be a dict whose
- * every key is a declared translation group — which an `objects` record, the
- * one other dict-of-dicts at that depth, is not.
+ * Two shapes, told apart structurally rather than by key spelling:
+ *
+ * - **A bare item** carries `locale` (REQUIRED on an item since #3778), or —
+ *   for a row written before `locale` was required, which the sync still reads
+ *   by its name — has a declared translation GROUP as a top-level key. A
+ *   bundle entry never does either: its top-level keys ARE the locale codes.
+ *   Only the item's own top-level `settings` is stripped, so an object
+ *   literally named `settings` under `objects` is untouched.
+ * - **A bundle entry**: the candidate value under each locale must be a dict
+ *   whose every key is a declared translation group — which an `objects`
+ *   record, the one other dict-of-dicts at that depth, is not.
  */
 const translationPerAppSettingsRemoved: MetadataConversion = {
   id: 'translation-per-app-settings-removed',
   toMajor: 18,
   retiredFromLoadPath: true,
-  surface: 'stack.translations[].<locale>.settings',
+  surface: 'stack.translations[].<locale>.settings / translation.settings',
   summary:
-    "per-app translation group 'settings' removed (#15178 — it is keyed by SettingsManifest.namespace "
-    + 'and only platform code declares a manifest, so an app-authored entry could only fill gaps the '
-    + "platform's own bundle left in the one merged served tree, and was overwritten wherever both "
-    + 'defined the key; those gaps now fall back to the manifest literal, and the group stays on the '
-    + 'PLATFORM bundle, PlatformTranslationData)',
+    "translation group 'settings' removed from both application-authored faces, the per-app bundle "
+    + 'entry (#15178) and the registered translation item (#19620). It is keyed by '
+    + 'SettingsManifest.namespace and only platform code declares a manifest. A per-app bundle entry '
+    + "could only fill gaps the platform's own bundle left in the one merged served tree, and was "
+    + 'overwritten wherever both defined the key; a stored item OVERRODE the platform copy, because the '
+    + 'runtime-authored layer is read over the shipped bundles. Overrides now give way to the platform '
+    + 'copy, gaps fall back to the manifest literal, and the group stays on the PLATFORM bundle, '
+    + 'PlatformTranslationData',
   apply(stack, emit) {
     /** The top-level groups a translation bundle entry may carry (either face). */
     const GROUPS = new Set([
@@ -7171,9 +7191,10 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
       'pages', 'flows', 'settings', 'metadataForms', 'settingsCommon',
     ]);
     return mapCollection(stack, 'translations', (entry, path) => {
-      // A `translation` ITEM, not a bundle — `settings` is still declared
-      // there. Leave it whole.
-      if ('locale' in entry) return entry;
+      // A bare `translation` ITEM: strip its own top-level group only.
+      if ('locale' in entry || Object.keys(entry).some((k) => GROUPS.has(k))) {
+        return stripKeys(entry, ['settings'], emit, path);
+      }
       let next = entry;
       for (const [locale, data] of Object.entries(entry)) {
         if (!isDict(data) || !isDict(data.settings)) continue;
@@ -7196,6 +7217,20 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
             apps: { crm: { label: '客户关系管理' } },
           },
         },
+        {
+          // The bare item shape a stored `translation` row replays as.
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          settings: { mail: { title: 'メール配信' } },
+          messages: { commonSave: '保存' },
+        },
+        {
+          // A row written before `locale` was required — told from a bundle
+          // entry by its top-level group key. The object literally NAMED
+          // `settings` is application copy under `objects` and stays.
+          name: 'fr',
+          objects: { settings: { label: 'Paramètres' } },
+        },
       ],
     },
     after: {
@@ -7205,10 +7240,19 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
             apps: { crm: { label: '客户关系管理' } },
           },
         },
+        {
+          name: 'ja_jp',
+          locale: 'ja-JP',
+          messages: { commonSave: '保存' },
+        },
+        {
+          name: 'fr',
+          objects: { settings: { label: 'Paramètres' } },
+        },
       ],
     },
-    // One per stripped group: the single `zh-CN` entry.
-    expectedNotices: 1,
+    // One per stripped group: the `zh-CN` bundle entry and the `ja-JP` item.
+    expectedNotices: 2,
   },
 };
 
@@ -8979,7 +9023,7 @@ const fieldReferenceToAlias: MetadataConversion = {
  * `logUnmapped`) and `ErrorMappingRuleSchema` (`sourceCode`, `sourceMessage`,
  * `targetCode`, `targetCategory`, `severity`, `retryable`, `userMessage`) were
  * authorable through `ConnectorSchema.errorMapping` — and, because
- * `DeclarativeConnectorEntrySchema` `superRefine`s the same shape, through
+ * `DeclarativeConnectorEntrySchema` carries the same shape, through
  * `stack.connectors[]` and the `PUT /meta/connector/:name` door — and NOTHING
  * read them: measured on `origin/main`, the only reference outside the
  * declaring file and its unit test was a type-identity pin. No provider,
@@ -9061,6 +9105,90 @@ const connectorErrorMappingRemoved: MetadataConversion = {
     },
     // One notice: the connector carrying the block. The nested keys are not
     // counted separately — the block is the unit of removal.
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * `connector.connectionTimeoutMs` removed (protocol 18, ADR-0049
+ * enforce-or-remove; maintainer ruling 2026-09-22, letter A).
+ *
+ * A bounded (`min(1000).max(300000)`), defaulted (`30000`), `.describe()`d key
+ * on `ConnectorSchema` — and, because `DeclarativeConnectorEntrySchema` wraps
+ * the same private base object, on `stack.connectors[]` and the
+ * `PUT /meta/connector/:name` door — that no site ever applied as a deadline.
+ *
+ * ⚠️ NOT a zero-mention retirement, and the distinction is the whole finding:
+ * five sites outside `packages/spec` READ the key. The materialization
+ * fingerprint and the provider-context build in
+ * `services/service-automation/src/plugin.ts`, `ctx.connectionTimeoutMs` in the
+ * `rest` and `openapi` provider factories, and the `?? 30000` fallbacks that
+ * deposit it back onto the reported def. Every one of them is a pass-through:
+ * the value's only termini are the def `GET /connectors` echoes and the
+ * fingerprint that decides whether to re-materialize. `connectorFetchOptions()`
+ * — the one mapping from authored policy onto the platform's outbound `fetch`
+ * (`integration/connector-fetch-policy.ts`) — was handed
+ * `{ retryConfig, requestTimeoutMs }` only. Carrying a number is not honouring
+ * it, and ADR-0049 forbids the parsed-unmarked-unenforced state whether the
+ * inert value travels or sits still.
+ *
+ * And it is not implementable where it was declared: a connector's outbound
+ * call is a WHATWG `fetch`, whose only cancellation surface is one
+ * `AbortSignal` over the whole operation, so nothing there observes the connect
+ * phase. `requestTimeoutMs` — the lit control for every reading above, live at
+ * `integration/connector-fetch-policy.ts` where it becomes `resilientFetch`'s
+ * per-attempt `timeoutMs` — is the bound the platform can keep.
+ *
+ * A pure lossless delete: the key never had an effect to preserve, so there is
+ * no value to rewrite into anything.
+ *
+ * `retiredFromLoadPath`: `ConnectorSchema` tombstones the key (`retiredKey`,
+ * tsc `never` + the parse-time prescription — the `errorMapping` posture one
+ * block over in the same schema), so a live parse refuses loudly rather than
+ * absorbing a key the author believes bounds a connect. This entry exists
+ * because a stored connector row CAN carry it: the write door
+ * `PUT /meta/connector/:name` parses `DeclarativeConnectorEntrySchema` and its
+ * output retained the authored value, and the rehydration seam
+ * `applyConversionsToStoredItem('connector', row)` is live for this type — both
+ * measured before the tombstone landed. So 17.x rows replay clean here, and
+ * `os migrate meta --from 17` lists the mechanical edits for author sources.
+ */
+const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
+  id: 'connector-connection-timeout-ms-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'connector.connectionTimeoutMs',
+  summary:
+    "connector key 'connectionTimeoutMs' removed (ADR-0049 — the platform never applied it as a "
+    + 'deadline and cannot at the site it names: a WHATWG `fetch` exposes one `AbortSignal` over '
+    + 'the whole operation and never the connect phase. The value only travelled — onto the '
+    + 'reported def and the materialization fingerprint. Use `requestTimeoutMs`, which '
+    + "`resilientFetch` applies as each attempt's deadline, and bound the connect phase at a "
+    + 'provider or gateway that can separate the phases)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) =>
+      stripKeys(c, ['connectionTimeoutMs'], emit, path));
+  },
+  fixture: {
+    before: {
+      connectors: [
+        // Minimal by the §3 disjointness contract: the retired key and nothing
+        // else this major's other `connectors[]` entries also walk
+        // (`errorMapping`, `health.circuitBreaker.monitoringWindow`,
+        // `triggers[].interval`), so every notice here is attributable to this id.
+        { name: 'ledger_api', label: 'Ledger API', type: 'api', connectionTimeoutMs: 15000 },
+        // A connector that never authored the key keeps its identity — the
+        // copy-on-write contract `stripKeys` / `mapCollection` are built on.
+        { name: 'inventory_sync', label: 'Inventory Sync', type: 'saas' },
+      ],
+    },
+    after: {
+      connectors: [
+        { name: 'ledger_api', label: 'Ledger API', type: 'api' },
+        { name: 'inventory_sync', label: 'Inventory Sync', type: 'saas' },
+      ],
+    },
+    // One notice: the one connector carrying the key.
     expectedNotices: 1,
   },
 };
@@ -10056,6 +10184,103 @@ const dashboardWidgetChartConfigStructureRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * `object.tenancy.organizationField` leaves the authorable surface (protocol
+ * 18, #19054 — ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18,
+ * verbatim and untranslated: 「organizationField 撤出可授权面 同意你的建议」).
+ *
+ * The key named the column a platform row is STAMPED from, as opposed to the
+ * column the object is WALLED by (`tenantField`). On an ordinary object those
+ * are the same column — the spec's own docblock said "for ordinary objects the
+ * two coincide and `organizationField` is never needed" — and the whole
+ * repository declared it exactly once, on `sys_api_key`, a table this platform
+ * ships. An authorable key whose only real declaration is ours makes every
+ * future piece of organization logic ask "what if somebody set this?" for a
+ * divergence no sanctioned consumer would honour: the cloud#1395 scope-pin
+ * allows exactly three readers, all of them platform-row writers.
+ *
+ * The divergence itself is NOT retired — only its authorability. It moves to
+ * `@objectstack/metadata-core`'s `PLATFORM_STAMP_ORGANIZATION_COLUMNS`
+ * (`sys_api_key` → `active_organization_id`, read by the stamp face alone), so
+ * the three writers keep their behaviour unchanged with no authorable input.
+ *
+ * **Retired from the load path** — the `tenancy` block is `.strict()` and
+ * rejects the key with its prescription (`TENANCY_RETIRED_KEY_GUIDANCE`), so a
+ * live author is taught at parse. This entry exists so stored 17.x rows replay
+ * clean (`applyConversionsToStoredItem` — without it a pre-removal row flags
+ * `metadata_spec_invalid` forever, mislabelling chain-owned history as a
+ * current-contract violation) and so `os migrate meta --from 17` lists the
+ * mechanical edits for existing sources.
+ *
+ * Deletion is the whole conversion, and it is behaviour-preserving in both
+ * directions for everything outside this repository: an application that
+ * declared the key was never read by anything (the three sanctioned consumers
+ * are platform writers over platform tables), so dropping it changes no
+ * stamp. A row on a platform object is unreachable from an authored stack —
+ * `sys_api_key` is `managedBy: 'better-auth'` and protection-locked.
+ */
+const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
+  id: 'object-tenancy-organization-field-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'object.tenancy.organizationField',
+  summary:
+    'object `tenancy.organizationField` removed (#19054, ADR-0049 — the stamp-only column '
+    + 'declaration was authorable by every application and declared exactly once in the whole '
+    + 'protocol, on the platform\'s own credential table; the divergence moves to a '
+    + 'platform-internal table in @objectstack/metadata-core and stops being a knob)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) => {
+      // `tenancy.*` sits one level down, so the top-level-only `stripKeys`
+      // cannot reach it — drill in and copy-on-write, so an untouched object
+      // keeps its identity (pattern of `object-enable-trash-mru-removed`).
+      const tenancy = obj.tenancy;
+      if (!tenancy || typeof tenancy !== 'object' || Array.isArray(tenancy)) return obj;
+      const stripped = stripKeys(
+        tenancy as Record<string, unknown>,
+        ['organizationField'],
+        emit,
+        `${path}.tenancy`,
+      );
+      if (stripped === tenancy) return obj;
+      return { ...obj, tenancy: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [
+        {
+          name: 'billing_api_credential',
+          label: 'Billing API Credential',
+          tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        },
+        // The walled neighbour passes through untouched: `tenantField` is the
+        // key that survives, and it answers the other question.
+        {
+          name: 'billing_invoice',
+          label: 'Invoice',
+          tenancy: { enabled: true, tenantField: 'workspace_id' },
+        },
+      ],
+    },
+    after: {
+      objects: [
+        {
+          name: 'billing_api_credential',
+          label: 'Billing API Credential',
+          tenancy: { enabled: false },
+        },
+        {
+          name: 'billing_invoice',
+          label: 'Invoice',
+          tenancy: { enabled: true, tenantField: 'workspace_id' },
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -10147,6 +10372,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     formViewOptionDefaultRemoved,
     fieldReferenceToAlias,
     connectorErrorMappingRemoved,
+    connectorConnectionTimeoutMsRemoved,
     hookTimeoutToTimeoutMs,
     jobTimeoutToTimeoutMs,
     apiEndpointCacheTtlToCacheTtlSeconds,
@@ -10160,6 +10386,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     chartConfigAriaRemoved,
     dashboardWidgetChartConfigStructureRemoved,
     translationPerAppSettingsRemoved,
+    objectTenancyOrganizationFieldRemoved,
   ],
 };
 

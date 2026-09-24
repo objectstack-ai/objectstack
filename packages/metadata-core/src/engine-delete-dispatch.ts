@@ -292,7 +292,17 @@ export const ENGINE_DELETE_DISPATCH_CASES: readonly EngineDeleteDispatchCase[] =
   //    accepted it, and what a running server answers 500 to.
   { what: 'predicate on a non-id column, no multi', options: { where: { rule_id: 'r1' } }, expect: 'reject' },
   { what: '$in over ids, no multi (an operator object is NOT an id)', options: { where: { id: { $in: ['a', 'b'] } } }, expect: 'reject' },
-  { what: 'array id, no multi', options: { where: { id: ['a', 'b'] } }, expect: 'reject' },
+  // [#19757] An 'array id, no multi' row — `where: { id: ['a', 'b'] }` — sat
+  // here. Since the 2026-09-23 ruling the shared comparand-shape face
+  // (`@objectstack/spec/data`) refuses an ARRAY in the equality slot at the
+  // engine's lowering seam, which every verb crosses BEFORE this dispatch runs:
+  // the real engine now answers that input with the face's INVALID_FILTER / 400,
+  // so no dispatch verdict for it is observable any more, and a row claiming
+  // one would pin a branch the engine never reaches. Retired rather than
+  // re-spelled — the `$in` row above keeps the "a non-scalar is not an id"
+  // coverage, and `scalarDeleteId`'s own array pin stays. A double bound to this
+  // predicate still refuses an array id with the dispatch sentence: no double
+  // runs the face, for this shape or any other face refusal.
   { what: 'null id, no multi', options: { where: { id: null } }, expect: 'reject' },
   // The two shapes objectstack#5747 was filed for: a fake pinned to
   // `assertEngineDeleteDispatch` ACCEPTED both until this case-set could

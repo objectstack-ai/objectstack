@@ -124,10 +124,16 @@ Compiled manifest adds four blocks to the existing `ObjectStackManifest`:
 
 ### 4.2 UI plugin (`runtime: 'ui'` — ADR-0026 §3.1)
 
-Same `.osplugin` envelope, but `type: ui-plugin`, `dist` is a **browser ESM
+Same `.osplugin` envelope, but `type: ui`, `dist` is a **browser ESM
 bundle** default-exporting a `register(host)` function, and the manifest carries a
 `ui` block (`entry`, `shared` singletons, `extends` extension points) plus
 client-scoped `permissions` (data read/write via SDK, network → CSP, navigation).
+
+> **Note (2026-09-23, #16140).** This document originally spelled the UI plugin
+> package type `ui-plugin`. The closed set of plugin types (`CORE_PLUGIN_TYPES`,
+> `packages/spec/src/kernel/plugin.zod.ts`) adopted `ui`, and both
+> `ManifestSchema` and `PluginSchema` refuse `ui-plugin`; this section and
+> worked example C in §10 use `ui`.
 
 ### 4.3 Packaging strategies (default: bundled)
 
@@ -274,7 +280,7 @@ the **App**; the connector rides inside it. Stripe API key → KV secret-ref at 
 install.
 
 **C. Community "fancy gauge" widget (UI, U1 default).**
-`type: ui-plugin`, `runtime: ui`, unverified publisher → **U1 iframe** only, CSP
+`type: ui`, `runtime: ui`, unverified publisher → **U1 iframe** only, CSP
 `connect-src` empty, data via scoped SDK (RLS-gated). Bundled into whatever App's
 dashboard uses it, or operator-enabled org-wide.
 

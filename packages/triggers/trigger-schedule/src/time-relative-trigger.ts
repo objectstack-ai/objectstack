@@ -14,8 +14,10 @@ import {
     refuseMissingOrganization,
     refuseScheduledWorkDisabled,
     resolveBindingOrganization,
+    readScheduledWorkPolicy,
+    type ScheduledWorkPolicySource,
+    type ScheduledWorkTriggerOptions,
 } from './schedule-trigger.js';
-import { resolveScheduledWorkPolicy } from '@objectstack/types';
 import type { ScheduledRunOwnership } from '@objectstack/types';
 // [#18378] The ONE resolver for "which organization does this record BELONG
 // to" — the WALL question (`tenancy.enabled: false` ⇒ nothing, then a declared
@@ -286,6 +288,8 @@ export class TimeRelativeTrigger implements FlowTrigger {
      * the previous kernel's object registry. See {@link organizationOfRecord}.
      */
     private recordOrgResolver: { engine: unknown; resolver: RecordOrganizationResolver } | null = null;
+    /** [#19834] Per-kernel policy; absent ⇒ the deployment resolver. */
+    private readonly scheduledWorkPolicy: ScheduledWorkPolicySource | undefined;
 
     constructor(
         getJobService: () => JobServiceSurface | null,
@@ -293,12 +297,14 @@ export class TimeRelativeTrigger implements FlowTrigger {
         logger: TriggerLogger,
         now: () => Date = () => new Date(),
         getClaimSurface: () => FlowDispatchClaimSurface | null = () => null,
+        options: ScheduledWorkTriggerOptions = {},
     ) {
         this.getJobService = getJobService;
         this.getDataEngine = getDataEngine;
         this.logger = logger;
         this.now = now;
         this.getClaimSurface = getClaimSurface;
+        this.scheduledWorkPolicy = options.scheduledWorkPolicy;
     }
 
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void {
@@ -309,7 +315,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
         // that matters most — its descriptor diagnostics are long and specific,
         // and sending an operator to fix one on a deployment that was never
         // going to run it is the wrong remedy at the wrong door.
-        const policy = resolveScheduledWorkPolicy();
+        const policy = readScheduledWorkPolicy(this.scheduledWorkPolicy);
         if (!policy.enabled) {
             this.stop(binding.flowName);
             refuseScheduledWorkDisabled(this.logger, 'time-relative', binding.flowName);

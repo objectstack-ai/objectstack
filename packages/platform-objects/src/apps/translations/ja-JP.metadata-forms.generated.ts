@@ -730,6 +730,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "テーブルオプション",
         description: "グリッド専用の表示オプション。"
       },
+      pagination: {
+        label: "ページネーション",
+        description: "ページサイズとページサイズの選択肢 — グリッドだけでなく、すべてのビュータイプで使用できます。"
+      },
       kanban: {
         label: "カンバン",
         description: "カンバン専用のボード設定。"
@@ -786,6 +790,48 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "列",
         helpText: "表示する列（選択オブジェクトのフィールド名）"
       },
+      "columns.field": {
+        label: "フィールド"
+      },
+      "columns.label": {
+        label: "表示名"
+      },
+      "columns.width": {
+        label: "幅（ピクセル）"
+      },
+      "columns.align": {
+        label: "配置"
+      },
+      "columns.hidden": {
+        label: "非表示"
+      },
+      "columns.sortable": {
+        label: "並び替え可能"
+      },
+      "columns.resizable": {
+        label: "サイズ変更可"
+      },
+      "columns.wrap": {
+        label: "テキストの折り返し"
+      },
+      "columns.type": {
+        label: "レンダラータイプ"
+      },
+      "columns.pinned": {
+        label: "固定"
+      },
+      "columns.summary": {
+        label: "集計"
+      },
+      "columns.prefix": {
+        label: "プレフィックス"
+      },
+      "columns.link": {
+        label: "主リンク"
+      },
+      "columns.action": {
+        label: "クリック時のアクション"
+      },
       filter: {
         label: "フィルター",
         helpText: "フィルター条件 — リストツールバーと同じビジュアルビルダー。演算子と値入力はフィールドタイプに応じて変わります"
@@ -793,6 +839,12 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sort: {
         label: "並び替え",
         helpText: "既定の並び順"
+      },
+      "sort.field": {
+        label: "フィールド"
+      },
+      "sort.order": {
+        label: "並び方向"
       },
       searchableFields: {
         label: "検索対象フィールド",
@@ -842,6 +894,33 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       tabs: {
         label: "タブ",
         helpText: "ビュー内フィルタータブ——各タブが独自のフィルタールールを適用"
+      },
+      "tabs.name": {
+        label: "名前"
+      },
+      "tabs.label": {
+        label: "表示名"
+      },
+      "tabs.icon": {
+        label: "アイコン"
+      },
+      "tabs.view": {
+        label: "リストビュー"
+      },
+      "tabs.filter": {
+        label: "フィルター"
+      },
+      "tabs.order": {
+        label: "表示順"
+      },
+      "tabs.pinned": {
+        label: "固定"
+      },
+      "tabs.isDefault": {
+        label: "既定のタブ"
+      },
+      "tabs.visible": {
+        label: "表示"
       },
       appearance: {
         label: "外観",

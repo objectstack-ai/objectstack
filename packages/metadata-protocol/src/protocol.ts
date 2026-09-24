@@ -19371,22 +19371,44 @@ export class ObjectStackProtocolImplementation implements
         // under the SOURCE's names — the collision the re-namespacing exists to
         // prevent.
         //
-        // ⛔ An explicitly declared `targetNamespace` still wins untouched: it
-        // is the caller's decision and this seam is about the DEFAULT.
+        // [#19577] ⭐ AN EXPLICIT `targetNamespace` STILL WINS OVER THE DEFAULT,
+        // BUT IT IS PARSED, NOT TAKEN RAW. Whichever branch answered, the value
+        // becomes the copy's `manifest.namespace` AND the prefix of every copied
+        // object name, so both branches pass ONE parse before anything is
+        // minted — `ManifestSchema.shape.namespace`, the declaration itself,
+        // never a hand-copied regex. An explicit value was the more reachable
+        // hole of the two: it is pure caller input, and `targetNamespace:
+        // 'my-ns'` minted `my-ns_ticket`, a name the object declaration refuses.
+        //
+        // ⛔ A refused explicit value is REFUSED, never sanitised the way the
+        // derivation sanitises an id: it is what the caller wrote, and a copy
+        // quietly landing under a namespace nobody wrote is the silent rewrite
+        // this door exists not to perform.
+        //
+        // The sentence is the DECLARATION's, surfaced — the discipline the id
+        // gate above follows — and this door adds only the key it read and the
+        // value that arrived. The throw carries `statusCode: 400` and no `code`,
+        // exactly like the id refusal above, so an HTTP boundary answers the
+        // status-derived `VALIDATION_ERROR` on both branches (`resolveThrownHttpError`).
         const sourceNs: string =
             (srcPkg?.manifest?.namespace as string) ?? (deriveNamespaceFromPackageId(request.sourcePackageId) ?? '');
-        const targetNs: string | null =
-            request.targetNamespace ?? deriveNamespaceFromPackageId(request.targetPackageId);
-        if (!targetNs) {
-            // Reachable only for an id the pattern admits but the namespace
-            // charset cannot carry (a single-letter final segment), or for an
-            // explicit `targetNamespace: ''`. Loud, with the remedy — never a
-            // copy renamed with an empty prefix.
+        const explicitNs = request.targetNamespace;
+        const targetNs: string | null = explicitNs ?? deriveNamespaceFromPackageId(request.targetPackageId);
+        // `?? ''` because the declaration is `.optional()`: an ABSENT value
+        // passes it, and a derivation that produced nothing must not.
+        const declaredTargetNs = ManifestSchema.shape.namespace.safeParse(targetNs ?? '');
+        if (targetNs == null || !declaredTargetNs.success) {
+            const rule = declaredTargetNs.error?.issues[0]?.message ?? 'See `manifest.namespace`';
             throw Object.assign(
                 new Error(
-                    `Cannot derive a package namespace from '${request.targetPackageId}'. `
-                    + 'Pass `targetNamespace` explicitly — a lowercase letter followed by '
-                    + '1–19 letters, digits or underscores.',
+                    explicitNs != null
+                        ? `Invalid package namespace '${String(explicitNs)}' on \`targetNamespace\`. ${rule}. `
+                            + 'It becomes the copy\'s `manifest.namespace` and the prefix of every copied object name.'
+                        // Reachable only for an id the pattern admits but the
+                        // namespace charset cannot carry (a single-letter final
+                        // segment) — never a copy renamed with an empty prefix.
+                        : `Cannot derive a package namespace from '${request.targetPackageId}'. `
+                            + `Pass \`targetNamespace\` explicitly. ${rule}.`,
                 ),
                 { statusCode: 400 },
             );
@@ -22621,17 +22643,18 @@ export class ObjectStackProtocolImplementation implements
      * boot hydration that replays it — out under its own always-on token
      * `package-registry` (`PLATFORM_ALWAYS_ON_CAPABILITIES`,
      * `packages/spec/src/kernel/platform-capabilities.ts`), leaving
-     * `marketplace` naming only the optional catalogue / browsing half. ⚠️ The
-     * runtime half of that split is NOT landed: measured on `origin/main` at
-     * c334ba0f3a, `Serve.CAPABILITY_PROVIDERS`
-     * (`packages/cli/src/commands/serve.ts`) keys `marketplace` and does not key
-     * `package-registry`, so the always-on token is force-appended to every
-     * app's `requires` and then resolves to no provider — silently, because the
-     * resolver only warns for tokens outside the vocabulary. ⇒ on a stock
-     * `objectstack dev` boot of an app that does not itself declare
-     * `requires: ['marketplace']`, this branch is still the one taken, which is
-     * the defect #17676 reports. Recorded here rather than worked around: the
-     * fix belongs to the capability resolver, not to this primitive.
+     * `marketplace` naming only the optional catalogue / browsing half. The
+     * runtime half of that split has landed (#19387): `objectstack serve` keys
+     * `package-registry` in `Serve.CAPABILITY_PROVIDERS`
+     * (`packages/cli/src/commands/serve.ts`) and mounts `PackageServicePlugin`
+     * for it, so a stock boot — an app that declares neither token — composes
+     * the `package` service and takes the `pkgSvc.publish` branch below. The
+     * in-memory-only branch is reached only on a host that mounts no provider
+     * (`objectstack serve --preset minimal`, a metadata-only embedding), the
+     * degraded path described above. ⚠️ Still open: `marketplace` maps to the
+     * same persistence provider today, and repointing it at the browse surface
+     * is #17676's remaining half. That repoint does not change which branch
+     * this primitive takes.
      *
      * [#19277] `request.enableOnInstall` is HONOURED here, under the same rule
      * the HTTP door implements — 「缺省 = 保持，有旗 = 设置」: `true` enables,

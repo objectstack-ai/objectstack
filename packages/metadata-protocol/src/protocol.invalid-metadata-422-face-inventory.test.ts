@@ -313,3 +313,59 @@ describe('[#10888 · GUARD] a face that carries no `issues[]` keeps the whole se
         expect(unknown.message).toContain(PRESCRIPTION);
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. #19620 — the `translation` item door refuses the platform-only `settings`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Ruling batch #210 item 2 letter B: `settings` left `TranslationItemSchema`,
+// so a `translation` item carrying it is refused at THIS gate — the metadata
+// door Studio, the metadata API and an AI agent write through — with the ADR-0112
+// envelope (`code` + `status`) and the platform-only prescription on the issue.
+// It used to be accepted, and a published item's `settings` overrode the
+// platform's own Settings copy (the runtime-authored layer is read over the
+// shipped bundles). Rides this file's pinned engine double rather than a new
+// one, since the gate under test is the same `saveMetaItem` refusal.
+
+async function saveTranslation(protocol: any, item: Record<string, unknown>): Promise<any> {
+    try {
+        return await protocol.saveMetaItem({
+            type: 'translation',
+            name: 'zh_cn',
+            item,
+            writeFace: 'meta-envelope',
+        });
+    } catch (e: any) {
+        return e;
+    }
+}
+
+describe('[#19620] a `translation` item carrying `settings` is refused at the metadata door', () => {
+    const settings = { mail: { title: '邮件', keys: { host: { label: '主机' } } } };
+
+    it.each(['settings', 'setting'])('`%s` — 422 INVALID_METADATA, platform-only prescription, nothing stored', async (key) => {
+        const { protocol, rows } = makeProtocol();
+        const err = await saveTranslation(protocol, { locale: 'zh-CN', [key]: settings });
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        const issue = (err.issues as Array<{ code?: string; message: string }>)
+            .find((i) => i.code === 'unrecognized_keys');
+        expect(issue?.message).toContain(`\`${key}\``);
+        expect(issue?.message).toContain('PLATFORM group');
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — the same item without `settings` is stored (the refusal is the key, not the item)', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveTranslation(protocol, {
+            locale: 'zh-CN',
+            settingsCommon: { sourceLabels: { tenant: '租户' } },
+            apps: { crm: { label: '客户关系管理' } },
+        });
+
+        expect(result).not.toBeInstanceOf(Error);
+        expect([...rows.values()].map((r) => r.type)).toEqual(['translation']);
+    });
+});

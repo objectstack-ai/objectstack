@@ -16,6 +16,14 @@
 //   • order + limit/offset
 // Anything beyond (joins via `include`, raw SQL) falls back to the caller's
 // normal execution path — the preview simply doesn't claim it.
+//
+// [#19810] "Doesn't claim it" is a FALL-BACK only where a fall-back exists. A
+// `where` operator outside the subset above has none: the rows being charted
+// live only in the pending seed draft, so there is no live path to hand the
+// query to. It is REFUSED — `INVALID_FILTER` / 400, the envelope this package's
+// `where` door already speaks — and never answered true. See
+// PREVIEW_FIELD_OPERATORS. [#19835] So is a field constraint carrying ZERO
+// operators (`{ name: {} }`), at any depth — see isEmptyFieldConstraint.
 
 import {
   calendarPartsInTzOrUtc,
@@ -24,6 +32,12 @@ import {
   utcInstantMs,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
+// [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
+// EXPORTED by `filter-normalizer` precisely so a sibling in this package cannot
+// invent a second spelling of it. A draft-preview filter is a `where`-door
+// refusal in every respect that matters: the caller authored the predicate and
+// the repair is theirs.
+import { invalidFilterError } from './strategies/filter-normalizer.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, type Cube } from '@objectstack/spec/data';
 
@@ -77,37 +91,218 @@ function lteBound(value: unknown, bound: unknown): boolean {
   return compare(value, bound) <= 0;
 }
 
-function matchOp(value: unknown, op: string, expected: unknown): boolean {
-  switch (op) {
-    case '$eq': return value === expected || String(value) === String(expected);
-    case '$ne': return !(value === expected || String(value) === String(expected));
-    case '$gt': return value != null && compare(value, expected) > 0;
-    case '$gte': return value != null && compare(value, expected) >= 0;
-    case '$lt': return value != null && compare(value, expected) < 0;
-    case '$lte': {
-      if (value == null) return false;
-      // A bare-day upper bound means "through that whole day" (#3777): the SQL
-      // paths compile it half-open (`< day+1`), and the preview must agree or
-      // a drafted chart shows different numbers than the published one. String
-      // ordering makes `< nextDay` equivalent to `<= day` for plain date
-      // values, so no type lookup is needed here either.
-      return lteBound(value, expected);
+/** One field operator's predicate, over one row's value. */
+type PreviewPredicate = (value: unknown, expected: unknown) => boolean;
+
+/**
+ * [#19810] The field operators this face EVALUATES — and, because the refusal
+ * below derives its vocabulary from these keys, the complete statement of what
+ * the draft preview accepts.
+ *
+ * ⛔ This was a `switch` whose `default` arm answered `return true` — "unknown
+ * operator — permissive (preview, reads only)". Permissive is the one thing a
+ * filter must never be: a predicate that answers true for every row does not
+ * narrow the query, it WIDENS it (#3948, #4286/ADR-0078, #5345). So a drafted
+ * chart carrying `name $icontains 'acme'` charted the WHOLE dataset and looked
+ * exactly like a working chart, until publish — where the real filter doors do
+ * apply the operator — changed the numbers under the author. Every declared
+ * operator with no row below was in that state: `$icontains`, `$notContains`,
+ * `$startsWith`, `$endsWith`, `$null`, `$exists`, plus `$like` / `$ilike` and
+ * any typo. "Reads only" argued the wrong half: the preview writes nothing and
+ * reports a NUMBER, and a wrong number is what a chart is.
+ *
+ * It is the identical shape this file already records twice — `$between` fell
+ * to that same `default` and matched every row (#4081), and `dateRange`
+ * degenerated to a point window (#16322) — because publish materialises the
+ * SAME seed, so any disagreement here makes the numbers jump across the publish
+ * boundary for no reason an author can see.
+ *
+ * Vocabulary and evaluator are ONE table, the shape `memory-analytics`'
+ * `MONGO_TO_CUBE_OPERATOR` took for this exact defect (#5345): adding a row
+ * here is the only way to widen what this face accepts, and forgetting to add
+ * one is a loud refusal rather than a wrong number. A `Map`, not an object
+ * literal, so a field constraint naming an `Object.prototype` member
+ * (`{ name: { toString: 'x' } }`) cannot resolve to an inherited function and
+ * be called as a predicate.
+ *
+ * ⛔ Widening it is deliberately NOT this card's work, and the ordering is
+ * already ruled: the `FILTER_OPERATORS` docblock's #6520 constraint — the word
+ * list must not land ahead of the evaluators — reads the same in this
+ * direction, so an arm joins this table in the PR that measures it against the
+ * shared text/temporal conformance kits, not before. Every row below is
+ * byte-for-byte the `case` it replaces.
+ */
+const PREVIEW_FIELD_OPERATORS = new Map<string, PreviewPredicate>([
+  ['$eq', (value, expected) => value === expected || String(value) === String(expected)],
+  ['$ne', (value, expected) => !(value === expected || String(value) === String(expected))],
+  ['$gt', (value, expected) => value != null && compare(value, expected) > 0],
+  ['$gte', (value, expected) => value != null && compare(value, expected) >= 0],
+  ['$lt', (value, expected) => value != null && compare(value, expected) < 0],
+  ['$lte', (value, expected) => {
+    if (value == null) return false;
+    // A bare-day upper bound means "through that whole day" (#3777): the SQL
+    // paths compile it half-open (`< day+1`), and the preview must agree or
+    // a drafted chart shows different numbers than the published one. String
+    // ordering makes `< nextDay` equivalent to `<= day` for plain date
+    // values, so no type lookup is needed here either.
+    return lteBound(value, expected);
+  }],
+  ['$between', (value, expected) => {
+    // Was absent, so it fell to the permissive `default` and matched EVERY
+    // row — a drafted chart with a range filter silently charted the whole
+    // dataset, then changed at publish (found by the ADR-0053 D-A3 matrix,
+    // #4081). The max takes the same whole-day rule as `$lte`.
+    if (value == null || !Array.isArray(expected) || expected.length !== 2) return false;
+    const [min, max] = expected;
+    if (min == null || max == null) return false;
+    return compare(value, min) >= 0 && lteBound(value, max);
+  }],
+  ['$in', (value, expected) => Array.isArray(expected) && expected.some((e) => value === e || String(value) === String(e))],
+  ['$nin', (value, expected) => Array.isArray(expected) && !expected.some((e) => value === e || String(value) === String(e))],
+  ['$contains', (value, expected) => String(value ?? '').toLowerCase().includes(String(expected ?? '').toLowerCase())],
+]);
+
+/**
+ * [#19810] A filter operator this face cannot evaluate, in the ADR-0112
+ * envelope every sibling filter refusal in this package speaks.
+ *
+ * ⛔ REFUSED, not answered-true and not silently excluded from the result. The
+ * three candidates are not equivalent: answering true is the defect; excluding
+ * the row makes the preview merely DIFFERENT from the published chart — zero
+ * rows where publish draws numbers — which is the silent failure #16322
+ * abolished on this very evaluator; only a refusal makes the disagreement
+ * VISIBLE to the author who can fix it. That is the call
+ * `uncompilableFieldOperatorError` states for the analytics cube face, and the
+ * posture `service-analytics` already takes for `$like` / `$ilike` (the
+ * `FILTER_OPERATORS` face table: "REFUSE, loudly, in the ADR-0112
+ * `INVALID_FILTER` envelope").
+ *
+ * This face is the ONLY door on the path it serves: `queryDataset`'s preview
+ * branch evaluates in memory and never reaches a strategy, so no `where` gate
+ * runs ahead of it — the same reason `lowerPreviewDateRange` refuses here
+ * rather than trusting the schema door behind it.
+ */
+function previewUnevaluableOperatorError(op: string, field: string): Error {
+  const supported = [...PREVIEW_FIELD_OPERATORS.keys()].join(', ');
+  return invalidFilterError(
+    `[analytics] Filter operator "${op}" on field "${field}" is not evaluated by the draft-data ` +
+      `preview. Operators this face evaluates: ${supported}. It is refused rather than answered ` +
+      `true for every row: a predicate that matches everything does not narrow the query, it ` +
+      `WIDENS it — the drafted chart is drawn over rows the filter excluded and looks like a ` +
+      `working chart, until publish applies the operator and the numbers change. Rewrite the ` +
+      `predicate with an operator listed above, or publish the seed and chart it live.`,
+  );
+}
+
+/**
+ * [#19835] Is this field spec `{}` — a field constrained by ZERO operators?
+ *
+ * A plain object with no own enumerable keys, and nothing else — the predicate
+ * `driver-memory`, `driver-mongodb`, `driver-sql` and `@objectstack/formula`
+ * each apply under the same name. A `Date`, a `RegExp` or a class instance also
+ * enumerates to nothing, but it is a COMPARAND rather than a constraint, so the
+ * prototype check keeps it out of this refusal exactly as it does there.
+ *
+ * Mirrored locally, not imported: the exported copy lives in `driver-memory`
+ * (`filter-refusal.ts`), a package this service does not depend on, and a
+ * dependency on a driver for a four-line predicate is the wrong direction.
+ */
+function isEmptyFieldConstraint(spec: unknown): boolean {
+  if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return false;
+  const proto = Object.getPrototypeOf(spec);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.keys(spec as Row).length === 0;
+}
+
+/**
+ * [#19835] `{ field: {} }` — a field constrained by ZERO operators — REFUSED,
+ * in the same `INVALID_FILTER` / 400 envelope as
+ * {@link previewUnevaluableOperatorError}.
+ *
+ * ⛔ It used to MATCH EVERY ROW, and not by anyone's decision: the per-field
+ * loop in {@link matchesWhere} iterates the constraint's entries, an empty
+ * object has none, so the loop body never ran and the row fell through to the
+ * function's closing `return true`. The operator-vocabulary refusal (#19810)
+ * could not reach it either — with no key there is no operator to look up and
+ * no lookup to fail.
+ *
+ * Every shipped backend already refuses this shape (#5240 ruled it: refused
+ * everywhere, one wording): `driver-memory`'s and `driver-mongodb`'s
+ * `emptyFieldConstraintError`, and `driver-sql`'s at the top level and inside
+ * `$and`/`$or`/`$not` alike. This package's own `where` door refuses it too
+ * (`filter-normalizer`'s wrapper arm). So the draft preview charted every row
+ * for a filter publish never answers at all — the preview/publish divergence
+ * this evaluator's other refusals exist to make visible.
+ *
+ * ⛔ Refused, NOT answered as "matches nothing". `{ status: {} }` does not mean
+ * "no rows" — read literally it means "rows whose status is anything", and the
+ * shape is almost always an authoring accident (a filter builder that recorded
+ * a field and never its operator). Either silent reading hands the author a row
+ * count they never asked for; only the refusal names the constraint to repair.
+ *
+ * The message follows the drivers' wording (constraint, position, the two legal
+ * repairs) and carries no tracker number, per the runtime-string rule.
+ */
+function previewEmptyFieldConstraintError(field: string, path: string): Error {
+  return invalidFilterError(
+    `[analytics] Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field ` +
+      `constraint must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a ` +
+      `direct comparand (e.g. { "${field}": "value" }). It is refused rather than evaluated: the ` +
+      `draft-data preview used to answer it with EVERY row, while every data driver and the live ` +
+      `analytics filter refuse it — so the drafted chart was drawn over rows the published one never ` +
+      `returns. It does not mean "no rows" either; name the operator the constraint was meant to carry.`,
+  );
+}
+
+/**
+ * [#19810] Refuse a `where` this face cannot evaluate BEFORE any row is read.
+ *
+ * Row-independent on purpose. {@link matchOp}'s refusal can only fire if some
+ * row reaches it, and a pending seed draft holding ZERO rows — the state a
+ * draft is authored in, and the state a `$null` filter over an empty seed lands
+ * in — would otherwise answer an unevaluable filter with an empty result and no
+ * complaint. `driver-memory`'s `assertFilterConditionShape` runs ahead of that
+ * driver's lowering for the same reason: the walk must not be a function of the
+ * data.
+ *
+ * It mirrors {@link matchesWhere}'s own traversal exactly, malformed shapes
+ * included — a non-array `$and` is left for `matchesWhere` to fault on as it
+ * always has, so this gate widens no refusal beyond the operator vocabulary
+ * and the zero-operator constraint.
+ *
+ * [#19835] The zero-operator constraint is judged HERE, for the whole tree,
+ * rather than only where {@link matchesWhere} meets it: that walk
+ * short-circuits (`every`/`some`, and a node returns on its first false entry),
+ * so a `{ $or: [{ name: 'Globex' }, { amount: {} }] }` would refuse or answer
+ * depending on which ROW was being tested. A malformed filter is refused for
+ * every row or none — the posture `@objectstack/formula`'s `assertFilterShape`
+ * takes for the same shape — and nesting under `$and`/`$or`/`$not` cannot
+ * route around it, the position `driver-sql` once dropped it in.
+ */
+function assertPreviewCanEvaluate(where: Record<string, unknown> | undefined, path = 'where'): void {
+  if (!where) return;
+  for (const [key, cond] of Object.entries(where)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      if (Array.isArray(cond)) cond.forEach((arm, i) => assertPreviewCanEvaluate(arm as Row, `${here}[${i}]`));
+    } else if (key === '$not') {
+      if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+        assertPreviewCanEvaluate(cond as Row, here);
+      }
+    } else if (isEmptyFieldConstraint(cond)) {
+      throw previewEmptyFieldConstraintError(key, here);
+    } else if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+      for (const op of Object.keys(cond as Row)) {
+        if (!PREVIEW_FIELD_OPERATORS.has(op)) throw previewUnevaluableOperatorError(op, key);
+      }
     }
-    case '$between': {
-      // Was absent, so it fell to the permissive `default` and matched EVERY
-      // row — a drafted chart with a range filter silently charted the whole
-      // dataset, then changed at publish (found by the ADR-0053 D-A3 matrix,
-      // #4081). The max takes the same whole-day rule as `$lte`.
-      if (value == null || !Array.isArray(expected) || expected.length !== 2) return false;
-      const [min, max] = expected;
-      if (min == null || max == null) return false;
-      return compare(value, min) >= 0 && lteBound(value, max);
-    }
-    case '$in': return Array.isArray(expected) && expected.some((e) => value === e || String(value) === String(e));
-    case '$nin': return Array.isArray(expected) && !expected.some((e) => value === e || String(value) === String(e));
-    case '$contains': return String(value ?? '').toLowerCase().includes(String(expected ?? '').toLowerCase());
-    default: return true; // unknown operator — permissive (preview, reads only)
   }
+}
+
+function matchOp(value: unknown, op: string, expected: unknown, field: string): boolean {
+  const evaluate = PREVIEW_FIELD_OPERATORS.get(op);
+  if (!evaluate) throw previewUnevaluableOperatorError(op, field);
+  return evaluate(value, expected);
 }
 
 export function matchesWhere(row: Row, where: Record<string, unknown> | undefined): boolean {
@@ -119,9 +314,14 @@ export function matchesWhere(row: Row, where: Record<string, unknown> | undefine
       if (!(cond as Row[]).some((c) => matchesWhere(row, c as Row))) return false;
     } else if (key === '$not') {
       if (matchesWhere(row, cond as Row)) return false;
+    } else if (isEmptyFieldConstraint(cond)) {
+      // [#19835] Zero entries would leave the loop below unrun and fall through
+      // to a MATCH. Refused here too, so a direct caller of this matcher gets
+      // the same answer the row-independent gate gives a whole query.
+      throw previewEmptyFieldConstraintError(key, key);
     } else if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
       for (const [op, expected] of Object.entries(cond as Row)) {
-        if (!matchOp(row[key], op, expected)) return false;
+        if (!matchOp(row[key], op, expected, key)) return false;
       }
     } else if (!(row[key] === cond || String(row[key]) === String(cond))) {
       return false; // implicit equality
@@ -426,6 +626,10 @@ export function evaluateAnalyticsQueryOverRows(
   rows: Row[],
 ): AnalyticsResult {
   // 1. Row-level filters: `where`, then timeDimension dateRanges.
+  // [#19810] The operator vocabulary is decided BEFORE the rows are read, so an
+  // unevaluable predicate refuses over an empty seed draft too — see
+  // {@link assertPreviewCanEvaluate}.
+  assertPreviewCanEvaluate(query.where);
   let filtered = rows.filter((r) => matchesWhere(r, query.where));
   const timeDims = query.timeDimensions ?? [];
   for (const td of timeDims) {

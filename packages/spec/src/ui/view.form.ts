@@ -37,9 +37,46 @@ export const viewForm = defineForm({
       label: 'Columns & filters',
       description: 'What rows show and how users filter them.',
       fields: [
-        { field: 'columns', type: 'repeater', required: true, helpText: 'Columns to display (field names from selected object)' },
+        {
+          field: 'columns',
+          type: 'repeater',
+          required: true,
+          helpText: 'Columns to display (field names from selected object)',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'field', label: 'Field' },
+            { field: 'label', label: 'Label' },
+            { field: 'width', label: 'Width (px)' },
+            { field: 'align', label: 'Alignment' },
+            { field: 'hidden', label: 'Hidden' },
+            { field: 'sortable', label: 'Sortable' },
+            { field: 'resizable', label: 'Resizable' },
+            { field: 'wrap', label: 'Wrap Text' },
+            { field: 'type', label: 'Renderer Type' },
+            { field: 'pinned', label: 'Pinned' },
+            { field: 'summary', label: 'Summary' },
+            { field: 'prefix', label: 'Prefix' },
+            { field: 'link', label: 'Primary Link' },
+            { field: 'action', label: 'Click Action' },
+          ],
+        },
         { field: 'filter', widget: 'filter-builder', dependsOn: 'data.object', helpText: 'Filter conditions — same visual builder as the list toolbar, with field-type-aware operators and value inputs' },
-        { field: 'sort', type: 'repeater', helpText: 'Default sort order' },
+        {
+          field: 'sort',
+          type: 'repeater',
+          helpText: 'Default sort order',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'field', label: 'Field' },
+            { field: 'order', label: 'Direction' },
+          ],
+        },
         { field: 'searchableFields', widget: 'string-tags', helpText: 'Field names available for quick search' },
         { field: 'filterableFields', widget: 'string-tags', helpText: 'Field names available for filtering' },
       ],
@@ -58,8 +95,20 @@ export const viewForm = defineForm({
         { field: 'compactToolbar', colSpan: 1 },
         { field: 'rowHeight', colSpan: 1 },
         { field: 'selection', type: 'composite', colSpan: 2 },
-        { field: 'pagination', type: 'composite', colSpan: 2 },
       ],
+    },
+    // `pagination` is NOT grid-only: every view type accepts it, and
+    // `pagination.pageSize` is the row bound every view type carries (maintainer
+    // ruling D on #19228 makes it the direction for a view's row bound). Its own
+    // section with no `visibleWhen` puts it in front of every type; inside
+    // `table_options` a non-grid author could not reach it.
+    {
+      name: 'pagination',
+      label: 'Pagination',
+      description: 'Page size and page-size options — every view type accepts them, not only grids.',
+      collapsible: true,
+      collapsed: true,
+      fields: [{ field: 'pagination', type: 'composite' }],
     },
     {
       name: 'kanban',
@@ -117,7 +166,26 @@ export const viewForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'userFilters', type: 'composite', helpText: 'Quick-filter bar: element style (dropdown / tabs / toggle) + exposed fields or tab presets' },
-        { field: 'tabs', type: 'repeater', helpText: 'In-view filter tabs — each tab applies its own filter rules' },
+        {
+          field: 'tabs',
+          type: 'repeater',
+          helpText: 'In-view filter tabs — each tab applies its own filter rules',
+          // Row-property names (#17508): every authorable row property, `label`
+          // equal to the item schema's `.meta({ title })`, so `os i18n extract`
+          // emits a catalog key per column and the panel keeps its schema-derived
+          // widgets (no `type` here).
+          fields: [
+            { field: 'name', label: 'Name' },
+            { field: 'label', label: 'Label' },
+            { field: 'icon', label: 'Icon' },
+            { field: 'view', label: 'List View' },
+            { field: 'filter', label: 'Filter' },
+            { field: 'order', label: 'Display Order' },
+            { field: 'pinned', label: 'Pinned' },
+            { field: 'isDefault', label: 'Default Tab' },
+            { field: 'visible', label: 'Visible' },
+          ],
+        },
         { field: 'appearance', type: 'composite', helpText: 'allowedVisualizations: which renderers users may switch between' },
         { field: 'userActions', type: 'composite', helpText: 'Toolbar toggles: sort / search / filter / row height' },
         { field: 'addRecord', type: 'composite' },

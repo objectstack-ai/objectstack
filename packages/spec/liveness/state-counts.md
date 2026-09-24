@@ -27,7 +27,7 @@ for both corollaries.
 
 | Type | live | exp | elsewhere | dead | planned | classified |
 |---|---|---|---|---|---|---|
-| `object` | 51 | 0 | 0 | 0 | 1 | 52 |
+| `object` | 50 | 0 | 0 | 0 | 1 | 51 |
 | `field` | 91 | 0 | 0 | 1 | 1 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
 | `action` | 44 | 0 | 0 | 3 | 2 | 49 |
@@ -52,7 +52,7 @@ for both corollaries.
 | `job` | 15 | 0 | 0 | 1 | 0 | 16 |
 | `mapping` | 14 | 0 | 0 | 0 | 0 | 14 |
 | `seed` | 13 | 0 | 0 | 0 | 0 | 13 |
-| `translation` | 23 | 0 | 0 | 0 | 2 | 25 |
+| `translation` | 22 | 0 | 0 | 0 | 2 | 24 |
 | `validation` | 18 | 0 | 0 | 0 | 0 | 18 |
 | `api` | 25 | 0 | 0 | 1 | 2 | 28 |
 | `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
@@ -67,4 +67,4 @@ for both corollaries.
 | `sharing_rule` | 16 | 0 | 0 | 0 | 1 | 17 |
 | `connector` | 29 | 0 | 0 | 44 | 1 | 74 |
 | `analytics_cube` | 17 | 0 | 0 | 10 | 0 | 27 |
-| **total** | **933** | **5** | **1** | **168** | **11** | **1118** |
+| **total** | **931** | **5** | **1** | **168** | **11** | **1116** |

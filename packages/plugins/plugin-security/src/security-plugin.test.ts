@@ -30,13 +30,23 @@ import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
  *
  * So the executor honours the seam the way the engine does: the flag first (it
  * answers "did the seam run", never "did the write pass"), then the judgement.
- * These doubles run no hooks, so the row that would be stored IS `opCtx.data`.
+ * These doubles run no hooks, so the rows an insert would store ARE
+ * `opCtx.data` — each element of an array insert ([#19964]).
+ *
+ * [#19950] A predicate (`multi`) update installs the same seam, and the engine
+ * hands it every row the composed AST matches, merged with the payload. These
+ * doubles hold no table, so that match set is empty: the judgement runs over
+ * no rows, exactly as a real engine's would over an empty one.
  */
 const runEngineWriteBody = async (opCtx: any): Promise<void> => {
   const seam = opCtx?.postHookWriteImageCheck;
   if (!seam) return;
   seam.honoured = true;
-  await seam.evaluate([opCtx.data]);
+  if (opCtx.operation === 'update') {
+    await seam.evaluate([]);
+    return;
+  }
+  await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
 };
 
 // ---------------------------------------------------------------------------
@@ -334,13 +344,19 @@ describe('SecurityPlugin', () => {
     const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
     await plugin.init(harness.ctx);
     await plugin.start(harness.ctx);
+    // The row carries the caller's own organization, as the org-scoping
+    // auto-stamp writes it in `beforeInsert` ahead of the post-image check. The
+    // `tenant_isolation` policy declares no `check`, so its `using` is the
+    // insert check (ADR-0058 D4 default) and a row with no organization would
+    // be refused. This double runs no hooks, so the payload stands in for them.
     const opCtx: any = {
-      object: 'task', operation: 'insert', data: { name: 'A' },
+      object: 'task', operation: 'insert', data: { name: 'A', organization_id: 'org-1' },
       context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] },
     };
     await harness.run(opCtx);
-    // SecurityPlugin no longer touches organization_id — that's plugin-org-scoping's job.
-    expect(opCtx.data.organization_id).toBeUndefined();
+    // SecurityPlugin does not touch organization_id — that's plugin-org-scoping's
+    // job — so the value arrives exactly as sent.
+    expect(opCtx.data.organization_id).toBe('org-1');
     expect(opCtx.data.owner_id).toBe('u1');
   });
 

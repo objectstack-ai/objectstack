@@ -40,8 +40,28 @@
 import { isGrantActive } from '@objectstack/core';
 import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
 import { PermissionDeniedError } from './errors.js';
+import {
+  resolveOwnOrganizationRow,
+  rowOrganizationId,
+  seedCtx as organizationScopedCtx,
+} from './per-organization-catalog.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
+/**
+ * Max by-name candidates read when resolving a scope's business-unit anchor,
+ * or a position's own `sys_position` row (the same shape: `sys_position.name`
+ * is per-organization too — see `resolveOwnPosition`).
+ *
+ * `sys_business_unit.name` carries NO uniqueness — the object's only unique
+ * index is `(code, organization_id)` — so under a walled posture two
+ * organizations may each hold a unit called `sales`. A `limit: 1` read
+ * therefore answers "whichever row the driver ordered first", which is an id
+ * ordering and not an organization. The anchor read asks for a small page of
+ * candidates instead and {@link resolveOwnOrganizationRow} picks the caller's
+ * own row out of it; a driver that honours the tenant scope has already
+ * removed most of the others.
+ */
+const ANCHOR_CANDIDATE_LIMIT = 50;
 /** Max BU-tree depth walked when expanding a scope subtree (safety bound). */
 const MAX_TREE_DEPTH = 32;
 /** Max existing assignments examined for a binding blast-radius check. */
@@ -49,6 +69,53 @@ const BLAST_RADIUS_CAP = 500;
 /** [ADR-0091 D3] Default self-delegation ceiling: 30 days. A "temporary"
  *  grant that can be rolled forever is a permanent grant with extra steps. */
 const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * The organization a delegated-admin resolution runs in — the caller's own
+ * active organization, never a scan across all of them.
+ *
+ * The same spelling as `SecurityPlugin.callerOrganizationId`, and deliberately
+ * so: the `adminScope` this gate resolves arrives on a permission set the
+ * plugin loaded through `dbLoaderFor(callerOrganizationId(context))`, i.e. out
+ * of THAT organization's catalog. Resolving the scope's business-unit anchor in
+ * any other organization pairs an authority minted in one tenant with a tree
+ * owned by another — which is what an unscoped by-name read did.
+ *
+ * Undefined for a `single`-posture caller, and for any context carrying no
+ * organization at all: the organization-less surface that posture correctly
+ * has, where a by-name anchor is unambiguous and nothing here changes.
+ *
+ * Under the `group` posture (ADR-0105 D2) this is the ACTIVE organization, not
+ * the caller's whole membership set. That is the narrower of the two, which is
+ * the direction a security boundary takes — and it is already the one the
+ * permission-set load took, so the scope and its anchor stay in one tenant.
+ */
+function callerOrganizationId(context: any): string | undefined {
+  const id = context?.organizationId ?? context?.tenantId;
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
+/**
+ * Does a `sys_user_position` row take effect in `organizationId`?
+ *
+ * The runtime resolver's own answer (`resolveAuthzContext` step 4, in
+ * `@objectstack/core`): a holding stamped with a DIFFERENT organization grants
+ * nothing there; an organization-less holding grants in every organization;
+ * `organizationId` undefined (a `single`-posture caller) drops nothing.
+ *
+ * Every holding the gate reasons about goes through this, because
+ * `sys_user_position.position` is a position NAME and `sys_position.name` is
+ * unique per organization only — so under a walled posture another
+ * organization's holding of a same-named position is the same string. The
+ * gate must count exactly the holdings the runtime grants: counting another
+ * organization's lets a user self-delegate a position they do not hold there;
+ * dropping organization-less ones refuses holdings the runtime honours.
+ */
+function holdingTakesEffectIn(row: any, organizationId?: string): boolean {
+  if (!organizationId) return true;
+  const org = rowOrganizationId(row);
+  return !org || org === organizationId;
+}
 
 /** Coerce a stored timestamp to epoch ms; undefined = absent, NaN = unparseable. */
 function toEpochMs(value: unknown): number | undefined {
@@ -176,6 +243,9 @@ export class DelegatedAdminGate {
     if (!GOVERNED_OPERATIONS.has(opCtx?.operation)) return;
 
     const ctx = opCtx.context ?? {};
+    // Every business-unit anchor this call resolves is resolved in the
+    // caller's own organization — see {@link callerOrganizationId}.
+    const organizationId = callerOrganizationId(ctx);
 
     // ── Unconditional invariant: no stored assignments to audience anchors —
     //    they are implicit for whole principal classes (ADR-0090 D5/D9), so a
@@ -246,10 +316,10 @@ export class DelegatedAdminGate {
     // `delegated_from` is still held to the delegation invariants — a
     // delegation is a delegation regardless of who writes it.)
     if (this.isDelegationWrite(opCtx)) {
-      return this.assertSelfDelegation(opCtx, ctx);
+      return this.assertSelfDelegation(opCtx, ctx, organizationId);
     }
 
-    const held = await this.resolveHeldScopes(sets);
+    const held = await this.resolveHeldScopes(sets, organizationId);
     if (held.length === 0) {
       throw new PermissionDeniedError(
         `[Security] Access denied: '${opCtx.operation}' on '${opCtx.object}' requires tenant-level ` +
@@ -276,13 +346,13 @@ export class DelegatedAdminGate {
 
     switch (opCtx.object) {
       case 'sys_user_position':
-        return this.assertAssignmentWrite(opCtx, ctx, held);
+        return this.assertAssignmentWrite(opCtx, ctx, held, organizationId);
       case 'sys_user_permission_set':
         return this.assertDirectGrantWrite(opCtx, ctx, held);
       case 'sys_position_permission_set':
         return this.assertBindingWrite(opCtx, held);
       case 'sys_permission_set':
-        return this.assertSetAuthoring(opCtx, held);
+        return this.assertSetAuthoring(opCtx, held, organizationId);
     }
   }
 
@@ -296,9 +366,17 @@ export class DelegatedAdminGate {
    * authoring): all of them administer capability inside the subtree, and
    * the report is read-only. Fail-closed: unresolvable scopes/memberships
    * cover nothing.
+   *
+   * `callerContext` supplies the organization the scopes resolve in. Omitting
+   * it resolves on the organization-less surface — correct for a `single`
+   * posture, and never wider than what this method answered before it existed.
    */
-  async scopesCoverUser(sets: PermissionSet[], targetUserId: string): Promise<boolean> {
-    const held = await this.resolveHeldScopes(sets);
+  async scopesCoverUser(
+    sets: PermissionSet[],
+    targetUserId: string,
+    callerContext?: any,
+  ): Promise<boolean> {
+    const held = await this.resolveHeldScopes(sets, callerOrganizationId(callerContext));
     if (held.length === 0) return false;
     const userBUs = await this.businessUnitsOfUser(targetUserId);
     if (userBUs.size === 0) return false;
@@ -326,16 +404,29 @@ export class DelegatedAdminGate {
    * already hold. Fail-closed shape: unresolvable scopes contribute
    * nothing, and a caller with no delegated authority gets empty lists.
    *
+   * `callerContext` supplies the organization every unit id in the report is
+   * resolved in — without it a business unit was named by NAME across
+   * organizations, so a picker could offer (and this report could disclose)
+   * another organization's unit ids. Omitting it resolves on the
+   * organization-less surface, correct for a `single` posture.
+   *
    * A tenant-level admin (ADR-0066 superuser wildcard) is unconstrained;
    * the report says so AND enumerates everything, so a consumer can render
    * one uniform picker instead of special-casing.
    */
-  async describeDelegableScope(sets: PermissionSet[]): Promise<DelegableScopeReport> {
+  async describeDelegableScope(
+    sets: PermissionSet[],
+    callerContext?: any,
+  ): Promise<DelegableScopeReport> {
     const ql = this.deps.ql;
+    const organizationId = callerOrganizationId(callerContext);
     const allPositions = async (): Promise<string[]> => {
       if (!ql?.find) return [];
       try {
-        const rows = await ql.find('sys_position', { limit: 1000, context: SYSTEM_CTX });
+        const rows = await ql.find('sys_position', {
+          limit: 1000,
+          context: organizationScopedCtx(organizationId),
+        });
         return (Array.isArray(rows) ? rows : [])
           .map((r: any) => String(r?.name ?? ''))
           .filter((n) => n && !ANCHOR_POSITIONS.has(n));
@@ -348,8 +439,15 @@ export class DelegatedAdminGate {
       let businessUnitIds: string[] = [];
       if (ql?.find) {
         try {
-          const rows = await ql.find('sys_business_unit', { limit: 5000, context: SYSTEM_CTX });
+          const rows = await ql.find('sys_business_unit', {
+            limit: 5000,
+            context: organizationScopedCtx(organizationId),
+          });
           businessUnitIds = (Array.isArray(rows) ? rows : [])
+            // A tenant admin is unconstrained INSIDE their organization, never
+            // across organizations: the picker this feeds must not name a unit
+            // the caller could not place anyone in.
+            .filter((r: any) => !organizationId || rowOrganizationId(r) === organizationId)
             .map((r: any) => String(r?.id ?? ''))
             .filter(Boolean);
         } catch {
@@ -364,7 +462,7 @@ export class DelegatedAdminGate {
       };
     }
 
-    const held = await this.resolveHeldScopes(sets);
+    const held = await this.resolveHeldScopes(sets, organizationId);
     const scopes = held.map((h) => ({
       setName: h.setName,
       businessUnit: h.scope.businessUnit,
@@ -387,7 +485,7 @@ export class DelegatedAdminGate {
     const assignablePositions: string[] = [];
     if (placing.length > 0) {
       for (const positionName of await allPositions()) {
-        const boundSets = await this.setsBoundToPosition(positionName);
+        const boundSets = await this.setsBoundToPosition(positionName, organizationId);
         const ok = placing.some((s) =>
           boundSets.every(
             (bound) =>
@@ -441,7 +539,7 @@ export class DelegatedAdminGate {
    * The writer is stamped into `granted_by` (dual audit: `granted_by` = writer,
    * `delegated_from` = authority source).
    */
-  private async assertSelfDelegation(opCtx: any, ctx: any): Promise<void> {
+  private async assertSelfDelegation(opCtx: any, ctx: any, organizationId?: string): Promise<void> {
     const now = this.now();
     const ceiling = this.deps.delegationCeilingMs ?? DEFAULT_DELEGATION_CEILING_MS;
     const ceilingDays = Math.round(ceiling / (24 * 60 * 60 * 1000));
@@ -490,7 +588,7 @@ export class DelegatedAdminGate {
       }
 
       // 4. Delegator currently holds it, directly (no re-delegation).
-      const holdings = await this.activeHoldings(String(ctx.userId), positionName, now);
+      const holdings = await this.activeHoldings(String(ctx.userId), positionName, now, organizationId);
       const directHolding = holdings.some((h) => h.direct);
       if (!directHolding) {
         if (holdings.length > 0) {
@@ -518,6 +616,7 @@ export class DelegatedAdminGate {
         const allowed = await this.delegatorAnchorSubtree(
           String(ctx.userId),
           holdings.filter((hd) => hd.direct),
+          organizationId,
         );
         if (!allowed.has(rowAnchor)) {
           deny(
@@ -530,12 +629,12 @@ export class DelegatedAdminGate {
       }
 
       // 5. The position must opt in to delegation.
-      if (!(await this.positionIsDelegatable(positionName))) {
+      if (!(await this.positionIsDelegatable(positionName, organizationId))) {
         deny(`position '${positionName}' is not delegatable — set delegatable: true on the position to allow it`, { position: positionName });
       }
 
       // 6. A delegatable position must not distribute administration.
-      const boundSets = await this.setsBoundToPosition(positionName);
+      const boundSets = await this.setsBoundToPosition(positionName, organizationId);
       for (const b of boundSets) {
         if (parseMaybeJson((b as any).admin_scope ?? (b as any).adminScope)) {
           deny(`position '${positionName}' distributes the admin set '${b.name}' — administration cannot be self-delegated (D12 containment)`, { position: positionName, permissionSet: b.name });
@@ -552,11 +651,17 @@ export class DelegatedAdminGate {
    *  delegation (only a direct holding is re-delegatable) and carrying each
    *  holding's own `businessUnitId` anchor (null = unanchored). The anchor of a
    *  direct holding bounds what a self-delegation of that position may hand out
-   *  (cloud#830 — the anchor is visibility load-bearing). */
+   *  (cloud#830 — the anchor is visibility load-bearing).
+   *
+   *  Only holdings that take effect in the caller's organization count
+   *  ({@link holdingTakesEffectIn}): a holding stamped for another organization
+   *  never answers "you currently hold it" — nor, through its anchor or its
+   *  directness, widens what the caller may delegate here. */
   private async activeHoldings(
     userId: string,
     positionName: string,
     now: number,
+    organizationId?: string,
   ): Promise<Array<{ direct: boolean; businessUnitId: string | null }>> {
     const ql = this.deps.ql;
     if (!ql?.find) return [];
@@ -571,6 +676,7 @@ export class DelegatedAdminGate {
       rows = [];
     }
     return (Array.isArray(rows) ? rows : [])
+      .filter((r) => holdingTakesEffectIn(r, organizationId))
       .filter((r) => isGrantActive(r, now))
       .map((r) => ({
         direct: r?.delegated_from == null || r.delegated_from === '',
@@ -579,12 +685,47 @@ export class DelegatedAdminGate {
       }));
   }
 
-  private async positionIsDelegatable(positionName: string): Promise<boolean> {
+  /**
+   * Resolve a position NAME to the caller's own organization's `sys_position`
+   * row — the one read both position-keyed authority decisions below stand on.
+   *
+   * `sys_position` is a per-organization catalog upserted by
+   * `(name, organization_id)`, and `name` carries no installation-wide
+   * uniqueness, so under a walled posture two organizations may each hold a
+   * position of the same name. A `limit: 1` read under a bare system context
+   * answered whichever row the driver ordered first — an id ordering, not an
+   * organization — and that row then decided whether the position may be
+   * self-delegated and which permission sets it distributes.
+   *
+   * The same two arms {@link resolveSubtree} uses for a business-unit anchor,
+   * and for the same reasons: the read carries the caller's organization so
+   * the driver composes a tenant predicate, and {@link resolveOwnOrganizationRow}
+   * reduces what came back to the caller's OWN row (a driver's compatibility
+   * arm also returns organization-less rows; a driver with no tenant scoping
+   * returns every organization's).
+   *
+   * Fail closed: a name with no row in the caller's organization resolves to
+   * `null` — never to another organization's row, never to an unscoped read.
+   * An organization-less caller (`single` posture) keeps the by-name answer —
+   * there is no other organization for it to cross into.
+   */
+  private async resolveOwnPosition(positionName: string, organizationId?: string): Promise<any | null> {
     const ql = this.deps.ql;
-    if (!ql?.find) return false;
+    if (!ql?.find || !positionName) return null;
+    const rows = await ql.find('sys_position', {
+      where: { name: positionName },
+      limit: ANCHOR_CANDIDATE_LIMIT,
+      context: organizationScopedCtx(organizationId),
+    });
+    return resolveOwnOrganizationRow(Array.isArray(rows) ? rows : [], organizationId).own;
+  }
+
+  /** [ADR-0091 D3 rule 5] Does the caller's OWN organization's row for this
+   *  position opt in to delegation? A position with no row there is not
+   *  delegatable (fail closed — see {@link resolveOwnPosition}). */
+  private async positionIsDelegatable(positionName: string, organizationId?: string): Promise<boolean> {
     try {
-      const rows = await ql.find('sys_position', { where: { name: positionName }, limit: 1, context: SYSTEM_CTX });
-      const pos = Array.isArray(rows) && rows[0] ? rows[0] : null;
+      const pos = await this.resolveOwnPosition(positionName, organizationId);
       const v = (pos as any)?.delegatable;
       return v === true || v === 1 || v === '1';
     } catch {
@@ -594,12 +735,17 @@ export class DelegatedAdminGate {
 
   // ── sys_user_position: user ↔ position assignments ──────────────────
 
-  private async assertAssignmentWrite(opCtx: any, ctx: any, held: HeldScope[]): Promise<void> {
+  private async assertAssignmentWrite(
+    opCtx: any,
+    ctx: any,
+    held: HeldScope[],
+    organizationId?: string,
+  ): Promise<void> {
     const targets = await this.materializeTargets(opCtx, 'sys_user_position');
     for (const t of targets) {
       const buId = t.next?.business_unit_id ?? null;
       const positionName = String(t.next?.position ?? t.prev?.position ?? '');
-      const boundSets = positionName ? await this.setsBoundToPosition(positionName) : [];
+      const boundSets = positionName ? await this.setsBoundToPosition(positionName, organizationId) : [];
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageAssignments) return 'the scope does not grant manageAssignments';
@@ -683,7 +829,8 @@ export class DelegatedAdminGate {
     const targets = await this.materializeTargets(opCtx, 'sys_position_permission_set');
     for (const t of targets) {
       const row = t.next ?? t.prev ?? {};
-      const positionName = await this.positionNameById(row.position_id);
+      const position = await this.positionById(row.position_id);
+      const positionName = position.name;
       if (ANCHOR_POSITIONS.has(positionName)) {
         throw new PermissionDeniedError(
           `[Security] Access denied: bindings of the '${positionName}' audience anchor are ` +
@@ -693,7 +840,9 @@ export class DelegatedAdminGate {
       }
       const setRow = await this.loadSetRowById(row.permission_set_id);
       const setName = String(setRow?.name ?? row.permission_set_id ?? '');
-      const radius = positionName ? await this.assignmentAnchorsOfPosition(positionName) : { anchors: new Set<string>(), overCap: false, unanchored: 0 };
+      const radius = positionName
+        ? await this.assignmentAnchorsOfPosition(positionName, position.organizationId)
+        : { anchors: new Set<string>(), overCap: false, unanchored: 0 };
 
       const failure = this.firstApprovalFailure(held, (s) => {
         if (!s.scope.manageBindings) return 'the scope does not grant manageBindings';
@@ -725,7 +874,7 @@ export class DelegatedAdminGate {
 
   // ── sys_permission_set: environment-set authoring ────────────────────
 
-  private async assertSetAuthoring(opCtx: any, held: HeldScope[]): Promise<void> {
+  private async assertSetAuthoring(opCtx: any, held: HeldScope[], organizationId?: string): Promise<void> {
     // Package-managed rows were already rejected by the two-doors gate; what
     // reaches here is environment-owned authoring.
     const targets = await this.materializeTargets(opCtx, 'sys_permission_set');
@@ -766,7 +915,7 @@ export class DelegatedAdminGate {
       // Authoring a set that CARRIES an adminScope = minting administration:
       // requires a held scope that STRICTLY contains the minted one.
       if (authoredScope) {
-        const containment = await this.checkStrictContainment(authoredScope, held);
+        const containment = await this.checkStrictContainment(authoredScope, held, organizationId);
         if (containment) {
           throw new PermissionDeniedError(
             `[Security] Access denied: the authored adminScope is not strictly contained by your ` +
@@ -854,8 +1003,16 @@ export class DelegatedAdminGate {
 
   /** Authoring-path strict containment with resolved subtrees. Returns a
    *  failure description, or null when some held scope strictly contains. */
-  private async checkStrictContainment(minted: AdminScope, held: HeldScope[]): Promise<string | null> {
-    const mintedSubtree = await this.resolveSubtree(minted.businessUnit, minted.includeSubtree !== false);
+  private async checkStrictContainment(
+    minted: AdminScope,
+    held: HeldScope[],
+    organizationId?: string,
+  ): Promise<string | null> {
+    const mintedSubtree = await this.resolveSubtree(
+      minted.businessUnit,
+      minted.includeSubtree !== false,
+      organizationId,
+    );
     if (mintedSubtree.size === 0) return `its business unit '${minted.businessUnit}' does not resolve`;
     for (const s of held) {
       let treeContained = true;
@@ -881,8 +1038,12 @@ export class DelegatedAdminGate {
     return 'no held scope covers its subtree, rights and allowlist with room to spare';
   }
 
-  /** Resolve every adminScope carried by the actor's resolved sets. */
-  private async resolveHeldScopes(sets: PermissionSet[]): Promise<HeldScope[]> {
+  /** Resolve every adminScope carried by the actor's resolved sets, inside the
+   *  caller's own organization ({@link callerOrganizationId}). */
+  private async resolveHeldScopes(
+    sets: PermissionSet[],
+    organizationId?: string,
+  ): Promise<HeldScope[]> {
     const out: HeldScope[] = [];
     for (const ps of sets) {
       const raw = parseMaybeJson((ps as any).adminScope ?? (ps as any).admin_scope);
@@ -897,31 +1058,64 @@ export class DelegatedAdminGate {
           ? raw.assignablePermissionSets.filter((n: unknown): n is string => typeof n === 'string')
           : [],
       };
-      const subtree = await this.resolveSubtree(scope.businessUnit, scope.includeSubtree);
+      const subtree = await this.resolveSubtree(scope.businessUnit, scope.includeSubtree, organizationId);
       out.push({ setName: (ps as any).name ?? '?', scope, subtree });
     }
     return out;
   }
 
-  /** BU name → covered BU-id set (root + descendants when includeSubtree). */
-  private async resolveSubtree(businessUnitName: string, includeSubtree: boolean): Promise<Set<string>> {
+  /**
+   * BU name → covered BU-id set (root + descendants when includeSubtree),
+   * resolved INSIDE the caller's own organization.
+   *
+   * The name is not a unique key (`ANCHOR_CANDIDATE_LIMIT`), so two things
+   * narrow the read, and they are not redundant:
+   *
+   * 1. the read carries the caller's organization, so `applyTenantScope`
+   *    composes a predicate instead of returning early on a bare
+   *    `{ isSystem: true }`;
+   * 2. the candidates that come back are reduced to the caller's OWN row by
+   *    {@link resolveOwnOrganizationRow}. That arm is load-bearing on its own:
+   *    the driver's compatibility arm deliberately also returns
+   *    organization-less rows, and a driver with no tenant scoping at all
+   *    returns every organization's. Under a walled posture an
+   *    organization-less business unit is invalid state
+   *    (`per-organization-catalog.ts`), so neither class may answer a
+   *    delegation boundary.
+   *
+   * Fail closed on both axes: a name that resolves to no row of the caller's
+   * own organization approves nothing, exactly as a misconfigured scope does.
+   * An organization-less caller (`single` posture) keeps the by-name answer —
+   * there is no other organization for it to cross into.
+   */
+  private async resolveSubtree(
+    businessUnitName: string,
+    includeSubtree: boolean,
+    organizationId?: string,
+  ): Promise<Set<string>> {
     const ql = this.deps.ql;
     if (!ql?.find) return new Set<string>();
     let root: any = null;
     try {
-      const roots = await ql.find('sys_business_unit', { where: { name: businessUnitName }, limit: 1, context: SYSTEM_CTX });
-      root = Array.isArray(roots) && roots[0] ? roots[0] : null;
+      const roots = await ql.find('sys_business_unit', {
+        where: { name: businessUnitName },
+        limit: ANCHOR_CANDIDATE_LIMIT,
+        context: organizationScopedCtx(organizationId),
+      });
+      root = resolveOwnOrganizationRow(Array.isArray(roots) ? roots : [], organizationId).own;
     } catch { root = null; }
-    if (!root?.id) return new Set<string>(); // misconfigured scope → approves nothing (fail closed)
+    // Unresolvable, or resolvable only in another organization → approves
+    // nothing (fail closed).
+    if (!root?.id) return new Set<string>();
     if (!includeSubtree) return new Set<string>([String(root.id)]);
-    return this.resolveSubtreeById(String(root.id));
+    return this.resolveSubtreeById(String(root.id), organizationId);
   }
 
   /** BU id → covered BU-id set (root id + all descendants). Subtree is always
    *  walked: the delegator's readScope depth is not known on the delegation
    *  path, so the whole subtree is the containment bound — matching the D12
    *  admin subtree check. Fail-closed on unresolvable ids (empty set). */
-  private async resolveSubtreeById(rootId: string): Promise<Set<string>> {
+  private async resolveSubtreeById(rootId: string, organizationId?: string): Promise<Set<string>> {
     const ids = new Set<string>();
     const ql = this.deps.ql;
     if (!ql?.find || !rootId) return ids;
@@ -933,11 +1127,15 @@ export class DelegatedAdminGate {
         children = await ql.find('sys_business_unit', {
           where: { parent_business_unit_id: { $in: frontier } },
           limit: 5000,
-          context: SYSTEM_CTX,
+          context: organizationScopedCtx(organizationId),
         });
       } catch { children = []; }
       const next: string[] = [];
       for (const c of Array.isArray(children) ? children : []) {
+        // A parent link is not an organization predicate: whatever a driver
+        // returned, a descendant outside the caller's organization never
+        // widens the subtree a delegation is judged against.
+        if (organizationId && rowOrganizationId(c) !== organizationId) continue;
         const id = String((c as any)?.id ?? '');
         if (id && !ids.has(id)) { ids.add(id); next.push(id); }
       }
@@ -956,18 +1154,19 @@ export class DelegatedAdminGate {
   private async delegatorAnchorSubtree(
     userId: string,
     directHoldings: Array<{ businessUnitId: string | null }>,
+    organizationId?: string,
   ): Promise<Set<string>> {
     const allowed = new Set<string>();
     let memberSubtreeResolved = false;
     for (const h of directHoldings) {
       if (h.businessUnitId) {
-        for (const id of await this.resolveSubtreeById(h.businessUnitId)) allowed.add(id);
+        for (const id of await this.resolveSubtreeById(h.businessUnitId, organizationId)) allowed.add(id);
       } else if (!memberSubtreeResolved) {
         // An unanchored direct holding resolves to the delegator's own member
         // BU(s); resolve those once (they don't vary by holding).
         memberSubtreeResolved = true;
         for (const bu of await this.businessUnitsOfUser(userId)) {
-          for (const id of await this.resolveSubtreeById(bu)) allowed.add(id);
+          for (const id of await this.resolveSubtreeById(bu, organizationId)) allowed.add(id);
         }
       }
     }
@@ -998,12 +1197,18 @@ export class DelegatedAdminGate {
     return [{ next: null, prev }];
   }
 
-  private async setsBoundToPosition(positionName: string): Promise<Array<{ name: string; admin_scope?: any }>> {
+  /** The permission sets the caller's OWN organization's row for this position
+   *  distributes. A position with no row there distributes nothing (fail
+   *  closed — see {@link resolveOwnPosition}); the bindings and sets are then
+   *  read by the resolved row's id, which no other organization shares. */
+  private async setsBoundToPosition(
+    positionName: string,
+    organizationId?: string,
+  ): Promise<Array<{ name: string; admin_scope?: any }>> {
     const ql = this.deps.ql;
     if (!ql?.find) return [];
     try {
-      const posRows = await ql.find('sys_position', { where: { name: positionName }, limit: 1, context: SYSTEM_CTX });
-      const pos = Array.isArray(posRows) && posRows[0] ? posRows[0] : null;
+      const pos = await this.resolveOwnPosition(positionName, organizationId);
       if (!pos?.id) return [];
       const bindings = await ql.find('sys_position_permission_set', {
         where: { position_id: pos.id },
@@ -1037,19 +1242,46 @@ export class DelegatedAdminGate {
     }
   }
 
-  private async positionNameById(id: unknown): Promise<string> {
-    if (id == null || !this.deps.ql?.find) return '';
+  /** A `sys_position` row by id: its name, and the organization that owns it
+   *  (undefined = an organization-less row). */
+  private async positionById(id: unknown): Promise<{ name: string; organizationId: string | undefined }> {
+    const none = { name: '', organizationId: undefined };
+    if (id == null || !this.deps.ql?.find) return none;
     try {
       const rows = await this.deps.ql.find('sys_position', { where: { id }, limit: 1, context: SYSTEM_CTX });
-      return String((Array.isArray(rows) && rows[0] ? (rows[0] as any).name : '') ?? '');
+      const row = Array.isArray(rows) && rows[0] ? (rows[0] as any) : null;
+      if (!row) return none;
+      return { name: String(row.name ?? ''), organizationId: rowOrganizationId(row) || undefined };
     } catch {
-      return '';
+      return none;
     }
   }
 
-  /** BU anchors of every current assignment of a position (blast radius). */
+  /**
+   * BU anchors of every assignment a re-binding of this position row reaches
+   * (blast radius).
+   *
+   * An assignment names the position by NAME, and a binding hangs off one
+   * `sys_position` ROW, which the runtime reaches only from the organization
+   * that owns it. So the holders a binding re-composes are the ones whose
+   * holding takes effect in the bound row's organization
+   * ({@link holdingTakesEffectIn}) — that organization's own holdings plus the
+   * organization-less ones — never another organization's same-named
+   * assignments, which would otherwise refuse the write as outside the
+   * subtree or push it over {@link BLAST_RADIUS_CAP}. Keyed on the bound
+   * row's organization rather than the caller's, so a binding written against
+   * another organization's row is still judged by THAT organization's holders.
+   * An organization-less row reaches every organization: no holding is dropped.
+   *
+   * The organization rides the read's context, so the driver's tenant scope
+   * (`organization_id = :org OR organization_id IS NULL`, the governed spelling
+   * of exactly this rule) applies BEFORE the cap — another organization's rows
+   * can neither fill the page nor trip {@link BLAST_RADIUS_CAP}. The same rule
+   * is re-applied to what comes back, for a driver that does not scope.
+   */
   private async assignmentAnchorsOfPosition(
     positionName: string,
+    positionOrganizationId?: string,
   ): Promise<{ anchors: Set<string>; overCap: boolean; unanchored: number }> {
     const anchors = new Set<string>();
     let unanchored = 0;
@@ -1060,14 +1292,14 @@ export class DelegatedAdminGate {
       rows = await ql.find('sys_user_position', {
         where: { position: positionName },
         limit: BLAST_RADIUS_CAP + 1,
-        context: SYSTEM_CTX,
+        context: organizationScopedCtx(positionOrganizationId),
       });
     } catch {
       rows = [];
     }
     const list = Array.isArray(rows) ? rows : [];
     if (list.length > BLAST_RADIUS_CAP) return { anchors, overCap: true, unanchored };
-    for (const r of list) {
+    for (const r of list.filter((row) => holdingTakesEffectIn(row, positionOrganizationId))) {
       const bu = (r as any)?.business_unit_id;
       if (bu == null || bu === '') unanchored += 1;
       else anchors.add(String(bu));

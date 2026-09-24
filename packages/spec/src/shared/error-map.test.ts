@@ -7,6 +7,7 @@ import {
   safeParsePretty,
 } from './error-map.zod';
 import { FieldType } from '../data/field.zod';
+import { NormalizedFilterSchema } from '../data/filter.zod';
 
 describe('objectStackErrorMap', () => {
   describe('FieldType enum errors', () => {
@@ -187,14 +188,26 @@ describe('formatZodError', () => {
 // `submitBehavior` reached for `discriminatedUnion` in the first place. Both
 // directions are pinned below.
 describe('[#4971] formatZodError expands invalid_union branches', () => {
-  // The campaign's shape: a string form OR a strict object form.
-  const ACTION_REF = z.union([
-    z.string(),
-    z.strictObject({ type: z.string(), params: z.record(z.string(), z.unknown()).optional() }),
-  ]);
+  // The campaign's shape: a string form OR a closed object form.
+  //
+  // [#19581] The closed arm is a REAL PRODUCT DOOR — `NormalizedFilterSchema`,
+  // whose `closedObject` seal this PR's `strict-object.ts` half put there — and
+  // not a `z.strictObject` declared here. From zod 4.5.0 an `unrecognized_keys`
+  // issue carries `continue: true`, so a bare `z.strictObject` arm whose only
+  // complaint is an unknown key is the union's lone NON-ABORTED member: zod's
+  // `handleUnionResults` short-circuits and returns that arm's issues unwrapped,
+  // no `invalid_union` is raised, and every assertion below passes over a shape
+  // it was never built to see. A fixture that cannot produce the code under test
+  // is not a weaker pin, it is no pin at all.
+  //
+  // ⛔ Do NOT re-declare this arm from raw zod primitives. What keeps these
+  // assertions honest is that the arm's refusal is TERMINAL, and terminal is a
+  // property the product's closed-object entry confers — not one a test file can
+  // assert about itself.
+  const ACTION_REF = z.union([z.string(), NormalizedFilterSchema]);
 
   it('renders the failing branch prose under the union line', () => {
-    const result = ACTION_REF.safeParse({ type: 'log', args: { a: 1 } });
+    const result = ACTION_REF.safeParse({ args: { a: 1 } });
     expect(result.success).toBe(false);
 
     const formatted = formatZodError(result.error!);
@@ -205,7 +218,7 @@ describe('[#4971] formatZodError expands invalid_union branches', () => {
   });
 
   it('drops the kind-mismatch branch that carries no prescription', () => {
-    const formatted = formatZodError(ACTION_REF.safeParse({ type: 'log', args: 1 }).error!);
+    const formatted = formatZodError(ACTION_REF.safeParse({ args: 1 }).error!);
     // `expected string, received object` is the string branch complaining that
     // the author did not write a string. They never meant to.
     expect(formatted).not.toContain('expected string');
@@ -214,7 +227,7 @@ describe('[#4971] formatZodError expands invalid_union branches', () => {
   it('resolves nested paths against the union, not relative to it', () => {
     const schema = z.object({ actions: z.array(ACTION_REF) });
     const formatted = formatZodError(
-      schema.safeParse({ actions: [{ type: 'log', args: { a: 1 } }] }).error!,
+      schema.safeParse({ actions: [{ args: { a: 1 } }] }).error!,
     );
     expect(formatted).toContain('✗ actions.0: Invalid input');
     expect(formatted).toContain('✗ actions.0: Unrecognized key: "args"');
@@ -225,7 +238,7 @@ describe('[#4971] formatZodError expands invalid_union branches', () => {
   it('expands a union nested inside a union', () => {
     const schema = z.object({ on: z.union([z.string(), z.object({ actions: z.array(ACTION_REF) })]) });
     const formatted = formatZodError(
-      schema.safeParse({ on: { actions: [{ type: 'log', args: { a: 1 } }] } }).error!,
+      schema.safeParse({ on: { actions: [{ args: { a: 1 } }] } }).error!,
     );
     expect(formatted).toContain('  ✗ on: Invalid input');
     expect(formatted).toContain('    ✗ on.actions.0: Invalid input');
@@ -299,21 +312,25 @@ describe('[#4971] formatZodError expands invalid_union branches', () => {
   it('counts the union as the one issue zod raised', () => {
     // The header must keep agreeing with `error.issues` / the REST body, or
     // the CLI and the API would disagree about how many things are wrong.
-    const result = ACTION_REF.safeParse({ type: 'log', args: { a: 1 } });
+    const result = ACTION_REF.safeParse({ args: { a: 1 } });
     expect(result.error!.issues).toHaveLength(1);
     expect(formatZodError(result.error!)).toContain('(1 issue)');
   });
 
   it('stops expanding after three levels of nesting', () => {
     // Bounded output: unions nest arbitrarily, the terminal does not.
-    const leaf = z.strictObject({ ok: z.string() });
+    // [#19581] Same real product door as `ACTION_REF`, and for the same reason:
+    // a `z.strictObject` leaf declared here is the innermost union's lone
+    // non-aborted arm, so no `invalid_union` is raised at ANY level and the
+    // depth this measures is the depth of an expansion that never happened.
+    const leaf = NormalizedFilterSchema;
     const l1 = z.union([z.string(), leaf]);
     const l2 = z.union([z.string(), z.object({ n: l1 })]);
     const l3 = z.union([z.string(), z.object({ n: l2 })]);
     const l4 = z.union([z.string(), z.object({ n: l3 })]);
 
     const formatted = formatZodError(
-      l4.safeParse({ n: { n: { n: { ok: 'x', bogus: 1 } } } }).error!,
+      l4.safeParse({ n: { n: { n: { bogus: 1 } } } }).error!,
     );
     const depths = formatted
       .split('\n')

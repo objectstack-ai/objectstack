@@ -10,6 +10,7 @@ import {
   JoinedReportBlockSchema,
   reportSelectionOrder,
 } from './report.zod';
+import { strictObjectDeclarations } from '../shared/strict-object';
 
 /**
  * ADR-0021 single-form: a report binds a `dataset` and selects `rows`
@@ -245,6 +246,92 @@ describe('ReportSchema — scope-filter aliases point at `runtimeFilter` (#5013)
     });
     expect(r.success).toBe(true);
     expect(r.data!.columns).toEqual(['region']);
+  });
+});
+
+/**
+ * The selection and ordering spellings a block already corrects, pinned by
+ * PARSE on the top-level report — the surface where they were missing.
+ *
+ * `ReportSchema`'s table says it is kept parallel to the block's, and ten of
+ * the block's entries were absent from it: `measures:` on a plain report was
+ * refused with no suggestion at all, while the same key one level down was
+ * told `values`. Measured before the fix, nine of the ten got no suggestion;
+ * `orderBy` alone reached `order` by edit distance.
+ *
+ * Two halves, as in the scope-filter block above: what the author SEES (the
+ * rejection names the prescribed key), and that taking the advice parses.
+ */
+describe('ReportSchema — routes the block vocabulary the way a block does', () => {
+  const VALID = {
+    name: 'pipeline', label: 'Pipeline', type: 'summary',
+    dataset: 'sales', rows: ['stage'], values: ['revenue'],
+  } as const;
+
+  /** A value the TARGET key accepts on `VALID`, so the advice can be taken verbatim. */
+  const VALUE_FOR: Record<string, unknown> = {
+    values: ['revenue'],
+    rows: ['stage'],
+    order: [{ by: 'revenue', direction: 'desc' }],
+    dataset: 'sales',
+  };
+
+  const ROUTES: ReadonlyArray<readonly [string, string]> = [
+    ['measures', 'values'],
+    ['metrics', 'values'],
+    ['dimensions', 'rows'],
+    ['groupBy', 'rows'],
+    ['groupings', 'rows'],
+    ['sort', 'order'],
+    ['orderBy', 'order'],
+    ['sortBy', 'order'],
+    ['objectName', 'dataset'],
+    ['object', 'dataset'],
+  ];
+
+  it.each(ROUTES)('`%s` on a top-level report is renamed onto `%s`', (key, target) => {
+    const r = ReportSchema.safeParse({ ...VALID, [key]: VALUE_FOR[target] });
+    expect(r.success, `\`${key}\` must still be rejected — it is not a declared key`).toBe(false);
+    const issue = r.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue, `\`${key}\` must be refused as an unknown key`).toBeDefined();
+    expect((issue as { keys?: readonly string[] }).keys).toEqual([key]);
+    expect(issue!.message).toContain(`Did you mean \`${key}\` → \`${target}\`?`);
+  });
+
+  it.each(ROUTES)('taking the advice for `%s` parses — `%s` is a key this report accepts', (_key, target) => {
+    const r = ReportSchema.safeParse({ ...VALID, [target]: VALUE_FOR[target] });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+  });
+
+  /**
+   * The parity claim itself, derived from the two tables at runtime rather
+   * than from a list: every key the block routes to a target this schema also
+   * declares is routed here, to the same target — or, where a key must not
+   * route at the top level, answered by a `guidance` entry that says why.
+   * Never silence.
+   */
+  it('every block alias whose target the report declares is routed here too, to the same target', () => {
+    // Force both lazy schemas so their declarations are registered.
+    ReportSchema.safeParse(VALID);
+    JoinedReportBlockSchema.safeParse({ ...VALID, type: 'tabular' });
+    const declarationOf = (surface: string) => {
+      const found = strictObjectDeclarations().filter((d) => d.options.surface === surface);
+      expect(found, `exactly one declaration answers to "${surface}"`).toHaveLength(1);
+      return found[0]!;
+    };
+    const block = declarationOf('this joined report block');
+    const top = declarationOf('this report');
+
+    const judged = Object.entries(block.options.aliases ?? {}).filter(([, target]) => target in top.shape);
+    // Not vacuous: the derivation reaches every key this pin was written for.
+    expect(judged.map(([key]) => key)).toEqual(expect.arrayContaining(ROUTES.map(([key]) => key)));
+
+    const topAliases = top.options.aliases ?? {};
+    const topGuidance = top.options.guidance ?? {};
+    const silentOrDivergent = judged
+      .filter(([key, target]) => topAliases[key] !== target && !(key in topGuidance))
+      .map(([key, target]) => `${key} → ${target} (top level: ${topAliases[key] ?? 'absent'})`);
+    expect(silentOrDivergent).toEqual([]);
   });
 });
 

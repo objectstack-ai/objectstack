@@ -293,7 +293,6 @@
     "check:strictness-ledger": "tsx scripts/check-strictness-ledger.mts",
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
-    "check:react-declaration-parity": "tsx scripts/check-react-blocks-declaration-parity.ts",
     "check:skill-examples": "tsx scripts/check-skill-examples.ts --self-test && tsx scripts/check-skill-examples.ts",
     "check:yaml-examples": "tsx scripts/check-yaml-examples.ts --self-test && tsx scripts/check-yaml-examples.ts",
     "check:template-manifests": "tsx scripts/check-template-manifests.ts --self-test && tsx scripts/check-template-manifests.ts",
@@ -321,7 +320,7 @@
   },
   "dependencies": {
     "pg-connection-string": "^2.14.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.1"
   },
   "peerDependencies": {
     "ai": "^7.0.0"

@@ -103,7 +103,8 @@ describe('#9756 — sys_webhook declares its data-API exposure explicitly', () =
 
   it('leaves the reachable-cleartext fields reachable — the card is not closed by this', () => {
     // `url` (#8025, won't-fix on masking) and a legacy row's un-migrated
-    // `definition_json.headers` (#7986, still read by `readLegacyHeaders`) are
+    // `definition_json.headers` (#7986; no longer delivered from, but still held
+    // by a row the boot sweep could not convert) are
     // served by `get`/`list`, which the console requires. Stated as an
     // assertion so nobody reads the new `enable` block as having removed them.
     expect(apiExposureDenialReason(ENABLE, 'get')).toBeNull();

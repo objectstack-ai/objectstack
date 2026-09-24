@@ -922,13 +922,17 @@ parked forever.
 The screen is treated as answered only when **all** of these hold:
 
 - the caller named **at least one of this screen's own fields** — a run that
-  named none of them is not driving the screen, and it renders as always. The
-  row id a launch carries does **not** count as naming a field: both dispatch
-  doors seed it into the params bag under `recordId` and the camelCase
-  `<object>Id` alias (and under an action's declared `recordIdParam`), and none
-  of those is the caller supplying a screen value.
+  named none of them is not driving the screen, and it renders as before. Which
+  keys the caller named is not read off the params bag, which also holds the
+  subject record's columns and the launched row's id that the door seeds itself.
+  It is read off the list the door states with the run,
+  `AutomationContext.callerParamKeys`. The action door
+  (`POST /api/v1/actions/...` and MCP `run_action`) and the trigger door
+  (`POST /api/v1/automation/:name/trigger` and a declarative `type: 'flow'`
+  endpoint) each record the keys of the caller's own `params` before they seed
+  anything.
 
-  **Accepted cost, precisely:** a field is never treated as caller-supplied when it is named `recordId` or `<object>Id`, or when its value equals what the bag carries under `recordId`, `<object>Id`, or `record.id` (normally the launched row's id); a required such field is therefore always collected interactively, an optional one simply does not count as answering the screen.
+  **Accepted cost, precisely:** both doors leave out of that list the keys they use to carry the launched row's id — `recordId`, the camelCase `<object>Id` alias, and on the action door the action's own `recordIdParam` — even when the caller's bag names them, because a client that mirrors the row id into `params.recordId` is addressing the row, not answering the screen. On a run started through either door, a field named like one of those keys is therefore not caller-supplied: a required such field is collected interactively, and an optional one does not count as answering the screen.
 
   Name a field you want a headless caller to fill something else;
 - every `required` field has a value (an empty or blank string is no value),
@@ -953,11 +957,18 @@ a column named like one of the fields and including when a field is named like
 one of the seeded id keys. ⛔ `waitForInput: false` remains the wrong tool for
 the headless case: it skips the form for interactive users too.
 
-⚠️ One known gap, on the trigger-record leg only: a run continued from the
-**durable** suspended-run store judges against a JSON copy of its context, so a
-later wizard screen whose field collides with a **non-scalar** column (an array
-or object) of the trigger record can read as caller-supplied. Scalar columns are
-unaffected, as is any run that has not been through a pause.
+A scheduled run has no caller, and the schedule trigger states exactly that —
+an empty list — so its own `jobId`, `flowName` and `schedule` params never
+answer a screen field: a screen in a scheduled flow pauses.
+
+A run started any other way — a record-change, time-relative or webhook
+trigger, a `subflow` or `map` child, or code calling the engine directly —
+carries no such list, and the screen falls back to inferring the caller's keys
+from the bag. That inference does not treat a key as the caller's when it is
+named `recordId` or `<object>Id`, when its value equals what the bag carries
+under `recordId` or `<object>Id` or the record's `id`, or when the subject
+record holds an equal value under the same name; each of those readings sends
+an uncertain key toward pausing.
 
 ⚠️ This does **not** make every screen flow completable from a headless caller. A
 call that omits the inputs still parks, and the MCP tool set has no verb to

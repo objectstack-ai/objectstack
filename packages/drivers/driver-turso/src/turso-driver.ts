@@ -12,11 +12,18 @@
  * logic is inherited from SqlDriver. In remote mode, TursoDriver delegates
  * all operations to RemoteTransport which uses @libsql/client directly.
  *
- * The transport mode is auto-detected from the URL:
+ * The transport mode is auto-detected from the URL, its scheme matched in any
+ * letter case, as `@libsql/client` matches it:
  * - `file:` or `:memory:` → local
- * - `file:` or `:memory:` + `syncUrl` → replica
+ * - `file:` + `syncUrl` → replica (an embedded replica is a local FILE)
  * - `libsql://`, `https://`, `http://`, `wss://` or `ws://` (no syncUrl) → remote
  *   (`http://` / `ws://` = plaintext, for self-hosted / local-dev endpoints)
+ *
+ * Refused at construction (`VALIDATION_ERROR` / 400), because the local engine
+ * would have run on a private `:memory:` database: in a local or replica mode,
+ * a url that is none of those (a bare path, an unsupported scheme); a remote
+ * url beside `syncUrl` or under `mode: 'local'` / `'replica'`; and a replica
+ * whose url names an in-memory database.
  */
 
 import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
@@ -32,6 +39,11 @@ import {
   type RemoteCanonicalBackfillOptions,
   type RemoteCanonicalBackfillReport,
 } from './remote-canonical-backfill.js';
+import {
+  backfillRemoteCodecResidueColumns,
+  type RemoteCodecResidueColumn,
+  type RemoteCodecResidueReport,
+} from './remote-codec-residue-backfill.js';
 
 // ── Transport Mode ───────────────────────────────────────────────────────────
 
@@ -52,8 +64,9 @@ export type TursoTransportMode = 'local' | 'replica' | 'remote';
  * Supports the following connection modes:
  * 1. **Local (Embedded):** `url: 'file:./data/local.db'`
  * 2. **In-memory (Ephemeral):** `url: ':memory:'`
- * 3. **Embedded Replica (Hybrid):** `url` (local file or `:memory:`) +
- *    `syncUrl` (remote `libsql://` / `https://` Turso endpoint)
+ * 3. **Embedded Replica (Hybrid):** `url` (a local `file:`, never `:memory:`
+ *    or a remote url, both refused at construction) + `syncUrl` (remote
+ *    `libsql://` / `https://` Turso endpoint)
  * 4. **Remote (Cloud):** `url: 'libsql://...'` — pure remote queries
  *    via @libsql/client, no local SQLite needed
  *
@@ -71,6 +84,13 @@ export interface TursoDriverConfig {
    * - `:memory:` → local mode (ephemeral)
    * - `libsql://my-db.turso.io` → remote mode (cloud-only)
    * - `https://my-db.turso.io` → remote mode (cloud-only)
+   *
+   * The scheme matches in any letter case (`LIBSQL://` is `libsql://`), as it
+   * does in `@libsql/client`. A path to a local database file needs the
+   * `file:` prefix: a bare path such as `./data/app.db` is not a url. In a
+   * local or replica mode the constructor refuses any url that is not `file:`,
+   * `:memory:` or a remote url (`VALIDATION_ERROR` / 400), because the local
+   * engine could open nothing but a private in-memory database for it.
    */
   url: string;
 
@@ -90,7 +110,15 @@ export interface TursoDriverConfig {
    */
   concurrency?: number;
 
-  /** Remote sync URL for embedded replica mode (`libsql://` or `https://`) */
+  /**
+   * Remote sync URL for embedded replica mode (`libsql://` or `https://`).
+   *
+   * Turns a local `file:` `url` into an embedded replica. Beside a remote
+   * `url` or `:memory:` the constructor refuses it (`VALIDATION_ERROR` / 400):
+   * there is no local file for the replica to live in, so the local engine
+   * would run on a private in-memory database. For a remote database, drop
+   * `syncUrl` and keep the remote `url`.
+   */
   syncUrl?: string;
 
   /** Sync configuration for embedded replica mode (requires `syncUrl`) */
@@ -138,8 +166,17 @@ export interface TursoDriverConfig {
    * from the URL:
    *
    * - `file:` or `:memory:` without syncUrl → `'local'`
-   * - `file:` or `:memory:` with syncUrl → `'replica'`
+   * - `file:` with syncUrl → `'replica'`
    * - `libsql://` / `https://` / `http://` / `wss://` / `ws://` without syncUrl → `'remote'`
+   *
+   * Schemes match in any letter case. A url that is none of these is refused
+   * at construction (`VALIDATION_ERROR` / 400), with or without `syncUrl`.
+   *
+   * A forced `'local'` or `'replica'` still runs on the local engine, so it
+   * is refused beside a remote url or any other url that is not `file:` or
+   * `:memory:` (`VALIDATION_ERROR` / 400), and `'replica'` is refused on an
+   * in-memory url too. The engine would otherwise run on a private in-memory
+   * database.
    */
   mode?: TursoTransportMode;
 
@@ -342,6 +379,135 @@ function refuseRemoteTransaction(door: string, detail: string): never {
   throw err;
 }
 
+// ── Remote deferred schema DDL: refused, never decorative ────────────────────
+
+/**
+ * [#19823] The Turso REMOTE face cannot defer schema DDL, and now says so when
+ * a caller tries to arm the deferral instead of accepting it and ignoring it.
+ *
+ * # The defect this replaces
+ *
+ * `SqlDriver.setDeferredDdl(true)` is how `os migrate plan` / `apply` /
+ * `duplicates` / `account-issuer` / `multi-value-columns` keep their dry-run or
+ * confirm-before-change promise: the Knex `initObjects` records the work in
+ * `deferredSchemaObjects` instead of performing it, `previewDeferredSchemaWork`
+ * renders it and `flushDeferredSchemaDdl` performs it after the operator says
+ * yes. This class inherited the setter, so the CLI's own loud refusal (it fires
+ * only when the method is absent) never fired — while every remote schema door
+ * (`syncSchemasBatch`, the engine's boot sync; `syncSchema` / `initObjects`)
+ * routes through `RemoteTransport`, which performs the DDL immediately, and the
+ * latter two also ran the #5770 canonical temporal backfill, which rewrites
+ * stored rows (the batch door runs it too since #19844). Measured
+ * (`turso-remote-deferred-ddl.test.ts`, before this refusal existed): the deferral was
+ * accepted, CREATE/ALTER ran on every door, the backfill rewrote rows on two of
+ * them, and preview and flush both answered `[]` — a dry run that changed the
+ * database and then reported no pending work.
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * Honouring the deferral remotely means recording the objects and building a
+ * remote preview/flush — new capability with no measured pull. The refusal keeps
+ * every promise those commands make true today, in the envelope and for the
+ * reason {@link refuseRemoteTransaction} and {@link refuseRemoteAutonumber}
+ * record for their sibling gaps on this transport: the call is spelled correctly
+ * and the base class declares it, so the gap is the backend's —
+ * `NOT_IMPLEMENTED`/501, a {@link StandardErrorCode} member, no new code.
+ *
+ * # Why at the setter
+ *
+ * It is the one door every deferring caller passes through, and it runs before
+ * any schema work: a refused arm has sent nothing to the database, and the
+ * driver is left un-armed, so an ordinary boot sync on it is unchanged.
+ */
+function refuseRemoteDeferredDdl(): never {
+  const err = new Error(
+    'Deferred schema DDL is not supported by the Turso REMOTE transport (this datasource\'s ' +
+    'transport mode is `remote`), so a command that promises a dry run or a confirmation before ' +
+    'any schema change cannot keep that promise against it. Remote mode sends every CREATE TABLE ' +
+    'and ALTER TABLE through `RemoteTransport`, which performs it immediately and records nothing ' +
+    'a plan could preview, and a remote schema sync also rewrites stored datetime/time values to ' +
+    'their canonical spelling in place. Until this change arming the deferral was accepted: the ' +
+    'database was altered during the boot and the plan then reported no pending work. The call is ' +
+    'spelled correctly and `SqlDriver` declares it, so this is a capability gap of the remote ' +
+    'transport rather than a mistake in the request — which is why it answers NOT_IMPLEMENTED/501 ' +
+    'and not a 400. To preview schema work, run the command against a local SQLite copy of this ' +
+    'database (a `file:` URL) — the local and embedded-replica faces defer DDL; to apply it, an ' +
+    'ordinary boot against this datasource (`os serve` / `os start`) performs the additive schema ' +
+    'sync directly.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+// ── Remote schema drift detection: refused, never "no drift" ─────────────────
+
+/**
+ * [#19845] The Turso REMOTE face cannot detect schema drift, and now says so
+ * instead of answering that there is none.
+ *
+ * # The defect this replaces
+ *
+ * `SqlDriver.detectManagedDrift` reads the physical schema through Knex: a
+ * `hasTable` probe per table, then column and index introspection fed to the
+ * shared differ. In remote mode that Knex instance is the placeholder
+ * `:memory:` database {@link TursoDriver.toKnexConfig} hands the base
+ * constructor. It holds none of this datasource's tables, so every table was
+ * skipped as absent and the answer was `[]` whatever the remote database held.
+ * The no-argument call had a second reason to answer `[]`: it iterates
+ * `managedObjectFields`, which only the Knex `initObjects` fills and no remote
+ * schema door reaches. Measured on the transport's SQLite-backed double
+ * (`turso-remote-drift-detection-refusal.test.ts`): a synced table carrying an
+ * extra physical column the declaration omits reads `unmapped_column` /
+ * `drop_column` on the local face and `[]` on the remote one, with or without
+ * explicit objects. The artifact-pinned boot gate of `os serve`, whose job is
+ * to refuse a boot on destructive drift, therefore let every remote-Turso boot
+ * through as never drifted.
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * The shared differ would serve a remote table: a clean remote-synced table,
+ * judged through a local Knex connection to the same SQLite file, reports no
+ * entries, as the local face does. But every read that feeds the differ goes
+ * through `this.knex` (table existence, column facts and order, the index set,
+ * the NULL-safe duplicate probe), so a remote implementation is a second copy
+ * of each of those SQLite arms. It also needs a remote answer for
+ * `applyMigrationEntries`, which the gate calls on whatever it finds and which
+ * runs on the same placeholder. Until that exists the refusal is the honest
+ * answer, in the envelope and for the reason {@link refuseRemoteDeferredDdl}
+ * records for its sibling gap on this transport: the call is spelled correctly
+ * and the base class declares it, so the gap is the backend's.
+ * `NOT_IMPLEMENTED`/501 is a {@link StandardErrorCode} member, so there is no
+ * new code.
+ *
+ * # What a caller sees
+ *
+ * The boot gate already has a channel for "the check did not run": a throw
+ * from `detectManagedDrift` becomes a warning carrying this message, and the
+ * boot continues. That is the right reading of a driver that cannot judge. It
+ * is neither a drift verdict that would refuse every remote boot nor a
+ * silence. The `os migrate` commands that read drift never get this far on a
+ * remote datasource, because they arm deferred DDL first and that is refused.
+ */
+function refuseRemoteDriftDetection(): never {
+  const err = new Error(
+    'Schema drift detection is not supported by the Turso REMOTE transport (this datasource\'s ' +
+    'transport mode is `remote`), so this driver cannot say whether the database\'s physical ' +
+    'schema matches the declared objects. Drift detection reads the physical schema through the ' +
+    'SQL driver\'s Knex connection, and in remote mode that connection is a placeholder in-memory ' +
+    'database holding none of this datasource\'s tables. Answering from it would report "no drift" ' +
+    'for every remote database, whatever its tables hold, so the call refuses. The call is spelled ' +
+    'correctly and `SqlDriver` declares it, so this is a capability gap of the remote transport ' +
+    'rather than a mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a ' +
+    '400. To check this database for drift, run `os migrate plan` against a local SQLite copy of it ' +
+    '(a `file:` URL), where the physical schema is introspected. Pointed at the remote URL, ' +
+    '`os migrate plan` refuses, because the remote transport cannot defer schema DDL.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 // ── Remote operation timeout ─────────────────────────────────────────────────
 
 /**
@@ -444,20 +610,15 @@ function timeoutWindow(config: TursoDriverConfig): number | undefined {
  * the refusal message echoes the operator's own spelling and stays greppable
  * against their config.
  *
- * ⚠️ DELIBERATE INCONSISTENCY, and it is deliberate: `TursoDriver.detectMode`
- * matches the same two schemes CASE-SENSITIVELY and is left that way. Folding
- * case there as well would delete its uppercase → `'local'` fall-through — a
- * mode-detection change on a published driver that predates this refusal
- * entirely and is out of scope here; it must be argued on its own, not slipped
- * in as a tidy-up. So the two readers of one url disagree on purpose: this one
- * answers "does the WINDOW reach anything", `detectMode` answers "which
- * transport is this", and only the first question is settled by the scheme the
- * libsql client will actually route on. ⛔ Do not "unify" them without that
- * argument.
+ * `TursoDriver.detectMode` reads the scheme through the same fold
+ * ({@link startsWithScheme}), so the two readers of one url agree: an uppercase
+ * `WSS://` with no `mode` is detected as remote and meets this refusal too. It
+ * used to be matched case-sensitively there and fell through to `'local'` on a
+ * private `:memory:` engine; that fall-through was argued and removed on its
+ * own (see {@link localEngineDefect}), not folded in here as a tidy-up.
  */
 function ridesWebSocketTransport(url: string): boolean {
-  const scheme = url.toLowerCase();
-  return scheme.startsWith('wss://') || scheme.startsWith('ws://');
+  return startsWithScheme(url, 'wss://') || startsWithScheme(url, 'ws://');
 }
 
 /**
@@ -485,8 +646,10 @@ function ridesWebSocketTransport(url: string): boolean {
  * a boot that would have run unbounded fails at the one constructor every
  * loader calls (`buildTursoDriverConfig` → `new TursoDriver`).
  *
- * Scoped to REMOTE mode: on the replica arm a `wss://` url beside `syncUrl`
- * still has `sync()` bounded, so the key is not inert there. `timeout: 0` is
+ * Scoped to REMOTE mode: on the replica arm `sync()` is bounded, so the key is
+ * not inert there. (A `wss://` url never reaches that arm: a remote url beside
+ * `syncUrl` is refused on its own grounds by `localEngineDefect`, whatever
+ * `timeout` says, and a replica's url is always a local `file:`.) `timeout: 0` is
  * the documented "no bound", asks for nothing, and is not refused. A
  * caller-supplied `client` is not consulted — its transport is not the driver's
  * to know; the scheme of the `url` beside it is what decides here.
@@ -566,6 +729,238 @@ function refuseSuppliedClientTimeout(timeoutMs: number): never {
       `\`createClient({ fetch })\`. Replica mode is unaffected: there \`sync()\` is bounded whatever ` +
       `client is in use.`,
   ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
+// ── The local engine: a file, or a declared `:memory:` — never a silent one ───
+
+/**
+ * Does `url` begin with `prefix` (a lowercase scheme, with its `://` or `:`),
+ * comparing the scheme's letters in any case?
+ *
+ * A url's scheme is case-insensitive, and `@libsql/client` reads it that way:
+ * `@libsql/core@0.17.4` `lib-esm/config.js` routes on
+ * `uri.scheme.toLowerCase()`. Executed against that version, `expandConfig`
+ * answers `https` for `LIBSQL://…`, `wss` for `Wss://…` and `file` for
+ * `FILE:./x.db`, and `createClient` opens each of them. Every reader of the url
+ * in this driver compares through here, so none of them classifies a url
+ * differently from the client it is handed to. Only the comparison folds: the
+ * url itself is passed on exactly as authored.
+ */
+function startsWithScheme(url: string, prefix: string): boolean {
+  return url.slice(0, prefix.length).toLowerCase() === prefix;
+}
+
+/**
+ * The url prefixes {@link TursoDriver.detectMode} classifies as remote — one
+ * list for the classifier and for {@link localEngineDefect}, so the refusal can
+ * never disagree with it about which urls are remote. Matched in any letter
+ * case, through {@link startsWithScheme}.
+ */
+const REMOTE_URL_PREFIXES = ['libsql://', 'https://', 'http://', 'wss://', 'ws://'] as const;
+
+function hasRemotePrefix(url: string): boolean {
+  return REMOTE_URL_PREFIXES.some((prefix) => startsWithScheme(url, prefix));
+}
+
+/** A `file:` url, its scheme matched in any letter case: the local engine opens its path. */
+function isFileUrl(url: string): boolean {
+  return startsWithScheme(url, 'file:');
+}
+
+/**
+ * Does this url name an in-memory database, by `@libsql/client`'s own reading?
+ *
+ * `@libsql/core@0.17.4` `lib-esm/config.js` expands a bare `:memory:` to
+ * `file::memory:`, and `isInMemoryConfig` then answers true for a `file` scheme
+ * whose path is `:memory:` or starts with `:memory:?`. Mirrored here so the
+ * replica refusal below covers exactly the urls the client's own embedded
+ * replica refuses.
+ */
+function namesInMemoryDatabase(url: string): boolean {
+  if (url === ':memory:') return true;
+  if (!isFileUrl(url)) return false;
+  const path = url.slice('file:'.length);
+  return path === ':memory:' || path.startsWith(':memory:?');
+}
+
+type LocalEngineDefect = 'remote-url' | 'unrecognised-url' | 'in-memory-replica';
+
+/**
+ * Which way, if any, a LOCAL or REPLICA configuration would leave the local
+ * engine with nothing durable behind it.
+ *
+ * Both non-remote arms run every read and write through the inherited Knex +
+ * better-sqlite3 engine, which can open exactly two things:
+ * {@link TursoDriver.toKnexConfig} hands it the path of a `file:` url, or
+ * `:memory:`. Anything else reached that method's last arm, which handed it
+ * `:memory:`: a private in-memory database. The writes succeed and read back,
+ * so from outside the datasource looks healthy, and all of it is gone on
+ * restart. Measured on `main` @ `2c1011b01b`, a `create` then a `find` then a
+ * fresh driver on the same config:
+ *
+ * ```
+ * libsql:// + syncUrl (sync.onConnect: false) -> replica, knex :memory:, 1 row, 0 after restart
+ * https:// / wss:// + syncUrl (same)          -> same
+ * libsql:// + mode: 'replica' (no syncUrl)    -> replica, knex :memory:, 1 row, 0 after restart
+ * libsql:// + mode: 'local'                   -> local,   knex :memory:, 1 row, 0 after restart
+ * :memory: + syncUrl + a supplied client      -> replica, knex :memory:, 1 row, 0 after restart
+ * file: + syncUrl (control)                   -> replica, knex <the file>, 1 row, 1 after restart
+ * ```
+ *
+ * With the driver building its own client and the default `sync.onConnect`,
+ * the first two rows failed at `connect()` rather than silently, but on
+ * libsql's error, not this driver's: an http/ws client's `sync()` throws
+ * `SYNC_NOT_SUPPORTED`, and a `:memory:` url beside `syncUrl` throws
+ * `URL_INVALID` ("Embedded replica must use file for local db"). So:
+ *
+ * - `'remote-url'`: a url {@link TursoDriver.detectMode} would call remote, in
+ *   a local or replica mode. `@libsql/client@0.17.4` builds no embedded replica
+ *   for it: `lib-esm/node.js` routes `http`/`https` to its HTTP client and
+ *   `ws`/`wss` to its WebSocket client, and `syncUrl` is read by
+ *   `lib-esm/sqlite3.js` alone (a `syncUrl` grep over `http.js` and `ws.js`
+ *   returns zero, while `authToken` returns six in each: the control that
+ *   makes the zero a reading).
+ * - `'unrecognised-url'`: a url that is none of `file:`, `:memory:` or a
+ *   remote url, such as a bare path (`./data/app.db`) or an unsupported
+ *   scheme. With no `mode`, {@link TursoDriver.detectMode} used to answer
+ *   `'local'` for it, matching remote schemes case-sensitively too, so an
+ *   uppercase `LIBSQL://` landed here as well; a forced `mode: 'local'` sent it
+ *   the same way (an uppercase `FILE:` too). Measured on `main` @ `a7581b326`,
+ *   same probe:
+ *
+ *   ```
+ *   LIBSQL://… (no mode)             -> local, 1 row, 0 after restart
+ *   FILE:<tmp>/x.db (no mode)        -> local, 1 row, 0 after restart, file never created
+ *   ./<dir>/app.db (no mode)         -> local, 1 row, 0 after restart, file never created
+ *   <tmp>/app.db (no mode)           -> local, 1 row, 0 after restart, file never created
+ *   ./<dir>/app.db + mode: 'local'   -> local, 1 row, 0 after restart, file never created
+ *   file:<tmp>/x.db (control)        -> local, 1 row, 1 after restart, file created
+ *   ```
+ *
+ *   The scheme is now matched in any letter case (see {@link startsWithScheme}),
+ *   so an uppercase remote url is remote, as the client routes it. What is left
+ *   has no durable reading at all: `@libsql/client@0.17.4` refuses a bare path
+ *   as `URL_INVALID` ("not in a valid format") and an unsupported scheme as
+ *   `URL_SCHEME_NOT_SUPPORTED`. Treating a bare path as `file:` instead was
+ *   rejected: that invents a url spelling the client refuses, so the same
+ *   string would open a file as a local database and fail as a replica.
+ * - `'in-memory-replica'`: a replica on a url `@libsql/client` reads as
+ *   in-memory. A replica IS a local file kept in sync with the remote; on
+ *   anything else nothing the sync brings down can reach the engine the reads
+ *   go through. The same rule as `@libsql/client`'s own `URL_INVALID` above.
+ *
+ * Checked in that order, so each configuration meets the one refusal that
+ * names its way out.
+ */
+function localEngineDefect(url: string, mode: 'local' | 'replica'): LocalEngineDefect | undefined {
+  if (hasRemotePrefix(url)) return 'remote-url';
+  if (url !== ':memory:' && !isFileUrl(url)) return 'unrecognised-url';
+  if (mode === 'replica' && namesInMemoryDatabase(url)) return 'in-memory-replica';
+  return undefined;
+}
+
+/**
+ * A local or replica configuration with nothing durable behind its engine,
+ * refused at construction. See {@link localEngineDefect} for the measurement.
+ *
+ * Raised BEFORE `super()`, beside `detectMode`, like the two `timeout`
+ * refusals above: ahead of the Knex base and of any `@libsql/client`, at the
+ * one constructor every loader calls (`buildTursoDriverConfig` →
+ * `new TursoDriver`). Neither loader parses a config schema on the way in, so
+ * this is the runtime's only gate for a datasource that bypassed authoring
+ * validation.
+ *
+ * ADR-0049 enforce-or-remove, and AGENTS.md's durability rule (prefer failing
+ * to falling back): the configuration asked for a replica, or a local
+ * database, and the driver quietly delivered a scratch in-memory one. The
+ * refusal changes no wire behaviour. Re-classifying the pair as `remote`
+ * instead was rejected: that would accept a declared `syncUrl` and then ignore
+ * it, which is the same declared-but-not-enforced shape.
+ *
+ * ⛔ The url is not echoed, only a remote url's scheme: a url may carry a live
+ * `?authToken=` (see `turso-authtoken-url-channel.test.ts`), and this message
+ * reaches an operator's boot log and Studio's datasource form. An unrecognised
+ * url has no scheme this driver can name, so nothing of it is echoed. ⛔ No
+ * internal issue id in the message either, for the same reason. The ids live
+ * in the comments beside it.
+ */
+function refuseNonDurableLocalEngine(
+  config: TursoDriverConfig,
+  mode: 'local' | 'replica',
+  defect: LocalEngineDefect,
+): never {
+  const arm = mode === 'replica' ? 'an embedded replica' : 'a local database';
+  const cause = config.mode ? `\`mode: '${config.mode}'\`` : '`syncUrl`';
+  let message: string;
+  if (defect === 'remote-url') {
+    const scheme = config.url.slice(0, config.url.indexOf('://') + '://'.length);
+    const toRemote = config.mode
+      ? `drop \`mode\` (a \`${scheme}\` url is detected as remote) or set \`mode: 'remote'\`` +
+        (config.syncUrl ? ', and drop `syncUrl`' : '')
+      : 'drop `syncUrl` (and `sync`): the url alone sends every read and write to it';
+    const toLocal =
+      mode === 'replica'
+        ? 'For an embedded replica, point `url` at a local file and keep the remote in `syncUrl`: ' +
+          "`url: 'file:./data/replica.db'`."
+        : "For a local database, point `url` at a file: `url: 'file:./data/app.db'`."
+    message =
+      `\`TursoDriverConfig.url\` is a remote \`${scheme}\` url, but ${cause} makes this datasource ` +
+      `${arm}, which runs every read and write through a local SQLite engine. That engine cannot open ` +
+      `a remote url, so it would run on a private in-memory database instead: writes would succeed and ` +
+      `read back, then be lost on restart, and none of them would reach the remote. ` +
+      (mode === 'replica'
+        ? '(@libsql/client builds a plain remote client for a remote url and ignores `syncUrl` beside ' +
+          'it, measured against @libsql/client 0.17.4, so there is no embedded replica to sync.) '
+        : '') +
+      `To use the remote database, ${toRemote}. ${toLocal}`;
+  } else if (defect === 'unrecognised-url') {
+    const asks = config.mode
+      ? `${cause} makes this datasource ${arm}`
+      : config.syncUrl
+        ? `\`syncUrl\` makes this datasource ${arm}`
+        : `With no \`mode\` and no remote scheme, this datasource is ${arm}`;
+    // Every key that would still make a remote url a local or replica
+    // configuration, so the remote way out is complete as written.
+    const keepsItLocal = [
+      ...(config.mode ? [`\`mode: '${config.mode}'\``] : []),
+      ...(config.syncUrl ? ['`syncUrl` (and `sync`)'] : []),
+    ];
+    const toRemote =
+      'For a remote database, ' +
+      (keepsItLocal.length > 0 ? `drop ${keepsItLocal.join(' and ')} and ` : '') +
+      'use one of the remote schemes above.';
+    const toFile =
+      mode === 'replica'
+        ? 'For an embedded replica, spell the local path as a `file:` url and ' +
+          (config.syncUrl ? 'keep' : 'name') +
+          " the remote in `syncUrl`: `url: 'file:./data/replica.db'`."
+        : "For a local database file, spell the path as a `file:` url: `url: 'file:./data/app.db'`. " +
+          "For a throwaway in-memory database, `url: ':memory:'`.";
+    message =
+      '`TursoDriverConfig.url` is not a url this driver recognises: it is not `:memory:`, not a ' +
+      '`file:` url, and not a remote `libsql://`, `https://`, `http://`, `wss://` or `ws://` url ' +
+      `(a scheme matches in any letter case). ${asks}, which runs every read and write through a ` +
+      'local SQLite engine that can open only a `file:` url or `:memory:`. On this url it would run ' +
+      'on a private in-memory database instead: writes would succeed and read back, then be lost on ' +
+      'restart. (@libsql/client refuses such a url itself: a bare path as URL_INVALID, an unsupported ' +
+      `scheme as URL_SCHEME_NOT_SUPPORTED, measured against @libsql/client 0.17.4.) ${toFile} ${toRemote}`;
+  } else {
+    const drop = config.mode
+      ? "`mode: 'replica'`" + (config.syncUrl ? ' and `syncUrl`' : '')
+      : '`syncUrl` (and `sync`)';
+    message =
+      `\`TursoDriverConfig.url\` names an in-memory database, so it cannot hold an embedded replica, ` +
+      `which ${cause} asks for. A replica is a local FILE kept in sync with the remote named in ` +
+      '`syncUrl`. Here the local engine would run on a private in-memory database that no sync ever ' +
+      'reaches: writes would succeed and read back, then be lost on restart. @libsql/client refuses ' +
+      "an in-memory embedded replica itself. Point `url` at a local file (`url: 'file:./data/replica.db'` " +
+      `beside \`syncUrl\`), or drop ${drop} for a plain in-memory local database, which is what the url ` +
+      'names: ephemeral by declaration.';
+  }
+  const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
   throw err;
@@ -723,8 +1118,26 @@ export class TursoDriver extends SqlDriver {
    */
   private readonly remoteManagedObjects = new Set<string>();
 
+  /**
+   * [#19868] Remote `date` / json columns whose storage backfill found nothing
+   * left to do in THIS process, so later schema syncs skip them. In memory
+   * only: the next process probes again, at one round-trip for all columns.
+   * Nothing reads it but {@link backfillRemoteCodecResidue}; unlike the
+   * temporal marks, it switches no read-side repair.
+   */
+  private readonly remoteCodecResidueConverged: Record<string, Set<string>> = {};
+
   constructor(config: TursoDriverConfig) {
     const mode = TursoDriver.detectMode(config);
+    // A local or replica engine with nothing durable behind it (a remote url,
+    // a url that is none of `file:` / `:memory:` / remote, or a replica on an
+    // in-memory url) is refused here, before the Knex base could open a
+    // private `:memory:` database in its place. See `localEngineDefect` for
+    // the measurement.
+    if (mode !== 'remote') {
+      const defect = localEngineDefect(config.url, mode);
+      if (defect) refuseNonDurableLocalEngine(config, mode, defect);
+    }
     // A window the WebSocket arm cannot deliver is refused here, ahead of the
     // Knex base and of any client — see `refuseWebSocketTimeout` for the
     // reading and the ruling behind it.
@@ -824,6 +1237,10 @@ export class TursoDriver extends SqlDriver {
 
   /**
    * Detect the transport mode from the URL and config.
+   *
+   * The scheme is matched in any letter case ({@link startsWithScheme}), the
+   * way `@libsql/client` routes it, so an uppercase `LIBSQL://` is remote here
+   * exactly as it is remote to the client this driver hands it to.
    */
   static detectMode(config: TursoDriverConfig): TursoTransportMode {
     // Explicit mode override
@@ -832,7 +1249,7 @@ export class TursoDriver extends SqlDriver {
     const url = config.url;
 
     // Local modes: file: or :memory:
-    if (url === ':memory:' || url.startsWith('file:')) {
+    if (url === ':memory:' || isFileUrl(url)) {
       return config.syncUrl ? 'replica' : 'local';
     }
 
@@ -841,25 +1258,28 @@ export class TursoDriver extends SqlDriver {
     // self-hosted / local-dev Turso-compatible endpoint (e.g. an ObjectBase
     // gateway with no TLS termination, or sqld on localhost). @libsql/client
     // natively accepts these schemes; they MUST be classified as remote so
-    // queries go over the wire — otherwise the URL falls through to the
-    // local-SQLite fallback below and silently writes to an ephemeral
-    // in-memory DB (data never reaches the remote, lost on every restart).
-    if (
-      url.startsWith('libsql://') ||
-      url.startsWith('https://') ||
-      url.startsWith('http://') ||
-      url.startsWith('wss://') ||
-      url.startsWith('ws://')
-    ) {
-      // When both url and syncUrl are remote, @libsql/client operates in
-      // embedded replica mode with an in-memory local cache. The remote URL
-      // serves as the primary database and syncUrl configures the sync target.
+    // queries go over the wire. Before they were, such a url fell through to
+    // the fallback below and silently wrote to an ephemeral in-memory DB (data
+    // never reached the remote, lost on every restart).
+    if (hasRemotePrefix(url)) {
+      // A remote url beside `syncUrl` is still classified `replica`, because
+      // that is what the declaration asks for, and the constructor REFUSES it
+      // (`localEngineDefect`). It is not a working configuration:
+      // `@libsql/client` builds no embedded replica for a remote url. It
+      // routes the url to its HTTP or WebSocket client, which never reads
+      // `syncUrl` and throws `SYNC_NOT_SUPPORTED` from `sync()`, and the local
+      // engine could only have opened `:memory:`. An embedded replica is a
+      // `file:` url beside `syncUrl`.
       if (config.syncUrl) return 'replica';
       return 'remote';
     }
 
-    // Fallback: treat as local
-    return 'local';
+    // Anything else (a bare path, an unsupported scheme) is classified by what
+    // the declaration asks for, like the two arms above, and the constructor
+    // REFUSES it (`localEngineDefect`): the local engine can open nothing but
+    // a private `:memory:` database for it, and `@libsql/client` refuses such
+    // a url itself. It is never run.
+    return config.syncUrl ? 'replica' : 'local';
   }
 
   /**
@@ -888,20 +1308,21 @@ export class TursoDriver extends SqlDriver {
       };
     }
 
-    if (config.url.startsWith('file:')) {
+    if (isFileUrl(config.url)) {
       return {
         client: 'better-sqlite3',
-        connection: { filename: config.url.replace(/^file:/, '') },
+        connection: { filename: config.url.slice('file:'.length) },
         useNullAsDefault: true,
       };
     }
 
-    // Remote URL with syncUrl (replica mode) — use :memory: as local backend
-    return {
-      client: 'better-sqlite3',
-      connection: { filename: ':memory:' },
-      useNullAsDefault: true,
-    };
+    // Not reached from the constructor: every local or replica url that is
+    // neither `file:` nor `:memory:` is refused there first
+    // (`localEngineDefect`). This arm used to hand such a url a private
+    // `:memory:` database, which lost every write on restart. It refuses
+    // instead, with the same envelope, so no url can reach an in-memory
+    // engine it did not name, whatever the caller.
+    return refuseNonDurableLocalEngine(config, mode, 'unrecognised-url');
   }
 
   /**
@@ -1638,9 +2059,10 @@ export class TursoDriver extends SqlDriver {
    *
    * It also records the object as one whose table this driver created, which is
    * the whole input to {@link paginationTieBreaker} in remote mode. That goes
-   * FIRST and outside the `try`: both callers reach here only after the DDL has
-   * already succeeded, so the table exists with its `id` primary key whether or
-   * not the best-effort coercion registration below does.
+   * FIRST and outside the `try`: its only caller, {@link completeRemoteSchemaSync},
+   * runs only after the DDL has already succeeded, so the table exists with its
+   * `id` primary key whether or not the best-effort coercion registration below
+   * does.
    */
   private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any>; tenancy?: any }): void {
     this.remoteManagedObjects.add(obj.name);
@@ -1648,6 +2070,110 @@ export class TursoDriver extends SqlDriver {
       this.registerExternalObject({ name: obj.name, fields: obj.fields, tenancy: obj.tenancy });
     } catch {
       /* metadata registration is best-effort; never block schema sync on it */
+    }
+  }
+
+  /**
+   * The post-DDL half every REMOTE schema door owes, in its one order: register
+   * each synced object's field metadata, then run the canonical temporal
+   * backfill and the `date` / `json` storage backfill, each ONCE for the whole
+   * call.
+   *
+   * All three remote doors (`syncSchema`, `initObjects`, `syncSchemasBatch`)
+   * send their DDL through `RemoteTransport` and so never reach
+   * `SqlDriver.initObjects`, which is what fills the read-coercion registries
+   * and runs the Knex backfill on the local faces. Each door has to finish the
+   * job itself, and they drifted apart once: `syncSchemasBatch` — the door
+   * `ObjectQLPlugin`'s boot sync takes whenever `supports.batchSchemaSync`
+   * holds, so every remote-Turso boot — returned straight after its DDL. A
+   * booted remote app then read a boolean back as `1` and JSON as a string, got
+   * no `id` tie-breaker on a paged read, and never converged its temporal
+   * columns (#19844). One helper called by all three is what keeps them from
+   * drifting again.
+   *
+   * Callers reach here only after their DDL resolved, so a DDL failure throws
+   * before anything is registered and no object is recorded as a table this
+   * driver created unless it exists. Registration precedes the backfills
+   * because they read it to learn which columns are temporal, `date` or json.
+   * Each backfill probes every column it finds in one round-trip, so calling
+   * them once per call rather than once per object is what keeps a boot's
+   * steady state at one round-trip per backfill.
+   */
+  private async completeRemoteSchemaSync(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+  ): Promise<void> {
+    if (objects.length === 0) return;
+    for (const obj of objects) this.registerRemoteFieldMetadata(obj);
+    await this.backfillRemoteCanonicalTemporalQuietly();
+    // [#19868] Then the `date` / `json` cells the pre-#19844 batch door stored
+    // without the write codec. Same registration, one probe round-trip of its own.
+    await this.backfillRemoteCodecResidueQuietly();
+  }
+
+  /**
+   * [#19868] Converge the REMOTE `Field.date` and `Field.json` cells that the
+   * pre-#19844 `syncSchemasBatch` door stored without `formatInput`: a `date`
+   * stored as a full timestamp, and a json string stored bare. See
+   * `remote-codec-residue-backfill.ts` for which cells are rewritten, which are
+   * left alone because their original value cannot be told from their bytes,
+   * and why no converted cell reads differently afterwards.
+   *
+   * Private on purpose: it needs no operator surface, because a budget-stopped
+   * column resumes on the next schema sync by itself.
+   */
+  private async backfillRemoteCodecResidue(
+    options?: RemoteCanonicalBackfillOptions,
+  ): Promise<RemoteCodecResidueReport> {
+    if (!this.isRemote) return { columns: [] };
+    const client = this.remoteTransport?.getClient() as RemoteBackfillClient | null | undefined;
+    if (!client) return { columns: [] };
+
+    const columns: RemoteCodecResidueColumn[] = [];
+    for (const table of this.remoteManagedObjects) {
+      const done = this.remoteCodecResidueConverged[table];
+      for (const field of this.dateFields[table] ?? []) {
+        if (!done?.has(field)) columns.push({ table, field, kind: 'date' });
+      }
+      // A single-value media column's canonical form (a quoted or a bare id) is
+      // an ADR-0104 deployment fact these remote doors never resolve, so it is
+      // not ours to rewrite. Both forms read the same.
+      const media = new Set(this.mediaFields[table] ?? []);
+      for (const field of this.jsonFields[table] ?? []) {
+        if (!media.has(field) && !done?.has(field)) columns.push({ table, field, kind: 'json' });
+      }
+    }
+    if (columns.length === 0) return { columns: [] };
+
+    const report = await backfillRemoteCodecResidueColumns(
+      client,
+      columns,
+      // The driver's OWN `Field.date` write conversion, handed over rather than
+      // copied, so what the backfill writes is what `formatInput` writes.
+      { toDateOnly: (value) => this.toDateOnly(value) },
+      options,
+      this.logger,
+    );
+    for (const column of report.columns) {
+      if (column.done) (this.remoteCodecResidueConverged[column.table] ??= new Set<string>()).add(column.field);
+    }
+    return report;
+  }
+
+  /**
+   * Run {@link backfillRemoteCodecResidue} after a remote schema sync and
+   * swallow everything, for the reason
+   * {@link backfillRemoteCanonicalTemporalQuietly} gives: a migration must
+   * never fail a boot. The module already reports instead of throwing; this
+   * catch covers a client lost between the sync and here.
+   */
+  private async backfillRemoteCodecResidueQuietly(): Promise<void> {
+    try {
+      await this.backfillRemoteCodecResidue();
+    } catch (err) {
+      this.logger.warn(
+        `[driver-turso] remote date/json storage backfill failed; the cells stay as they were`,
+        { error: err instanceof Error ? err.message : String(err) },
+      );
     }
   }
 
@@ -1938,18 +2464,45 @@ export class TursoDriver extends SqlDriver {
   // Schema Management (remote mode overrides)
   // ===================================
 
+  /**
+   * Arm/disarm DDL deferral — refused on the REMOTE face when arming, see
+   * {@link refuseRemoteDeferredDdl}. None of the remote schema doors below reads
+   * the flag, so accepting it here would promise a dry run nothing keeps.
+   * Disarming is accepted (it is what the flag already is), and local / replica
+   * modes inherit the Knex deferral unchanged.
+   */
+  override setDeferredDdl(deferred: boolean): void {
+    if (deferred && this.isRemote) refuseRemoteDeferredDdl();
+    super.setDeferredDdl(deferred);
+  }
+
+  /**
+   * Detect managed-schema drift — refused on the REMOTE face, see
+   * {@link refuseRemoteDriftDetection}. The inherited detector reads the
+   * physical schema through the placeholder Knex connection remote mode is
+   * built with, so its remote answer was always `[]`. Refused with or without
+   * explicit `objects`, because both read the same placeholder. Local and
+   * replica modes inherit the Knex detector unchanged.
+   *
+   * The parameter repeats the base's declared shape key for key rather than
+   * deriving it (`check:object-def-param-keys` arm C), so the keys a caller may
+   * pass stay visible on this override's own declaration.
+   */
+  override async detectManagedDrift(
+    objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
+  ): ReturnType<SqlDriver['detectManagedDrift']> {
+    if (this.isRemote) refuseRemoteDriftDetection();
+    return super.detectManagedDrift(objects);
+  }
+
   override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchema');
     if (this.isRemote) {
       await this.remoteTransport!.syncSchema(object, schema);
-      // See initObjects(): populate the read-coercion registries for remote mode.
-      // Key strictly by `object` (what find()/formatOutput look up) — never let a
+      // Registration + canonical backfill, see completeRemoteSchemaSync(). Key
+      // strictly by `object` (what find()/formatOutput look up) — never let a
       // stray `schema.name` shadow it.
-      this.registerRemoteFieldMetadata({ ...(schema as Record<string, any>), name: object });
-      // #5770: the remote twin of the `backfillCanonicalDatetimes` call
-      // `SqlDriver.initObjects` makes at exactly this point. Must run AFTER the
-      // registration above — that is what tells it which columns are temporal.
-      await this.backfillRemoteCanonicalTemporalQuietly();
+      await this.completeRemoteSchemaSync([{ ...(schema as Record<string, any>), name: object }]);
       return;
     }
     return super.syncSchema(object, schema, options);
@@ -1992,17 +2545,11 @@ export class TursoDriver extends SqlDriver {
         objects.map((obj) => ({ object: obj.name, schema: obj })),
       );
       // Remote DDL bypasses SqlDriver.initObjects, which is what normally
-      // populates the boolean/json/date/numeric read-coercion registries.
-      // Register the field-type metadata explicitly (no DDL) so remote reads
-      // run the same formatOutput() coercion as local/replica mode — otherwise
-      // a boolean reads back as raw 0/1, JSON as a string, dates as raw text.
+      // populates the boolean/json/date/numeric read-coercion registries and
+      // runs the canonical temporal backfill. Without the registration a
+      // boolean reads back as raw 0/1, JSON as a string, dates as raw text.
       // (Root cause of the 2026-07-06 case_escalation `1 != true` incident.)
-      for (const obj of objects) this.registerRemoteFieldMetadata(obj);
-      // #5770: the remote twin of the `backfillCanonicalDatetimes` /
-      // `backfillCanonicalTimes` calls `SqlDriver.initObjects` makes per table.
-      // One batched probe covers every column synced here, so the steady state
-      // (nothing to converge) costs a single round-trip for the whole boot.
-      await this.backfillRemoteCanonicalTemporalQuietly();
+      await this.completeRemoteSchemaSync(objects);
       return;
     }
     return super.initObjects(objects);
@@ -2012,14 +2559,24 @@ export class TursoDriver extends SqlDriver {
    * Batch-synchronize multiple schemas in a single round-trip.
    *
    * In remote mode, delegates to `RemoteTransport.syncSchemasBatch()` which
-   * uses `client.batch()` to submit all DDL as one network call.
+   * uses `client.batch()` to submit all DDL as one network call, then finishes
+   * exactly as the other two remote doors do (see
+   * {@link completeRemoteSchemaSync}). This is the door `ObjectQLPlugin`'s boot
+   * sync takes on this driver, so it is the one that decides what a booted
+   * remote app reads back.
    * In local/replica mode, falls back to sequential `syncSchema()` calls
    * (Knex + better-sqlite3 is already local, so batching has no benefit).
    */
   async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'syncSchemasBatch');
     if (this.isRemote) {
-      return this.remoteTransport!.syncSchemasBatch(schemas);
+      await this.remoteTransport!.syncSchemasBatch(schemas);
+      // Key strictly by `object`, as syncSchema() does: it is the name the
+      // engine hands every later read and write for this table.
+      await this.completeRemoteSchemaSync(
+        schemas.map(({ object, schema }) => ({ ...(schema as Record<string, any>), name: object })),
+      );
+      return;
     }
     // Local/replica fallback: sequential sync (already fast with local SQLite)
     for (const { object, schema } of schemas) {

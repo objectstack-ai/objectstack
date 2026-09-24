@@ -91,9 +91,10 @@ function refusalFor(filter: unknown, alias = 'crm_opportunity'): Refusal | undef
 }
 
 /**
- * Every refusing site in `read-scope-sql.ts`, in source order.
+ * Every refusing site in `read-scope-sql.ts`, in source order — except row ⑯,
+ * appended when it was added (its row says where it runs).
  *
- * FIFTEEN rows over THIRTEEN throw sites: TWO sites are each reached by two
+ * SIXTEEN rows over FOURTEEN throw sites: TWO sites are each reached by two
  * triggers, and every trigger is listed on purpose.
  *
  *   - `quoteIdent`, with two `kind` values. That alias-vs-field split was option
@@ -233,6 +234,18 @@ const REFUSALS: Array<{
     message: /unsupported operator "\$regex" on "owner_email" \(fail-closed\)/,
     sensitive: 'owner_email',
   },
+  {
+    // [#19975] Ruling 乙 (#19757) pushed down to this compiler: the explicit
+    // spelling of the equality slot, whose implicit spelling is row ⑨. Listed
+    // last because it was added last; in `compileField` it runs FIRST, ahead
+    // of row ⑥, so a list under `$eq` is diagnosed as the list and never by
+    // one of its members.
+    name: '⑯ a list under $eq',
+    site: 'compileField: list in the equality slot',
+    filter: { region_code: { $eq: ['emea', 'apac'] } },
+    message: /array value for "region_code"\.\$eq — an equality compares one value, so a list is refused rather than bound; use \{ \$in: \[\.\.\.\] \} \(fail-closed\)/,
+    sensitive: 'region_code',
+  },
 ];
 
 /**
@@ -323,14 +336,15 @@ describe('[#5367] every read-scope refusal carries the ADR-0112 envelope (READ_S
     // #5352's lesson, stated as a guard: seven of `filter-normalizer.ts`'s nine
     // sites carrying an envelope was indistinguishable from none of them at the
     // HTTP boundary, because the commonest input hit one of the two bare ones.
-    // Fifteen inputs over the module's THIRTEEN throw sites (see the table's
+    // Sixteen inputs over the module's FOURTEEN throw sites (see the table's
     // note on the two sites with two triggers each), and every one of them
-    // enveloped. [#6125] added the eleventh site, [#6387] the twelfth, and
-    // [#13571] the thirteenth (the empty-`$nin` refusal); these two numbers
-    // are the ratchet that makes a future unenveloped `throw` fail HERE instead
-    // of at an HTTP boundary.
-    expect(REFUSALS).toHaveLength(15);
-    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(13);
+    // enveloped. [#6125] added the eleventh site, [#6387] the twelfth,
+    // [#13571] the thirteenth (the empty-`$nin` refusal) and [#19975] the
+    // fourteenth (a list under `$eq`); these two numbers are the ratchet that
+    // makes a future unenveloped `throw` fail HERE instead of at an HTTP
+    // boundary.
+    expect(REFUSALS).toHaveLength(16);
+    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(14);
     for (const c of REFUSALS) {
       expect(refusalFor(c.filter, c.alias)?.code, `${c.site} is still bare`).toBe('READ_SCOPE_COMPILE_FAILED');
     }

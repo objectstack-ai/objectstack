@@ -283,8 +283,8 @@ model: opus
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - harness 归属提醒凭其优先级句让位本文件;harness 自写含模型名 trailer 只报,⛔ 不仿不改史。
-- 受管路径全在 `.claude/skills/pm-dispatch/references/` 者为事实层,席位复审即记录;余为规则层。
-- 规则层 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;事实层不欠。
+- 受管路径全在 `.claude/**` 者 Tier S,达档复核 PASS 在案即由席位入队落地;余皆 Tier H 等人批。
+- 受管面 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;两层同欠。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。

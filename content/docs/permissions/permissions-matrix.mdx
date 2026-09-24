@@ -47,6 +47,22 @@ owner-scoped write policies keep `org_member` holders owner-scoped on
 Layer 0 tenant wall always ANDs on top. See
 [Sharing & OWD](/docs/permissions/sharing-rules#how-viewallrecords--modifyallrecords-interact-with-the-owd)
 and `plugin-security/src/security-plugin.ts` (`computeLayeredRlsFilter`).
+
+The bypass is **also gated by the deployment's tenancy posture** (ADR-0105
+D4), because a principal is short-circuited only if some set it holds carries
+the bits at all. Under the default wall-less `single` posture there is no
+organization wall to bound them, so the membership-driven auto-grant
+(`auto-org-admin-grant`) gives org owners and admins
+`organization_admin_no_bypass` — `organization_admin` without
+`viewAllRecords` / `modifyAllRecords` — instead of `organization_admin`.
+On a `single` deployment an org admin is therefore **not** short-circuited,
+not even on a posture-permitting object (a better-auth-managed one included):
+the object's RLS policies apply to them as to any other holder. The walled
+postures (`group` / `isolated`) grant the full `organization_admin` unless the
+deployment suppresses it. A deployment-wide data superuser needs
+`admin_full_access` or an explicit set carrying the bits. See
+`plugin-security/src/objects/default-permission-sets.ts`
+(`deriveWallLessOrgAdmin`).
 </Callout>
 
 <Callout type="warn">

@@ -1,6 +1,6 @@
 # 复核清单细则
 
-见 SKILL.md 〈复核〉;本文逐项展开每份 dev 报告的复核判据,对着它过。
+见 execution-duties.md 〈复核〉;本文逐项展开每份 dev 报告的复核判据,对着它过。
 
 ## PR 形态与卡片关系
 
@@ -15,10 +15,11 @@
 
 ## 范围与 changeset
 
-- 取 changed files 核范围,⛔ 不看报告自述。
 - 三条判据:无 `content/docs/releases/` 改动、用户可见改动有 changeset、无与卡无关的文件。
 - Tests/docs-only 按仓库分流:本仓库走 `skip-changeset` 标签,⛔ 不走空 changeset。
 - 空 changeset 在本仓库滞留发布;含读者可见生成产物时 dev 改选 changeset 亦对。
+- dev 挂 `skip-changeset` 遭分类器拒 ⇒ 席位自核 tests/docs-only 即自挂,评论写依据是席位复核。
+- 此标是席位结论,⛔ 非替 dev 转发,自核不成立不挂;dev 报告 `deviations` 须逐字载被拒命令。
 - objectui 无此标签,空 frontmatter changeset 即正确形态;⛔ 永不要求或铸出该标签。
 - 就地修范围外的邻接缺陷 ⇒ 四条件逐条核:同缺陷类、机械、无他人认领、同门禁族。
 - 再核 claim 文件面同轮已修订、PR 正文点名该修并载证据;缺一条即判 REWORK。
@@ -38,7 +39,6 @@
 - 判据是同块点名声明该符号的模块那份移动了的产物,或具名探针;缺则记 INCONCLUSIVE。
 - 报告证据里有 git 本可回答的 API 读吗:`list_issues`/`search_issues` 一类,或重跑去重读数。
 - ⛔ 不因此判 REWORK,ACCEPT 照给,但把这条记进 ACCEPT 评论。
-- CI 收敛读数只属于复核侧:dev 的契约是草稿 PR 时点交报,gate `in_progress` 是诚实读数。
 - 翻 ready、挂 auto-merge 或入队前,亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job。
 - 两个 job 的 `conclusion` 都须为 `success`,门禁族跑在其内;⛔ 不因报告写了本地绿跳过。
 - 两 job 只是 required 地板,入队另要求全 check 绿(第三种情形见 SKILL.md);跑法见 `true-green.md`。

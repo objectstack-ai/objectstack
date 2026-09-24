@@ -5,7 +5,7 @@ import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { retiredKey } from '../shared/retired-key';
+import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 
 /**
  * Connector Protocol - LEVEL 3: Enterprise Connector
@@ -58,17 +58,20 @@ import { retiredKey } from '../shared/retired-key';
  * spaces out the calls you already made, it does not cap the rate, so the
  * sentence above about rate limiting stands unchanged.
  *
- * ⛔ **Two exceptions, both still inert and both still `dead` in
- * `packages/spec/liveness/connector.json`.** `health.circuitBreaker`: every
- * sub-key is unread and no breaker ever opens — implement circuit breaking in
- * the connector provider. `connectionTimeoutMs`: it is carried to a provider
- * factory but the platform does not enforce it, because a WHATWG `fetch`
+ * ⛔ **One exception remains, still inert and still `dead` in
+ * `packages/spec/liveness/connector.json`:** `health.circuitBreaker` — every
+ * sub-key is unread and no breaker ever opens; implement circuit breaking in
+ * the connector provider.
+ *
+ * `connectionTimeoutMs` used to be the second exception and is now **removed**
+ * (ADR-0049, the narrower second decision that surface was owed): it was
+ * carried to a provider factory but never applied as a deadline anywhere, and
+ * it is not implementable where it was declared, because a WHATWG `fetch`
  * exposes one `AbortSignal` over the whole operation and never the connection
- * phase alone; `requestTimeoutMs` is the bound the platform can keep, and
- * ADR-0049 owes this one key a narrower decision. The full removal reasoning
- * for the rate-limit shape is recorded at the removal site: the "REMOVED:
- * outbound rate limiting" block in `integration/connector.zod.ts`, and
- * `packages/spec/docs/SYNC_ARCHITECTURE.md`.
+ * phase alone. `requestTimeoutMs` is the bound the platform can keep. The full
+ * removal reasoning is recorded at each removal site: the "REMOVED:
+ * `connectionTimeoutMs`" and "REMOVED: outbound rate limiting" blocks in
+ * `integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
  *
  * **Field mapping does not transform values.** This header used to offer "field
  * mapping and transformations"; only the first half was ever true.
@@ -535,6 +538,120 @@ const ERROR_MAPPING_RETIRED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 // ============================================================================
+// REMOVED: `connectionTimeoutMs` — the connect-phase deadline (ADR-0049)
+// ============================================================================
+//
+// A bounded (`min(1000).max(300000)`), defaulted (`30000`), `.describe()`d key
+// on this schema and — because both published carriers wrap the same private
+// `ConnectorBaseSchema` — on
+// `DeclarativeConnectorEntrySchema`, so it was authorable from `stack.connectors[]`,
+// from `PUT /meta/connector/:name`, and served back by `/meta/connector`. Every
+// signal an authoring surface can give said it worked.
+//
+// ⚠️ It was not merely unimplemented — it is NOT IMPLEMENTABLE AT THE SITE IT
+// NAMES, which is why ADR-0049's `实现` arm was unavailable and the second
+// decision came out `retire`. A connector's outbound call is a WHATWG `fetch`,
+// whose only cancellation surface is ONE `AbortSignal` covering the whole
+// operation; nothing in that interface observes the connection phase
+// separately. The two honest readings were both losses: bound "time until the
+// response arrives" with this key — which kills a slow-but-connected upstream
+// the author meant to allow with a large `requestTimeoutMs`, breaking the very
+// promise the key makes — or leave it unenforced and say so. (Node's undici
+// exposes `connectTimeout` through a custom dispatcher; Node-only, and a new
+// subsystem underneath every connector, which the #18975 ruling forbids.)
+//
+// ⚠️ The carry was real and is what this removal actually withdraws, so do not
+// read it as a zero-mention retirement. #18975 put the key on
+// `ConnectorProviderContext`, and five sites outside `packages/spec` READ it:
+// the materialization fingerprint and the context build in
+// `services/service-automation/src/plugin.ts`, `ctx.connectionTimeoutMs` in the
+// `rest` and `openapi` provider factories, and the `?? 30000` fallbacks that
+// deposited it back onto the reported def. Measured across all five, the
+// value's only termini were the def `GET /connectors` echoes and the
+// fingerprint that decides whether to re-materialize — never a deadline.
+// `connectorFetchOptions()` (`integration/connector-fetch-policy.ts`) is the one
+// mapping from authored policy onto the platform's outbound `fetch`, and it was
+// handed `{ retryConfig, requestTimeoutMs }` only. Carrying a number is not
+// honouring it: ADR-0049 forbids the parsed-unmarked-unenforced state whether
+// the inert value travels or sits still.
+//
+// `requestTimeoutMs` is the replacement and the lit control for every reading
+// above — same schema, same census, same files — because it resolves to a real
+// read. The live record is in the tree, not in a card number:
+// `integration/connector-fetch-policy.ts` maps it onto `opts.timeoutMs`,
+// `resilientFetch`'s per-attempt deadline, and `connector-fetch-policy.test.ts`
+// pins that mapping. Bound the connect phase at a provider or gateway that can
+// see it.
+//
+// `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
+// strip (ADR-0104); the tombstone below makes the removal audible in the two
+// channels an upgrading author actually hits — `tsc` and the parse. Registered
+// as `integration/Connector:connectionTimeoutMs` and
+// `integration/DeclarativeConnectorEntry:connectionTimeoutMs` in
+// `RETIRED_KEYS_BY_MAJOR[18]`; stored rows and authored sources are rewritten by
+// the D2 conversion `connector-connection-timeout-ms-removed`, and the withdrawn
+// `ConnectorProviderContext` member by the D3 semantic entry
+// `connector-provider-context-connection-timeout-ms-retired`.
+//
+// No orphaned def leaves with it: the key was a bare `z.number()`, not a
+// `ConfigSchema` shape, so `RETIRED_DEFS_BY_MAJOR[18]` gains nothing here.
+
+/**
+ * The prescription an author meets when they write `connectionTimeoutMs` — in
+ * `tsc` (the key's input type is `never`) and at parse (this string is the
+ * issue message). It IS the migration doc for whoever hits it; the closing
+ * sentence is the house `os migrate meta` form pinned by
+ * `shared/retired-key-migrate-sentence.test.ts`.
+ */
+const CONNECTION_TIMEOUT_MS_RETIRED =
+  '`connector.connectionTimeoutMs` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — the platform never honoured it and cannot honour it where it was '
+  + "declared: a connector's outbound call is a WHATWG `fetch`, whose only cancellation "
+  + 'surface is one `AbortSignal` over the whole operation, so nothing there observes the '
+  + 'connection phase separately, and the value only ever travelled (onto the reported def '
+  + 'and the materialization fingerprint) without ever bounding a connect. Delete the key. '
+  + 'Use `requestTimeoutMs` for the deadline the platform does keep — it is applied as '
+  + "`resilientFetch`'s per-attempt timeout — and bound the connect phase at a connector "
+  + 'provider or upstream gateway on a transport that can separate the phases. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
+ * The retired default the published 17.x toolchain MATERIALIZED, captured as a
+ * literal because nothing else records it once the declaration is gone
+ * (#12840, maintainer ruling 2026-08-28; the class rule is
+ * `shared/retired-key.ts` — "the next retirement of a defaulted key reuses this
+ * helper with its own captured literal instead of re-inventing the judgement").
+ *
+ * ⭐ WHY THIS RETIREMENT IS OWED THE STAGE, measured rather than argued by
+ * analogy. `connectionTimeoutMs` was declared `.optional().default(30000)`, so a
+ * 17.x parse emitted it into EVERY connector — authored or not. Measured across
+ * two builds: on the base build `ObjectStackSchema.parse({ connectors: [{ name,
+ * label, type }] })` returns an entry whose keys are `authentication`,
+ * `connectionTimeoutMs`, `enabled`, `label`, `name`, `requestTimeoutMs`,
+ * `status`, `type` — the author typed three of those. Feed that exact emitted
+ * object back to the tombstoned build and it is refused at
+ * `connectors.0.connectionTimeoutMs`.
+ *
+ * That residue is not hypothetical, because this schema has TWO DOORS (the fact
+ * `liveness/connector.json` records at the top of its `_note`): besides the
+ * authoring doors, `AutomationEngine.registerConnector` parses `ConnectorSchema`
+ * for a def a PLUGIN or an ADR-0097 provider factory builds IN CODE. A connector
+ * package still compiled against 17.x carries the materialized `30000` in that
+ * def literal — every one of the four shipped connectors did, which is what the
+ * card counted as its five hardcoded writes — so without this stage a 17.x
+ * plugin fails registration on a value its author never typed.
+ *
+ * ⛔ Nothing is un-retired: `z.input` stays `never` (authoring it is still a tsc
+ * error), the `[RETIRED]` authorable-surface row stays, and any OTHER value —
+ * `15000`, `1000` — keeps the tombstone's refusal with the prescription
+ * byte-for-byte. Only the emitted default is accepted, and it is STRIPPED, so a
+ * parse → serialize round-trip converges on the clean shape.
+ */
+const CONNECTOR_RETIRED_KEY_RESIDUE = {
+  connectionTimeoutMs: 30000,
+} as const;
+
+// ============================================================================
 // Health Check & Circuit Breaker Configuration
 // ============================================================================
 
@@ -735,7 +852,7 @@ export type ConnectorTrigger = z.input<typeof ConnectorTriggerSchema>;
  * Base Connector Schema
  * Core connector configuration shared across all connector types
  */
-export const ConnectorSchema = lazySchema(() => z.object({
+const ConnectorBaseSchema = lazySchema(() => z.object({
   /**
    * Machine name (snake_case)
    */
@@ -864,10 +981,16 @@ export const ConnectorSchema = lazySchema(() => z.object({
   retryConfig: RetryConfigSchema.optional().describe('Retry configuration'),
   
   /**
-   * Connection timeout in milliseconds
+   * `connectionTimeoutMs` — RETIRED (ADR-0049 enforce-or-remove). A bounded,
+   * defaulted, served-back key that no site ever applied as a deadline, and one
+   * that is not implementable where it was declared: a WHATWG `fetch` exposes a
+   * single `AbortSignal` over the whole operation and never the connect phase.
+   * `requestTimeoutMs` below is the bound the platform can keep. The section
+   * comment above `CONNECTION_TIMEOUT_MS_RETIRED` records the measurement,
+   * including the five reader sites #18975 created and what this withdraws.
    */
-  connectionTimeoutMs: z.number().min(1000).max(300000).optional().default(30000).describe('Connection timeout in ms'),
-  
+  connectionTimeoutMs: retiredKey(CONNECTION_TIMEOUT_MS_RETIRED),
+
   /**
    * Request timeout in milliseconds
    */
@@ -895,8 +1018,11 @@ export const ConnectorSchema = lazySchema(() => z.object({
    * nobody anything. `ConnectorSchema` is NOT `.strict()`, so a plain delete
    * would be a silent strip (ADR-0104); the tombstone makes the removal audible
    * in the two channels an upgrading author actually hits — `tsc` and the
-   * parse — and `DeclarativeConnectorEntrySchema` (`ConnectorSchema.superRefine`)
-   * inherits it, so `stack.connectors[]` and the `/meta/connector` door refuse
+   * parse — and `DeclarativeConnectorEntrySchema` carries it too (both
+   * published carriers wrap the same private `ConnectorBaseSchema`; until the
+   * `connectionTimeoutMs` retirement the entry schema was literally
+   * `ConnectorSchema.superRefine(...)`), so `stack.connectors[]` and the
+   * `/meta/connector` door refuse
    * it too. Registered as `integration/Connector:errorMapping` and
    * `integration/DeclarativeConnectorEntry:errorMapping` in
    * `RETIRED_KEYS_BY_MAJOR[18]`; sources are rewritten by the D2 conversion
@@ -946,6 +1072,29 @@ export const ConnectorSchema = lazySchema(() => z.object({
   ...MetadataProtectionFields,
 }));
 
+/**
+ * Core connector configuration — the authorable shape behind the ruled
+ * retired-default residue stage (see {@link CONNECTOR_RETIRED_KEY_RESIDUE}).
+ *
+ * The wrapper is a `z.preprocess` PIPE, not a `ZodObject`: it keeps a
+ * read-through `shape` so the schema walkers and shape-reading consumers see
+ * the inner authorable truth, but the `ZodObject` combinators do NOT survive
+ * it. Measured on the built entry against a plain-object control
+ * (`WebhookConfigSchema`, which keeps all nine): `.extend()`, `.omit()`,
+ * `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()` and
+ * `.safeExtend()` are gone.
+ *
+ * ⚠️ `.superRefine()` is the exception and the trap — it lives on zod's base
+ * type, so it is still CALLABLE here and silently returns a schema with no
+ * read-through `shape`, which is precisely what the authorable-surface and
+ * liveness walkers duck-test. So: build on `ConnectorBaseSchema` and re-wrap,
+ * the way `DeclarativeConnectorEntrySchema` below does (the
+ * `EffectiveObjectPermissionSchema` precedent).
+ */
+export const ConnectorSchema = lazySchema(() =>
+  acceptRetiredDefaultResidue(ConnectorBaseSchema, CONNECTOR_RETIRED_KEY_RESIDUE),
+);
+
 export type Connector = z.input<typeof ConnectorSchema>;
 /** Post-parse shape of {@link Connector} — defaults applied, transforms run (ADR-0122). */
 export type ConnectorParsed = z.infer<typeof ConnectorSchema>;
@@ -964,8 +1113,26 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * plus the cross-field rules that apply only when a connector is *authored inside
  * a stack*, as opposed to a def a plugin builds at runtime and hands to
  * `registerConnector`. `stack.zod.ts` validates the `connectors:` array against
- * this; the base {@link ConnectorSchema} stays a plain object so connector
- * *subtypes* (github / database / …) can still `.extend()` it.
+ * this.
+ *
+ * ⚠️ This used to end "the base {@link ConnectorSchema} stays a plain object so
+ * connector *subtypes* (github / database / …) can still `.extend()` it". That
+ * is NO LONGER TRUE and the sentence is corrected rather than deleted, because
+ * it was quoted verbatim downstream: both published exports are now
+ * `z.preprocess` PIPES (the ADR-0049 retired-default residue stage), and a pipe
+ * is not a `ZodObject`. Measured on the built entry, against a plain-object
+ * control (`WebhookConfigSchema`) that keeps all nine: `.extend()`, `.omit()`,
+ * `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()` and
+ * `.safeExtend()` are all gone from `ConnectorSchema` and from this schema.
+ * `.superRefine()` is the one that survives — it lives on zod's base type — but
+ * ⛔ calling it on a pipe returns a schema with NO read-through `shape`, which
+ * is what the authorable-surface and liveness walkers duck-test, so a
+ * refinement still belongs on the inner object.
+ *
+ * **Subtype route:** extend `ConnectorBaseSchema` and re-wrap the result with
+ * `acceptRetiredDefaultResidue(…, CONNECTOR_RETIRED_KEY_RESIDUE)` — exactly
+ * what this schema does below, and the `EffectiveObjectPermissionSchema`
+ * precedent.
  *
  * One rule applies to EVERY authored entry (#7990, maintainer-ruled 2026-08-12):
  *  - NO entry may inline secrets via `authentication`. A published connector
@@ -983,7 +1150,15 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  *    authoring both the instance and its actions reintroduces drift (§5 non-goals).
  */
 export const DeclarativeConnectorEntrySchema = lazySchema(() =>
-  ConnectorSchema.superRefine((entry, ctx) => {
+  // [#12840 precedent] The ADR-0097 refusals ride on the BASE, INSIDE the
+  // residue stage, for the reason `ObjectPermissionSchema` records: in zod 4
+  // `.superRefine()` on a `ZodObject` returns a `ZodObject` that keeps
+  // `.shape`, while the same call on the residue PIPE returns a schema with no
+  // `.shape` — and the pipe's read-through `shape` is exactly what the
+  // authorable-surface / liveness walkers duck-test. Wrapping second also keeps
+  // this door's residue tolerance identical to the base's rather than a second
+  // dialect.
+  acceptRetiredDefaultResidue(ConnectorBaseSchema.superRefine((entry, ctx) => {
     const isInstance = typeof entry.provider === 'string' && entry.provider.length > 0;
     // #7990 — the one rule that binds EVERY authored entry, descriptor and
     // instance alike: `authentication` is the RUNTIME shape (its secret fields
@@ -1030,7 +1205,7 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         message: `Provider-bound connector instance '${entry.name}' must not author \`triggers\` — the '${entry.provider}' provider derives them from the upstream at boot (ADR-0097 §5).`,
       });
     }
-  }),
+  }), CONNECTOR_RETIRED_KEY_RESIDUE),
 );
 
 export type DeclarativeConnectorEntry = z.input<typeof DeclarativeConnectorEntrySchema>;

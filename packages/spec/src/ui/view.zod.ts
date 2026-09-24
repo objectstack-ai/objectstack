@@ -51,7 +51,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictObject, strictObjectError } from '../shared/strict-object';
+import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
@@ -70,6 +70,12 @@ import { retiredKey } from '../shared/retired-key';
 // docblock for the measurement and for the two routes that were not taken.
 import { MAX_RENDERABLE_SCALE, SCALE_UPPER_BOUND_MESSAGE } from '../shared/scale-ceiling';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
+// [#19514] The text-comparand door the Filter Protocol publishes for the
+// case-insensitive contains operator — the discrimination `FILTER_TEXT_CASES`'
+// two REJECTION rows are about, and the reason text that answers them. Imported
+// rather than restated so this vocabulary and the `$` dialect cannot drift into
+// judging two different sets; the module imports nothing, so no cycle.
+import { isRefusedTextComparand, textComparandRefusalReason } from '../data/filter-text-comparand';
 import { BulkActionDefSchema } from './bulk-action.zod';
 
 /**
@@ -518,6 +524,34 @@ function previewFilterValue(value: unknown): string {
 }
 
 /**
+ * The operators that take their direction from their NAME and ignore `value`.
+ *
+ * Deliberately NOT exported, where {@link VIEW_FILTER_LIST_VALUE_OPERATORS} and
+ * {@link VIEW_FILTER_PAIR_VALUE_OPERATORS} are. Those two exist because a
+ * PRODUCER has to ask the question the schema asks — `@object-ui`'s filter
+ * builder decides `isMultiOperator` and would otherwise keep its own list. This
+ * set answers the opposite question ("may I skip the value check?"), which only
+ * the check below asks; publishing it would enlarge the package's public face to
+ * carry a fact nothing outside this file needs. The vocabulary itself is
+ * declared once, in {@link VIEW_FILTER_OPERATORS}, and this is a subset of it.
+ */
+const VIEW_FILTER_VALUELESS_OPERATORS = [
+  'is_empty', 'is_not_empty', 'is_null', 'is_not_null',
+] as const satisfies readonly ViewFilterOperator[];
+
+/**
+ * The one operator this vocabulary spells for which `FILTER_TEXT_CASES` writes
+ * comparand REJECTION rows — the infix twin of the `$` dialect's `$icontains`
+ * (the `AST_OPERATOR_MAP` row that made them one capability, not two spellings).
+ *
+ * A named constant rather than a literal at the comparison, so the coupling
+ * between "the operator this door judges" and "the spelling the refusal names"
+ * is one declaration. Private for the same reason
+ * {@link VIEW_FILTER_VALUELESS_OPERATORS} is.
+ */
+const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOperator;
+
+/**
  * [#6227] `value` must have the shape the rule's OPERATOR can execute.
  *
  * ## The two-stage failure this closes
@@ -534,33 +568,97 @@ function previewFilterValue(value: unknown): string {
  * module docblock names this schema as the reachable authoring source of the
  * defect.
  *
- * ## Why this mirrors the runtime gate EXACTLY, and refuses to go further
+ * ## Why this mirrors the query path's refusals, and refuses to go further
  *
- * The checks below are `assertListComparandShapes`' three constraints, one for
- * one: `$in`/`$nin` must be an array, `$between` must be a 2-array. Nothing else
- * is judged here, deliberately — #5685 already ruled on the opposite error, where
- * `FieldOperatorsSchema` declared `$gt` as `number | Date | FieldReference` while
- * every first-party producer put an ISO STRING there; the schema was ruled the
- * wrong side and widened to match the runtime. A publish-time gate refusing more
- * than the query path refuses would re-create that mismatch pointing the other
- * way, and would reject stored metadata that executes correctly today.
- * Specifically NOT refused, because the runtime does not refuse them:
+ * The first two checks below are `assertListComparandShapes`' constraints, one
+ * for one: `$in`/`$nin` must be an array, `$between` must be a 2-array. The
+ * third — a SCALAR operator handed an array — is `driver-sql`'s
+ * `assertCompilableComparand` scalar arm. The fourth — a scalar operator handed
+ * NO value (#19751) — is `parseFilterAST`'s undefined-comparand refusal: a
+ * stored rule without `value` lowers to `[field, operator]`, which lowers in
+ * turn to an undefined comparand and is refused for every scalar operator
+ * (thirteen at this change, `icontains` among them); the unary four lower to
+ * `$null` and never reach it.
+ * Nothing beyond those is judged, deliberately — #5685 already ruled on the
+ * opposite error, where `FieldOperatorsSchema` declared `$gt` as
+ * `number | Date | FieldReference` while every first-party producer put an ISO
+ * STRING there; the schema was ruled the wrong side and widened to match the
+ * runtime. A publish-time gate refusing
+ * more than the query path refuses would re-create that mismatch pointing the
+ * other way, and would reject stored metadata that executes correctly today.
+ *
+ * ⚠️ **The scalar arm REVERSES a reading recorded here at #6227**, which said
+ * `equals: ['a','b']` "lowers to a bare `{ field: value }` deep-equality
+ * comparand, which every backend answers". **The backends a lowered view rule
+ * reaches at this change do not agree** — so
+ * each is named rather than generalised, in the present tense:
+ *
+ * - **The SQL family REFUSES** — `driver-sql`, the `driver-turso` /
+ *   `driver-sqlite-wasm` drivers built on it, and turso's `RemoteTransport`. The
+ *   lowered `{ tags: ['a'] }` reaches `driver-sql`'s bare `{ field: value }`
+ *   loop, which calls `assertCompilableComparand(column, '=', value)`; `'='` is
+ *   in that file's `SCALAR_COMPARAND_OPERATORS`, `isBindableComparand(['a'])` is
+ *   `false` (an array is none of the six accepted comparand types —
+ *   `isAcceptedFilterComparand`, `filter-comparand-type.ts`), and the comparand
+ *   is refused with the withheld `INVALID_FILTER` / 400 envelope.
+ * - **`driver-memory` REFUSES** the same shape in the same envelope — `match()`
+ *   runs `assertFilterConditionShape`, whose implicit-equality arm throws on an
+ *   array (`filter-refusal.ts`). That refusal first shipped in
+ *   `@objectstack/driver-memory@17.4.0`; published 17.3.0 returned the row
+ *   stored as `['a']` (run in this change's review; which other rows it
+ *   selected is NOT MEASURED).
+ * - **`driver-mongodb` ANSWERS** — `translateFilter({ tags: ['a'] })` emits
+ *   `{"tags":["a"]}` unchanged (the array falls to the implicit-equality arm),
+ *   and the engine's shared comparand doors — `normalizeFilterComparandTypes`
+ *   and `assertListComparandShapes` — both pass the shape, so the server
+ *   applies MongoDB's equality rule for an array operand: a row matches when
+ *   its stored array EQUALS `['a']` or HOLDS `['a']` as an element, and a row
+ *   storing the scalar `'a'` does not (mingo 7.2.4, over `['a']`, `'a'`,
+ *   `['a','b']`, `['b','a']`, `[['a'],'x']`, `[['a']]` and `'b'`, selects
+ *   `['a']`, `[['a'],'x']` and `[['a']]`). ⚠️ Read at the driver's compile
+ *   face, at those engine doors and through `mingo`; a live `mongod` cell is
+ *   NOT MEASURED.
+ *
+ * Method: `driver-sql` on SQLite, `driver-memory`,
+ * `driver-mongodb`'s `translateFilter` and `mingo` were each run on the
+ * lowered `{ tags: ['a'] }` beside a scalar and an `$in` control;
+ * MySQL, a live Turso server and
+ * a live `mongod` are NOT MEASURED, and so is whether any SQL-family release
+ * before this change answered the shape.
+ *
+ * So **none reads the array as the SCALAR the operator
+ * declares**: `driver-mongodb` returns
+ * rows for a different predicate — array equality, and only on an array-valued
+ * field (live `mongod` NOT MEASURED). The ORIGINAL reading was therefore the one that widened the accept
+ * set past the query path; this arm pulls it back to what `value`'s own
+ * `.describe()` has declared since #6227 — 「every other operator takes a
+ * scalar」.
+ * Direction set by objectui#9050's ruling C′ (「the differences are the
+ * protocol's to close」); prescription registered as the ADR-0087 entry
+ * `view-filter-rule-scalar-operator-array-refused`.
+ *
+ * Specifically NOT refused, because the query path does not refuse them:
  *
  * - **`in: []` / `not_in: []`.** An empty list is a legitimate declared predicate
  *   — "matches nothing" / "matches everything" — and the runtime gate says so in
  *   as many words. Arity is not this check's business for membership; only "is it
  *   a list at all".
- * - **A scalar operator carrying an array** (`equals: ['a','b']`). `equals`
- *   lowers to a bare `{ field: value }` deep-equality comparand
- *   (`convertComparison`), which every backend answers.
  * - **A string operator carrying a number** (`contains: 5`). Lowers to
- *   `$contains: 5`; no backend refuses it.
- * - **A unary operator carrying a value** (`is_empty: ''`). The null predicates
- *   take their direction from the operator NAME — `convertComparison` maps them
- *   to `{ $null: true|false }` and ignores the value position entirely — and the
- *   ObjectUI client deliberately sends a truthy PLACEHOLDER value for both
- *   `isnull` and `isnotnull`. Refusing it would break a live first-party producer
- *   to enforce nothing.
+ *   `$contains: 5`; none of the backends above refuses it (`driver-sql`
+ *   on SQLite and `driver-memory` answer it, `driver-mongodb` compiles it to a
+ *   `$regex`). `icontains` is the ONE
+ *   exception and it is not an analogy — `FILTER_TEXT_CASES` declares that
+ *   comparand refused as data, and {@link checkViewFilterRuleTextComparand}
+ *   below answers those rows and only those rows.
+ * - **A unary operator carrying a value** (`is_empty: ''`, and `is_empty: []`)
+ *   **or carrying none.** The null predicates take their direction from the
+ *   operator NAME — `convertComparison` maps them to `{ $null: true|false }` and
+ *   ignores the value position entirely — and the ObjectUI client deliberately
+ *   sends a truthy PLACEHOLDER value for both `isnull` and `isnotnull`. Refusing
+ *   it would break a live first-party producer to enforce nothing, which is why
+ *   the scalar arm skips them explicitly, BEFORE its absent-value check, rather
+ *   than by accident. `value`'s own `.describe()` carves them out in the same
+ *   words, and they are the only operators on which an absent value parses.
  *
  * ## Why `superRefine` and not `z.discriminatedUnion` (measured, not assumed)
  *
@@ -598,6 +696,15 @@ function previewFilterValue(value: unknown): string {
  * two moments it can be reported. The TAIL deliberately differs: the runtime's
  * closing fact is "the filter was NOT applied", which is false here — nothing
  * ran, the metadata is being refused — so this one prescribes the fix instead.
+ *
+ * The absent-value arm keeps `undefinedComparandRefusal`'s leading sentence,
+ * "Filter comparand at PATH is undefined", with the one substitution the list
+ * and range arms already make: the location is named in the vocabulary the
+ * author wrote — operator and field — because a view rule has no `where.…`
+ * path, and the `$` spelling in that path is not one a view author can write.
+ * Its prescription is this vocabulary's, not the runtime's: the runtime tells a
+ * `$` author to write `{"$eq": null}`, and a view author's equivalent is one of
+ * the valueless operators.
  */
 function checkViewFilterRuleValueShape(
   rule: { field?: unknown; operator?: unknown; value?: unknown },
@@ -630,16 +737,123 @@ function checkViewFilterRuleValueShape(
     return;
   }
 
-  if (!isPair) return;
-  if (Array.isArray(value) && value.length === 2) return;
+  if (isPair) {
+    if (Array.isArray(value) && value.length === 2) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message:
+        `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+        + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
+        + `A range needs exactly two bounds, in order. This is refused at authoring time `
+        + `because the query path refuses it too (400 INVALID_FILTER).`,
+    });
+    return;
+  }
+
+  // Everything left takes a SCALAR — `value`'s own `.describe()` has said so
+  // since #6227 and nothing judged it, so the whole class rode through. The one
+  // carve-out is the one the query path itself makes: the valueless operators,
+  // whose `value` position is discarded by `convertComparison` — so for them
+  // anything goes, an absent value included, and they are answered FIRST.
+  //
+  // [#19751] An ABSENT value is NOT a carve-out on any other operator, though
+  // this comment used to name it as one. The key is optional because the unary
+  // operators need none; every operator that reaches this line takes one. Both
+  // lowerings of a stored rule — the console's and the REST picker route's —
+  // emit an absent value as the two-element `[field, operator]` node, and
+  // `parseFilterAST` refuses that with its undefined-comparand `INVALID_FILTER`
+  // / 400 for every one of these operators (measured over the whole class).
+  // Nothing on the way drops the rule first, so one valueless rule failed every
+  // query that read its view.
+  if ((VIEW_FILTER_VALUELESS_OPERATORS as readonly string[]).includes(operator)) return;
+  if (value === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message:
+        `Filter comparand for operator "${operator}" on field "${field}" is undefined. `
+        + `The rule carries no value, and "${operator}" compares the field against one — write `
+        + `the value to compare against, or, if the rule means the field has no value, use an `
+        + `operator that takes none ("${VIEW_FILTER_VALUELESS_OPERATORS.join('" / "')}"), which `
+        + `reads its direction from its name. This is refused at authoring time because the `
+        + `query path refuses it too (400 INVALID_FILTER).`,
+    });
+    return;
+  }
+  if (!Array.isArray(value)) return;
   ctx.addIssue({
     code: 'custom',
     path: ['value'],
     message:
-      `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+      `Operator "${operator}" on field "${field}" requires a SCALAR value. `
       + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
-      + `A range needs exactly two bounds, in order. This is refused at authoring time `
-      + `because the query path refuses it too (400 INVALID_FILTER).`,
+      + `Only "${VIEW_FILTER_LIST_VALUE_OPERATORS.join('" / "')}" take a list and only `
+      + `"${VIEW_FILTER_PAIR_VALUE_OPERATORS.join('" / "')}" takes a [min, max] range — write `
+      + `${value.length > 0 ? previewFilterValue(value[0]) : 'the value to compare against'} `
+      + `to compare against one value, or use "${VIEW_FILTER_LIST_VALUE_OPERATORS[0]}" to test `
+      + `membership of the list.`,
+  });
+}
+
+/**
+ * [#19514] `icontains` takes the comparand `FILTER_TEXT_CASES` declares.
+ *
+ * ## The half this answers, and the half it leaves alone
+ *
+ * `@objectstack/spec/data` publishes two REJECTION rows for the
+ * case-insensitive contains operator — an EMPTY comparand and a NON-STRING one,
+ * each `code: 'INVALID_FILTER'`, `mustMention: ['$icontains']` — and publishes
+ * the discrimination those rows are about as {@link isRefusedTextComparand},
+ * with the author-facing half as {@link textComparandRefusalReason}. Three
+ * objectui faces already seat that reason in their own envelopes.
+ *
+ * ⭐ This arm CALLS the predicate rather than restating it. A hand-written
+ * `typeof value !== 'string' || value === ''` here would be a second spelling of
+ * a rule the table owns, and the two would drift the first time a row moved —
+ * which is the failure the predicate was lifted into spec to end. A row added to
+ * the table therefore reaches this door without an edit here.
+ *
+ * ## Three carve-outs, each the caller's own and none of them a new row
+ *
+ * 1. **ABSENCE.** `isRefusedTextComparand(undefined)` answers `true`, and its
+ *    docblock says in as many words that a vocabulary with an "absent" must test
+ *    for it BEFORE asking. A view rule is exactly that vocabulary — `value` is
+ *    optional on every rule — so an omitted comparand is left to whatever judges
+ *    absence, and the table says nothing about it.
+ * 2. **ARRAYS** are {@link checkViewFilterRuleValueShape}'s business. One defect,
+ *    one issue: an author who wrote `icontains: ['a']` is told about the SHAPE,
+ *    which is what they have to fix first.
+ * 3. **THE SIBLING OPERATORS.** `contains` / `starts_with` / `ends_with`
+ *    keep the answer they give today. Widening by
+ *    analogy is the table's decision to make, never this door's.
+ *
+ * ## The `$` twin is named here, not in the contract half
+ *
+ * `textComparandRefusalReason` names the spelling that ARRIVED — `icontains`
+ * from this vocabulary — and deliberately does not substitute the `$` dialect's
+ * `$icontains` for it, because a view author cannot write that key. Naming the
+ * wire operator is the FACE's job, and this tail does it: that is where the
+ * refusal the author will hit at query time is spelled, and it is what the
+ * published rows' `mustMention` is written in.
+ */
+function checkViewFilterRuleTextComparand(
+  rule: { field?: unknown; operator?: unknown; value?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (rule.operator !== VIEW_FILTER_TEXT_COMPARAND_OPERATOR) return;
+  const value = rule.value;
+  if (value === undefined) return;
+  if (Array.isArray(value)) return;
+  if (!isRefusedTextComparand(value)) return;
+  const field = typeof rule.field === 'string' ? rule.field : '<field>';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['value'],
+    message:
+      `The ${textComparandRefusalReason(field, VIEW_FILTER_TEXT_COMPARAND_OPERATOR, value)}. `
+      + `This rule lowers to the wire operator "$icontains", where the query path refuses the `
+      + `same comparand (400 INVALID_FILTER).`,
   });
 }
 
@@ -712,16 +926,28 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
    * Filter value (optional for unary operators like is_empty, is_null).
    *
    * The accepted SHAPE is coupled to `operator` by
-   * {@link checkViewFilterRuleValueShape} (#6227).
+   * {@link checkViewFilterRuleValueShape} (#6227, scalar arm #19514), and the
+   * `icontains` COMPARAND by {@link checkViewFilterRuleTextComparand} (#19514).
    */
   value: z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.union([z.string(), z.number()]))])
     .optional().describe(
       'Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an '
       + 'array (any length, including []), `between` takes exactly [min, max], every other '
       + 'operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / '
-      + 'is_not_null) take their direction from the operator name and ignore this key.',
+      + 'is_not_null) take their direction from the operator name and ignore this key. '
+      + 'One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY '
+      + 'STRING, the comparand the Filter Protocol conformance table declares for it — an '
+      + 'empty comparand constrains nothing and a non-string one would answer a query nobody '
+      + 'wrote, and both are refused at the query path too.',
     ),
-}).superRefine(checkViewFilterRuleValueShape).describe('View filter rule'));
+}).superRefine((rule, ctx) => {
+  // ONE refinement calling two checks, rather than two chained `.superRefine`s:
+  // zod runs every check in the chain even after one has added an issue, so a
+  // chain would report an `icontains` array TWICE — once for its shape and once
+  // for its comparand. The order is the order an author fixes them in.
+  checkViewFilterRuleValueShape(rule, ctx);
+  checkViewFilterRuleTextComparand(rule, ctx);
+}).describe('View filter rule'));
 
 export type ViewFilterRule = z.input<typeof ViewFilterRuleSchema>;
 /** Post-parse shape of {@link ViewFilterRule} — defaults applied, transforms run (ADR-0122). */
@@ -827,29 +1053,35 @@ export const ListColumnSchema = lazySchema(() => strictObject({
   surface: 'this list column',
   history: VIEW_HISTORY,
 }, {
-  field: z.string().describe('Field name (snake_case)'),
-  label: I18nLabelSchema.optional().describe('Display label override'),
-  width: z.number().positive().optional().describe('Column width in pixels'),
-  align: z.enum(['left', 'center', 'right']).optional().describe('Text alignment'),
-  hidden: z.boolean().optional().describe('Hide column by default'),
-  sortable: z.boolean().optional().describe('Allow sorting by this column'),
-  resizable: z.boolean().optional().describe('Allow resizing this column'),
-  wrap: z.boolean().optional().describe('Allow text wrapping'),
-  type: z.string().optional().describe('Renderer type override (e.g., "currency", "date")'),
+  field: z.string().describe('Field name (snake_case)').meta({ title: 'Field' }),
+  label: I18nLabelSchema.optional().describe('Display label override').meta({ title: 'Label' }),
+  width: z.number().positive().optional().describe('Column width in pixels').meta({ title: 'Width (px)' }),
+  align: z.enum(['left', 'center', 'right']).optional().describe('Text alignment').meta({ title: 'Alignment' }),
+  hidden: z.boolean().optional().describe('Hide column by default').meta({ title: 'Hidden' }),
+  sortable: z.boolean().optional().describe('Allow sorting by this column').meta({ title: 'Sortable' }),
+  resizable: z.boolean().optional().describe('Allow resizing this column').meta({ title: 'Resizable' }),
+  wrap: z.boolean().optional().describe('Allow text wrapping').meta({ title: 'Wrap Text' }),
+  type: z.string().optional().describe('Renderer type override (e.g., "currency", "date")')
+    .meta({ title: 'Renderer Type' }),
 
   /** Pinning (Airtable-style frozen columns) */
-  pinned: z.enum(['left', 'right']).optional().describe('Pin/freeze column to left or right side'),
+  pinned: z.enum(['left', 'right']).optional().describe('Pin/freeze column to left or right side')
+    .meta({ title: 'Pinned' }),
 
   /** Column Footer Summary (Airtable-style aggregation) */
   summary: z.union([ColumnSummarySchema, ColumnSummaryConfigSchema]).optional()
-    .describe('Footer aggregation for this column — the function alone, or { type, field } to aggregate another field'),
+    .describe('Footer aggregation for this column — the function alone, or { type, field } to aggregate another field')
+    .meta({ title: 'Summary' }),
 
   /** Compound cell (Airtable-style): render another field inline before the value */
-  prefix: ColumnPrefixSchema.optional().describe('Field rendered inline before this cell value'),
+  prefix: ColumnPrefixSchema.optional().describe('Field rendered inline before this cell value')
+    .meta({ title: 'Prefix' }),
 
   /** Interaction */
-  link: z.boolean().optional().describe('Functions as the primary navigation link (triggers View navigation)'),
-  action: z.string().optional().describe('Registered Action ID to execute when clicked'),
+  link: z.boolean().optional().describe('Functions as the primary navigation link (triggers View navigation)')
+    .meta({ title: 'Primary Link' }),
+  action: z.string().optional().describe('Registered Action ID to execute when clicked')
+    .meta({ title: 'Click Action' }),
 }));
 
 /**
@@ -1288,15 +1520,15 @@ export const ViewTabSchema = lazySchema(() => strictObject({
   surface: 'this view tab',
   history: VIEW_HISTORY,
 }, {
-  name: SnakeCaseIdentifierSchema.describe('Tab identifier (snake_case)'),
-  label: I18nLabelSchema.optional().describe('Display label'),
-  icon: z.string().optional().describe('Tab icon name'),
-  view: z.string().optional().describe('Referenced list view name from listViews'),
-  filter: z.array(ViewFilterRuleSchema).optional().describe('Tab-specific filter criteria'),
-  order: z.number().int().min(0).optional().describe('Tab display order'),
-  pinned: z.boolean().default(false).describe('Pin tab (cannot be removed by users)'),
-  isDefault: z.boolean().default(false).describe('Set as the default active tab'),
-  visible: z.boolean().default(true).describe('Tab visibility'),
+  name: SnakeCaseIdentifierSchema.describe('Tab identifier (snake_case)').meta({ title: 'Name' }),
+  label: I18nLabelSchema.optional().describe('Display label').meta({ title: 'Label' }),
+  icon: z.string().optional().describe('Tab icon name').meta({ title: 'Icon' }),
+  view: z.string().optional().describe('Referenced list view name from listViews').meta({ title: 'List View' }),
+  filter: z.array(ViewFilterRuleSchema).optional().describe('Tab-specific filter criteria').meta({ title: 'Filter' }),
+  order: z.number().int().min(0).optional().describe('Tab display order').meta({ title: 'Display Order' }),
+  pinned: z.boolean().default(false).describe('Pin tab (cannot be removed by users)').meta({ title: 'Pinned' }),
+  isDefault: z.boolean().default(false).describe('Set as the default active tab').meta({ title: 'Default Tab' }),
+  visible: z.boolean().default(true).describe('Tab visibility').meta({ title: 'Visible' }),
 }).describe('Tab configuration for multi-tab view interface'));
 
 /**
@@ -1765,9 +1997,17 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
  * EXECUTING the pinned declarations, not by reading them, and RE-READ at pin
  * `87af769e9` on 2026-09-20 — every one of the seven anchors below moved on
- * that hop, one of them lost the symbol it quoted, and the quotes now read the
- * NEW tree; each anchor quotes the line it was read at, so the next pin bump
- * reds instead of rotting (`check:objectui-pin-citations`):
+ * that hop, one of them lost the symbol it quoted, and the quotes read that
+ * tree. RE-READ again at pin `62597c588` on 2026-09-23: that bump redded the
+ * two `ObjectMap.tsx` anchors, as designed, and they are re-pointed below —
+ * objectui `2252653d0` rewrote the docblock and dev warning ABOVE
+ * `getMapConfig` (the remedy for a top-level `style` now names the declared
+ * `map: { style }`, which the flatten whitelist carries out as `mapStyle`),
+ * while `getMapConfig` itself is byte-identical, so both read points moved 19
+ * lines and neither changed what it does; the other five anchors sit in files
+ * byte-identical to `87af769e9`. Each anchor quotes the line it was read at,
+ * so the next pin bump reds instead of rotting
+ * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:146` first line
@@ -1788,10 +2028,10 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. `getMapConfig` consults that `safeParse`
- *   (`packages/plugin-map/src/ObjectMap.tsx:385` first line
+ *   (`packages/plugin-map/src/ObjectMap.tsx:404` first line
  *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
  *   whether to `console.warn`, then returns a spread of the AUTHORED block
- *   (`:390` first line `return { ...config, style: config.style || style };`),
+ *   (`:409` first line `return { ...config, style: config.style || style };`),
  *   undeclared key and all. That spread is reached by objectui's own
  *   component-node `map` prop, never by this face's flatten product ("neither
  *   flattener emits a `map` key at all", `getMapConfig`).
@@ -1810,10 +2050,13 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (`schema.map?.style`) while this block did not declare it, so strictness here
  * refused a style URL the renderer honours — an author could not declare a map
  * style through this face at all (#18406, director decision batch #153 item 4).
- * The two key sets match again. Re-read at the `.objectui-sha` pin `87af769e9`
- * (2026-09-20; each of these three moved on the hop and each was re-READ):
+ * The two key sets match again. Re-read at the `.objectui-sha` pin `62597c588`
+ * (2026-09-23: `objectql.zod.ts` and `plugin-map.mdx` are byte-identical to
+ * `87af769e9`, and the `ObjectMap.tsx` read MOVED `377` -> `396` with its line
+ * byte-identical; at `87af769e9`, 2026-09-20, each of these three had moved
+ * and each was re-READ):
  * `packages/types/src/zod/objectql.zod.ts:1574` declares the eight keys,
- * `packages/plugin-map/src/ObjectMap.tsx:377` reads
+ * `packages/plugin-map/src/ObjectMap.tsx:396` reads
  * `schema.mapStyle || schema.map?.style`, and objectui's own
  * `content/docs/plugins/plugin-map.mdx:143` documents `style` in the block —
  * so the divergence was against the documented surface this docblock cites, not
@@ -2248,11 +2491,27 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Data Source Configuration */
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
   
-  /** Shared Query Config */
+  /**
+   * Shared Query Config
+   *
+   * `columns` is the PROJECTION member of the per-view field composition
+   * declared on `hiddenFields` / `fieldOrder` below: it is the candidate set
+   * and the baseline order, `hiddenFields` subtracts from it, and `fieldOrder`
+   * orders what survives. Neither of those two keys can add a field this list
+   * omits. An EMPTY list declares no projection, so neither of them applies
+   * (step 1 of the composition docblock below states the boundary).
+   */
   columns: z.union([
     z.array(z.string()), // Legacy: simple field names
     z.array(ListColumnSchema), // Enhanced: detailed column config
-  ]).describe('Fields to display as columns'),
+  ]).describe(
+    'Fields to display as columns — the PROJECTION of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the '
+    + 'baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. '
+    + '`hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares '
+    + 'no projection, so neither of them applies: which columns show is then left to the '
+    + 'renderer (objectui\'s `ListView` grid derives the object\'s default columns).',
+  ),
   filter: z.array(ViewFilterRuleSchema).optional().describe('Filter criteria (JSON Rules)'),
   /**
    * Sort order — the structured `{ field, order }[]` array, and only that.
@@ -2303,8 +2562,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
       id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
     },
   }, {
-    field: z.string(),
-    order: z.enum(['asc', 'desc'])
+    // Titles mirror the shared `SortItemSchema` (`shared/enums.zod.ts`): this
+    // entry is an INLINE shape, so titling that schema never reached it.
+    field: z.string().meta({ title: 'Field' }),
+    order: z.enum(['asc', 'desc']).meta({ title: 'Direction' }),
   }), {
     // Only the spelling that used to be legal gets the retirement message; a
     // number, an object, anything else keeps zod's default `invalid_type`.
@@ -2380,9 +2641,56 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Row Color (Airtable-style) */
   rowColor: RowColorConfigSchema.optional().describe('Color rows based on field value'),
 
-  /** Field Visibility & Ordering per View (Airtable-style) */
-  hiddenFields: z.array(z.string()).optional().describe('Fields to hide in this specific view'),
-  fieldOrder: z.array(z.string()).optional().describe('Explicit field display order for this view'),
+  /**
+   * Field Visibility & Ordering per View (Airtable-style)
+   *
+   * ## The composition, declared (#15184 ruling B, 2026-09-11)
+   *
+   * Three keys on this schema together build one field list, and they
+   * COMPOSE — they are not three ways to say the same thing, and none of them
+   * is a fallback for another:
+   *
+   * 1. `columns` is the **projection**: the candidate set and the baseline
+   *    order. An EMPTY `columns` declares no projection, so steps 2 and 3 do
+   *    not apply: which columns show is left to the renderer (objectui's
+   *    `ListView` hands its grid no columns, and the grid derives the
+   *    object's default ones).
+   * 2. `hiddenFields` **subtracts** from that projection: every name it lists
+   *    is removed. A name it lists that `columns` never projected subtracts
+   *    nothing.
+   * 3. `fieldOrder` **orders what survives**: it sorts the set left after the
+   *    subtraction and never adds to it. A surviving column absent from
+   *    `fieldOrder` sorts LAST, after every listed one, keeping its
+   *    `columns`-relative order among its fellow unlisted columns; a name
+   *    `fieldOrder` lists that did not survive orders nothing.
+   *
+   * ⛔ This is a DECLARATION of the order of application, not a precedence
+   * rule between rival spellings: `columns` and `fieldOrder` never contradict
+   * each other, because one selects and the other sorts.
+   *
+   * The composition was ruled into the contract rather than retired to one key
+   * because it is the shape objectui's list-view renderer already applies —
+   * `packages/plugin-list/src/ListView.tsx`, the `effectiveFields` memo, runs
+   * these three steps in this order, with one more between steps 1 and 2: it
+   * drops the columns field-level security denies the current user read on.
+   * The ledger row
+   * (`packages/spec/liveness/view.json`, `/props/list/children/fieldOrder`)
+   * carries the measured citation; `view-field-order-composition.pin.test.ts`
+   * holds this declaration and the accept set together.
+   */
+  hiddenFields: z.array(z.string()).optional().describe(
+    'Fields to hide in this specific view — the SUBTRACTION of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the '
+    + '`columns` projection before `fieldOrder` orders the remainder. A name `columns` never '
+    + 'projected subtracts nothing.',
+  ),
+  fieldOrder: z.array(z.string()).optional().describe(
+    'Explicit field display order for this view — the ORDERING of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus '
+    + '`hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts '
+    + 'LAST, after every listed one, keeping its `columns`-relative order; a name listed here '
+    + 'that did not survive orders nothing.',
+  ),
 
   /** Row & Bulk Actions */
   rowActions: z.array(z.string()).optional().describe('Actions available for individual row items'),
@@ -2856,7 +3164,9 @@ const FormFieldBaseSchema = lazySchema(() => {
   colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
    * [#2578] Relative field width. 'full' resolves to the form grid's full
-   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:153`); which
+   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:154` at
+   * `62597c588`, one line down from `:153` at `87af769e9` — an import was
+   * added above it, the function is unchanged); which
    * container-query tiers receive the span class is the form renderer's, not
    * this key's.
    * At the `.objectui-sha` pin `87af769e9` the renderer emits one clamped
@@ -2868,9 +3178,11 @@ const FormFieldBaseSchema = lazySchema(() => {
    * objectui#9244 / objectui#9253 (objectui `bd09957380`, 2026-09-12) land
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
-   * 720px) no longer reproduces at the pin this repo builds against.
+   * 720px) no longer reproduces at the pin this repo builds against
+   * (`.objectui-sha` = `62597c588`, re-read 2026-09-23: `form.tsx` is
+   * byte-identical to `87af769e9`, so `spanLadderFor` still emits the ladder).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `87af769e9`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `62597c588`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -2973,7 +3285,7 @@ const FormFieldBaseSchema = lazySchema(() => {
   visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
-  return z.object(shape, {
+  const base = z.object(shape, {
     error: strictObjectError({
       ...VISIBILITY_STRICT_OPTIONS,
       // #8202 — this shape names ITSELF. The shared table's `'this view/page
@@ -3009,6 +3321,22 @@ const FormFieldBaseSchema = lazySchema(() => {
       aliases: { disabled: 'readonly' },
     }, shape),
   });
+  // [#19581] Sealed HERE, on the open base, rather than on the `.strict()`
+  // extension below. Three instruments read these two declarations and all
+  // three keep reading them unchanged this way: the literal `z.object(shape,
+  // { error: strictObjectError(…) })` above is still the expression the
+  // strictness ledger's AST reader counts as this file's one `authorable`
+  // strip site (see this schema's docblock), `FormFieldSchema`'s expression
+  // below is still the composition `declaration-map` unwinds to reach
+  // `FormFieldBaseSchema`, and `closedObject` reaches the extension anyway —
+  // `util.clone()` rebuilds through `_zod.constr`, so `.extend()` and
+  // `.strict()` both carry the seal forward. Sealing an OPEN shape is a no-op
+  // by itself (it has no unknown key to refuse); the extension is where it
+  // bites, and without it that member is the only non-aborted arm of the
+  // `z.union([z.string(), FormFieldSchema])` a section's `fields` uses, so zod
+  // returns its issues unwrapped instead of the `invalid_union` this door's
+  // diagnosis is built on.
+  return closedObject(base);
 });
 
 /**
@@ -5836,8 +6164,25 @@ export type ViewParsed = z.infer<typeof ViewSchema>;
 export type ViewItem = z.input<typeof ViewItemSchema>;
 /** A ViewItem record as it travels the WIRE — the authoring shape plus Studio's round-trip keys (#5074). */
 export type ViewItemWire = z.input<typeof ViewItemWireSchema>;
-/** Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095). */
-export type ViewMetadata = z.input<typeof ViewMetadataSchema>;
+/**
+ * Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095) —
+ * the union of the INPUT types of the members {@link ViewMetadataSchema}'s union runs, read off
+ * {@link VIEW_METADATA_MEMBERS} (the union's member list by construction).
+ *
+ * [#19871] Deliberately NOT `z.input<typeof ViewMetadataSchema>`. That schema is a `z.preprocess`,
+ * whose input type is `unknown`, and its union's members are cast to `z.ZodTypeAny` where the
+ * union is built — so every type derived from the schema itself is `unknown`, and this name used to
+ * type-check any body at all. `view-metadata-type.test.ts` pins that `unknown` and an undeclared
+ * key are refused here, and that a body of each member still type-checks.
+ *
+ * A static type, not the door's verdict, in both directions: the door accepts bodies this type
+ * refuses (the preprocess removes the console's row `id`s, and three members strip undeclared
+ * top-level keys), and refuses bodies it admits — the identity precondition, the members'
+ * refinements, and a body that mixes keys of different members, because TypeScript checks an
+ * object literal's keys against the union as a whole and the container member's keys are all
+ * optional. `ViewMetadataSchema` remains the only judge.
+ */
+export type ViewMetadata = z.input<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
 /** Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122). */
 export type ViewMetadataParsed = z.infer<typeof ViewMetadataSchema>;
 export type ViewScope = z.input<typeof ViewScopeSchema>;

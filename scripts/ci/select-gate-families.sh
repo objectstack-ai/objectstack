@@ -117,6 +117,18 @@
 #                          as its population, reads the workflow tree and
 #                          .github/actions to learn which self-tests CI runs,
 #                          and spawns those self-tests.
+#   migration_registry     `pnpm --filter @objectstack/spec
+#                          check:migration-registry` (#19753): tsx runs
+#                          packages/spec/scripts/build-migration-registry.ts,
+#                          its own self-test and then its check. It reads the
+#                          generated registry and the entry directories it
+#                          concatenates -- both under
+#                          packages/spec/src/migrations/ -- plus its own
+#                          source, the package manifest pnpm resolves the
+#                          script through, and the package tsconfig.json tsx
+#                          loads from that directory (which extends the root
+#                          one, and root configuration runs every family).
+#                          Nothing else in the workspace, nothing outside it.
 #
 # Root configuration (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
 # `turbo.json`, `tsconfig.json`, `eslint.config.mjs`, .gitignore,
@@ -154,6 +166,17 @@
 # behind the selector, or making one of these read-sets smaller -- is again a
 # maintainer call, taken here, under this script's self-test.
 #
+# ## migration_registry ADDS a gate to the PR path; it scopes nothing away
+#
+# The other nine families were steps that ran on every PR before the selector
+# existed. `check:migration-registry` ran in no CI step at all, so a PR that
+# edited a migration entry without regenerating registry.ts shipped a stale,
+# published registry with every required check green (#19753). The maintainer
+# ruled it onto the required job as a scoped step, verbatim 「同意 A′」
+# (#19753): every PR is judged, and the step runs when a change touches the
+# read-set declared above. Its skip is a RATCHET-grade claim -- no changed path
+# is one the gate reads -- not the weaker tooling-self-test claim of #19498.
+#
 # ## The interface
 #
 #   OS_GATE_EVENT_NAME            `github.event_name`
@@ -172,7 +195,7 @@ set -euo pipefail
 # The family ids, in the order the job runs them. `--families` prints them so
 # the self-test can pin the workflow's `if:` set against this list without a
 # second transcription.
-FAMILIES='slot_lookup query_options_erasure entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock'
+FAMILIES='migration_registry slot_lookup query_options_erasure entry_guard comment_mask_corpus pm_dispatch_gates declared_population_live bare_root_worklist self_test_workflow_commands verify_lock'
 
 if [ "${1:-}" = '--families' ]; then
   for id in $FAMILIES; do echo "$id"; done
@@ -470,6 +493,21 @@ family_reads() {
       is_masked_source "$path" && return 0
       case "$class" in
         docs|changeset|workflow|agent-config|scripts|workspace|verify-lock) return 1 ;;
+        *) return 0 ;;
+      esac
+      ;;
+    migration_registry)
+      # The read-set declared in the header, named path by path: the migration
+      # tree (the entries AND the generated registry -- an edit to either side
+      # alone is exactly the drift this gate reports), the generator, and the
+      # two package files that decide how it runs. Every other spec file skips.
+      case "$path" in
+        packages/spec/src/migrations/*) return 0 ;;
+        packages/spec/scripts/build-migration-registry.ts) return 0 ;;
+        packages/spec/package.json|packages/spec/tsconfig.json) return 0 ;;
+      esac
+      case "$class" in
+        docs|changeset|workflow|agent-config|scripts|verify-lock|workspace) return 1 ;;
         *) return 0 ;;
       esac
       ;;

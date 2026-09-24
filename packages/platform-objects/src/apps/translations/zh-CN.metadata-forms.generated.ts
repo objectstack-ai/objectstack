@@ -730,6 +730,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "表格选项",
         description: "仅 Grid 表格的显示选项"
       },
+      pagination: {
+        label: "分页",
+        description: "每页条数与每页条数选项——所有视图类型都接受，不只是 Grid 表格"
+      },
       kanban: {
         label: "看板配置",
         description: "看板专属配置"
@@ -786,6 +790,48 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "列",
         helpText: "要展示的列（来自所选对象的字段名）"
       },
+      "columns.field": {
+        label: "字段"
+      },
+      "columns.label": {
+        label: "显示名称"
+      },
+      "columns.width": {
+        label: "宽度（像素）"
+      },
+      "columns.align": {
+        label: "对齐方式"
+      },
+      "columns.hidden": {
+        label: "隐藏"
+      },
+      "columns.sortable": {
+        label: "可排序"
+      },
+      "columns.resizable": {
+        label: "可调整大小"
+      },
+      "columns.wrap": {
+        label: "自动换行"
+      },
+      "columns.type": {
+        label: "渲染器类型"
+      },
+      "columns.pinned": {
+        label: "固定"
+      },
+      "columns.summary": {
+        label: "汇总"
+      },
+      "columns.prefix": {
+        label: "前缀"
+      },
+      "columns.link": {
+        label: "主链接"
+      },
+      "columns.action": {
+        label: "点击操作"
+      },
       filter: {
         label: "筛选",
         helpText: "筛选条件——与列表工具栏相同的可视化构建器，运算符与取值输入随字段类型变化"
@@ -793,6 +839,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sort: {
         label: "排序",
         helpText: "默认排序方式"
+      },
+      "sort.field": {
+        label: "字段"
+      },
+      "sort.order": {
+        label: "排序方向"
       },
       searchableFields: {
         label: "可搜索字段",
@@ -842,6 +894,33 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       tabs: {
         label: "标签页",
         helpText: "视图内筛选标签页——每个标签页应用各自的筛选规则"
+      },
+      "tabs.name": {
+        label: "名称"
+      },
+      "tabs.label": {
+        label: "显示名称"
+      },
+      "tabs.icon": {
+        label: "图标"
+      },
+      "tabs.view": {
+        label: "列表视图"
+      },
+      "tabs.filter": {
+        label: "筛选"
+      },
+      "tabs.order": {
+        label: "显示顺序"
+      },
+      "tabs.pinned": {
+        label: "固定"
+      },
+      "tabs.isDefault": {
+        label: "默认标签页"
+      },
+      "tabs.visible": {
+        label: "可见"
       },
       appearance: {
         label: "外观",

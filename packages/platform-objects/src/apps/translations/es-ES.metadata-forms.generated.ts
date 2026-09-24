@@ -730,6 +730,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Opciones de tabla",
         description: "Opciones de visualización solo de cuadrícula."
       },
+      pagination: {
+        label: "Paginación",
+        description: "Tamaño de página y opciones de tamaño de página — los aceptan todos los tipos de vista, no solo la cuadrícula."
+      },
       kanban: {
         label: "Tablero Kanban",
         description: "Configuración de tablero específica de Kanban."
@@ -786,6 +790,48 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Columnas",
         helpText: "Columnas que mostrar (nombres de campo del objeto seleccionado)"
       },
+      "columns.field": {
+        label: "Campo"
+      },
+      "columns.label": {
+        label: "Etiqueta"
+      },
+      "columns.width": {
+        label: "Ancho (px)"
+      },
+      "columns.align": {
+        label: "Alineación"
+      },
+      "columns.hidden": {
+        label: "Oculta"
+      },
+      "columns.sortable": {
+        label: "Ordenable"
+      },
+      "columns.resizable": {
+        label: "Redimensionable"
+      },
+      "columns.wrap": {
+        label: "Ajustar texto"
+      },
+      "columns.type": {
+        label: "Tipo de renderizador"
+      },
+      "columns.pinned": {
+        label: "Fijada"
+      },
+      "columns.summary": {
+        label: "Resumen"
+      },
+      "columns.prefix": {
+        label: "Prefijo"
+      },
+      "columns.link": {
+        label: "Enlace principal"
+      },
+      "columns.action": {
+        label: "Acción al hacer clic"
+      },
       filter: {
         label: "Filtro",
         helpText: "Condiciones de filtro — el mismo constructor visual que la barra de herramientas de la lista, con operadores y entradas de valor según el tipo de campo"
@@ -793,6 +839,12 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       sort: {
         label: "Orden",
         helpText: "Orden predeterminado"
+      },
+      "sort.field": {
+        label: "Campo"
+      },
+      "sort.order": {
+        label: "Dirección"
       },
       searchableFields: {
         label: "Campos buscables",
@@ -842,6 +894,33 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       tabs: {
         label: "Pestañas",
         helpText: "Pestañas de filtro en la vista: cada pestaña aplica sus propias reglas de filtro"
+      },
+      "tabs.name": {
+        label: "Nombre"
+      },
+      "tabs.label": {
+        label: "Etiqueta"
+      },
+      "tabs.icon": {
+        label: "Icono"
+      },
+      "tabs.view": {
+        label: "Vista de lista"
+      },
+      "tabs.filter": {
+        label: "Filtro"
+      },
+      "tabs.order": {
+        label: "Orden de visualización"
+      },
+      "tabs.pinned": {
+        label: "Fijada"
+      },
+      "tabs.isDefault": {
+        label: "Pestaña predeterminada"
+      },
+      "tabs.visible": {
+        label: "Visibilidad"
       },
       appearance: {
         label: "Apariencia",

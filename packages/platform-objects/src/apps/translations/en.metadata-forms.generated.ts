@@ -730,6 +730,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Table options",
         description: "Grid-only display options."
       },
+      pagination: {
+        label: "Pagination",
+        description: "Page size and page-size options — every view type accepts them, not only grids."
+      },
       kanban: {
         label: "Kanban",
         description: "Kanban-specific board configuration."
@@ -786,6 +790,48 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Columns",
         helpText: "Columns to display (field names from selected object)"
       },
+      "columns.field": {
+        label: "Field"
+      },
+      "columns.label": {
+        label: "Label"
+      },
+      "columns.width": {
+        label: "Width (px)"
+      },
+      "columns.align": {
+        label: "Alignment"
+      },
+      "columns.hidden": {
+        label: "Hidden"
+      },
+      "columns.sortable": {
+        label: "Sortable"
+      },
+      "columns.resizable": {
+        label: "Resizable"
+      },
+      "columns.wrap": {
+        label: "Wrap Text"
+      },
+      "columns.type": {
+        label: "Renderer Type"
+      },
+      "columns.pinned": {
+        label: "Pinned"
+      },
+      "columns.summary": {
+        label: "Summary"
+      },
+      "columns.prefix": {
+        label: "Prefix"
+      },
+      "columns.link": {
+        label: "Primary Link"
+      },
+      "columns.action": {
+        label: "Click Action"
+      },
       filter: {
         label: "Filter",
         helpText: "Filter conditions — same visual builder as the list toolbar, with field-type-aware operators and value inputs"
@@ -793,6 +839,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       sort: {
         label: "Sort",
         helpText: "Default sort order"
+      },
+      "sort.field": {
+        label: "Field"
+      },
+      "sort.order": {
+        label: "Direction"
       },
       searchableFields: {
         label: "Searchable Fields",
@@ -842,6 +894,33 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       tabs: {
         label: "Tabs",
         helpText: "In-view filter tabs — each tab applies its own filter rules"
+      },
+      "tabs.name": {
+        label: "Name"
+      },
+      "tabs.label": {
+        label: "Label"
+      },
+      "tabs.icon": {
+        label: "Icon"
+      },
+      "tabs.view": {
+        label: "List View"
+      },
+      "tabs.filter": {
+        label: "Filter"
+      },
+      "tabs.order": {
+        label: "Display Order"
+      },
+      "tabs.pinned": {
+        label: "Pinned"
+      },
+      "tabs.isDefault": {
+        label: "Default Tab"
+      },
+      "tabs.visible": {
+        label: "Visible"
       },
       appearance: {
         label: "Appearance",

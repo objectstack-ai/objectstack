@@ -1222,7 +1222,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // Reading the two ownership markers — ONE place, decoration included (#18680).
 //
 // The two constants above describe the BARE directive and still do: they are
-// exported, a sibling gate imports the claim one (`check-clause2-carriers.mjs`)
+// exported, a sibling tool imports the claim one (`post-stamped.mjs`)
 // and several cases here assert on them directly, so their semantics are held
 // still on purpose. What was missing is the READING — how a line written by a
 // seat is offered to them.
@@ -2705,10 +2705,9 @@ export function branchNameTarget(ref) {
  *
  * ⚠️ This relation answers "is there a PR on this card", NOT "is the card
  * finished". H8's MERGED side needs the second question and asks it of
- * `prFullyDeliversCard` below; every other reader here — H8's open side,
- * `claimDelivery`, and the pairing `check-clause2-carriers` derives — wants
- * this wide one, because a half in flight is live work. ⛔ Do
- * not narrow it here to serve H8: that would make the live half invisible to
+ * `prFullyDeliversCard` below; every other reader here — H8's open side and
+ * `claimDelivery` — wants this wide one, because a half in flight is live
+ * work. ⛔ Do not narrow it here to serve H8: that would make the live half invisible to
  * the rows that exist to see it.
  *
  * ⭐ And ⛔ not narrowed for a reader that needs the stronger question either
@@ -5488,8 +5487,9 @@ export function claimedBranches(body) {
  *
  * ⭐ An unparsed claim is an UNCLASSIFIED result, ⛔ never a "no". Its three
  * consequences are all silent and all wrong in different directions: H20/H27
- * probe a branch the seat is no longer on, `check-clause2-carriers` reads a
- * SUPERSEDED declaration as if it were the current one (measured on #16322 —
+ * probe a branch the seat is no longer on, `check-clause2-carriers` (deleted
+ * since) read a SUPERSEDED declaration as if it were the current one (measured
+ * on #16322 —
  * two rounds, a director re-review and a re-issued claim to clear), and the
  * near-miss on the same card is sharper still — a fallback whose older claim
  * happens to AGREE is a green that is right for the wrong reason and nothing
@@ -6698,9 +6698,10 @@ export function h30QueueRotting(issue, nowMs = Date.now()) {
  * `prDeliversCard` owns the second question and stays wide for the readers that
  * need a half in flight to be visible. ⛔ Do not substitute one for the other.
  *
- * Exported because `check-clause2-carriers.mjs` asks the same question of an
- * epic tracker reached through a `Part of` line (#18214), and wants this
- * predicate rather than a second copy of it.
+ * Exported for `check-clause2-carriers.mjs`, which asked the same question of
+ * an epic tracker reached through a `Part of` line (#18214) and wanted this
+ * predicate rather than a second copy of it; that file is deleted, and no other
+ * file imports it.
  */
 export function bindingClosesCard(pr, n) {
   return deliveryEvidence(pr, n) === 'closing-keyword';
@@ -9652,13 +9653,28 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 //
 // ## Report-only, and pointedly so
 //
-// ⛔ Nothing can ship wrong through this gap: the queue guard still refuses an
-// unapproved governed enqueue and a human merge is still the review record. The
-// failure is THROUGHPUT and VISIBILITY — 「一个只有在被保护的人自己发现它缺席时
-// 才显形的治理通道,不是通道」 — so the remedy is a REQUEST (or the assign
-// fallback), never a label written from here and never a gate. A governed PR
-// sitting as a DRAFT is the CORRECT terminal state of this regime, so draft
-// status neither fires this row nor silences it.
+// ⛔ Nothing can ship wrong through this gap: on Tier H the queue guard still
+// refuses an unapproved governed enqueue, and a human merge or an authorized
+// approval is the review record. The failure is THROUGHPUT and VISIBILITY —
+// 「一个只有在被保护的人自己发现它缺席时才显形的治理通道,不是通道」 — so the
+// remedy is a REQUEST (or the assign fallback), never a label written from here
+// and never a gate. A governed PR sitting as a DRAFT is the CORRECT terminal
+// state of this regime, so draft status neither fires this row nor silences it.
+//
+// ## Tier S is OUT of this population — and the register says which tier
+//
+// The landing is tiered: a PR whose governed paths ALL lie on a Tier S row
+// (`.claude/**`) lands on the owning seat's `## Contract review` record with
+// NO approval and NO maintainer click, and the queue guard admits it on that
+// record. On such a PR every remedy this row can print — request an approver,
+// take the assign fallback — asks for exactly the click the tiering removed, so
+// the row stands down there (`governedLandsOnRecord`), and so does H48 below,
+// whose inbox label and brief are the same handoff. The tier is the register's
+// own ALL-quantified `landingTierOf` on the slice this row already matched: one
+// Tier H row in a mixed diff keeps the PR here, and an empty or tier-less slice
+// reads H (fail closed). ⛔ No second copy of which surfaces are which lives in
+// this file — a register that did not load stands nothing down, and the sweep
+// never reaches these rows without it.
 //
 // ## The register is IMPORTED, never restated — and never fatally
 //
@@ -9737,21 +9753,38 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
       load('./check-governed-queue-guard.mjs'),
     ]);
     const matcher = merges?.governedPathsIn;
+    const tierOf = merges?.landingTierOf;
+    const recordTier = merges?.GOVERNED_TIER_S;
     const approvers = guard?.GOVERNED_APPROVERS;
-    if (typeof matcher !== 'function' || !Array.isArray(approvers) || approvers.length === 0) {
+    if (
+      typeof matcher !== 'function' ||
+      typeof tierOf !== 'function' ||
+      typeof recordTier !== 'string' ||
+      !Array.isArray(approvers) ||
+      approvers.length === 0
+    ) {
       return {
         available: false,
         matcher: null,
+        tierOf: null,
+        recordTier: null,
         approvers: [],
         reason:
-          'the governed register loaded but did not export what this row reads — `governedPathsIn` ' +
-          'and a non-empty `GOVERNED_APPROVERS`. A rename is the likely cause, and this row is the ' +
-          'reader that noticed',
+          'the governed register loaded but did not export what this row reads — `governedPathsIn`, ' +
+          '`landingTierOf`, `GOVERNED_TIER_S` and a non-empty `GOVERNED_APPROVERS`. A rename is the ' +
+          'likely cause, and this row is the reader that noticed',
       };
     }
-    return { available: true, matcher, approvers, reason: null };
+    return { available: true, matcher, tierOf, recordTier, approvers, reason: null };
   } catch (err) {
-    return { available: false, matcher: null, approvers: [], reason: governedRegisterFailure(err) };
+    return {
+      available: false,
+      matcher: null,
+      tierOf: null,
+      recordTier: null,
+      approvers: [],
+      reason: governedRegisterFailure(err),
+    };
   }
 }
 
@@ -9762,6 +9795,25 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
  * scheduled runs a day that nobody watches.
  */
 export const GOVERNED_REGISTER = await loadGovernedRegister();
+
+/**
+ * Whether a matched governed slice lands on a REVIEW OF RECORD rather than on
+ * the maintainer's word — the register's Tier S, asked through its own
+ * ALL-quantified `landingTierOf` on the slice the matcher already returned
+ * (H43's header, "Tier S is OUT of this population"). `false` for a Tier H or
+ * mixed slice, for an empty or tier-less one (fail closed: the tier of nothing
+ * is never the cheaper one) and for a register that did not load — standing a
+ * row down is the one thing an absent register must never do.
+ *
+ * @param {{ tier?: string, files?: string[] }[]} governed — the matched slice.
+ * @param {{ available?: boolean, tierOf?: Function|null, recordTier?: string|null }} register
+ */
+export function governedLandsOnRecord(governed, register = GOVERNED_REGISTER) {
+  if (!register?.available || typeof register.tierOf !== 'function') return false;
+  const list = Array.isArray(governed) ? governed : [];
+  if (list.length === 0) return false;
+  return register.tierOf(list) === register.recordTier;
+}
 
 /**
  * The two fields a PR LIST row already carries. No request buys this, which is
@@ -9776,26 +9828,31 @@ export function h43CheapCoverage(pr) {
 
 /**
  * The gathering policy, H16's idiom: answerable from the LIST row plus the
- * file page already in hand, and never NARROWER than the population it feeds.
- * A governed PR whose two cheap fields already cover every approver is DECIDED
- * — no row can fire — so its review page is a request nobody needs.
+ * file page already in hand, and never NARROWER than the population it feeds
+ * — nor WIDER: it reads the same matched slice as the row, so a Tier S PR
+ * (which the row stands down on) buys no review page either, and cannot crowd
+ * a Tier H candidate out of the oldest-first probe cap. A governed PR whose two
+ * cheap fields already cover every approver is DECIDED — no row can fire — so
+ * its review page is a request nobody needs.
  */
-export function h43NeedsReviewProbe(pr, governedCount, approvers) {
-  if (!(governedCount > 0)) return false;
+export function h43NeedsReviewProbe(pr, governed, approvers) {
+  const surfaces = Array.isArray(governed) ? governed : [];
+  if (surfaces.length === 0 || governedLandsOnRecord(surfaces)) return false;
   const cheap = h43CheapCoverage(pr);
   return (approvers ?? []).some((a) => !cheap.has(a));
 }
 
 /**
  * The row. `governed` is the matched slice from the imported matcher (empty ⇒
- * out of scope); `reviewed` is the logins that have SUBMITTED a review, or
+ * out of scope; a slice that lands on a record — Tier S — ⇒ out of scope too,
+ * header above); `reviewed` is the logins that have SUBMITTED a review, or
  * `null` when that leg was not read — three input states, never two (#4690):
  * covered, uncovered, and uncovered-on-the-cheap-union-alone, which says so.
  */
 export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = null) {
   const surfaces = governed ?? [];
   const list = approvers ?? [];
-  if (surfaces.length === 0 || list.length === 0) return null;
+  if (surfaces.length === 0 || list.length === 0 || governedLandsOnRecord(surfaces)) return null;
   const cheap = h43CheapCoverage(pr);
   const submitted = reviewed == null ? null : new Set([...reviewed].map((l) => String(l)));
   const missing = list.filter((a) => !cheap.has(a) && !(submitted?.has(a) ?? false));
@@ -9827,13 +9884,13 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
         'a review would clear it, and that reading is missing rather than negative.'
       : '';
   return (
-    `open and GOVERNED (${hits} changed file(s) on the register: ${named}${more}), and ${asked}. ` +
+    `open and GOVERNED on Tier H (${hits} changed file(s) on the register: ${named}${more}), and ${asked}. ` +
     'Being a DRAFT is neither why this fires nor why it would go quiet — a governed PR waiting as a ' +
     'draft for the human merge is the CORRECT terminal state of this regime, and it is still a state ' +
     'in which nobody has been asked to look.' +
     authorClause +
     ' Report-only patrol INPUT, not a verdict and not a gate: nothing can ship through this gap (the ' +
-    'queue guard still refuses an unapproved governed enqueue), so what is missing is only that the ' +
+    'queue guard still refuses an unapproved Tier H enqueue), so what is missing is only that the ' +
     'person the regime protects was never asked. Remedy is the request itself, or the assign fallback ' +
     'above — ⛔ never a label, and ⛔ never an approving review from a seat.' +
     legClause
@@ -10588,8 +10645,7 @@ export function h45EpicUnderUndelegatedParent(issue, parent) {
 //
 // The keyword extraction is `closingKeywordTargets` — H7's and H21's, so the
 // three rows can never disagree about what GitHub will act on. The claim half
-// is `CLAIM_COMMENT_MARKER` and the branch half is `claimedBranches`, the same
-// pair `check-clause2-carriers.mjs` reads.
+// is `CLAIM_COMMENT_MARKER` and the branch half is `claimedBranches`.
 //
 // ## What it costs, and the silences that buys
 //
@@ -10890,12 +10946,12 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 //
 // ## The rule this row patrols
 //
-// A governed surface is landed by the maintainer, by hand (Prime Directive
-// #14), so the seat's review is not a merge — it is a HANDOFF, and the handoff
-// is one act with two writes: the `needs-user-decision` label puts the PR in
-// the maintainer's inbox, and a `## 维护者速读` comment is what makes reading
-// it a two-minute job rather than a diff review. One act, two writes means
-// exactly the shapes this row reads:
+// A Tier H surface lands only on the maintainer's word (Prime Directive #14),
+// so the seat's review is not a merge — it is a HANDOFF, and the handoff is one
+// act with two writes: the `needs-user-decision` label puts the PR in the
+// maintainer's inbox, and a `## 维护者速读` comment is what makes reading it a
+// two-minute job rather than a diff review. One act, two writes means exactly
+// the shapes this row reads:
 //
 //   verdict ∧ ¬LABEL   accepted and UNFINDABLE — the inbox filter never lists
 //                      it, so the queue it is waiting in has no row for it.
@@ -10909,6 +10965,13 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 // LABEL with no verdict behind it (the 代读 shape, live on two PRs the day this
 // landed) deserves a row is a DIFFERENT question and deliberately not answered
 // here.
+//
+// ⛔ A Tier S PR is OUT of this population (H43's header, "Tier S is OUT"): it
+// lands on the owning seat's `## Contract review` record, no maintainer click
+// is waited for, so there is no inbox to list it in and no brief the
+// maintainer reads — both remedies would ask for the handoff the tiering
+// removed. The tier is the register's `landingTierOf` on the slice already
+// matched (`governedLandsOnRecord`), never a second list here.
 //
 // ## The three readings, each from the PR's own state
 //
@@ -11016,6 +11079,7 @@ export const MAINTAINER_BRIEF_MARKER = /^\s*>?\s*## 维护者速读/m;
  */
 export function h48SpeaksAbout(pr, governed) {
   if ((governed?.length ?? 0) === 0) return false;
+  if (governedLandsOnRecord(governed)) return false;
   if (pr?.merged_at) return false;
   return String(pr?.state ?? 'open') !== 'closed';
 }
@@ -11077,9 +11141,9 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
       'read here: the draft is written before the review happens, while the brief is the seat\'s own ' +
       'word after it — so this row reads COMMENT threads and nothing else.';
   return (
-    `open and GOVERNED (${hits} changed file(s) on the register: ${named}${more}), carrying a seat's ` +
+    `open and GOVERNED on Tier H (${hits} changed file(s) on the register: ${named}${more}), carrying a seat's ` +
     `\`**ACCEPT**\` verdict${when}, and ${missing.join(' and ')}. The verdict is a HANDOFF rather than ` +
-    'a merge — a governed surface is landed by the maintainer, by hand — and the handoff is ONE act ' +
+    'a merge — a Tier H surface lands only on the maintainer\'s word — and the handoff is ONE act ' +
     'with two writes: the label puts the PR in the review inbox and the brief is what makes reading it ' +
     `a two-minute job. With this half missing, ${cost}.` +
     briefClause +
@@ -11360,7 +11424,7 @@ export const H50_COMMENT_PAGE_CEILING = 5;
 /**
  * The `Thread-read:` line of a claim body — H2's leading-blockquote tolerance,
  * `claimedBranches`'s leading-bullet tolerance, and the bold/code decoration
- * around the key that `check-clause2-carriers` admits on `Clause-②`. ⛔ The
+ * around the key that `readClause2Line` (`clause2-line.mjs`) admits on `Clause-②`. ⛔ The
  * VALUE is read strictly: the remainder of the line, trimmed, with ONE pair of
  * enclosing backticks removed and nothing else decoded — a hashed, prosed or
  * capitalised value is reported as the text it is, exactly as a `Clause-②: YES`
@@ -11859,7 +11923,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
 // ---------------------------------------------------------------------------
 // The contract-review RECORD readers — the heading marker, the head-sha span
 // and the newest-on-head finder. Read by H48/H64 here and, through
-// `check-clause2-carriers.mjs`, by the queue guard's record recognisers. The
+// `record-recognisers.mjs`, by the queue guard's record recognisers. The
 // rows that patrolled the retired `needs:contract-review` label around these
 // readers are gone (ruling record 5770886272 on #19061, letter B); the
 // `H51_` prefix on the two span constants is kept so their importer keeps one
@@ -13982,8 +14046,7 @@ export function h60ClaimBranchUnparsed(issue, governance) {
       : `governance SILENTLY FELL BACK to an OLDER claim (${governing.createdAt ?? 'undated'}, ` +
         `naming ${namedBranches(governing.branches.map((branch) => ({ branch, state: 'exists' })))}) — ` +
         'so every reader here is answering about a claim this seat has already replaced. H20 and H27 ' +
-        'probe the superseded branch; `check-clause2-carriers` reads the superseded comment\'s ' +
-        '`Clause-②` declaration as if it were the current one. ⚠️ And when the older claim happens ' +
+        'probe the superseded branch. ⚠️ And when the older claim happens ' +
         'to AGREE, the fallback produces a GREEN that is right for the wrong reason and no row ' +
         'anywhere reports it — that near-miss is the sharper half of this class, not the mild one.';
 
@@ -15101,7 +15164,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 //
 // ## The rule, and the clause that had no reader
 //
-// `.claude/skills/pm-dispatch/SKILL.md` 〈分诊座位职责〉 makes the triage seat's
+// `.claude/skills/pm-dispatch/references/triage-duties.md` 〈分诊座位职责〉 makes the triage seat's
 // inventory two-tiered and closes the rule with a forcing function: 「选层按
 // fire 时刻,⛔ 不用计数器;简报写明本轮跑的层」. The SELECTOR itself is pinned
 // one hop away in `.claude/skills/pm-dispatch/references/dispatch-runbook.md`
@@ -15168,7 +15231,7 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 //
 // The filing card measured, and this file's flight re-measured, that the
 // English word `Tier` in any casing appears NOWHERE in the charter: the only
-// clause is SKILL.md 〈分诊座位职责〉 「选层按 fire 时刻,⛔ 不用计数器;简报写明
+// clause is references/triage-duties.md 〈分诊座位职责〉 「选层按 fire 时刻,⛔ 不用计数器;简报写明
 // 本轮跑的层」, which requires the tier to be WRITTEN and prescribes no
 // spelling. So the repair is HERE, in the predicate, and ⛔ NOT in adding an
 // English spelling to a charter that is a governed surface and never said it.
@@ -15520,7 +15583,7 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
       : '';
   return (
     `${hit.shape} (comment \`${id}\`) ${because} — so the two-tier rule at ` +
-    '`.claude/skills/pm-dispatch/SKILL.md` 〈分诊座位职责〉 (「选层按 fire 时刻,⛔ 不用计数器;' +
+    '`.claude/skills/pm-dispatch/references/triage-duties.md` 〈分诊座位职责〉 (「选层按 fire 时刻,⛔ 不用计数器;' +
     '简报写明本轮跑的层」) is satisfied by SILENCE here. The clause is the rule\'s forcing ' +
     'function: a seat that must NAME its tier cannot skip choosing one, and the one measured ' +
     'instance of the skipped choice was a full-board enumeration on a fire that owed a `since` ' +
@@ -17436,7 +17499,8 @@ export function summaryLine(counts, findingCount) {
         : `${counts.governedPrs ?? 0} of the open PR(s) whose changed-file page was read hit the ` +
           `governed register, and the submitted-review leg answered on ${counts.governedReviewProbed ?? 0} ` +
           `of ${counts.governedReviewCandidates ?? 0} that the request/assignment union already left ` +
-          `short (oldest-first, ${H43_REVIEW_PROBE_CAP} per run). An unread review leg leaves its row ` +
+          `short (Tier H only — a Tier S PR lands on a record, is asked nobody, and is out of this item; ` +
+          `oldest-first, ${H43_REVIEW_PROBE_CAP} per run). An unread review leg leaves its row ` +
           'standing on the two cheap fields and the row says so; a PR whose file page went unread is ' +
           'not judged by this item at all'
     }. ` +
@@ -17546,7 +17610,8 @@ export function summaryLine(counts, findingCount) {
           `of ${H48_COMMENTS_PAGE_SIZE}). This is a NEW fetch class rather than a second reader of one ` +
           'already in hand: `commentCache` holds CARD threads only. A thread that failed or reached that ' +
           'ceiling is UNJUDGED rather than short, a PR whose changed-file page went unread is not in this ' +
-          'population at all, and a governed PR with NO `**ACCEPT**` verdict is CLEAN rather than quiet'
+          'population at all — nor is a Tier S PR, whose landing has no maintainer inbox — and a governed ' +
+          'PR with NO `**ACCEPT**` verdict is CLEAN rather than quiet'
     }. ` +
     // H49's coverage pair (#16003). UNCONDITIONAL like every other window's,
     // and it carries the two disclosures this row owes: it fetches NOTHING (the
@@ -22441,11 +22506,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     stats.governedPrs = governedByPr.size;
 
     // Oldest-first, because the PR nobody has asked about for longest is the
-    // one the cap must not be the reason nobody hears about.
+    // one the cap must not be the reason nobody hears about. The policy reads
+    // the matched slice, so a Tier S PR — which the row stands down on — buys
+    // no review page and takes no slot under the cap.
     const shortOfCoverage = [...seenPrs.values()]
-      .filter((pr) =>
-        h43NeedsReviewProbe(pr, governedByPr.get(pr.number)?.length ?? 0, GOVERNED_REGISTER.approvers),
-      )
+      .filter((pr) => h43NeedsReviewProbe(pr, governedByPr.get(pr.number) ?? [], GOVERNED_REGISTER.approvers))
       .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
     stats.governedReviewCandidates = shortOfCoverage.length;
 
@@ -24728,8 +24793,8 @@ async function selfTest() {
   t('#16706 reader claimDelivery: …and the suppression is attributable', cd.evidence[0].kind, 'part-of-inline');
   t('#16706 reader claimDelivery: …naming the PR it came from', cd.evidence[0].pr, 8354);
   t('#16706 reader claimDelivery: a merged delivery is attributed too', claimDelivery(7760, [], [mergedPr(8354, body8354)]).evidence[0].kind, 'closing-keyword');
-  // READER 4 is `derivePairs`/C1, which lives in `check-clause2-carriers.mjs`
-  // and is pinned in that file's own self-test.
+  // READER 4 was `derivePairs`/C1, deleted with `check-clause2-carriers.mjs`
+  // and that file's own pin of it.
 
   // -- #16706: the `Refs` axis — the reading the ruling asked for -----------
   // The hole is OPEN on this axis too: `refsRe` is documented as "same
@@ -30728,10 +30793,10 @@ async function selfTest() {
 
   // The gathering policy: a request is bought only for a governed PR the cheap
   // fields already leave short. Never narrower than the population it feeds.
-  t('H43 policy: a non-governed PR buys no review page', h43NeedsReviewProbe(h43pr(12), 0, APP43), false);
-  t('H43 policy: a governed PR already covered buys none either', h43NeedsReviewProbe(h43pr(12, { requested: APP43 }), 1, APP43), false);
-  t('H43 policy: a governed PR short of coverage does', h43NeedsReviewProbe(h43pr(12, { requested: ['hotlong'] }), 1, APP43), true);
-  t('H43 policy: …and one with nobody asked, obviously', h43NeedsReviewProbe(h43pr(12), 1, APP43), true);
+  t('H43 policy: a non-governed PR buys no review page', h43NeedsReviewProbe(h43pr(12), [], APP43), false);
+  t('H43 policy: a governed PR already covered buys none either', h43NeedsReviewProbe(h43pr(12, { requested: APP43 }), GOV43, APP43), false);
+  t('H43 policy: a governed PR short of coverage does', h43NeedsReviewProbe(h43pr(12, { requested: ['hotlong'] }), GOV43, APP43), true);
+  t('H43 policy: …and one with nobody asked, obviously', h43NeedsReviewProbe(h43pr(12), GOV43, APP43), true);
   t('H43: the cheap union reads BOTH list fields', [...h43CheapCoverage(h43pr(13, { requested: ['a'], assigned: ['b'] }))].sort().join(','), 'a,b');
 
   // The row is a `stall`, not a gate: nothing ships wrong through this gap —
@@ -30754,6 +30819,26 @@ async function selfTest() {
   t('H43 register: a missing sibling names the two files to copy', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('check-governed-queue-guard.mjs'), true);
   t('H43 register: …and says the rest of the sweep is unaffected', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('every other row is unaffected'), true);
   t('H43 register: any other load failure carries its own message', governedRegisterFailure(new Error('boom')).includes('boom'), true);
+
+  // The TIER, read off the REAL register's own slices rather than a fixture
+  // that restates which surfaces are which: a PR whose governed paths all lie
+  // on the record row (`.claude/**`, Tier S) lands on the owning seat's
+  // `## Contract review` record and is asked nobody, so the row stands down;
+  // one Tier H row in a mixed diff keeps it here. ⚠️ `GOV43` above is a
+  // hand-built slice carrying no `tier`, which `landingTierOf` reads as H (fail
+  // closed) — every case above it is a Tier H case by construction.
+  const TIER_S_43 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md']) : [];
+  const MIXED_43 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md', 'docs/adr/0121-x.md']) : [];
+  t('H43 register: …and it exports the landing-tier reader beside the matcher, answering its own record tier on the record row', GOVERNED_REGISTER.available && typeof GOVERNED_REGISTER.tierOf === 'function' && GOVERNED_REGISTER.tierOf(TIER_S_43) === GOVERNED_REGISTER.recordTier, true);
+  t('H43 tier: a PR whose governed paths ALL land on a record (Tier S) is asked nobody and is CLEAN, however empty the request list', h43GovernedReviewRequestGap(h43pr(15), TIER_S_43, APP43, []), null);
+  t('H43 tier: …and a MIXED slice (one Tier H row) is Tier H, so the same PR still fires', typeof h43GovernedReviewRequestGap(h43pr(15), MIXED_43, APP43, []), 'string');
+  t('H43 tier: …naming the tier it speaks about', h43row(h43pr(15), MIXED_43, APP43, []).includes('GOVERNED on Tier H'), true);
+  t('H43 tier: the Tier S PR buys no review page either, so it takes no slot under the probe cap', h43NeedsReviewProbe(h43pr(15), TIER_S_43, APP43), false);
+  t('H43 tier: …while the mixed one does', h43NeedsReviewProbe(h43pr(15), MIXED_43, APP43), true);
+  t('H43 tier: the answer is the register\'s, on the slice — S for the record row, H for mixed, H for a tier-less fixture, H for nothing', [governedLandsOnRecord(TIER_S_43), governedLandsOnRecord(MIXED_43), governedLandsOnRecord(GOV43), governedLandsOnRecord([])].join(), 'true,false,false,false');
+  t('H43 tier: ⛔ a register that did not load stands NOTHING down', governedLandsOnRecord(TIER_S_43, { available: false, tierOf: null, recordTier: null }), false);
+  t('H43 tier: …nor does one that loaded without the tier reader', governedLandsOnRecord(TIER_S_43, { available: true, tierOf: null, recordTier: 'S' }), false);
+  t('H43 summary: the review leg is stated as Tier H only', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('Tier H only'), true);
 
   // The coverage clause, both branches, cut out of the summary line so only
   // H43's own words can answer for H43.
@@ -31558,6 +31643,18 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H48 population: a merged PR is out', h48SpeaksAbout(pr48([], { merged_at: '2026-09-05T14:29:00Z' }), GOV48), false);
   t('H48 population: an absent state field is judged, not exempted', h48SpeaksAbout({ ...pr48([]), state: undefined }, GOV48), true);
 
+  // Tier S is OUT — there is no maintainer inbox on that tier, so a verdict
+  // there owes neither the label nor the brief. Driven by the REAL register's
+  // slice for the same reason as H43's tier cases; `GOV48` above carries no
+  // `tier` and reads as H (fail closed), so every case above is Tier H's.
+  const TIER_S_48 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md']) : [];
+  const MIXED_48 = GOVERNED_REGISTER.available ? GOVERNED_REGISTER.matcher(['.claude/agents/os-dev.md', 'AGENTS.md']) : [];
+  t('H48 population: a Tier S PR (all governed paths on the record row) is OUT — no inbox on that tier', h48SpeaksAbout(pr48([]), TIER_S_48), false);
+  t('H48 tier: …so a verdict with NEITHER half on a Tier S PR is no finding', h48GovernedVerdictWithoutBrief(pr48([]), TIER_S_48, [cm48(VERDICT48)]), null);
+  t('H48 tier: …and the same verdict on a MIXED slice (one Tier H row) still is one', typeof h48GovernedVerdictWithoutBrief(pr48([]), MIXED_48, [cm48(VERDICT48)]), 'string');
+  t('H48 tier: …naming the tier it speaks about', h48row(pr48([]), MIXED_48, [cm48(VERDICT48)]).includes('GOVERNED on Tier H'), true);
+  t('H48 summary: a Tier S PR is stated as out of the population', saidBy('h48Brief', summaryLine({}, 0)).includes('nor is a Tier S PR'), true);
+
   // Three input states, never two (#4690) — and here the unreadable one is a
   // thread this row BOUGHT and did not get, which is why it must not read clean.
   t('H48: an unconsulted thread is UNJUDGED, never clean', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, undefined), null);
@@ -32088,7 +32185,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // SYNTHETIC fixtures (⛔ the self-test never touches GitHub) whose SHAPES were
   // read off the live board: two title dialects and the 7-to-40 hex spelling
   // range. `latestContractReviewOnHead` is what the queue guard's recognisers
-  // reach through `check-clause2-carriers.mjs`, so its head-scoping stays pinned.
+  // reach through `record-recognisers.mjs`, so its head-scoping stays pinned.
   const HEAD51 = 'ba3d95a4f3514243131a698f12589c23d49e6fcd';
   const OLDHEAD51 = 'de0bd50469a6c5f20102f67e0901c43fe316567c';
   const cm51 = (id, body, at) => ({ id, body, created_at: at });

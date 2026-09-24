@@ -248,13 +248,15 @@ jobs:
       # over the ten merge-group runs measured for #16496; the PM dispatch-gates
       # self-test alone 597 s), and none of its expensive steps read a
       # merge group's file surface: a docs-only group paid the full battery.
-      # So on `merge_group` and `pull_request` the NINE scoped families below
+      # So on `merge_group` and `pull_request` the TEN scoped families below
       # -- each step carrying `if: steps.gate-families.outputs.<id> != 'skip'`
       # -- run only when the changed paths touch the files that family reads.
+      # One of the ten, `migration_registry` (#19753), is a gate this job did
+      # not run before at all; the other nine were scoped away from it.
       # `push` on main and the scheduled full run keep the whole battery: the
       # script runs everything for any event it does not scope.
       #
-      # #19498 added four of those nine (`entry_guard`,
+      # #19498 added four of the nine (`entry_guard`,
       # `declared_population_live`, `bare_root_worklist`,
       # `self_test_workflow_commands`) and narrowed `pm_dispatch_gates`, on
       # ruling #208 on #19491 (R4) and the maintainer's sentence quoted in the
@@ -361,6 +363,25 @@ jobs:
       # would otherwise see the gate fail before it mattered.
       - name: ADR anchors + number uniqueness (governed code names its decision)
         run: pnpm check:adr-anchors
+
+      # Migration registry matches its entry files (#19753). `registry.ts` is
+      # the generated concatenation of `packages/spec/src/migrations/entries/`,
+      # it ships in the spec package's `dist`, and this check is the only
+      # proof the two agree -- `check:generated --reconcile-only` (in the
+      # `Type Check · source gates` job) proves the script is classified,
+      # never that the artifact is current. It ran
+      # in no CI step, so an entry edited without `gen:migration-registry`
+      # shipped the old text with every required check green.
+      #
+      # Scoped, on the maintainer's ruling for that card: a step in THIS
+      # required job, run when the change touches what the check reads
+      # (`migration_registry` in the selector above). ⛔ Not a separate
+      # `paths:`-filtered job: one that never reports on an unrelated PR
+      # leaves a required context pending forever. Cheap -- tsx over one
+      # directory, no build (~1.4 s measured locally) -- so it sits early.
+      - name: Migration registry matches its entry files
+        if: steps.gate-families.outputs.migration_registry != 'skip'
+        run: pnpm --filter @objectstack/spec check:migration-registry
 
       # Enforces the no-restricted-imports guard against @objectstack/spec root
       # namespace imports (the dormant rule was never run in CI). Syntactic
@@ -881,7 +902,8 @@ jobs:
       # is the thing that notices. Offline record checks only (existence, shape,
       # sha256 vs the provenance record, record pin vs `.objectui-sha`): the
       # regenerate-and-compare half runs where a regeneration can (the Node
-      # generator needs the published @object-ui set — see
+      # generator reads objectui's BUILT tree at the pin, which only
+      # `pnpm objectui:build` materialises — see
       # scripts/gen-sdui-manifest-node.mjs), and a pin bump goes red HERE until
       # it has been re-run — the same moment the lockstep step above forces the
       # parser parity re-verification, with an objectui checkout guaranteed in
@@ -1247,24 +1269,20 @@ jobs:
       - name: PM half-state sweeper self-test
         run: pnpm check:pm-half-states
 
-      # Clause-② carrier + declaration checker self-test (#13922 · #12409 ·
-      # #13914). Same family and the same split as the two steps either side:
-      # the LIVE sweep reads a shared board over the API and is report-only, so
-      # only the offline self-test runs here — a clause-② desync on somebody
-      # else's pair is a fact about the board, not about the PR that happens to
-      # run CI next, and failing that PR would punish the wrong actor.
+      # Contract-review record recogniser self-test (#18042 · #18701). The
+      # readers the Governed Surface Queue Guard's Tier S leg lazily imports,
+      # and the record `--template` prints, live in
+      # `scripts/pm/record-recognisers.mjs`; this step runs that file's offline
+      # self-test, which pins each reader and drives the guard once with the
+      # printed record on each thread. Same family and the same split as the
+      # steps either side: offline, no network, no token.
       #
-      # ⛔ Do not "promote" the live sweep into this step. The script's `--pair`
-      # landing pre-check is retired (ruling record 5770886272 on #19061) and
-      # nothing runs it; the file stays only because the Governed Surface Queue
-      # Guard lazily imports its contract-review record recognisers and
-      # `--template`, and this self-test is what keeps those loadable.
-      #
-      # The self-test is offline and imports `check-half-states.mjs` for the
-      # `prDeliversCard` delivery relation and the shared PREREQUISITE-NOT-MET
-      # exit code — one source for each.
-      - name: Clause-② carrier checker self-test
-        run: pnpm check:pm-clause2-carriers
+      # This is the step that ran `check-clause2-carriers.mjs`'s self-test,
+      # retargeted when ruling record 5770886272 on #19061 (letter B, its last
+      # step) deleted that file with its retired `--pair` sweep — ⛔ not a gate
+      # added beside it.
+      - name: Contract-review record recogniser self-test
+        run: pnpm check:pm-record-recognisers
 
       # Widening-tell gate self-test (#16448) — the mechanical half of the
       # directional clause-② ruling (#16349), and the same split as every step
@@ -6694,18 +6712,6 @@ jobs:
       # neighbours.
       - name: Check docs YAML examples parse against live spec schemas
         run: pnpm --filter @objectstack/spec run check:yaml-examples
-
-      # ADR-0082 D4's spec↔registry react-block declaration-parity ratchet, fed
-      # by the checked-in repo-root manifest (#12924 execution point 1: the same
-      # artefact resolves this gate's EXTERNAL_INPUT_REQUIRED standing — the
-      # input it always lacked now lives in the tree, held fresh by the
-      # check-sdui-manifest step in the lint job). Baseline-ratcheted: only a
-      # divergence NEW since packages/spec/react-declaration-parity.baseline.json
-      # reds, so wiring it per-PR promotes the cut-rc-only run without
-      # manufacturing a standing red. Reads spec src/ through tsx like its
-      # neighbours — no dist. ~5 s.
-      - name: Ratchet spec-vs-registry react declaration parity against the checked-in manifest
-        run: MANIFEST="$PWD/sdui.manifest.json" pnpm --filter @objectstack/spec check:react-declaration-parity --baseline react-declaration-parity.baseline.json --strict
 
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing

@@ -78,6 +78,10 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * trigger dialect with its own identity-forwarding bugs. Exporting it is the
  * whole point: the alternative (a second builder over there) is the shape
  * #4127 above was written to remove.
+ *
+ * [#19846] It also states `callerParamKeys` — which keys of the params bag the
+ * caller supplied, as opposed to the row id this builder seeds — so every route
+ * sharing it carries the same caller-provenance signal.
  */
 export function buildAutomationContext(body: any, context: HttpProtocolContext): Record<string, unknown> {
     const ctxBody = body && typeof body === 'object' ? body : {};
@@ -102,16 +106,27 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
             if (baseParams[k] === undefined) baseParams[k] = v;
         }
     }
+    // [#19846] The keys the CALLER supplied, read before the row-id seeds below
+    // are added — `AutomationContext.callerParamKeys`, so the screen node's
+    // headless verdict is told rather than left to infer it from the merged
+    // bag. The two row-id keys this door defines (`recordId` and the
+    // `<objectName>Id` alias) stay out even when the caller's own bag names
+    // them: the console mirrors the launched row's id into `params.recordId`,
+    // and that is the row being addressed, not a screen being answered.
+    const alias = objectName
+        ? `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`
+        : undefined;
+    const callerParamKeys = Object.keys(baseParams).filter((k) => k !== 'recordId' && k !== alias);
     if (recordId !== undefined && baseParams.recordId === undefined) {
         baseParams.recordId = recordId;
     }
-    if (recordId !== undefined && objectName) {
-        const alias = `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`;
+    if (recordId !== undefined && alias !== undefined) {
         if (baseParams[alias] === undefined) baseParams[alias] = recordId;
     }
 
     const automationContext: Record<string, unknown> = {
         params: baseParams,
+        callerParamKeys,
         object: objectName,
         event: ctxBody.event ?? 'manual',
     };
@@ -1497,6 +1512,115 @@ async function consumedSuspensionSurvives(
 }
 
 /**
+ * [#15705] What a resume door serves for a REFUSED or FAILED engine result.
+ * `details` is passed to the door's error builder as it is, so a `code` in it
+ * is promoted. Without one, the builder derives the code from `status`.
+ */
+export interface ResumeRefusal {
+    message: string;
+    status: number;
+    details?: Record<string, unknown>;
+}
+
+/**
+ * [#15705] The engine refusals a resume answers with, keyed by the engine's
+ * own `code`. Each row gives the status and the message used when the engine
+ * sent none. A `Map`, not an object literal, so an engine code that happens to
+ * be spelled like an `Object.prototype` member can never match a row.
+ */
+const RESUME_REFUSAL_ROWS: ReadonlyMap<string, { status: number; fallback: string }> = new Map([
+    ['PERMISSION_DENIED', { status: 403, fallback: 'Resume forbidden' }],
+    ['INVALID_SIGNAL', { status: 400, fallback: 'Invalid resume signal' }],
+    ['INVALID_SCREEN_INPUT', { status: 400, fallback: 'Invalid screen input' }],
+    ['RUN_NOT_FOUND', { status: 404, fallback: 'No such suspended run' }],
+    ['STORE_UNAVAILABLE', { status: 503, fallback: 'Suspended-run store unavailable' }],
+    ['RESUME_IN_PROGRESS', { status: 409, fallback: 'Run is already being resumed' }],
+]);
+
+/**
+ * [#15705] Classify what `IAutomationService.resume` returned. Answers
+ * `undefined` for a success, which is a run that completed or paused again on
+ * its next screen, and the {@link ResumeRefusal} to serve otherwise.
+ *
+ * ONE table for two doors: `POST /:name/runs/:runId/resume` below, and the MCP
+ * `resume_run` tool (`./mcp.ts`). Both hand the refusal to the same
+ * `deps.error` builder, so one engine result gets one code, one status and one
+ * message on either door. This used to be inline in the REST arm. It moved here
+ * unchanged, and the arm's wire answers are byte-identical.
+ *
+ * The six coded rows are REFUSALS the engine made BEFORE consuming the
+ * suspension, so the run is still parked and the caller can retry (the codes
+ * and why each has its status are listed at the REST arm).
+ *
+ * [#8684] TERMINAL RUN FAILURE → 400 `FLOW_FAILED`, inheriting #3962's ruling
+ * for `/actions` (maintainer, 2026-08-15): a business failure must not ride
+ * HTTP 200 inside a double envelope. It did here until then —
+ * `{success:true,data:{success:false,error:"Node 'x' failed: …"}}` — so a
+ * scripted or integration caller that branches on the HTTP status alone read a
+ * failed run as a successful one.
+ *
+ * Every coded row is a REFUSAL that left the suspension intact and can be
+ * retried; what reaches the last row consumed its pause and ran. Two engine
+ * exits produce it — the flow itself failed, or a subflow child failed
+ * terminally — and both are the "ran and was rejected" row, hence 400. The two
+ * NEVER-DISPATCHED exits are answered 404 by the `RUN_NOT_FOUND` row because
+ * the ENGINE classifies them (#8684, producer-first): this table never sniffs
+ * the result for `summary`/`durationMs` to tell the two classes apart, which is
+ * the tolerant-consumer shape PD #12 forbids.
+ *
+ * `FLOW_FAILED` is the code `/actions` already answers for a flow that ran and
+ * rejected (`../action-execution.ts`), and the ADR-0112 ledger registers it to
+ * `@objectstack/runtime` — the door, not the engine, is where the wire
+ * vocabulary is named.
+ *
+ * ⚠️ `errorMessage` is the flow AUTHOR's own failure text (`flow.errorMessage`,
+ * engine `resumeInternal`) and it travels in `details`, which is the one place
+ * the console reads it from (objectui `flowResponse.ts` / PR #4899 — no alias
+ * chain). The ADR-0112 envelope carries no `data`, so a producer that builds
+ * its message out of `result.error` alone drops the author's words silently;
+ * `/actions`'s producer does exactly that, and this deliberately does not copy
+ * it. `summary` rides along for the same reason it was on the 200 body: a
+ * failed run's per-node accounting is how a caller finds WHICH node failed.
+ *
+ * [#15221] And the engine's VERDICT rides with them. Of the two exits above,
+ * only the flow-itself-failed one can be `status: 'stranded'` (#14384 / #13937:
+ * the pause a durable decision was waiting on is gone and an operator verb can
+ * re-arm the run) — and until then this arm copied `errorMessage` and `summary`
+ * off the result and dropped `status`, so `'stranded'` could not reach the wire
+ * through any door and an HTTP-only caller read "beyond reach" and "repair
+ * waiting" as one and the same 400. The #16472 ruling (option A) carries it
+ * here, in the details of the EXISTING code: `runId`, `status` (verbatim, when
+ * stamped) and `repairable` (always present; [#17541] the stamped exits are
+ * answered by the stamp and the status-LESS ones by asking the engine's
+ * `inspectConsumedSuspension`, see {@link resumeFailureDetails}), declared once
+ * as `ResumeFailureDetailsSchema` in `@objectstack/spec/api`. ⛔ No
+ * `FLOW_STRANDED` sibling code: the console treats `400 FLOW_FAILED` as
+ * terminal (#8684) and a client that wants to branch reads
+ * `details.repairable`, never a regex over the message.
+ */
+export async function classifyResumeResult(
+    deps: DomainHandlerDeps,
+    automationService: IAutomationService,
+    runId: string,
+    result: AutomationResult | null | undefined,
+): Promise<ResumeRefusal | undefined> {
+    if (result?.success !== false) return undefined;
+    const row = typeof result.code === 'string' ? RESUME_REFUSAL_ROWS.get(result.code) : undefined;
+    if (row) return { message: result.error ?? row.fallback, status: row.status };
+    const verdict = await resumeFailureDetails(deps, automationService, runId, result);
+    return {
+        message: result.error ?? 'Flow run failed',
+        status: 400,
+        details: {
+            code: 'FLOW_FAILED',
+            ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+            ...(result.summary !== undefined ? { summary: result.summary } : {}),
+            ...verdict,
+        },
+    };
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -2268,90 +2392,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (b.output !== undefined) signal.output = b.output;
                 if (b.branchLabel !== undefined) signal.branchLabel = b.branchLabel;
                 const result = await automationService.resume(parts[2], signal);
-                if (result?.success === false && result.code === 'PERMISSION_DENIED') {
-                    return { handled: true, response: deps.error(result.error ?? 'Resume forbidden', 403) };
-                }
-                if (result?.success === false && result.code === 'INVALID_SIGNAL') {
-                    return { handled: true, response: deps.error(result.error ?? 'Invalid resume signal', 400) };
-                }
-                if (result?.success === false && result.code === 'INVALID_SCREEN_INPUT') {
-                    return { handled: true, response: deps.error(result.error ?? 'Invalid screen input', 400) };
-                }
-                if (result?.success === false && result.code === 'RUN_NOT_FOUND') {
-                    return { handled: true, response: deps.error(result.error ?? 'No such suspended run', 404) };
-                }
-                if (result?.success === false && result.code === 'STORE_UNAVAILABLE') {
-                    return { handled: true, response: deps.error(result.error ?? 'Suspended-run store unavailable', 503) };
-                }
-                if (result?.success === false && result.code === 'RESUME_IN_PROGRESS') {
-                    return { handled: true, response: deps.error(result.error ?? 'Run is already being resumed', 409) };
-                }
-                // [#8684] TERMINAL RUN FAILURE → 400 `FLOW_FAILED`, inheriting
-                // #3962's ruling for `/actions` (maintainer, 2026-08-15): a
-                // business failure must not ride HTTP 200 inside a double
-                // envelope. It did here until now — `{success:true,data:{success:
-                // false,error:"Node 'x' failed: …"}}` — so a scripted or
-                // integration caller that branches on the HTTP status alone read
-                // a failed run as a successful one.
-                //
-                // Every arm above is a REFUSAL that left the suspension intact
-                // and can be retried; what reaches HERE consumed its pause and
-                // ran. Two engine exits produce it — the flow itself failed, or a
-                // subflow child failed terminally — and both are the "ran and was
-                // rejected" row, hence 400. The two NEVER-DISPATCHED exits are
-                // answered 404 by the `RUN_NOT_FOUND` arm above because the
-                // ENGINE classifies them (#8684, producer-first): this route
-                // never sniffs the result for `summary`/`durationMs` to tell the
-                // two classes apart, which is the tolerant-consumer shape PD #12
-                // forbids.
-                //
-                // `FLOW_FAILED` is the code `/actions` already answers for a flow
-                // that ran and rejected (`../action-execution.ts`), and the
-                // ADR-0112 ledger registers it to `@objectstack/runtime` — this
-                // door, not the engine's, is where the wire vocabulary is named.
-                //
-                // ⚠️ `errorMessage` is the flow AUTHOR's own failure text
-                // (`flow.errorMessage`, engine `resumeInternal`) and it travels in
-                // `details`, which is the one place the console reads it from
-                // (objectui `flowResponse.ts` / PR #4899 — no alias chain). The
-                // ADR-0112 envelope carries no `data`, so a producer that builds
-                // its message out of `result.error` alone drops the author's words
-                // silently; `/actions`'s producer does exactly that, and this
-                // deliberately does not copy it. `summary` rides along for the
-                // same reason it was on the 200 body: a failed run's per-node
-                // accounting is how a caller finds WHICH node failed.
-                //
-                // [#15221] And the engine's VERDICT rides with them. Of the
-                // two exits above, only the flow-itself-failed one can be
-                // `status: 'stranded'` (#14384 / #13937: the pause a durable
-                // decision was waiting on is gone and an operator verb can
-                // re-arm the run) — and until now this arm copied
-                // `errorMessage` and `summary` off the result and dropped
-                // `status`, so `'stranded'` could not reach the wire through
-                // any door and an HTTP-only caller read "beyond reach" and
-                // "repair waiting" as one and the same 400. The #16472
-                // ruling (option A) carries it here, in the details of the
-                // EXISTING code: `runId`, `status` (verbatim, when stamped)
-                // and `repairable` (always present; [#17541] the stamped
-                // exits are answered by the stamp and the status-LESS ones by
-                // asking the engine's `inspectConsumedSuspension`, see
-                // `resumeFailureDetails`), declared once as
-                // `ResumeFailureDetailsSchema` in `@objectstack/spec/api`.
-                // ⛔ No `FLOW_STRANDED` sibling code: the console treats
-                // `400 FLOW_FAILED` as terminal (#8684) and a client that
-                // wants to branch reads `details.repairable`, never a regex
-                // over the message.
-                if (result?.success === false) {
-                    const verdict = await resumeFailureDetails(deps, automationService, parts[2], result);
-                    return {
-                        handled: true,
-                        response: deps.error(result.error ?? 'Flow run failed', 400, {
-                            code: 'FLOW_FAILED',
-                            ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
-                            ...(result.summary !== undefined ? { summary: result.summary } : {}),
-                            ...verdict,
-                        }),
-                    };
+                // [#15705] The engine's answer is classified by
+                // `classifyResumeResult`, the one table this door shares with
+                // the MCP `resume_run` tool (`./mcp.ts`), so the two doors
+                // cannot answer one engine result two ways. Every row, and why
+                // it answers what it answers, is documented there.
+                const refusal = await classifyResumeResult(deps, automationService, parts[2], result);
+                if (refusal) {
+                    return { handled: true, response: deps.error(refusal.message, refusal.status, refusal.details) };
                 }
                 return { handled: true, response: deps.success(result) };
             }

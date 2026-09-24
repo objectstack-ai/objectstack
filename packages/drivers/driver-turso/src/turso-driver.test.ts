@@ -396,14 +396,22 @@ describe('TursoDriver URL Parsing', () => {
     expect(driver.isRemote).toBe(true);
   });
 
-  it('should accept remote URL when syncUrl is provided', () => {
-    // Should not throw — embedded replica mode
-    const driver = new TursoDriver({
-      url: 'libsql://test-db.turso.io',
-      syncUrl: 'libsql://test-db.turso.io',
-      authToken: 'test-token',
-    });
-    expect(driver.getTursoConfig().syncUrl).toBe('libsql://test-db.turso.io');
+  it('should refuse a remote URL beside syncUrl: an embedded replica is a local file', () => {
+    // This pair used to construct as a "replica" whose local engine was a
+    // private `:memory:` database: writes read back, then vanished on restart.
+    // The full set of arms lives in turso-driver-remote-url-replica-refusal.test.ts.
+    let refusal: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      new TursoDriver({
+        url: 'libsql://test-db.turso.io',
+        syncUrl: 'libsql://test-db.turso.io',
+        authToken: 'test-token',
+      });
+    } catch (error) {
+      refusal = error as Error & { code?: string; status?: number };
+    }
+    expect(refusal?.code).toBe('VALIDATION_ERROR');
+    expect(refusal?.status).toBe(400);
   });
 });
 
@@ -488,14 +496,16 @@ describe('TursoDriver Transport Mode Detection', () => {
     expect(driver.isRemote).toBe(false);
   });
 
-  it('should detect replica mode for :memory: with syncUrl', () => {
-    const driver = new TursoDriver({
-      url: ':memory:',
-      syncUrl: 'libsql://test.turso.io',
-      authToken: 'test-token',
-    });
-    expect(driver.transportMode).toBe('replica');
-    expect(driver.isRemote).toBe(false);
+  it('should classify :memory: with syncUrl as replica (which the constructor then refuses)', () => {
+    // The classifier's answer is unchanged. Constructing is refused, because
+    // a replica needs a local file (turso-driver-remote-url-replica-refusal.test.ts).
+    expect(
+      TursoDriver.detectMode({
+        url: ':memory:',
+        syncUrl: 'libsql://test.turso.io',
+        authToken: 'test-token',
+      }),
+    ).toBe('replica');
   });
 
   it('should detect remote mode for libsql:// URL', () => {
@@ -571,14 +581,17 @@ describe('TursoDriver Transport Mode Detection', () => {
     expect(driver.getRemoteTransport()).toBeNull();
   });
 
-  it('should detect replica mode for libsql:// URL with syncUrl', () => {
-    const driver = new TursoDriver({
-      url: 'libsql://test-db.turso.io',
-      syncUrl: 'libsql://test-db.turso.io',
-      authToken: 'test-token',
-    });
-    expect(driver.transportMode).toBe('replica');
-    expect(driver.isRemote).toBe(false);
+  it('should classify a libsql:// URL with syncUrl as replica (which the constructor then refuses)', () => {
+    // Classified as what the declaration asks for, then refused at
+    // construction rather than re-classified: see
+    // turso-driver-remote-url-replica-refusal.test.ts.
+    expect(
+      TursoDriver.detectMode({
+        url: 'libsql://test-db.turso.io',
+        syncUrl: 'libsql://test-db.turso.io',
+        authToken: 'test-token',
+      }),
+    ).toBe('replica');
   });
 });
 
