@@ -475,10 +475,15 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *
  * ⚠️ What those two drives post is NOT covered by this branch, and saying so
  * is the point. Measured: `{ id, name: id, namespace, version: '1.0.0' }` and
- * `{ id: 'pkg-a', name: 'A' }` are both refused here (`invalid_union`) because
- * neither carries `type`, and the second carries no `version` either. They are
- * bare in FORM and incomplete in CONTENT — the form is declared, the content
- * is part of the residual below, and they are pinned as REFUSED in
+ * `{ id: 'com.example.pkg-a', name: 'A', version: '1.0.0' }` are both refused
+ * here (`invalid_union`) on `type` alone, and the door answers both `201` (the
+ * second on the `?overwrite=true` limb of its duplicate-id case). The second
+ * was repaired twice, each time by the PR that made the door parse the leg it
+ * broke: PR #19326 gave it the `version` it lacked (clause 1a below), and
+ * PR #19473 replaced its id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The
+ * door answers that old body `400` now, so it is no part of the residual. They
+ * are bare in FORM and incomplete in CONTENT — the form is declared, the
+ * content is part of the residual below, and they are pinned as REFUSED in
  * `package-api.test.ts` rather than dressed up as green fixtures.
  *
  * ## The two branches are disjoint — but only ONE of them is closed
@@ -507,9 +512,18 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *
  * This is a SUBSET description of the live door, deliberately. Measured
  * through `HttpDispatcher.handlePackages`, the door additionally answers `201`
- * to five classes this schema refuses:
+ * to five classes this schema refuses — class 1 in its `type` half only,
+ * since PR #19326:
  *
- * 1. a manifest missing `type` and/or `version` (both door drives above);
+ * 1. a manifest missing `type` or `version` — recorded as one class until
+ *    PR #19326, split since, because its two halves no longer answer alike:
+ *    - 1a. missing `version` — ✅ CLOSED by PR #19326, no longer residual: the
+ *      door parses `ManifestSchema.shape.version` by reference and answers
+ *      `400` / `VALIDATION_ERROR` without installing, so declaration and door
+ *      agree (door-side pin:
+ *      `packages/runtime/src/domains/packages-install-manifest-version.test.ts`);
+ *    - 1b. missing `type` — still OPEN, answered `201` (both door drives
+ *      above);
  * 2. unknown keys on either form — refused by name on the bare branch,
  *    silently dropped on the wrapped one, `201` either way;
  * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
