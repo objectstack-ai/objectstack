@@ -99,9 +99,20 @@ const READ_SHARE = {
 // ── in-memory engine ───────────────────────────────────────────────────────
 
 /**
- * `storeFaults` names the tables whose reads THROW — a store that is down. The
- * thrown error is one instance per table, so a cell can assert that the error
- * the real request failed with IS the injected fault, not merely some error.
+ * A table whose store is down: reading it throws `fault`. Every read of the
+ * double below goes through `filter`, so the outage surfaces where a real
+ * driver's would — on the read — and `find` itself stays an ordinary double.
+ */
+function unavailableTable(fault: Error): any[] {
+  const rows: any[] = [];
+  (rows as any).filter = () => { throw fault; };
+  return rows;
+}
+
+/**
+ * `storeFaults` names the tables whose reads THROW. The thrown error is one
+ * instance per table, so a cell can assert that the error the real request
+ * failed with IS the injected fault, not merely some error.
  */
 function makeEngine(schema: Record<string, unknown>, storeFaults: ReadonlyMap<string, Error>) {
   const tables: Record<string, any[]> = {
@@ -110,6 +121,7 @@ function makeEngine(schema: Record<string, unknown>, storeFaults: ReadonlyMap<st
     // The delegator exists, so `resolveDelegatorContext` reaches the grant reads.
     sys_user: [{ id: U_REPORTER, email: 'reporter@example.com' }],
   };
+  for (const [table, fault] of storeFaults) tables[table] = unavailableTable(fault);
   // `$or` / `$and` conjoin WITH their sibling keys, the way a real driver ANDs
   // them. An operator this double does not know THROWS rather than comparing an
   // object to a scalar: a matcher that silently answers `false` would green a
@@ -139,10 +151,9 @@ function makeEngine(schema: Record<string, unknown>, storeFaults: ReadonlyMap<st
     registerMiddleware: (mw: any) => middlewares.push(mw),
     getSchema: (name: string) => (name === OBJECT ? schema : undefined),
     async find(object: string, options: any = {}) {
-      const fault = storeFaults.get(object);
-      if (fault) throw fault;
       const rows = (tables[object] ??= []);
-      return rows.filter((r) => matches(r, options.filter ?? options.where)).slice(0, options.limit ?? 1000);
+      const hits = rows.filter((r) => matches(r, options.filter ?? options.where));
+      return typeof options.limit === 'number' ? hits.slice(0, options.limit) : hits;
     },
     async findOne(object: string, options: any = {}) {
       assertEngineFindOnePredicate(object, options);
