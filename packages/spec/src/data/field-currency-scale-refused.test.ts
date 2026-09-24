@@ -15,7 +15,12 @@
  * `max_scale` branch — a narrower write contract bought with no visible
  * change. The write seam drops `currency` from its enforced set in the same
  * change (pinned in that package's `record-validator.test.ts`); this file pins
- * the authoring half.
+ * the authoring half: the parse door, and the OFFER beside it. The object
+ * designer's quick-add grid (`object.form.ts`, the registered `object` form)
+ * showed its `scale` input on currency rows until the at-tier review of this
+ * change caught it; a door that refuses a key a registered form still offers is
+ * the offer-vs-door shape the retirement exists to remove, so the last block
+ * reads every registered form's `scale` rows against a currency field.
  *
  * Key-vs-value note: the rule judges the KEY on one type, whatever its value,
  * so the refusal is asserted as a full `safeParse` failure located at
@@ -26,6 +31,8 @@
 import { describe, expect, it } from 'vitest';
 import { Field, FieldSchema } from './field.zod';
 import { ObjectSchema } from './object.zod';
+import { objectForm } from './object.form';
+import { METADATA_FORM_REGISTRY } from '../system/metadata-form-registry';
 
 type Issue = { code: string; path: PropertyKey[]; message: string };
 
@@ -133,5 +140,105 @@ describe('#19629 — CONTROLS: what the refusal must leave alone', () => {
     expect(description).toContain('REFUSED on a `currency` field — delete it there');
     expect(description).toContain('the currency\'s ISO 4217 minor unit decides how the amount displays');
     expect(description).not.toContain('currencyConfig');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// The offer half: no registered metadata form shows `scale` on a currency field.
+//
+// The predicate reader below is the fail-closed mirror of the metadata-admin
+// predicate subset that `form-delete-behavior-options.test.ts` uses: it knows
+// only the `data.type` spellings these forms write (`==`, `in [...]`, joined by
+// `||`) and THROWS on anything else, so a row whose predicate it cannot read
+// fails here instead of being assumed visible or hidden.
+// ────────────────────────────────────────────────────────────────────────────
+
+type FormRow = Record<string, unknown>;
+
+/** `defineForm` stores a predicate as `{ dialect, source }`; accept the bare string too. */
+function predicateSource(row: FormRow): string | undefined {
+  const raw = row.visibleWhen;
+  if (raw == null) return undefined;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && typeof (raw as { source?: unknown }).source === 'string') {
+    return (raw as { source: string }).source;
+  }
+  throw new Error(`unreadable visibleWhen on '${String(row.field)}': ${JSON.stringify(raw)}`);
+}
+
+/** Whether the row renders for a field of `type`. Throws on an unrecognised clause. */
+function isOfferedForType(row: FormRow, type: string): boolean {
+  const src = predicateSource(row);
+  if (src === undefined) return true;
+  return src.split('||').some((part) => {
+    const clause = part.trim();
+    const eq = /^data\.type\s*==\s*'([^']*)'$/.exec(clause);
+    if (eq) return eq[1] === type;
+    const inList = /^data\.type\s+in\s+\[([^\]]*)\]$/.exec(clause);
+    if (inList) {
+      return inList[1].split(',').map((m) => {
+        const lit = /^'([^']*)'$/.exec(m.trim());
+        if (!lit) throw new Error(`non-literal member in \`in\` list: ${m}`);
+        return lit[1];
+      }).includes(type);
+    }
+    throw new Error(`predicate spelling not covered by this reader: ${JSON.stringify(clause)}`);
+  });
+}
+
+/** Every row named `key` in a form, at any depth (sections, repeater rows), by dotted path. */
+function rowsNamed(form: unknown, key: string): Array<{ path: string; row: FormRow }> {
+  const out: Array<{ path: string; row: FormRow }> = [];
+  const walk = (rows: unknown, prefix: string) => {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows as FormRow[]) {
+      if (typeof row?.field !== 'string') continue;
+      const path = prefix ? `${prefix}.${row.field}` : row.field;
+      if (row.field === key) out.push({ path, row });
+      walk(row.fields, path);
+    }
+  };
+  for (const section of ((form as { sections?: Array<{ fields?: unknown }> })?.sections ?? [])) {
+    walk(section.fields, '');
+  }
+  return out;
+}
+
+describe('#19629 — no registered metadata form OFFERS `scale` on a currency field', () => {
+  it('CONTROLS: the walk reaches exactly the two `scale` rows the registered forms declare, and the object form is the registered one', () => {
+    // A lit roster, so an empty result below is a measured zero rather than a
+    // walk that found nothing to judge; a new `scale` row anywhere turns this
+    // red and gets read against the ruling before it ships.
+    const roster = Object.entries(METADATA_FORM_REGISTRY)
+      .flatMap(([type, form]) => rowsNamed(form, 'scale').map((r) => `${type}:${r.path}`))
+      .sort();
+    expect(roster).toEqual(['field:scale', 'object:fields.scale']);
+    expect(METADATA_FORM_REGISTRY.object).toBe(objectForm);
+    // The reader is capable of saying "offered": a known row it must light up.
+    expect(isOfferedForType({ field: 'x', visibleWhen: "data.type in ['currency']" }, 'currency')).toBe(true);
+  });
+
+  it('the object designer\'s quick-add grid does not offer `scale` on a currency row — the door refuses it at parse', () => {
+    const rows = rowsNamed(objectForm, 'scale');
+    expect(rows.map((r) => r.path)).toEqual(['fields.scale']);
+    expect(isOfferedForType(rows[0].row, 'currency')).toBe(false);
+  });
+
+  it('the object designer still offers `scale` where the key applies — number and percent', () => {
+    const [{ row }] = rowsNamed(objectForm, 'scale');
+    for (const type of ['number', 'percent']) {
+      expect(isOfferedForType(row, type), type).toBe(true);
+      // And the door agrees: the offered key parses on that type.
+      expect(FieldSchema.safeParse({ name: 'n', label: 'N', type, scale: 2 }).success, type).toBe(true);
+    }
+  });
+
+  it('no registered form offers `scale` on a currency field', () => {
+    const offered = Object.entries(METADATA_FORM_REGISTRY).flatMap(([type, form]) =>
+      rowsNamed(form, 'scale')
+        .filter((r) => isOfferedForType(r.row, 'currency'))
+        .map((r) => `${type}:${r.path}`),
+    );
+    expect(offered).toEqual([]);
   });
 });
