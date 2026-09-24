@@ -15,7 +15,7 @@ import {
 } from './package-api.zod';
 
 /**
- * # Package API Protocol — the declarations that carry the ASSEMBLED package body
+ * The Package API declarations that carry the ASSEMBLED package body.
  *
  * Published from `@objectstack/spec/api-assembled`, never from
  * `@objectstack/spec/api`. Everything here is part of the Package API
