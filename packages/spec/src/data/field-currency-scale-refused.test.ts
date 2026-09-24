@@ -3,7 +3,12 @@
 /**
  * #19629 — `scale` is RETIRED from the `currency` field type (maintainer ruling
  * 5791803339, batch #215 item 1, letter B): a currency field carrying `scale`
- * is refused at parse, with a remedy naming `currencyConfig.precision`.
+ * is refused at parse. The remedy is worded by ruling 5805782503 (batch #218
+ * item 2, letter 乙 — a currency's decimal places are the currency's, not a
+ * setting): delete the key; the currency's ISO 4217 minor unit decides its
+ * display, and its write allowance stays unconstrained. It names no other key
+ * to carry the value, and the remedy pins below hold both halves: the ruled
+ * wording is present, and the retired pointer is absent.
  *
  * On a currency field the key was offered by the field designer, never read by
  * the amount's cell, and still enforced on writes by `packages/objectql`'s
@@ -29,16 +34,28 @@ function scaleIssues(result: { success: boolean; error?: { issues: Issue[] } }):
   return result.success ? [] : result.error!.issues.filter((i) => i.path[i.path.length - 1] === 'scale');
 }
 
+/**
+ * The ruled remedy, held on the message itself: the wording is the contract
+ * here (ruling 乙 rules the prescription, not only the refusal), so the pin
+ * reads the first sentence verbatim, the two ruled clauses, and the ABSENCE of
+ * any key the author could be sent to instead.
+ */
+function expectRuledRemedy(message: string): void {
+  expect(message.startsWith('`scale` is not valid on a `currency` field — delete the key.')).toBe(true);
+  expect(message).toContain('the currency\'s ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how the amount displays');
+  expect(message).toContain('the field\'s write allowance stays unconstrained');
+  expect(message).not.toMatch(/currencyConfig|precision/);
+}
+
 describe('#19629 — `scale` on a `currency` field is refused at parse', () => {
-  it('refuses the designer-produced shape, located at `scale`, with the remedy naming `currencyConfig.precision`', () => {
+  it('refuses the designer-produced shape, located at `scale`, with the ruled remedy: delete the key, and no other key named', () => {
     const result = FieldSchema.safeParse({ name: 'amount', label: 'Amount', type: 'currency', scale: 3 });
     expect(result.success).toBe(false);
     const issues = scaleIssues(result);
     expect(issues).toHaveLength(1);
     expect(issues[0].code).toBe('custom');
     expect(issues[0].path).toEqual(['scale']);
-    // The ruled remedy's named subject — the one knob the refusal points to.
-    expect(issues[0].message).toContain('`currencyConfig.precision`');
+    expectRuledRemedy(issues[0].message);
   });
 
   it('refuses every declared value, `scale: 0` and `scale: 2` included — it is the key that is retired', () => {
@@ -49,16 +66,20 @@ describe('#19629 — `scale` on a `currency` field is refused at parse', () => {
     }
   });
 
-  it('refuses it beside a `currencyConfig` too — the width key is not an alias for it', () => {
+  it('refuses it beside a `currencyConfig` too, with the same remedy — the block neither licenses the key nor receives its value', () => {
     const result = FieldSchema.safeParse({
       name: 'amount',
       label: 'Amount',
       type: 'currency',
       scale: 2,
-      currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
+      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
     });
     expect(result.success).toBe(false);
-    expect(scaleIssues(result)).toHaveLength(1);
+    const issues = scaleIssues(result);
+    expect(issues).toHaveLength(1);
+    // The field that most invites a "move it into the block" remedy gets the
+    // same prescription as every other: delete the key.
+    expectRuledRemedy(issues[0].message);
   });
 
   it('fires through the `Field.currency()` helper and `ObjectSchema` — the path an object document crosses', () => {
@@ -71,6 +92,7 @@ describe('#19629 — `scale` on a `currency` field is refused at parse', () => {
     const issues = scaleIssues(result);
     expect(issues).toHaveLength(1);
     expect(issues[0].path).toEqual(['fields', 'amount', 'scale']);
+    expectRuledRemedy(issues[0].message);
   });
 });
 
@@ -81,14 +103,20 @@ describe('#19629 — CONTROLS: what the refusal must leave alone', () => {
     expect(FieldSchema.parse(once)).toEqual(once);
   });
 
-  it('the remedy target parses: `currencyConfig.precision` on a currency field', () => {
-    const result = FieldSchema.safeParse({
-      name: 'amount',
-      label: 'Amount',
-      type: 'currency',
-      currencyConfig: { precision: 3, currencyMode: 'fixed', defaultCurrency: 'KWD' },
-    });
-    expect(result.success).toBe(true);
+  it('following the remedy parses: each refused shape, with `scale` deleted and nothing added, is accepted', () => {
+    const refused: Record<string, unknown>[] = [
+      { name: 'amount', label: 'Amount', type: 'currency', scale: 3 },
+      { name: 'amount', label: 'Amount', type: 'currency', scale: 2, min: 0, currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'KWD' } },
+    ];
+    for (const shape of refused) {
+      expect(FieldSchema.safeParse(shape).success).toBe(false);
+      const remedied = { ...shape };
+      delete remedied.scale;
+      expect(Object.keys(remedied)).toEqual(Object.keys(shape).filter((k) => k !== 'scale'));
+      const result = FieldSchema.safeParse(remedied);
+      expect(result.success, JSON.stringify(remedied)).toBe(true);
+      if (result.success) expect('scale' in result.data).toBe(false);
+    }
   });
 
   it('every type the key still applies to keeps it — number, percent, rating, slider', () => {
@@ -99,9 +127,11 @@ describe('#19629 — CONTROLS: what the refusal must leave alone', () => {
     }
   });
 
-  it('the describe names the type set the key still applies to, and the currency refusal', () => {
+  it('the describe names the type set the key still applies to, and the currency refusal with the ruled remedy', () => {
     const description = (FieldSchema.shape as Record<string, { description?: string }>).scale?.description ?? '';
     expect(description).toContain('Applies to `number`, `percent`, `rating` and `slider`');
-    expect(description).toContain('REFUSED on a `currency` field');
+    expect(description).toContain('REFUSED on a `currency` field — delete it there');
+    expect(description).toContain('the currency\'s ISO 4217 minor unit decides how the amount displays');
+    expect(description).not.toContain('currencyConfig');
   });
 });

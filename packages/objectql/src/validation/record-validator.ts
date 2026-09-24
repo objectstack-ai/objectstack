@@ -792,18 +792,21 @@ function validateOne(
     // ── `currency` is OUTSIDE the enforced set (#19629) ──
     // Maintainer ruling 5791803339 (batch #215 item 1, letter B): `scale` is
     // retired from the `currency` type. `FieldSchema` refuses the key there at
-    // parse, with a remedy naming `currencyConfig.precision`, so no authored
-    // currency field declares it any more — and this branch stops reading
-    // `def.scale` for the type, so a declaration that reaches here anyway (a
-    // stored field that predates the refusal, a hand-built runtime schema)
-    // narrows nothing either. The key was the currency field's one enforced
-    // effect: the amount's cell never read it, so an author who set it bought a
-    // narrower write contract and no visible change. `min` / `max` and the
-    // finite-number check above still apply to `currency` unchanged.
-    // ⛔ Not replaced by a read of `currencyConfig.precision`: enforcing that
-    // width on writes (the ruling's B′) was offered and NOT taken — a currency
+    // parse, with the remedy ruling 5805782503 (batch #218 item 2, letter 乙)
+    // words (delete the key; the currency's ISO 4217 minor unit decides its
+    // display), so no authored currency field declares it any more — and this
+    // branch stops reading `def.scale` for the type, so a declaration that
+    // reaches here anyway (a stored field that predates the refusal, a
+    // hand-built runtime schema) narrows nothing either. The key was the
+    // currency field's one enforced effect: the amount's cell never read it,
+    // so an author who set it bought a narrower write contract and no visible
+    // change. `min` / `max` and the finite-number check above still apply to
+    // `currency` unchanged.
+    // ⛔ Not replaced by a read of any other key: a currency's write
+    // allowance stays unconstrained (ruling 乙, today's contract) — a currency
     // write carries whatever decimals it carries, exactly as it always has on
-    // a currency field that declared no `scale`.
+    // a currency field that declared no `scale`. Enforcing a currency width on
+    // writes (the first ruling's B′) was offered and NOT taken.
     if (
       t !== 'currency' &&
       def.scale !== undefined &&

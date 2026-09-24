@@ -1229,10 +1229,11 @@ export const FieldSchema = lazySchema(() => {
   // reads only that page is exactly the author the ruling is about.
   // #19629 — and on ONE type the key is not authorable at all: ruling
   // 5791803339 (batch #215 item 1, letter B) retires `scale` from `currency`,
-  // refused in the superRefine below. The describe names the type set the key
-  // still applies to, for the same reason as above.
+  // refused in the superRefine below, with the remedy ruling 5805782503
+  // (batch #218 item 2, letter 乙) words. The describe names the type set the
+  // key still applies to, for the same reason as above.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field: a currency amount\'s decimal places come from its currency (the ISO 4217 minor unit), and `currencyConfig.precision` is that type\'s own width key. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s ISO 4217 minor unit decides how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -2264,30 +2265,30 @@ export const FieldSchema = lazySchema(() => {
   // `packages/objectql`'s `max_scale` branch still refused writes carrying
   // more decimals — so an author who set it bought a narrower write contract
   // and no visible change. The ruling retires the key rather than aligning the
-  // money faces to it, and names `currencyConfig.precision` as the width key
-  // the remedy points to. ⛔ No alias and no grace window (the ruling's own
-  // words: retirement is immediate), and the write seam drops `currency` from
-  // its enforced set in the same change, so no declaration anywhere keeps the
-  // old narrowing alive. `scale` has no schema default, so `undefined` here
-  // always means "not authored" — a currency field without the key can never
-  // fire this, and `parse(parse(x))` stays stable. The remedy warns against
-  // ADDING a `currencyConfig` only to carry the value, because that block
-  // materializes `defaultCurrency` (default `CNY`) and would change the
-  // currency the field resolves. Stored metadata carrying the key is covered
-  // by the ADR-0087 semantic entry `field-currency-scale-refused`.
+  // money faces to it. The remedy is worded by ruling 5805782503 (batch #218
+  // item 2, letter 乙 — a currency's decimal places are the currency's, not a
+  // setting): delete the key; the currency's ISO 4217 minor unit decides its
+  // display, and its write allowance stays unconstrained (today's contract
+  // for a currency field that declares no `scale`). ⛔ The remedy names no
+  // other key to carry the value: nothing replaces it. ⛔ No alias and no
+  // grace window (the first ruling's own words: retirement is immediate), and
+  // the write seam drops `currency` from its enforced set in the same change,
+  // so no declaration anywhere keeps the old narrowing alive. `scale` has no
+  // schema default, so `undefined` here always means "not authored" — a
+  // currency field without the key can never fire this, and `parse(parse(x))`
+  // stays stable. Stored metadata carrying the key is covered by the ADR-0087
+  // semantic entry `field-currency-scale-refused`.
   if (field.type === 'currency' && field.scale !== undefined) {
     ctx.addIssue({
       code: 'custom',
       path: ['scale'],
       message:
-        '`scale` is not valid on a `currency` field: a currency amount\'s decimal places come from its ' +
-        'currency — the ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD) — so the amount\'s cell ' +
-        'never read the key, and its one enforced effect was refusing writes with more decimals, which ' +
-        'this field type no longer does. Delete the key. A currency field\'s own width key is ' +
-        '`currencyConfig.precision`: if the field already declares a `currencyConfig`, move the value ' +
-        'there instead. Do not add a `currencyConfig` just to carry it — that block also sets ' +
-        '`currencyMode` and `defaultCurrency` (default `CNY`), which changes the currency the field ' +
-        'resolves.',
+        '`scale` is not valid on a `currency` field — delete the key. A currency amount\'s decimal ' +
+        'places are its currency\'s, not a field setting: the currency\'s ISO 4217 minor unit (2 for ' +
+        'USD, 0 for JPY, 3 for KWD) decides how the amount displays, and the field\'s write allowance ' +
+        'stays unconstrained — a currency write is accepted with the decimals it carries, as it always ' +
+        'was on a currency field that declared no `scale`. The key\'s one enforced effect was refusing ' +
+        'writes with more decimals, which this field type no longer does.',
     });
   }
 

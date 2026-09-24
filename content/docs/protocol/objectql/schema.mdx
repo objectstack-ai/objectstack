@@ -289,7 +289,7 @@ fields:
 | `valueDomain` | `string` | `text` | Standard the written value must belong to: `iana_time_zone`, `iso_4217_currency` or `iso_3166_alpha2` (the closed vocabulary shared with settings specifiers). |
 | `min` | `number` | `number`, `currency` | Minimum numeric value. |
 | `max` | `number` | `number`, `currency` | Maximum numeric value. |
-| `scale` | `number` | `number`, `percent`, `rating`, `slider` | Decimal places, enforced on writes. Refused on `currency`: a currency amount's decimal places come from its currency's ISO 4217 minor unit. |
+| `scale` | `number` | `number`, `percent`, `rating`, `slider` | Decimal places, enforced on writes. Refused on `currency` — delete it there: a currency amount's decimal places are its currency's, so its ISO 4217 minor unit decides the display. |
 | `precision` | `number` | `number`, `currency` | Total digits (including scale). |
 | `options` | `array` | `select`, `multiselect` | List of valid values. |
 | `multiple` | `boolean` | `select`, `lookup` | Allow multiple selections. |

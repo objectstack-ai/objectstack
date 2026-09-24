@@ -1280,10 +1280,11 @@ describe('validateRecord — a fraction-stored percent derives `scale + 2` (#193
  * a hand-built runtime schema) narrows nothing either.
  *
  * Three pins, per the ruling: a currency write with more decimals is ACCEPTED
- * when nothing declares a width (today's contract, unchanged); the same write
- * is accepted with a legacy `scale` on the def (the change); and `number` /
- * `percent` still refuse the identical over-scale write (the controls that
- * prove the branch is live in this harness, not deleted).
+ * when nothing declares a width (today's contract, unchanged — ruling
+ * 5805782503, letter 乙: a currency's write allowance stays unconstrained);
+ * the same write is accepted with a legacy `scale` on the def (the change);
+ * and `number` / `percent` still refuse the identical over-scale write (the
+ * controls that prove the branch is live in this harness, not deleted).
  */
 describe('validateRecord — `currency` is outside the max_scale enforced set (#19629)', () => {
   const fieldsOf = (
