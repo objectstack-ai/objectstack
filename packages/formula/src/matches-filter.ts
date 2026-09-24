@@ -63,6 +63,19 @@
  * where such a constraint sat under an `$or` beside a satisfied branch, or under
  * a `$not`, the old `false` was ABSORBED and the write was allowed. Those writes
  * now fail. See {@link emptyFieldConstraintError}.
+ *
+ * [#19886] A second shape is refused the same way: an ARRAY where a single
+ * comparable value is expected — under `$ne`, or in the equality position
+ * (`{ field: [...] }`, `{ field: { $eq: [...] } }`). It is the one position
+ * where this face's answer was not merely silent but the WRONG way round for a
+ * write gate: a strict comparison never equals an array, so `$ne` matched EVERY
+ * record, and a negated equality (`$not` around `{ field: [...] }`, which is
+ * what `!(record.f == [...])` lowers to) did too. On the ADR-0058 D4 `check`
+ * that admitted every write the policy was written to refuse, measured through
+ * the real `plugin-security` on three drivers. The query faces the read side
+ * runs on — driver-sql's unbindable-comparand refusal and driver-memory's
+ * array-comparand refusal — already refuse the shape with `INVALID_FILTER` /
+ * 400; this face now gives the same envelope. See {@link arrayComparandError}.
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
@@ -118,6 +131,83 @@ function emptyFieldConstraintError(field: string, path: string): Error {
   return err;
 }
 
+/**
+ * [#19886] An ARRAY where one comparable value is expected — under `$ne`, or in
+ * the equality position (a bare-array field spec, or `$eq`) — is REFUSED, not
+ * evaluated, with the envelope the other faces already give the same shape
+ * (`INVALID_FILTER` / 400).
+ *
+ * # Why refused rather than answered
+ *
+ * The answer this face used to give was unsafe on the surface it exists for.
+ * `looseEq` is a strict comparison, and no stored scalar is ever `===` an array,
+ * so:
+ *
+ * | shape                                   | old answer, every record |
+ * |:----------------------------------------|:-------------------------|
+ * | `{ f: { $ne: [...] } }`                 | `true`                   |
+ * | `{ f: [...] }` / `{ f: { $eq: [...] } }`| `false`                  |
+ * | `{ $not: { f: [...] } }`                | `true`                   |
+ *
+ * An RLS `check` is authored as CEL, and `record.f != ['a', 'b']` (or `!=`
+ * against a `current_user` membership array) lowers to the first row, so every
+ * write the policy was written to refuse was admitted and stored. The positive
+ * equality row only failed closed by accident, and inverted the moment it was
+ * negated. There is no answer here that is right in every polarity — which is
+ * the #5240 argument for refusing rather than choosing.
+ *
+ * # What stays exactly as it was
+ *
+ * `$in` / `$nin` (the list operators — this is what they are FOR), scalars,
+ * `null`, `Date`, and `{ $field }` references. The refusal reads the AUTHORED
+ * comparand, never a resolved one: a `{ $field }` reference whose column
+ * happens to hold an array is untouched.
+ *
+ * # Why the message names nothing from the filter
+ *
+ * This face's callers evaluate access policies — the write gate's `check`, and
+ * the explain engine's record attribution — and the caller who receives the
+ * 400 is usually not the author of the predicate. The comparand may be a
+ * resolved membership set (other users' ids), which must not be echoed to them.
+ * So the field, the operator and the value are withheld, the posture
+ * driver-sql's withheld-diagnostic ruling took for the same reason, and the
+ * message carries the refusal's identity and the remedy only.
+ */
+function arrayComparandError(): Error {
+  const err = new Error(
+    'A single-value comparison in this filter received an array as its comparand: an array ' +
+      'under "$ne", or an array in the equality position ({ "field": [ ... ] } or "$eq"). A list ' +
+      'is not one comparable value. For "one of these values" use "$in", and for "none of these ' +
+      'values" use "$nin" — the list operators the filter protocol declares. It is refused before ' +
+      'any record is judged rather than evaluated, because this evaluator compares strictly and ' +
+      'no stored value ever equals an array: "$ne" matched EVERY record, and so did a negated ' +
+      'equality, which on a row-level write check admitted every write the check was written to ' +
+      'refuse. The field, the operator and the value are withheld from this message because the ' +
+      'filter may be an access policy the caller did not write; in a row-level policy, look for ' +
+      'a "!=" or "==" compared against a list literal or a current_user membership key, and ' +
+      'rewrite it with "in" (for example "!(record.status in [\'closed\', \'archived\'])").',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#19886] The operators whose array comparand this face refuses: exactly the
+ * two the refusal was ruled for — the equality slot and its negation. The
+ * ordering operators (`$gt` / `$gte` / `$lt` / `$lte`) are deliberately NOT in
+ * this list; what they do with an array is a separate question this refusal
+ * does not answer.
+ */
+const ARRAY_REFUSED_OPERATORS = ['$eq', '$ne'] as const;
+
+/** A plain object — an operator map rather than a comparand (`Date` is a comparand). */
+function isOperatorMap(spec: unknown): spec is Record<string, unknown> {
+  if (spec === null || typeof spec !== 'object' || Array.isArray(spec) || spec instanceof Date) return false;
+  const proto = Object.getPrototypeOf(spec);
+  return proto === Object.prototype || proto === null;
+}
+
 /** True iff `record` satisfies `filter`. A null/empty filter matches everything. */
 export function matchesFilterCondition(record: Record<string, unknown>, filter: FilterCondition | null | undefined): boolean {
   if (filter == null) return true;
@@ -134,9 +224,11 @@ export function matchesFilterCondition(record: Record<string, unknown>, filter: 
 
 /**
  * [#5240] Walk the whole condition tree and refuse any zero-operator field
- * constraint. Shapes this evaluator already answers fail-closed (a non-node
- * `$and` element, an unknown `$`-operator, a bare array field spec) are left to
- * it — this walk adds exactly one refusal and changes nothing else.
+ * constraint. [#19886] The same walk refuses an array comparand under `$ne`
+ * or in the equality position ({@link arrayComparandError}), at any depth under
+ * `$and` / `$or` / `$not`. Shapes this evaluator already answers fail-closed in
+ * every polarity (a non-node `$and` element, an unknown `$`-operator) are left
+ * to it — this walk adds those two refusals and changes nothing else.
  */
 function assertFilterShape(node: unknown, path: string): void {
   if (node == null || typeof node !== 'object' || Array.isArray(node)) return;
@@ -152,6 +244,14 @@ function assertFilterShape(node: unknown, path: string): void {
     }
     if (key.startsWith('$')) continue;
     if (isEmptyFieldConstraint(val)) throw emptyFieldConstraintError(key, here);
+    // [#19886] The equality position, spelled bare: `{ field: [...] }`.
+    if (Array.isArray(val)) throw arrayComparandError();
+    // [#19886] …and spelled with an operator: `$eq` / `$ne` carrying an array.
+    if (isOperatorMap(val)) {
+      for (const op of ARRAY_REFUSED_OPERATORS) {
+        if (Array.isArray(val[op])) throw arrayComparandError();
+      }
+    }
   }
 }
 
@@ -195,6 +295,9 @@ function evalField(record: Record<string, unknown>, field: string, spec: unknown
   // Scalar / Date → implicit equality.
   if (typeof spec !== 'object' || spec instanceof Date) return looseEq(actual, spec);
   // A bare array value is not a valid field spec (must be `{ $in: [...] }`).
+  // [#19886] Refused up front by `assertFilterShape` on the public entry point,
+  // so this arm is a floor for a recursive call on a subtree, not this face's
+  // answer to the shape — the same standing as the `keys.length === 0` arm below.
   if (Array.isArray(spec)) return false;
 
   const ops = spec as Record<string, unknown>;
