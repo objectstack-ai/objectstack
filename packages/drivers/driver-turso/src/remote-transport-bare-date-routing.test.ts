@@ -146,12 +146,15 @@ describe('RemoteTransport bare-Date comparand routing (#1066)', () => {
       // The narrowing must be `Date`-shaped, not "any object with no $ keys":
       // a typo'd operator must still reach the `default:` arm rather than
       // becoming an implicit-equality comparand.
-      await expect(t.find('deal', { where: { amount: { $gtt: 10 } } })).rejects.toThrow(
-        /Unsupported filter operator "\$gtt"/,
-      );
-      await expect(t.find('deal', { where: { amount: { budget: 10 } } })).rejects.toThrow(
-        /key "budget" is not an operator/,
-      );
+      // [#20020] Marked author-written: both refusals now withhold their naming
+      // half from a predicate no boundary vouched, and WHICH gate answers is
+      // what this case asks about.
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ amount: { $gtt: 10 } }, 'author') }),
+      ).rejects.toThrow(/Unsupported filter operator "\$gtt"/);
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ amount: { budget: 10 } }, 'author') }),
+      ).rejects.toThrow(/key "budget" is not an operator/);
     });
 
     it('keeps arrays refused in bare position', async () => {
@@ -173,9 +176,10 @@ describe('RemoteTransport bare-Date comparand routing (#1066)', () => {
       // not an operator. Unchanged by this fix, and pinned so the narrowing
       // above is never widened from "Date" to "any object that binds": it must
       // still throw, and it must still be THIS gate that says so.
-      await expect(t.find('deal', { where: { blob: new Uint8Array([1]) } })).rejects.toThrow(
-        /key "0" is not an operator/,
-      );
+      // [#20020] Marked author-written, for the reason given one case up.
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ blob: new Uint8Array([1]) }, 'author') }),
+      ).rejects.toThrow(/key "0" is not an operator/);
       // An EMPTY buffer has no keys at all — pre-fix it vanished exactly like a
       // Date did; now it is the zero-clause refusal.
       await expect(t.find('deal', { where: { blob: new Uint8Array([]) } })).rejects.toThrow(
