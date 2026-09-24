@@ -289,12 +289,23 @@ function makeEngine() {
     },
     // Both write verbs open with the PRODUCER's own dispatch predicate
     // (`assertEngine*Dispatch`), never a hand-mirrored guard.
-    async update(object: string, data: any, options?: any) {
+    //
+    // [#19950] `opCtx` is the operation the middleware chain ran on, as the
+    // real engine holds it. On the PREDICATE path the engine hands an
+    // installed write-image check every matched row merged with the payload
+    // before it writes, so this double does the same: a double that skipped
+    // it would be refused, fail-closed, by the security middleware.
+    async update(object: string, data: any, options?: any, opCtx?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);
       const rows = (tables[object] ??= []);
       const targets = dispatch.kind === 'by-id'
         ? rows.filter((r) => r.id === dispatch.id)
         : rows.filter((r) => matches(r, options?.where));
+      const seam = dispatch.kind === 'by-id' ? undefined : opCtx?.postHookWriteImageCheck;
+      if (seam) {
+        seam.honoured = true;
+        await seam.evaluate(targets.map((r) => ({ ...r, ...data })));
+      }
       for (const r of targets) Object.assign(r, data);
       return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
@@ -379,7 +390,7 @@ async function makeStack(opts: { orgScoping?: boolean } = {}): Promise<Stack> {
         await sharingMw(opCtx, async () => {
           if (opCtx.operation === 'delete') await engine.delete(opCtx.object, opCtx.options);
           else if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data);
-          else await engine.update(opCtx.object, opCtx.data, opCtx.options);
+          else await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
           reached = true;
         });
       });
@@ -594,11 +605,13 @@ describe('[#8059 site 1] Layer 1 actually DERIVES for a check-only policy — th
   let stack: Stack;
   beforeEach(async () => { stack = await makeStack(); });
 
-  it('the bulk UPDATE path touches only READABLE rows — a path step 3.6 explicitly declines to check', async () => {
-    // Step 3.6 logs "not post-image validated" and skips for a write with no
-    // single id, so belt 2 contributes NOTHING here by its own construction.
+  it('the bulk UPDATE path touches only READABLE rows — a path step 3.6 can refuse but never scope', async () => {
+    // Since #19950 step 3.6 judges every row a bulk update stores, but a check
+    // can only REFUSE a write; it cannot choose which rows the write touches.
     // The only thing that can scope this write is Layer 1 injected into the
-    // AST — i.e. the derivation. On a site-1 revert both rows are rewritten.
+    // AST — i.e. the derivation. On a site-1 revert the match set grows to the
+    // other contributor's row, whose new image fails the owner check, so the
+    // whole write is refused and the caller's own row is not rewritten either.
     const opCtx: any = {
       object: 'qa_invoice',
       operation: 'update',
@@ -609,7 +622,7 @@ describe('[#8059 site 1] Layer 1 actually DERIVES for a check-only policy — th
     };
     const securityMw = stack.engine._middlewares[0];
     await securityMw(opCtx, async () => {
-      await stack.engine.update(opCtx.object, opCtx.data, { ...opCtx.options, where: opCtx.ast.where, multi: true });
+      await stack.engine.update(opCtx.object, opCtx.data, { ...opCtx.options, where: opCtx.ast.where, multi: true }, opCtx);
     });
     expect(stack.rows('qa_invoice').find((r) => r.id === INVOICE_C2.id)?.subject).toBe('bulk-edit');
     expect(
@@ -632,7 +645,7 @@ describe('[#8059 site 1] Layer 1 actually DERIVES for a check-only policy — th
     };
     const securityMw = stack.engine._middlewares[0];
     await securityMw(opCtx, async () => {
-      await stack.engine.update(opCtx.object, opCtx.data, { ...opCtx.options, where: opCtx.ast.where, multi: true });
+      await stack.engine.update(opCtx.object, opCtx.data, { ...opCtx.options, where: opCtx.ast.where, multi: true }, opCtx);
     });
     expect(stack.rows('qa_invoice').find((r) => r.id === INVOICE_C2.id)?.subject).toBe('own-bulk-edit');
   });

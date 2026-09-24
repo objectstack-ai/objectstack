@@ -2224,8 +2224,16 @@ export interface OperationContext {
    * against `opCtx.data`, and {@link ObjectQL.insert} calls it once the
    * `beforeInsert` chain has produced the row — before the first producer with
    * a side effect (the secret channel, the autonumber, the statement), so a
-   * refusal still costs nothing. `update` needs no seam: that path already
-   * merges its pre-image with the change set, which is the same proposition.
+   * refusal still costs nothing. An ARRAY insert is one operation: every live
+   * row is judged in the same call.
+   *
+   * [#19950] A PREDICATE `update` (`multi: true`, no row address) uses the same
+   * seam. The middleware cannot know which rows the write will change: they
+   * are the rows the COMPOSED AST selects, and that AST is complete only after
+   * every middleware has run. So {@link ObjectQL.update} calls it on that path,
+   * once the payload is final, with every matched row merged with the payload.
+   * A by-id `update` is never handed to the seam: the middleware judges that
+   * one row itself, by merging its pre-image with the change set.
    *
    * ABSENT is the ordinary state — no enforcement layer is mounted, or the
    * write is one it does not gate. The engine never invents one.
@@ -2237,11 +2245,12 @@ export interface OperationContext {
  * [#16608] The judgement {@link OperationContext.postHookWriteImageCheck}
  * carries, and the acknowledgement its installer reads back.
  *
- * `evaluate` receives the rows exactly as the `beforeInsert` chain left them —
- * the images the driver is about to be handed — and REFUSES by throwing. It is
- * called at most once per operation, and only for rows still live (a row the
- * declared-field door culled from a partial batch is never judged: it will not
- * be written).
+ * `evaluate` receives the images the driver is about to store, and REFUSES by
+ * throwing. On an `insert` those are the rows exactly as the `beforeInsert`
+ * chain left them, only the live ones (a row the declared-field door culled
+ * from a partial batch is never judged: it will not be written). On a
+ * predicate `update` they are the matched rows, each merged with the final
+ * payload. It is called at most once per operation.
  *
  * `honoured` is set by the engine immediately before `evaluate` runs. It exists
  * so the installer can fail CLOSED on a seam that was never called: an
@@ -13222,6 +13231,56 @@ export class ObjectQL implements IObjectQLEngine {
                // caller is told before N rows are written with a column missing
                // — the failure mode a bulk write makes N times larger.
                assertNoStrictDrops();
+               // ── [#19950] The post-image seam on the PREDICATE path ─────────
+               //
+               // An enforcement layer's write `check` must hold for EVERY row a
+               // write stores (ADR-0058 D4: "and on the AST-injected bulk
+               // path"). For a by-id update the enforcement middleware can judge
+               // the new row itself: it knows the one row and reads it. For a
+               // predicate update it cannot: the rows are the ones the
+               // middleware-COMPOSED AST selects, and that AST is complete only
+               // once every middleware has run (the enforcement layer's own
+               // scope, a sharing layer's editable-rows filter, the tenant
+               // wall). So the layer installs its judgement on
+               // `opCtx.postHookWriteImageCheck`, as it does for an insert, and
+               // the engine hands it the rows here.
+               //
+               // Each image is one matched row merged with the payload, the
+               // row `updateMany` is about to produce, and it is the same shape
+               // the per-row `afterUpdate` context calls `result`
+               // (`buildPerRowAfterContexts`). The rows come from the D7 read,
+               // the one `readPriorRows` memo that validation, the
+               // `readonlyWhen` strip and both hook phases share, bound to the
+               // same composed AST the statement binds. That is the one read the
+               // ruling allows, never a second fetch.
+               //
+               // Placement: the payload is FINAL here. The per-row
+               // `beforeUpdate` chain, the hand-back, both readonly strips and
+               // the strict-drop refusal have all run, and nothing below
+               // changes a value before the statement. The seam judges the rows
+               // that will be stored, which is the rule the insert seam was
+               // held to. The credential channel (`encryptSecretFields`) runs
+               // above on this branch, so a refused write that carried a secret
+               // field has already minted its `sys_secret` row. A validation
+               // refusal two lines down already pays the same cost here, and
+               // moving that channel is a separate change. A `check` naming a
+               // secret field judges the stored reference.
+               //
+               // `honoured` is set BEFORE `evaluate`, exactly as on the insert
+               // path: it answers "did the seam run", never "did the write
+               // pass". Zero matched rows is an empty judgement, not a skipped
+               // one.
+               const predicateImageCheck = opCtx.postHookWriteImageCheck;
+               if (predicateImageCheck) {
+                   predicateImageCheck.honoured = true;
+                   const matchedRows = (await readPriorRows()) ?? [];
+                   const payload = hookContext.input.data as Record<string, unknown>;
+                   await predicateImageCheck.evaluate(
+                     matchedRows.map(
+                       (row) => coerceBooleanFields(updateSchema as any, { ...row, ...payload } as any) as Record<string, unknown>,
+                     ),
+                   );
+               }
                // [#3106] Same enforcement the single-id branch runs at its
                // `evaluateValidationRules` call, applied per matched row: any
                // error-severity violation rejects the WHOLE batch before

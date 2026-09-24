@@ -319,10 +319,9 @@ for (const [driverName, makeDriver] of DRIVERS) {
 
   describe(`[#17042] WRITE face, end to end — ${driverName}`, () => {
     /**
-     * ⚠️ A SINGLE object, never an array. Step 3.6 is guarded by
-     * `!Array.isArray(opCtx.data)`, so a bulk payload skips the check gate
-     * entirely and every cell below would read "permitted" for a reason that
-     * has nothing to do with this card.
+     * A single-row insert, so each cell reads one row's verdict. (An array
+     * insert is judged row by row too; that shape is pinned in
+     * `rls-check-multi-row-writes.test.ts`.)
      */
     const insert = (engine: ObjectQL, isPrivate: boolean) =>
       engine.insert(
