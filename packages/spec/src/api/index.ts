@@ -79,6 +79,15 @@ export * from './query-adapter.zod';
 export * from './export.zod';
 export * from './automation-api.zod';
 export * from './package-api.zod';
+// ⛔ `./package-api-assembled.zod` is deliberately NOT re-exported here. Its
+// declarations (`AssembledInstalledPackageSchema`,
+// `InstalledPackageAtEitherStageSchema`, `ListInstalledPackagesResponseSchema`,
+// `GetInstalledPackageResponseSchema`, `PackageApiContracts`) embed the
+// assembled package body, which links the whole metadata vocabulary and the
+// datasource/driver validators; they are published from
+// `@objectstack/spec/api-assembled` so this browser-facing entry does not carry
+// that tree (maintainer ruling on #18576, letter B). `./api-entry-graph.pin.test.ts`
+// holds the boundary.
 // #12038 — the package lifecycle response contracts (ADR-0067 commit
 // timeline, draft batch doors, ADR-0070 export/adopt/duplicate), including
 // the ruling-5A `/api` re-export of `PackagePublishResultSchema`.
