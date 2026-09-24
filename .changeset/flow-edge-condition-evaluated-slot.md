@@ -80,7 +80,7 @@ the refusal itself carries the prescription.
 
 **A flow ALREADY STORED in `sys_metadata` stops running entirely — the whole
 flow, not just the edge.** The paragraph above is the author's remedy, at
-`objectstack validate` / `POST /flows`; a stored row has no author in front of
+`objectstack validate` / `POST /api/v1/automation`; a stored row has no author in front of
 it. Stored flows are deliberately NOT canonicalized by
 `applyConversionsToStoredItem` (`spec/src/conversions/stored.ts`, and the same
 skip in `metadata/src/loaders/database-loader.ts`'s `rowToData`) — flow-node
