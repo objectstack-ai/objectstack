@@ -10,7 +10,7 @@
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 交付后复核按面欠 ⛔ 不按车道(五面见 `references/contract-review.md`);双肢命中即 spec 车道。
-- 子代理起不来 ⇒ 复核缺席,PR 留 draft 队列外等档;唯一旁路是维护者亲审,逐次为准。
+- 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`):同 head 达档复核 PASS 记录即确认,⛔ 不等维护者。
 - 记录须点名被改 note、逐句判改写句,缺一不算;算即按 SKILL.md 三条件带红入队,门禁不改。
