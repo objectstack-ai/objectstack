@@ -2,6 +2,19 @@
 
 import type { z } from 'zod';
 
+/** The slice of zod's metadata registry (`$ZodRegistry`) the facade uses. */
+interface MetadataRegistryLike {
+  get(schema: unknown): Record<string, unknown> | undefined;
+  has(schema: unknown): boolean;
+  add(schema: unknown, meta: Record<string, unknown>): unknown;
+}
+
+/** The slice of zod's `toJSONSchema` context a `processJSONSchema` hook receives. */
+interface JsonSchemaHookContext {
+  seen?: Map<unknown, unknown>;
+  metadataRegistry?: MetadataRegistryLike;
+}
+
 /**
  * Wrap a Zod schema constructor so its body is only evaluated on first use.
  *
@@ -52,6 +65,17 @@ export function lazySchema<T extends z.ZodTypeAny>(factory: () => T): T {
    * the real instance before delegating, so both identities resolve to the
    * same entry. If the real instance was already traversed under its own
    * identity it keeps its entry (alias, never clobber).
+   *
+   * The same wrapper aliases the real instance's METADATA onto the Proxy
+   * (#19101). zod reads a node's `.describe()` / `.meta()` with
+   * `ctx.metadataRegistry.get(node)` right after this hook returns — a
+   * WeakMap keyed on identity — and the node it holds is the Proxy while the
+   * metadata was registered on the real instance, so every lazySchema
+   * referenced by identity lost its authored `description` in lazy mode and
+   * kept it under `OS_EAGER_SCHEMAS=1`, where no Proxy exists. The two modes
+   * then published different JSON Schemas from one source: the OpenAPI
+   * artifact, `/meta/types` and the `os generate` IDE schema all shipped the
+   * lazy, description-less answer.
    */
   let zodFacade: object | undefined;
   const makeZodFacade = (real: T): object | undefined => {
@@ -63,16 +87,39 @@ export function lazySchema<T extends z.ZodTypeAny>(factory: () => T): T {
     return Object.create(realZod as object, {
       processJSONSchema: {
         enumerable: true,
-        value: (ctx: { seen?: Map<unknown, unknown> }, json: unknown, params: unknown) => {
+        value: (ctx: JsonSchemaHookContext, json: unknown, params: unknown) => {
           const seen = ctx?.seen;
           if (seen && typeof seen.get === 'function') {
             const entry = seen.get(proxy);
             if (entry !== undefined && !seen.has(real)) seen.set(real, entry);
           }
-          return delegate(ctx, json, params);
+          const emitted = delegate(ctx, json, params);
+          aliasMetadataOntoProxy(ctx?.metadataRegistry, real);
+          return emitted;
         },
       },
     }) as object;
+  };
+
+  /**
+   * Register the real instance's metadata under the Proxy identity in the
+   * registry this conversion reads, once, and only when nothing is registered
+   * under the Proxy already (alias, never clobber). The registry merges a
+   * node's `_zod.parent` chain on read, which the Proxy shares with the real
+   * instance, so the Proxy then answers exactly what the real instance does —
+   * less `id`.
+   */
+  const aliasMetadataOntoProxy = (registry: MetadataRegistryLike | undefined, real: T): void => {
+    if (!registry || typeof registry.get !== 'function' || typeof registry.has !== 'function'
+      || typeof registry.add !== 'function' || registry.has(proxy)) {
+      return;
+    }
+    const meta = registry.get(real);
+    if (!meta) return;
+    const aliased: Record<string, unknown> = { ...meta };
+    // `id` stays un-aliased: the Proxy and the real instance both enter one conversion's seen map, and zod throws "Duplicate schema id" when two of its nodes share an id.
+    delete aliased.id;
+    if (Object.keys(aliased).length > 0) registry.add(proxy, aliased);
   };
 
   const proxy = new Proxy(target as object, {
