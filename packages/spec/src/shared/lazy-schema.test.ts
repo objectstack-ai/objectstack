@@ -141,7 +141,7 @@ describe('lazySchema × z.toJSONSchema metadata (#19101)', () => {
   it("the real instance's own describe wins over the one it inherits from its parent", () => {
     const Base = z.string().describe('inherited');
     const lazy = lazySchema(() => Base.describe('own'));
-    const json = z.toJSONSchema(z.object({ v: lazy })) as { properties: { v: { description?: string } } };
+    const json = z.toJSONSchema(z.object({ v: lazy })) as unknown as { properties: { v: { description?: string } } };
     expect(json.properties.v.description).toBe('own');
   });
 
@@ -150,7 +150,7 @@ describe('lazySchema × z.toJSONSchema metadata (#19101)', () => {
       z.object({ x: z.string() }).meta({ id: 'LazySchemaIdProbe19101', description: 'probe' }),
     );
     const Doc = z.object({ a: (Leaf as any).optional(), b: z.lazy(() => Leaf) });
-    const json = z.toJSONSchema(Doc) as { properties: { b: { description?: string } } };
+    const json = z.toJSONSchema(Doc) as unknown as { properties: { b: { description?: string } } };
     expect(json.properties.b.description).toBe('probe');
     expect(z.globalRegistry.get(Leaf)?.id).toBeUndefined();
   });
