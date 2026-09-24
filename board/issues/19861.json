@@ -2,7 +2,7 @@
   "number": 19861,
   "kind": "pull_request",
   "title": "fix(spec): refuse an absent value on a value-taking view filter operator at authoring time",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T12:14:35Z",
-  "updated_at": "2026-09-24T14:13:31Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-24T14:44:25Z",
+  "closed_at": "2026-09-24T14:44:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-24T14:44:23Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19861",

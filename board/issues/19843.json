@@ -2,25 +2,30 @@
   "number": 19843,
   "kind": "pull_request",
   "title": "docs(qa): key the permission-matrix publish refusal on code NO_DRAFT, not a retired message spelling",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
   "labels": [
-    "size/s"
+    "size/s",
+    "skip-changeset"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T10:35:41Z",
-  "updated_at": "2026-09-23T11:00:56Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-24T16:30:10Z",
+  "closed_at": "2026-09-24T16:30:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-24T16:30:08Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19843",

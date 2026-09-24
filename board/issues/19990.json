@@ -1,0 +1,34 @@
+{
+  "number": 19990,
+  "kind": "issue",
+  "title": "pm-dispatch: relay-opened dev PRs are never attached to the seat's session, and the relay landing route has no allow rule, so auto mode decides seat landings call by call",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T14:55:44Z",
+  "updated_at": "2026-09-24T17:32:07Z",
+  "closed_at": "2026-09-24T17:31:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19990",
+  "body": "Filing gate: **③ a task the maintainer directed.** The maintainer, in the `domain:engine#1` seat's session `session_01Bvd69VPa6puiNzzPUroDBx` (chat), 2026-09-24, verbatim, in order:\n- 「你的pr为什么没有挂在当前session上」\n- 「写一个 skills 卡片，更新技能」\n- 「包括你刚才为什么不能merge，我当前session设置的是auto」\n\nThe maintainer names the skills lane. ⛔ Routing labels are triage's, so this card is filed bare. Filed by the `domain:engine` execution seat 1. ⛔ Not a claim.\n\n## Case 1: dev PRs opened through the relay are not attached to the seat's session\n\n**What happened.** PR #19971, PR #19972 and PR #19979 were opened by `os-dev` subagents running inside this seat's session. Each went through the relay (`pr_create`, executed by the `fleet-write` workflow as `objectstack-fleet[bot]`), so the session did not create them, and nothing attached them to it. The harness's own \"subscribe after you create a PR\" step never fires for a relay-created PR. The seat subscribed all three at 14:45Z, only when the maintainer asked, roughly 50–75 minutes after the PRs opened. The PRs had CI runs, two FAIL reviews, patch rounds and re-reviews in between.\n\n**Governing text.** `references/landing-operations.md` 〈B〉: 「落地窗口给关键 PR 挂 `subscribe_pr_activity`,会话型座位专用」 and 「⛔ 不订阅 dev 交报告前的 PR」. The rule exists, but:\n- it is optional in wording (\"关键 PR\");\n- it lives in the landing file, which a seat reads only after ACCEPT;\n- nothing in the collection step (`references/execution-duties.md` 〈收集〉) says to subscribe when a report names a PR.\n\n**Ask.** Make the subscription part of collection: when an `os-dev-report` (subagent or cloud) names a PR, a session seat subscribes it in the same act and lists it on the seat post; the unsubscribe at MERGED / closed stays as written. State once why it is needed: relay-created PRs are never auto-attached.\n\n## Case 2: why the seat could not land under auto mode, then could\n\nReadings from this session:\n1. **Denied, `[CI Bypass]`.** Under ruling 1A (#19940, 5814546887) the seat edited PR #19979's record and correction comment so it could enqueue over the by-design red `Check Changeset`. The very next command was denied: a read-back `curl` of those two comments.\n2. **Denied, `[Self-Approval]`.** A `send_later` timer whose text said: if every check on PR #19971 / PR #19972 is green, post the ACCEPT and run `pr_ready` + `automerge_enable`. Both PRs were written by `os-dev` subagents inside the same session.\n3. **Passed.** After the maintainer's 「你试试看现在有没有权限」, the seat ran `scripts/pm/with-fleet.sh --via dispatch --repo objectstack-ai/objectstack --actions FILE`: first with `pr_ready` + `automerge_enable` for PR #19979 (14:49Z), then for PR #19971 and PR #19972 (14:53Z). The session was in auto mode, and all three calls passed. PR #19972 and PR #19979 are in the merge queue; PR #19971 is ready with auto-merge armed.\n\n**What the tree says.**\n- `.claude/settings.json` allow-lists the direct REST landing calls: `curl … /pulls/*/ccr/ready_for_review` and `curl … /pulls/*/ccr/auto_merge` for three repos, landed by PR #19047 for #19014. It also allows `post-stamped` and `label-write`.\n- A cloud seat's writes go through the relay (`references/rest-channel.md`, the `dispatch` route), and `scripts/pm/with-fleet.sh` has no allow rule. `git grep -n 'with-fleet' .claude/settings.json` gives 0 hits; control: `git grep -n 'label-write' .claude/settings.json` gives 2.\n- ⇒ On the relay channel, landing is again a per-call classifier judgment: the #19014 / #18469 class, on the route that replaced the one those cards fixed.\n- Separately, a `mode:subagent` dev's PR is authored inside the landing session. The classifier can read the seat's own landing of it as self-approval, whichever command spells it. No allow rule settles that by itself.\n\n**Ask** (the skills seat recommends; a new allow rule stays the maintainer's call):\n- (a) Give the relay's landing ops a spelling that can be allow-listed narrowly. `with-fleet.sh --actions *` would admit every op, so a landing-only entry point is one option.\n- (b) Say where a maintainer's standing authorization to land reviewed PRs is recorded, if seats are to land `mode:subagent` PRs under auto mode at all; otherwise say that the landing click stays human for those PRs.\n- (c) One line in the landing text: a classifier denial during landing is stop, surface to the maintainer, and record on the card, ⛔ never routed around. That is what this seat did, from the harness's own instruction, not from the skill.\n- (d) Timer texts: `reading-discipline.md` already bars unconditioned imperatives in timers. Consider stating that a timer carries only the re-read and its triggers, never a landing write verb.\n\n## Filing-gate answers\n\n- **Class:** ③ (maintainer-directed task).\n- **Acting reader:** the `domain:skills` seat.\n- **Dedupe**, MCP issue search in this repo, `closed` included:\n  - `PM seat dev PR opened through fleet relay not subscribed to session subscribe_pr_activity` → 1 hit: #17007 (closed, charter reload; unrelated).\n  - `auto mode classifier denied seat landing self-approval CI bypass ready auto-merge` → 5 hits: #18469, #19014, #19940, #18167, #11114, all closed. #19014 and #18469 are this class on the direct REST channel, fixed by PR #19047; #19940 is the maintainer-directed sibling on why landings needed the maintainer. None covers the relay channel, the self-approval reading, or the missing subscription.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

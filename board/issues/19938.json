@@ -12,7 +12,7 @@
   },
   "labels": [
     "domain:spec",
-    "pm:awaiting-maintainer",
+    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T01:23:11Z",
-  "updated_at": "2026-09-24T09:48:16Z",
+  "updated_at": "2026-09-24T15:19:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19938",
   "body": "Filed by the director seat, summon #28 (续) (`session_01GLdRPcbaCBQCTvVmU6YEUY`), under ruling **batch #218 item 1 · letter D** on objectstack-ai/objectstack#11182 (record: the `Ruling:` comment on that card, maintainer 「11182 D 其他同意」). Filing gate ③ (a ruled task). ⛔ Not a claim. Lane and grade set by the ruling: `domain:spec` · `priority:p1` (inherited from #11182, the maintainer's 「优先处理」).\n\n## The gap, measured by the #11182 round (5795796051) and re-stated here\n\nThe spec expression ledger declares only `assignment.assignments.*` as a value-role envelope slot. `create_record` / `update_record` `fields.*` — where 106 of the 113 measured template-bearing sites live (HotCRM 92, this repo 21) — has **no CEL path**: an author cannot write a CEL expression envelope there today. Ruling D's A leg needs the slot declared before the engine half (objectstack-ai/objectstack#11182, `domain:services`) can accept the envelope.\n\n## Ruled shape (what this card lands)\n\n1. The expression ledger (`packages/spec`, the ADR-0032 ledger of expression slots) declares `create_record.fields.*` and `update_record.fields.*` as **value-role** envelope slots, the same shape and dialect rules as `assignment.assignments.*`. ⛔ No change to what the `{var}` template dialect means or accepts in 17.x — a plain string in `fields.*` stays a template string; only the envelope form (`{ dialect, source }`) is newly accepted there.\n2. Generated artefacts (authorable surface, JSON Schema, reference docs) follow from the ledger change; pins: the envelope parses in `fields.*`, a plain string still parses as before, the ledger's slot census gains exactly two rows.\n3. `Clause-②: yes` — this widens the accept set of a published authoring surface (an envelope is newly accepted in `fields.*`); at-tier review per the spec lane's clause-② rule; changeset `minor`.\n\n## Consumer\n\nobjectstack-ai/objectstack#11182 (`domain:services`, `pm:blocked` on this card): the automation engine evaluates the envelope in `fields.*` through the CEL engine, exactly as it does for `assignments.*`; an author-time lint hint (warning) nudges template strings toward the envelope. The v18 leg (refusing the template dialect) is its own carrier card.\n\nDedupe (searched this summon: `fields.* value-role expression slot ledger create_record CEL envelope` → the #11182 thread only): `fields.* envelope slot` · `expression ledger create_record` · `#11182 D`."

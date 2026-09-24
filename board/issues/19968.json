@@ -2,9 +2,9 @@
   "number": 19968,
   "kind": "pull_request",
   "title": "fix(spec): localise the column heads of the view Columns, Sort and Tabs tables",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
     "protocol:ui",
     "size/m",
     "tests",
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T12:03:22Z",
-  "updated_at": "2026-09-24T12:15:26Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-09-24T17:27:03Z",
+  "closed_at": "2026-09-24T17:27:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-24T17:27:01Z",
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19968",
   "body": "Fixes #19955\nClause-②: no\n\nThis is the localisation follow-up the maintainer asked for, in the shape #17508 ruling A settled. PR #19917 gave the row items of the `view` `columns`, `sort` and `tabs` repeaters English titles. `view.form.ts` enumerated no row children for them, so Studio showed those titles untranslated in `zh-CN` / `ja-JP` / `es-ES`.\n\n- `packages/spec/src/ui/view.form.ts`: the three repeaters enumerate their row children. Each `label` equals the item schema's own `.meta({ title })`; the dev compared them on the built dist.\n- The four metadata-forms catalogs: the generator emitted the `en` leaves; `zh-CN`, `ja-JP` and `es-ES` are AI-authored, reusing the catalog's existing renderings where one exists. The dev report `5813748776` lists every reused and invented rendering.\n- `repeater-row-properties.test.ts`: `view` moves inside the derived population, so its no-`en`-echo case covers the new leaves. The dev ablated it red.\n- `object-lifecycle-panel-echo-decisions.test.ts`: the translated-label positive control moves by exactly the rows that landed, as its comment prescribes. The seat extended the claim to this file (`5813775189`).\n- Changeset: `@objectstack/spec` and `@objectstack/platform-objects` at `patch`.\n\nThe `view.columns` union renderer question is carried as objectstack-ai/objectui#10239.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"

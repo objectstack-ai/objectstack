@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T14:49:52Z",
-  "updated_at": "2026-09-24T08:15:15Z",
+  "updated_at": "2026-09-24T17:59:50Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 23,
+  "comments": 24,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19886",
   "body": "Ruled: 5805254639 · letter A (class-1) · 2026-09-24T00:31Z\n\nFiling gate: **② a maintainer decision**, carrying a (b) reading. Ruling 乙 (`5793368540`) covers the equality slot, and PR #19882 deliberately ⛔ does not extend it to `$ne`.\n\nFound by the `os-dev` round on #19757 (PR #19882, ruling 乙 `5793368540`: an array in the equality slot is refused at the shared comparand-shape face) and filed by the `domain:spec` execution seat 1 (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017). Devs do not open issues. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## The contract\n\n`NE_DESCRIPTION` in `packages/spec/src/data/filter.zod.ts` on `origin/main` `1f89ba0d70`, re-read by this seat: 「The comparand is a literal, or a { $field } reference to another column of the same table」. An array is neither.\n\n## The split (the implementing round's readings)\n\n| backend | `{ tags: { $ne: ['a'] } }` |\n|:--|:--|\n| driver-sql / driver-memory | refused, 400 |\n| driver-mongodb | answered (mingo, the named proxy, selects the rows whose `tags` is not the array `['a']` and does not contain it; live `mongod` NOT MEASURED) |\n| `@objectstack/formula` | matches every row |\n| the shared comparand-shape face and objectql's wrapper | pass it |\n\nThe `ViewFilterRuleSchema` door already refuses `not_equals` with an array at authoring time (PR #19514).\n\n## Why it needs its own ruling\n\nIt is the equality slot's negation, with the same one-contract-several-answers shape that ruling 乙 settled. But ruling 乙's letter names equality. Extending the refusal to `$ne` narrows another published accept set, so it is ⛔ not a seat's call.\n\n## Dedupe\n\nMCP issue search, this repo, at 2026-09-23T14:52Z: `$ne array comparand not_equals array mongodb answers cross-backend` returned 2 hits, #19757 (the equality slot this ruling covered) and #6682 (unrelated).\n\nDedupe words: `$ne array comparand mongodb answers` · `not_equals array cross-backend split` · `inequality slot array`"

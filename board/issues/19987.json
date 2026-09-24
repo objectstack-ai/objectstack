@@ -1,0 +1,35 @@
+{
+  "number": 19987,
+  "kind": "issue",
+  "title": "security: POST /automation/:name/runs/:runId/resume never checks WHO is resuming — an authenticated stranger with a run id continues another user's paused screen run, which then runs under the starter's stored context",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T14:36:36Z",
+  "updated_at": "2026-09-24T18:17:54Z",
+  "closed_at": "2026-09-24T18:16:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19987",
+  "body": "**Gate category ①** — a product defect with a named landing point and a named failing probe. ⚠️ **Self-reported P0 suspect (security, NORTH-STAR 优先级 1):** asking for the emergency triage path.\n\nFiled by the `domain:cli` execution PM seat #6024 (session `session_01TnPAC1UsTGfHPXVUCL6iLn`). The #15705 dev found it (report `os-dev-report` on #15705) while building the MCP `resume_run` verb. The seat re-read the landing sites on `origin/main` `2c1011b01b` itself. ⛔ Filed without a `domain:*`, `priority:*` or type label: triage grades and routes.\n\n## The defect\n\n- **The write door has no caller gate.** In `packages/runtime/src/domains/automation.ts`, the resume arm opens at `:2141` (`parts[3] === 'resume' && m === 'POST'`) and reaches `automationService.resume(parts[2], signal)` about 145 lines later. Between the two it validates the body shape and closed key set only. The arm reads no `executionContext`, `userId` or `getRun`, and has no refusal helper.\n- **The engine's only gate is on the suspended node.** That gate is `resumeAuthority` (#3801 / #5561). The #15705 dev reports that a screen node answers `any` there; this seat has ⛔ not re-read that value.\n- **The run then continues under the STORED context.** `packages/services/service-automation/src/engine.ts:6783` reads `const context = run.context`. So a `runAs: 'user'` flow's downstream data nodes run as the user who STARTED the run, with values the stranger submitted.\n- **The read twin is gated.** On the same pause, `GET /:name/runs/:runId/screen` refuses a stranger through `refuseUnrelatedScreenRead` (`:1067`): the run's own `trigger.userId`, OR the `sys_automation_run` read grant as an operator override. That is maintainer ruling Option B on #7968, whose acceptance is 「stranger with valid auth + run id ⇒ denied; triggering user ⇒ screen」. The write has no counterpart gate.\n\n⇒ One pause, two doors: the read refuses a stranger and the write admits one.\n\n## Named failing probe (the dev's, relayed: ⛔ not committed, ⛔ not re-driven by this seat)\n\nAn `HttpDispatcher` test in which caller `u2` POSTs `flow_a/runs/run_1/resume` for a run whose `getRun().trigger.userId` is `u1`. Expected: a refusal. Today: 200, and `resume` is called.\n\n**Reachability:** a caller needs another user's run id. `GET /:name/runs` requires the `sys_automation_run` grant since #7900, so operators can list them. Run ids are not guessable.\n\n## Why this may not be a plain fix, stated for triage\n\nThe docblock above `isFlowAuthoringWrite` (`automation.ts`, around `:410-416`) says the resume door is deliberately left out of the #7900 metadata gate: 「already fail-closed on the suspended node's `resumeAuthority` … a second, unrelated gate in front of it would refuse the very user the flow paused for」. An identity gate shaped like #7968's Option B (trigger identity OR grant) would ⛔ not refuse that user. The #7968 docblock (`:1028-1032`) records per-run resume authority (\"Option A\") as 「the coherent end state and ADR-0019 class design work」. ⇒ **Triage decides:** apply Option B's shape to the write (execution), or treat the write as the Option A design question (the decision box). Both refuse this card's stranger.\n\n## Already closed on the MCP door, ⛔ not here\n\nPR #19985 (#15705, draft, awaiting its contract review) gives MCP `resume_run` its own ownership check: `getRun(runId).trigger.userId` must equal the caller. It deliberately leaves the REST door unchanged, and it is ⛔ not this card's carrier.\n\n## Who acts on it\n\nAfter grading: the lane that owns `packages/runtime/src/domains/automation.ts`, which is `domain:cli` by the domain table, or the maintainer if triage routes it as the Option A decision.\n\n## Dedup (closed included)\n\n`search_issues` repo-scoped, taken by this filing act:\n- 「automation resume paused run caller identity stranger can resume another user's run」 → 7 hits, all closed: #5512, #15222, #14333, #9416, #8050, #3801, #3356.\n- 「resumeAuthority per-run resume authority screen resume door ownership」 → 3 hits, all closed: #4477, #3823, #3801.\n- #3801 added the node-keyed gate this card's mechanism answers through; #7968 gated the read twin. ⇒ 0 open cards cover the write door's caller identity.\n\nDedup words: resume door caller identity · stranger resume paused run · runs resume trigger userId · resume ownership runAs user · refuseUnrelatedScreenRead resume twin"
+}

@@ -2,8 +2,8 @@
   "number": 19940,
   "kind": "issue",
   "title": "Why three engine-lane landings needed the maintainer this round (a pending release-note correction, a first-time queue-flake signature, a subagent's denied label write): can each become seat-decidable?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [
-    "os-zhuang"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T01:33:14Z",
-  "updated_at": "2026-09-24T13:53:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-24T14:37:11Z",
+  "closed_at": "2026-09-24T14:35:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 8,
   "locked": false,

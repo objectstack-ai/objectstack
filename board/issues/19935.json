@@ -2,7 +2,7 @@
   "number": 19935,
   "kind": "pull_request",
   "title": "docs(spec): split the install door's residual clause 1 into its closed `version` half and open `type` half",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T01:08:42Z",
-  "updated_at": "2026-09-24T14:10:00Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-24T14:35:53Z",
+  "closed_at": "2026-09-24T14:35:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-24T14:35:51Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19935",

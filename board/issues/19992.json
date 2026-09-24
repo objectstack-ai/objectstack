@@ -1,0 +1,31 @@
+{
+  "number": 19992,
+  "kind": "issue",
+  "title": "[finding] currencyConfig.precision is declared and validated against ISO 4217, but no renderer or runtime reads it — an ADR-0049 enforce-or-remove case, filed on ruling 乙 on #19910",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T15:10:40Z",
+  "updated_at": "2026-09-24T18:32:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19992",
+  "body": "Filing gate: **① a defect**, class (c): an author, AI or human, sets `currencyConfig.precision` expecting it to decide a currency's decimal places, and nothing honours it. Filed by `domain:spec` execution seat 1 (`session_013RDBh5DqXd2xnLwvHLgLFr`) because the maintainer's ruling orders it. ⛔ Not graded or routed here; that is triage's.\n\n**Provenance.** Ruling 乙 on #19910 (record `5805782503`, batch #218 item 2, maintainer 「其他同意」), item 3, verbatim: 「Two findings follow through the filing gate, filed by the `domain:spec` seat, ⛔ not riders: `currencyConfig.precision` is declared and read by nothing (ADR-0049 enforce-or-remove); objectui's `CurrencyField` reads the field-level `precision` (a digit count) as decimal places.」 This is the first of the two. The second goes to objectstack-ai/objectui.\n\n## Readings, re-taken at filing on `origin/main` `c8399867b8`\n\n- **Declared:** `packages/spec/src/data/field.zod.ts:1663` declares `currencyConfig: CurrencyConfigSchema.optional()`, and `CurrencyConfigSchema` carries `precision`.\n- **Its only reader is its own validation:** `field.zod.ts:457-458` checks an authored `precision` against the currency's ISO 4217 digits, via `currencyPrecisionContradiction`.\n- **Nothing reads it for behaviour.** A `git grep -n -E \"currencyConfig\"` over `packages/*/src`, non-test, finds these, and none of them reads `precision`:\n  - `driver-sql/src/builtin-column-collision.ts:89` (storage mode);\n  - `service-analytics/src/analytics-service.ts:1794` and `plugin.ts:1070-1084` (`defaultCurrency` only);\n  - spec prose.\n- **Firing control:** the same instrument finds `currencyConfig?.defaultCurrency` read at `service-analytics/src/plugin.ts:1084`.\n- **Renderer side,** at `.objectui-sha` `62597c588072`: `packages/fields/src/widgets/CurrencyField.tsx` resolves decimals from the field-level `precision` or the ISO 4217 minor unit. The file's own comment says the `currencyConfig` key is one 「this widget never reads」 (#19910 triage `5800441682`).\n\n⇒ A declared, validated key whose value changes nothing a user sees.\n\n## The decision this card carries (ADR-0049)\n\nEnforce it (a named consumer reads `currencyConfig.precision`), or remove it (a retirement with its ADR-0087 entry). Ruling 乙 on #19910 already set the direction for currency: 「a currency's decimal places are the currency's, not a setting」. That reads toward removal, but ⛔ this card does not decide it.\n\n## Related, ⛔ not folded\n\n- PR #19909 (card #19629) retires `scale` on currency; under ruling 乙 its remedy no longer points at this key.\n- objectstack-ai/objectui#10221 widens the summary footer and metric tile to the ISO minor unit.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped: 「currencyConfig.precision declared but nothing reads it enforce-or-remove」 → 2 hits, #19910 (closed, the ruling's own card) and #7918 (closed, a publish-time contradiction question). No open card carries this."
+}

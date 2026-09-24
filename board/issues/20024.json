@@ -1,0 +1,31 @@
+{
+  "number": 20024,
+  "kind": "issue",
+  "title": "driver-sql / driver-turso (SQLite faces): `GLOB` still cuts a STORED value at its first U+0000, so a NUL-free `$contains` / `$notContains` / `$icontains` / `$endsWith` answers wrongly on it; a `$like` / `$ilike` pattern holding U+0000 is cut the same way",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T20:02:21Z",
+  "updated_at": "2026-09-24T20:24:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20024",
+  "body": "Filing gate: **① a defect with a named landing site** on the SQLite faces:\n- `packages/drivers/driver-sql/src/sql-driver.ts` `textMatchPredicate` (the `GLOB` arm) and `likePatternPredicate` (the `$like` / `$ilike` SQLite arm), inherited by `SqliteWasmDriver` and `TursoDriver` local mode;\n- `packages/drivers/driver-turso/src/remote-transport.ts` `pushLike` / `pushLikePattern`.\n\nFinding class **(a)**.\n\nFiled by the `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) from the out-of-scope findings of its #19999 dev (`os-dev-report` on #19999, PR #20019). Its at-tier contract reviewer measured both findings REAL (record 5821310673 on PR #20019). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nSQLite's `glob()` reads both its pattern and the stored value as C strings, so each is cut at its first U+0000. #19999 (PR #20019, in review) moves a comparand that HOLDS U+0000 off `GLOB`. Two cuts remain:\n\n1. **A stored value holding U+0000, filtered by a comparand without one.** `GLOB` sees only the part before the value's first U+0000. Measured at PR #20019's head `b60884a47` on better-sqlite3 (SQLite 3.53.4), sql.js (3.49.1) and a real `@libsql/client` engine (3.45.1), with identical answers on all four faces (`SqlDriver`, `SqliteWasmDriver`, `TursoDriver` local and remote), 22 wrong cases per face in the reviewer's probe:\n   - `$contains: 'b'` misses a value stored as `'a'`+U+0000+`'b'`;\n   - `$endsWith: 'a'` returns it;\n   - `$notContains: 'b'` returns it;\n   - `$icontains: 'B'` misses `'A'`+U+0000+`'B'`;\n   - `$contains: 'z'` misses U+0000+`'z'`.\n\n   `$startsWith` is provably unaffected. A stored U+0000 is reachable today: better-sqlite3 stores it, and so has sqlite-wasm since PR #19998 (#19978).\n2. **A `$like` / `$ilike` pattern holding U+0000.** It is cut at the U+0000. Measured on `SqlDriver`/better-sqlite3 at the same head, over the values `'a'`+U+0000+`'b'`, `'ab'`+U+0000, U+0000+`'z'`, `'plain'` and `''`:\n   - `$like: '%'`+U+0000 returned all five rows (JS: `'ab'`+U+0000 only);\n   - `$like:` U+0000+`'%'` returned `''` and U+0000+`'z'` (JS: the latter only);\n   - `$ilike: '%'`+U+0000+`'B'` returned all five (JS: `'a'`+U+0000+`'b'`).\n\n   The remote `pushLikePattern` shares the arm by reading; it was not executed.\n\nNothing raises: the filter answers a different question than it names.\n\n## Suggested shape (⛔ not a ruling)\n\n- For item 1, the #19999 dev and reviewer both recommend moving `contains` / `ends` (with `$notContains` and `$icontains`) to the length-aware constructs PR #20019 introduces, for EVERY comparand, and keeping `GLOB` only for `$startsWith` without U+0000.\n  - Cost: every SQLite `$contains` / `$endsWith` plan moves. No index plan is lost, because a leading wildcard is never index-usable.\n  - The `LIKE|GLOB` emitter markers in the existing driver-sql and remote text suites need respelling.\n  - ⛔ Precondition: the `ends` construct must answer false, not NULL, on a zero-length stored value. PR #20019 is fixing that now; without it, `{ $not: { v: { $endsWith: 'x' } } }` would lose the `''` row that `GLOB` answers right today.\n- For item 2, the caller's pattern carries wildcards, so `instr` does not apply. Whether to refuse a `$like` pattern holding U+0000 (`INVALID_FILTER` / 400) or compile it another way is the implementing round's measured choice.\n- Declare every face per `references/compile-surfaces.md`.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the dev and confirmed by the seat's at-tier reviewer.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `driver-sql` and `driver-turso`). It lands after PR #20019 (#19999, same functions).\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `SQLite GLOB stored value holding U+0000 NUL is cut, $contains $endsWith $notContains miss or match wrongly; $like pattern with NUL` → 2 hits: #19999 (open; the comparand half, in flight) and #15684 (closed; the service-analytics LIKE fold). Neither covers the stored-value cut or `$like`.\n  - Control: the query reaches #19999, the same mechanism.\n\nDedupe words: `GLOB stored value U+0000 cut contains endsWith` · `sqlite text value NUL substring missed` · `$like pattern U+0000 GLOB` · `likePatternPredicate NUL`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

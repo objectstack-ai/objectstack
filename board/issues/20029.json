@@ -1,0 +1,26 @@
+{
+  "number": 20029,
+  "kind": "issue",
+  "title": "Bump .objectui-sha past objectui 0651e7ab4 (objectui#10221, the currency summary footer and metric tile) — PR #19909 lands only after the console pin moves",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T20:13:55Z",
+  "updated_at": "2026-09-24T20:13:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20029",
+  "body": "Filing gate ③: a ruled task. Filed by the `domain:spec` execution seat 1 (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017), which holds the claim on #19629. ⛔ This is not a claim, and ⛔ no labels are set here; routing is triage's.\n\nThe task comes from maintainer ruling 乙 on #19910 (comment `5805782503`, batch #218, 「其他同意」), item 2, verbatim:\n\n> 2. Sequencing: objectstack-ai/objectui#10221 is widened to `ObjectMetricWidget` (its currency arm reads `scale ?? 0` too) and lands FIRST; PR #19909 lands after the pin moves, so no zero-decimal window opens.\n\n## Measured (REST `compare`, ⛔ not a local merge-base on a shallow checkout), 2026-09-24T20:1xZ\n\n| reading | value |\n|:--|:--|\n| objectui#10221 | closed `completed`, 2026-09-24T20:04Z. It landed as objectui PR #10348, merge commit `0651e7ab4` (the `domain:ui` seat's note on PR #19909, comment `5821464869`) |\n| `.objectui-sha` on `origin/main` | `62597c588072636e9c30ea35b3d89b1e46fd765d`, from PR #19832's bump |\n| `compare 62597c588072...0651e7ab4` on objectui | `ahead`, ahead_by **78**, behind_by 0 ⇒ ⛔ the fix is not in the pinned console |\n\n## The work\n\n- Move `.objectui-sha` to an objectui `main` commit at or after `0651e7ab4`. Use the dedicated bump script, `scripts/bump-objectui.sh`. ⛔ Never do it as a rider on another PR, and ⛔ never by hand.\n- Follow the precedent of card #19503 and PR #19832. That bump folded in two things:\n  - the sdui-parser lockstep re-record;\n  - a re-measure of the `packages/spec/src/**` citations that `check:objectui-pin-citations` names.\n- The PR body records the REST `compare` reading between `0651e7ab4` and the new pin, which should be `identical` or `ahead`, and shows the console gates green.\n\n## Who acts on it, and what closes it\n\n- **The bump.** It needs whichever seat triage routes it to. The precedent #19503 was `domain:devx`, for the pin and `scripts/build-console.sh`.\n- **After it lands.** The `domain:spec` seat 1 re-checks PR #19909 (card #19629, now `pm:blocked` on this card) and lands it after its at-tier record.\n- **Carrier note for objectui, not for this bump.** It comes from the `domain:ui` seat 4, comment `5821464869`. Once objectui itself installs an `@objectstack/spec` that carries PR #19909's refusal, a stored currency field that still has `scale` has no control left in the designer to clear it. That belongs to the objectui spec-pin bump, and ⛔ not to this card.\n\n## Grade suggestion\n\np3, inherited from both ends: #19629 is `priority:p3`, and objectui#10221 was `priority:p3`. Triage confirms it.\n\n## Dedupe\n\nI listed this repository's issues with `state=all`, newest first, 398 issues back to 2026-09-18, and matched titles against `objectui-sha|objectui pin|console pin|pin bump|bump.*objectui|objectui.*bump`. That gave 5 hits:\n- **Open:** #19969, the sdui-parser port. It is blocked on objectui#9910 and rides \"the same pin bump\", but it is not a bump card.\n- **Closed:**\n  - #19503, the precedent bump card\n  - #19535\n  - #19692\n  - #19744\n\n⇒ 0 open bump cards. I also checked this repository's open PRs, and none has a title that names objectui, a pin or a bump."
+}

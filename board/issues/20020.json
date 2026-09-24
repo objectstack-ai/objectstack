@@ -1,0 +1,32 @@
+{
+  "number": 20020,
+  "kind": "issue",
+  "title": "engine + driver-sql: seven filter-refusal doors ignore the #8220 provenance mark, so a refusal inside a `policy` read-scope subtree relays the policy field (and some comparands) in its 400: the #7929 redaction is not applied",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T19:37:17Z",
+  "updated_at": "2026-09-24T20:22:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20020",
+  "body": "Filing gate ① — a product defect with named sites and a measurement (class b: a declared, ruled contract not held at some of the doors it names).\n\n- **Filed by:** the `domain:services` seat (`session_01Evb5jFDZGKQE9KG4jbMfMF`, seat post #6021).\n- **Surfaced by:** the #19995 dev on PR #20017, whose residue this is.\n- ⛔ This is not a claim.\n- **Actionable reader:** the lane that owns `packages/objectql` and `packages/drivers/driver-sql` (triage routes). #19995 waits on this card.\n\n## The contract (standing ruling, not a new decision)\n\n`packages/spec/src/data/filter-subtree-provenance.ts` (#8220, which implements A of the #7929 maintainer ruling of 2026-08-12, 「接受你的全部建议。」):\n\n- `'policy'`: 「injected policy the caller never wrote (an RLS / sharing / tenant read scope). A refusal raised from inside it keeps the #7929 redaction: identity (`INVALID_FILTER` / 400) and capability statement on the wire, operands in the server log.」\n- 「**Unmarked or ambiguous ⇒ withheld.**」 The header names the two read-scope merge boundaries that stamp the mark: `plugin-security`'s CRUD injection and `service-analytics`' `ObjectQLStrategy.withReadScope`.\n\n## The defect\n\nOnly `driver-sql`'s bind and cross-field refusals read the mark. Seven refusal classes raised from inside a `'policy'`-marked read scope do not, and their 400 message names the policy's field, and for some classes its comparand:\n\n| refusal class | refusing door |\n|:--|:--|\n| a column the object does not have | `driver-sql` (missing column) |\n| a retired or unknown operator | `driver-sql` operator vocabulary |\n| a text operator on a non-text field | engine declared-type door |\n| a temporal comparand the platform cannot read | engine temporal door |\n| a combinator with a non-array operand | `driver-sql` |\n| a non-boolean `$null` / `$exists` | `driver-sql` |\n| an unknown filter placeholder | engine token resolver (`FILTER_TOKEN_UNKNOWN`) |\n\n## Measured (the #19995 dev; ⛔ not re-run by this seat)\n\n- **Setup:** real `ObjectQL` over `SqlDriver` (better-sqlite3) and `SqliteWasmDriver`, both drivers identical. The HTTP legs went through the real `POST /api/v1/analytics/query` and `POST /analytics/dataset/query` routes.\n- **Result:** every class above answered a 400 whose body carried the policy's field, on both doors. The table and the probe are in the `os-dev-report` on #19995 and in PR #20017's body.\n- **Already closed, not this card:** PR #20017 moves the nine shape classes the engine's two shared comparand faces refuse to `READ_SCOPE_COMPILE_FAILED` / 500 on the analytics face. Those are judged analytics-side before the merge.\n- **Reachability:** a policy naming a column that was renamed or removed (schema drift), and admin-authored CEL comparisons on date or number fields.\n- **Not measured:** whether the same doors also relay policy content on the ordinary CRUD face (`plugin-security`'s merge). Measure that first.\n\n## Direction (per the ruling; the implementer measures)\n\n- Each door above resolves the mark of the offending node (`resolveFilterSubtreeProvenance`) and discloses its full diagnostic only for a subtree positively marked `'author'`. `'policy'` and unmarked keep `INVALID_FILTER` / 400 with the operands in the server log only, which is the #7929 B shape `driver-sql`'s cross-field refusal already has.\n- ⚠️ Unmarked ⇒ withheld also reaches a caller's own filter on a host that stamps no mark. Measure which hosts stamp before choosing.\n- Envelope note, for the record: on the analytics face this gives the residue a withheld 400 (#8220), while the analytics read-scope compiler's own refusals are a withheld 500 (#5367). Both rulings withhold the policy content. This card does not decide the status split.\n\n## Dedupe\n\nOne semantic issue search, open and closed, on 「driver-sql or engine filter refusal does not consult filter subtree provenance mark policy; missing column unknown operator refusal message discloses RLS policy field in 400」: 75 hits. Adjacent: #19995 (the analytics face; its residue is this card), #19949 (driver-mongodb cross-field), and #19885 (closed). None covers mark-blind refusal doors.\n\nDedupe words: `provenance mark refusal door policy subtree` · `driver-sql missing column refusal discloses policy field` · `engine declared-type door policy redaction` · `FILTER_TOKEN_UNKNOWN read scope disclosure`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
