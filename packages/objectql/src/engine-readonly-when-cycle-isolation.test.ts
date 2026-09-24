@@ -308,8 +308,9 @@ describe('a readonlyWhen cycle no longer over-locks the rest of the update (#199
     const payload = Object.fromEntries(Object.entries({ ...CHAIN_WRITE, ...NONE_WRITE }).reverse());
     await engine.update('beside_none_first', { id: 'n1', ...payload }, options);
     expect(row('beside_none_first', 'n1')).toMatchObject({ c: 'L', x: 'xv', y: 'old', a: 'old_a', b: 'y' });
-    // Reported in declaration order, as ever.
-    expect(events).toEqual([{ object: 'beside_none_first', fields: ['a', 'b', 'c', 'y'], reason: 'readonly_when' }]);
+    // The same four drops, listed in the payload's key order, as the event
+    // always has (`reportDroppedFields` walks the payload).
+    expect(events).toEqual([{ object: 'beside_none_first', fields: ['b', 'a', 'y', 'c'], reason: 'readonly_when' }]);
   });
 
   // ── One connected group: a cycle that reads the chain, locks that read the cycle
