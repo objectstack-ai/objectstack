@@ -1293,6 +1293,42 @@ export class SecurityPlugin implements Plugin {
     this.metadata = metadata;
     this.ql = ql;
 
+    // [#18682] Answer the engine's create/update gate question for `validate()`.
+    //
+    // `validate()` runs no middleware for its target object, so without this the
+    // dry run would answer for callers the write path refuses. Same evaluator
+    // and same permission sets the CRUD gate itself uses — ⛔ not a second
+    // decision about who may write.
+    //
+    // The PAYLOAD is passed straight through, because the write decision is not
+    // object-level: the middleware's field-level write gate (step 2.5 below)
+    // refuses a caller who holds the CRUD grant but may not edit a field the
+    // payload names, before any rule runs. A probe that dropped the payload
+    // would answer the preview for exactly that caller.
+    //
+    // Fails CLOSED: any resolution error denies, and the engine treats a denial
+    // as "resolve nothing", which makes a traversing rule refuse in preview.
+    if (typeof (ql as any).registerWriteGateProbe === 'function') {
+      (ql as any).registerWriteGateProbe(
+        (object: string, operation: 'insert' | 'update', context: any, data: unknown): Promise<boolean> =>
+          this.canWriteObject(object, operation, context, data),
+      );
+    } else {
+      // Absence must be loud. This engine takes middleware — so its write path
+      // IS gated — but exposes no seam for the preview to ask the same
+      // question, which means `validate()` there answers a traversing rule for
+      // callers the write path would refuse. Functional degradation, not
+      // durability: the deployment is visibly older than this plugin, and the
+      // remedy is the version bump.
+      ctx.logger.warn(
+        '[security] this ObjectQL exposes no write-gate seam (registerWriteGateProbe), so the '
+        + 'write PREVIEW (validate() / the dryRun import) cannot ask whether the caller could '
+        + 'perform the write. A validation rule that reads through a reference field will be '
+        + 'answered there for callers the real write path refuses. Upgrade @objectstack/objectql '
+        + 'to a version that offers the seam.',
+      );
+    }
+
     // [#11968] Bind the invalidation epoch to the ENGINE's seam when the wired
     // engine exposes one. Resolved here, once, rather than probed per request:
     // the plugin DI graph is static after start, and a per-request probe would
@@ -3282,7 +3318,8 @@ export class SecurityPlugin implements Plugin {
         //
         // The cheap posture/context pre-test comes first on purpose: the common
         // deployment is `single` (Layer 0 inert), and the common caller HAS an
-        // active organization. Neither pays for the layered compile below.
+        // active organization. Neither pays for the layered compile inside
+        // `organizationWallRefusal` — the one verdict `canWriteObject` asks too.
         //
         // Ordered AHEAD of the forge guard deliberately. A caller with no
         // organization scope at all who also supplies a foreign `organization_id`
@@ -3292,49 +3329,32 @@ export class SecurityPlugin implements Plugin {
         // tenant, so its target is selected through the Layer 0 ROW wall, which
         // already resolves to nothing (ADR-0123 D2, stated there as a boundary
         // rather than left as an omission).
-        if (this.orgScopingEnabled && !callerHasOrganizationScope(opCtx.context, this.tenancyPosture)) {
-          const callerWall = await this.computeWriteTenantCheckFilter(
-            permissionSets,
-            opCtx.object,
-            opCtx.operation,
-            opCtx.context,
+        const denied = await this.organizationWallRefusal(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx.context,
+          delegatorSets,
+          delegatorContext,
+        );
+        if (denied) {
+          const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
+          this.logger.warn?.(
+            `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
+              `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
           );
-          // [ADR-0090 D10] The delegator is walled on its own context, exactly as
-          // the forge guard walls it — an on-behalf-of write may not land a row
-          // the delegator itself could not place.
-          const delegatorWall =
-            delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
-              ? await this.computeWriteTenantCheckFilter(
-                  delegatorSets,
-                  opCtx.object,
-                  opCtx.operation,
-                  delegatorContext,
-                )
-              : null;
-          const denied = isTenantWallDenial(callerWall)
-            ? 'caller'
-            : isTenantWallDenial(delegatorWall)
-              ? 'delegator'
-              : null;
-          if (denied) {
-            const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
-            this.logger.warn?.(
-              `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
-                `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
-            );
-            throw new PermissionDeniedError(
-              `[Security] Access denied: '${opCtx.object}' is scoped to an organization, and ` +
-                `${principal} has no active organization — so this ${opCtx.operation} has no ` +
-                `organization to place the record in. Join or select an active organization and retry.`,
-              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
-              `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
-                `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
-                `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
-                `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
-                `writes are refused rather than landing a row with a NULL organization that no reader — ` +
-                `including its own author — could ever see. System contexts and platform operators are unaffected.`,
-            );
-          }
+          throw new PermissionDeniedError(
+            `[Security] Access denied: '${opCtx.object}' is scoped to an organization, and ` +
+              `${principal} has no active organization — so this ${opCtx.operation} has no ` +
+              `organization to place the record in. Join or select an active organization and retry.`,
+            { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
+              `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
+              `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
+              `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
+              `writes are refused rather than landing a row with a NULL organization that no reader — ` +
+              `including its own author — could ever see. System contexts and platform operators are unaffected.`,
+          );
         }
 
         const suppliedRows = writeRows.filter(
@@ -5314,6 +5334,315 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * [#18682] Whether `context` may CREATE or UPDATE `object` under the arms
+   * enumerated below — the WRITE admission the preview asks for, and the
+   * exact sibling of {@link canReadObject}.
+   *
+   * ## Why it exists
+   *
+   * `ObjectQL.validate()` is a write PREVIEW that runs no middleware for its
+   * target object, by design. A validation rule that reads
+   * one hop through a reference field is evaluated there against a related row
+   * fetched under SYSTEM authority, and the accepted cost of that elevation is
+   * an inference channel — so the preview asks this before it reads. What this
+   * method restores is the arms enumerated below and nothing beyond them — the
+   * closing paragraph names the refusals that stay ahead of it.
+   *
+   * ## The arms, in the middleware's own order — ⛔ the CRUD grant is not the gate
+   *
+   * A probe that checked only `isSystem`, a principal and the CRUD grant admits
+   * classes the write path refuses: a caller holding `allowCreate` but not a D3
+   * `requiredPermissions` capability; an `onBehalfOf` context naming a delegator
+   * that does not exist; and — earlier than either, before anything resolves —
+   * a caller asking about an object whose writes a platform service owns, or
+   * about an RBAC link table on the strength of a plain CRUD grant. All were
+   * measured reaching the preview while `insert()` refused them. So the arms
+   * are the middleware's, in its order:
+   *
+   *   1. `isSystem` → admit (the total bypass);
+   *   2. ADR-0103 `assertEngineOwnedWriteAllowed` over the registered schema —
+   *      the middleware's own primitive, ⛔ never a second reading of
+   *      `resolveCrudAffordances`: a user-context write to an `engine-owned` /
+   *      `append-only` object whose `userActions` do not open the verb DENIES,
+   *      ahead of the fall-open below and of every resolution;
+   *   3. ADR-0090 D12 `delegatedAdminGate.assert` — the same gate object the
+   *      middleware calls, handed `object`, `operation`, `context` and the rows
+   *      of `data`. A plain-CRUD holder on an RBAC link table DENIES; a tenant
+   *      admin passes to the arms below;
+   *   4. no permission sets resolved → arm 10 decides (the middleware guards its
+   *      whole CRUD gate with `if (permissionSets.length > 0)`, not that wall);
+   *   5. `secMeta.unresolved` → DENY (#3545);
+   *   6. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the WRITE
+   *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
+   *      delegator;
+   *   7. the `allowCreate` / `allowEdit` CRUD grant for the operation asked;
+   *   8. ADR-0090 D10 — the delegator must independently hold the same grant;
+   *      a dangling delegator denies.
+   *
+   * Arms 2 and 3 refuse a CALLER CLASS: the same caller cannot reach the write
+   * by omitting a value or by naming a different row, so a preview that
+   * answered them would hand the elevated read to someone who cannot write the
+   * object at all, for that verb, under any payload. Arms 6 and 8 were added on
+   * that same ground one gate later.
+   *
+   * ## …and the arm that needs the PAYLOAD
+   *
+   * The arms above are not the whole write decision either. The middleware
+   * also refuses payload-dependent writes, and the first of them is the
+   * field-level-security write gate (step 2.5): a caller holding the object's
+   * CRUD grant but not `editable` on a field the payload names is refused
+   * `PERMISSION_DENIED` there. A probe carrying no payload cannot ask it — so
+   * an editor of the child object who is FLS-locked out of the lookup column
+   * was refused by `insert()` and answered by the preview, the same divergence
+   * arms 6 and 8 close one gate earlier.
+   *
+   *   9. step 2.5's own primitives over `data`, in the middleware's order —
+   *      `getFieldPermissions` folded through `foldFieldRequiredPermissions`
+   *      (ADR-0066 D3), intersected under D10 with the delegator's mask via
+   *      `intersectFieldMasks`, then `detectForbiddenWrites`. Skipped when no
+   *      payload is supplied, exactly as the middleware skips it on `!opCtx.data`.
+   *
+   * `data` is the caller's RAW payload — one row or an array, the shape
+   * `detectForbiddenWrites` already normalises and the shape `opCtx.data`
+   * carries. ⛔ Not a post-default image: a key the runtime filled is not a
+   * field the caller wrote.
+   *
+   * ## …and the organization wall
+   *
+   *  10. ADR-0123 D2 `organizationWallRefusal` — the method the middleware's
+   *      step 3.7 throws on, asked under that step's guard (a payload is
+   *      supplied, the context names a user) at that step's point, after arm
+   *      9; arm 4 asks it too, as the middleware does with no set resolved. It
+   *      is handed no row — the payload decides only whether it is asked — so
+   *      it refuses a CALLER CLASS, as arms 2 and 3 do.
+   *
+   * `can-write-object-admission.test.ts` pins this method's answer equal to the
+   * registered middleware's on its equivalence block's cases, and pins one
+   * arm-3 UPDATE case as a direction: this method `false`, the middleware `true`.
+   *
+   * Fails CLOSED: a throw anywhere denies, and callers must treat a throw as a
+   * denial too.
+   *
+   * ⭐ What it answers, POSITIVELY — stated by NAMING WHAT IT RUNS, ⛔ never by
+   * naming a category of the write decision: a `true` here means this caller
+   * passed the ADR-0103 engine-owned affordance gate and the ADR-0090 D12
+   * delegated-admin gate (arms 2 and 3, the middleware's own primitives, at the
+   * middleware's own point in its order), the fail-closed postures (#3545's
+   * unresolvable posture and the D10 dangling delegator), the ADR-0066 D3
+   * capability AND-gate for both principals, the `allowCreate`/`allowEdit` CRUD
+   * grant, the D10 delegator's independent grant, the step 2.5 FLS write gate
+   * over the keys THIS payload names, and the ADR-0123 D2 organization wall. It
+   * means nothing about any refusal not in that list.
+   *
+   * ⛔ `true` never means "this write will succeed", and ⛔ what follows is not
+   * an enumeration of the distance to success: the middleware refuses both
+   * before and after `next()` for reasons this method is never asked. The
+   * families nearest to hand, named so the arms above are not read as the whole
+   * write decision:
+   *
+   *  - **The remaining PRE-RESOLUTION gates, which run beside arms 2 and 3 and
+   *    are not asked here.** Two judge a row's PROVENANCE, which a preview
+   *    holds no row to carry: the ADR-0086/0094 package-managed write gate and
+   *    the ADR-0066 system-row write gate. Two judge a payload VALUE: the
+   *    ADR-0066 D1 curated-capability-name refusal and the ADR-0090 D5/D9
+   *    audience-anchor binding guard. And the ADR-0056 `publicFormGrant` scope,
+   *    which admits create plus read-back on exactly the granted object and
+   *    refuses everything else pre-resolution — not asked because no wire
+   *    caller and no constructor in the tree presents the grant here (it is
+   *    constructed only by the public form-submit route, whose context goes to
+   *    the real write, and the key is not in the inbound
+   *    `ENTRY_EXECUTION_CONTEXT_FIELDS` set) and because it has no
+   *    extracted primitive, so an arm would be a SECOND SPELLING of its scope —
+   *    the drift this method exists to avoid.
+   *  - **Row-level and post-image refusals — the preview names no stored row.**
+   *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent master
+   *    edit (2.8), the RLS `check` post-image (3.6) and the Layer 0 tenant
+   *    post-image (3.7), none of which this method can judge because it is
+   *    asked about no ROW.
+   *  - **Payload-VALUE refusals the same caller passes by not sending the
+   *    value** — the masked echo (2.5a) and the `owner_id` forge (3.5), which
+   *    therefore widen the caller class by nothing.
+   *  - **The caller's own PREDICATE** — the anti-filter-oracle guard (2.9),
+   *    which this method is handed none of.
+   *  - **After `next()`** — the fail-closed assertion that the engine honoured
+   *    `OperationContext.postHookWriteImageCheck`, i.e. that the insert `check`
+   *    seam really ran, which judges an executed write.
+   *  - **Outside the middleware entirely** — `readonlyWhen`, the static
+   *    `readonly` strip and the validation rules themselves.
+   *
+   * Nothing here may be used to widen.
+   */
+  async canWriteObject(
+    object: string,
+    operation: 'insert' | 'update',
+    context?: any,
+    data?: unknown,
+  ): Promise<boolean> {
+    const objectName = String(object ?? '');
+    if (!objectName) return false;
+    // 1. System operations bypass.
+    if (context?.isSystem) return true;
+
+    try {
+      // 2-3. The middleware's two PRE-RESOLUTION caller-class refusals, called
+      //      as the middleware calls them and at the same point in its order:
+      //      after the `isSystem` bypass, BEFORE the principal-less fall-open
+      //      (arm 4) and before any permission set resolves. Both answer about
+      //      the CALLER and the OBJECT, so a caller they refuse cannot reach
+      //      the write by omitting a value or naming a different row — which
+      //      is exactly the class this method exists to keep out of the
+      //      preview.
+      try {
+        // 2. [ADR-0103] Engine-owned write affordance. ⛔ Not a re-derivation:
+        //    this is the middleware's own primitive over the same registered
+        //    schema, so the `userActions` members that reopen a verb pass here
+        //    for the one reason they pass there.
+        assertEngineOwnedWriteAllowed(
+          typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(objectName) : undefined,
+          operation,
+          context,
+        );
+        // 3. [ADR-0090 D12] Delegated administration on the RBAC link tables.
+        //    The middleware hands its whole `opCtx`; a preview names no stored
+        //    row, so this hands `object`, `operation`, `context` and the rows
+        //    of `data` and NOTHING else — leaving the gate's delegate branch
+        //    refusing an id-less mutation it cannot boundary-check, pinned as a
+        //    direction in `can-write-object-admission.test.ts`.
+        //
+        //    ⭐ And the rows it supplies are SHALLOW COPIES, never the caller's
+        //    own objects. The gate stamps `granted_by` onto the rows it
+        //    materialises (its dual audit), and on an insert it materialises
+        //    the payload rows BY REFERENCE — while `validate()` hands this
+        //    method the caller's RAW payload, so passing it straight through
+        //    would let a PREVIEW write into the caller's own objects. The
+        //    decision cannot notice the copy: nothing reads `granted_by` back,
+        //    it is only ever written — so its pin reads the caller's rows
+        //    instead (`can-write-object-admission.test.ts`, the copy block).
+        if (this.delegatedAdminGate) {
+          const shallow = (row: unknown) =>
+            row && typeof row === 'object' && !Array.isArray(row)
+              ? { ...(row as Record<string, unknown>) }
+              : row;
+          await this.delegatedAdminGate.assert({
+            object: objectName,
+            operation,
+            context,
+            data: Array.isArray(data) ? data.map(shallow) : shallow(data),
+          });
+        }
+      } catch (e) {
+        // A refusal from either gate IS the admission answer — the write path's
+        // own denial, not a failure to resolve one. Anything else is a
+        // subsystem failure and belongs to the outer catch, which logs it and
+        // still denies.
+        if (e instanceof PermissionDeniedError) return false;
+        throw e;
+      }
+
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      // 10. [ADR-0123 D2] The no-active-organization write wall — the
+      //     middleware's own verdict, `organizationWallRefusal`, under its step
+      //     3.7 guard: a payload is supplied and the context names a user. Its
+      //     point is last, after the field gate; it is spelled here because
+      //     arm 4 returns through it — the middleware asks it with no set
+      //     resolved as well.
+      const organizationWallAdmits = async (
+        delegatorSets: PermissionSet[] | null,
+        delegatorContext: unknown,
+      ): Promise<boolean> =>
+        !(data && typeof data === 'object' && context?.userId
+          && (await this.organizationWallRefusal(
+            permissionSets, objectName, operation, context, delegatorSets, delegatorContext,
+          )));
+      // 4. No sets resolved → no permission-set restriction applies (the
+      //    middleware guards its whole CRUD gate with `if (permissionSets.length > 0)`),
+      //    and arm 10 is not behind that guard.
+      if (permissionSets.length === 0) return await organizationWallAdmits(null, null);
+
+      const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
+        await this.getObjectSecurityMeta(objectName);
+      // 5. [#3545] Posture unresolvable → deny.
+      if (unresolved) return false;
+
+      // [ADR-0090 D10] Resolve the delegator ONCE — the arms below need it,
+      // and a dangling link denies before any of them runs.
+      let delegatorSets: PermissionSet[] | null = null;
+      let delegatorContext: unknown = null;
+      if (context?.onBehalfOf?.userId) {
+        const del = await resolveDelegatorContext(this.ql, context);
+        if (del.kind === 'missing') return false;
+        if (del.kind === 'resolved') {
+          delegatorContext = del.context;
+          delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        }
+      }
+
+      // 6. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+      //    principals.
+      const required = requiredCapsForOperation(requiredPermissions, operation);
+      if (required.length > 0) {
+        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+        if (required.some((cap) => !held.has(cap))) return false;
+        if (delegatorSets && delegatorSets.length > 0) {
+          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+          if (required.some((cap) => !delHeld.has(cap))) return false;
+        }
+      }
+
+      // 7. The object-level CRUD grant for the operation asked.
+      if (!this.permissionEvaluator.checkObjectPermission(operation, objectName, permissionSets, { isPrivate })) {
+        return false;
+      }
+
+      // 8. [ADR-0090 D10] The delegator must independently grant the same write.
+      if (
+        delegatorSets &&
+        delegatorSets.length > 0 &&
+        !this.permissionEvaluator.checkObjectPermission(operation, objectName, delegatorSets, { isPrivate })
+      ) {
+        return false;
+      }
+
+      // 9. The field-level-security WRITE gate — the middleware's step 2.5,
+      //    over the payload the caller supplied. Same primitives, same order,
+      //    same guards: the middleware runs this only for an `insert`/`update`
+      //    carrying `opCtx.data` with permission sets resolved, and both of the
+      //    latter already hold here (arm 4 returned for the empty resolution).
+      //    ⛔ Not a re-derivation — a second spelling of "which fields may this
+      //    caller write" is the drift this whole method exists to avoid.
+      if (data) {
+        let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
+        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the map.
+        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, fieldRequiredPermissions, permissionSets);
+        // [ADR-0090 D10] Intersect with the delegator's field perms — a field
+        // the agent may edit but the delegator may not becomes forbidden.
+        if (delegatorSets) {
+          let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
+          delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, fieldRequiredPermissions, delegatorSets);
+          fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+        }
+        if (Object.keys(fieldPerms).length > 0) {
+          const forbidden = this.fieldMasker.detectForbiddenWrites(
+            data as Record<string, any> | Record<string, any>[],
+            fieldPerms,
+          );
+          if (forbidden.length > 0) return false;
+        }
+      }
+
+      // 10. [ADR-0123 D2] At the middleware's point — see above.
+      return await organizationWallAdmits(delegatorSets, delegatorContext);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] canWriteObject could not resolve the write admission for ` +
+          `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return false;
+    }
+  }
+
+  /**
    * [#3544] Whether `context` may EXPORT `object` — the user-level export axis.
    *
    * Export is READ-DERIVED (`export ⊆ list`), so a bulk export reaches the
@@ -6897,6 +7226,36 @@ export class SecurityPlugin implements Plugin {
   ): Promise<Record<string, unknown> | null> {
     const { layer0 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
     return layer0;
+  }
+
+  /**
+   * [ADR-0123 D2] Which principal the no-active-organization write wall
+   * refuses, or `null` — the verdict the middleware's step 3.7 throws on.
+   * {@link canWriteObject} asks this same method, so the two doors share one
+   * spelling of the wall. It is handed no row, stored or written.
+   */
+  private async organizationWallRefusal(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+    delegatorSets: PermissionSet[] | null,
+    delegatorContext: any,
+  ): Promise<'caller' | 'delegator' | null> {
+    if (!this.orgScopingEnabled || callerHasOrganizationScope(context, this.tenancyPosture)) return null;
+    const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
+    // [ADR-0090 D10] The delegator is walled on its own context, exactly as
+    // the forge guard walls it — an on-behalf-of write may not land a row
+    // the delegator itself could not place.
+    const delegatorWall =
+      delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
+        ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
+        : null;
+    return isTenantWallDenial(callerWall)
+      ? 'caller'
+      : isTenantWallDenial(delegatorWall)
+        ? 'delegator'
+        : null;
   }
 
   /**
