@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FilterCondition } from '@objectstack/spec/data';
+// [#19995] The engine's own shared comparand faces — run on a read scope, alone,
+// at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}.
+import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
@@ -414,6 +417,20 @@ import {
  * already refused by the bare-array arm. {@link assertNoListInEqualitySlot}
  * refuses it in this module's envelope. See there for the measured answers, the
  * reachability reading, and why `$ne` is not judged here.
+ *
+ * ## The ObjectQL ENGINE path refuses a bad comparand in THIS envelope too (#19995)
+ *
+ * The #13640 section above is the vacancy half of the engine path; this is the
+ * comparand half. A scope carrying a comparand the ENGINE's shared comparand
+ * faces refuse was handed to `engine.aggregate` and came back as the engine's
+ * `INVALID_FILTER` / 400, a 4xx whose prose the HTTP doors relay — while the
+ * NativeSQL face and the echo refused the same scope in the withheld envelope
+ * above. One scope, two envelopes, and the 400 one is the disclosure #5367
+ * closed. The engine's refusal does not read the `'policy'` provenance mark
+ * (#8220); only `driver-sql`'s cross-field and bind refusals do.
+ * {@link assertReadScopeComparandsRunnable} closes it at the two engine-bound
+ * merge sites. See there for why its refusal set is exactly the engine's, and
+ * for what it deliberately leaves to the engine.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -645,6 +662,63 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
     `[read-scope-sql] read scope for "${objectName}" has an empty $in under negation at ${found.path} — an empty membership matches nothing, ` +
       `so its negation matches every row and the read scope admits the whole table (fail-closed).`,
   );
+}
+
+/**
+ * [#19995] Refuse, in this module's envelope, a read scope the ENGINE would
+ * refuse for one of its comparands — judged on the scope ALONE, before it is
+ * composed with the caller's filter.
+ *
+ * The door for the two ENGINE-bound merges: `ObjectQLStrategy.withReadScope`
+ * (the direct and the cross-object base aggregate) and `resolveFkAttr` (the
+ * referenced object's scope). There the scope used to reach `engine.aggregate`
+ * unjudged, and a comparand the engine refuses came back as its
+ * `INVALID_FILTER` / 400, message relayed. At the merge site the scope is
+ * still a distinguishable object; one line later it is `$and`-composed with
+ * the caller's own filter and no consumer can tell whose clause a refusal
+ * came from — which is why this is a judgement here and ⛔ never a catch
+ * around `executeAggregate`: the caller's own `where` still reaches the
+ * engine's doors for some shapes, and those refusals are the caller's to read.
+ *
+ * ## Why the refusal set is exactly the engine's
+ *
+ * The two faces called below are the ones the engine runs on every
+ * object-form `where` (`lowerWhereFilterArray`, `@objectstack/objectql`):
+ * `@objectstack/spec/data`'s list-shape face and comparand-type face. Both are
+ * pure walks whose verdict on a subtree does not depend on the rest of the
+ * tree or on any object's schema, so the scope alone answers exactly as the
+ * scope inside `{ $and: [userFilter, scope] }` does. Same functions, same
+ * verdicts: nothing the engine serves is refused here, and a `{ $field }`
+ * reference (served on this path under #7598 Q1 = B) is stepped around by
+ * both, as the engine steps around it.
+ *
+ * ## What it deliberately does not judge
+ *
+ * The engine refuses other scope shapes through doors that read the object's
+ * SCHEMA or the request's CONTEXT (text operators on non-text fields, temporal
+ * comparands, filter placeholders), and `driver-sql` refuses more at compile
+ * time. Judging those here would mean a second copy of rules this package
+ * cannot see; their envelope is the engine's and the driver's to give.
+ *
+ * Anything the two walks throw is attributable to the scope — they read
+ * nothing else — so every throw is re-raised in the one envelope, the walk's
+ * own sentence kept for the operator's log.
+ *
+ * @param scope the `StrategyContext.getReadScope` output, exactly as returned
+ * @param objectName the object the scope was requested for — for the operator's
+ *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
+ *   500 declaration, like every message in this module.
+ */
+export function assertReadScopeComparandsRunnable(scope: unknown, objectName: string): void {
+  try {
+    assertListComparandShapes(scope, undefined, 'readScope');
+    normalizeFilterComparandTypes(scope, undefined, 'readScope');
+  } catch (e) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" carries a comparand the engine refuses — ` +
+        `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
+    );
+  }
 }
 
 /**
