@@ -167,19 +167,39 @@ const RUN_READ_DENY_MESSAGE =
     `Reading automation run state requires read access to '${AUTOMATION_RUN_OBJECT}'.`;
 
 /**
- * [#7968] The screen route's own refusal text — same `code` and `status`, a
- * different sentence, because a different question was asked.
+ * [#7968 / #19987] What admits a caller to a paused run, stated ONCE for the
+ * two doors onto a pause: reading its screen and resuming it. Both refusals
+ * end with these exact words, because both ask the one question
+ * {@link isRunStarterOrRunStateReader} answers.
  *
  * The two halves are BOTH named. A caller refused here is either the wrong
  * person or an operator without the grant, and a message naming only the grant
  * would tell the end user the flow paused for to go ask for operator tooling —
- * the exact misdirection this route's gate exists to avoid. It still names no
+ * the exact misdirection this gate exists to avoid. It still names no
  * position, permission set or identity (#7450): what it lists is what would
  * admit ANY caller, not what this one is missing.
  */
-const SCREEN_READ_DENY_MESSAGE =
-    'Reading a paused run\'s screen requires being the identity that triggered the run, '
+const PAUSED_RUN_REQUIREMENT =
+    'requires being the identity that triggered the run, '
     + `or read access to '${AUTOMATION_RUN_OBJECT}'.`;
+
+/**
+ * [#7968] The screen route's own refusal text — same `code` and `status` as
+ * the run-state reads, a different sentence, because a different question was
+ * asked. Byte-identical to what it was before #19987 factored the requirement
+ * out: only the verb phrase is this route's own.
+ */
+const SCREEN_READ_DENY_MESSAGE = `Reading a paused run's screen ${PAUSED_RUN_REQUIREMENT}`;
+
+/**
+ * [#19987] The resume door's refusal text: the screen read's `code`, `status`
+ * and requirement, word for word, under the verb the caller actually used.
+ * A resume refused with "Reading a paused run's screen …" would name an
+ * operation the caller did not attempt — the misdirection #11666 removed from
+ * the toggle door, where one shared sentence named a verb the caller never
+ * used.
+ */
+const RESUME_DENY_MESSAGE = `Resuming a paused run ${PAUSED_RUN_REQUIREMENT}`;
 
 /**
  * [#7900] Which `/automation` GET routes serve `sys_automation_run`-class data.
@@ -196,6 +216,9 @@ const SCREEN_READ_DENY_MESSAGE =
  * but on a DIFFERENT question (`refuseUnrelatedScreenRead`): the run's own
  * trigger identity, with this grant as an operator override. Adding it here
  * would apply the grant alone and lock out the end user the flow paused for.
+ * [#19987] The write on the same pause, `POST /:name/runs/:runId/resume`, asks
+ * that same question (`refuseUnrelatedResume`) and is not here for the same
+ * reason.
  */
 function isRunStateRead(parts: string[], method: string): boolean {
     if (method !== 'GET') return false;
@@ -413,6 +436,9 @@ function isFlowEnablementWrite(parts: string[], method: string): boolean {
  *     fail-closed on the suspended node's `resumeAuthority` (#3801 / #5561) —
  *     a second, unrelated gate in front of it would refuse the very user the
  *     flow paused for, which is the mistake #7968 records for the screen read.
+ *     [#19987] Its caller gate is the screen read's own question instead (the
+ *     run's trigger identity, or the `sys_automation_run` grant), which admits
+ *     that user by construction: `refuseUnrelatedResume`.
  *
  * The reads are untouched: `GET /` and `GET /:name` serve flow definitions and
  * keep the posture the #7900 audit recorded for them.
@@ -997,39 +1023,89 @@ function restoreRefusalStatus(refusal: unknown): number {
 }
 
 /**
- * [#7968] The screen route's gate: **the run's own trigger identity, OR the
- * `sys_automation_run` read grant as an operator override.**
+ * [#7968 / #19987] May this caller act on THIS paused run? **The run's own
+ * trigger identity, OR the `sys_automation_run` read grant as an operator
+ * override.** The one question both doors onto a pause ask — reading its
+ * screen ({@link refuseUnrelatedScreenRead}) and resuming it
+ * ({@link refuseUnrelatedResume}) — so the read and the write on one pause
+ * cannot answer one caller two ways. Each door owns only its refusal sentence
+ * and WHERE it asks; neither owns a copy of the answer.
  *
- * Maintainer ruling, 2026-08-12 (Option B). Acceptance, verbatim: *"stranger
- * with valid auth + run id ⇒ denied; triggering user ⇒ screen; holder of
- * `sys_automation_run` read ⇒ screen."*
+ * Maintainer ruling, 2026-08-12 (Option B), for the read. Acceptance,
+ * verbatim: *"stranger with valid auth + run id ⇒ denied; triggering user ⇒
+ * screen; holder of `sys_automation_run` read ⇒ screen."* #19987 applies the
+ * same shape to the write, by triage direction as execution of that ruling.
  *
  * ## ⛔ Why this is NOT the grant check one route up
  *
  * The obvious gate — require the `sys_automation_run` grant, exactly as
- * `/:name/runs/:runId` does — was **considered and ruled out for this route**,
- * and the reason is the whole point of the card: it would **refuse the end user
- * the flow paused for**. The pause exists because the flow is asking THIS
- * caller to fill a form in; a screen served only to grant-holders is a screen
- * served to everyone except its audience. So the grant is the OVERRIDE half
- * here (operator tooling, support), never the whole question — and the
- * over-block direction is pinned as hard as the under-block one
- * (`automation-screen-read-gate.test.ts`).
+ * `/:name/runs/:runId` does — was **considered and ruled out**, and the reason
+ * is the whole point of #7968: it would **refuse the end user the flow paused
+ * for**. The pause exists because the flow is asking THIS caller to fill a form
+ * in; a screen served only to grant-holders, or a resume accepted only from
+ * them, is a pause answerable by everyone except its audience. So the grant is
+ * the OVERRIDE half (operator tooling, support, an integration that feeds a
+ * signal wait), never the whole question — and the over-block direction is
+ * pinned as hard as the under-block one (`automation-screen-read-gate.test.ts`,
+ * `automation-resume-caller-gate.test.ts`).
  *
  * ## What the identity half reads, and why that field
  *
  * `ExecutionLogEntry.trigger.userId` — the caller whose request started the run,
  * written by the engine's single `buildRunTrigger` chokepoint (#7533) at every
- * site that records a run. It is the only identity the run itself carries, and
- * it is the same axis `resume` answers on (`resumeAuthority`, #3801 / #5561),
- * so read and write on one pause stay on one axis rather than the two unrelated
- * permissions #7900 exists to remove.
+ * site that records a run. It is the only identity the run itself carries. It
+ * matters on the write for the reason it matters on the read, and more: a
+ * resumed run continues under the context STORED on the run, so the run's data
+ * nodes run as the user who started it, whoever submitted the values.
  *
  * ⚠️ It is deliberately NOT the richer per-run authority question — "may this
  * caller resume THIS suspension, per its declared `resumeAuthority`/assignee
  * state". That is Option A, recorded as the coherent end state and ADR-0019
  * class design work; B does not preclude it, because both refuse the same
  * stranger and admit the same end user.
+ *
+ * ## The non-denials
+ *
+ * Everything {@link mayReadRunState} decides: a system context passes, a
+ * deployment with no `plugin-security` (or a partial one) passes, and an
+ * `explain` that throws fails CLOSED — but only the OVERRIDE half fails closed,
+ * so the triggering user still reaches their own pause while the permission
+ * subsystem is unavailable. That asymmetry is the point of a two-half gate: the
+ * end user's access does not depend on operator infrastructure.
+ *
+ * The identity half, in turn, never admits on absence: a run with no
+ * `trigger.userId` (a schedule), a service without `getRun`, a `getRun` that
+ * throws, and a run `getRun` cannot find all admit nobody on this half — never
+ * everybody — and leave the answer to the override half.
+ */
+async function isRunStarterOrRunStateReader(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: Partial<IAutomationService>,
+    runId: string,
+): Promise<boolean> {
+    const ec = context?.executionContext;
+    if (ec?.isSystem === true) return true;
+
+    // ── Half 1: the run's own trigger identity ───────────────────────────────
+    // Best-effort: `getRun` is optional on `IAutomationService`, and a service
+    // that cannot answer who triggered a run simply does not admit anyone on
+    // this half — it never admits everyone. A throw is the same: unresolved,
+    // not granted.
+    const callerId = typeof ec?.userId === 'string' && ec.userId !== '' ? ec.userId : undefined;
+    if (callerId && typeof automationService.getRun === 'function') {
+        const run = await automationService.getRun(runId).catch(() => undefined);
+        const triggerUserId = (run as { trigger?: { userId?: unknown } } | null | undefined)?.trigger?.userId;
+        if (typeof triggerUserId === 'string' && triggerUserId === callerId) return true;
+    }
+
+    // ── Half 2: the operator override, asked as ONE question with #7900 ──────
+    return mayReadRunState(deps, context);
+}
+
+/**
+ * [#7968] The screen route's gate: {@link isRunStarterOrRunStateReader} as a
+ * guard clause, refusing with {@link SCREEN_READ_DENY_MESSAGE}.
  *
  * ## Order of operations — the 404 comes FIRST, on purpose
  *
@@ -1054,15 +1130,6 @@ function restoreRefusalStatus(refusal: unknown): number {
  * than the disclosure it replaces (an id, not the record's values), and closing
  * it means answering 404 for the refused caller — a different, defensible
  * design that is not what was ruled.
- *
- * ## The non-denials it inherits
- *
- * Everything {@link mayReadRunState} decides: a system context passes, a
- * deployment with no `plugin-security` (or a partial one) passes, and an
- * `explain` that throws fails CLOSED — but only the OVERRIDE half fails closed,
- * so the triggering user still gets their own screen while the permission
- * subsystem is unavailable. That asymmetry is the point of a two-half gate: the
- * end user's access does not depend on operator infrastructure.
  */
 async function refuseUnrelatedScreenRead(
     deps: DomainHandlerDeps,
@@ -1070,27 +1137,82 @@ async function refuseUnrelatedScreenRead(
     automationService: Partial<IAutomationService>,
     runId: string,
 ): Promise<HttpDispatcherResult | undefined> {
-    const ec = context?.executionContext;
-    if (ec?.isSystem === true) return undefined;
-
-    // ── Half 1: the run's own trigger identity ───────────────────────────────
-    // Best-effort: `getRun` is optional on `IAutomationService`, and a service
-    // that cannot answer who triggered a run simply does not admit anyone on
-    // this half — it never admits everyone. A throw is the same: unresolved,
-    // not granted.
-    const callerId = typeof ec?.userId === 'string' && ec.userId !== '' ? ec.userId : undefined;
-    if (callerId && typeof automationService.getRun === 'function') {
-        const run = await automationService.getRun(runId).catch(() => undefined);
-        const triggerUserId = (run as { trigger?: { userId?: unknown } } | null | undefined)?.trigger?.userId;
-        if (typeof triggerUserId === 'string' && triggerUserId === callerId) return undefined;
-    }
-
-    // ── Half 2: the operator override, asked as ONE question with #7900 ──────
-    if (await mayReadRunState(deps, context)) return undefined;
-
+    if (await isRunStarterOrRunStateReader(deps, context, automationService, runId)) return undefined;
     return {
         handled: true,
         response: deps.error(SCREEN_READ_DENY_MESSAGE, RUN_READ_DENY_STATUS, { code: RUN_READ_DENY_CODE }),
+    };
+}
+
+/**
+ * [#19987] The resume door's caller gate: {@link isRunStarterOrRunStateReader}
+ * as a guard clause, refusing with {@link RESUME_DENY_MESSAGE} under the screen
+ * read's `code` and `status`.
+ *
+ * What it closes, measured: the arm validated the body and called
+ * `resume(runId, signal)` without reading any identity, so an authenticated
+ * stranger holding another user's run id continued that user's paused run —
+ * and the run went on under the starter's STORED context, with the stranger's
+ * values. The read twin on the same pause already refused that stranger.
+ *
+ * ## It never refuses a caller the suspended node itself authorizes
+ *
+ * The node-level gate is the engine's `resumeAuthority` (#3801 / #5561), a
+ * closed enum that names no person:
+ *
+ *   `'any'`     — `screen`, `wait`, `map`, `subflow`: the route is the intended
+ *                 door, and "any" authorizes no specific caller, so this gate
+ *                 adds starter-or-grant there;
+ *   `'service'` — `approval`, `approval_revise`: refused by the ENGINE to every
+ *                 caller of this door, because the service marker is a symbol
+ *                 no JSON body can carry. An approver decides through
+ *                 `ApprovalService`, which resumes in process and never enters
+ *                 this handler;
+ *   undeclared  — resolves to `'service'` (#5561), the same.
+ *
+ * So no caller this door admitted before is one the node names, and the node
+ * gate still answers — unchanged, word for word — for every caller this gate
+ * admits.
+ *
+ * ## Order of operations — AFTER the body checks, immediately BEFORE `resume()`
+ *
+ *  - **After the body checks.** They read nothing about the run, so every 400
+ *    they answer stays byte-identical for every caller, and the lookup below is
+ *    spent only on a request the engine would otherwise receive.
+ *  - **Before `resume()`.** Nothing reaches the engine until the caller is
+ *    admitted, so a refused resume consumes nothing: the pause stays parked and
+ *    the rightful caller can still answer it.
+ *  - **Fail-closed on a run `getRun` cannot resolve, with no 404-first step —
+ *    the one place this door departs from the read twin, and why.** The read
+ *    twin answers 404 first because `getSuspendedScreen` is a durable,
+ *    authoritative "is there anything to disclose". This door has no such probe
+ *    short of `resume()` itself, which consumes the pause. `getRun`'s `null` is
+ *    NOT that probe: the engine answers `null` for a run that is parked and
+ *    resumable when its durable read degrades, and after its in-memory ring
+ *    evicts the entry on a deployment with no suspended-run store — and a
+ *    caller able to start flows can drive that eviction. Letting `null` through
+ *    to `resume()` would open the gate in exactly those states. So the answers
+ *    that move are only those of a caller who is neither the run's starter, nor
+ *    a grant holder, nor a system context: an unknown or finished run answers
+ *    them this 403 instead of the engine's 404 — which also means a stranger
+ *    cannot tell a paused run id from an unknown one here. For every caller the
+ *    gate admits, every engine answer (the unknown and finished runs' 404
+ *    included) is unchanged.
+ *
+ * ⛔ Not the MCP door's rule. `resume_run` (`./mcp.ts`) is starter-only by
+ * design and admits no operator override; this door keeps the override half,
+ * as the read twin does.
+ */
+async function refuseUnrelatedResume(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: Partial<IAutomationService>,
+    runId: string,
+): Promise<HttpDispatcherResult | undefined> {
+    if (await isRunStarterOrRunStateReader(deps, context, automationService, runId)) return undefined;
+    return {
+        handled: true,
+        response: deps.error(RESUME_DENY_MESSAGE, RUN_READ_DENY_STATUS, { code: RUN_READ_DENY_CODE }),
     };
 }
 
@@ -1676,6 +1798,9 @@ export async function classifyResumeResult(
  *                                  `FLOW_FAILED` whose details carry the engine's
  *                                  verdict — `status: 'stranded'` + `repairable` —
  *                                  beside `errorMessage` / `summary`, #15221)
+ *                                  ⚑ run's trigger identity OR the
+ *                                    `sys_automation_run` grant — the screen
+ *                                    read's predicate (#19987)
  *   POST   /:name/runs/:runId/cancel → cancel a suspended run (ADR-0044,
  *                                  #13953). Body `{ reason? }`, closed. Answers
  *                                  200 `{ runId, cancelled, notice }` both ways —
@@ -2219,6 +2344,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // is gated the same way, so this door is one a descriptor opts into with
         // `'any'` rather than one every pausing node inherits.
         //
+        // [#19987] That gate asks WHAT the run is parked on, never WHO is
+        // resuming it. The caller gate is the screen read's (#7968 Option B):
+        // the run's own starter, or the `sys_automation_run` read grant —
+        // `refuseUnrelatedResume`, answering 403 `PERMISSION_DENIED` before the
+        // engine is reached.
+        //
         // REFUSAL codes come back from the engine and are answered as such
         // rather than a 200 carrying `success: false` (which reads as "your
         // resume ran and the flow failed"):
@@ -2391,6 +2522,16 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (inputs !== undefined) signal.variables = inputs;
                 if (b.output !== undefined) signal.output = b.output;
                 if (b.branchLabel !== undefined) signal.branchLabel = b.branchLabel;
+                // [#19987] WHO is resuming: the run's own starter, or the
+                // `sys_automation_run` read grant as the operator override —
+                // the screen read's question, asked through the same
+                // predicate. After the body checks (every 400 above is
+                // unchanged for every caller) and immediately before the
+                // engine, so a refused resume consumes nothing. Why it fails
+                // closed on a run it cannot resolve, and why it never refuses a
+                // caller the suspended node itself names: `refuseUnrelatedResume`.
+                const unrelated = await refuseUnrelatedResume(deps, context, automationService, parts[2]);
+                if (unrelated) return unrelated;
                 const result = await automationService.resume(parts[2], signal);
                 // [#15705] The engine's answer is classified by
                 // `classifyResumeResult`, the one table this door shares with
@@ -2569,8 +2710,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // `{record.email}` / `{record.phone}` answered those values to ANY
         // authenticated caller who knew a run id. The ruling of 2026-08-12
         // closes it on the identity axis instead, keeping the end user in.
-        // Reasoning, the ordering, and what stays out of scope (Option A, the
-        // per-run `resumeAuthority` read gate): `refuseUnrelatedScreenRead`.
+        // Reasoning and what stays out of scope (Option A, the per-run
+        // `resumeAuthority` read gate): `isRunStarterOrRunStateReader`, the
+        // predicate the resume door shares since #19987; this route's
+        // ordering: `refuseUnrelatedScreenRead`.
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'screen' && m === 'GET') {
             if (typeof automationService.getSuspendedScreen === 'function') {
                 const screen = await automationService.getSuspendedScreen(parts[2]);
