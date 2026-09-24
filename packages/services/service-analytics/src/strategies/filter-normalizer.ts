@@ -196,11 +196,13 @@
  *     non-NULL row — because `stringifyForCube(null)` was `''`. It is now
  *     `LIKE '%null%'`, which is what `driver-sql` has always compiled it to.
  *   - `{amount: {$gt: null}}` compiled to `amount > ''`, a real comparison
- *     against the empty string. It now binds NULL, so the predicate is UNKNOWN
- *     and the widget draws nothing — the honest answer for an unordered
- *     comparand, and the one `driver-memory` / `formula` give. (#5332 named this
+ *     against the empty string. It then bound NULL, so the predicate was UNKNOWN
+ *     and the widget drew nothing — the honest answer for an unordered
+ *     comparand, and the one `driver-memory` / `formula` gave. (#5332 named this
  *     comparand position as covered by no ruling and left the `''` placeholder
- *     alone; deleting the encoder decides it by construction.)
+ *     alone; deleting the encoder decided it by construction.) [#20010] The
+ *     position has a ruling now (2026-09-01, #14080) and it is a refusal, at the
+ *     shared comparand-shape face this door runs — see the #20010 section below.
  *
  * # A `where` ARRAY is lowered here, not dropped (#5334)
  *
@@ -346,6 +348,23 @@
  * `{ f: { $in: [...] } }` for "one of these values". `$ne` with a list is not
  * this ruling's.
  *
+ * # The same face's OTHER arms reach the object spelling too (#20010)
+ *
+ * The same face carries the null and blank carve-outs ruled onto it — a `null`
+ * `$in` / `$nin` member and a `null` `$between` endpoint (2026-08-31), a `null`
+ * ordering comparand (2026-09-01), a blank `$between` endpoint (2026-09-20) —
+ * and its original rule, that `$in` / `$nin` / `$between` receive a list at
+ * all. The `FilterArray` spelling met every one of them inside
+ * `parseFilterAST`; the object spelling met none, so `{ s: { $in: ['won', null] } }`
+ * compiled to `s IN ('won', NULL)` and `{ s: { $in: 'won' } }` was laundered to
+ * a one-member list, while the array spelling of each was refused
+ * `INVALID_FILTER` / 400. {@link assertWhereComparandShapes} now hands every
+ * field entry to the face after the #19888 equality pass, so both spellings
+ * get the face's own refusal byte for byte, on every face of this door and on
+ * the draft preview. The comparand-TYPE face is not run here; `undefined`
+ * keeps {@link assertDefinedComparands}' refusal except as a `$between`
+ * endpoint, which the face now answers.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -360,7 +379,9 @@
  * `filter-normalizer-mixed-wrapper.test.ts` for the mixed `$`/non-`$` wrapper
  * refusal and its pure-shape control groups (#6444), and
  * `where-equality-slot-list-refusal.test.ts` for the equality-slot list refusal
- * on every analytics face and its neighbouring shapes (#19888).
+ * on every analytics face and its neighbouring shapes (#19888), and
+ * `where-face-arms-refusal.test.ts` for the face's other arms, both spellings,
+ * every face (#20010).
  */
 
 import {
@@ -674,6 +695,13 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
  * Asserted under the `$between` name, not under the `gte` / `lte` the bounds
  * lower to, because the author wrote `$between` and that is the key they have
  * to repair.
+ *
+ * [#20010] The `where` door now hands every field entry to the shared
+ * comparand-shape face before any leaf is built, and the face refuses this
+ * endpoint by the 2026-08-11 ruling (#7596, on the face since #19377) — so the
+ * door answers in the face's words, the ones the `FilterArray` spelling always
+ * got, and this check is {@link fieldLeaves}' own invariant rather than the
+ * door's refusal. The laundering argument above is why the invariant stays.
  */
 function assertNoFieldReferenceComparand(opKey: string, field: string, value: unknown): void {
   if (opKey !== '$between' || !Array.isArray(value)) return;
@@ -758,7 +786,11 @@ function undefinedComparandError(field: string, path: string): Error {
  *   - an OPERATOR's comparand — `{d: {$gt: undefined}}`, `$eq`, `$ne`, the LIKE
  *     family, every other single-value operator;
  *   - a MEMBER of a list operator's array — `{d: {$in: [undefined]}}`, `$nin`,
- *     and `$between`'s two bounds.
+ *     and `$between`'s two bounds. [#20010] A `$between` bound is answered
+ *     first by the shared comparand-shape face, whose 2026-09-20 ruling
+ *     refuses an `undefined` endpoint as BLANK, naming the side; the door runs
+ *     that face before any leaf is built, so this gate's sentence is reached
+ *     only in the other positions.
  *
  * `$null` / `$exists` are deliberately NOT swept, exactly as on the twin: their
  * comparand is a declared BOOLEAN — a flag, not a value to compare against — so
@@ -970,6 +1002,10 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // (`native-sql-temporal-conformance.test.ts`).
         if (opKey === '$between') {
           const v = wrapper[opKey];
+          // [#20010] From `lowerAnalyticsWhere`, the shared comparand-shape face
+          // has already judged this range — arity, a null or blank endpoint, a
+          // `{ $field }` endpoint — in its own words, so the two checks below
+          // are this function's invariants and are not reached from the door.
           if (!Array.isArray(v) || v.length !== 2) {
             // Never drop it: an unbounded read is the failure mode this whole
             // branch exists to prevent, and it is indistinguishable from a
@@ -1894,6 +1930,8 @@ export function collectFilterLeaves(
  * the honest answer for an unordered comparand and the one the JS backends give;
  * the `''` this used to bind was a real comparison against the empty string,
  * which on a text column silently matched rows (see the module header).
+ * [#20010] From the `where` door, a `null` no longer reaches an ordering slot
+ * at all: the shared comparand-shape face refuses it first (2026-09-01 ruling).
  */
 export function toSqlBindValue(v: unknown): unknown {
   if (typeof v === 'boolean') return v ? 1 : 0;

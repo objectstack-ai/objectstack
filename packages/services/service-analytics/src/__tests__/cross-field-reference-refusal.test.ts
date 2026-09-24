@@ -286,23 +286,38 @@ describe("[#7598] the #5222 corpus's REFUSAL arm — routed, or refused at this 
       .toContain('StringOperatorSchema');
     expect(refusalOf(() => tree({ amount: { $in: [{ $field: 'budget' }, 1] } })).message)
       .toContain('cannot be bound as a SQL parameter');
+    // [#20010] RE-JUDGED: the `$between` endpoint is now answered one step
+    // earlier, by the shared comparand-shape face this door hands every field
+    // entry to, in the face's words (its #7596 endpoint arm, on the face since
+    // #19377). Still a third gate with its own wording, which is this case's
+    // point; the FilterArray spelling gets the same bytes.
     expect(refusalOf(() => tree({ amount: { $between: [{ $field: 'budget' }, 100] } })).message)
-      .toContain('may not be a field reference on any backend');
+      .toContain('does not accept a { "$field": … } reference as an endpoint');
     // …and the scalar position is not refused at all here any more.
     expect(tree({ amount: { $gt: { $field: 'budget' } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'gt', values: [{ $field: 'budget' }],
     });
   });
 
-  it('the `$between` refusal names the laundering it prevents, not a bind failure', () => {
+  it('the `$between` refusal names the endpoint and the two-bound spelling, not a bind failure', () => {
     // The repair a `$between` author needs is different from the one a
     // read-scope author needs, so the two sentences are different (#5240 in the
     // direction that separates rather than merges).
+    //
+    // [#20010] RE-JUDGED. This pinned this door's own sentence, which named the
+    // laundering (`index 1`, `#7596`). The door now hands every field entry to
+    // the shared comparand-shape face before any leaf is built, and the face's
+    // endpoint arm answers first — the 2026-08-11 ruling (#7596), on the face
+    // since #19377: "The reference stays legal in the four ORDERING slots …
+    // the alternative this refusal prescribes". Same verdict, the face's words,
+    // which are the words the FilterArray spelling already got on this door.
+    // What the case protects is unchanged: the side is named, and the message
+    // points at the spelling that IS served.
     const err = refusalOf(() => tree({ amount: { $between: [0, { $field: 'budget' }] } }));
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
-    expect(err.message).toContain('index 1');
-    expect(err.message).toContain('#7596');
+    expect(err.message).toContain('at where.amount.$between[1], the MAX bound');
+    expect(err.message).not.toContain('cannot be bound');
     // It points at the spelling that IS served, rather than at "use a literal"
     // alone — the capability exists one operator away.
     expect(err.message).toContain('"$gte"');
