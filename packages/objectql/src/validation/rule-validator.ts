@@ -192,9 +192,10 @@
  * evaluator once per matched row — one payload, N priors (#3106).
  */
 
-import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
+import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals, findTraversalConflicts } from '@objectstack/formula';
+import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
-import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, referenceTargetOf, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { recordAdvisoryHit } from '@objectstack/core';
 // [#8215] The canonical spelling of the primary-key column — the sanctioned use
 // of this registry ("what is the canonical spelling of the column that plays
@@ -293,6 +294,10 @@ interface RuleContext {
   /** Locale + translation hooks: the BUILT-IN messages (#3957) and the
    *  authored `rule.message` (#14253) — one hook, two message sources. */
   messages: ValidationMessageContext | undefined;
+  /** [#18682] Related rows the engine resolved for this write, or undefined
+   *  when it resolved none. Applied per rule — see
+   *  {@link resolveTraversalScope}. */
+  related: RelatedRecordBinding | undefined;
 }
 
 /**
@@ -383,6 +388,29 @@ export interface EvaluateRulesOptions {
    */
   previousParent?: ParentBinding;
   /**
+   * [#18682] The related records this write's predicates read ONE HOP through a
+   * reference field — `record.crm_account.type` on an opportunity. Keyed by the
+   * reference FIELD name; the value is a {@link RelatedFieldBinding}, which
+   * either carries the related row or says WHY it has none. ⛔ Not `row | null`:
+   * the reason is what lets the refusal name the related object and column
+   * instead of leaving CEL to discover a missing key.
+   *
+   * Only the engine owns a driver, so it resolves these and hands them over —
+   * the same division of labour `parent` follows, and like `parent` the read is
+   * made under SYSTEM authority. A validation rule's output is a pass/fail the
+   * SYSTEM enforces, not data handed to the caller, which is why RLS predicates
+   * are excluded from this capability altogether. What bounds the elevation is
+   * the PROJECTION — only the columns the predicate names, intersected with the
+   * related object's declared fields.
+   *
+   * ⛔ NOT applied to every rule alike. A rule is hydrated only for the
+   * reference fields ITS OWN condition reads through, because hydrating a field
+   * replaces its stored id with the related record: a sibling rule that
+   * compares the bare id must keep seeing the id. See
+   * {@link resolveTraversalScope}.
+   */
+  related?: RelatedRecordBinding;
+  /**
    * When true, `state_machine` rules are skipped entirely — both the
    * `initialStates` entry-point check on insert (#3165) and the transition
    * check on update. Set by the engine for CURATED SEED writes
@@ -415,7 +443,91 @@ export function needsPriorRecord(
 ): boolean {
   const rules = objectSchema?.validations;
   const ruleNeeds = Array.isArray(rules) && rules.some((r) => ruleNeedsPrior(r));
-  return !!(ruleNeeds || fieldsNeedPrior(objectSchema?.fields));
+  // [#18682] A rule that reads ONE HOP through a reference field needs the
+  // prior row too, and for a reason the `previous`-reading rules do not share:
+  // the hop is taken from the foreign KEY, and a PATCH that does not touch that
+  // key does not carry it. Without the prior row the engine has no id to
+  // resolve, the related field arrives absent, and the rule faults and rejects
+  // a write it should have accepted. Counting it here is what keeps the bulk
+  // path's no-prior branch unreachable for such an object — the same argument
+  // #4977 makes for `parent`, which is bound only on the per-row branch.
+  const traverses = collectPredicateRelationships(objectSchema).size > 0;
+  return !!(ruleNeeds || traverses || fieldsNeedPrior(objectSchema?.fields));
+}
+
+/**
+ * [#18682] The reference fields an object's PREDICATE rules read one hop
+ * through, and the related fields they name on each — everything the engine
+ * must preload before evaluating this object's validation rules, and nothing
+ * more.
+ *
+ * Returns an empty map when no rule traverses anything, which is the common
+ * case and is what lets the engine skip the extra read entirely: the N+1 bound
+ * is "one hop, only the named fields, only when a rule asks".
+ *
+ * ## Scope: `script` / `cross_field`, including inside `conditional`
+ *
+ * These are the rules {@link checkPredicate} evaluates, and they are fail-CLOSED
+ * (#4649) — the one policy under which a rule that cannot be evaluated refuses
+ * the write instead of waving it through. The field-level `requiredWhen` /
+ * `readonlyWhen` / option `visibleWhen` predicates are deliberately NOT
+ * collected here: they fail OPEN, so a rule that could not be evaluated would
+ * silently not enforce their gate — the opposite of what this capability's
+ * refusal is for. They are their own card.
+ *
+ * ## Only REFERENCE-typed fields
+ *
+ * Judged with the spec's own `REFERENCE_VALUE_TYPES` through
+ * {@link referenceTargetOf}, the same arbiter the `$expand` gate and the engine
+ * already ask, so "what does this field point at" cannot answer differently
+ * here than it does one layer down. `record.address.city` on an object-valued
+ * field is left alone — it traverses today and keeps traversing.
+ */
+export function collectPredicateRelationships(
+  objectSchema: { validations?: unknown[]; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const rules = objectSchema?.validations;
+  if (!Array.isArray(rules) || rules.length === 0) return out;
+  const fields = objectSchema?.fields;
+  if (!fields) return out;
+
+  const addFrom = (cond: unknown): void => {
+    // The DIALECT is checked, not assumed: a `template` or `js` source that
+    // happens to parse as CEL would otherwise be analysed and hydrated, and the
+    // hop list would describe an expression no CEL engine ever evaluates.
+    // A bare string is CEL by the envelope's own default.
+    if (cond && typeof cond === 'object' && (cond as Expression).dialect !== undefined
+        && (cond as Expression).dialect !== 'cel') return;
+    const source = typeof cond === 'string'
+      ? cond
+      : (cond && typeof cond === 'object' ? (cond as Expression).source : undefined);
+    if (typeof source !== 'string' || !source) return;
+    const analysis = analysisFor(source);
+    if (!analysis) return;
+    for (const [field, related] of analysis.traversals) {
+      // `referenceTargetOf` answers undefined for a non-reference field AND for
+      // a reference field naming no target — both mean "nothing to preload".
+      if (!referenceTargetOf(fields[field])) continue;
+      let set = out.get(field);
+      if (!set) out.set(field, (set = new Set()));
+      for (const name of related) set.add(name);
+    }
+  };
+
+  const visit = (rule: unknown, depth: number): void => {
+    if (!rule || typeof rule !== 'object' || depth > 8) return;
+    const r = rule as { type?: unknown; condition?: unknown; then?: unknown; otherwise?: unknown };
+    if (r.type === 'script' || r.type === 'cross_field') addFrom(r.condition);
+    // A `conditional` wraps the rules it guards; its own `when` is evaluated
+    // by a different seam, so only the wrapped rules are collected here.
+    if (r.type === 'conditional') {
+      visit(r.then, depth + 1);
+      visit(r.otherwise, depth + 1);
+    }
+  };
+  for (const rule of rules) visit(rule, 0);
+  return out;
 }
 
 /**
@@ -425,6 +537,71 @@ export function needsPriorRecord(
  * resolve to opposite verdicts.
  */
 export type ParentBinding = Record<string, unknown> | null | undefined;
+
+/**
+ * [#18682] The reasons do NOT collapse: each names itself in
+ * the refusal, because "there is no parent" and "that column does not exist"
+ * send an author to different repairs.
+ */
+export type RelatedUnavailableReason =
+  /** The record stores no reference — the FK is null/empty, so there is no row. */
+  | 'no-reference'
+  /** The related read failed, or — for a related object no organization wall scopes — the caller's own read does not return the row. */
+  | 'unreadable'
+  /**
+   * The predicate names a column the RELATED object does not declare. A real
+   * authoring fault, and deliberately distinct from a column that exists and is
+   * empty: the latter evaluates as `null`, this one refuses.
+   */
+  | 'undeclared-field'
+  /** A reference is stored but the related record was not found. */
+  | 'unresolved';
+
+/**
+ * [#18682] What the engine resolved for ONE reference field a predicate reads
+ * through.
+ *
+ * ⭐ Why this is a discriminated record and not just `row | null`: the verdict
+ * must be decided by the ENGINE, BEFORE evaluation, and it must not depend on
+ * which CEL operator the author happened to write. Handing CEL an absent key
+ * delegates the verdict to key-absence semantics, and `has(...)`, `.?` and
+ * `orValue(...)` all read an absent key as an ordinary `false`/default — so a
+ * genuine fault would quietly stop the rule firing. The engine therefore says
+ * WHY a row is unusable and {@link checkPredicate} turns that into a refusal,
+ * rather than letting the expression discover it.
+ *
+ * It also separates the two absences #6457 taught us to keep apart: a column the
+ * related object DECLARES but which is empty is materialised to `null` on `row`
+ * (so the predicate evaluates), while a column it does not declare makes the
+ * binding unavailable (so the predicate refuses). Before this split both arrived
+ * as "the key is missing" and the verdict depended on which columns a driver
+ * happened to echo.
+ *
+ * ⚠️ The related row is read under SYSTEM authority — a validation rule's output
+ * is a pass/fail the system enforces, not data handed to the caller. The read is
+ * bounded by its PROJECTION (only the columns the predicate names, intersected
+ * with the related object's declared fields) and, on a related object no
+ * organization wall scopes, by the ROWS the own read of a caller that is not
+ * system returns. ⛔ This
+ * applies to validation rules alone; RLS and UI predicates are out of the
+ * capability entirely.
+ */
+export interface RelatedFieldBinding {
+  /** The object this reference field points at — named in the refusal text. */
+  readonly object: string;
+  /**
+   * The related row, materialised to `null` over the declared fields the
+   * predicate names. Present iff the row is usable.
+   */
+  readonly row?: Record<string, unknown>;
+  /** Why `row` is absent. Present iff `row` is absent. */
+  readonly unavailable?: RelatedUnavailableReason;
+  /** For `undeclared-field`: the named fields the related object does not declare. */
+  readonly undeclaredFields?: readonly string[];
+}
+
+/** Reference FIELD name → what the engine resolved for it. */
+export type RelatedRecordBinding = Readonly<Record<string, RelatedFieldBinding>>;
 
 /**
  * The two CEL roots a field `readonlyWhen` predicate reads — `record` (the
@@ -2813,7 +2990,7 @@ export function evaluateValidationRules(
   // and update: what a predicate can read is the object's DECLARED shape, not
   // whatever subset of columns this driver happened to return.
   if (groundTruth) materializeDeclaredFields(merged, fields);
-  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages };
+  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages, related: opts.related };
 
   const errors: FieldValidationError[] = [];
 
@@ -3028,7 +3205,7 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
       return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous, ctx);
     case 'script':
     case 'cross_field':
-      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages);
+      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages, ctx.related, ctx.fields);
     case 'format':
       return checkFormat(rule as FormatRule, ctx.data, ctx.logger, ctx.messages);
     case 'json_schema':
@@ -3177,20 +3354,214 @@ function unevaluableRuleError(
  * declared field — is a broken rule, and a broken validation is **fail-closed**
  * (#4649): it rejects the write rather than waving it through.
  */
+/**
+ * [#18682] The parsed hop analysis for one authored source, memoised.
+ *
+ * Authored predicates are a small closed set per deployment, so this is bounded
+ * in practice; the cap is a guard against a caller that synthesises sources,
+ * and overflowing it costs a re-parse, never a wrong answer.
+ */
+const traversalAnalysisCache = new Map<string, RelationshipTraversalAnalysis | null>();
+const TRAVERSAL_CACHE_CAP = 512;
+
+function analysisFor(source: string): RelationshipTraversalAnalysis | null {
+  const hit = traversalAnalysisCache.get(source);
+  if (hit !== undefined) return hit;
+  const analysis = analyzeRelationshipTraversals(source);
+  if (traversalAnalysisCache.size < TRAVERSAL_CACHE_CAP) {
+    traversalAnalysisCache.set(source, analysis);
+  }
+  return analysis;
+}
+
+/** What {@link resolveTraversalScope} decided for one predicate. */
+type TraversalScope =
+  /** Evaluate against `record` (hydrated where the rule traverses). */
+  | { readonly ok: true; readonly record: Record<string, unknown> }
+  /** ⛔ Do not evaluate: refuse the write with this sentence. */
+  | { readonly ok: false; readonly summary: string; readonly detail: string };
+
+/**
+ * [#18682] Decide, BEFORE evaluation, what this one predicate may be evaluated
+ * against — or that it may not be evaluated at all.
+ *
+ * Three outcomes, and the two refusing ones are the point of the function:
+ *
+ * 1. **Refuse — unserviceable shape.** A reference field read BOTH through the
+ *    relationship and as a plain value cannot be served: hydrating it makes the
+ *    plain-value comparison compare a map against a string, which CEL answers
+ *    `false` WITHOUT faulting, so the rule silently stops firing. That is a
+ *    silent verdict flip on a fail-closed seam, so the rule is refused here —
+ *    in the ENGINE — and not only in the authoring layer. `@objectstack/lint`
+ *    refuses the same shape with the same prescription, but no runtime package
+ *    imports lint: metadata authored through Studio, written straight to
+ *    `sys_metadata`, or produced by an agent never meets it. ADR-0137 D1 —
+ *    a predicate slot accepts only what the engine can actually run — is a
+ *    statement about the ENGINE, and ADR-0124's server-enforces/client-is-
+ *    courtesy rule says an author-side direction is never the whole answer.
+ *
+ * 2. **Refuse — the related data is not readable.** The engine already decided
+ *    this (see {@link RelatedFieldBinding}); this function only turns the reason
+ *    into a sentence that names the RELATED object and field.
+ *
+ * 3. **Evaluate**, against a shallow COPY carrying the related rows for exactly
+ *    the reference fields THIS rule traverses. Per rule, because hydrating a
+ *    field replaces its stored id and a sibling rule comparing the bare id must
+ *    keep seeing the id. Onto a copy, because the record a rule is handed is the
+ *    write payload.
+ *
+ * A rule that traverses nothing is handed the record untouched — byte-identical
+ * to the pre-#18682 input, which is what keeps every existing rule unaffected.
+ */
+function resolveTraversalScope(
+  record: Record<string, unknown>,
+  source: string,
+  related: RelatedRecordBinding | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): TraversalScope {
+  const analysis = analysisFor(source);
+  if (!analysis || (analysis.traversals.size === 0 && analysis.multiHopFields.size === 0)) {
+    return { ok: true, record };
+  }
+
+  // (1) The shapes the engine cannot serve, judged against the SAME arbiter the
+  // authoring layer and the `$expand` gate ask — `referenceTargetOf` — so the
+  // two layers can never disagree about which fields are references.
+  const isReference = (field: string): boolean => !!referenceTargetOf(fields?.[field]);
+  const conflicts = findTraversalConflicts(analysis, isReference);
+  if (conflicts.length > 0) {
+    return {
+      ok: false,
+      summary: conflicts[0].kind === 'multi-hop'
+        ? 'reads more than one relationship hop'
+        : 'reads a reference field both through the relationship and as a value',
+      detail: ' ' + conflicts.map((c) => c.message).join(' '),
+    };
+  }
+
+  // (2)/(3) Hydrate what is available; refuse on the first field that is not.
+  let copy: Record<string, unknown> | undefined;
+  for (const field of analysis.traversals.keys()) {
+    if (!isReference(field)) continue;
+    const binding = related?.[field];
+    // No binding at all means the engine resolved nothing for this write (an
+    // embedding that never called `collectPredicateRelationships`, or the
+    // referential FK clear). Leave the record alone and let evaluation meet the
+    // bare id as it did before — this function invents no verdict for it.
+    if (!binding) continue;
+    // ⛔ Only the row this record's own foreign key names; any other is unresolved.
+    if (binding.row && binding.row.id != null && String(binding.row.id) === String(record[field])) {
+      if (!copy) copy = { ...record };
+      copy[field] = binding.row;
+      continue;
+    }
+    const reason = binding.row ? { object: binding.object, unavailable: 'unresolved' as const } : binding;
+    return { ok: false, ...traversalRefusal(field, reason, analysis.traversals.get(field)) };
+  }
+  return { ok: true, record: copy ?? record };
+}
+
+/**
+ * [#18682 / ADR-0137 D2] The sentence a traversal refusal carries.
+ *
+ * ⭐ It names the RELATED object and the related field. The generic
+ * undeclared-key prescription cannot be reused here: it reads "the predicate
+ * reads 'status', which this object does not declare — fix the rule's condition,
+ * or declare the field", and on a traversal every clause of that is wrong. The
+ * field IS declared, on another object, and an author who follows it adds a
+ * bogus column to the object they were editing. ADR-0137 D2 requires a faulting
+ * field-rule predicate to name the field and the rule; naming the wrong object
+ * sends the author to the wrong file.
+ */
+function traversalRefusal(
+  field: string,
+  binding: RelatedFieldBinding,
+  named: ReadonlySet<string> | undefined,
+): { summary: string; detail: string } {
+  const names = [...(named ?? [])].sort();
+  const columns = names.length === 1 ? `'${names[0]}'` : names.map((n) => `'${n}'`).join(', ');
+  const on = `\`${field}\` (object '${binding.object}')`;
+  switch (binding.unavailable) {
+    case 'no-reference':
+      // Three stored shapes reach this arm and the sentence names all three,
+      // because "empty" and "a list" and "already expanded" send an author to
+      // different repairs: a null/empty FK has nothing to read; a MULTI-valued
+      // reference names no single related record, so one hop is not defined on
+      // it at all; and a slot already holding an expanded object is not a
+      // foreign key this can resolve from.
+      return {
+        summary: `cannot read ${columns} through ${on}: no single related record`,
+        detail:
+          ` The rule reads ${columns} through ${on}, but this record holds no single`
+          + ' reference there to read — the field is empty, holds MULTIPLE references, or'
+          + ' already holds an expanded record rather than an id. A predicate resolves ONE'
+          + ' hop through a single reference. Guard the rule on the reference being set, make'
+          + ' it required, or — for a multi-value reference — test it with a macro'
+          + ' (`exists`, `size`) instead of reading through it.',
+      };
+    case 'undeclared-field': {
+      const missing = (binding.undeclaredFields ?? []).map((n) => `'${n}'`).join(', ') || columns;
+      return {
+        summary: `'${binding.object}' declares no ${missing}`,
+        detail:
+          ` The rule reads ${missing} through ${on}, but '${binding.object}' declares no such`
+          + ` field. Fix the rule's condition, or declare ${missing} on '${binding.object}' —`
+          + ` ⛔ not on the object carrying this rule.`,
+      };
+    }
+    case 'unresolved':
+      return {
+        summary: `cannot read ${columns} through ${on}: the related record was not found`,
+        detail: '',
+      };
+    case 'unreadable':
+    default:
+      return {
+        summary: `could not read '${binding.object}'`,
+        detail:
+          ` The rule reads ${columns} through ${on}, and that row could not be read. The rule has no`
+          + ' verdict, so the write is rejected rather than allowed on an unchecked rule.',
+      };
+  }
+}
+
 function checkPredicate(
   rule: PredicateRule,
   record: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   logger: EvaluateRulesOptions['logger'],
   messages?: ValidationMessageContext,
+  related?: RelatedRecordBinding,
+  fields?: Record<string, ConditionalFieldDef>,
 ): FieldValidationError | null {
   const expr = toExpression(rule.condition);
+  const field = rule.fields?.[0] ?? '_record';
+
+  // [#18682 / ADR-0137 D2] Decide the relationship question BEFORE evaluation.
+  // A refusal here is a rule that HAS no verdict — never a rule whose verdict is
+  // `false` — so it rejects the write exactly as an unevaluable predicate does
+  // (#4649), but says which RELATED object and field it could not read.
+  if (typeof expr.source === 'string' && expr.dialect === 'cel') {
+    const scope = resolveTraversalScope(record, expr.source, related, fields);
+    if (!scope.ok) {
+      logger?.warn?.(
+        `Validation rule '${rule.name}' predicate could not be evaluated (${scope.summary}) — write rejected`,
+      );
+      return {
+        field,
+        code: 'rule_violation',
+        message:
+          `Validation rule '${rule.name}' could not be evaluated (${scope.summary}) — write rejected.${scope.detail}`,
+        constraint: { rule: rule.name, reason: 'unevaluable', fault: scope.summary },
+      };
+    }
+    record = scope.record;
+  }
+
   const result = ExpressionEngine.evaluate<boolean>(expr, {
     record,
     previous: previous ?? undefined,
   });
-
-  const field = rule.fields?.[0] ?? '_record';
 
   if (!result.ok) {
     // Still logged — the operator needs the fault in the log even though the
