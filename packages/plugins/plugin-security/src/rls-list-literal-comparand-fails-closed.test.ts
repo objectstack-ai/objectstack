@@ -1,22 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#19886] A row-level policy that compares a field against a LIST LITERAL with
- * `!=` or `==` fails closed on both clauses, through the real plugin and engine.
+ * [#19886] A row-level policy that compares a field with `!=` or `==` against a
+ * LIST — a list literal, or a `current_user` membership set the kernel resolves
+ * to an array — fails closed on both clauses, through the real plugin and engine.
  *
  * `compileCelToFilter` refuses the comparison (`unsupported`), so
- * `RLSCompiler.compileFilter` drops the policy on its existing
- * "uncompilable predicate" branch and, with nothing else applicable, answers
- * `RLS_DENY_FILTER`:
+ * `RLSCompiler.compileFilter` drops the policy — a literal on its
+ * "uncompilable predicate" branch, a resolved array on its per-request denial
+ * branch — and, with nothing else applicable, answers `RLS_DENY_FILTER`:
  *
  *   - a `using` read returns ZERO rows — never the rows the policy was written
- *     to exclude, which is what the lowered `$ne: [...]` returned on
- *     driver-mongodb before the refusal;
+ *     to exclude, which is what the lowered `$ne: [...]` (and the `$nor` of a
+ *     negated equality) returned on driver-mongodb before the refusal;
  *   - a `check` write is refused with the row-level CHECK envelope
- *     (`PERMISSION_DENIED` / 403) and nothing is stored.
+ *     (`PERMISSION_DENIED` / 403) and nothing is stored — before the refusal
+ *     the resolved-array spellings ADMITTED the forbidden row here.
  *
- * The control is the spelling the refusal points at, `!(record.status in [...])`,
- * which keeps its exact meaning. The ground truth is read past every scope.
+ * The controls are the spellings the refusal points at, `!(record.f in …)`,
+ * which keep their exact meaning. The ground truth is read past every scope.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -57,6 +59,7 @@ async function boot(clause: 'using' | 'check', predicate: string) {
       fields: {
         id: { name: 'id', type: 'text', primaryKey: true },
         status: { name: 'status', type: 'text' },
+        reviewer_id: { name: 'reviewer_id', type: 'text' },
       },
     }],
   } as never);
@@ -89,7 +92,13 @@ async function boot(clause: 'using' | 'check', predicate: string) {
   await plugin.start(ctx as never);
   vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
 
-  const caller = { userId: 'usr_member', positions: ['qa_pos'], permissions: [set.name], posture: 'MEMBER' };
+  const caller = {
+    userId: 'usr_member',
+    positions: ['qa_pos'],
+    permissions: [set.name],
+    posture: 'MEMBER',
+    org_user_ids: ['usr_member', 'usr_peer'],
+  };
   const stored = async () =>
     ((await engine.find(OBJ, { context: SYS_CTX } as never)) as Array<{ id: string }>).map((r) => r.id).sort();
   return { engine, caller, stored };
@@ -98,13 +107,22 @@ async function boot(clause: 'using' | 'check', predicate: string) {
 const EXCLUDING = [
   ['`!=` against a list literal', "record.status != ['closed', 'archived']"],
   ['a negated `==` against a list literal', "!(record.status == ['closed', 'archived'])"],
+  ['`!=` against a resolved membership set', 'record.reviewer_id != current_user.org_user_ids'],
+  ['a negated `==` against a resolved membership set', '!(record.reviewer_id == current_user.org_user_ids)'],
 ] as const;
 
-describe('[#19886] a `using` clause comparing against a list literal reads ZERO rows', () => {
+/** `r_closed` is excluded by every spelling above: closed, and reviewed inside the caller's org. */
+const ROWS = [
+  { id: 'r_open', status: 'open', reviewer_id: 'usr_external' },
+  { id: 'r_closed', status: 'closed', reviewer_id: 'usr_member' },
+];
+const FORBIDDEN = { id: 'ins_bad', status: 'closed', reviewer_id: 'usr_member' };
+
+describe('[#19886] a `using` clause comparing against a list reads ZERO rows', () => {
   for (const [spelling, predicate] of EXCLUDING) {
     it(spelling, async () => {
       const { engine, caller, stored } = await boot('using', predicate);
-      await engine.insert(OBJ, [{ id: 'r_open', status: 'open' }, { id: 'r_closed', status: 'closed' }], { context: SYS_CTX } as never);
+      await engine.insert(OBJ, ROWS, { context: SYS_CTX } as never);
 
       const rows = (await engine.find(OBJ, { context: caller } as never)) as Array<{ id: string }>;
 
@@ -113,22 +131,27 @@ describe('[#19886] a `using` clause comparing against a list literal reads ZERO 
     });
   }
 
-  it('CONTROL — `!(record.status in [...])` reads exactly the rows it admits', async () => {
-    const { engine, caller } = await boot('using', "!(record.status in ['closed', 'archived'])");
-    await engine.insert(OBJ, [{ id: 'r_open', status: 'open' }, { id: 'r_closed', status: 'closed' }], { context: SYS_CTX } as never);
+  for (const predicate of [
+    "!(record.status in ['closed', 'archived'])",
+    '!(record.reviewer_id in current_user.org_user_ids)',
+  ]) {
+    it(`CONTROL — \`${predicate}\` reads exactly the rows it admits`, async () => {
+      const { engine, caller } = await boot('using', predicate);
+      await engine.insert(OBJ, ROWS, { context: SYS_CTX } as never);
 
-    const rows = (await engine.find(OBJ, { context: caller } as never)) as Array<{ id: string }>;
+      const rows = (await engine.find(OBJ, { context: caller } as never)) as Array<{ id: string }>;
 
-    expect(rows.map((r) => r.id)).toEqual(['r_open']);
-  });
+      expect(rows.map((r) => r.id)).toEqual(['r_open']);
+    });
+  }
 });
 
-describe('[#19886] a `check` clause comparing against a list literal refuses the write', () => {
+describe('[#19886] a `check` clause comparing against a list refuses the write', () => {
   for (const [spelling, predicate] of EXCLUDING) {
     it(`${spelling}: PERMISSION_DENIED / 403, and nothing is stored`, async () => {
       const { engine, caller, stored } = await boot('check', predicate);
 
-      const err = await engine.insert(OBJ, { id: 'ins_bad', status: 'closed' }, { context: caller } as never)
+      const err = await engine.insert(OBJ, FORBIDDEN, { context: caller } as never)
         .then(() => null, (e: { code?: string; status?: number; statusCode?: number }) => e);
 
       expect(err?.code).toBe('PERMISSION_DENIED');

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#19886] `==` / `!=` against a LIST LITERAL is a compile error, not a lowering.
+ * [#19886] `==` / `!=` against a LIST is a compile error, not a lowering — a
+ * list literal, and a `current_user` variable that resolves to an array.
  *
  * It used to lower to `{ f: { $ne: [...] } }` and to the bare-array
  * `{ f: [...] }` (with `$not` around it for `!(… == [...])`). Those shapes
@@ -11,10 +12,11 @@
  * row on driver-mongodb). Refused here, every consumer of this compiler fails
  * closed on its own existing `unsupported` path: the RLS compiler drops the
  * policy, the sharing seeder skips the rule, and the authoring gate
- * (`isPushdownableCel` / `isSupportedRlsExpression`) reports it.
+ * (`isPushdownableCel` / `isSupportedRlsExpression`) reports a literal.
  *
- * Scope, pinned by what is NOT here as much as by what is: a `current_user`
- * variable that resolves to an array is not refused by this change.
+ * A variable's value exists only per request, so the shape check cannot see a
+ * resolved array: that refusal is pinned at request time, with the shape check
+ * still passing the source.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -22,7 +24,16 @@ import { describe, expect, it } from 'vitest';
 import { compileCelToFilter, isPushdownableCel } from './cel-to-filter';
 import { isSupportedRlsExpression } from './rls-predicate';
 
-const VARS = { current_user: { id: 'u_me', org_user_ids: ['u_me', 'u_peer'] } };
+const VARS = {
+  current_user: {
+    id: 'u_me',
+    email: 'me@example.test',
+    org_user_ids: ['u_me', 'u_peer'],
+    // A §7.3.1 membership set staged by an app resolver, and an emptied one.
+    blocked_accounts: ['acc_secret'],
+    empty_set: [] as string[],
+  },
+};
 
 const REFUSED = [
   "record.status != ['closed', 'archived']",
@@ -51,6 +62,36 @@ describe('[#19886] == / != against a list literal is refused at the lowering', (
   }
 });
 
+const REFUSED_RESOLVED = [
+  'record.reviewer_id != current_user.org_user_ids',
+  'record.reviewer_id == current_user.org_user_ids',
+  '!(record.reviewer_id == current_user.org_user_ids)',
+  '!(record.reviewer_id != current_user.org_user_ids)',
+  'current_user.org_user_ids != record.reviewer_id',
+  'current_user.org_user_ids == record.reviewer_id',
+  'record.account != current_user.blocked_accounts',
+  'record.account != current_user.empty_set',
+  "record.status == 'open' && record.reviewer_id != current_user.org_user_ids",
+  "record.status == 'open' || !(record.reviewer_id == current_user.org_user_ids)",
+];
+
+describe('[#19886] == / != against a variable that RESOLVES to a list is refused at request time', () => {
+  for (const source of REFUSED_RESOLVED) {
+    it(`${source} — unsupported, naming the variable and withholding its value`, () => {
+      const compiled = compileCelToFilter(source, { variables: VARS });
+      expect(compiled.ok).toBe(false);
+      expect(compiled.ok ? undefined : compiled.reason).toBe('unsupported');
+      const detail = compiled.ok ? '' : compiled.detail;
+      expect(detail).toMatch(/current_user\.(org_user_ids|blocked_accounts|empty_set)/);
+      for (const member of ['u_me', 'u_peer', 'acc_secret']) expect(detail).not.toContain(member);
+      // The value is per request, so the shape check passes the source: the
+      // refusal lands on the RLS compiler's per-request denial path instead.
+      expect(isPushdownableCel(source).ok).toBe(true);
+      expect(isSupportedRlsExpression(source)).toBe(true);
+    });
+  }
+});
+
 describe('[#19886] every neighbouring comparison lowers exactly as before', () => {
   const ok = (source: string) => {
     const r = compileCelToFilter(source, { variables: VARS });
@@ -63,8 +104,11 @@ describe('[#19886] every neighbouring comparison lowers exactly as before', () =
     expect(ok("!(record.status in ['closed', 'archived'])")).toEqual({ $not: { status: { $in: ['closed', 'archived'] } } });
   });
 
-  it('`in` against a resolved membership array', () => {
+  it('`in` / `not in` against a resolved membership array', () => {
     expect(ok('record.owner_id in current_user.org_user_ids')).toEqual({ owner_id: { $in: ['u_me', 'u_peer'] } });
+    expect(ok('!(record.owner_id in current_user.org_user_ids)')).toEqual({
+      $not: { owner_id: { $in: ['u_me', 'u_peer'] } },
+    });
   });
 
   it('scalar == / != against a literal and against a resolved scalar', () => {
@@ -72,6 +116,7 @@ describe('[#19886] every neighbouring comparison lowers exactly as before', () =
     expect(ok("record.status == 'open'")).toEqual({ status: 'open' });
     expect(ok('record.owner_id == current_user.id')).toEqual({ owner_id: 'u_me' });
     expect(ok('record.owner_id != current_user.id')).toEqual({ owner_id: { $ne: 'u_me' } });
+    expect(ok('current_user.email == record.owner')).toEqual({ owner: 'me@example.test' });
   });
 
   it('== null / != null', () => {
