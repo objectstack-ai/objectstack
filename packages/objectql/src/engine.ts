@@ -214,7 +214,7 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectPredicateRelationships, evaluateValidationRules, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -7316,7 +7316,25 @@ export class ObjectQL implements IObjectQLEngine {
     // to CEL), where reading through it faults and refuses the cleanup. Pinned
     // end to end in plugin-security's
     // `delete-reference-cleanup-system-identity.test.ts`.
-    if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) return unbound;
+    if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) {
+      // [#20006] Still NOTHING is resolved: the binding handed back is empty.
+      // It carries WHY — the delete and the reference it clears, which
+      // `cascadeDeleteRelations` stamps beside the marker — so a traversing rule
+      // that faults here refuses with a text naming them, instead of one
+      // prescribing a column on the object carrying the rule. Only for the
+      // record the cleanup was issued for: a write a hook issues during the
+      // cleanup inherits the envelope, and that write is not the clear.
+      const cause = (context as { __referentialFieldClearCause?: Record<string, unknown> } | undefined)
+        ?.__referentialFieldClearCause;
+      if (!cause || schema?.name !== cause.referencingObject) return unbound;
+      const binding = referentialClearBinding({
+        object: String(cause.object),
+        id: String(cause.id),
+        referencingObject: String(cause.referencingObject),
+        field: String(cause.field),
+      });
+      return (row) => (row?.id != null && String(row.id) === String(cause.referencingId) ? binding : undefined);
+    }
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
     // ⛔ Every bound below keys on "not SYSTEM", never on `userId`: a public-form
@@ -14832,7 +14850,20 @@ export class ObjectQL implements IObjectQLEngine {
             // operation-private key — on the real request path the inherited
             // caller envelope makes the cleanup otherwise indistinguishable
             // from a hand-clear of the same lookup.
-            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
+            //
+            // [#20006] `__referentialFieldClearCause` rides beside it: the
+            // delete this cleanup serves and the reference it clears, which a
+            // traversing rule's refusal of the cleanup names (see
+            // `resolvePredicateRelated`). It authorizes nothing — it is read
+            // only where the marker already holds, and only to word a refusal —
+            // and the referencing row's id in it never reaches that text.
+            const referentialCtx = {
+              ...(context ?? {}),
+              __referentialFieldClear: true,
+              __referentialFieldClearCause: {
+                object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
+              },
+            } as ExecutionContext;
             if (multiValued) {
               // The FK is a SET, so `set_null` clears the deleted MEMBER, not
               // the slot: filter the stored array and write what remains.
