@@ -2,7 +2,8 @@
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#19995] The engine's own shared comparand faces — run on a read scope, alone,
-// at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}.
+// at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
+// [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { type LikeShape } from './like-pattern.js';
@@ -431,6 +432,35 @@ import {
  * {@link assertReadScopeComparandsRunnable} closes it at the two engine-bound
  * merge sites. See there for why its refusal set is exactly the engine's, and
  * for what it deliberately leaves to the engine.
+ *
+ * ## …and THIS compiler runs the same two faces, after its own gates (#20018)
+ *
+ * The paragraph above held for most shapes, not all of them: this compiler's own
+ * gates are narrower than the two shared faces, so a class of scopes the
+ * ObjectQL face refused was LOWERED here and served by the NativeSQL face and
+ * the echo. Measured on real SQLite (`read-scope-comparand-three-faces.test.ts`
+ * carries the table):
+ *
+ *   - a `null` member of `$in` compiled to `IN (…, NULL)`, which matches nothing
+ *     through the NULL — and under `$not`, or as a `$nin` member, the scope
+ *     admitted ONLY the rows whose column is NULL, which it names as excluded;
+ *   - a `null` ordering comparand or `$between` bound compiled to a comparison
+ *     with NULL: zero rows, silently;
+ *   - a blank `$between` bound was bound and served;
+ *   - a bigint beyond 2^53 and a binary comparand (a package-local bindable,
+ *     `comparand-shape.ts`) bound and matched nothing;
+ *   - a plain-object or other non-plain-object comparand in a scalar position
+ *     was bound, and the DATABASE refused the statement (`DATABASE_ERROR`).
+ *
+ * {@link compileScopedFilterToSql} now calls
+ * {@link assertReadScopeComparandsRunnable} once {@link compileNode} returns.
+ * Both faces are pure walks of the scope, so the order cannot change WHICH
+ * scopes are refused — the verdict is the union of the two gate sets either
+ * way — only which sentence a doubly-refused scope carries. After the lowering,
+ * a shape this compiler already refuses keeps its own message (the #13926
+ * ordering, for the same door-distinguishable log), and the faces add only what
+ * would otherwise have been lowered. The envelope is this module's one
+ * envelope; nothing here re-argues the rulings the faces carry.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -533,6 +563,13 @@ export function compileScopedFilterToSql(
   const quotedAlias = quoteIdent(alias, 'alias');
   const params: unknown[] = [];
   const sql = compileNode(filter, quotedAlias, params, options);
+  // [#20018] The shared comparand faces, on the scope ALONE: the judgement the
+  // ObjectQL execute face makes at its merge sites (#19995), made here too, so
+  // one read scope gets one verdict on all three analytics faces. AFTER the
+  // lowering on purpose: a shape this compiler already refuses keeps its own
+  // sentence, and the faces add exactly the shapes it would otherwise have
+  // lowered. See the module header's #20018 section.
+  assertReadScopeComparandsRunnable(filter, alias);
   return { sql, params };
 }
 
@@ -679,6 +716,12 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
  * came from — which is why this is a judgement here and ⛔ never a catch
  * around `executeAggregate`: the caller's own `where` still reaches the
  * engine's doors for some shapes, and those refusals are the caller's to read.
+ *
+ * [#20018] Its third caller is {@link compileScopedFilterToSql}, after the
+ * lowering, which is how the NativeSQL face and the `/analytics/sql` echo give
+ * the same verdict as the two merges above. There `objectName` is the alias the
+ * scope is compiled for: the object's name on the base table, the join alias on
+ * a joined hop.
  *
  * ## Why the refusal set is exactly the engine's
  *
