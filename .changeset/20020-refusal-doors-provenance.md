@@ -1,5 +1,6 @@
 ---
 '@objectstack/driver-sql': patch
+'@objectstack/driver-sqlite-wasm': patch
 '@objectstack/driver-turso': patch
 ---
 
@@ -20,6 +21,8 @@ Each of these doors now reads the mark on the node it refused, the same way the 
 - **`'author'`:** the full message, the same text the door answered before.
 
 To find the node, the unresolvable-column door looks up the column name the database reported. It discloses only when every node that names that column is marked `'author'`. A `$and` / `$or` with a primitive operand is judged by the node that carries the key.
+
+`SqliteWasmDriver` (`@objectstack/driver-sqlite-wasm`) and `TursoDriver` in local mode extend `SqlDriver`, so they inherit this change from it: the same four doors answer the same way there.
 
 **What an unmarked caller loses:** its own diagnostic from these four doors. Measured cases where the caller's own predicate reaches the driver unmarked:
 
