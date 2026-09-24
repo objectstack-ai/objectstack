@@ -9,6 +9,7 @@
 import type { z } from 'zod';
 import type { MetadataFormat } from '@objectstack/spec/system';
 import type { MetadataSerializer, SerializeOptions } from './serializer-interface.js';
+import { sortObjectKeys } from './sort-object-keys.js';
 
 /**
  * The spec type a `typescript`-format file's `metadata` constant is annotated
@@ -26,9 +27,13 @@ import type { MetadataSerializer, SerializeOptions } from './serializer-interfac
  * `unknown` or another type's shape.
  *
  * Two metadata types are deliberately absent:
- * - `view`: `ViewMetadataSchema` is a `z.preprocess`, so its input type, and
- *   with it `ViewMetadata`, is `unknown`. Annotating with it would check
- *   nothing.
+ * - `view`: `ViewMetadataSchema` is a `z.preprocess`, so its input type is
+ *   `unknown`. `ViewMetadata` is declared instead as the union of the input
+ *   types of the members the schema's union runs, so it is not the bound
+ *   schema's `z.input` and this table's rule excludes it. The rule holds for a
+ *   reason here: the view door accepts bodies `ViewMetadata` refuses (the
+ *   preprocess removes the console's row `id`s before any member judges the
+ *   body), so annotating a saved view with it could be false.
  * - `book`: `Book` is written by hand and lacks the `_packageId` /
  *   `_provenance` protection keys `BookSchema` accepts, so a book the loader
  *   has stamped would fail against it.
@@ -79,9 +84,13 @@ function renderModule(
   options: SerializeOptions | undefined,
   annotation: readonly [typeName: string, subpath: string] | undefined,
 ): string {
-  const { prettify = true, indent = 2 } = options || {};
+  const { prettify = true, indent = 2, sortKeys = false } = options || {};
 
-  const jsonStr = JSON.stringify(item, null, prettify ? indent : 0);
+  // Same sort `JSONSerializer` applies (recursive, ⛔ not a second
+  // implementation) — the JSON body this format wraps is otherwise the one
+  // place `sortKeys: true` silently produced unsorted keys (#19872).
+  const body = sortKeys ? sortObjectKeys(item) : item;
+  const jsonStr = JSON.stringify(body, null, prettify ? indent : 0);
 
   if (annotation) {
     const [typeName, subpath] = annotation;

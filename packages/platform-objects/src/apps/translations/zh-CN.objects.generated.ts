@@ -35,7 +35,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "平台角色",
-        help: "平台级角色（admin、user 等）。通过“设置平台角色”操作设置。"
+        help: "遗留的 better-auth 角色标量（admin、user 等）。ObjectStack 不再写入该字段（ADR-0068 D2）。要授予平台管理员身份，请将该用户已验证的邮箱加入 `OS_PLATFORM_OWNER_EMAIL`；在 `single` 租户态势下，`sys_user_permission_set` 中一条未限定范围的 `admin_full_access` 授权同样可以赋予该身份。"
       },
       banned: {
         label: "已封禁",

@@ -808,6 +808,15 @@ export class ScheduleTrigger implements FlowTrigger {
                         flowName: binding.flowName,
                         schedule,
                     },
+                    // [#19900] A tick has no caller, so no key above is a
+                    // caller's answer — all three are this trigger's own seeds.
+                    // Stated rather than left to inference: a `screen` node's
+                    // headless verdict reads this list when present (#19846),
+                    // and without it inferred `jobId` / `flowName` / `schedule`
+                    // as supplied, skipping a screen whose field shared a name.
+                    // ⛔ An empty list, never an absent key — absent means
+                    // "not stated", and the inference answers that.
+                    callerParamKeys: [],
                 };
                 await callback(ctx);
                 if (key) await this.settleDispatch(binding.flowName, key, 'succeeded');

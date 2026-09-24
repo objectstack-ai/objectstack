@@ -30,6 +30,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { composeStacks } from '@objectstack/spec';
+import { applyProtection } from '@objectstack/spec/shared';
 
 import { resolveArtifactCollections, packageOwnedCollectionKeys } from './artifact-collections';
 
@@ -80,7 +81,7 @@ describe('packageOwnedCollectionKeys', () => {
 });
 
 describe('resolveArtifactCollections', () => {
-    it('returns the ARGUMENT ITSELF for anything without `packages[]`', () => {
+    it('returns the ARGUMENT ITSELF for a non-object and for an ABSENT `packages`', () => {
         // The D7 branch: every single-package artifact and every `defineStack()`
         // config the platform has ever booted takes it, and identity is the only
         // way to say "this cannot have moved" rather than to hope so.
@@ -89,10 +90,45 @@ describe('resolveArtifactCollections', () => {
         expect(resolveArtifactCollections(null)).toBe(null);
         expect(resolveArtifactCollections(undefined)).toBe(undefined);
         expect(resolveArtifactCollections('not an object')).toBe('not an object');
-        // `packages` present but not an array is not a shape this walks; the
-        // artifact's own loader refuses it.
-        const odd = { packages: 'nope', objects: [obj('o')] };
-        expect(resolveArtifactCollections(odd)).toBe(odd);
+        // An explicit `undefined`, and `null`, read as absent too. `null` is read
+        // this way by every reader today; the schema's `.optional()` refuses it,
+        // and that disagreement is recorded beside `AssembledPackageBodySchema`
+        // rather than decided here.
+        const explicitUndefined = { packages: undefined, objects: [obj('o')] };
+        expect(resolveArtifactCollections(explicitUndefined)).toBe(explicitUndefined);
+        const nullPackages = { packages: null, objects: [obj('o')] };
+        expect(resolveArtifactCollections(nullPackages)).toBe(nullPackages);
+    });
+
+    // A `packages` that is present but is not an array is MALFORMED, not absent
+    // (the rule beside `AssembledPackageBodySchema`). This reader used to hand
+    // such an artifact back by identity, answering about its top level while
+    // the loader refused the same bytes.
+    it.each([
+        ['{}', {}],
+        ['0', 0],
+        ["'x'", 'x'],
+    ])('refuses `packages: %s` with the resolver\'s INVALID_ARTIFACT_PACKAGES envelope', (_label, packages) => {
+        let raised: any;
+        try {
+            resolveArtifactCollections({ manifest: { id: 'com.example.a', name: 'A' }, objects: [obj('o')], packages });
+        } catch (err) {
+            raised = err;
+        }
+        expect(raised?.code).toBe('INVALID_ARTIFACT_PACKAGES');
+        expect(raised?.status).toBe(422);
+    });
+
+    it('lit controls for the refusal above: a well-formed `packages[]` resolves, and an absent key takes the single-package branch', () => {
+        // Without these two, an instrument that always threw would pin the
+        // three rows above just as green.
+        const wellFormed = resolveArtifactCollections({
+            packages: packagesOf({ objects: [obj('account')] }, { objects: [obj('order')] }),
+        }) as Record<string, any>;
+        expect(wellFormed.objects.map((o: any) => o.name)).toEqual(['account', 'order']);
+
+        const absent = { manifest: { id: 'com.example.a', name: 'A' }, objects: [obj('o')] };
+        expect(resolveArtifactCollections(absent)).toBe(absent);
     });
 
     it('returns the ARGUMENT ITSELF for an EMPTY `packages: []` too', () => {
@@ -148,6 +184,53 @@ describe('resolveArtifactCollections', () => {
         const resolved = resolveArtifactCollections(roundTripped) as typeof additive;
         expect(resolved.translations).toHaveLength(1);
         expect(resolved.requires).toEqual(['platform']);
+    });
+
+    it('claims a nameless item whose package-body copy registration has already STAMPED', () => {
+        // Boot registration (`registerApp` -> `registerItem` -> `applyProtection`)
+        // writes `_packageId` / `_provenance` onto the package body's copy IN
+        // PLACE and never touches the flattened top level, and `AppPlugin`
+        // resolves its collections after that. A nameless item is claimed by
+        // value, so the stamps alone used to turn one definition into two.
+        const additive = JSON.parse(JSON.stringify({
+            data: [{ object: 'account', mode: 'insert', records: [{ name: 'once' }] }],
+            datasourceMapping: [{ datasource: 'primary', default: true }],
+            packages: packagesOf({
+                data: [{ object: 'account', mode: 'insert', records: [{ name: 'once' }] }],
+                datasourceMapping: [{ datasource: 'primary', default: true }],
+            }),
+        }));
+        // `data` is the kind boot registration really stamps; `datasourceMapping`
+        // is a second nameless kind, so the claim is shown to be the identity
+        // rule's and not a special case for seeds.
+        const core = additive.packages[1].manifest;
+        for (const key of ['data', 'datasourceMapping']) {
+            applyProtection(core[key][0], { packageId: 'com.example.core', packageVersion: '1.0.0' });
+        }
+        // The precondition, measured on the fixture rather than assumed: the two
+        // copies really do differ now, and only by the envelope.
+        expect(core.data[0]).toMatchObject({ _packageId: 'com.example.core', _provenance: 'package' });
+        expect(additive.data[0]._packageId).toBeUndefined();
+
+        const resolved = resolveArtifactCollections(additive) as typeof additive;
+        expect(resolved.data).toHaveLength(1);
+        expect(resolved.datasourceMapping).toHaveLength(1);
+        // The top level is taken whole, so the copy handed on is the unstamped one.
+        expect(resolved.data).toBe(additive.data);
+    });
+
+    it('still contributes a body item that differs in what the AUTHOR wrote, stamped or not', () => {
+        // The control for the case above: only the registration envelope is left
+        // out of identity. A dataset whose records differ is a second
+        // definition, and it still arrives.
+        const additive = JSON.parse(JSON.stringify({
+            data: [{ object: 'account', mode: 'insert', records: [{ name: 'top' }] }],
+            packages: packagesOf({ data: [{ object: 'account', mode: 'insert', records: [{ name: 'body' }] }] }),
+        }));
+        applyProtection(additive.packages[1].manifest.data[0], { packageId: 'com.example.core' });
+
+        const resolved = resolveArtifactCollections(additive) as typeof additive;
+        expect(resolved.data.map((d: any) => d.records[0].name)).toEqual(['top', 'body']);
     });
 
     it('claims by NAME too, so a merged top-level object is not joined by its unmerged halves', () => {

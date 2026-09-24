@@ -339,10 +339,34 @@ describe('appSecurityPluginOptions over `packages[]` (ADR-0130 D4, #15007)', () 
       }
     };
 
-    it('`packages` that is not an array', () => {
-      const err = refusalOf({ packages: 'nope' });
+    // A `packages` that is present but is not an array is MALFORMED, not absent
+    // (the rule beside `AssembledPackageBodySchema`). This reader keeps no
+    // `packages` guard of its own, so the refusal is the resolver's.
+    it.each([
+      ['{}', {}],
+      ['0', 0],
+      ["'x'", 'x'],
+    ])('`packages: %s`, which is not an array', (_label, packages) => {
+      const err = refusalOf({ packages });
       expect(err.code).toBe('INVALID_ARTIFACT_PACKAGES');
       expect(err.status).toBe(422);
+    });
+
+    it('lit controls for the rows above: a well-formed `packages[]` resolves, and an absent key takes the single-package branch', () => {
+      // Without these, an instrument that always threw would pin the three
+      // rows above just as green.
+      const wellFormed = { manifest: { id: CORE_ID, name: 'Core', version: '1.0.0', type: 'app', permissions: [permissionSet(CORE_PROFILE)] } };
+      expect(refusalOf({ packages: [wellFormed] })).toEqual({});
+      expect(appSecurityPluginOptions({ packages: [wellFormed] })).toEqual({ fallbackPermissionSet: CORE_PROFILE });
+
+      // Absent, explicitly `undefined`, and `null`: all three read the top level
+      // exactly as before the private guard was dropped.
+      for (const absent of [{}, { packages: undefined }, { packages: null }]) {
+        expect(refusalOf({ ...absent, permissions: [permissionSet('top')] })).toEqual({});
+        expect(appSecurityPluginOptions({ ...absent, permissions: [permissionSet('top')] }))
+          .toEqual({ fallbackPermissionSet: 'top' });
+        expect(appSecurityPluginOptions({ ...absent })).toBeUndefined();
+      }
     });
 
     it('an entry inlined instead of wrapped under `manifest:`', () => {

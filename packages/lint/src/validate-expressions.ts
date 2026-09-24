@@ -1167,6 +1167,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // anything tries to read a source out of it. The refusal is the spec's,
     // shared with the engine's `registerFlow` pass: `error`, because that pass
     // throws, and a shape build refuses must not pass author time.
+    //
+    // [#17493] The same call refuses a BLANK string too (the resolver emits it
+    // for this role). `objectstack validate` meets that value first at its
+    // schema step — `FlowSchema.parse` refuses it — so this is the pass that
+    // answers for a stack handed to `validateStackExpressions` directly.
     const shapeRefusal = predicateSlotRefusal(raw);
     if (shapeRefusal) {
       issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });

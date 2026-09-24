@@ -172,7 +172,7 @@
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
 - PR 形态与范围:draft、目标 `main`、`Fixes`/`Part of` 首行判据,翻 ready 前亲核。
 - `Part of` 卡 MERGED 时点收口;changed files 范围与 changeset/`skip-changeset` 分流;测试证据。
-- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取维护者原话或出处三件转述。
+- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。

@@ -201,11 +201,21 @@ describe('#19514 §2 — the view vocabulary refuses the same two comparands', (
     expect(rule(value).success).toBe(true);
   });
 
-  it('ABSENCE is left unjudged — this vocabulary HAS an absent, and no row is about it', () => {
+  it('ABSENCE is not the table\'s to judge — no row is about it, and this door stays out of it', () => {
     // `isRefusedTextComparand(undefined)` answers TRUE, and its docblock hands
     // the carve-out to callers with an "absent". `value` is optional on every
     // view rule, so an omitted comparand is not a comparand the table judged.
-    expect(rule().success).toBe(true);
+    //
+    // [#19751] It IS refused now — by the value-shape check's absent-value arm,
+    // which refuses a missing value on every operator that takes one, because
+    // the query path refuses the lowered `[field, operator]` node. What this pin
+    // keeps is the half that is this door's: the refusal arrives ONCE and in the
+    // absent-value arm's words, never in the table's.
+    const issue = issueAt(rule(), 'value');
+    expect(issue.message).toContain('Filter comparand for operator "icontains" on field "name" is undefined.');
+    expect(issue.message).not.toContain('EMPTY STRING');
+    expect(issue.message).not.toContain('not a string');
+    expect(issue.message).not.toContain(`"${DOLLAR_SPELLING}"`);
   });
 
   it('an ARRAY is the SHAPE arm defect, reported once and with the shape wording', () => {

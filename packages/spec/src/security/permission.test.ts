@@ -46,6 +46,63 @@ describe('AdminScopeSchema (ADR-0090 D12)', () => {
   it('requires the businessUnit boundary', () => {
     expect(() => AdminScopeSchema.parse({ manageAssignments: true })).toThrow();
   });
+
+  // [#19461] The one required key is required NON-BLANK: an empty or
+  // whitespace-only anchor names no business unit, so it satisfied the
+  // requirement vacuously. Each refusal is exactly ONE issue at the key's own
+  // path, and its message names what a valid anchor is.
+  describe('refuses a blank businessUnit anchor', () => {
+    const blanks: ReadonlyArray<readonly [string, string]> = [
+      ['the empty string', ''],
+      ['spaces only', '   '],
+      ['a tab only', '\t'],
+    ];
+
+    it.each(blanks)('refuses %s at businessUnit', (_label, businessUnit) => {
+      const result = AdminScopeSchema.safeParse({ businessUnit, manageAssignments: true });
+      expect(result.success).toBe(false);
+      const issues = result.error!.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.path).toEqual(['businessUnit']);
+      expect(issues[0]!.message).toContain('sys_business_unit.name');
+    });
+
+    it.each(blanks)('refuses %s through PermissionSetSchema.adminScope', (_label, businessUnit) => {
+      const result = PermissionSetSchema.safeParse({
+        name: 'east_subsidiary_admin',
+        objects: {},
+        adminScope: { businessUnit, manageAssignments: true },
+      });
+      expect(result.success).toBe(false);
+      const issues = result.error!.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.path).toEqual(['adminScope', 'businessUnit']);
+      expect(issues[0]!.message).toContain('sys_business_unit.name');
+    });
+
+    it('accepts a real business-unit name, unchanged by the parse', () => {
+      expect(AdminScopeSchema.parse({ businessUnit: 'north_america' }).businessUnit).toBe('north_america');
+      // The refinement is NON-TRANSFORMING: the parse never rewrites the
+      // anchor, because the stored body is the submitted one and the gate
+      // looks the anchor up by exact name. Padding is kept byte-identical —
+      // this pins the absence of a transform, not a verdict that padding is
+      // wanted.
+      expect(AdminScopeSchema.parse({ businessUnit: ' north_america ' }).businessUnit).toBe(' north_america ');
+    });
+
+    it('keeps the absent-key refusal exactly as before: one invalid_type at businessUnit', () => {
+      const result = AdminScopeSchema.safeParse({ manageAssignments: true });
+      expect(result.success).toBe(false);
+      const issues = result.error!.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('invalid_type');
+      expect(issues[0]!.path).toEqual(['businessUnit']);
+      expect((issues[0] as { expected?: string }).expected).toBe('string');
+      expect(issues[0]!.message).not.toContain('sys_business_unit.name');
+    });
+  });
 });
 
 describe('ObjectPermissionSchema', () => {

@@ -1286,13 +1286,13 @@ const battery = (name) => {
 let selfTestReachedVerdict = false;
 
 /**
- * The write transports this throttle is wired into — the census. Nine: the
+ * The write transports this throttle is wired into — the census. Ten: the
  * five board tools, the token minter (its one POST creates no content, but a
  * write verb is a write verb and the roster below is mechanical), the
- * card-creation door, and the two halves of the fleet-write relay — the
- * seat-side dispatcher (its one POST is the `repository_dispatch` that
- * carries a stroke) and the runner-side executor (the writes that stroke asked
- * for, paced on the runner's own log).
+ * card-creation door, the card-transfer door, and the two halves of the
+ * fleet-write relay — the seat-side dispatcher (its one POST is the
+ * `repository_dispatch` that carries a stroke) and the runner-side executor
+ * (the writes that stroke asked for, paced on the runner's own log).
  *
  * Spelled REPO-RELATIVE, because the dispatch derivation reads every
  * separator-bearing literal in a gate's source as a path lead: a bare
@@ -1309,6 +1309,7 @@ export const WIRED_WRITE_TOOLS = Object.freeze([
   'scripts/pm/sweep-stale-finding.mjs',
   'scripts/pm/fleet-token.mjs',
   'scripts/pm/issue-create.mjs',
+  'scripts/pm/issue-transfer.mjs',
   'scripts/pm/fleet-write/dispatch.mjs',
   'scripts/pm/fleet-write/execute.mjs',
 ]);

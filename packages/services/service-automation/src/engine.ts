@@ -9522,6 +9522,14 @@ export class AutomationEngine implements IAutomationService {
                     // evaluation must be one set, and the refusal itself is the
                     // spec's, shared with `objectstack validate` so build and
                     // author time cannot disagree about the shape.
+                    //
+                    // [#17493] The same call now refuses a BLANK string too: the
+                    // resolver emits it for this role, and `predicateSlotRefusal`
+                    // refuses it under the same sentence. ⚠️ For that value this
+                    // is the second line, not the first — `FlowSchema.parse`
+                    // (in `canonicalizeStoredFlow`, above) refuses it before
+                    // this pass runs, the same way it meets a blank
+                    // `edge.condition` before `checkStructuralCondition` does.
                     const shapeRefusal = predicateSlotRefusal(found.value);
                     if (shapeRefusal) {
                         failures.push(`  • ${slotWhere}: ${shapeRefusal.message}\n      source: \`${shapeRefusal.source}\``);

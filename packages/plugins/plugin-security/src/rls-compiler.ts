@@ -524,9 +524,16 @@ export class RLSCompiler {
 
     for (const policy of policies) {
       // [ADR-0058 D4] On a WRITE (check) pass, the post-image is validated against
-      // the `check` clause, defaulting to `using` when omitted. Reads use `using`.
+      // the `check` clause, defaulting to `using` when the policy declares no
+      // `check` (the published `RowLevelSecurityPolicySchema.check` default).
+      // Reads use `using`. The default is REACHED: the write gate
+      // (`SecurityPlugin.computeWriteCheckFilter`, through its
+      // `writeCheckPolicies` selector) hands USING-only policies to this pass
+      // when no applicable policy declares a `check`. "Declares" is
+      // `policyDeclaresClause`, the same test the selector applies, so a blank
+      // `check` string defaults here too instead of skipping the policy.
       const predicate = clause === 'check'
-        ? ((policy as { check?: string }).check ?? policy.using)
+        ? (policyDeclaresClause(policy, 'check') ? (policy as { check?: string }).check : policy.using)
         : policy.using;
       // A policy that carries no predicate for THIS clause (e.g. a check-only
       // policy on the `using` read pass) is not applicable here — skip it
