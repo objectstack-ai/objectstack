@@ -293,15 +293,16 @@ function makeEngine() {
     // [#19950] `opCtx` is the operation the middleware chain ran on, as the
     // real engine holds it. On the PREDICATE path the engine hands an
     // installed write-image check every matched row merged with the payload
-    // before it writes, so this double does the same: a double that skipped
-    // it would be refused, fail-closed, by the security middleware.
+    // before it writes, and [#19989] on the BY-ID path the one row it writes,
+    // merged with the payload. This double does the same on both: a double
+    // that skipped it would be refused, fail-closed, by the security middleware.
     async update(object: string, data: any, options?: any, opCtx?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);
       const rows = (tables[object] ??= []);
       const targets = dispatch.kind === 'by-id'
         ? rows.filter((r) => r.id === dispatch.id)
         : rows.filter((r) => matches(r, options?.where));
-      const seam = dispatch.kind === 'by-id' ? undefined : opCtx?.postHookWriteImageCheck;
+      const seam = opCtx?.postHookWriteImageCheck;
       if (seam) {
         seam.honoured = true;
         await seam.evaluate(targets.map((r) => ({ ...r, ...data })));

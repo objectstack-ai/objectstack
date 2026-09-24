@@ -12,6 +12,9 @@ import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, type FieldMaskingR
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
 import { renderOperationMessage } from '@objectstack/spec/system';
+// [#19989] The engine's own update-dispatch predicate, asked rather than
+// re-derived: step 3.6 needs to know which row the ENGINE will write.
+import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import {
   localWriteEpochSource,
   resolveWriteEpochSource,
@@ -208,8 +211,10 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
  * The write `check` for the writes this middleware cannot judge on
  * its own, installed on the operation context for the engine to run on the
  * rows that will be stored: every row of an insert, single or array, once the
- * `beforeInsert` chain has produced it, and [#19950] every row a predicate
- * (`multi`) update selects, merged with the final payload.
+ * `beforeInsert` chain has produced it, [#19950] every row a predicate
+ * (`multi`) update selects, merged with the final payload, and [#19989] the one
+ * row a by-id update writes, merged with the payload the `beforeUpdate` chain
+ * left.
  *
  * Structurally identical to `OperationContext.postHookWriteImageCheck` in
  * `@objectstack/objectql`, and deliberately declared here rather than imported:
@@ -2988,8 +2993,9 @@ export class SecurityPlugin implements Plugin {
       //
       // ── [#16608] WHICH IMAGE, on an INSERT ────────────────────────────────
       //
-      // Both verbs judge THE ROW THAT WILL EXIST. `update` reaches it here, by
-      // merging the caller's pre-image with the change set. `insert` could not:
+      // Both verbs judge THE ROW THAT WILL EXIST. `update` has a pre-image to
+      // merge the change set onto here, though only the change set AS SENT
+      // (the [#19989] note below says what that missed). `insert` could not:
       // it has no pre-image, and this middleware runs BEFORE the engine's
       // operation — so `opCtx.data` is the caller's payload as it arrived, and
       // the `beforeInsert` hooks that derive the row's real values have not run.
@@ -3040,6 +3046,22 @@ export class SecurityPlugin implements Plugin {
       //     selects, known only once every middleware has run, so the same
       //     seam is installed and the engine runs it over each matched row
       //     merged with the final payload.
+      //
+      // ── [#19989] The BY-ID update, after its hooks ────────────────────────
+      //
+      // The by-id image formed HERE is the caller's pre-image merged with the
+      // change set as sent, and this middleware runs before `next()` runs the
+      // `beforeUpdate` chain. A hook that rewrites a checked field (a scoping
+      // column stamped from a re-pointed parent, a status derived from another
+      // field) therefore produced a row nobody judged, and it was stored. So a
+      // by-id update installs the seam too, and the engine runs it on the one
+      // row it writes, merged with the final payload.
+      //
+      // The judgement here STAYS. It refuses a change set whose own values the
+      // check refuses, including one a hook would have overwritten with a
+      // value the check admits; dropping it would admit writes refused today,
+      // and this change only ever refuses more. A by-id update is now judged
+      // twice: the change set as sent, here, and the stored row, in the engine.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
@@ -3123,9 +3145,11 @@ export class SecurityPlugin implements Plugin {
           } else {
             const targetId = this.extractSingleId(opCtx);
             if (targetId != null) {
-              // BY-ID UPDATE — unchanged. Build the post-image: the caller's
-              // pre-image merged with the change set (so a check on an
-              // unchanged field still sees its value).
+              // BY-ID UPDATE, the change set AS SENT. Build the image: the
+              // caller's pre-image merged with the change set (so a check on
+              // an unchanged field still sees its value). Unchanged by
+              // [#19989], which adds the stored-row judgement below rather
+              // than replacing this one (see the block note above).
               let postImage: Record<string, unknown> = { ...(opCtx.data as Record<string, unknown>) };
               if (this.ql) {
                 // Shares the memoized caller pre-image with the step-3.5 owner
@@ -3135,24 +3159,58 @@ export class SecurityPlugin implements Plugin {
               }
               if (!satisfiesCheck(postImage)) denyCheck();
             }
-            // [#19950] PREDICATE UPDATE — the engine runs the judgement over
-            // every row the composed AST selects, each merged with the final
-            // payload (see the block note above). Installed whenever the ENGINE
-            // will not treat the write as addressing one row, which is wider
-            // than `targetId == null`: the engine reads a FALSY scalar id
-            // (`''`, `0`) as no row address at all
-            // (`resolveEngineUpdateDispatch`) and routes the write to its
-            // predicate path, so a falsy id is judged BOTH ways — its by-id
-            // image above, exactly as before, and every matched row here.
-            // Neither judgement alone would do: without the seam a falsy id
-            // would carry a bulk update past the per-row check on the strength
-            // of a change-set-only image. If no image can be formed the write
-            // is not admitted: the engine refuses a predicate update it cannot
-            // route, and a seam it never runs fails CLOSED after `next()`.
-            if (!targetId) {
-              writeImageCheckSeam = newWriteImageCheck();
-              opCtx.postHookWriteImageCheck = writeImageCheckSeam;
+            // [#19989] A FALSY payload id (`''`, `0`) is not a row address to
+            // the engine (`resolveEngineUpdateDispatch`), which then binds a
+            // truthy scalar `where.id` instead and writes THAT row by id. The
+            // image above, and every other by-id gate in this middleware, was
+            // formed from the payload id, so what they judged is not the row
+            // that would be stored. That write used to reach the driver and be
+            // refused only afterwards, by the fail-closed guard below (the
+            // seam was installed for a predicate path the engine never took).
+            // Now that the engine runs the seam on the by-id path too, that
+            // guard would no longer fire, so the write is refused HERE, before
+            // anything runs: one row address, or no write. The question is put
+            // to the engine's own dispatch predicate, never re-derived.
+            if (targetId != null && !targetId) {
+              const engineRoute = resolveEngineUpdateDispatch(opCtx.data as EngineUpdateDispatchData, opCtx.options);
+              if (engineRoute.kind === 'by-id') {
+                const developerMessage =
+                  `[Security] Access denied: the update on '${opCtx.object}' carries the payload id ` +
+                  `'${String(targetId)}', which addresses no row, while the engine would write the row ` +
+                  `'${String(engineRoute.id)}' named by where.id — so the row this gate judged is not the row ` +
+                  `that would be stored, and the row-level CHECK cannot vouch for it. Address the row with ` +
+                  `one id: update(object, { id, ...fields }) or update(object, fields, { where: { id } }).`;
+                ctx.logger.warn(developerMessage, {
+                  operation: opCtx.operation,
+                  object: opCtx.object,
+                  positions,
+                  userId: opCtx.context?.userId ?? 'unknown',
+                });
+                throw new PermissionDeniedError(
+                  userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
+                  { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+                  developerMessage,
+                );
+              }
             }
+            // The stored-row judgement, installed on EVERY update and run by
+            // the engine once the payload is final (a write it never runs
+            // fails CLOSED after `next()`):
+            //
+            //   • [#19989] BY-ID — the one row it writes, merged with the
+            //     payload the `beforeUpdate` chain left;
+            //   • [#19950] PREDICATE — every row the composed AST selects, each
+            //     merged with the final payload. That covers a null id and a
+            //     falsy one the engine routes to its predicate path, which is
+            //     then judged BOTH ways: its by-id image above, and every
+            //     matched row. Without the seam a falsy id would carry a bulk
+            //     update past the per-row check on a change-set-only image.
+            //
+            // If no image can be formed the write is not admitted: the engine
+            // refuses an update it cannot route, and a seam it never runs
+            // fails CLOSED after `next()`.
+            writeImageCheckSeam = newWriteImageCheck();
+            opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           }
         }
       }
@@ -3509,9 +3567,11 @@ export class SecurityPlugin implements Plugin {
 
       // [#16608] FAIL CLOSED on a seam that was never run. `honoured` is set by
       // the engine immediately before it calls the judgement, so an unset flag
-      // means one thing only: the write went past without the insert `check`
-      // being evaluated at all — an engine that does not implement the seam, or
-      // a host that executed the operation itself. The row may already be
+      // means one thing only: the write went past without its stored-row
+      // `check` being evaluated at all — an engine that does not implement the
+      // seam, or a host that executed the operation itself. Every insert and
+      // every update step 3.6 judges is covered ([#19950], [#19989] by-id
+      // included). The row may already be
       // stored, which is exactly why this is LOUD: the alternative is a gate
       // that silently stops gating and a deployment that never finds out.
       // ⛔ Do not soften this into a warning: a middleware that cannot say a

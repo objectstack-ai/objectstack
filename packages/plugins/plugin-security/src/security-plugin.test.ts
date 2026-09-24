@@ -37,6 +37,13 @@ import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
  * hands it every row the composed AST matches, merged with the payload. These
  * doubles hold no table, so that match set is empty: the judgement runs over
  * no rows, exactly as a real engine's would over an empty one.
+ *
+ * [#19989] A by-id update installs it too, and a real engine hands it the one
+ * row it writes, merged with the final payload. These doubles hold no row to
+ * merge onto, so that judgement also runs over none here: the cells in this
+ * file exercise the middleware's own change-set judgement, which still runs,
+ * and the stored-row judgement is pinned against the real engine in
+ * `rls-check-by-id-update-post-hook.test.ts`.
  */
 const runEngineWriteBody = async (opCtx: any): Promise<void> => {
   const seam = opCtx?.postHookWriteImageCheck;

@@ -161,12 +161,23 @@ function makeEngine() {
     // Both write verbs open with the PRODUCER's dispatch predicate, never a
     // hand-mirrored guard: a fake looser than `ObjectQL` collects greens from
     // call shapes the real engine would refuse.
-    async update(object: string, data: any, options?: any) {
+    //
+    // [#19989] `opCtx` is the operation the middleware chain ran on. The engine
+    // runs an installed write-image check on every update before it writes
+    // (the rows it will store, each merged with the payload), so this double
+    // does too: one that skipped it would be refused, fail-closed, by the
+    // security middleware.
+    async update(object: string, data: any, options?: any, opCtx?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);
       const rows = (tables[object] ??= []);
       const targets = dispatch.kind === 'by-id'
         ? rows.filter((r) => r.id === dispatch.id)
         : rows.filter((r) => matches(r, options?.where));
+      const seam = opCtx?.postHookWriteImageCheck;
+      if (seam) {
+        seam.honoured = true;
+        await seam.evaluate(targets.map((r) => ({ ...r, ...data })));
+      }
       for (const r of targets) Object.assign(r, data);
       return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
@@ -251,7 +262,12 @@ async function run(op: OpShape, locale?: string, i18n?: FileI18nAdapter): Promis
   };
   let admitted = false;
   try {
-    await securityMw(opCtx, async () => { admitted = true; });
+    await securityMw(opCtx, async () => {
+      // [#19989] An update reaches the engine, which runs the installed
+      // stored-row check before it writes (see the double's `update`).
+      if (opCtx.operation === 'update') await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
+      admitted = true;
+    });
   } catch (e: any) {
     return {
       admitted: false,

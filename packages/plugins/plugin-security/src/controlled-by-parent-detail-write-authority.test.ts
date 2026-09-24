@@ -56,7 +56,7 @@ import { matchesFilterCondition } from '@objectstack/formula';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const MKT = 'usr_marketing';
 const ADMIN = 'usr_admin';
@@ -380,6 +380,23 @@ function makeStore(rows: Record<string, Row[]>) {
       const all = rows[object] ?? [];
       return all.find((r) => matchesFilterCondition(r, options?.where ?? options?.filter ?? null)) ?? null;
     }),
+    /**
+     * [#19989] Not a write verb: the engine's stored-row check, which the
+     * terminal `next()` stands in for on a by-id UPDATE. `ObjectQL.update` runs
+     * the installed `postHookWriteImageCheck` on the row it writes, merged with
+     * the payload, before the statement; a terminal that skipped it would be
+     * refused fail-closed by the security middleware. Only the by-id path is
+     * modelled, through the producer's own dispatch predicate.
+     */
+    async runByIdWriteImageCheck(opCtx: any) {
+      const seam = opCtx?.postHookWriteImageCheck;
+      if (!seam || opCtx.operation !== 'update') return;
+      const dispatch = assertEngineUpdateDispatch(opCtx.data, opCtx.options);
+      if (dispatch.kind !== 'by-id') return;
+      seam.honoured = true;
+      const targets = (rows[opCtx.object] ?? []).filter((r) => r.id === dispatch.id);
+      await seam.evaluate(targets.map((r) => ({ ...r, ...opCtx.data })));
+    },
   };
 }
 
@@ -457,6 +474,7 @@ async function boot(seed: { shares?: Row[] } = {}) {
     try {
       await securityMw(opCtx, async () => {
         await sharingMw(opCtx, async () => {
+          await store.runByIdWriteImageCheck(opCtx);
           reached = true;
         });
       });
