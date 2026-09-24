@@ -249,6 +249,43 @@ describe('#8034 stdio transport: tools/list', () => {
 
     expect(names).toContain('list_actions');
     expect(names).toContain('run_action');
+    // CONTROL for the case below: a bridge with no `resumeRun` gets no
+    // `resume_run`, so the listing there is caused by the member.
+    expect(names).not.toContain('resume_run');
+  });
+
+  // [#15705] `resume_run` exists wherever `run_action` does: both come from
+  // `wireBridgeTools`, so the long-lived server lists it, with its closed input
+  // schema, and a `tools/call` over the pipe reaches the bridge.
+  it('registers resume_run beside run_action, and a stdio tools/call reaches the bridge', async () => {
+    const resumeRun = vi.fn(async (runId: string) => ({ ok: true, result: { status: 'completed', runId } }));
+    const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+    runtime.bridgeDataTools({
+      ...makeBridge(),
+      async listActions() {
+        return [{ name: 'complete_task', objectName: 'task' }];
+      },
+      async runAction() {
+        return { ok: true };
+      },
+      resumeRun,
+    });
+
+    const session = await connect(runtime);
+    await handshake(session);
+    const listed = await session.rpc('tools/list');
+    const tool = (listed.result.tools as Array<{ name: string; inputSchema: any }>).find((t) => t.name === 'resume_run');
+    expect(tool).toBeDefined();
+    expect(tool!.inputSchema.required).toEqual(['runId']);
+    expect(Object.keys(tool!.inputSchema.properties).sort()).toEqual(['confirm', 'runId', 'values']);
+    expect(tool!.inputSchema.additionalProperties).toBe(false);
+
+    const called = await session.rpc('tools/call', {
+      name: 'resume_run',
+      arguments: { runId: 'run_7', values: { subject: 'Call back' } },
+    });
+    expect(called.result.isError).toBeFalsy();
+    expect(resumeRun).toHaveBeenCalledWith('run_7', { values: { subject: 'Call back' }, confirm: undefined });
   });
 
   it('serves NO tools and advertises none when no bridge was given', async () => {

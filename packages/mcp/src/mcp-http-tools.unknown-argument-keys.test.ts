@@ -63,6 +63,7 @@ function makeBridge(): StubBridge {
     async remove(object: string, id: string) { calls.push(['remove', object, id]); return { object, id, success: true }; },
     async listActions() { calls.push(['listActions']); return [{ name: 'complete_task', objectName: 'crm_opportunity' }]; },
     async runAction(name: string, input: any) { calls.push(['runAction', name, input]); return { ok: true }; },
+    async resumeRun(runId: string, input: any) { calls.push(['resumeRun', runId, input]); return { ok: true }; },
   };
 }
 
@@ -108,6 +109,7 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   delete_record: { objectName: 'crm_opportunity', recordId: 'r1' },
   list_actions: {},
   run_action: { actionName: 'complete_task' },
+  resume_run: { runId: 'run_1' },
 };
 
 describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
@@ -181,6 +183,26 @@ describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
     });
   });
 
+  // [#15705] The REST resume door's body key is `inputs`, so it is the first
+  // spelling a caller who knows that door sends. It is refused and the
+  // refusal names `values`; the bridge is never reached.
+  it('resume_run refuses the REST door\'s `inputs` key, and names `values` as the spelling to send', async () => {
+    const { refused, text } = await callTool(runtime, bridge, 'resume_run', {
+      runId: 'run_1',
+      inputs: { subject: 'Call back' },
+    });
+    expect(refused).toBe(true);
+    expect(text).toContain('inputs');
+    expect(text).toContain('values');
+    expect(bridge.calls.find((c: any[]) => c[0] === 'resumeRun')).toBeUndefined();
+
+    // CONTROL — the declared spelling reaches the bridge unchanged.
+    const ok = await callTool(runtime, bridge, 'resume_run', { runId: 'run_1', values: { subject: 'Call back' } });
+    expect(ok.refused).toBe(false);
+    expect(bridge.calls.find((c: any[]) => c[0] === 'resumeRun')?.[2])
+      .toEqual({ values: { subject: 'Call back' }, confirm: undefined });
+  });
+
   it('an argument-less tool still accepts an empty argument object', async () => {
     // The control for the closure: `{}` is a valid payload for a shape that
     // declares nothing, and closing the shape must not turn it into a refusal.
@@ -191,11 +213,12 @@ describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
 
   // ── The sweep: every advertised tool holds the same posture ────────────────
 
-  it('advertises the eleven tools this sweep covers', async () => {
+  it('advertises the twelve tools this sweep covers', async () => {
     const json = await rpc(runtime, bridge, 'tools/list');
     const names = (json.result?.tools ?? []).map((t: any) => t.name).sort();
     expect(names).toEqual(Object.keys(VALID_ARGS).sort());
-    expect(names).toHaveLength(11);
+    // [#15705] Twelve with `resume_run`, which this stub's bridge implements.
+    expect(names).toHaveLength(12);
   });
 
   it('every advertised tool ACCEPTS its declared arguments (the sweep control)', async () => {

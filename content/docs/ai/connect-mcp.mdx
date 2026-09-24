@@ -170,7 +170,7 @@ decision.
 
 ## What the agent gets
 
-Eleven tools, generated from your metadata:
+Twelve tools, generated from your metadata:
 
 | Tool | What it does |
 |:---|:---|
@@ -180,6 +180,7 @@ Eleven tools, generated from your metadata:
 | `aggregate_records` | Grouped aggregation (registered when the active driver supports it) |
 | `create_record` / `update_record` / `delete_record` | Write data |
 | `list_actions` / `run_action` | Discover and invoke your business actions by name |
+| `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
 
 The tools are a fixed ~10-tool **spine** with the object name as a *parameter*
 (`query_records(objectName, …)`), not one tool per object — so the list stays
@@ -296,7 +297,7 @@ call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 # → {"result":{"serverInfo":{"name":"objectstack",...},"capabilities":{"tools":{...},"prompts":{}}},...}
 
 call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"[a-z_]*"'
-# → the eleven tools, list_objects … run_action
+# → the twelve tools, list_objects … resume_run
 
 call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_records","arguments":{"objectName":"crm_opportunity","limit":3}}}'
 # → {"result":{"content":[{"type":"text","text":"{ \"object\": \"crm_opportunity\", \"records\": [ ... ], \"total\": 23, \"hasMore\": true }"}]}}

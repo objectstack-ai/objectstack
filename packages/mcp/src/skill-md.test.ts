@@ -63,6 +63,7 @@ describe('renderSkillMarkdown', () => {
       'delete_record',
       'list_actions',
       'run_action',
+      'resume_run',
     ]) {
       expect(md).toContain(tool);
     }
