@@ -108,7 +108,20 @@ function formWithRow(schemaId: string, row: Record<string, unknown>) {
   });
 }
 
-/** The ZodError a build threw, or a loud failure when it built. */
+/** This file's own name — the module every `defineForm(...)` call below is made from. */
+const THIS_MODULE = 'form-option-enum-derive.test.ts';
+
+/**
+ * The ZodError a build threw, or a loud failure when it built.
+ *
+ * The refusal must be an `Error` with a stack, or an uncaught module-load
+ * throw prints `ZodError { name, message: [Getter/Setter] }` and nothing else:
+ * `new z.ZodError(...)` is a zod trait object, not an `Error`, and
+ * `toBeInstanceOf(z.ZodError)` passes on it all the same. A string `stack` is
+ * not enough either — zod builds `parsed.error` and a bare
+ * `new z.ZodRealError(...)` with no frame at all — so the stack must also name
+ * the module that called `defineForm`.
+ */
 function refusal(build: () => unknown): z.ZodError {
   let thrown: unknown;
   try {
@@ -117,6 +130,9 @@ function refusal(build: () => unknown): z.ZodError {
     thrown = e;
   }
   expect(thrown, 'expected defineForm to REFUSE at module load').toBeInstanceOf(z.ZodError);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(typeof (thrown as Error).stack).toBe('string');
+  expect((thrown as Error).stack, 'the stack names no frame in the module that called defineForm').toContain(THIS_MODULE);
   return thrown as z.ZodError;
 }
 
@@ -199,6 +215,19 @@ describe('defineForm: the refusal of an unspellable option value names the deriv
     // make every "states no blanket rule" assertion in this file vacuous.
     expect(statesBlanketOmitRule('On a metadata form (schema-bound, built by `defineForm`), a row whose key is a spec enum omits `options`: …')).toBe(true);
     expect(statesBlanketOmitRule('When this row edits a spec enum, omit `options`: …')).toBe(true);
+  });
+
+  it('the wall an uncaught throw prints (the stack) carries the grammar message and the remedy', () => {
+    // Node prints an uncaught `Error` by its `stack`, whose first line is
+    // `name: message`, and a ZodError's message is its issue list as JSON.
+    const stack = refusal(formWithOption('new-tab')).stack ?? '';
+    const firstFrame = stack.search(/\n\s+at /);
+    const head = firstFrame < 0 ? stack : stack.slice(0, firstFrame);
+    expect(head.startsWith('ZodError: '), head.slice(0, 80)).toBe(true);
+    // Today's grammar message, read live off the object face and JSON-escaped as the message prints it.
+    expect(head).toContain(JSON.stringify(objectFaceMessage('new-tab')).slice(1, -1));
+    expect(namesDerivePath(head), head).toBe(true);
+    expect(scopesDeriveToUnspellable(head), head).toBe(true);
   });
 
   it('a nested row (composite `fields`) gets the same remedy', () => {

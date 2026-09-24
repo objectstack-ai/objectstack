@@ -6369,7 +6369,18 @@ export function defineForm(
     data: { provider: 'schema', schemaId },
   });
   if (parsed.success) return parsed.data;
-  throw new z.ZodError(withOptionValueDeriveRemedy(parsed.error.issues));
+  // The refusal stays an `Error` with a stack, so an uncaught module-load throw
+  // prints its issues and the remedy, with the author's `defineForm(...)` call
+  // as the first frame. Two traps, both measured on zod 4.6.1: `new z.ZodError`
+  // builds a plain object (no `Error` parent, no `stack`), which node prints as
+  // `ZodError { name, message: [Getter/Setter] }`; and zod builds every
+  // `ZodRealError` with `Error.stackTraceLimit = 0`, capturing a trace only in
+  // `parse`, so `parsed.error` or a bare `new z.ZodRealError` carries no frame.
+  // The error is built from issues that already carry the remedy, so its
+  // lazily computed `message` holds it whenever it is first read.
+  const refusal = new z.ZodRealError(withOptionValueDeriveRemedy(parsed.error.issues));
+  z.core.util.captureStackTrace(refusal, defineForm);
+  throw refusal;
 }
 
 /**
