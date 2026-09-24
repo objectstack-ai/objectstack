@@ -341,7 +341,7 @@
  "packages/metadata-core/src/engine-update-dispatch.ts": {
   "#11009": 6,
   "#11142": 5,
-  "#11230": 6,
+  "#11230": 5,
   "#5748": 4
  },
  "packages/metadata-core/src/object-schema-fls-contract.ts": {
