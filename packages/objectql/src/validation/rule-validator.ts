@@ -3578,20 +3578,27 @@ function referenceGuardRepair(field: string): string {
 }
 
 /**
- * [#20006] Can `key` fault somewhere OTHER than a read through a reference —
- * on a column of the rule's own object? Then a `No such key: KEY` fault on the
- * cleanup is not attributable to the cleanup, and the generic text stands.
+ * [#20006] Does the predicate make an OWN read that faults on this write — a
+ * read of the rule's own record, not one through a reference? Then the rule is
+ * its author's to fix whatever the cleanup does, and the generic text stands.
  *
- * Decided from where the predicate reads `key`, against what those places hold
- * on this write. Each of these reads faults exactly when its holder lacks the
- * key, so each counts only then:
+ * Answered for EVERY own read the predicate makes, never only for the key a
+ * fault reports: when both operands of `&&` / `||` fault, this CEL front end
+ * reports the RIGHT one's key (measured), so `record.kind == 'x' &&
+ * record.account.status == 'closed'` on an object declaring no `kind` reports
+ * the traversal's `status` — and a check keyed on it would blame the cleanup
+ * for a rule that faults on `kind` on every write.
+ *
+ * Each read below faults exactly when its holder lacks the key, so each counts
+ * only then:
  *
  *  - `record.KEY` — the record is made total over its DECLARED fields, so this
  *    faults only on an undeclared key, and does so on every write;
  *  - `record.FIELD.KEY` through a field that is not a reference, which nothing
  *    hydrates;
- *  - `previous.KEY` and `previous.FIELD.KEY` — the `previous` root is never
- *    hydrated, so a read through a reference there faults on its bare id.
+ *  - `previous.KEY`, and `previous.FIELD.KEY` through ANY field, a reference
+ *    included — the `previous` root is never hydrated, so a read through a
+ *    reference there meets its bare id.
  *
  * ⛔ Not a re-evaluation with the traversals served: measured, CEL's `&&` and
  * `||` absorb an error when the other side decides, so `record.status == 'x'
@@ -3599,24 +3606,24 @@ function referenceGuardRepair(field: string): string {
  * holds a row, and a counterfactual run would pin the bare fault on the
  * traversal.
  */
-function readsKeyOffTheTraversal(
+function readsAnOwnColumnItLacks(
   source: string,
-  key: string,
   record: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   fields: Record<string, ConditionalFieldDef> | undefined,
 ): boolean {
-  const lacks = (holder: unknown): boolean => !(holder && typeof holder === 'object' && key in holder);
+  const lacks = (holder: unknown, key: string): boolean =>
+    !(holder && typeof holder === 'object' && key in holder);
   const faultsOn = (
     analysis: RelationshipTraversalAnalysis | null,
     holder: Record<string, unknown> | undefined,
     skipReferences: boolean,
   ): boolean => {
     if (!analysis) return false;
-    if (analysis.bareFields.has(key) && lacks(holder)) return true;
+    for (const key of analysis.bareFields) if (lacks(holder, key)) return true;
     for (const [through, columns] of analysis.traversals) {
-      if (!columns.has(key) || (skipReferences && referenceTargetOf(fields?.[through]))) continue;
-      if (lacks(holder?.[through])) return true;
+      if (skipReferences && referenceTargetOf(fields?.[through])) continue;
+      for (const key of columns) if (lacks(holder?.[through], key)) return true;
     }
     return false;
   };
@@ -3642,12 +3649,12 @@ function readsKeyOffTheTraversal(
  * the generic one, byte for byte.
  *
  * The fault is attributed to the cleanup only when the missing key is a column
- * the rule reads through a reference AND can fault nowhere else. A key NAME is
- * not a location: `record.status == 'x' && record.account.status == 'closed'`
- * on an object declaring no `status` faults on its own bare `record.status`
- * too, and that rule is its author's to fix whatever the cleanup does — see
- * {@link readsKeyOffTheTraversal}. Such a fault, and a fault on any other key,
- * keeps the generic text.
+ * the rule reads through a reference AND the rule makes no own read that
+ * faults — see {@link readsAnOwnColumnItLacks}. `record.status == 'x' &&
+ * record.account.status == 'closed'` on an object declaring no `status` is its
+ * author's to fix whatever the cleanup does, and so is `record.kind == 'x' &&
+ * …` beside it, though CEL reports the traversal's key there. Such a rule, and
+ * a fault on any other key, keeps the generic text.
  */
 function referentialClearRefusal(
   ruleName: string,
@@ -3674,7 +3681,7 @@ function referentialClearRefusal(
     if (columns.has(missingKey as string)) named = true;
     reads.push(`${[...columns].sort().map((n) => `'${n}'`).join(', ')} through \`${through}\``);
   }
-  if (!named || readsKeyOffTheTraversal(expr.source as string, missingKey as string, record, previous, fields)) {
+  if (!named || readsAnOwnColumnItLacks(expr.source as string, record, previous, fields)) {
     return null;
   }
 
