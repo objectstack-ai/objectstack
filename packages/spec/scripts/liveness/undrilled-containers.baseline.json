@@ -137,7 +137,6 @@
     "translation/metadataForms",
     "translation/objects",
     "translation/pages",
-    "translation/settings",
     "translation/settingsCommon",
     "view/form.buttons",
     "view/form.groups",

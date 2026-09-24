@@ -50,9 +50,9 @@
  * so it cannot record "whatever we have now" as accepted. Run it after a port
  * and one of two things happens: the port was byte-faithful and the gate goes
  * green, or it was not and the gate stays RED naming the difference. That is
- * the opposite of the accepted-divergence baselines elsewhere in this repo
- * (`packages/spec/react-declaration-parity.baseline.json` records a diff and
- * ratchets it); this record holds ONE SIDE, so there is no diff in it to bless.
+ * the opposite of an accepted-divergence baseline (the retired
+ * `packages/spec/react-declaration-parity.baseline.json` recorded a diff and
+ * ratcheted it); this record holds ONE SIDE, so there is no diff in it to bless.
  *
  * ## And why `--update` REFUSES off the pin
  *

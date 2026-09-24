@@ -130,6 +130,25 @@ Transport mode is automatically detected from the URL:
 | `libsql://...` | `remote` | @libsql/client only |
 | `https://...` | `remote` | @libsql/client only |
 
+An embedded replica is a local **file** kept in sync with a remote. The local and
+replica modes run every read and write through the local SQLite engine, which
+cannot open a remote url, and a replica needs a file for the sync to land in.
+The constructor therefore refuses (`VALIDATION_ERROR` / 400):
+
+- a remote url (the lowercase `libsql://`, `https://`, `http://`, `wss://`,
+  `ws://` that auto-detection matches) beside `syncUrl`, or under a forced
+  `mode: 'local'` / `'replica'`;
+- a replica on an in-memory url (`:memory:`, `file::memory:`). That covers a
+  replica auto-detected from a `:memory:` or `file:` url beside `syncUrl`, and
+  one forced with `mode: 'replica'`;
+- under a forced `mode: 'replica'`, any `url` that is not a local `file:` path.
+
+In each case the engine would otherwise run on a private in-memory database
+whose writes read back and then vanish on restart, and `@libsql/client` builds
+no embedded replica for a remote url anyway. For a remote database, drop
+`syncUrl` and any forced `mode`. For an embedded replica, use
+`url: 'file:./data/replica.db'` beside `syncUrl`.
+
 You can also force a specific mode:
 
 ```typescript
@@ -216,7 +235,7 @@ interface TursoDriverConfig {
    */
   concurrency?: number;
 
-  /** Remote sync URL for embedded replica mode (libsql:// or https://) */
+  /** Remote sync URL for embedded replica mode (libsql:// or https://); the replica is the local file: named by `url` */
   syncUrl?: string;
 
   /** Sync configuration (requires syncUrl) */

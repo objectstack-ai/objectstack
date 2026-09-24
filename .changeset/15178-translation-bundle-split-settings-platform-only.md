@@ -66,8 +66,9 @@ and the rejection carries the prescription above.
 
 ### Unchanged
 
-The registered `translation` metadata type (`TranslationItemSchema`) still
-declares `settings` — this ruling covers the file-authored bundle. `GET
+The registered `translation` metadata type (`TranslationItemSchema`) is not
+changed by THIS entry — this ruling covers the file-authored bundle. (Superseded
+in the same release: #19620 narrows the item door too; see its own changeset.) `GET
 /api/v1/i18n/translations/:locale` still declares it on its response, because the
 served document is the merged tree; `GetTranslationsResponseSchema` is typed
 against the platform face for exactly that reason.

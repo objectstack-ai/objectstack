@@ -3,11 +3,16 @@
 
 /**
  * gen-sdui-manifest-node — regenerate the repo-root `sdui.manifest.json` from
- * objectui's PUBLISHED registry packages, without a browser.
+ * objectui's registry AT THE PIN, read out of the pin's BUILT tree, without a
+ * browser. The one producer of the tracked artefact (ruling 丙 on #17735).
  *
- *   node scripts/gen-sdui-manifest-node.mjs                      # temp npm install (network); version from the PIN
- *   node scripts/gen-sdui-manifest-node.mjs --modules-root DIR   # use a preinstalled node_modules parent
- *   node scripts/gen-sdui-manifest-node.mjs --objectui-version V # override the version to install
+ *   pnpm objectui:build                    # build objectui at .objectui-sha into .cache/objectui-<SHA12>/
+ *   node scripts/gen-sdui-manifest-node.mjs
+ *
+ * No flags. The modules root is DERIVED from `.objectui-sha` —
+ * `.cache/objectui-<SHA12>/apps/console`, the directory `scripts/build-console.sh`
+ * materialises — and the version recorded is READ from the tree, so neither can
+ * be named by hand and disagree with the pin.
  *
  * ## What this produces, and from what
  *
@@ -21,80 +26,59 @@
  * the hoisted, lockstep-pinned copy of objectui's adapter
  * (`pnpm check:sdui-lockstep` holds the two copies byte-equal).
  *
- * ## Why plain Node is a valid producer (the browser-only claim is expired)
+ * `apps/console/node_modules/@object-ui/` in the built tree carries every
+ * registry package as a workspace symlink whose `exports["."].import` is
+ * `./dist/index.js`, so stock resolution from that directory lands on the
+ * BUILT dist of the pinned SOURCE and keeps one `@object-ui/core` registry
+ * instance. The objectui repo root is NOT a valid modules root: its
+ * `node_modules/@object-ui/` holds none of the registry packages.
  *
- * `packages/spec/CHANGELOG.md` records (twice, byte-identically) that only a
- * real browser can enumerate the registry. Measured false on 2026-08-29 and
- * re-measured on 2026-08-30 against published `@object-ui/*` 17.6.0: all 16
- * modules import under plain Node once `.css` imports resolve to an empty
- * module — the ONLY failure without the hook is
- * `ERR_UNKNOWN_FILE_EXTENSION .css` on plugin-dashboard/plugin-map, a loader
- * limitation, not a browser API. 57 configs, 0 lazy stubs, ~4.5 s, no
- * Playwright, no objectui build. Reproduced independently in review of #18608:
- * the 17 published `@object-ui/*` 17.6.0 packages installed from npm,
- * `sdui-parser` bundled, this generator run under plain Node — `sha256
- * 49211fee7792` / `git hash-object 78f870e42fe9`, `cmp` byte-identical to the
- * tracked artefact. The browser route (`pnpm sdui:manifest`) still exists for
- * operators holding an objectui checkout; both routes serialize the same
- * registry through the same adapter.
+ * ## Why the built tree, and never an npm install
  *
- * ⛔ Do not put an objectui issue number back on the 2026-08-29 measurement.
- * The citation this paragraph used to carry resolves to nothing — 404 for both
- * the issue and the PR at that number, while seven neighbouring objectui
- * numbers answer 200 as controls, so the zero is that NUMBER, not the endpoint
- * and not the token — and the readings above stand without one. #18608 dropped
- * the same citation from the two sibling gate scripts (check-generated.ts,
- * check-react-blocks-declaration-parity.ts) and left the same number-free
- * tombstone there; this header is what both of them now send readers to for
- * the readings.
+ * `.objectui-sha` pins a COMMIT. The `@object-ui` version that commit's
+ * `packages/core/package.json` declares names a tarball built from an EARLIER
+ * commit, because objectui bumps its version only at release — so installing
+ * "the version the pin declares" from npm described a registry up to one
+ * release behind the pin (measured on #17735: 18 of 57 components differed,
+ * every divergence landed in objectui inside that window). This script used to
+ * default to exactly that install; the default is deleted, and there is no
+ * other input route.
  *
- * ## Versioning contract — ONE oracle, shared with the gate
+ * ## Plain Node is a valid producer
  *
- * The manifest must describe the registry the SHIPPED console runs — i.e. the
- * `@object-ui/*` version that `.objectui-sha` ships. This script installs that
- * version from npm. Which version that is has exactly one source:
- * `--objectui-version` when it is passed, otherwise what
- * `packages/core/package.json` DECLARES at the pinned commit — read through
- * `check-sdui-manifest.mjs`'s exported `readPinnedDeclaredVersion`, the SAME
- * function its check 4 judges the written record with, imported rather than
- * re-typed.
- *
- * ⛔ The version is NOT defaulted from `scripts/sdui-manifest.record.json`.
- * That default is what this file was fixed for: `objectuiSha` below is re-read
- * from the LIVE pin while `objectuiPackagesVersion` fell back to the value
- * already in the record, so the two fields were read at two different moments.
- * A regeneration after a pin bump therefore wrote the NEW pin under the OLD
- * version string — a record whose two objectui fields describe two different
- * commits, which check 4 reds. The person it reds is the one who followed the
- * documented bump procedure, so the producer is where it is fixed. Two readers
- * consulting two oracles is precisely where that drift came from; there is now
- * one oracle and both read it.
- *
- * When the oracle cannot answer — no objectui checkout, or one that does not
- * carry the pinned commit — this script REFUSES. An unread version is never
- * converted into a version string (Route & surface ownership §3: prefer failing
- * to falling back). Point `OBJECTUI_ROOT` at a checkout that carries the pin,
- * or pass `--objectui-version` explicitly.
+ * The registry imports under plain Node once `.css` side-effect imports resolve
+ * to an empty module — the only failure without that hook is
+ * `ERR_UNKNOWN_FILE_EXTENSION .css` (plugin-dashboard, plugin-map), a loader
+ * limitation, not a browser API. 57 configs, 0 lazy stubs, a few seconds, no
+ * Playwright. Regeneration is byte-deterministic (two runs over one built tree
+ * `cmp` identical).
  *
  * ## Preconditions (all loud)
  *
- * `packages/sdui-parser/dist` must exist (`pnpm --filter @objectstack/sdui-parser build`):
- * the adapter is consumed exactly as production consumes it. Absence exits 1.
+ *   - `packages/sdui-parser/dist` exists (`pnpm --filter @objectstack/sdui-parser build`):
+ *     the adapter is consumed exactly as production consumes it.
+ *   - `.cache/objectui-<SHA12>/` is a checkout AT the pin (its HEAD equals
+ *     `.objectui-sha`), and it is BUILT: `apps/console/node_modules/@object-ui/core/dist/index.js`
+ *     exists. Either missing ⇒ exit 1 naming `pnpm objectui:build`.
+ *
+ * The runner this spawns is written to a fresh temp dir and removed afterwards:
+ * nothing is written into the objectui build tree.
  */
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-
-import { readPinnedDeclaredVersion } from './check-sdui-manifest.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const RECORD_PATH = join(ROOT, 'scripts', 'sdui-manifest.record.json');
 const OUT_PATH = join(ROOT, 'sdui.manifest.json');
 const PARSER_DIST = join(ROOT, 'packages', 'sdui-parser', 'dist', 'index.mjs');
+
+/** What the record's `source` says for every artefact this script writes. */
+const SOURCE = 'built-tree';
 
 /** The registration set, in objectui's `apps/console/dev/manifest-dump.tsx` order. */
 const REGISTRY_MODULES = [
@@ -121,9 +105,13 @@ function fail(msg) {
   process.exit(1);
 }
 
-function arg(name) {
-  const i = process.argv.indexOf(name);
-  return i > -1 ? process.argv[i + 1] : undefined;
+if (process.argv.length > 2) {
+  fail(
+    `takes no arguments (got: ${process.argv.slice(2).join(' ')}).\n` +
+      '  The modules root is derived from .objectui-sha and the version is read from the built tree;\n' +
+      '  the retired --modules-root / --objectui-version routes are what let the artefact describe a\n' +
+      '  registry the pin does not name.',
+  );
 }
 
 if (!existsSync(PARSER_DIST)) {
@@ -134,8 +122,46 @@ if (!existsSync(PARSER_DIST)) {
 }
 
 const pinPath = join(ROOT, '.objectui-sha');
-if (!existsSync(pinPath)) fail('.objectui-sha is missing — cannot record provenance.');
+if (!existsSync(pinPath)) fail('.objectui-sha is missing — cannot derive the objectui build tree.');
 const pin = readFileSync(pinPath, 'utf8').trim();
+if (!/^[0-9a-f]{40}$/.test(pin)) fail(`.objectui-sha does not hold a 40-character commit sha (got ${JSON.stringify(pin)}).`);
+
+// Repo-relative, POSIX-separated: this string is what the record carries.
+const BUILD_TREE_REL = `.cache/objectui-${pin.slice(0, 12)}`;
+const MODULES_ROOT_REL = `${BUILD_TREE_REL}/apps/console`;
+const BUILD_TREE = join(ROOT, ...BUILD_TREE_REL.split('/'));
+const MODULES_ROOT = join(ROOT, ...MODULES_ROOT_REL.split('/'));
+const CORE_PKG = join(MODULES_ROOT, 'node_modules', '@object-ui', 'core', 'package.json');
+const BUILT_SENTINEL = join(MODULES_ROOT, 'node_modules', '@object-ui', 'core', 'dist', 'index.js');
+const REMEDY = '  Run `pnpm objectui:build` first — it builds objectui at the pin into that directory.';
+
+if (!existsSync(BUILD_TREE)) {
+  fail(`no objectui build tree at ${BUILD_TREE_REL}/ for pin ${pin.slice(0, 12)}….\n${REMEDY}`);
+}
+let head = '';
+try {
+  head = execFileSync('git', ['-C', BUILD_TREE, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+} catch (e) {
+  fail(`${BUILD_TREE_REL}/ is not a git checkout (${String(e?.stderr || e?.message || e).trim().split('\n')[0]}).\n${REMEDY}`);
+}
+if (head !== pin) {
+  fail(`${BUILD_TREE_REL}/ is checked out at ${head.slice(0, 12)}…, not at the pin ${pin.slice(0, 12)}….\n${REMEDY}`);
+}
+if (!existsSync(BUILT_SENTINEL)) {
+  fail(
+    `objectui at ${pin.slice(0, 12)}… is checked out but NOT BUILT: ${MODULES_ROOT_REL}/node_modules/@object-ui/core/dist/index.js is missing.\n${REMEDY}`,
+  );
+}
+
+let workspaceVersion;
+try {
+  workspaceVersion = JSON.parse(readFileSync(CORE_PKG, 'utf8'))?.version;
+} catch (e) {
+  fail(`cannot read ${MODULES_ROOT_REL}/node_modules/@object-ui/core/package.json: ${e.message}`);
+}
+if (typeof workspaceVersion !== 'string' || workspaceVersion === '') {
+  fail(`${MODULES_ROOT_REL}/node_modules/@object-ui/core/package.json declares no string \`version\`.`);
+}
 
 let record = {};
 if (existsSync(RECORD_PATH)) {
@@ -146,59 +172,27 @@ if (existsSync(RECORD_PATH)) {
   }
 }
 
-// The version this run installs AND records. `--objectui-version` wins; the
-// default is what the PIN declares, through check 4's own oracle — never the
-// version already sitting in the record (see the versioning contract above).
-const explicitVersion = arg('--objectui-version');
-let version = explicitVersion;
-let versionSource = '--objectui-version, as passed';
-if (!version) {
-  const leg = readPinnedDeclaredVersion(pin, { root: ROOT });
-  if (leg.status !== 'resolved') {
-    fail(
-      `no --objectui-version, and the pinned commit's declared version could not be read: ${leg.reason}\n` +
-        '  ⛔ This script does NOT fall back to the version in scripts/sdui-manifest.record.json: after a pin\n' +
-        '  bump that re-records the NEW pin under the OLD version string, and check-sdui-manifest.mjs check 4\n' +
-        '  reds exactly that record. Either:\n' +
-        `    - point OBJECTUI_ROOT at an objectui checkout carrying ${pin.slice(0, 12)}…, or\n` +
-        '    - pass --objectui-version {the @object-ui version that pin ships} explicitly.',
-    );
-  }
-  version = leg.version;
-  versionSource = `packages/core/package.json at objectui ${pin.slice(0, 12)}… (read from ${leg.where})`;
-}
-
-let modulesRoot = arg('--modules-root');
-if (modulesRoot) {
-  if (!existsSync(join(modulesRoot, 'node_modules'))) {
-    fail(`--modules-root ${modulesRoot} has no node_modules/ — point it at a directory whose install carries the @object-ui set.`);
-  }
-} else {
-  modulesRoot = mkdtempSync(join(tmpdir(), 'sdui-manifest-gen-'));
-  const deps = Object.fromEntries(REGISTRY_MODULES.concat('@object-ui/core').map((m) => [m, version]));
-  deps.react = '18.3.1';
-  deps['react-dom'] = '18.3.1';
-  writeFileSync(
-    join(modulesRoot, 'package.json'),
-    JSON.stringify({ name: 'sdui-manifest-gen', private: true, type: 'module', dependencies: deps }, null, 2),
-  );
-  console.error(`→ installing @object-ui/* ${version} into ${modulesRoot} (npm, network)...`);
-  execFileSync('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
-    cwd: modulesRoot,
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
-}
-
-// The one loader accommodation plain Node needs: `.css` side-effect imports
-// (plugin-dashboard, plugin-map) resolve to an empty module. Everything else
-// is stock resolution from the install above.
+// The runner lives in its own temp dir, so bare specifiers are re-anchored to
+// the modules root by the resolve hook below: resolution is exactly what it
+// would be for a file sitting in `apps/console/`, and the build tree gets no
+// file written into it. The one other accommodation plain Node needs: `.css`
+// side-effect imports (plugin-dashboard, plugin-map) resolve to an empty module.
+const runnerDir = mkdtempSync(join(tmpdir(), 'sdui-manifest-runner-'));
+const runnerPath = join(runnerDir, 'sdui-manifest-runner.mjs');
+const runnerUrl = pathToFileURL(runnerPath).href;
+const anchorUrl = pathToFileURL(join(MODULES_ROOT, 'package.json')).href;
+const hooks =
+  `const RUNNER = ${JSON.stringify(runnerUrl)};\n` +
+  `const ANCHOR = ${JSON.stringify(anchorUrl)};\n` +
+  'const BARE = (s) => !/^(\\.{0,2}\\/|[a-z][a-z0-9+.-]*:)/i.test(s);\n' +
+  'export async function resolve(s, c, n) {\n' +
+  '  if (s.endsWith(".css")) return { url: "data:text/javascript,", shortCircuit: true };\n' +
+  '  if (c.parentURL === RUNNER && BARE(s)) return n(s, { ...c, parentURL: ANCHOR });\n' +
+  '  return n(s, c);\n' +
+  '}\n';
 const runner = `
 import { register } from 'node:module';
-register('data:text/javascript,' + encodeURIComponent(
-  'export async function resolve(s, c, n) {' +
-  '  if (s.endsWith(".css")) return { url: "data:text/javascript,", shortCircuit: true };' +
-  '  return n(s, c);' +
-  '}'), import.meta.url);
+register('data:text/javascript,' + encodeURIComponent(${JSON.stringify(hooks)}), import.meta.url);
 const MODULES = ${JSON.stringify(REGISTRY_MODULES)};
 const failures = [];
 for (const m of MODULES) {
@@ -219,10 +213,22 @@ if (!Object.keys(manifest.components).length) { console.error('manifestFromConfi
 // Same serialization as objectui's dump (JSON.stringify(manifest, null, 2), no trailing newline).
 process.stdout.write(JSON.stringify(manifest, null, 2));
 `;
-const runnerPath = join(modulesRoot, 'sdui-manifest-runner.mjs');
-writeFileSync(runnerPath, runner);
-console.error(`→ enumerating the registry (${REGISTRY_MODULES.length} modules)...`);
-const json = execFileSync(process.execPath, [runnerPath], { cwd: modulesRoot, maxBuffer: 64 * 1024 * 1024 }).toString();
+
+let json;
+let enumerationError;
+try {
+  writeFileSync(runnerPath, runner);
+  console.error(`→ enumerating the registry (${REGISTRY_MODULES.length} modules) from ${MODULES_ROOT_REL}/...`);
+  json = execFileSync(process.execPath, [runnerPath], { cwd: MODULES_ROOT, maxBuffer: 64 * 1024 * 1024 }).toString();
+} catch (e) {
+  enumerationError = e;
+} finally {
+  // Before any exit: `process.exit` inside the catch would skip this.
+  rmSync(runnerDir, { recursive: true, force: true });
+}
+if (enumerationError) {
+  fail(`the registry enumeration failed (exit ${enumerationError?.status ?? '?'}); its stderr is above.`);
+}
 
 const manifest = JSON.parse(json);
 const count = Object.keys(manifest.components).length;
@@ -231,7 +237,9 @@ const sha256 = createHash('sha256').update(json).digest('hex');
 const nextRecord = {
   '//': record['//'] ?? [],
   objectuiSha: pin,
-  objectuiPackagesVersion: version,
+  source: SOURCE,
+  modulesRoot: MODULES_ROOT_REL,
+  objectuiWorkspaceVersion: workspaceVersion,
   generator: 'scripts/gen-sdui-manifest-node.mjs',
   generatedAt: new Date().toISOString().slice(0, 10),
   sha256,
@@ -240,6 +248,6 @@ const nextRecord = {
 writeFileSync(RECORD_PATH, JSON.stringify(nextRecord, null, 2) + '\n');
 console.error(`✓ wrote sdui.manifest.json (${count} components, ${Buffer.byteLength(json)} bytes, sha256 ${sha256.slice(0, 12)}…)`);
 console.error(
-  `✓ re-recorded scripts/sdui-manifest.record.json at pin ${pin.slice(0, 12)} / @object-ui ${version}\n` +
-    `  (version from ${versionSource})`,
+  `✓ re-recorded scripts/sdui-manifest.record.json at pin ${pin.slice(0, 12)} — ${SOURCE} ${MODULES_ROOT_REL}, ` +
+    `@object-ui/core workspace version ${workspaceVersion}`,
 );

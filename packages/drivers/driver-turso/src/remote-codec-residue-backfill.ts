@@ -121,6 +121,7 @@ import {
   type RemoteBackfillLogger,
   type RemoteCanonicalBackfillOptions,
 } from './remote-canonical-backfill.js';
+import { recoverUnencodedJsonText } from '@objectstack/driver-sql';
 
 /** Which codec a column is converged on. */
 export type RemoteCodecResidueKind = 'date' | 'json';
@@ -211,17 +212,11 @@ export function recoverResidueCell(
   stored: string,
   codec: RemoteCodecResidueCodec,
 ): string | null {
-  if (kind === 'json') {
-    try {
-      // It parses, so it reads as what it parses to: one of the ambiguous
-      // classes, or a structure too deep for `json_valid()`. Never rewritten.
-      JSON.parse(stored);
-      return null;
-    } catch {
-      // Only a string produces unparseable text, and it reads back as itself.
-      return JSON.stringify(stored);
-    }
-  }
+  // The same rule the local SQLite backfill applies, imported rather than
+  // copied: text that parses is never rewritten (one of the ambiguous classes,
+  // or a structure too deep for `json_valid()`); text that does not is a string
+  // that reads back as itself, rewritten as its JSON string.
+  if (kind === 'json') return recoverUnencodedJsonText(stored);
   const day = codec.toDateOnly(stored);
   return typeof day === 'string' && day !== stored ? day : null;
 }

@@ -25,7 +25,7 @@
 // tree and this file goes RED with the alias named, and the fix is the one the
 // ADR prescribes: declare `XParsed` next to the bare alias and delete the pin
 // line. The list therefore moves in both directions, and it moves for the right
-// reason — phase 2 grew it by 35 for a reason it records at the block itself.
+// reason — phase 2 grew it by 35 for a reason recorded at the head of the list.
 //
 // ## It is also the gate's registry
 //
@@ -285,756 +285,49 @@ import type * as M188 from './ai/build-progress.zod.js';
 // Iso...` declarations and never the prose sitting beside them.
 // ---------------------------------------------------------------------------
 
+// How a pin is named, and where it goes. A pin is named for the pair that is
+// already unique to it — its module and its schema: `Iso_`, then the module's
+// path below `src/` without `.zod.ts`, each kebab segment camelCased and the
+// segments joined by `_` (`ai/knowledge-document.zod.ts` becomes
+// `ai_knowledgeDocument`), then `__`, then the schema's export name. The block
+// is sorted by that name in code-unit order (the order `LC_ALL=C sort` gives),
+// one heading per module, and a note about a module's pins sits under its
+// heading and names the pins it is about. A new pin's name AND its place are
+// therefore functions of the schema alone: two branches that each pin a
+// different schema write different lines in different places, and git merges
+// them with nobody renumbering anything.
+//
+// The names used to be a dense counter, `Iso0` up to `Iso881`, each new pin
+// taking "the next free number" — so two branches off one base took the SAME
+// number for two different schemas, at insertion points hundreds of lines
+// apart, and git merged the pair cleanly into two declarations of one name
+// (`Iso871`, then `Iso877` / `Iso878`; both are recorded in the history at the
+// bottom of this file). #19665 retired the counter. An `IsoNNN` that a note or
+// that history still cites is the pin's former name, true of the file when it
+// was written. The `Mn` import aliases above keep their positional numbering.
+//
+// Two cohorts used to head blocks of their own; their pins are now filed under
+// their modules like every other pin.
+//
+// Phase 2 (#6083) additions. These 35 schemas were never in phase 1's
+// population: their bare alias already read `z.input` before the flip, so the
+// phase-1 gate — which only looked at bare `z.infer` aliases — never asked
+// whether their parsed state was named. The inverted gate does ask, and the
+// same probe that chose phase 1's split (with the same deliberate control
+// assertion, so a vacuous pass could not be mistaken for isomorphism) says
+// these 35 coincide. The other 22 it found got an `XParsed` instead.
+//
+// #4593 — the documented-schema type-alias backfill (2026-08-08). Every schema
+// in it already had a published JSON Schema and a reference page, and the
+// page's `import type { X }` line was being dropped because no alias carried
+// the name (`docs-import-surface.baseline.json`, "no type export"). The
+// backfill declares the bare alias; each schema in it measured isomorphic, so
+// it takes a pin rather than an `XParsed` synonym — the (RISE) case, and the
+// largest single rise this file has taken.
+
 // ai/agent.zod.ts
-export type Iso0 = Assert<Eq< z.input< typeof M0.StructuredOutputFormatSchema >, z.infer< typeof M0.StructuredOutputFormatSchema > >>;
-export type Iso1 = Assert<Eq< z.input< typeof M0.TransformPipelineStepSchema >, z.infer< typeof M0.TransformPipelineStepSchema > >>;
-
-// ai/conversation.zod.ts
-export type Iso2 = Assert<Eq< z.input< typeof M1.MessageRoleSchema >, z.infer< typeof M1.MessageRoleSchema > >>;
-export type Iso3 = Assert<Eq< z.input< typeof M1.MessageContentTypeSchema >, z.infer< typeof M1.MessageContentTypeSchema > >>;
-export type Iso4 = Assert<Eq< z.input< typeof M1.FunctionCallSchema >, z.infer< typeof M1.FunctionCallSchema > >>;
-export type Iso5 = Assert<Eq< z.input< typeof M1.TokenBudgetStrategySchema >, z.infer< typeof M1.TokenBudgetStrategySchema > >>;
-export type Iso6 = Assert<Eq< z.input< typeof M1.ConversationContextSchema >, z.infer< typeof M1.ConversationContextSchema > >>;
-export type Iso7 = Assert<Eq< z.input< typeof M1.ConversationSummarySchema >, z.infer< typeof M1.ConversationSummarySchema > >>;
-export type Iso8 = Assert<Eq< z.input< typeof M1.MessagePruningEventSchema >, z.infer< typeof M1.MessagePruningEventSchema > >>;
-
-// ai/embedding.zod.ts
-export type Iso9 = Assert<Eq< z.input< typeof M2.VectorStoreProviderSchema >, z.infer< typeof M2.VectorStoreProviderSchema > >>;
-export type Iso10 = Assert<Eq< z.input< typeof M2.EmbeddingModelSchema >, z.infer< typeof M2.EmbeddingModelSchema > >>;
-export type Iso11 = Assert<Eq< z.input< typeof M2.VectorStoreSchema >, z.infer< typeof M2.VectorStoreSchema > >>;
-
-// ai/knowledge-document.zod.ts
-export type Iso12 = Assert<Eq< z.input< typeof M3.KnowledgeDocumentSchema >, z.infer< typeof M3.KnowledgeDocumentSchema > >>;
-export type Iso13 = Assert<Eq< z.input< typeof M3.KnowledgeChunkSchema >, z.infer< typeof M3.KnowledgeChunkSchema > >>;
-export type Iso14 = Assert<Eq< z.input< typeof M3.KnowledgeHitSchema >, z.infer< typeof M3.KnowledgeHitSchema > >>;
-
-// ai/knowledge-source.zod.ts
-export type Iso16 = Assert<Eq< z.input< typeof M4.ObjectKnowledgeSourceSchema >, z.infer< typeof M4.ObjectKnowledgeSourceSchema > >>;
-export type Iso17 = Assert<Eq< z.input< typeof M4.FileKnowledgeSourceSchema >, z.infer< typeof M4.FileKnowledgeSourceSchema > >>;
-export type Iso18 = Assert<Eq< z.input< typeof M4.HttpKnowledgeSourceSchema >, z.infer< typeof M4.HttpKnowledgeSourceSchema > >>;
-export type Iso19 = Assert<Eq< z.input< typeof M4.KnowledgeSourceKindSchema >, z.infer< typeof M4.KnowledgeSourceKindSchema > >>;
-
-// ai/mcp.zod.ts
-export type Iso21 = Assert<Eq< z.input< typeof M5.MCPTransportSchema >, z.infer< typeof M5.MCPTransportSchema > >>;
-export type Iso22 = Assert<Eq< z.input< typeof M5.MCPApprovalPolicySchema >, z.infer< typeof M5.MCPApprovalPolicySchema > >>;
-
-// ai/model-registry.zod.ts
-export type Iso23 = Assert<Eq< z.input< typeof M6.ModelProviderSchema >, z.infer< typeof M6.ModelProviderSchema > >>;
-export type Iso24 = Assert<Eq< z.input< typeof M6.ModelLimitsSchema >, z.infer< typeof M6.ModelLimitsSchema > >>;
-
-// ai/skill.zod.ts
-export type Iso25 = Assert<Eq< z.input< typeof M7.SkillTriggerConditionSchema >, z.infer< typeof M7.SkillTriggerConditionSchema > >>;
-
-// ai/solution-blueprint.zod.ts
-export type Iso26 = Assert<Eq< z.input< typeof M8.BlueprintConditionSchema >, z.infer< typeof M8.BlueprintConditionSchema > >>;
-export type Iso27 = Assert<Eq< z.input< typeof M8.BlueprintSummaryOperationsSchema >, z.infer< typeof M8.BlueprintSummaryOperationsSchema > >>;
-export type Iso28 = Assert<Eq< z.input< typeof M8.BlueprintFieldSchema >, z.infer< typeof M8.BlueprintFieldSchema > >>;
-export type Iso29 = Assert<Eq< z.input< typeof M8.BlueprintObjectSchema >, z.infer< typeof M8.BlueprintObjectSchema > >>;
-export type Iso30 = Assert<Eq< z.input< typeof M8.BlueprintWidgetConditionSchema >, z.infer< typeof M8.BlueprintWidgetConditionSchema > >>;
-export type Iso31 = Assert<Eq< z.input< typeof M8.BlueprintDashboardSchema >, z.infer< typeof M8.BlueprintDashboardSchema > >>;
-export type Iso32 = Assert<Eq< z.input< typeof M8.BlueprintSeedSchema >, z.infer< typeof M8.BlueprintSeedSchema > >>;
-export type Iso33 = Assert<Eq< z.input< typeof M8.SolutionBlueprintStrictSchema >, z.infer< typeof M8.SolutionBlueprintStrictSchema > >>;
-
-// ai/tool.zod.ts
-export type Iso34 = Assert<Eq< z.input< typeof M9.ToolSchema >, z.infer< typeof M9.ToolSchema > >>;
-
-// ai/usage.zod.ts
-export type Iso35 = Assert<Eq< z.input< typeof M10.TokenUsageSchema >, z.infer< typeof M10.TokenUsageSchema > >>;
-export type Iso36 = Assert<Eq< z.input< typeof M10.AIUsageRecordSchema >, z.infer< typeof M10.AIUsageRecordSchema > >>;
-
-// api/analytics.zod.ts
-export type Iso37 = Assert<Eq< z.input< typeof M11.AnalyticsEndpoint >, z.infer< typeof M11.AnalyticsEndpoint > >>;
-export type Iso38 = Assert<Eq< z.input< typeof M11.AnalyticsQueryRequestSchema >, z.infer< typeof M11.AnalyticsQueryRequestSchema > >>;
-// [#17551] The ADR-0021 dataset selection and its two nested directives. Their
-// seven shared members ARE `AnalyticsQuerySchema`'s own declarations (Iso300
-// above pins that schema isomorphic), and the four dataset-only members carry
-// no default, transform, catch or pipe — so the author state and the parsed
-// state coincide and no `XParsed` name would be anything but a synonym.
-export type Iso877 = Assert<Eq< z.input< typeof M11.DatasetCompareToSchema >, z.infer< typeof M11.DatasetCompareToSchema > >>;
-export type Iso878 = Assert<Eq< z.input< typeof M11.DatasetTotalsSchema >, z.infer< typeof M11.DatasetTotalsSchema > >>;
-export type Iso879 = Assert<Eq< z.input< typeof M11.DatasetSelectionSchema >, z.infer< typeof M11.DatasetSelectionSchema > >>;
-
-// api/auth-endpoints.zod.ts
-export type Iso39 = Assert<Eq< z.input< typeof M12.AuthEndpointSchema >, z.infer< typeof M12.AuthEndpointSchema > >>;
-export type Iso40 = Assert<Eq< z.input< typeof M12.EmailPasswordConfigPublicSchema >, z.infer< typeof M12.EmailPasswordConfigPublicSchema > >>;
-export type Iso41 = Assert<Eq< z.input< typeof M12.DeviceTokenResponseSchema >, z.infer< typeof M12.DeviceTokenResponseSchema > >>;
-
-// api/auth.zod.ts
-export type Iso42 = Assert<Eq< z.input< typeof M13.AuthProvider >, z.infer< typeof M13.AuthProvider > >>;
-export type Iso43 = Assert<Eq< z.input< typeof M13.SessionSchema >, z.infer< typeof M13.SessionSchema > >>;
-export type Iso44 = Assert<Eq< z.input< typeof M13.LoginType >, z.infer< typeof M13.LoginType > >>;
-export type Iso45 = Assert<Eq< z.input< typeof M13.RegisterRequestSchema >, z.infer< typeof M13.RegisterRequestSchema > >>;
-export type Iso46 = Assert<Eq< z.input< typeof M13.RefreshTokenRequestSchema >, z.infer< typeof M13.RefreshTokenRequestSchema > >>;
-
-// api/automation-api.zod.ts
-export type Iso47 = Assert<Eq< z.input< typeof M14.AutomationFlowPathParamsSchema >, z.infer< typeof M14.AutomationFlowPathParamsSchema > >>;
-export type Iso48 = Assert<Eq< z.input< typeof M14.AutomationRunPathParamsSchema >, z.infer< typeof M14.AutomationRunPathParamsSchema > >>;
-export type Iso49 = Assert<Eq< z.input< typeof M14.FlowSummarySchema >, z.infer< typeof M14.FlowSummarySchema > >>;
-export type Iso50 = Assert<Eq< z.input< typeof M14.GetFlowRequestSchema >, z.infer< typeof M14.GetFlowRequestSchema > >>;
-export type Iso51 = Assert<Eq< z.input< typeof M14.DeleteFlowRequestSchema >, z.infer< typeof M14.DeleteFlowRequestSchema > >>;
-export type Iso52 = Assert<Eq< z.input< typeof M14.TriggerFlowRequestSchema >, z.infer< typeof M14.TriggerFlowRequestSchema > >>;
-export type Iso53 = Assert<Eq< z.input< typeof M14.ToggleFlowRequestSchema >, z.infer< typeof M14.ToggleFlowRequestSchema > >>;
-export type Iso54 = Assert<Eq< z.input< typeof M14.GetRunRequestSchema >, z.infer< typeof M14.GetRunRequestSchema > >>;
-export type Iso55 = Assert<Eq< z.input< typeof M14.AutomationApiErrorCode >, z.infer< typeof M14.AutomationApiErrorCode > >>;
-
-// api/batch.zod.ts
-export type Iso56 = Assert<Eq< z.input< typeof M15.BatchOperationType >, z.infer< typeof M15.BatchOperationType > >>;
-export type Iso57 = Assert<Eq< z.input< typeof M15.BatchRecordSchema >, z.infer< typeof M15.BatchRecordSchema > >>;
-export type Iso58 = Assert<Eq< z.input< typeof M15.UpdateManyRecordSchema >, z.infer< typeof M15.UpdateManyRecordSchema > >>;
-export type Iso59 = Assert<Eq< z.input< typeof M15.CrossObjectBatchDroppedFieldsSchema >, z.infer< typeof M15.CrossObjectBatchDroppedFieldsSchema > >>;
-export type Iso60 = Assert<Eq< z.input< typeof M15.CrossObjectBatchResponseSchema >, z.infer< typeof M15.CrossObjectBatchResponseSchema > >>;
-
-// api/contract.zod.ts
-export type Iso61 = Assert<Eq< z.input< typeof M16.RecordDataSchema >, z.infer< typeof M16.RecordDataSchema > >>;
-export type Iso62 = Assert<Eq< z.input< typeof M16.CreateRequestSchema >, z.infer< typeof M16.CreateRequestSchema > >>;
-export type Iso63 = Assert<Eq< z.input< typeof M16.UpdateRequestSchema >, z.infer< typeof M16.UpdateRequestSchema > >>;
-export type Iso64 = Assert<Eq< z.input< typeof M16.IdRequestSchema >, z.infer< typeof M16.IdRequestSchema > >>;
-
-// api/discovery.zod.ts
-export type Iso65 = Assert<Eq< z.input< typeof M17.ServiceStatus >, z.infer< typeof M17.ServiceStatus > >>;
-export type Iso66 = Assert<Eq< z.input< typeof M17.ServiceSelfInfoSchema >, z.infer< typeof M17.ServiceSelfInfoSchema > >>;
-export type Iso67 = Assert<Eq< z.input< typeof M17.DiscoveryEnvironmentSchema >, z.infer< typeof M17.DiscoveryEnvironmentSchema > >>;
-export type Iso68 = Assert<Eq< z.input< typeof M17.WellKnownCapabilitiesSchema >, z.infer< typeof M17.WellKnownCapabilitiesSchema > >>;
-export type Iso69 = Assert<Eq< z.input< typeof M17.CapabilityDescriptorSchema >, z.infer< typeof M17.CapabilityDescriptorSchema > >>;
-export type Iso70 = Assert<Eq< z.input< typeof M17.DiscoverySchema >, z.infer< typeof M17.DiscoverySchema > >>;
-// [#16325] `EnvironmentTypeSchema` moved here from cloud/environment.zod.ts (was Iso262).
-export type Iso871 = Assert<Eq< z.input< typeof M17.EnvironmentTypeSchema >, z.infer< typeof M17.EnvironmentTypeSchema > >>;
-export type Iso71 = Assert<Eq< z.input< typeof M17.ApiRoutesSchema >, z.infer< typeof M17.ApiRoutesSchema > >>;
-export type Iso72 = Assert<Eq< z.input< typeof M17.ServiceInfoSchema >, z.infer< typeof M17.ServiceInfoSchema > >>;
-export type Iso73 = Assert<Eq< z.input< typeof M17.RouteHealthEntrySchema >, z.infer< typeof M17.RouteHealthEntrySchema > >>;
-export type Iso74 = Assert<Eq< z.input< typeof M17.RouteHealthReportSchema >, z.infer< typeof M17.RouteHealthReportSchema > >>;
-
-// api/dispatcher.zod.ts
-export type Iso75 = Assert<Eq< z.input< typeof M18.DispatcherErrorCode >, z.infer< typeof M18.DispatcherErrorCode > >>;
-export type Iso76 = Assert<Eq< z.input< typeof M18.DispatcherErrorResponseSchema >, z.infer< typeof M18.DispatcherErrorResponseSchema > >>;
-
-// api/documentation.zod.ts
-export type Iso77 = Assert<Eq< z.input< typeof M19.OpenApiServerSchema >, z.infer< typeof M19.OpenApiServerSchema > >>;
-export type Iso78 = Assert<Eq< z.input< typeof M19.OpenApiSecuritySchemeSchema >, z.infer< typeof M19.OpenApiSecuritySchemeSchema > >>;
-export type Iso79 = Assert<Eq< z.input< typeof M19.ApiTestingUiType >, z.infer< typeof M19.ApiTestingUiType > >>;
-export type Iso80 = Assert<Eq< z.input< typeof M19.CodeGenerationTemplateSchema >, z.infer< typeof M19.CodeGenerationTemplateSchema > >>;
-
-// api/errors.zod.ts
-export type Iso81 = Assert<Eq< z.input< typeof M20.ErrorCategory >, z.infer< typeof M20.ErrorCategory > >>;
-export type Iso82 = Assert<Eq< z.input< typeof M20.StandardErrorCode >, z.infer< typeof M20.StandardErrorCode > >>;
-export type Iso83 = Assert<Eq< z.input< typeof M20.RetryStrategy >, z.infer< typeof M20.RetryStrategy > >>;
-
-// api/error-code-ledger.zod.ts
-export type Iso838 = Assert<Eq< z.input< typeof M182.StandardSynonymWaiverSchema >, z.infer< typeof M182.StandardSynonymWaiverSchema > >>;
-export type Iso865 = Assert<Eq< z.input< typeof M182.ProvenanceWaiverSchema >, z.infer< typeof M182.ProvenanceWaiverSchema > >>;
-export type Iso84 = Assert<Eq< z.input< typeof M20.FieldErrorCode >, z.infer< typeof M20.FieldErrorCode > >>;
-export type Iso85 = Assert<Eq< z.input< typeof M20.FieldErrorSchema >, z.infer< typeof M20.FieldErrorSchema > >>;
-
-// api/events.zod.ts
-export type Iso86 = Assert<Eq< z.input< typeof M21.MetadataEventType >, z.infer< typeof M21.MetadataEventType > >>;
-export type Iso87 = Assert<Eq< z.input< typeof M21.DataEventType >, z.infer< typeof M21.DataEventType > >>;
-export type Iso88 = Assert<Eq< z.input< typeof M21.BulkDataEventType >, z.infer< typeof M21.BulkDataEventType > >>;
-export type Iso89 = Assert<Eq< z.input< typeof M21.MetadataEventSchema >, z.infer< typeof M21.MetadataEventSchema > >>;
-export type Iso90 = Assert<Eq< z.input< typeof M21.DataEventSchema >, z.infer< typeof M21.DataEventSchema > >>;
-export type Iso91 = Assert<Eq< z.input< typeof M21.BulkDataEventSchema >, z.infer< typeof M21.BulkDataEventSchema > >>;
-
-// api/export.zod.ts
-export type Iso92 = Assert<Eq< z.input< typeof M22.ExportFormat >, z.infer< typeof M22.ExportFormat > >>;
-export type Iso93 = Assert<Eq< z.input< typeof M22.ExportJobStatus >, z.infer< typeof M22.ExportJobStatus > >>;
-export type Iso94 = Assert<Eq< z.input< typeof M22.ImportValidationMode >, z.infer< typeof M22.ImportValidationMode > >>;
-export type Iso95 = Assert<Eq< z.input< typeof M22.DeduplicationStrategy >, z.infer< typeof M22.DeduplicationStrategy > >>;
-export type Iso96 = Assert<Eq< z.input< typeof M22.ImportWriteMode >, z.infer< typeof M22.ImportWriteMode > >>;
-export type Iso97 = Assert<Eq< z.input< typeof M22.ImportRowResultSchema >, z.infer< typeof M22.ImportRowResultSchema > >>;
-export type Iso98 = Assert<Eq< z.input< typeof M22.ImportResponseSchema >, z.infer< typeof M22.ImportResponseSchema > >>;
-export type Iso99 = Assert<Eq< z.input< typeof M22.ImportJobStatus >, z.infer< typeof M22.ImportJobStatus > >>;
-export type Iso100 = Assert<Eq< z.input< typeof M22.CreateImportJobResponseSchema >, z.infer< typeof M22.CreateImportJobResponseSchema > >>;
-export type Iso101 = Assert<Eq< z.input< typeof M22.ImportJobProgressSchema >, z.infer< typeof M22.ImportJobProgressSchema > >>;
-export type Iso102 = Assert<Eq< z.input< typeof M22.ImportJobResultsSchema >, z.infer< typeof M22.ImportJobResultsSchema > >>;
-export type Iso103 = Assert<Eq< z.input< typeof M22.ImportJobSummarySchema >, z.infer< typeof M22.ImportJobSummarySchema > >>;
-export type Iso104 = Assert<Eq< z.input< typeof M22.ListImportJobsResponseSchema >, z.infer< typeof M22.ListImportJobsResponseSchema > >>;
-export type Iso105 = Assert<Eq< z.input< typeof M22.UndoImportJobResponseSchema >, z.infer< typeof M22.UndoImportJobResponseSchema > >>;
-export type Iso106 = Assert<Eq< z.input< typeof M22.GetExportJobDownloadRequestSchema >, z.infer< typeof M22.GetExportJobDownloadRequestSchema > >>;
-export type Iso107 = Assert<Eq< z.input< typeof M22.ExportJobSummarySchema >, z.infer< typeof M22.ExportJobSummarySchema > >>;
-
-// api/http-cache.zod.ts
-export type Iso108 = Assert<Eq< z.input< typeof M23.CacheDirective >, z.infer< typeof M23.CacheDirective > >>;
-export type Iso109 = Assert<Eq< z.input< typeof M23.CacheControlSchema >, z.infer< typeof M23.CacheControlSchema > >>;
-export type Iso110 = Assert<Eq< z.input< typeof M23.MetadataCacheRequestSchema >, z.infer< typeof M23.MetadataCacheRequestSchema > >>;
-export type Iso111 = Assert<Eq< z.input< typeof M23.CacheInvalidationTarget >, z.infer< typeof M23.CacheInvalidationTarget > >>;
-export type Iso112 = Assert<Eq< z.input< typeof M23.CacheInvalidationResponseSchema >, z.infer< typeof M23.CacheInvalidationResponseSchema > >>;
-
-// api/metadata.zod.ts
-export type Iso113 = Assert<Eq< z.input< typeof M24.MetadataRegisterRequestSchema >, z.infer< typeof M24.MetadataRegisterRequestSchema > >>;
-
-// api/odata.zod.ts
-export type Iso114 = Assert<Eq< z.input< typeof M25.ODataQuerySchema >, z.infer< typeof M25.ODataQuerySchema > >>;
-export type Iso115 = Assert<Eq< z.input< typeof M25.ODataFilterFunctionSchema >, z.infer< typeof M25.ODataFilterFunctionSchema > >>;
-export type Iso116 = Assert<Eq< z.input< typeof M25.ODataResponseSchema >, z.infer< typeof M25.ODataResponseSchema > >>;
-export type Iso117 = Assert<Eq< z.input< typeof M25.ODataErrorSchema >, z.infer< typeof M25.ODataErrorSchema > >>;
-
-// api/package-api.zod.ts
-export type Iso118 = Assert<Eq< z.input< typeof M26.PackagePathParamsSchema >, z.infer< typeof M26.PackagePathParamsSchema > >>;
-export type Iso119 = Assert<Eq< z.input< typeof M26.GetInstalledPackageRequestSchema >, z.infer< typeof M26.GetInstalledPackageRequestSchema > >>;
-export type Iso120 = Assert<Eq< z.input< typeof M26.UninstallPackageApiRequestSchema >, z.infer< typeof M26.UninstallPackageApiRequestSchema > >>;
-export type Iso121 = Assert<Eq< z.input< typeof M26.PackageApiErrorCode >, z.infer< typeof M26.PackageApiErrorCode > >>;
-
-// api/plugin-rest-api.zod.ts
-export type Iso122 = Assert<Eq< z.input< typeof M27.RestApiRouteCategory >, z.infer< typeof M27.RestApiRouteCategory > >>;
-export type Iso124 = Assert<Eq< z.input< typeof M27.ValidationMode >, z.infer< typeof M27.ValidationMode > >>;
-
-// api/protocol.zod.ts
-export type Iso127 = Assert<Eq< z.input< typeof M28.GetDiscoveryRequestSchema >, z.infer< typeof M28.GetDiscoveryRequestSchema > >>;
-export type Iso128 = Assert<Eq< z.input< typeof M28.GetDiscoveryResponseSchema >, z.infer< typeof M28.GetDiscoveryResponseSchema > >>;
-export type Iso129 = Assert<Eq< z.input< typeof M28.GetMetaTypesRequestSchema >, z.infer< typeof M28.GetMetaTypesRequestSchema > >>;
-export type Iso130 = Assert<Eq< z.input< typeof M28.GetMetaTypesResponseSchema >, z.infer< typeof M28.GetMetaTypesResponseSchema > >>;
-export type Iso131 = Assert<Eq< z.input< typeof M28.GetMetaItemsRequestSchema >, z.infer< typeof M28.GetMetaItemsRequestSchema > >>;
-export type Iso132 = Assert<Eq< z.input< typeof M28.GetMetaItemsResponseSchema >, z.infer< typeof M28.GetMetaItemsResponseSchema > >>;
-export type Iso133 = Assert<Eq< z.input< typeof M28.GetMetaItemRequestSchema >, z.infer< typeof M28.GetMetaItemRequestSchema > >>;
-export type Iso134 = Assert<Eq< z.input< typeof M28.GetMetaItemResponseSchema >, z.infer< typeof M28.GetMetaItemResponseSchema > >>;
-export type Iso853 = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredRequestSchema >, z.infer< typeof M28.GetMetaItemLayeredRequestSchema > >>;
-export type Iso833 = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredResponseSchema >, z.infer< typeof M28.GetMetaItemLayeredResponseSchema > >>;
-export type Iso135 = Assert<Eq< z.input< typeof M28.SaveMetaItemRequestSchema >, z.infer< typeof M28.SaveMetaItemRequestSchema > >>;
-export type Iso136 = Assert<Eq< z.input< typeof M28.SaveMetaItemResponseSchema >, z.infer< typeof M28.SaveMetaItemResponseSchema > >>;
-export type Iso836 = Assert<Eq< z.input< typeof M28.PublishMetaItemResponseSchema >, z.infer< typeof M28.PublishMetaItemResponseSchema > >>;
-export type Iso856 = Assert<Eq< z.input< typeof M28.PublishMetaItemRequestSchema >, z.infer< typeof M28.PublishMetaItemRequestSchema > >>;
-export type Iso852 = Assert<Eq< z.input< typeof M28.PublishPackageDraftsResponseSchema >, z.infer< typeof M28.PublishPackageDraftsResponseSchema > >>;
-export type Iso837 = Assert<Eq< z.input< typeof M28.RuntimeAuthoringIssueSchema >, z.infer< typeof M28.RuntimeAuthoringIssueSchema > >>;
-export type Iso137 = Assert<Eq< z.input< typeof M28.DeleteMetaItemRequestSchema >, z.infer< typeof M28.DeleteMetaItemRequestSchema > >>;
-export type Iso138 = Assert<Eq< z.input< typeof M28.DeleteMetaItemResponseSchema >, z.infer< typeof M28.DeleteMetaItemResponseSchema > >>;
-export type Iso857 = Assert<Eq< z.input< typeof M28.AuditMetaItemRequestSchema >, z.infer< typeof M28.AuditMetaItemRequestSchema > >>;
-export type Iso858 = Assert<Eq< z.input< typeof M28.AuditMetaItemResponseSchema >, z.infer< typeof M28.AuditMetaItemResponseSchema > >>;
-export type Iso863 = Assert<Eq< z.input< typeof M28.HistoryMetaItemRequestSchema >, z.infer< typeof M28.HistoryMetaItemRequestSchema > >>;
-export type Iso864 = Assert<Eq< z.input< typeof M28.HistoryMetaItemResponseSchema >, z.infer< typeof M28.HistoryMetaItemResponseSchema > >>;
-export type Iso139 = Assert<Eq< z.input< typeof M28.GetMetaItemCachedRequestSchema >, z.infer< typeof M28.GetMetaItemCachedRequestSchema > >>;
-export type Iso140 = Assert<Eq< z.input< typeof M28.GetUiViewRequestSchema >, z.infer< typeof M28.GetUiViewRequestSchema > >>;
-export type Iso141 = Assert<Eq< z.input< typeof M28.AutomationTriggerRequestSchema >, z.infer< typeof M28.AutomationTriggerRequestSchema > >>;
-export type Iso142 = Assert<Eq< z.input< typeof M28.AutomationTriggerResponseSchema >, z.infer< typeof M28.AutomationTriggerResponseSchema > >>;
-export type Iso143 = Assert<Eq< z.input< typeof M28.FindDataResponseSchema >, z.infer< typeof M28.FindDataResponseSchema > >>;
-export type Iso144 = Assert<Eq< z.input< typeof M28.GetDataResponseSchema >, z.infer< typeof M28.GetDataResponseSchema > >>;
-export type Iso145 = Assert<Eq< z.input< typeof M28.CreateDataResponseSchema >, z.infer< typeof M28.CreateDataResponseSchema > >>;
-export type Iso146 = Assert<Eq< z.input< typeof M28.UpdateDataResponseSchema >, z.infer< typeof M28.UpdateDataResponseSchema > >>;
-export type Iso147 = Assert<Eq< z.input< typeof M28.DeleteDataResponseSchema >, z.infer< typeof M28.DeleteDataResponseSchema > >>;
-export type Iso859 = Assert<Eq< z.input< typeof M28.CloneDataResponseSchema >, z.infer< typeof M28.CloneDataResponseSchema > >>;
-export type Iso860 = Assert<Eq< z.input< typeof M28.SearchAllHitSchema >, z.infer< typeof M28.SearchAllHitSchema > >>;
-export type Iso866 = Assert<Eq< z.input< typeof M28.SearchAllPageHitSchema >, z.infer< typeof M28.SearchAllPageHitSchema > >>;
-export type Iso861 = Assert<Eq< z.input< typeof M28.SearchAllResponseSchema >, z.infer< typeof M28.SearchAllResponseSchema > >>;
-export type Iso148 = Assert<Eq< z.input< typeof M28.CreateManyDataResponseSchema >, z.infer< typeof M28.CreateManyDataResponseSchema > >>;
-export type Iso150 = Assert<Eq< z.input< typeof M28.CheckPermissionResponseSchema >, z.infer< typeof M28.CheckPermissionResponseSchema > >>;
-export type Iso151 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsResponseSchema >, z.infer< typeof M28.GetEffectivePermissionsResponseSchema > >>;
-export type Iso152 = Assert<Eq< z.input< typeof M28.RealtimeConnectResponseSchema >, z.infer< typeof M28.RealtimeConnectResponseSchema > >>;
-export type Iso153 = Assert<Eq< z.input< typeof M28.RealtimeDisconnectResponseSchema >, z.infer< typeof M28.RealtimeDisconnectResponseSchema > >>;
-export type Iso154 = Assert<Eq< z.input< typeof M28.RealtimeSubscribeResponseSchema >, z.infer< typeof M28.RealtimeSubscribeResponseSchema > >>;
-export type Iso155 = Assert<Eq< z.input< typeof M28.RealtimeUnsubscribeResponseSchema >, z.infer< typeof M28.RealtimeUnsubscribeResponseSchema > >>;
-export type Iso156 = Assert<Eq< z.input< typeof M28.SetPresenceResponseSchema >, z.infer< typeof M28.SetPresenceResponseSchema > >>;
-export type Iso157 = Assert<Eq< z.input< typeof M28.GetPresenceResponseSchema >, z.infer< typeof M28.GetPresenceResponseSchema > >>;
-export type Iso158 = Assert<Eq< z.input< typeof M28.RegisterDeviceResponseSchema >, z.infer< typeof M28.RegisterDeviceResponseSchema > >>;
-export type Iso159 = Assert<Eq< z.input< typeof M28.UnregisterDeviceResponseSchema >, z.infer< typeof M28.UnregisterDeviceResponseSchema > >>;
-export type Iso160 = Assert<Eq< z.input< typeof M28.MarkNotificationsReadResponseSchema >, z.infer< typeof M28.MarkNotificationsReadResponseSchema > >>;
-export type Iso161 = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadResponseSchema >, z.infer< typeof M28.MarkAllNotificationsReadResponseSchema > >>;
-export type Iso162 = Assert<Eq< z.input< typeof M28.AiChatResponseSchema >, z.infer< typeof M28.AiChatResponseSchema > >>;
-export type Iso163 = Assert<Eq< z.input< typeof M28.AiStreamChunkSchema >, z.infer< typeof M28.AiStreamChunkSchema > >>;
-export type Iso164 = Assert<Eq< z.input< typeof M28.AiModelsResponseSchema >, z.infer< typeof M28.AiModelsResponseSchema > >>;
-export type Iso165 = Assert<Eq< z.input< typeof M28.AiConversationSchema >, z.infer< typeof M28.AiConversationSchema > >>;
-export type Iso166 = Assert<Eq< z.input< typeof M28.ListAiConversationsResponseSchema >, z.infer< typeof M28.ListAiConversationsResponseSchema > >>;
-export type Iso167 = Assert<Eq< z.input< typeof M28.AiAgentCapabilitiesSchema >, z.infer< typeof M28.AiAgentCapabilitiesSchema > >>;
-export type Iso168 = Assert<Eq< z.input< typeof M28.AiAgentSummarySchema >, z.infer< typeof M28.AiAgentSummarySchema > >>;
-export type Iso169 = Assert<Eq< z.input< typeof M28.AiAgentsResponseSchema >, z.infer< typeof M28.AiAgentsResponseSchema > >>;
-export type Iso170 = Assert<Eq< z.input< typeof M28.AiPendingActionStatusSchema >, z.infer< typeof M28.AiPendingActionStatusSchema > >>;
-export type Iso171 = Assert<Eq< z.input< typeof M28.AiPendingActionSchema >, z.infer< typeof M28.AiPendingActionSchema > >>;
-export type Iso172 = Assert<Eq< z.input< typeof M28.ListAiPendingActionsResponseSchema >, z.infer< typeof M28.ListAiPendingActionsResponseSchema > >>;
-export type Iso173 = Assert<Eq< z.input< typeof M28.ApproveAiPendingActionResponseSchema >, z.infer< typeof M28.ApproveAiPendingActionResponseSchema > >>;
-export type Iso174 = Assert<Eq< z.input< typeof M28.RejectAiPendingActionResponseSchema >, z.infer< typeof M28.RejectAiPendingActionResponseSchema > >>;
-export type Iso175 = Assert<Eq< z.input< typeof M28.GetTranslationsResponseSchema >, z.infer< typeof M28.GetTranslationsResponseSchema > >>;
-export type Iso176 = Assert<Eq< z.input< typeof M28.GetFieldLabelsResponseSchema >, z.infer< typeof M28.GetFieldLabelsResponseSchema > >>;
-
-// api/query-adapter.zod.ts
-export type Iso177 = Assert<Eq< z.input< typeof M29.QueryAdapterTargetSchema >, z.infer< typeof M29.QueryAdapterTargetSchema > >>;
-export type Iso178 = Assert<Eq< z.input< typeof M29.OperatorMappingSchema >, z.infer< typeof M29.OperatorMappingSchema > >>;
-
-// api/realtime-shared.zod.ts
-export type Iso179 = Assert<Eq< z.input< typeof M30.PresenceStatus >, z.infer< typeof M30.PresenceStatus > >>;
-export type Iso180 = Assert<Eq< z.input< typeof M30.RealtimeRecordAction >, z.infer< typeof M30.RealtimeRecordAction > >>;
-export type Iso181 = Assert<Eq< z.input< typeof M30.BasePresenceSchema >, z.infer< typeof M30.BasePresenceSchema > >>;
-
-// api/realtime.zod.ts
-export type Iso182 = Assert<Eq< z.input< typeof M31.TransportProtocol >, z.infer< typeof M31.TransportProtocol > >>;
-export type Iso183 = Assert<Eq< z.input< typeof M31.RealtimeEventType >, z.infer< typeof M31.RealtimeEventType > >>;
-export type Iso184 = Assert<Eq< z.input< typeof M31.SubscriptionSchema >, z.infer< typeof M31.SubscriptionSchema > >>;
-export type Iso185 = Assert<Eq< z.input< typeof M31.RealtimePresenceSchema >, z.infer< typeof M31.RealtimePresenceSchema > >>;
-export type Iso186 = Assert<Eq< z.input< typeof M31.RealtimeEventSchema >, z.infer< typeof M31.RealtimeEventSchema > >>;
-
-// api/rest-server.zod.ts
-export type Iso187 = Assert<Eq< z.input< typeof M32.CrudOperation >, z.infer< typeof M32.CrudOperation > >>;
-export type Iso189 = Assert<Eq< z.input< typeof M32.GeneratedEndpointSchema >, z.infer< typeof M32.GeneratedEndpointSchema > >>;
-export type Iso190 = Assert<Eq< z.input< typeof M32.EndpointRegistrySchema >, z.infer< typeof M32.EndpointRegistrySchema > >>;
-
-// api/router.zod.ts
-export type Iso191 = Assert<Eq< z.input< typeof M33.RouteCategory >, z.infer< typeof M33.RouteCategory > >>;
-export type Iso192 = Assert<Eq< z.input< typeof M33.ConflictResolutionStrategy >, z.infer< typeof M33.ConflictResolutionStrategy > >>;
-
-// api/storage.zod.ts
-export type Iso193 = Assert<Eq< z.input< typeof M34.CompleteUploadRequestSchema >, z.infer< typeof M34.CompleteUploadRequestSchema > >>;
-export type Iso194 = Assert<Eq< z.input< typeof M34.FileTypeValidationSchema >, z.infer< typeof M34.FileTypeValidationSchema > >>;
-export type Iso195 = Assert<Eq< z.input< typeof M34.UploadChunkRequestSchema >, z.infer< typeof M34.UploadChunkRequestSchema > >>;
-export type Iso196 = Assert<Eq< z.input< typeof M34.CompleteChunkedUploadRequestSchema >, z.infer< typeof M34.CompleteChunkedUploadRequestSchema > >>;
-
-// api/versioning.zod.ts
-export type Iso197 = Assert<Eq< z.input< typeof M35.VersioningStrategy >, z.infer< typeof M35.VersioningStrategy > >>;
-export type Iso198 = Assert<Eq< z.input< typeof M35.VersionStatus >, z.infer< typeof M35.VersionStatus > >>;
-export type Iso199 = Assert<Eq< z.input< typeof M35.VersionDefinitionSchema >, z.infer< typeof M35.VersionDefinitionSchema > >>;
-export type Iso200 = Assert<Eq< z.input< typeof M35.VersionNegotiationResponseSchema >, z.infer< typeof M35.VersionNegotiationResponseSchema > >>;
-
-// api/websocket.zod.ts
-export type Iso201 = Assert<Eq< z.input< typeof M36.WebSocketMessageType >, z.infer< typeof M36.WebSocketMessageType > >>;
-export type Iso202 = Assert<Eq< z.input< typeof M36.EventPatternSchema >, z.infer< typeof M36.EventPatternSchema > >>;
-export type Iso203 = Assert<Eq< z.input< typeof M36.EventSubscriptionSchema >, z.infer< typeof M36.EventSubscriptionSchema > >>;
-export type Iso204 = Assert<Eq< z.input< typeof M36.UnsubscribeRequestSchema >, z.infer< typeof M36.UnsubscribeRequestSchema > >>;
-export type Iso205 = Assert<Eq< z.input< typeof M36.WebSocketPresenceStatus >, z.infer< typeof M36.WebSocketPresenceStatus > >>;
-export type Iso206 = Assert<Eq< z.input< typeof M36.PresenceStateSchema >, z.infer< typeof M36.PresenceStateSchema > >>;
-export type Iso207 = Assert<Eq< z.input< typeof M36.PresenceUpdateSchema >, z.infer< typeof M36.PresenceUpdateSchema > >>;
-export type Iso208 = Assert<Eq< z.input< typeof M36.CursorPositionSchema >, z.infer< typeof M36.CursorPositionSchema > >>;
-export type Iso209 = Assert<Eq< z.input< typeof M36.EditOperationType >, z.infer< typeof M36.EditOperationType > >>;
-export type Iso210 = Assert<Eq< z.input< typeof M36.EditOperationSchema >, z.infer< typeof M36.EditOperationSchema > >>;
-export type Iso211 = Assert<Eq< z.input< typeof M36.DocumentStateSchema >, z.infer< typeof M36.DocumentStateSchema > >>;
-export type Iso212 = Assert<Eq< z.input< typeof M36.SubscribeMessageSchema >, z.infer< typeof M36.SubscribeMessageSchema > >>;
-export type Iso213 = Assert<Eq< z.input< typeof M36.UnsubscribeMessageSchema >, z.infer< typeof M36.UnsubscribeMessageSchema > >>;
-export type Iso214 = Assert<Eq< z.input< typeof M36.EventMessageSchema >, z.infer< typeof M36.EventMessageSchema > >>;
-export type Iso215 = Assert<Eq< z.input< typeof M36.PresenceMessageSchema >, z.infer< typeof M36.PresenceMessageSchema > >>;
-export type Iso216 = Assert<Eq< z.input< typeof M36.CursorMessageSchema >, z.infer< typeof M36.CursorMessageSchema > >>;
-export type Iso217 = Assert<Eq< z.input< typeof M36.EditMessageSchema >, z.infer< typeof M36.EditMessageSchema > >>;
-export type Iso218 = Assert<Eq< z.input< typeof M36.AckMessageSchema >, z.infer< typeof M36.AckMessageSchema > >>;
-export type Iso219 = Assert<Eq< z.input< typeof M36.ErrorMessageSchema >, z.infer< typeof M36.ErrorMessageSchema > >>;
-export type Iso220 = Assert<Eq< z.input< typeof M36.PingMessageSchema >, z.infer< typeof M36.PingMessageSchema > >>;
-export type Iso221 = Assert<Eq< z.input< typeof M36.PongMessageSchema >, z.infer< typeof M36.PongMessageSchema > >>;
-export type Iso222 = Assert<Eq< z.input< typeof M36.WebSocketMessageSchema >, z.infer< typeof M36.WebSocketMessageSchema > >>;
-export type Iso223 = Assert<Eq< z.input< typeof M36.WebSocketEventSchema >, z.infer< typeof M36.WebSocketEventSchema > >>;
-export type Iso224 = Assert<Eq< z.input< typeof M36.SimplePresenceStateSchema >, z.infer< typeof M36.SimplePresenceStateSchema > >>;
-export type Iso225 = Assert<Eq< z.input< typeof M36.SimpleCursorPositionSchema >, z.infer< typeof M36.SimpleCursorPositionSchema > >>;
-
-// automation/approval.zod.ts
-export type Iso226 = Assert<Eq< z.input< typeof M37.ApprovalDecision >, z.infer< typeof M37.ApprovalDecision > >>;
-export type Iso227 = Assert<Eq< z.input< typeof M37.ApprovalNodeApproverSchema >, z.infer< typeof M37.ApprovalNodeApproverSchema > >>;
-export type Iso228 = Assert<Eq< z.input< typeof M37.DecisionOutputDefSchema >, z.infer< typeof M37.DecisionOutputDefSchema > >>;
-
-// automation/bpmn-interop.zod.ts
-export type Iso229 = Assert<Eq< z.input< typeof M38.BpmnUnmappedStrategySchema >, z.infer< typeof M38.BpmnUnmappedStrategySchema > >>;
-export type Iso230 = Assert<Eq< z.input< typeof M38.BpmnVersionSchema >, z.infer< typeof M38.BpmnVersionSchema > >>;
-export type Iso231 = Assert<Eq< z.input< typeof M38.BpmnDiagnosticSchema >, z.infer< typeof M38.BpmnDiagnosticSchema > >>;
-
-// automation/execution.zod.ts
-export type Iso232 = Assert<Eq< z.input< typeof M39.ExecutionStatus >, z.infer< typeof M39.ExecutionStatus > >>;
-export type Iso233 = Assert<Eq< z.input< typeof M39.ExecutionStepMetricsSchema >, z.infer< typeof M39.ExecutionStepMetricsSchema > >>;
-export type Iso234 = Assert<Eq< z.input< typeof M39.ExecutionStepSkipReasonSchema >, z.infer< typeof M39.ExecutionStepSkipReasonSchema > >>;
-export type Iso235 = Assert<Eq< z.input< typeof M39.FlowRunNodeSummarySchema >, z.infer< typeof M39.FlowRunNodeSummarySchema > >>;
-export type Iso236 = Assert<Eq< z.input< typeof M39.FlowRunGateSummarySchema >, z.infer< typeof M39.FlowRunGateSummarySchema > >>;
-export type Iso237 = Assert<Eq< z.input< typeof M39.ExecutionErrorSeverity >, z.infer< typeof M39.ExecutionErrorSeverity > >>;
-
-// automation/flow-function.zod.ts
-export type Iso238 = Assert<Eq< z.input< typeof M40.FlowFunctionEffectSchema >, z.infer< typeof M40.FlowFunctionEffectSchema > >>;
-
-// automation/node-executor.zod.ts
-export type Iso239 = Assert<Eq< z.input< typeof M41.WaitEventTypeSchema >, z.infer< typeof M41.WaitEventTypeSchema > >>;
-export type Iso240 = Assert<Eq< z.input< typeof M41.WaitResumePayloadSchema >, z.infer< typeof M41.WaitResumePayloadSchema > >>;
-export type Iso241 = Assert<Eq< z.input< typeof M41.WaitTimeoutBehaviorSchema >, z.infer< typeof M41.WaitTimeoutBehaviorSchema > >>;
-export type Iso242 = Assert<Eq< z.input< typeof M41.ActionCategorySchema >, z.infer< typeof M41.ActionCategorySchema > >>;
-export type Iso243 = Assert<Eq< z.input< typeof M41.ActionParadigmSchema >, z.infer< typeof M41.ActionParadigmSchema > >>;
-
-// automation/state-machine.zod.ts
-export type Iso244 = Assert<Eq< z.input< typeof M42.ActionRefSchema >, z.infer< typeof M42.ActionRefSchema > >>;
-export type Iso245 = Assert<Eq< z.input< typeof M42.TransitionSchema >, z.infer< typeof M42.TransitionSchema > >>;
-export type Iso246 = Assert<Eq< z.input< typeof M42.StateMachineSchema >, z.infer< typeof M42.StateMachineSchema > >>;
-
-// automation/time-relative-trigger.zod.ts
-export type Iso247 = Assert<Eq< z.input< typeof M43.TimeRelativeTriggerSchema >, z.infer< typeof M43.TimeRelativeTriggerSchema > >>;
-
-// automation/schedule-organization.zod.ts
-// [#16659] A bare non-empty string: no transform, no default, no coercion — an
-// organization id is written exactly as it is stored. So input === infer, and an
-// `XParsed` here would be a permanent synonym. The day this schema learns to
-// normalize an id, this line goes red and the ADR's remedy applies.
-export type Iso872 = Assert<Eq< z.input< typeof M186.ScheduleOrganizationSchema >, z.infer< typeof M186.ScheduleOrganizationSchema > >>;
-
-// automation/webhook.zod.ts
-export type Iso248 = Assert<Eq< z.input< typeof M44.WebhookTriggerType >, z.infer< typeof M44.WebhookTriggerType > >>;
-
-// marketplace/marketplace.zod.ts
-export type Iso274 = Assert<Eq< z.input< typeof M50.ArtifactDownloadResponseSchema >, z.infer< typeof M50.ArtifactDownloadResponseSchema > >>;
-export type Iso275 = Assert<Eq< z.input< typeof M50.PublisherVerificationSchema >, z.infer< typeof M50.PublisherVerificationSchema > >>;
-export type Iso276 = Assert<Eq< z.input< typeof M50.MarketplaceCategorySchema >, z.infer< typeof M50.MarketplaceCategorySchema > >>;
-export type Iso277 = Assert<Eq< z.input< typeof M50.ListingStatusSchema >, z.infer< typeof M50.ListingStatusSchema > >>;
-export type Iso278 = Assert<Eq< z.input< typeof M50.PricingModelSchema >, z.infer< typeof M50.PricingModelSchema > >>;
-export type Iso279 = Assert<Eq< z.input< typeof M50.MarketplaceInstallResponseSchema >, z.infer< typeof M50.MarketplaceInstallResponseSchema > >>;
-
-// marketplace/package-version.zod.ts
-export type Iso280 = Assert<Eq< z.input< typeof M51.PackageVersionStatusSchema >, z.infer< typeof M51.PackageVersionStatusSchema > >>;
-export type Iso281 = Assert<Eq< z.input< typeof M51.CreatePackageVersionRequestSchema >, z.infer< typeof M51.CreatePackageVersionRequestSchema > >>;
-export type Iso282 = Assert<Eq< z.input< typeof M51.UpdatePackageVersionRequestSchema >, z.infer< typeof M51.UpdatePackageVersionRequestSchema > >>;
-export type Iso283 = Assert<Eq< z.input< typeof M51.PublishPackageVersionRequestSchema >, z.infer< typeof M51.PublishPackageVersionRequestSchema > >>;
-
-// marketplace/package.zod.ts
-export type Iso284 = Assert<Eq< z.input< typeof M52.PackageVisibilitySchema >, z.infer< typeof M52.PackageVisibilitySchema > >>;
-export type Iso285 = Assert<Eq< z.input< typeof M52.PackageCategorySchema >, z.infer< typeof M52.PackageCategorySchema > >>;
-export type Iso286 = Assert<Eq< z.input< typeof M52.PackagePublisherSchema >, z.infer< typeof M52.PackagePublisherSchema > >>;
-export type Iso287 = Assert<Eq< z.input< typeof M52.PackageLocaleSchema >, z.infer< typeof M52.PackageLocaleSchema > >>;
-export type Iso288 = Assert<Eq< z.input< typeof M52.PackageTranslationSchema >, z.infer< typeof M52.PackageTranslationSchema > >>;
-export type Iso289 = Assert<Eq< z.input< typeof M52.PackageTranslationsSchema >, z.infer< typeof M52.PackageTranslationsSchema > >>;
-export type Iso290 = Assert<Eq< z.input< typeof M52.CreatePackageRequestSchema >, z.infer< typeof M52.CreatePackageRequestSchema > >>;
-export type Iso291 = Assert<Eq< z.input< typeof M52.UpdatePackageRequestSchema >, z.infer< typeof M52.UpdatePackageRequestSchema > >>;
-
-// marketplace/template-manifest.zod.ts
-export type Iso292 = Assert<Eq< z.input< typeof M53.TemplateManifestSchema >, z.infer< typeof M53.TemplateManifestSchema > >>;
-
-// data/analytics.zod.ts
-export type Iso298 = Assert<Eq< z.input< typeof M55.MetricSchema >, z.infer< typeof M55.MetricSchema > >>;
-export type Iso299 = Assert<Eq< z.input< typeof M55.DimensionSchema >, z.infer< typeof M55.DimensionSchema > >>;
-export type Iso300 = Assert<Eq< z.input< typeof M55.AnalyticsQuerySchema >, z.infer< typeof M55.AnalyticsQuerySchema > >>;
-
-// data/data-engine.zod.ts
-export type Iso301 = Assert<Eq< z.input< typeof M56.BaseEngineOptionsSchema >, z.infer< typeof M56.BaseEngineOptionsSchema > >>;
-export type Iso302 = Assert<Eq< z.input< typeof M56.EngineUpdateOptionsSchema >, z.infer< typeof M56.EngineUpdateOptionsSchema > >>;
-export type Iso303 = Assert<Eq< z.input< typeof M56.DroppedFieldsEventSchema >, z.infer< typeof M56.DroppedFieldsEventSchema > >>;
-export type Iso304 = Assert<Eq< z.input< typeof M56.EngineDeleteOptionsSchema >, z.infer< typeof M56.EngineDeleteOptionsSchema > >>;
-export type Iso305 = Assert<Eq< z.input< typeof M56.EngineAggregateOptionsSchema >, z.infer< typeof M56.EngineAggregateOptionsSchema > >>;
-export type Iso306 = Assert<Eq< z.input< typeof M56.EngineCountOptionsSchema >, z.infer< typeof M56.EngineCountOptionsSchema > >>;
-export type Iso307 = Assert<Eq< z.input< typeof M56.DataEngineFilterSchema >, z.infer< typeof M56.DataEngineFilterSchema > >>;
-export type Iso308 = Assert<Eq< z.input< typeof M56.DataEngineInsertOptionsSchema >, z.infer< typeof M56.DataEngineInsertOptionsSchema > >>;
-export type Iso309 = Assert<Eq< z.input< typeof M56.DataEngineUpdateOptionsSchema >, z.infer< typeof M56.DataEngineUpdateOptionsSchema > >>;
-export type Iso310 = Assert<Eq< z.input< typeof M56.DataEngineDeleteOptionsSchema >, z.infer< typeof M56.DataEngineDeleteOptionsSchema > >>;
-export type Iso311 = Assert<Eq< z.input< typeof M56.DataEngineAggregateOptionsSchema >, z.infer< typeof M56.DataEngineAggregateOptionsSchema > >>;
-export type Iso312 = Assert<Eq< z.input< typeof M56.DataEngineCountOptionsSchema >, z.infer< typeof M56.DataEngineCountOptionsSchema > >>;
-
-// data/datasource.zod.ts
-export type Iso313 = Assert<Eq< z.input< typeof M57.DriverDefinitionSchema >, z.infer< typeof M57.DriverDefinitionSchema > >>;
-export type Iso314 = Assert<Eq< z.input< typeof M57.SchemaModeSchema >, z.infer< typeof M57.SchemaModeSchema > >>;
-
-// data/driver-nosql.zod.ts
-export type Iso315 = Assert<Eq< z.input< typeof M58.NoSQLDatabaseTypeSchema >, z.infer< typeof M58.NoSQLDatabaseTypeSchema > >>;
-export type Iso316 = Assert<Eq< z.input< typeof M58.NoSQLOperationTypeSchema >, z.infer< typeof M58.NoSQLOperationTypeSchema > >>;
-export type Iso317 = Assert<Eq< z.input< typeof M58.ConsistencyLevelSchema >, z.infer< typeof M58.ConsistencyLevelSchema > >>;
-export type Iso318 = Assert<Eq< z.input< typeof M58.NoSQLIndexTypeSchema >, z.infer< typeof M58.NoSQLIndexTypeSchema > >>;
-export type Iso319 = Assert<Eq< z.input< typeof M58.NoSQLDataTypeMappingSchema >, z.infer< typeof M58.NoSQLDataTypeMappingSchema > >>;
-export type Iso320 = Assert<Eq< z.input< typeof M58.NoSQLQueryOptionsSchema >, z.infer< typeof M58.NoSQLQueryOptionsSchema > >>;
-export type Iso321 = Assert<Eq< z.input< typeof M58.AggregationStageSchema >, z.infer< typeof M58.AggregationStageSchema > >>;
-export type Iso322 = Assert<Eq< z.input< typeof M58.AggregationPipelineSchema >, z.infer< typeof M58.AggregationPipelineSchema > >>;
-export type Iso323 = Assert<Eq< z.input< typeof M58.NoSQLTransactionOptionsSchema >, z.infer< typeof M58.NoSQLTransactionOptionsSchema > >>;
-
-// data/driver-sql.zod.ts
-export type Iso324 = Assert<Eq< z.input< typeof M59.SQLDialectSchema >, z.infer< typeof M59.SQLDialectSchema > >>;
-export type Iso325 = Assert<Eq< z.input< typeof M59.DataTypeMappingSchema >, z.infer< typeof M59.DataTypeMappingSchema > >>;
-
-// data/driver.zod.ts
-export type Iso326 = Assert<Eq< z.input< typeof M60.DriverOptionsSchema >, z.infer< typeof M60.DriverOptionsSchema > >>;
-export type Iso327 = Assert<Eq< z.input< typeof M60.DriverCapabilitiesSchema >, z.infer< typeof M60.DriverCapabilitiesSchema > >>;
-
-// data/driver/common.zod.ts
-export type Iso328 = Assert<Eq< z.input< typeof M61.SqlAutoMigrateSchema >, z.infer< typeof M61.SqlAutoMigrateSchema > >>;
-
-// data/driver/memory.zod.ts
-export type Iso329 = Assert<Eq< z.input< typeof M62.PersistenceAdapterSchema >, z.infer< typeof M62.PersistenceAdapterSchema > >>;
-export type Iso330 = Assert<Eq< z.input< typeof M62.PersistenceTypeSchema >, z.infer< typeof M62.PersistenceTypeSchema > >>;
-export type Iso331 = Assert<Eq< z.input< typeof M62.LocalStoragePersistenceConfigSchema >, z.infer< typeof M62.LocalStoragePersistenceConfigSchema > >>;
-export type Iso332 = Assert<Eq< z.input< typeof M62.CustomPersistenceConfigSchema >, z.infer< typeof M62.CustomPersistenceConfigSchema > >>;
-export type Iso333 = Assert<Eq< z.input< typeof M62.AutoPersistenceConfigSchema >, z.infer< typeof M62.AutoPersistenceConfigSchema > >>;
-
-// data/driver/sqlite.zod.ts
-export type Iso334 = Assert<Eq< z.input< typeof M63.SqliteWasmPersistModeSchema >, z.infer< typeof M63.SqliteWasmPersistModeSchema > >>;
-
-// data/driver/turso.zod.ts
-export type Iso834 = Assert<Eq< z.input< typeof M181.TursoTransportModeSchema >, z.infer< typeof M181.TursoTransportModeSchema > >>;
-
-// data/external-lookup.zod.ts — retired whole (#8075, ADR-0049); its pin left with it.
-
-// data/feed.zod.ts
-export type Iso336 = Assert<Eq< z.input< typeof M65.FeedItemType >, z.infer< typeof M65.FeedItemType > >>;
-export type Iso337 = Assert<Eq< z.input< typeof M65.FeedFilterMode >, z.infer< typeof M65.FeedFilterMode > >>;
-
-// data/field.zod.ts
-export type Iso338 = Assert<Eq< z.input< typeof M66.FieldType >, z.infer< typeof M66.FieldType > >>;
-export type Iso339 = Assert<Eq< z.input< typeof M66.LocationCoordinatesSchema >, z.infer< typeof M66.LocationCoordinatesSchema > >>;
-export type Iso340 = Assert<Eq< z.input< typeof M66.AddressSchema >, z.infer< typeof M66.AddressSchema > >>;
-export type Iso341 = Assert<Eq< z.input< typeof M66.CurrencyValueSchema >, z.infer< typeof M66.CurrencyValueSchema > >>;
-// #8993 partial masking: keepHead/keepTail are plain optional-free ints — no
-// transform, no defaults, so input === infer and the bare alias needs no Parsed.
-export type Iso850 = Assert<Eq< z.input< typeof M66.FieldMaskingKeepSchema >, z.infer< typeof M66.FieldMaskingKeepSchema > >>;
-
-// data/filter.zod.ts
-export type Iso342 = Assert<Eq< z.input< typeof M67.FieldReferenceSchema >, z.infer< typeof M67.FieldReferenceSchema > >>;
-export type Iso343 = Assert<Eq< z.input< typeof M67.FieldOperatorsSchema >, z.infer< typeof M67.FieldOperatorsSchema > >>;
-export type Iso344 = Assert<Eq< z.input< typeof M67.QueryFilterSchema >, z.infer< typeof M67.QueryFilterSchema > >>;
-
-// data/hook-body.zod.ts
-export type Iso345 = Assert<Eq< z.input< typeof M68.HookBodyCapability >, z.infer< typeof M68.HookBodyCapability > >>;
-export type Iso346 = Assert<Eq< z.input< typeof M68.ExpressionBodySchema >, z.infer< typeof M68.ExpressionBodySchema > >>;
-
-// data/hook.zod.ts
-export type Iso347 = Assert<Eq< z.input< typeof M69.HookEvent >, z.infer< typeof M69.HookEvent > >>;
-export type Iso348 = Assert<Eq< z.input< typeof M69.HookContextSchema >, z.infer< typeof M69.HookContextSchema > >>;
-
-// data/object.zod.ts
-export type Iso349 = Assert<Eq< z.input< typeof M70.ApiMethod >, z.infer< typeof M70.ApiMethod > >>;
-export type Iso350 = Assert<Eq< z.input< typeof M70.PerOperationRequiredPermissionsSchema >, z.infer< typeof M70.PerOperationRequiredPermissionsSchema > >>;
-export type Iso351 = Assert<Eq< z.input< typeof M70.ObjectRequiredPermissionsSchema >, z.infer< typeof M70.ObjectRequiredPermissionsSchema > >>;
-export type Iso352 = Assert<Eq< z.input< typeof M70.TenancyConfigSchema >, z.infer< typeof M70.TenancyConfigSchema > >>;
-export type Iso353 = Assert<Eq< z.input< typeof M70.LifecycleClassSchema >, z.infer< typeof M70.LifecycleClassSchema > >>;
-export type Iso354 = Assert<Eq< z.input< typeof M70.LifecycleSchema >, z.infer< typeof M70.LifecycleSchema > >>;
-export type Iso355 = Assert<Eq< z.input< typeof M70.ObjectOwnershipEnum >, z.infer< typeof M70.ObjectOwnershipEnum > >>;
-
-// data/query.zod.ts
-export type Iso356 = Assert<Eq< z.input< typeof M71.AggregationNodeSchema >, z.infer< typeof M71.AggregationNodeSchema > >>;
-export type Iso357 = Assert<Eq< z.input< typeof M71.GroupByNodeSchema >, z.infer< typeof M71.GroupByNodeSchema > >>;
-export type Iso358 = Assert<Eq< z.input< typeof M71.DateGranularity >, z.infer< typeof M71.DateGranularity > >>;
-
-// data/seed-loader.zod.ts
-export type Iso359 = Assert<Eq< z.input< typeof M72.ReferenceResolutionErrorSchema >, z.infer< typeof M72.ReferenceResolutionErrorSchema > >>;
-export type Iso360 = Assert<Eq< z.input< typeof M72.SeedIdentitySchema >, z.infer< typeof M72.SeedIdentitySchema > >>;
-
-// data/seed.zod.ts
-export type Iso361 = Assert<Eq< z.input< typeof M73.SeedMode >, z.infer< typeof M73.SeedMode > >>;
-
-// data/validation.zod.ts
-export type Iso362 = Assert<Eq< z.input< typeof M74.ValidationRuleSchema >, z.infer< typeof M74.ValidationRuleSchema > >>;
-
-// identity/identity.zod.ts
-export type Iso363 = Assert<Eq< z.input< typeof M75.AccountSchema >, z.infer< typeof M75.AccountSchema > >>;
-export type Iso364 = Assert<Eq< z.input< typeof M75.VerificationTokenSchema >, z.infer< typeof M75.VerificationTokenSchema > >>;
-
-// identity/organization.zod.ts
-export type Iso365 = Assert<Eq< z.input< typeof M76.OrganizationSchema >, z.infer< typeof M76.OrganizationSchema > >>;
-export type Iso366 = Assert<Eq< z.input< typeof M76.MemberSchema >, z.infer< typeof M76.MemberSchema > >>;
-export type Iso367 = Assert<Eq< z.input< typeof M76.InvitationStatus >, z.infer< typeof M76.InvitationStatus > >>;
-
-// identity/scim.zod.ts
-export type Iso368 = Assert<Eq< z.input< typeof M77.SCIMMetaSchema >, z.infer< typeof M77.SCIMMetaSchema > >>;
-export type Iso369 = Assert<Eq< z.input< typeof M77.SCIMNameSchema >, z.infer< typeof M77.SCIMNameSchema > >>;
-export type Iso370 = Assert<Eq< z.input< typeof M77.SCIMGroupReferenceSchema >, z.infer< typeof M77.SCIMGroupReferenceSchema > >>;
-export type Iso371 = Assert<Eq< z.input< typeof M77.SCIMEnterpriseUserSchema >, z.infer< typeof M77.SCIMEnterpriseUserSchema > >>;
-export type Iso372 = Assert<Eq< z.input< typeof M77.SCIMMemberReferenceSchema >, z.infer< typeof M77.SCIMMemberReferenceSchema > >>;
-export type Iso373 = Assert<Eq< z.input< typeof M77.SCIMPatchOperationSchema >, z.infer< typeof M77.SCIMPatchOperationSchema > >>;
-export type Iso374 = Assert<Eq< z.input< typeof M77.SCIMBulkOperationSchema >, z.infer< typeof M77.SCIMBulkOperationSchema > >>;
-export type Iso375 = Assert<Eq< z.input< typeof M77.SCIMBulkResponseOperationSchema >, z.infer< typeof M77.SCIMBulkResponseOperationSchema > >>;
-
-// integration/connector.zod.ts
-export type Iso376 = Assert<Eq< z.input< typeof M78.SyncStrategySchema >, z.infer< typeof M78.SyncStrategySchema > >>;
-export type Iso377 = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionSchema >, z.infer< typeof M78.ConnectorConflictResolutionSchema > >>;
-export type Iso378 = Assert<Eq< z.input< typeof M78.WebhookEventSchema >, z.infer< typeof M78.WebhookEventSchema > >>;
-export type Iso379 = Assert<Eq< z.input< typeof M78.WebhookSignatureAlgorithmSchema >, z.infer< typeof M78.WebhookSignatureAlgorithmSchema > >>;
-export type Iso380 = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
-export type Iso383 = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
-export type Iso384 = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.infer< typeof M78.ConnectorStatusSchema > >>;
-// [#4395] Added after the generated corpus, so its number continues from the
-// file's end rather than from its neighbours — the `IsoNNN` label is only a
-// unique name (the gate reads the `z.input< typeof Mn.XSchema >` occurrence,
-// not the label), and renumbering 300+ following lines to close the gap would
-// be a merge-conflict magnet for no reader benefit. Grouped with its siblings
-// here because the FILE heading is what a reader navigates by.
-// A bare `z.enum`, exactly like `ConnectorType` / `ConnectorStatus` two lines
-// up: no default, no transform, so author and parsed states coincide and D5
-// gives it no `XParsed`.
-export type Iso718 = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
-
-// kernel/cli-extension.zod.ts
-// Iso385 (`CLICommandContributionSchema`) left with the #12007 retirement.
-export type Iso386 = Assert<Eq< z.input< typeof M79.OclifPluginConfigSchema >, z.infer< typeof M79.OclifPluginConfigSchema > >>;
-
-// kernel/cluster.zod.ts
-export type Iso387 = Assert<Eq< z.input< typeof M80.EventScopeSchema >, z.infer< typeof M80.EventScopeSchema > >>;
-export type Iso388 = Assert<Eq< z.input< typeof M80.EventDeliverySemanticsSchema >, z.infer< typeof M80.EventDeliverySemanticsSchema > >>;
-export type Iso389 = Assert<Eq< z.input< typeof M80.ServiceClusterScopeSchema >, z.infer< typeof M80.ServiceClusterScopeSchema > >>;
-export type Iso390 = Assert<Eq< z.input< typeof M80.ServiceLeaderStrategySchema >, z.infer< typeof M80.ServiceLeaderStrategySchema > >>;
-export type Iso391 = Assert<Eq< z.input< typeof M80.ClusterDriverSchema >, z.infer< typeof M80.ClusterDriverSchema > >>;
-export type Iso392 = Assert<Eq< z.input< typeof M80.ClusterTenantIsolationSchema >, z.infer< typeof M80.ClusterTenantIsolationSchema > >>;
-
-// kernel/context.zod.ts
-export type Iso395 = Assert<Eq< z.input< typeof M81.RuntimeMode >, z.infer< typeof M81.RuntimeMode > >>;
-
-// kernel/dependency-resolution.zod.ts
-export type Iso396 = Assert<Eq< z.input< typeof M82.DependencyStatusEnum >, z.infer< typeof M82.DependencyStatusEnum > >>;
-export type Iso397 = Assert<Eq< z.input< typeof M82.ResolvedDependencySchema >, z.infer< typeof M82.ResolvedDependencySchema > >>;
-export type Iso398 = Assert<Eq< z.input< typeof M82.RequiredActionSchema >, z.infer< typeof M82.RequiredActionSchema > >>;
-export type Iso399 = Assert<Eq< z.input< typeof M82.DependencyResolutionResultSchema >, z.infer< typeof M82.DependencyResolutionResultSchema > >>;
-
-// kernel/events/core.zod.ts
-export type Iso400 = Assert<Eq< z.input< typeof M83.EventPriority >, z.infer< typeof M83.EventPriority > >>;
-
-// kernel/events/handlers.zod.ts
-export type Iso401 = Assert<Eq< z.input< typeof M84.EventRouteSchema >, z.infer< typeof M84.EventRouteSchema > >>;
-
-// kernel/manifest.zod.ts
-export type Iso402 = Assert<Eq< z.input< typeof M85.PluginPermissionsSchema >, z.infer< typeof M85.PluginPermissionsSchema > >>;
-export type Iso403 = Assert<Eq< z.input< typeof M85.ManifestPermissionsSchema >, z.infer< typeof M85.ManifestPermissionsSchema > >>;
-export type Iso404 = Assert<Eq< z.input< typeof M85.PluginEnginesSchema >, z.infer< typeof M85.PluginEnginesSchema > >>;
-export type Iso405 = Assert<Eq< z.input< typeof M85.PluginRuntimeSchema >, z.infer< typeof M85.PluginRuntimeSchema > >>;
-export type Iso406 = Assert<Eq< z.input< typeof M85.PluginPackagingSchema >, z.infer< typeof M85.PluginPackagingSchema > >>;
-export type Iso407 = Assert<Eq< z.input< typeof M85.PluginIntegritySchema >, z.infer< typeof M85.PluginIntegritySchema > >>;
-
-// kernel/metadata-customization.zod.ts
-// (Iso408 `CustomizationOriginSchema` / Iso409 `FieldChangeSchema` /
-// Iso410 `MergeConflictSchema` / Iso411 `MergeResultSchema` removed with
-// their module — #13135's ADR-0049 retirement of the paper
-// metadata-customization protocol. The Iso numbers are positional and stay
-// vacant.)
-
-// kernel/metadata-loader.zod.ts
-export type Iso412 = Assert<Eq< z.input< typeof M87.MetadataFallbackStrategySchema >, z.infer< typeof M87.MetadataFallbackStrategySchema > >>;
-
-// kernel/metadata-plugin.zod.ts
-export type Iso413 = Assert<Eq< z.input< typeof M88.MetadataTypeSchema >, z.infer< typeof M88.MetadataTypeSchema > >>;
-export type Iso414 = Assert<Eq< z.input< typeof M88.MetadataQueryResultSchema >, z.infer< typeof M88.MetadataQueryResultSchema > >>;
-export type Iso415 = Assert<Eq< z.input< typeof M88.MetadataValidationResultSchema >, z.infer< typeof M88.MetadataValidationResultSchema > >>;
-export type Iso416 = Assert<Eq< z.input< typeof M88.MetadataBulkResultSchema >, z.infer< typeof M88.MetadataBulkResultSchema > >>;
-export type Iso417 = Assert<Eq< z.input< typeof M88.MetadataDependencySchema >, z.infer< typeof M88.MetadataDependencySchema > >>;
-
-// kernel/metadata-protection.zod.ts
-export type Iso418 = Assert<Eq< z.input< typeof M89.MetadataLockSchema >, z.infer< typeof M89.MetadataLockSchema > >>;
-export type Iso419 = Assert<Eq< z.input< typeof M89.MetadataLockSourceSchema >, z.infer< typeof M89.MetadataLockSourceSchema > >>;
-export type Iso420 = Assert<Eq< z.input< typeof M89.MetadataProvenanceSchema >, z.infer< typeof M89.MetadataProvenanceSchema > >>;
-
-// kernel/package-artifact.zod.ts
-export type Iso421 = Assert<Eq< z.input< typeof M90.MetadataCategoryEnum >, z.infer< typeof M90.MetadataCategoryEnum > >>;
-export type Iso422 = Assert<Eq< z.input< typeof M90.ArtifactFileEntrySchema >, z.infer< typeof M90.ArtifactFileEntrySchema > >>;
-
-// kernel/package-registry.zod.ts
-export type Iso423 = Assert<Eq< z.input< typeof M91.PackageStatusEnum >, z.infer< typeof M91.PackageStatusEnum > >>;
-export type Iso424 = Assert<Eq< z.input< typeof M91.NamespaceRegistryEntrySchema >, z.infer< typeof M91.NamespaceRegistryEntrySchema > >>;
-export type Iso425 = Assert<Eq< z.input< typeof M91.NamespaceConflictErrorSchema >, z.infer< typeof M91.NamespaceConflictErrorSchema > >>;
-export type Iso426 = Assert<Eq< z.input< typeof M91.ListPackagesRequestSchema >, z.infer< typeof M91.ListPackagesRequestSchema > >>;
-export type Iso427 = Assert<Eq< z.input< typeof M91.GetPackageRequestSchema >, z.infer< typeof M91.GetPackageRequestSchema > >>;
-export type Iso428 = Assert<Eq< z.input< typeof M91.UninstallPackageRequestSchema >, z.infer< typeof M91.UninstallPackageRequestSchema > >>;
-export type Iso429 = Assert<Eq< z.input< typeof M91.UninstallPackageResponseSchema >, z.infer< typeof M91.UninstallPackageResponseSchema > >>;
-export type Iso430 = Assert<Eq< z.input< typeof M91.EnablePackageRequestSchema >, z.infer< typeof M91.EnablePackageRequestSchema > >>;
-export type Iso431 = Assert<Eq< z.input< typeof M91.DisablePackageRequestSchema >, z.infer< typeof M91.DisablePackageRequestSchema > >>;
-
-// kernel/package-upgrade.zod.ts
-export type Iso432 = Assert<Eq< z.input< typeof M92.MetadataChangeTypeSchema >, z.infer< typeof M92.MetadataChangeTypeSchema > >>;
-export type Iso433 = Assert<Eq< z.input< typeof M92.UpgradeImpactLevelSchema >, z.infer< typeof M92.UpgradeImpactLevelSchema > >>;
-export type Iso434 = Assert<Eq< z.input< typeof M92.UpgradePhaseSchema >, z.infer< typeof M92.UpgradePhaseSchema > >>;
-export type Iso435 = Assert<Eq< z.input< typeof M92.RollbackPackageResponseSchema >, z.infer< typeof M92.RollbackPackageResponseSchema > >>;
-
-// kernel/plugin-capability.zod.ts
-export type Iso436 = Assert<Eq< z.input< typeof M93.CapabilityConformanceLevelSchema >, z.infer< typeof M93.CapabilityConformanceLevelSchema > >>;
-export type Iso437 = Assert<Eq< z.input< typeof M93.ProtocolVersionSchema >, z.infer< typeof M93.ProtocolVersionSchema > >>;
-export type Iso438 = Assert<Eq< z.input< typeof M93.ProtocolReferenceSchema >, z.infer< typeof M93.ProtocolReferenceSchema > >>;
-
-// kernel/plugin-lifecycle-advanced.zod.ts
-export type Iso439 = Assert<Eq< z.input< typeof M94.PluginHealthStatusSchema >, z.infer< typeof M94.PluginHealthStatusSchema > >>;
-export type Iso440 = Assert<Eq< z.input< typeof M94.PluginHealthReportSchema >, z.infer< typeof M94.PluginHealthReportSchema > >>;
-
-// kernel/plugin-loading.zod.ts
-// (Iso441 pinned `PluginLoadingStrategySchema`, removed with the rest of the
-// `manifest.loading` block in #4914 — ADR-0049 enforce-or-remove.)
-export type Iso442 = Assert<Eq< z.input< typeof M95.PluginLoadingEventSchema >, z.infer< typeof M95.PluginLoadingEventSchema > >>;
-
-// kernel/plugin-registry.zod.ts
-export type Iso443 = Assert<Eq< z.input< typeof M96.PluginSearchFiltersSchema >, z.infer< typeof M96.PluginSearchFiltersSchema > >>;
-export type Iso444 = Assert<Eq< z.input< typeof M96.PluginInstallConfigSchema >, z.infer< typeof M96.PluginInstallConfigSchema > >>;
-
-// kernel/plugin-security-advanced.zod.ts
-export type Iso445 = Assert<Eq< z.input< typeof M97.PermissionScopeSchema >, z.infer< typeof M97.PermissionScopeSchema > >>;
-export type Iso446 = Assert<Eq< z.input< typeof M97.PermissionActionSchema >, z.infer< typeof M97.PermissionActionSchema > >>;
-export type Iso447 = Assert<Eq< z.input< typeof M97.ResourceTypeSchema >, z.infer< typeof M97.ResourceTypeSchema > >>;
-export type Iso448 = Assert<Eq< z.input< typeof M97.PluginTrustLevelSchema >, z.infer< typeof M97.PluginTrustLevelSchema > >>;
-
-// kernel/plugin-security.zod.ts
-export type Iso449 = Assert<Eq< z.input< typeof M98.VulnerabilitySeverity >, z.infer< typeof M98.VulnerabilitySeverity > >>;
-export type Iso450 = Assert<Eq< z.input< typeof M98.PackageDependencyConflictSchema >, z.infer< typeof M98.PackageDependencyConflictSchema > >>;
-
-// kernel/plugin-structure.zod.ts
-export type Iso451 = Assert<Eq< z.input< typeof M99.OpsFilePathSchema >, z.infer< typeof M99.OpsFilePathSchema > >>;
-export type Iso452 = Assert<Eq< z.input< typeof M99.OpsDomainModuleSchema >, z.infer< typeof M99.OpsDomainModuleSchema > >>;
-export type Iso453 = Assert<Eq< z.input< typeof M99.OpsPluginStructureSchema >, z.infer< typeof M99.OpsPluginStructureSchema > >>;
-
-// kernel/plugin-validator.zod.ts
-export type Iso454 = Assert<Eq< z.input< typeof M100.ValidationErrorSchema >, z.infer< typeof M100.ValidationErrorSchema > >>;
-export type Iso455 = Assert<Eq< z.input< typeof M100.ValidationWarningSchema >, z.infer< typeof M100.ValidationWarningSchema > >>;
-export type Iso456 = Assert<Eq< z.input< typeof M100.ValidationResultSchema >, z.infer< typeof M100.ValidationResultSchema > >>;
-export type Iso457 = Assert<Eq< z.input< typeof M100.PluginMetadataSchema >, z.infer< typeof M100.PluginMetadataSchema > >>;
-
-// kernel/plugin-versioning.zod.ts
-export type Iso458 = Assert<Eq< z.input< typeof M101.SemanticVersionSchema >, z.infer< typeof M101.SemanticVersionSchema > >>;
-export type Iso459 = Assert<Eq< z.input< typeof M101.VersionConstraintSchema >, z.infer< typeof M101.VersionConstraintSchema > >>;
-export type Iso460 = Assert<Eq< z.input< typeof M101.CompatibilityLevelSchema >, z.infer< typeof M101.CompatibilityLevelSchema > >>;
-export type Iso461 = Assert<Eq< z.input< typeof M101.DeprecationNoticeSchema >, z.infer< typeof M101.DeprecationNoticeSchema > >>;
-
-// kernel/plugin.zod.ts
-export type Iso462 = Assert<Eq< z.input< typeof M102.PluginContextSchema >, z.infer< typeof M102.PluginContextSchema > >>;
-export type Iso463 = Assert<Eq< z.input< typeof M102.PluginSchema >, z.infer< typeof M102.PluginSchema > >>;
-
-// kernel/service-registry.zod.ts
-export type Iso464 = Assert<Eq< z.input< typeof M103.ServiceScopeType >, z.infer< typeof M103.ServiceScopeType > >>;
-export type Iso465 = Assert<Eq< z.input< typeof M103.ScopeConfigSchema >, z.infer< typeof M103.ScopeConfigSchema > >>;
-export type Iso466 = Assert<Eq< z.input< typeof M103.ScopeInfoSchema >, z.infer< typeof M103.ScopeInfoSchema > >>;
-
-// kernel/startup-orchestrator.zod.ts
-export type Iso468 = Assert<Eq< z.input< typeof M104.PluginStartupResultSchema >, z.infer< typeof M104.PluginStartupResultSchema > >>;
-
-// qa/testing.zod.ts
-export type Iso470 = Assert<Eq< z.input< typeof M105.TestSuiteSchema >, z.infer< typeof M105.TestSuiteSchema > >>;
-export type Iso471 = Assert<Eq< z.input< typeof M105.TestScenarioSchema >, z.infer< typeof M105.TestScenarioSchema > >>;
-export type Iso472 = Assert<Eq< z.input< typeof M105.TestStepSchema >, z.infer< typeof M105.TestStepSchema > >>;
-export type Iso473 = Assert<Eq< z.input< typeof M105.TestActionSchema >, z.infer< typeof M105.TestActionSchema > >>;
-export type Iso474 = Assert<Eq< z.input< typeof M105.TestAssertionSchema >, z.infer< typeof M105.TestAssertionSchema > >>;
-
-// security/explain.zod.ts
-export type Iso475 = Assert<Eq< z.input< typeof M106.ExplainOperationSchema >, z.infer< typeof M106.ExplainOperationSchema > >>;
-export type Iso476 = Assert<Eq< z.input< typeof M106.AuthzPostureSchema >, z.infer< typeof M106.AuthzPostureSchema > >>;
-export type Iso477 = Assert<Eq< z.input< typeof M106.ExplainMatchedRuleSchema >, z.infer< typeof M106.ExplainMatchedRuleSchema > >>;
-export type Iso478 = Assert<Eq< z.input< typeof M106.ExplainRequestSchema >, z.infer< typeof M106.ExplainRequestSchema > >>;
-export type Iso479 = Assert<Eq< z.input< typeof M106.AccessMatrixEntrySchema >, z.infer< typeof M106.AccessMatrixEntrySchema > >>;
-
-// security/permission.zod.ts
-export type Iso480 = Assert<Eq< z.input< typeof M107.ObjectAccessScopeSchema >, z.infer< typeof M107.ObjectAccessScopeSchema > >>;
-export type Iso481 = Assert<Eq< z.input< typeof M107.EffectiveObjectPermissionSchema >, z.infer< typeof M107.EffectiveObjectPermissionSchema > >>;
-
-// security/rls.zod.ts
-export type Iso482 = Assert<Eq< z.input< typeof M108.RLSOperation >, z.infer< typeof M108.RLSOperation > >>;
-export type Iso483 = Assert<Eq< z.input< typeof M108.RLSUserContextSchema >, z.infer< typeof M108.RLSUserContextSchema > >>;
-export type Iso484 = Assert<Eq< z.input< typeof M108.RLSEvaluationResultSchema >, z.infer< typeof M108.RLSEvaluationResultSchema > >>;
-
-// shared/connector-auth.zod.ts
-export type Iso485 = Assert<Eq< z.input< typeof M109.ConnectorInstanceAuthSchema >, z.infer< typeof M109.ConnectorInstanceAuthSchema > >>;
-
-// shared/enums.zod.ts
-export type Iso486 = Assert<Eq< z.input< typeof M110.SortDirectionEnum >, z.infer< typeof M110.SortDirectionEnum > >>;
-export type Iso487 = Assert<Eq< z.input< typeof M110.SortItemSchema >, z.infer< typeof M110.SortItemSchema > >>;
-export type Iso488 = Assert<Eq< z.input< typeof M110.MutationEventEnum >, z.infer< typeof M110.MutationEventEnum > >>;
-export type Iso489 = Assert<Eq< z.input< typeof M110.IsolationLevelEnum >, z.infer< typeof M110.IsolationLevelEnum > >>;
-
-// shared/expression.zod.ts
-export type Iso490 = Assert<Eq< z.input< typeof M111.ExpressionDialect >, z.infer< typeof M111.ExpressionDialect > >>;
-export type Iso491 = Assert<Eq< z.input< typeof M111.ExpressionMetaSchema >, z.infer< typeof M111.ExpressionMetaSchema > >>;
-export type Iso492 = Assert<Eq< z.input< typeof M111.ExpressionSchema >, z.infer< typeof M111.ExpressionSchema > >>;
-export type Iso493 = Assert<Eq< z.input< typeof M111.PredicateSchema >, z.infer< typeof M111.PredicateSchema > >>;
-
-// shared/http.zod.ts
-export type Iso494 = Assert<Eq< z.input< typeof M112.HttpMethod >, z.infer< typeof M112.HttpMethod > >>;
-export type Iso495 = Assert<Eq< z.input< typeof M112.HttpMethodSubsetSchema >, z.infer< typeof M112.HttpMethodSubsetSchema > >>;
-export type Iso496 = Assert<Eq< z.input< typeof M112.StaticMountSchema >, z.infer< typeof M112.StaticMountSchema > >>;
-
-// shared/identifiers.zod.ts
-export type Iso497 = Assert<Eq< z.input< typeof M113.SystemIdentifierSchema >, z.infer< typeof M113.SystemIdentifierSchema > >>;
-export type Iso498 = Assert<Eq< z.input< typeof M113.SnakeCaseIdentifierSchema >, z.infer< typeof M113.SnakeCaseIdentifierSchema > >>;
-export type Iso862 = Assert<Eq< z.input< typeof M113.MetadataItemNameSchema >, z.infer< typeof M113.MetadataItemNameSchema > >>;
-
-// shared/mapping.zod.ts
-// Graduated INTO the isomorphic set at protocol 17: #5552 retired `transform` and the
-// whole `FieldMappingTransform` union, which is what used to give this schema two shapes.
-export type Iso717 = Assert<Eq< z.input< typeof M169.FieldMappingSchema >, z.infer< typeof M169.FieldMappingSchema > >>;
-
-// shared/metadata-types.zod.ts
-export type Iso500 = Assert<Eq< z.input< typeof M114.MetadataFormatSchema >, z.infer< typeof M114.MetadataFormatSchema > >>;
-export type Iso501 = Assert<Eq< z.input< typeof M114.BaseMetadataRecordSchema >, z.infer< typeof M114.BaseMetadataRecordSchema > >>;
-
-// shared/protection.zod.ts
-export type Iso502 = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer< typeof M115.ProtectionSchema > >>;
-
-// shared/epoch.zod.ts — the shared epoch-millisecond INSTANT (#15676), the
-// first of the two exemptions ruling B on #14478 declares on the schema.
-// `z.number().int()`: no default, no transform, the (RISE) case.
-export type Iso868 = Assert<Eq< z.input< typeof M185.EpochMs >, z.infer< typeof M185.EpochMs > >>;
-
-// shared/duration.zod.ts — the closed DURATION vocabulary (#18122), step ① of
-// ruling A on #18115 and the counterpart of the instant above. Both are
-// `z.number().int().nonnegative()`: no default, no transform, the (RISE) case.
-// The refinement is deliberate rather than incidental, so these two pins are
-// what goes red the day someone gives a duration type a `.default()` — which
-// would put the author state and the parsed state on different sides of it.
-export type Iso873 = Assert<Eq< z.input< typeof M187.DurationMs >, z.infer< typeof M187.DurationMs > >>;
-export type Iso874 = Assert<Eq< z.input< typeof M187.DurationSeconds >, z.infer< typeof M187.DurationSeconds > >>;
+export type Iso_ai_agent__StructuredOutputFormatSchema = Assert<Eq< z.input< typeof M0.StructuredOutputFormatSchema >, z.infer< typeof M0.StructuredOutputFormatSchema > >>;
+export type Iso_ai_agent__TransformPipelineStepSchema = Assert<Eq< z.input< typeof M0.TransformPipelineStepSchema >, z.infer< typeof M0.TransformPipelineStepSchema > >>;
 
 // ai/build-progress.zod.ts -- the closed build-progress PHASE vocabulary
 // (#18451, cloud#2172 ruling A) and the frame that carries it. The enum has
@@ -1045,275 +338,1195 @@ export type Iso874 = Assert<Eq< z.input< typeof M187.DurationSeconds >, z.infer<
 // someone gives `phase` or `hop` a `.default()` to 'help' a producer that
 // omits it, author state and parsed state part company -- this is the line
 // that says so by name.
-export type Iso875 = Assert<Eq< z.input< typeof M188.BuildProgressPhaseSchema >, z.infer< typeof M188.BuildProgressPhaseSchema > >>;
-export type Iso876 = Assert<Eq< z.input< typeof M188.BuildProgressFrameSchema >, z.infer< typeof M188.BuildProgressFrameSchema > >>;
+export type Iso_ai_buildProgress__BuildProgressFrameSchema = Assert<Eq< z.input< typeof M188.BuildProgressFrameSchema >, z.infer< typeof M188.BuildProgressFrameSchema > >>;
+export type Iso_ai_buildProgress__BuildProgressPhaseSchema = Assert<Eq< z.input< typeof M188.BuildProgressPhaseSchema >, z.infer< typeof M188.BuildProgressPhaseSchema > >>;
+
+// ai/conversation.zod.ts
+export type Iso_ai_conversation__ConversationContextSchema = Assert<Eq< z.input< typeof M1.ConversationContextSchema >, z.infer< typeof M1.ConversationContextSchema > >>;
+export type Iso_ai_conversation__ConversationSummarySchema = Assert<Eq< z.input< typeof M1.ConversationSummarySchema >, z.infer< typeof M1.ConversationSummarySchema > >>;
+export type Iso_ai_conversation__FileContentSchema = Assert<Eq< z.input< typeof M1.FileContentSchema >, z.infer< typeof M1.FileContentSchema > >>;
+export type Iso_ai_conversation__FunctionCallSchema = Assert<Eq< z.input< typeof M1.FunctionCallSchema >, z.infer< typeof M1.FunctionCallSchema > >>;
+export type Iso_ai_conversation__MessageContentTypeSchema = Assert<Eq< z.input< typeof M1.MessageContentTypeSchema >, z.infer< typeof M1.MessageContentTypeSchema > >>;
+export type Iso_ai_conversation__MessagePruningEventSchema = Assert<Eq< z.input< typeof M1.MessagePruningEventSchema >, z.infer< typeof M1.MessagePruningEventSchema > >>;
+export type Iso_ai_conversation__MessageRoleSchema = Assert<Eq< z.input< typeof M1.MessageRoleSchema >, z.infer< typeof M1.MessageRoleSchema > >>;
+export type Iso_ai_conversation__TextContentSchema = Assert<Eq< z.input< typeof M1.TextContentSchema >, z.infer< typeof M1.TextContentSchema > >>;
+export type Iso_ai_conversation__TokenBudgetStrategySchema = Assert<Eq< z.input< typeof M1.TokenBudgetStrategySchema >, z.infer< typeof M1.TokenBudgetStrategySchema > >>;
+
+// ai/embedding.zod.ts
+export type Iso_ai_embedding__EmbeddingModelSchema = Assert<Eq< z.input< typeof M2.EmbeddingModelSchema >, z.infer< typeof M2.EmbeddingModelSchema > >>;
+export type Iso_ai_embedding__VectorStoreProviderSchema = Assert<Eq< z.input< typeof M2.VectorStoreProviderSchema >, z.infer< typeof M2.VectorStoreProviderSchema > >>;
+export type Iso_ai_embedding__VectorStoreSchema = Assert<Eq< z.input< typeof M2.VectorStoreSchema >, z.infer< typeof M2.VectorStoreSchema > >>;
+
+// ai/knowledge-document.zod.ts
+export type Iso_ai_knowledgeDocument__KnowledgeChunkSchema = Assert<Eq< z.input< typeof M3.KnowledgeChunkSchema >, z.infer< typeof M3.KnowledgeChunkSchema > >>;
+export type Iso_ai_knowledgeDocument__KnowledgeDocumentSchema = Assert<Eq< z.input< typeof M3.KnowledgeDocumentSchema >, z.infer< typeof M3.KnowledgeDocumentSchema > >>;
+export type Iso_ai_knowledgeDocument__KnowledgeHitSchema = Assert<Eq< z.input< typeof M3.KnowledgeHitSchema >, z.infer< typeof M3.KnowledgeHitSchema > >>;
+
+// ai/knowledge-source.zod.ts
+export type Iso_ai_knowledgeSource__FileKnowledgeSourceSchema = Assert<Eq< z.input< typeof M4.FileKnowledgeSourceSchema >, z.infer< typeof M4.FileKnowledgeSourceSchema > >>;
+export type Iso_ai_knowledgeSource__HttpKnowledgeSourceSchema = Assert<Eq< z.input< typeof M4.HttpKnowledgeSourceSchema >, z.infer< typeof M4.HttpKnowledgeSourceSchema > >>;
+export type Iso_ai_knowledgeSource__KnowledgeSourceKindSchema = Assert<Eq< z.input< typeof M4.KnowledgeSourceKindSchema >, z.infer< typeof M4.KnowledgeSourceKindSchema > >>;
+export type Iso_ai_knowledgeSource__ObjectKnowledgeSourceSchema = Assert<Eq< z.input< typeof M4.ObjectKnowledgeSourceSchema >, z.infer< typeof M4.ObjectKnowledgeSourceSchema > >>;
+
+// ai/mcp.zod.ts
+export type Iso_ai_mcp__MCPApprovalPolicySchema = Assert<Eq< z.input< typeof M5.MCPApprovalPolicySchema >, z.infer< typeof M5.MCPApprovalPolicySchema > >>;
+export type Iso_ai_mcp__MCPTransportSchema = Assert<Eq< z.input< typeof M5.MCPTransportSchema >, z.infer< typeof M5.MCPTransportSchema > >>;
+
+// ai/model-registry.zod.ts
+export type Iso_ai_modelRegistry__ModelLimitsSchema = Assert<Eq< z.input< typeof M6.ModelLimitsSchema >, z.infer< typeof M6.ModelLimitsSchema > >>;
+export type Iso_ai_modelRegistry__ModelProviderSchema = Assert<Eq< z.input< typeof M6.ModelProviderSchema >, z.infer< typeof M6.ModelProviderSchema > >>;
+
+// ai/skill.zod.ts
+export type Iso_ai_skill__SkillTriggerConditionSchema = Assert<Eq< z.input< typeof M7.SkillTriggerConditionSchema >, z.infer< typeof M7.SkillTriggerConditionSchema > >>;
+
+// ai/solution-blueprint.zod.ts
+export type Iso_ai_solutionBlueprint__BlueprintConditionSchema = Assert<Eq< z.input< typeof M8.BlueprintConditionSchema >, z.infer< typeof M8.BlueprintConditionSchema > >>;
+export type Iso_ai_solutionBlueprint__BlueprintDashboardSchema = Assert<Eq< z.input< typeof M8.BlueprintDashboardSchema >, z.infer< typeof M8.BlueprintDashboardSchema > >>;
+export type Iso_ai_solutionBlueprint__BlueprintFieldSchema = Assert<Eq< z.input< typeof M8.BlueprintFieldSchema >, z.infer< typeof M8.BlueprintFieldSchema > >>;
+export type Iso_ai_solutionBlueprint__BlueprintObjectSchema = Assert<Eq< z.input< typeof M8.BlueprintObjectSchema >, z.infer< typeof M8.BlueprintObjectSchema > >>;
+export type Iso_ai_solutionBlueprint__BlueprintSeedSchema = Assert<Eq< z.input< typeof M8.BlueprintSeedSchema >, z.infer< typeof M8.BlueprintSeedSchema > >>;
+export type Iso_ai_solutionBlueprint__BlueprintSummaryOperationsSchema = Assert<Eq< z.input< typeof M8.BlueprintSummaryOperationsSchema >, z.infer< typeof M8.BlueprintSummaryOperationsSchema > >>;
+export type Iso_ai_solutionBlueprint__BlueprintWidgetConditionSchema = Assert<Eq< z.input< typeof M8.BlueprintWidgetConditionSchema >, z.infer< typeof M8.BlueprintWidgetConditionSchema > >>;
+export type Iso_ai_solutionBlueprint__SolutionBlueprintStrictSchema = Assert<Eq< z.input< typeof M8.SolutionBlueprintStrictSchema >, z.infer< typeof M8.SolutionBlueprintStrictSchema > >>;
+
+// ai/tool.zod.ts
+export type Iso_ai_tool__ToolSchema = Assert<Eq< z.input< typeof M9.ToolSchema >, z.infer< typeof M9.ToolSchema > >>;
+
+// ai/usage.zod.ts
+export type Iso_ai_usage__AIUsageRecordSchema = Assert<Eq< z.input< typeof M10.AIUsageRecordSchema >, z.infer< typeof M10.AIUsageRecordSchema > >>;
+export type Iso_ai_usage__TokenUsageSchema = Assert<Eq< z.input< typeof M10.TokenUsageSchema >, z.infer< typeof M10.TokenUsageSchema > >>;
+
+// api/analytics.zod.ts
+// [#17551] The ADR-0021 dataset selection (`DatasetSelectionSchema`) and its two
+// nested directives (`DatasetCompareToSchema`, `DatasetTotalsSchema`). Their
+// seven shared members ARE `AnalyticsQuerySchema`'s own declarations
+// (`Iso_data_analytics__AnalyticsQuerySchema` pins that schema isomorphic), and
+// the four dataset-only members carry no default, transform, catch or pipe — so
+// the author state and the parsed state coincide and no `XParsed` name would be
+// anything but a synonym.
+export type Iso_api_analytics__AnalyticsEndpoint = Assert<Eq< z.input< typeof M11.AnalyticsEndpoint >, z.infer< typeof M11.AnalyticsEndpoint > >>;
+export type Iso_api_analytics__AnalyticsQueryRequestSchema = Assert<Eq< z.input< typeof M11.AnalyticsQueryRequestSchema >, z.infer< typeof M11.AnalyticsQueryRequestSchema > >>;
+export type Iso_api_analytics__DatasetCompareToSchema = Assert<Eq< z.input< typeof M11.DatasetCompareToSchema >, z.infer< typeof M11.DatasetCompareToSchema > >>;
+export type Iso_api_analytics__DatasetSelectionSchema = Assert<Eq< z.input< typeof M11.DatasetSelectionSchema >, z.infer< typeof M11.DatasetSelectionSchema > >>;
+export type Iso_api_analytics__DatasetTotalsSchema = Assert<Eq< z.input< typeof M11.DatasetTotalsSchema >, z.infer< typeof M11.DatasetTotalsSchema > >>;
+export type Iso_api_analytics__GetAnalyticsMetaRequestSchema = Assert<Eq< z.input< typeof M11.GetAnalyticsMetaRequestSchema >, z.infer< typeof M11.GetAnalyticsMetaRequestSchema > >>;
+
+// api/auth-endpoints.zod.ts
+export type Iso_api_authEndpoints__AuthEndpointSchema = Assert<Eq< z.input< typeof M12.AuthEndpointSchema >, z.infer< typeof M12.AuthEndpointSchema > >>;
+export type Iso_api_authEndpoints__DeviceTokenResponseSchema = Assert<Eq< z.input< typeof M12.DeviceTokenResponseSchema >, z.infer< typeof M12.DeviceTokenResponseSchema > >>;
+export type Iso_api_authEndpoints__EmailPasswordConfigPublicSchema = Assert<Eq< z.input< typeof M12.EmailPasswordConfigPublicSchema >, z.infer< typeof M12.EmailPasswordConfigPublicSchema > >>;
+
+// api/auth.zod.ts
+export type Iso_api_auth__AuthProvider = Assert<Eq< z.input< typeof M13.AuthProvider >, z.infer< typeof M13.AuthProvider > >>;
+export type Iso_api_auth__LoginType = Assert<Eq< z.input< typeof M13.LoginType >, z.infer< typeof M13.LoginType > >>;
+export type Iso_api_auth__RefreshTokenRequestSchema = Assert<Eq< z.input< typeof M13.RefreshTokenRequestSchema >, z.infer< typeof M13.RefreshTokenRequestSchema > >>;
+export type Iso_api_auth__RegisterRequestSchema = Assert<Eq< z.input< typeof M13.RegisterRequestSchema >, z.infer< typeof M13.RegisterRequestSchema > >>;
+export type Iso_api_auth__SessionSchema = Assert<Eq< z.input< typeof M13.SessionSchema >, z.infer< typeof M13.SessionSchema > >>;
+
+// api/automation-api.zod.ts
+export type Iso_api_automationApi__AutomationApiErrorCode = Assert<Eq< z.input< typeof M14.AutomationApiErrorCode >, z.infer< typeof M14.AutomationApiErrorCode > >>;
+export type Iso_api_automationApi__AutomationFlowPathParamsSchema = Assert<Eq< z.input< typeof M14.AutomationFlowPathParamsSchema >, z.infer< typeof M14.AutomationFlowPathParamsSchema > >>;
+export type Iso_api_automationApi__AutomationRunPathParamsSchema = Assert<Eq< z.input< typeof M14.AutomationRunPathParamsSchema >, z.infer< typeof M14.AutomationRunPathParamsSchema > >>;
+export type Iso_api_automationApi__DeleteFlowRequestSchema = Assert<Eq< z.input< typeof M14.DeleteFlowRequestSchema >, z.infer< typeof M14.DeleteFlowRequestSchema > >>;
+export type Iso_api_automationApi__FlowSummarySchema = Assert<Eq< z.input< typeof M14.FlowSummarySchema >, z.infer< typeof M14.FlowSummarySchema > >>;
+export type Iso_api_automationApi__GetFlowRequestSchema = Assert<Eq< z.input< typeof M14.GetFlowRequestSchema >, z.infer< typeof M14.GetFlowRequestSchema > >>;
+export type Iso_api_automationApi__GetRunRequestSchema = Assert<Eq< z.input< typeof M14.GetRunRequestSchema >, z.infer< typeof M14.GetRunRequestSchema > >>;
+export type Iso_api_automationApi__ToggleFlowRequestSchema = Assert<Eq< z.input< typeof M14.ToggleFlowRequestSchema >, z.infer< typeof M14.ToggleFlowRequestSchema > >>;
+export type Iso_api_automationApi__TriggerFlowRequestSchema = Assert<Eq< z.input< typeof M14.TriggerFlowRequestSchema >, z.infer< typeof M14.TriggerFlowRequestSchema > >>;
+
+// api/batch.zod.ts
+export type Iso_api_batch__BatchOperationType = Assert<Eq< z.input< typeof M15.BatchOperationType >, z.infer< typeof M15.BatchOperationType > >>;
+export type Iso_api_batch__BatchRecordSchema = Assert<Eq< z.input< typeof M15.BatchRecordSchema >, z.infer< typeof M15.BatchRecordSchema > >>;
+export type Iso_api_batch__CrossObjectBatchDroppedFieldsSchema = Assert<Eq< z.input< typeof M15.CrossObjectBatchDroppedFieldsSchema >, z.infer< typeof M15.CrossObjectBatchDroppedFieldsSchema > >>;
+export type Iso_api_batch__CrossObjectBatchResponseSchema = Assert<Eq< z.input< typeof M15.CrossObjectBatchResponseSchema >, z.infer< typeof M15.CrossObjectBatchResponseSchema > >>;
+export type Iso_api_batch__UpdateManyRecordSchema = Assert<Eq< z.input< typeof M15.UpdateManyRecordSchema >, z.infer< typeof M15.UpdateManyRecordSchema > >>;
+
+// api/contract.zod.ts
+export type Iso_api_contract__CreateRequestSchema = Assert<Eq< z.input< typeof M16.CreateRequestSchema >, z.infer< typeof M16.CreateRequestSchema > >>;
+export type Iso_api_contract__IdRequestSchema = Assert<Eq< z.input< typeof M16.IdRequestSchema >, z.infer< typeof M16.IdRequestSchema > >>;
+export type Iso_api_contract__RecordDataSchema = Assert<Eq< z.input< typeof M16.RecordDataSchema >, z.infer< typeof M16.RecordDataSchema > >>;
+export type Iso_api_contract__UpdateRequestSchema = Assert<Eq< z.input< typeof M16.UpdateRequestSchema >, z.infer< typeof M16.UpdateRequestSchema > >>;
+
+// api/discovery.zod.ts
+// [#16325] `EnvironmentTypeSchema` moved here from cloud/environment.zod.ts (was Iso262).
+export type Iso_api_discovery__ApiRoutesSchema = Assert<Eq< z.input< typeof M17.ApiRoutesSchema >, z.infer< typeof M17.ApiRoutesSchema > >>;
+export type Iso_api_discovery__CapabilityDescriptorSchema = Assert<Eq< z.input< typeof M17.CapabilityDescriptorSchema >, z.infer< typeof M17.CapabilityDescriptorSchema > >>;
+export type Iso_api_discovery__DiscoveryEnvironmentSchema = Assert<Eq< z.input< typeof M17.DiscoveryEnvironmentSchema >, z.infer< typeof M17.DiscoveryEnvironmentSchema > >>;
+export type Iso_api_discovery__DiscoverySchema = Assert<Eq< z.input< typeof M17.DiscoverySchema >, z.infer< typeof M17.DiscoverySchema > >>;
+export type Iso_api_discovery__EnvironmentTypeSchema = Assert<Eq< z.input< typeof M17.EnvironmentTypeSchema >, z.infer< typeof M17.EnvironmentTypeSchema > >>;
+export type Iso_api_discovery__RouteHealthEntrySchema = Assert<Eq< z.input< typeof M17.RouteHealthEntrySchema >, z.infer< typeof M17.RouteHealthEntrySchema > >>;
+export type Iso_api_discovery__RouteHealthReportSchema = Assert<Eq< z.input< typeof M17.RouteHealthReportSchema >, z.infer< typeof M17.RouteHealthReportSchema > >>;
+export type Iso_api_discovery__ServiceInfoSchema = Assert<Eq< z.input< typeof M17.ServiceInfoSchema >, z.infer< typeof M17.ServiceInfoSchema > >>;
+export type Iso_api_discovery__ServiceSelfInfoSchema = Assert<Eq< z.input< typeof M17.ServiceSelfInfoSchema >, z.infer< typeof M17.ServiceSelfInfoSchema > >>;
+export type Iso_api_discovery__ServiceStatus = Assert<Eq< z.input< typeof M17.ServiceStatus >, z.infer< typeof M17.ServiceStatus > >>;
+export type Iso_api_discovery__WellKnownCapabilitiesSchema = Assert<Eq< z.input< typeof M17.WellKnownCapabilitiesSchema >, z.infer< typeof M17.WellKnownCapabilitiesSchema > >>;
+
+// api/dispatcher.zod.ts
+export type Iso_api_dispatcher__DispatcherErrorCode = Assert<Eq< z.input< typeof M18.DispatcherErrorCode >, z.infer< typeof M18.DispatcherErrorCode > >>;
+export type Iso_api_dispatcher__DispatcherErrorResponseSchema = Assert<Eq< z.input< typeof M18.DispatcherErrorResponseSchema >, z.infer< typeof M18.DispatcherErrorResponseSchema > >>;
+
+// api/documentation.zod.ts
+export type Iso_api_documentation__ApiTestingUiType = Assert<Eq< z.input< typeof M19.ApiTestingUiType >, z.infer< typeof M19.ApiTestingUiType > >>;
+export type Iso_api_documentation__CodeGenerationTemplateSchema = Assert<Eq< z.input< typeof M19.CodeGenerationTemplateSchema >, z.infer< typeof M19.CodeGenerationTemplateSchema > >>;
+export type Iso_api_documentation__OpenApiSecuritySchemeSchema = Assert<Eq< z.input< typeof M19.OpenApiSecuritySchemeSchema >, z.infer< typeof M19.OpenApiSecuritySchemeSchema > >>;
+export type Iso_api_documentation__OpenApiServerSchema = Assert<Eq< z.input< typeof M19.OpenApiServerSchema >, z.infer< typeof M19.OpenApiServerSchema > >>;
+
+// api/endpoint.zod.ts
+export type Iso_api_endpoint__ApiMappingSchema = Assert<Eq< z.input< typeof M174.ApiMappingSchema >, z.infer< typeof M174.ApiMappingSchema > >>;
+
+// api/error-code-ledger.zod.ts
+export type Iso_api_errorCodeLedger__ProvenanceWaiverSchema = Assert<Eq< z.input< typeof M182.ProvenanceWaiverSchema >, z.infer< typeof M182.ProvenanceWaiverSchema > >>;
+export type Iso_api_errorCodeLedger__StandardSynonymWaiverSchema = Assert<Eq< z.input< typeof M182.StandardSynonymWaiverSchema >, z.infer< typeof M182.StandardSynonymWaiverSchema > >>;
+
+// api/errors.zod.ts
+export type Iso_api_errors__ErrorCategory = Assert<Eq< z.input< typeof M20.ErrorCategory >, z.infer< typeof M20.ErrorCategory > >>;
+export type Iso_api_errors__FieldErrorCode = Assert<Eq< z.input< typeof M20.FieldErrorCode >, z.infer< typeof M20.FieldErrorCode > >>;
+export type Iso_api_errors__FieldErrorSchema = Assert<Eq< z.input< typeof M20.FieldErrorSchema >, z.infer< typeof M20.FieldErrorSchema > >>;
+export type Iso_api_errors__RetryStrategy = Assert<Eq< z.input< typeof M20.RetryStrategy >, z.infer< typeof M20.RetryStrategy > >>;
+export type Iso_api_errors__StandardErrorCode = Assert<Eq< z.input< typeof M20.StandardErrorCode >, z.infer< typeof M20.StandardErrorCode > >>;
+
+// api/events.zod.ts
+export type Iso_api_events__BulkDataEventSchema = Assert<Eq< z.input< typeof M21.BulkDataEventSchema >, z.infer< typeof M21.BulkDataEventSchema > >>;
+export type Iso_api_events__BulkDataEventType = Assert<Eq< z.input< typeof M21.BulkDataEventType >, z.infer< typeof M21.BulkDataEventType > >>;
+export type Iso_api_events__DataEventSchema = Assert<Eq< z.input< typeof M21.DataEventSchema >, z.infer< typeof M21.DataEventSchema > >>;
+export type Iso_api_events__DataEventType = Assert<Eq< z.input< typeof M21.DataEventType >, z.infer< typeof M21.DataEventType > >>;
+export type Iso_api_events__MetadataEventSchema = Assert<Eq< z.input< typeof M21.MetadataEventSchema >, z.infer< typeof M21.MetadataEventSchema > >>;
+export type Iso_api_events__MetadataEventType = Assert<Eq< z.input< typeof M21.MetadataEventType >, z.infer< typeof M21.MetadataEventType > >>;
+
+// api/export.zod.ts
+export type Iso_api_export__CreateImportJobResponseSchema = Assert<Eq< z.input< typeof M22.CreateImportJobResponseSchema >, z.infer< typeof M22.CreateImportJobResponseSchema > >>;
+export type Iso_api_export__DeduplicationStrategy = Assert<Eq< z.input< typeof M22.DeduplicationStrategy >, z.infer< typeof M22.DeduplicationStrategy > >>;
+export type Iso_api_export__ExportFormat = Assert<Eq< z.input< typeof M22.ExportFormat >, z.infer< typeof M22.ExportFormat > >>;
+export type Iso_api_export__ExportJobStatus = Assert<Eq< z.input< typeof M22.ExportJobStatus >, z.infer< typeof M22.ExportJobStatus > >>;
+export type Iso_api_export__ExportJobSummarySchema = Assert<Eq< z.input< typeof M22.ExportJobSummarySchema >, z.infer< typeof M22.ExportJobSummarySchema > >>;
+export type Iso_api_export__GetExportJobDownloadRequestSchema = Assert<Eq< z.input< typeof M22.GetExportJobDownloadRequestSchema >, z.infer< typeof M22.GetExportJobDownloadRequestSchema > >>;
+export type Iso_api_export__ImportJobProgressSchema = Assert<Eq< z.input< typeof M22.ImportJobProgressSchema >, z.infer< typeof M22.ImportJobProgressSchema > >>;
+export type Iso_api_export__ImportJobResultsSchema = Assert<Eq< z.input< typeof M22.ImportJobResultsSchema >, z.infer< typeof M22.ImportJobResultsSchema > >>;
+export type Iso_api_export__ImportJobStatus = Assert<Eq< z.input< typeof M22.ImportJobStatus >, z.infer< typeof M22.ImportJobStatus > >>;
+export type Iso_api_export__ImportJobSummarySchema = Assert<Eq< z.input< typeof M22.ImportJobSummarySchema >, z.infer< typeof M22.ImportJobSummarySchema > >>;
+export type Iso_api_export__ImportResponseSchema = Assert<Eq< z.input< typeof M22.ImportResponseSchema >, z.infer< typeof M22.ImportResponseSchema > >>;
+export type Iso_api_export__ImportRowResultSchema = Assert<Eq< z.input< typeof M22.ImportRowResultSchema >, z.infer< typeof M22.ImportRowResultSchema > >>;
+export type Iso_api_export__ImportValidationMode = Assert<Eq< z.input< typeof M22.ImportValidationMode >, z.infer< typeof M22.ImportValidationMode > >>;
+export type Iso_api_export__ImportWriteMode = Assert<Eq< z.input< typeof M22.ImportWriteMode >, z.infer< typeof M22.ImportWriteMode > >>;
+export type Iso_api_export__ListImportJobsResponseSchema = Assert<Eq< z.input< typeof M22.ListImportJobsResponseSchema >, z.infer< typeof M22.ListImportJobsResponseSchema > >>;
+export type Iso_api_export__UndoImportJobResponseSchema = Assert<Eq< z.input< typeof M22.UndoImportJobResponseSchema >, z.infer< typeof M22.UndoImportJobResponseSchema > >>;
+
+// api/http-cache.zod.ts
+export type Iso_api_httpCache__CacheControlSchema = Assert<Eq< z.input< typeof M23.CacheControlSchema >, z.infer< typeof M23.CacheControlSchema > >>;
+export type Iso_api_httpCache__CacheDirective = Assert<Eq< z.input< typeof M23.CacheDirective >, z.infer< typeof M23.CacheDirective > >>;
+export type Iso_api_httpCache__CacheInvalidationResponseSchema = Assert<Eq< z.input< typeof M23.CacheInvalidationResponseSchema >, z.infer< typeof M23.CacheInvalidationResponseSchema > >>;
+export type Iso_api_httpCache__CacheInvalidationTarget = Assert<Eq< z.input< typeof M23.CacheInvalidationTarget >, z.infer< typeof M23.CacheInvalidationTarget > >>;
+export type Iso_api_httpCache__MetadataCacheRequestSchema = Assert<Eq< z.input< typeof M23.MetadataCacheRequestSchema >, z.infer< typeof M23.MetadataCacheRequestSchema > >>;
+
+// api/metadata.zod.ts
+export type Iso_api_metadata__MetadataBulkUnregisterRequestSchema = Assert<Eq< z.input< typeof M24.MetadataBulkUnregisterRequestSchema >, z.infer< typeof M24.MetadataBulkUnregisterRequestSchema > >>;
+export type Iso_api_metadata__MetadataRegisterRequestSchema = Assert<Eq< z.input< typeof M24.MetadataRegisterRequestSchema >, z.infer< typeof M24.MetadataRegisterRequestSchema > >>;
+export type Iso_api_metadata__MetadataValidateRequestSchema = Assert<Eq< z.input< typeof M24.MetadataValidateRequestSchema >, z.infer< typeof M24.MetadataValidateRequestSchema > >>;
+
+// api/odata.zod.ts
+export type Iso_api_odata__ODataErrorSchema = Assert<Eq< z.input< typeof M25.ODataErrorSchema >, z.infer< typeof M25.ODataErrorSchema > >>;
+export type Iso_api_odata__ODataFilterFunctionSchema = Assert<Eq< z.input< typeof M25.ODataFilterFunctionSchema >, z.infer< typeof M25.ODataFilterFunctionSchema > >>;
+export type Iso_api_odata__ODataQuerySchema = Assert<Eq< z.input< typeof M25.ODataQuerySchema >, z.infer< typeof M25.ODataQuerySchema > >>;
+export type Iso_api_odata__ODataResponseSchema = Assert<Eq< z.input< typeof M25.ODataResponseSchema >, z.infer< typeof M25.ODataResponseSchema > >>;
+
+// api/package-api.zod.ts
+export type Iso_api_packageApi__GetInstalledPackageRequestSchema = Assert<Eq< z.input< typeof M26.GetInstalledPackageRequestSchema >, z.infer< typeof M26.GetInstalledPackageRequestSchema > >>;
+export type Iso_api_packageApi__PackageApiErrorCode = Assert<Eq< z.input< typeof M26.PackageApiErrorCode >, z.infer< typeof M26.PackageApiErrorCode > >>;
+export type Iso_api_packageApi__PackagePathParamsSchema = Assert<Eq< z.input< typeof M26.PackagePathParamsSchema >, z.infer< typeof M26.PackagePathParamsSchema > >>;
+export type Iso_api_packageApi__UninstallPackageApiRequestSchema = Assert<Eq< z.input< typeof M26.UninstallPackageApiRequestSchema >, z.infer< typeof M26.UninstallPackageApiRequestSchema > >>;
+
+// api/plugin-rest-api.zod.ts
+export type Iso_api_pluginRestApi__RestApiRouteCategory = Assert<Eq< z.input< typeof M27.RestApiRouteCategory >, z.infer< typeof M27.RestApiRouteCategory > >>;
+export type Iso_api_pluginRestApi__ValidationMode = Assert<Eq< z.input< typeof M27.ValidationMode >, z.infer< typeof M27.ValidationMode > >>;
+
+// api/protocol.zod.ts
+export type Iso_api_protocol__AiAgentCapabilitiesSchema = Assert<Eq< z.input< typeof M28.AiAgentCapabilitiesSchema >, z.infer< typeof M28.AiAgentCapabilitiesSchema > >>;
+export type Iso_api_protocol__AiAgentChatRequestSchema = Assert<Eq< z.input< typeof M28.AiAgentChatRequestSchema >, z.infer< typeof M28.AiAgentChatRequestSchema > >>;
+export type Iso_api_protocol__AiAgentSummarySchema = Assert<Eq< z.input< typeof M28.AiAgentSummarySchema >, z.infer< typeof M28.AiAgentSummarySchema > >>;
+export type Iso_api_protocol__AiAgentsResponseSchema = Assert<Eq< z.input< typeof M28.AiAgentsResponseSchema >, z.infer< typeof M28.AiAgentsResponseSchema > >>;
+export type Iso_api_protocol__AiChatRequestSchema = Assert<Eq< z.input< typeof M28.AiChatRequestSchema >, z.infer< typeof M28.AiChatRequestSchema > >>;
+export type Iso_api_protocol__AiChatResponseSchema = Assert<Eq< z.input< typeof M28.AiChatResponseSchema >, z.infer< typeof M28.AiChatResponseSchema > >>;
+export type Iso_api_protocol__AiCompleteRequestSchema = Assert<Eq< z.input< typeof M28.AiCompleteRequestSchema >, z.infer< typeof M28.AiCompleteRequestSchema > >>;
+export type Iso_api_protocol__AiConversationSchema = Assert<Eq< z.input< typeof M28.AiConversationSchema >, z.infer< typeof M28.AiConversationSchema > >>;
+export type Iso_api_protocol__AiMessageSchema = Assert<Eq< z.input< typeof M28.AiMessageSchema >, z.infer< typeof M28.AiMessageSchema > >>;
+export type Iso_api_protocol__AiModelsResponseSchema = Assert<Eq< z.input< typeof M28.AiModelsResponseSchema >, z.infer< typeof M28.AiModelsResponseSchema > >>;
+export type Iso_api_protocol__AiPendingActionSchema = Assert<Eq< z.input< typeof M28.AiPendingActionSchema >, z.infer< typeof M28.AiPendingActionSchema > >>;
+export type Iso_api_protocol__AiPendingActionStatusSchema = Assert<Eq< z.input< typeof M28.AiPendingActionStatusSchema >, z.infer< typeof M28.AiPendingActionStatusSchema > >>;
+export type Iso_api_protocol__AiStreamChunkSchema = Assert<Eq< z.input< typeof M28.AiStreamChunkSchema >, z.infer< typeof M28.AiStreamChunkSchema > >>;
+export type Iso_api_protocol__ApproveAiPendingActionResponseSchema = Assert<Eq< z.input< typeof M28.ApproveAiPendingActionResponseSchema >, z.infer< typeof M28.ApproveAiPendingActionResponseSchema > >>;
+export type Iso_api_protocol__AuditMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.AuditMetaItemRequestSchema >, z.infer< typeof M28.AuditMetaItemRequestSchema > >>;
+export type Iso_api_protocol__AuditMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.AuditMetaItemResponseSchema >, z.infer< typeof M28.AuditMetaItemResponseSchema > >>;
+export type Iso_api_protocol__AutomationTriggerRequestSchema = Assert<Eq< z.input< typeof M28.AutomationTriggerRequestSchema >, z.infer< typeof M28.AutomationTriggerRequestSchema > >>;
+export type Iso_api_protocol__AutomationTriggerResponseSchema = Assert<Eq< z.input< typeof M28.AutomationTriggerResponseSchema >, z.infer< typeof M28.AutomationTriggerResponseSchema > >>;
+export type Iso_api_protocol__CheckPermissionRequestSchema = Assert<Eq< z.input< typeof M28.CheckPermissionRequestSchema >, z.infer< typeof M28.CheckPermissionRequestSchema > >>;
+export type Iso_api_protocol__CheckPermissionResponseSchema = Assert<Eq< z.input< typeof M28.CheckPermissionResponseSchema >, z.infer< typeof M28.CheckPermissionResponseSchema > >>;
+export type Iso_api_protocol__CloneDataResponseSchema = Assert<Eq< z.input< typeof M28.CloneDataResponseSchema >, z.infer< typeof M28.CloneDataResponseSchema > >>;
+export type Iso_api_protocol__CreateAiConversationRequestSchema = Assert<Eq< z.input< typeof M28.CreateAiConversationRequestSchema >, z.infer< typeof M28.CreateAiConversationRequestSchema > >>;
+export type Iso_api_protocol__CreateDataRequestSchema = Assert<Eq< z.input< typeof M28.CreateDataRequestSchema >, z.infer< typeof M28.CreateDataRequestSchema > >>;
+export type Iso_api_protocol__CreateDataResponseSchema = Assert<Eq< z.input< typeof M28.CreateDataResponseSchema >, z.infer< typeof M28.CreateDataResponseSchema > >>;
+export type Iso_api_protocol__CreateManyDataRequestSchema = Assert<Eq< z.input< typeof M28.CreateManyDataRequestSchema >, z.infer< typeof M28.CreateManyDataRequestSchema > >>;
+export type Iso_api_protocol__CreateManyDataResponseSchema = Assert<Eq< z.input< typeof M28.CreateManyDataResponseSchema >, z.infer< typeof M28.CreateManyDataResponseSchema > >>;
+export type Iso_api_protocol__DeleteDataRequestSchema = Assert<Eq< z.input< typeof M28.DeleteDataRequestSchema >, z.infer< typeof M28.DeleteDataRequestSchema > >>;
+export type Iso_api_protocol__DeleteDataResponseSchema = Assert<Eq< z.input< typeof M28.DeleteDataResponseSchema >, z.infer< typeof M28.DeleteDataResponseSchema > >>;
+export type Iso_api_protocol__DeleteMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.DeleteMetaItemRequestSchema >, z.infer< typeof M28.DeleteMetaItemRequestSchema > >>;
+export type Iso_api_protocol__DeleteMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.DeleteMetaItemResponseSchema >, z.infer< typeof M28.DeleteMetaItemResponseSchema > >>;
+export type Iso_api_protocol__FindDataResponseSchema = Assert<Eq< z.input< typeof M28.FindDataResponseSchema >, z.infer< typeof M28.FindDataResponseSchema > >>;
+export type Iso_api_protocol__GetDataRequestSchema = Assert<Eq< z.input< typeof M28.GetDataRequestSchema >, z.infer< typeof M28.GetDataRequestSchema > >>;
+export type Iso_api_protocol__GetDataResponseSchema = Assert<Eq< z.input< typeof M28.GetDataResponseSchema >, z.infer< typeof M28.GetDataResponseSchema > >>;
+export type Iso_api_protocol__GetDiscoveryRequestSchema = Assert<Eq< z.input< typeof M28.GetDiscoveryRequestSchema >, z.infer< typeof M28.GetDiscoveryRequestSchema > >>;
+export type Iso_api_protocol__GetDiscoveryResponseSchema = Assert<Eq< z.input< typeof M28.GetDiscoveryResponseSchema >, z.infer< typeof M28.GetDiscoveryResponseSchema > >>;
+export type Iso_api_protocol__GetEffectivePermissionsRequestSchema = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsRequestSchema >, z.infer< typeof M28.GetEffectivePermissionsRequestSchema > >>;
+export type Iso_api_protocol__GetEffectivePermissionsResponseSchema = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsResponseSchema >, z.infer< typeof M28.GetEffectivePermissionsResponseSchema > >>;
+export type Iso_api_protocol__GetFieldLabelsRequestSchema = Assert<Eq< z.input< typeof M28.GetFieldLabelsRequestSchema >, z.infer< typeof M28.GetFieldLabelsRequestSchema > >>;
+export type Iso_api_protocol__GetFieldLabelsResponseSchema = Assert<Eq< z.input< typeof M28.GetFieldLabelsResponseSchema >, z.infer< typeof M28.GetFieldLabelsResponseSchema > >>;
+export type Iso_api_protocol__GetLocalesRequestSchema = Assert<Eq< z.input< typeof M28.GetLocalesRequestSchema >, z.infer< typeof M28.GetLocalesRequestSchema > >>;
+export type Iso_api_protocol__GetMetaItemCachedRequestSchema = Assert<Eq< z.input< typeof M28.GetMetaItemCachedRequestSchema >, z.infer< typeof M28.GetMetaItemCachedRequestSchema > >>;
+export type Iso_api_protocol__GetMetaItemLayeredRequestSchema = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredRequestSchema >, z.infer< typeof M28.GetMetaItemLayeredRequestSchema > >>;
+export type Iso_api_protocol__GetMetaItemLayeredResponseSchema = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredResponseSchema >, z.infer< typeof M28.GetMetaItemLayeredResponseSchema > >>;
+export type Iso_api_protocol__GetMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.GetMetaItemRequestSchema >, z.infer< typeof M28.GetMetaItemRequestSchema > >>;
+export type Iso_api_protocol__GetMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.GetMetaItemResponseSchema >, z.infer< typeof M28.GetMetaItemResponseSchema > >>;
+export type Iso_api_protocol__GetMetaItemsRequestSchema = Assert<Eq< z.input< typeof M28.GetMetaItemsRequestSchema >, z.infer< typeof M28.GetMetaItemsRequestSchema > >>;
+export type Iso_api_protocol__GetMetaItemsResponseSchema = Assert<Eq< z.input< typeof M28.GetMetaItemsResponseSchema >, z.infer< typeof M28.GetMetaItemsResponseSchema > >>;
+export type Iso_api_protocol__GetMetaTypesRequestSchema = Assert<Eq< z.input< typeof M28.GetMetaTypesRequestSchema >, z.infer< typeof M28.GetMetaTypesRequestSchema > >>;
+export type Iso_api_protocol__GetMetaTypesResponseSchema = Assert<Eq< z.input< typeof M28.GetMetaTypesResponseSchema >, z.infer< typeof M28.GetMetaTypesResponseSchema > >>;
+export type Iso_api_protocol__GetNotificationPreferencesRequestSchema = Assert<Eq< z.input< typeof M28.GetNotificationPreferencesRequestSchema >, z.infer< typeof M28.GetNotificationPreferencesRequestSchema > >>;
+export type Iso_api_protocol__GetObjectPermissionsRequestSchema = Assert<Eq< z.input< typeof M28.GetObjectPermissionsRequestSchema >, z.infer< typeof M28.GetObjectPermissionsRequestSchema > >>;
+export type Iso_api_protocol__GetPresenceRequestSchema = Assert<Eq< z.input< typeof M28.GetPresenceRequestSchema >, z.infer< typeof M28.GetPresenceRequestSchema > >>;
+export type Iso_api_protocol__GetPresenceResponseSchema = Assert<Eq< z.input< typeof M28.GetPresenceResponseSchema >, z.infer< typeof M28.GetPresenceResponseSchema > >>;
+export type Iso_api_protocol__GetTranslationsRequestSchema = Assert<Eq< z.input< typeof M28.GetTranslationsRequestSchema >, z.infer< typeof M28.GetTranslationsRequestSchema > >>;
+export type Iso_api_protocol__GetTranslationsResponseSchema = Assert<Eq< z.input< typeof M28.GetTranslationsResponseSchema >, z.infer< typeof M28.GetTranslationsResponseSchema > >>;
+export type Iso_api_protocol__GetUiViewRequestSchema = Assert<Eq< z.input< typeof M28.GetUiViewRequestSchema >, z.infer< typeof M28.GetUiViewRequestSchema > >>;
+export type Iso_api_protocol__HistoryMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.HistoryMetaItemRequestSchema >, z.infer< typeof M28.HistoryMetaItemRequestSchema > >>;
+export type Iso_api_protocol__HistoryMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.HistoryMetaItemResponseSchema >, z.infer< typeof M28.HistoryMetaItemResponseSchema > >>;
+export type Iso_api_protocol__ListAiConversationsRequestSchema = Assert<Eq< z.input< typeof M28.ListAiConversationsRequestSchema >, z.infer< typeof M28.ListAiConversationsRequestSchema > >>;
+export type Iso_api_protocol__ListAiConversationsResponseSchema = Assert<Eq< z.input< typeof M28.ListAiConversationsResponseSchema >, z.infer< typeof M28.ListAiConversationsResponseSchema > >>;
+export type Iso_api_protocol__ListAiPendingActionsRequestSchema = Assert<Eq< z.input< typeof M28.ListAiPendingActionsRequestSchema >, z.infer< typeof M28.ListAiPendingActionsRequestSchema > >>;
+export type Iso_api_protocol__ListAiPendingActionsResponseSchema = Assert<Eq< z.input< typeof M28.ListAiPendingActionsResponseSchema >, z.infer< typeof M28.ListAiPendingActionsResponseSchema > >>;
+export type Iso_api_protocol__MarkAllNotificationsReadRequestSchema = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadRequestSchema >, z.infer< typeof M28.MarkAllNotificationsReadRequestSchema > >>;
+export type Iso_api_protocol__MarkAllNotificationsReadResponseSchema = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadResponseSchema >, z.infer< typeof M28.MarkAllNotificationsReadResponseSchema > >>;
+export type Iso_api_protocol__MarkNotificationsReadRequestSchema = Assert<Eq< z.input< typeof M28.MarkNotificationsReadRequestSchema >, z.infer< typeof M28.MarkNotificationsReadRequestSchema > >>;
+export type Iso_api_protocol__MarkNotificationsReadResponseSchema = Assert<Eq< z.input< typeof M28.MarkNotificationsReadResponseSchema >, z.infer< typeof M28.MarkNotificationsReadResponseSchema > >>;
+export type Iso_api_protocol__PublishMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.PublishMetaItemRequestSchema >, z.infer< typeof M28.PublishMetaItemRequestSchema > >>;
+export type Iso_api_protocol__PublishMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.PublishMetaItemResponseSchema >, z.infer< typeof M28.PublishMetaItemResponseSchema > >>;
+export type Iso_api_protocol__PublishPackageDraftsResponseSchema = Assert<Eq< z.input< typeof M28.PublishPackageDraftsResponseSchema >, z.infer< typeof M28.PublishPackageDraftsResponseSchema > >>;
+export type Iso_api_protocol__RealtimeConnectRequestSchema = Assert<Eq< z.input< typeof M28.RealtimeConnectRequestSchema >, z.infer< typeof M28.RealtimeConnectRequestSchema > >>;
+export type Iso_api_protocol__RealtimeConnectResponseSchema = Assert<Eq< z.input< typeof M28.RealtimeConnectResponseSchema >, z.infer< typeof M28.RealtimeConnectResponseSchema > >>;
+export type Iso_api_protocol__RealtimeDisconnectRequestSchema = Assert<Eq< z.input< typeof M28.RealtimeDisconnectRequestSchema >, z.infer< typeof M28.RealtimeDisconnectRequestSchema > >>;
+export type Iso_api_protocol__RealtimeDisconnectResponseSchema = Assert<Eq< z.input< typeof M28.RealtimeDisconnectResponseSchema >, z.infer< typeof M28.RealtimeDisconnectResponseSchema > >>;
+export type Iso_api_protocol__RealtimeSubscribeRequestSchema = Assert<Eq< z.input< typeof M28.RealtimeSubscribeRequestSchema >, z.infer< typeof M28.RealtimeSubscribeRequestSchema > >>;
+export type Iso_api_protocol__RealtimeSubscribeResponseSchema = Assert<Eq< z.input< typeof M28.RealtimeSubscribeResponseSchema >, z.infer< typeof M28.RealtimeSubscribeResponseSchema > >>;
+export type Iso_api_protocol__RealtimeUnsubscribeRequestSchema = Assert<Eq< z.input< typeof M28.RealtimeUnsubscribeRequestSchema >, z.infer< typeof M28.RealtimeUnsubscribeRequestSchema > >>;
+export type Iso_api_protocol__RealtimeUnsubscribeResponseSchema = Assert<Eq< z.input< typeof M28.RealtimeUnsubscribeResponseSchema >, z.infer< typeof M28.RealtimeUnsubscribeResponseSchema > >>;
+export type Iso_api_protocol__RegisterDeviceRequestSchema = Assert<Eq< z.input< typeof M28.RegisterDeviceRequestSchema >, z.infer< typeof M28.RegisterDeviceRequestSchema > >>;
+export type Iso_api_protocol__RegisterDeviceResponseSchema = Assert<Eq< z.input< typeof M28.RegisterDeviceResponseSchema >, z.infer< typeof M28.RegisterDeviceResponseSchema > >>;
+export type Iso_api_protocol__RejectAiPendingActionResponseSchema = Assert<Eq< z.input< typeof M28.RejectAiPendingActionResponseSchema >, z.infer< typeof M28.RejectAiPendingActionResponseSchema > >>;
+export type Iso_api_protocol__RuntimeAuthoringIssueSchema = Assert<Eq< z.input< typeof M28.RuntimeAuthoringIssueSchema >, z.infer< typeof M28.RuntimeAuthoringIssueSchema > >>;
+export type Iso_api_protocol__SaveMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.SaveMetaItemRequestSchema >, z.infer< typeof M28.SaveMetaItemRequestSchema > >>;
+export type Iso_api_protocol__SaveMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.SaveMetaItemResponseSchema >, z.infer< typeof M28.SaveMetaItemResponseSchema > >>;
+export type Iso_api_protocol__SearchAllHitSchema = Assert<Eq< z.input< typeof M28.SearchAllHitSchema >, z.infer< typeof M28.SearchAllHitSchema > >>;
+export type Iso_api_protocol__SearchAllPageHitSchema = Assert<Eq< z.input< typeof M28.SearchAllPageHitSchema >, z.infer< typeof M28.SearchAllPageHitSchema > >>;
+export type Iso_api_protocol__SearchAllResponseSchema = Assert<Eq< z.input< typeof M28.SearchAllResponseSchema >, z.infer< typeof M28.SearchAllResponseSchema > >>;
+export type Iso_api_protocol__SetPresenceRequestSchema = Assert<Eq< z.input< typeof M28.SetPresenceRequestSchema >, z.infer< typeof M28.SetPresenceRequestSchema > >>;
+export type Iso_api_protocol__SetPresenceResponseSchema = Assert<Eq< z.input< typeof M28.SetPresenceResponseSchema >, z.infer< typeof M28.SetPresenceResponseSchema > >>;
+export type Iso_api_protocol__UnregisterDeviceRequestSchema = Assert<Eq< z.input< typeof M28.UnregisterDeviceRequestSchema >, z.infer< typeof M28.UnregisterDeviceRequestSchema > >>;
+export type Iso_api_protocol__UnregisterDeviceResponseSchema = Assert<Eq< z.input< typeof M28.UnregisterDeviceResponseSchema >, z.infer< typeof M28.UnregisterDeviceResponseSchema > >>;
+export type Iso_api_protocol__UpdateAiConversationRequestSchema = Assert<Eq< z.input< typeof M28.UpdateAiConversationRequestSchema >, z.infer< typeof M28.UpdateAiConversationRequestSchema > >>;
+export type Iso_api_protocol__UpdateDataRequestSchema = Assert<Eq< z.input< typeof M28.UpdateDataRequestSchema >, z.infer< typeof M28.UpdateDataRequestSchema > >>;
+export type Iso_api_protocol__UpdateDataResponseSchema = Assert<Eq< z.input< typeof M28.UpdateDataResponseSchema >, z.infer< typeof M28.UpdateDataResponseSchema > >>;
+export type Iso_api_protocol__ValidateDataIssueSchema = Assert<Eq< z.input< typeof M28.ValidateDataIssueSchema >, z.infer< typeof M28.ValidateDataIssueSchema > >>;
+export type Iso_api_protocol__ValidateDataRequestSchema = Assert<Eq< z.input< typeof M28.ValidateDataRequestSchema >, z.infer< typeof M28.ValidateDataRequestSchema > >>;
+export type Iso_api_protocol__ValidateDataResponseSchema = Assert<Eq< z.input< typeof M28.ValidateDataResponseSchema >, z.infer< typeof M28.ValidateDataResponseSchema > >>;
+
+// api/query-adapter.zod.ts
+export type Iso_api_queryAdapter__OperatorMappingSchema = Assert<Eq< z.input< typeof M29.OperatorMappingSchema >, z.infer< typeof M29.OperatorMappingSchema > >>;
+export type Iso_api_queryAdapter__QueryAdapterTargetSchema = Assert<Eq< z.input< typeof M29.QueryAdapterTargetSchema >, z.infer< typeof M29.QueryAdapterTargetSchema > >>;
+
+// api/realtime-shared.zod.ts
+export type Iso_api_realtimeShared__BasePresenceSchema = Assert<Eq< z.input< typeof M30.BasePresenceSchema >, z.infer< typeof M30.BasePresenceSchema > >>;
+export type Iso_api_realtimeShared__PresenceStatus = Assert<Eq< z.input< typeof M30.PresenceStatus >, z.infer< typeof M30.PresenceStatus > >>;
+export type Iso_api_realtimeShared__RealtimeRecordAction = Assert<Eq< z.input< typeof M30.RealtimeRecordAction >, z.infer< typeof M30.RealtimeRecordAction > >>;
+
+// api/realtime.zod.ts
+export type Iso_api_realtime__RealtimeEventSchema = Assert<Eq< z.input< typeof M31.RealtimeEventSchema >, z.infer< typeof M31.RealtimeEventSchema > >>;
+export type Iso_api_realtime__RealtimeEventType = Assert<Eq< z.input< typeof M31.RealtimeEventType >, z.infer< typeof M31.RealtimeEventType > >>;
+export type Iso_api_realtime__RealtimePresenceSchema = Assert<Eq< z.input< typeof M31.RealtimePresenceSchema >, z.infer< typeof M31.RealtimePresenceSchema > >>;
+export type Iso_api_realtime__SubscriptionEventSchema = Assert<Eq< z.input< typeof M31.SubscriptionEventSchema >, z.infer< typeof M31.SubscriptionEventSchema > >>;
+export type Iso_api_realtime__SubscriptionSchema = Assert<Eq< z.input< typeof M31.SubscriptionSchema >, z.infer< typeof M31.SubscriptionSchema > >>;
+export type Iso_api_realtime__TransportProtocol = Assert<Eq< z.input< typeof M31.TransportProtocol >, z.infer< typeof M31.TransportProtocol > >>;
+
+// api/rest-server.zod.ts
+export type Iso_api_restServer__CrudOperation = Assert<Eq< z.input< typeof M32.CrudOperation >, z.infer< typeof M32.CrudOperation > >>;
+export type Iso_api_restServer__EndpointRegistrySchema = Assert<Eq< z.input< typeof M32.EndpointRegistrySchema >, z.infer< typeof M32.EndpointRegistrySchema > >>;
+export type Iso_api_restServer__GeneratedEndpointSchema = Assert<Eq< z.input< typeof M32.GeneratedEndpointSchema >, z.infer< typeof M32.GeneratedEndpointSchema > >>;
+
+// api/router.zod.ts
+export type Iso_api_router__ConflictResolutionStrategy = Assert<Eq< z.input< typeof M33.ConflictResolutionStrategy >, z.infer< typeof M33.ConflictResolutionStrategy > >>;
+export type Iso_api_router__RouteCategory = Assert<Eq< z.input< typeof M33.RouteCategory >, z.infer< typeof M33.RouteCategory > >>;
+
+// [#10235] api/sortability.zod.ts — the served projection carries no defaults
+// or transforms by design (it is a serve-time computation, never parsed from
+// an author), so input and parsed coincide and the bare aliases stand alone.
+export type Iso_api_sortability__FieldSortabilitySchema = Assert<Eq< z.input< typeof M183.FieldSortabilitySchema >, z.infer< typeof M183.FieldSortabilitySchema > >>;
+export type Iso_api_sortability__ObjectSortabilitySchema = Assert<Eq< z.input< typeof M183.ObjectSortabilitySchema >, z.infer< typeof M183.ObjectSortabilitySchema > >>;
+
+// api/storage.zod.ts
+export type Iso_api_storage__CompleteChunkedUploadRequestSchema = Assert<Eq< z.input< typeof M34.CompleteChunkedUploadRequestSchema >, z.infer< typeof M34.CompleteChunkedUploadRequestSchema > >>;
+export type Iso_api_storage__CompleteUploadRequestSchema = Assert<Eq< z.input< typeof M34.CompleteUploadRequestSchema >, z.infer< typeof M34.CompleteUploadRequestSchema > >>;
+export type Iso_api_storage__FileTypeValidationSchema = Assert<Eq< z.input< typeof M34.FileTypeValidationSchema >, z.infer< typeof M34.FileTypeValidationSchema > >>;
+export type Iso_api_storage__UploadChunkRequestSchema = Assert<Eq< z.input< typeof M34.UploadChunkRequestSchema >, z.infer< typeof M34.UploadChunkRequestSchema > >>;
+
+// api/versioning.zod.ts
+export type Iso_api_versioning__VersionDefinitionSchema = Assert<Eq< z.input< typeof M35.VersionDefinitionSchema >, z.infer< typeof M35.VersionDefinitionSchema > >>;
+export type Iso_api_versioning__VersionNegotiationResponseSchema = Assert<Eq< z.input< typeof M35.VersionNegotiationResponseSchema >, z.infer< typeof M35.VersionNegotiationResponseSchema > >>;
+export type Iso_api_versioning__VersionStatus = Assert<Eq< z.input< typeof M35.VersionStatus >, z.infer< typeof M35.VersionStatus > >>;
+export type Iso_api_versioning__VersioningStrategy = Assert<Eq< z.input< typeof M35.VersioningStrategy >, z.infer< typeof M35.VersioningStrategy > >>;
+
+// api/websocket.zod.ts
+export type Iso_api_websocket__AckMessageSchema = Assert<Eq< z.input< typeof M36.AckMessageSchema >, z.infer< typeof M36.AckMessageSchema > >>;
+export type Iso_api_websocket__CursorMessageSchema = Assert<Eq< z.input< typeof M36.CursorMessageSchema >, z.infer< typeof M36.CursorMessageSchema > >>;
+export type Iso_api_websocket__CursorPositionSchema = Assert<Eq< z.input< typeof M36.CursorPositionSchema >, z.infer< typeof M36.CursorPositionSchema > >>;
+export type Iso_api_websocket__DocumentStateSchema = Assert<Eq< z.input< typeof M36.DocumentStateSchema >, z.infer< typeof M36.DocumentStateSchema > >>;
+export type Iso_api_websocket__EditMessageSchema = Assert<Eq< z.input< typeof M36.EditMessageSchema >, z.infer< typeof M36.EditMessageSchema > >>;
+export type Iso_api_websocket__EditOperationSchema = Assert<Eq< z.input< typeof M36.EditOperationSchema >, z.infer< typeof M36.EditOperationSchema > >>;
+export type Iso_api_websocket__EditOperationType = Assert<Eq< z.input< typeof M36.EditOperationType >, z.infer< typeof M36.EditOperationType > >>;
+export type Iso_api_websocket__ErrorMessageSchema = Assert<Eq< z.input< typeof M36.ErrorMessageSchema >, z.infer< typeof M36.ErrorMessageSchema > >>;
+export type Iso_api_websocket__EventMessageSchema = Assert<Eq< z.input< typeof M36.EventMessageSchema >, z.infer< typeof M36.EventMessageSchema > >>;
+export type Iso_api_websocket__EventPatternSchema = Assert<Eq< z.input< typeof M36.EventPatternSchema >, z.infer< typeof M36.EventPatternSchema > >>;
+export type Iso_api_websocket__EventSubscriptionSchema = Assert<Eq< z.input< typeof M36.EventSubscriptionSchema >, z.infer< typeof M36.EventSubscriptionSchema > >>;
+export type Iso_api_websocket__PingMessageSchema = Assert<Eq< z.input< typeof M36.PingMessageSchema >, z.infer< typeof M36.PingMessageSchema > >>;
+export type Iso_api_websocket__PongMessageSchema = Assert<Eq< z.input< typeof M36.PongMessageSchema >, z.infer< typeof M36.PongMessageSchema > >>;
+export type Iso_api_websocket__PresenceMessageSchema = Assert<Eq< z.input< typeof M36.PresenceMessageSchema >, z.infer< typeof M36.PresenceMessageSchema > >>;
+export type Iso_api_websocket__PresenceStateSchema = Assert<Eq< z.input< typeof M36.PresenceStateSchema >, z.infer< typeof M36.PresenceStateSchema > >>;
+export type Iso_api_websocket__PresenceUpdateSchema = Assert<Eq< z.input< typeof M36.PresenceUpdateSchema >, z.infer< typeof M36.PresenceUpdateSchema > >>;
+export type Iso_api_websocket__SimpleCursorPositionSchema = Assert<Eq< z.input< typeof M36.SimpleCursorPositionSchema >, z.infer< typeof M36.SimpleCursorPositionSchema > >>;
+export type Iso_api_websocket__SimplePresenceStateSchema = Assert<Eq< z.input< typeof M36.SimplePresenceStateSchema >, z.infer< typeof M36.SimplePresenceStateSchema > >>;
+export type Iso_api_websocket__SubscribeMessageSchema = Assert<Eq< z.input< typeof M36.SubscribeMessageSchema >, z.infer< typeof M36.SubscribeMessageSchema > >>;
+export type Iso_api_websocket__UnsubscribeMessageSchema = Assert<Eq< z.input< typeof M36.UnsubscribeMessageSchema >, z.infer< typeof M36.UnsubscribeMessageSchema > >>;
+export type Iso_api_websocket__UnsubscribeRequestSchema = Assert<Eq< z.input< typeof M36.UnsubscribeRequestSchema >, z.infer< typeof M36.UnsubscribeRequestSchema > >>;
+export type Iso_api_websocket__WebSocketEventSchema = Assert<Eq< z.input< typeof M36.WebSocketEventSchema >, z.infer< typeof M36.WebSocketEventSchema > >>;
+export type Iso_api_websocket__WebSocketMessageSchema = Assert<Eq< z.input< typeof M36.WebSocketMessageSchema >, z.infer< typeof M36.WebSocketMessageSchema > >>;
+export type Iso_api_websocket__WebSocketMessageType = Assert<Eq< z.input< typeof M36.WebSocketMessageType >, z.infer< typeof M36.WebSocketMessageType > >>;
+export type Iso_api_websocket__WebSocketPresenceStatus = Assert<Eq< z.input< typeof M36.WebSocketPresenceStatus >, z.infer< typeof M36.WebSocketPresenceStatus > >>;
+
+// automation/approval.zod.ts
+export type Iso_automation_approval__ApprovalDecision = Assert<Eq< z.input< typeof M37.ApprovalDecision >, z.infer< typeof M37.ApprovalDecision > >>;
+export type Iso_automation_approval__ApprovalNodeApproverSchema = Assert<Eq< z.input< typeof M37.ApprovalNodeApproverSchema >, z.infer< typeof M37.ApprovalNodeApproverSchema > >>;
+export type Iso_automation_approval__ApproverType = Assert<Eq< z.input< typeof M37.ApproverType >, z.infer< typeof M37.ApproverType > >>;
+export type Iso_automation_approval__DecisionOutputDefSchema = Assert<Eq< z.input< typeof M37.DecisionOutputDefSchema >, z.infer< typeof M37.DecisionOutputDefSchema > >>;
+
+// automation/bpmn-interop.zod.ts
+export type Iso_automation_bpmnInterop__BpmnDiagnosticSchema = Assert<Eq< z.input< typeof M38.BpmnDiagnosticSchema >, z.infer< typeof M38.BpmnDiagnosticSchema > >>;
+export type Iso_automation_bpmnInterop__BpmnUnmappedStrategySchema = Assert<Eq< z.input< typeof M38.BpmnUnmappedStrategySchema >, z.infer< typeof M38.BpmnUnmappedStrategySchema > >>;
+export type Iso_automation_bpmnInterop__BpmnVersionSchema = Assert<Eq< z.input< typeof M38.BpmnVersionSchema >, z.infer< typeof M38.BpmnVersionSchema > >>;
+
+// automation/builtin-node-config.zod.ts
+export type Iso_automation_builtinNodeConfig__ScreenFieldConfigSchema = Assert<Eq< z.input< typeof M172.ScreenFieldConfigSchema >, z.infer< typeof M172.ScreenFieldConfigSchema > >>;
+
+// automation/execution.zod.ts
+export type Iso_automation_execution__ExecutionErrorSeverity = Assert<Eq< z.input< typeof M39.ExecutionErrorSeverity >, z.infer< typeof M39.ExecutionErrorSeverity > >>;
+export type Iso_automation_execution__ExecutionStatus = Assert<Eq< z.input< typeof M39.ExecutionStatus >, z.infer< typeof M39.ExecutionStatus > >>;
+export type Iso_automation_execution__ExecutionStepMetricsSchema = Assert<Eq< z.input< typeof M39.ExecutionStepMetricsSchema >, z.infer< typeof M39.ExecutionStepMetricsSchema > >>;
+export type Iso_automation_execution__ExecutionStepSkipReasonSchema = Assert<Eq< z.input< typeof M39.ExecutionStepSkipReasonSchema >, z.infer< typeof M39.ExecutionStepSkipReasonSchema > >>;
+export type Iso_automation_execution__FlowRunGateSummarySchema = Assert<Eq< z.input< typeof M39.FlowRunGateSummarySchema >, z.infer< typeof M39.FlowRunGateSummarySchema > >>;
+export type Iso_automation_execution__FlowRunNodeSummarySchema = Assert<Eq< z.input< typeof M39.FlowRunNodeSummarySchema >, z.infer< typeof M39.FlowRunNodeSummarySchema > >>;
+
+// automation/flow-function.zod.ts
+export type Iso_automation_flowFunction__FlowFunctionEffectSchema = Assert<Eq< z.input< typeof M40.FlowFunctionEffectSchema >, z.infer< typeof M40.FlowFunctionEffectSchema > >>;
+
+// automation/flow.zod.ts
+export type Iso_automation_flow__FlowNodeAction = Assert<Eq< z.input< typeof M175.FlowNodeAction >, z.infer< typeof M175.FlowNodeAction > >>;
+
+// automation/node-executor.zod.ts
+export type Iso_automation_nodeExecutor__ActionCategorySchema = Assert<Eq< z.input< typeof M41.ActionCategorySchema >, z.infer< typeof M41.ActionCategorySchema > >>;
+export type Iso_automation_nodeExecutor__ActionParadigmSchema = Assert<Eq< z.input< typeof M41.ActionParadigmSchema >, z.infer< typeof M41.ActionParadigmSchema > >>;
+export type Iso_automation_nodeExecutor__WaitEventTypeSchema = Assert<Eq< z.input< typeof M41.WaitEventTypeSchema >, z.infer< typeof M41.WaitEventTypeSchema > >>;
+export type Iso_automation_nodeExecutor__WaitResumePayloadSchema = Assert<Eq< z.input< typeof M41.WaitResumePayloadSchema >, z.infer< typeof M41.WaitResumePayloadSchema > >>;
+export type Iso_automation_nodeExecutor__WaitTimeoutBehaviorSchema = Assert<Eq< z.input< typeof M41.WaitTimeoutBehaviorSchema >, z.infer< typeof M41.WaitTimeoutBehaviorSchema > >>;
+
+// automation/schedule-organization.zod.ts
+// [#16659] A bare non-empty string: no transform, no default, no coercion — an
+// organization id is written exactly as it is stored. So input === infer, and an
+// `XParsed` here would be a permanent synonym. The day this schema learns to
+// normalize an id, this line goes red and the ADR's remedy applies.
+export type Iso_automation_scheduleOrganization__ScheduleOrganizationSchema = Assert<Eq< z.input< typeof M186.ScheduleOrganizationSchema >, z.infer< typeof M186.ScheduleOrganizationSchema > >>;
+
+// automation/schemaless-node-config.zod.ts
+export type Iso_automation_schemalessNodeConfig__DecisionConditionSchema = Assert<Eq< z.input< typeof M173.DecisionConditionSchema >, z.infer< typeof M173.DecisionConditionSchema > >>;
+
+// automation/state-machine.zod.ts
+export type Iso_automation_stateMachine__ActionRefSchema = Assert<Eq< z.input< typeof M42.ActionRefSchema >, z.infer< typeof M42.ActionRefSchema > >>;
+export type Iso_automation_stateMachine__GuardRefSchema = Assert<Eq< z.input< typeof M42.GuardRefSchema >, z.infer< typeof M42.GuardRefSchema > >>;
+export type Iso_automation_stateMachine__StateMachineSchema = Assert<Eq< z.input< typeof M42.StateMachineSchema >, z.infer< typeof M42.StateMachineSchema > >>;
+export type Iso_automation_stateMachine__StateNodeSchema = Assert<Eq< z.input< typeof M42.StateNodeSchema >, z.infer< typeof M42.StateNodeSchema > >>;
+export type Iso_automation_stateMachine__TransitionSchema = Assert<Eq< z.input< typeof M42.TransitionSchema >, z.infer< typeof M42.TransitionSchema > >>;
+
+// automation/time-relative-trigger.zod.ts
+export type Iso_automation_timeRelativeTrigger__TimeRelativeTriggerSchema = Assert<Eq< z.input< typeof M43.TimeRelativeTriggerSchema >, z.infer< typeof M43.TimeRelativeTriggerSchema > >>;
+
+// automation/webhook.zod.ts
+export type Iso_automation_webhook__WebhookTriggerType = Assert<Eq< z.input< typeof M44.WebhookTriggerType >, z.infer< typeof M44.WebhookTriggerType > >>;
+
+// data/analytics.zod.ts
+// [#16041] The closed `timeDimensions[].dateRange` vocabulary:
+// `AnalyticsDateRangePresetSchema`, a bare `z.enum` derived from
+// `DATE_RANGE_PRESETS`, and `AnalyticsDateRangeSchema`, the union of that enum
+// with `z.array(z.string())` — no default, no transform on either arm, so
+// author and parsed states coincide.
+export type Iso_data_analytics__AggregationMetricType = Assert<Eq< z.input< typeof M55.AggregationMetricType >, z.infer< typeof M55.AggregationMetricType > >>;
+export type Iso_data_analytics__AnalyticsDateRangePresetSchema = Assert<Eq< z.input< typeof M55.AnalyticsDateRangePresetSchema >, z.infer< typeof M55.AnalyticsDateRangePresetSchema > >>;
+export type Iso_data_analytics__AnalyticsDateRangeSchema = Assert<Eq< z.input< typeof M55.AnalyticsDateRangeSchema >, z.infer< typeof M55.AnalyticsDateRangeSchema > >>;
+export type Iso_data_analytics__AnalyticsQuerySchema = Assert<Eq< z.input< typeof M55.AnalyticsQuerySchema >, z.infer< typeof M55.AnalyticsQuerySchema > >>;
+export type Iso_data_analytics__DimensionSchema = Assert<Eq< z.input< typeof M55.DimensionSchema >, z.infer< typeof M55.DimensionSchema > >>;
+export type Iso_data_analytics__DimensionType = Assert<Eq< z.input< typeof M55.DimensionType >, z.infer< typeof M55.DimensionType > >>;
+export type Iso_data_analytics__MetricSchema = Assert<Eq< z.input< typeof M55.MetricSchema >, z.infer< typeof M55.MetricSchema > >>;
+export type Iso_data_analytics__TimeUpdateInterval = Assert<Eq< z.input< typeof M55.TimeUpdateInterval >, z.infer< typeof M55.TimeUpdateInterval > >>;
+
+// data/context-tokens.zod.ts
+export type Iso_data_contextTokens__ContextTokenPlaceholderSchema = Assert<Eq< z.input< typeof M176.ContextTokenPlaceholderSchema >, z.infer< typeof M176.ContextTokenPlaceholderSchema > >>;
+
+// data/data-engine.zod.ts
+export type Iso_data_dataEngine__BaseEngineOptionsSchema = Assert<Eq< z.input< typeof M56.BaseEngineOptionsSchema >, z.infer< typeof M56.BaseEngineOptionsSchema > >>;
+export type Iso_data_dataEngine__DataEngineAggregateOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineAggregateOptionsSchema >, z.infer< typeof M56.DataEngineAggregateOptionsSchema > >>;
+export type Iso_data_dataEngine__DataEngineCountOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineCountOptionsSchema >, z.infer< typeof M56.DataEngineCountOptionsSchema > >>;
+export type Iso_data_dataEngine__DataEngineDeleteOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineDeleteOptionsSchema >, z.infer< typeof M56.DataEngineDeleteOptionsSchema > >>;
+export type Iso_data_dataEngine__DataEngineExecuteRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineExecuteRequestSchema >, z.infer< typeof M56.DataEngineExecuteRequestSchema > >>;
+export type Iso_data_dataEngine__DataEngineFilterSchema = Assert<Eq< z.input< typeof M56.DataEngineFilterSchema >, z.infer< typeof M56.DataEngineFilterSchema > >>;
+export type Iso_data_dataEngine__DataEngineInsertOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineInsertOptionsSchema >, z.infer< typeof M56.DataEngineInsertOptionsSchema > >>;
+export type Iso_data_dataEngine__DataEngineInsertRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineInsertRequestSchema >, z.infer< typeof M56.DataEngineInsertRequestSchema > >>;
+export type Iso_data_dataEngine__DataEngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.DataEngineUpdateOptionsSchema >, z.infer< typeof M56.DataEngineUpdateOptionsSchema > >>;
+export type Iso_data_dataEngine__DataEngineVectorFindRequestSchema = Assert<Eq< z.input< typeof M56.DataEngineVectorFindRequestSchema >, z.infer< typeof M56.DataEngineVectorFindRequestSchema > >>;
+export type Iso_data_dataEngine__DroppedFieldsEventSchema = Assert<Eq< z.input< typeof M56.DroppedFieldsEventSchema >, z.infer< typeof M56.DroppedFieldsEventSchema > >>;
+export type Iso_data_dataEngine__EngineAggregateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineAggregateOptionsSchema >, z.infer< typeof M56.EngineAggregateOptionsSchema > >>;
+export type Iso_data_dataEngine__EngineCountOptionsSchema = Assert<Eq< z.input< typeof M56.EngineCountOptionsSchema >, z.infer< typeof M56.EngineCountOptionsSchema > >>;
+export type Iso_data_dataEngine__EngineDeleteOptionsSchema = Assert<Eq< z.input< typeof M56.EngineDeleteOptionsSchema >, z.infer< typeof M56.EngineDeleteOptionsSchema > >>;
+export type Iso_data_dataEngine__EngineUpdateOptionsSchema = Assert<Eq< z.input< typeof M56.EngineUpdateOptionsSchema >, z.infer< typeof M56.EngineUpdateOptionsSchema > >>;
+
+// data/datasource.zod.ts
+export type Iso_data_datasource__DriverDefinitionSchema = Assert<Eq< z.input< typeof M57.DriverDefinitionSchema >, z.infer< typeof M57.DriverDefinitionSchema > >>;
+export type Iso_data_datasource__DriverType = Assert<Eq< z.input< typeof M57.DriverType >, z.infer< typeof M57.DriverType > >>;
+export type Iso_data_datasource__SchemaModeSchema = Assert<Eq< z.input< typeof M57.SchemaModeSchema >, z.infer< typeof M57.SchemaModeSchema > >>;
+
+// data/date-macros.zod.ts
+export type Iso_data_dateMacros__DateMacroPlaceholderSchema = Assert<Eq< z.input< typeof M177.DateMacroPlaceholderSchema >, z.infer< typeof M177.DateMacroPlaceholderSchema > >>;
+
+// data/driver-nosql.zod.ts
+export type Iso_data_driverNosql__AggregationPipelineSchema = Assert<Eq< z.input< typeof M58.AggregationPipelineSchema >, z.infer< typeof M58.AggregationPipelineSchema > >>;
+export type Iso_data_driverNosql__AggregationStageSchema = Assert<Eq< z.input< typeof M58.AggregationStageSchema >, z.infer< typeof M58.AggregationStageSchema > >>;
+export type Iso_data_driverNosql__ConsistencyLevelSchema = Assert<Eq< z.input< typeof M58.ConsistencyLevelSchema >, z.infer< typeof M58.ConsistencyLevelSchema > >>;
+export type Iso_data_driverNosql__NoSQLDataTypeMappingSchema = Assert<Eq< z.input< typeof M58.NoSQLDataTypeMappingSchema >, z.infer< typeof M58.NoSQLDataTypeMappingSchema > >>;
+export type Iso_data_driverNosql__NoSQLDatabaseTypeSchema = Assert<Eq< z.input< typeof M58.NoSQLDatabaseTypeSchema >, z.infer< typeof M58.NoSQLDatabaseTypeSchema > >>;
+export type Iso_data_driverNosql__NoSQLIndexTypeSchema = Assert<Eq< z.input< typeof M58.NoSQLIndexTypeSchema >, z.infer< typeof M58.NoSQLIndexTypeSchema > >>;
+export type Iso_data_driverNosql__NoSQLOperationTypeSchema = Assert<Eq< z.input< typeof M58.NoSQLOperationTypeSchema >, z.infer< typeof M58.NoSQLOperationTypeSchema > >>;
+export type Iso_data_driverNosql__NoSQLQueryOptionsSchema = Assert<Eq< z.input< typeof M58.NoSQLQueryOptionsSchema >, z.infer< typeof M58.NoSQLQueryOptionsSchema > >>;
+export type Iso_data_driverNosql__NoSQLTransactionOptionsSchema = Assert<Eq< z.input< typeof M58.NoSQLTransactionOptionsSchema >, z.infer< typeof M58.NoSQLTransactionOptionsSchema > >>;
+
+// data/driver-sql.zod.ts
+export type Iso_data_driverSql__DataTypeMappingSchema = Assert<Eq< z.input< typeof M59.DataTypeMappingSchema >, z.infer< typeof M59.DataTypeMappingSchema > >>;
+export type Iso_data_driverSql__SQLDialectSchema = Assert<Eq< z.input< typeof M59.SQLDialectSchema >, z.infer< typeof M59.SQLDialectSchema > >>;
+
+// data/driver.zod.ts
+export type Iso_data_driver__DriverCapabilitiesSchema = Assert<Eq< z.input< typeof M60.DriverCapabilitiesSchema >, z.infer< typeof M60.DriverCapabilitiesSchema > >>;
+export type Iso_data_driver__DriverOptionsSchema = Assert<Eq< z.input< typeof M60.DriverOptionsSchema >, z.infer< typeof M60.DriverOptionsSchema > >>;
+
+// data/driver/common.zod.ts
+export type Iso_data_driver_common__DriverSslToggleSchema = Assert<Eq< z.input< typeof M61.DriverSslToggleSchema >, z.infer< typeof M61.DriverSslToggleSchema > >>;
+export type Iso_data_driver_common__SqlAutoMigrateSchema = Assert<Eq< z.input< typeof M61.SqlAutoMigrateSchema >, z.infer< typeof M61.SqlAutoMigrateSchema > >>;
+
+// data/driver/memory.zod.ts
+export type Iso_data_driver_memory__AutoPersistenceConfigSchema = Assert<Eq< z.input< typeof M62.AutoPersistenceConfigSchema >, z.infer< typeof M62.AutoPersistenceConfigSchema > >>;
+export type Iso_data_driver_memory__CustomPersistenceConfigSchema = Assert<Eq< z.input< typeof M62.CustomPersistenceConfigSchema >, z.infer< typeof M62.CustomPersistenceConfigSchema > >>;
+export type Iso_data_driver_memory__LocalStoragePersistenceConfigSchema = Assert<Eq< z.input< typeof M62.LocalStoragePersistenceConfigSchema >, z.infer< typeof M62.LocalStoragePersistenceConfigSchema > >>;
+export type Iso_data_driver_memory__PersistenceAdapterSchema = Assert<Eq< z.input< typeof M62.PersistenceAdapterSchema >, z.infer< typeof M62.PersistenceAdapterSchema > >>;
+export type Iso_data_driver_memory__PersistenceTypeSchema = Assert<Eq< z.input< typeof M62.PersistenceTypeSchema >, z.infer< typeof M62.PersistenceTypeSchema > >>;
+
+// data/driver/sqlite.zod.ts
+export type Iso_data_driver_sqlite__SqliteWasmPersistModeSchema = Assert<Eq< z.input< typeof M63.SqliteWasmPersistModeSchema >, z.infer< typeof M63.SqliteWasmPersistModeSchema > >>;
+
+// data/driver/turso.zod.ts
+export type Iso_data_driver_turso__TursoTransportModeSchema = Assert<Eq< z.input< typeof M181.TursoTransportModeSchema >, z.infer< typeof M181.TursoTransportModeSchema > >>;
+
+// data/external-lookup.zod.ts — retired whole (#8075, ADR-0049); its pin left with it.
+
+// data/feed.zod.ts
+export type Iso_data_feed__FeedFilterMode = Assert<Eq< z.input< typeof M65.FeedFilterMode >, z.infer< typeof M65.FeedFilterMode > >>;
+export type Iso_data_feed__FeedItemType = Assert<Eq< z.input< typeof M65.FeedItemType >, z.infer< typeof M65.FeedItemType > >>;
+
+// data/field-value.zod.ts
+export type Iso_data_fieldValue__AddressValueSchema = Assert<Eq< z.input< typeof M178.AddressValueSchema >, z.infer< typeof M178.AddressValueSchema > >>;
+export type Iso_data_fieldValue__CalendarDateValueSchema = Assert<Eq< z.input< typeof M178.CalendarDateValueSchema >, z.infer< typeof M178.CalendarDateValueSchema > >>;
+export type Iso_data_fieldValue__ClockTimeValueSchema = Assert<Eq< z.input< typeof M178.ClockTimeValueSchema >, z.infer< typeof M178.ClockTimeValueSchema > >>;
+export type Iso_data_fieldValue__FileLikeValueSchema = Assert<Eq< z.input< typeof M178.FileLikeValueSchema >, z.infer< typeof M178.FileLikeValueSchema > >>;
+export type Iso_data_fieldValue__FileReferenceIdValueSchema = Assert<Eq< z.input< typeof M178.FileReferenceIdValueSchema >, z.infer< typeof M178.FileReferenceIdValueSchema > >>;
+export type Iso_data_fieldValue__FileValueSchema = Assert<Eq< z.input< typeof M178.FileValueSchema >, z.infer< typeof M178.FileValueSchema > >>;
+export type Iso_data_fieldValue__InstantValueSchema = Assert<Eq< z.input< typeof M178.InstantValueSchema >, z.infer< typeof M178.InstantValueSchema > >>;
+export type Iso_data_fieldValue__LocationValueSchema = Assert<Eq< z.input< typeof M178.LocationValueSchema >, z.infer< typeof M178.LocationValueSchema > >>;
+export type Iso_data_fieldValue__ReferenceIdValueSchema = Assert<Eq< z.input< typeof M178.ReferenceIdValueSchema >, z.infer< typeof M178.ReferenceIdValueSchema > >>;
+
+// data/field.zod.ts
+// #8993 partial masking (`FieldMaskingKeepSchema`): keepHead/keepTail are plain
+// optional-free ints — no transform, no defaults, so input === infer and the
+// bare alias needs no Parsed.
+export type Iso_data_field__AddressSchema = Assert<Eq< z.input< typeof M66.AddressSchema >, z.infer< typeof M66.AddressSchema > >>;
+export type Iso_data_field__CurrencyValueSchema = Assert<Eq< z.input< typeof M66.CurrencyValueSchema >, z.infer< typeof M66.CurrencyValueSchema > >>;
+export type Iso_data_field__FieldMaskingKeepSchema = Assert<Eq< z.input< typeof M66.FieldMaskingKeepSchema >, z.infer< typeof M66.FieldMaskingKeepSchema > >>;
+export type Iso_data_field__FieldType = Assert<Eq< z.input< typeof M66.FieldType >, z.infer< typeof M66.FieldType > >>;
+export type Iso_data_field__LocationCoordinatesSchema = Assert<Eq< z.input< typeof M66.LocationCoordinatesSchema >, z.infer< typeof M66.LocationCoordinatesSchema > >>;
+
+// data/filter.zod.ts
+export type Iso_data_filter__FieldOperatorsSchema = Assert<Eq< z.input< typeof M67.FieldOperatorsSchema >, z.infer< typeof M67.FieldOperatorsSchema > >>;
+export type Iso_data_filter__FieldReferenceSchema = Assert<Eq< z.input< typeof M67.FieldReferenceSchema >, z.infer< typeof M67.FieldReferenceSchema > >>;
+export type Iso_data_filter__QueryFilterSchema = Assert<Eq< z.input< typeof M67.QueryFilterSchema >, z.infer< typeof M67.QueryFilterSchema > >>;
+
+// data/hook-body.zod.ts
+export type Iso_data_hookBody__ExpressionBodySchema = Assert<Eq< z.input< typeof M68.ExpressionBodySchema >, z.infer< typeof M68.ExpressionBodySchema > >>;
+export type Iso_data_hookBody__HookBodyCapability = Assert<Eq< z.input< typeof M68.HookBodyCapability >, z.infer< typeof M68.HookBodyCapability > >>;
+
+// data/hook.zod.ts
+export type Iso_data_hook__HookContextSchema = Assert<Eq< z.input< typeof M69.HookContextSchema >, z.infer< typeof M69.HookContextSchema > >>;
+export type Iso_data_hook__HookEvent = Assert<Eq< z.input< typeof M69.HookEvent >, z.infer< typeof M69.HookEvent > >>;
+
+// data/mapping.zod.ts
+export type Iso_data_mapping__TransformType = Assert<Eq< z.input< typeof M179.TransformType >, z.infer< typeof M179.TransformType > >>;
+
+// data/object.zod.ts
+export type Iso_data_object__ApiMethod = Assert<Eq< z.input< typeof M70.ApiMethod >, z.infer< typeof M70.ApiMethod > >>;
+export type Iso_data_object__LifecycleClassSchema = Assert<Eq< z.input< typeof M70.LifecycleClassSchema >, z.infer< typeof M70.LifecycleClassSchema > >>;
+export type Iso_data_object__LifecycleSchema = Assert<Eq< z.input< typeof M70.LifecycleSchema >, z.infer< typeof M70.LifecycleSchema > >>;
+export type Iso_data_object__ObjectOwnershipEnum = Assert<Eq< z.input< typeof M70.ObjectOwnershipEnum >, z.infer< typeof M70.ObjectOwnershipEnum > >>;
+export type Iso_data_object__ObjectRequiredPermissionsSchema = Assert<Eq< z.input< typeof M70.ObjectRequiredPermissionsSchema >, z.infer< typeof M70.ObjectRequiredPermissionsSchema > >>;
+export type Iso_data_object__PerOperationRequiredPermissionsSchema = Assert<Eq< z.input< typeof M70.PerOperationRequiredPermissionsSchema >, z.infer< typeof M70.PerOperationRequiredPermissionsSchema > >>;
+export type Iso_data_object__TenancyConfigSchema = Assert<Eq< z.input< typeof M70.TenancyConfigSchema >, z.infer< typeof M70.TenancyConfigSchema > >>;
+
+// data/query.zod.ts
+export type Iso_data_query__AggregationFunction = Assert<Eq< z.input< typeof M71.AggregationFunction >, z.infer< typeof M71.AggregationFunction > >>;
+export type Iso_data_query__AggregationNodeSchema = Assert<Eq< z.input< typeof M71.AggregationNodeSchema >, z.infer< typeof M71.AggregationNodeSchema > >>;
+export type Iso_data_query__DateGranularity = Assert<Eq< z.input< typeof M71.DateGranularity >, z.infer< typeof M71.DateGranularity > >>;
+export type Iso_data_query__GroupByNodeSchema = Assert<Eq< z.input< typeof M71.GroupByNodeSchema >, z.infer< typeof M71.GroupByNodeSchema > >>;
+
+// data/seed-loader.zod.ts
+export type Iso_data_seedLoader__ReferenceResolutionErrorSchema = Assert<Eq< z.input< typeof M72.ReferenceResolutionErrorSchema >, z.infer< typeof M72.ReferenceResolutionErrorSchema > >>;
+export type Iso_data_seedLoader__SeedIdentitySchema = Assert<Eq< z.input< typeof M72.SeedIdentitySchema >, z.infer< typeof M72.SeedIdentitySchema > >>;
+
+// data/seed.zod.ts
+export type Iso_data_seed__SeedMode = Assert<Eq< z.input< typeof M73.SeedMode >, z.infer< typeof M73.SeedMode > >>;
+
+// data/validation.zod.ts
+export type Iso_data_validation__ValidationRuleSchema = Assert<Eq< z.input< typeof M74.ValidationRuleSchema >, z.infer< typeof M74.ValidationRuleSchema > >>;
+
+// identity/identity.zod.ts
+export type Iso_identity_identity__AccountSchema = Assert<Eq< z.input< typeof M75.AccountSchema >, z.infer< typeof M75.AccountSchema > >>;
+export type Iso_identity_identity__VerificationTokenSchema = Assert<Eq< z.input< typeof M75.VerificationTokenSchema >, z.infer< typeof M75.VerificationTokenSchema > >>;
+
+// identity/organization.zod.ts
+export type Iso_identity_organization__InvitationStatus = Assert<Eq< z.input< typeof M76.InvitationStatus >, z.infer< typeof M76.InvitationStatus > >>;
+export type Iso_identity_organization__MemberSchema = Assert<Eq< z.input< typeof M76.MemberSchema >, z.infer< typeof M76.MemberSchema > >>;
+export type Iso_identity_organization__OrganizationSchema = Assert<Eq< z.input< typeof M76.OrganizationSchema >, z.infer< typeof M76.OrganizationSchema > >>;
+
+// identity/scim.zod.ts
+export type Iso_identity_scim__SCIMBulkOperationSchema = Assert<Eq< z.input< typeof M77.SCIMBulkOperationSchema >, z.infer< typeof M77.SCIMBulkOperationSchema > >>;
+export type Iso_identity_scim__SCIMBulkResponseOperationSchema = Assert<Eq< z.input< typeof M77.SCIMBulkResponseOperationSchema >, z.infer< typeof M77.SCIMBulkResponseOperationSchema > >>;
+export type Iso_identity_scim__SCIMEnterpriseUserSchema = Assert<Eq< z.input< typeof M77.SCIMEnterpriseUserSchema >, z.infer< typeof M77.SCIMEnterpriseUserSchema > >>;
+export type Iso_identity_scim__SCIMGroupReferenceSchema = Assert<Eq< z.input< typeof M77.SCIMGroupReferenceSchema >, z.infer< typeof M77.SCIMGroupReferenceSchema > >>;
+export type Iso_identity_scim__SCIMMemberReferenceSchema = Assert<Eq< z.input< typeof M77.SCIMMemberReferenceSchema >, z.infer< typeof M77.SCIMMemberReferenceSchema > >>;
+export type Iso_identity_scim__SCIMMetaSchema = Assert<Eq< z.input< typeof M77.SCIMMetaSchema >, z.infer< typeof M77.SCIMMetaSchema > >>;
+export type Iso_identity_scim__SCIMNameSchema = Assert<Eq< z.input< typeof M77.SCIMNameSchema >, z.infer< typeof M77.SCIMNameSchema > >>;
+export type Iso_identity_scim__SCIMPatchOperationSchema = Assert<Eq< z.input< typeof M77.SCIMPatchOperationSchema >, z.infer< typeof M77.SCIMPatchOperationSchema > >>;
+
+// integration/connector.zod.ts
+// [#4395] `ConnectorActionEffectSchema`, added after the generated corpus: a
+// bare `z.enum`, exactly like its `ConnectorType` / `ConnectorStatus` siblings
+// in this module — no default, no transform, so author and parsed states
+// coincide and D5 gives it no `XParsed`.
+export type Iso_integration_connector__ConnectorActionEffectSchema = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
+export type Iso_integration_connector__ConnectorActionSchema = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
+export type Iso_integration_connector__ConnectorConflictResolutionSchema = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionSchema >, z.infer< typeof M78.ConnectorConflictResolutionSchema > >>;
+export type Iso_integration_connector__ConnectorRetryStrategySchema = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
+export type Iso_integration_connector__ConnectorStatusSchema = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.infer< typeof M78.ConnectorStatusSchema > >>;
+export type Iso_integration_connector__ConnectorTriggerSchema = Assert<Eq< z.input< typeof M78.ConnectorTriggerSchema >, z.infer< typeof M78.ConnectorTriggerSchema > >>;
+export type Iso_integration_connector__ConnectorTypeSchema = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
+export type Iso_integration_connector__SyncStrategySchema = Assert<Eq< z.input< typeof M78.SyncStrategySchema >, z.infer< typeof M78.SyncStrategySchema > >>;
+export type Iso_integration_connector__WebhookEventSchema = Assert<Eq< z.input< typeof M78.WebhookEventSchema >, z.infer< typeof M78.WebhookEventSchema > >>;
+export type Iso_integration_connector__WebhookSignatureAlgorithmSchema = Assert<Eq< z.input< typeof M78.WebhookSignatureAlgorithmSchema >, z.infer< typeof M78.WebhookSignatureAlgorithmSchema > >>;
+
+// kernel/cli-extension.zod.ts
+// Iso385 (`CLICommandContributionSchema`) left with the #12007 retirement.
+export type Iso_kernel_cliExtension__OclifPluginConfigSchema = Assert<Eq< z.input< typeof M79.OclifPluginConfigSchema >, z.infer< typeof M79.OclifPluginConfigSchema > >>;
+
+// kernel/cluster.zod.ts
+export type Iso_kernel_cluster__ClusterDriverSchema = Assert<Eq< z.input< typeof M80.ClusterDriverSchema >, z.infer< typeof M80.ClusterDriverSchema > >>;
+export type Iso_kernel_cluster__ClusterTenantIsolationSchema = Assert<Eq< z.input< typeof M80.ClusterTenantIsolationSchema >, z.infer< typeof M80.ClusterTenantIsolationSchema > >>;
+export type Iso_kernel_cluster__EventDeliverySemanticsSchema = Assert<Eq< z.input< typeof M80.EventDeliverySemanticsSchema >, z.infer< typeof M80.EventDeliverySemanticsSchema > >>;
+export type Iso_kernel_cluster__EventScopeSchema = Assert<Eq< z.input< typeof M80.EventScopeSchema >, z.infer< typeof M80.EventScopeSchema > >>;
+export type Iso_kernel_cluster__ServiceClusterScopeSchema = Assert<Eq< z.input< typeof M80.ServiceClusterScopeSchema >, z.infer< typeof M80.ServiceClusterScopeSchema > >>;
+export type Iso_kernel_cluster__ServiceLeaderStrategySchema = Assert<Eq< z.input< typeof M80.ServiceLeaderStrategySchema >, z.infer< typeof M80.ServiceLeaderStrategySchema > >>;
+
+// kernel/context.zod.ts
+export type Iso_kernel_context__RuntimeMode = Assert<Eq< z.input< typeof M81.RuntimeMode >, z.infer< typeof M81.RuntimeMode > >>;
+
+// kernel/dependency-resolution.zod.ts
+export type Iso_kernel_dependencyResolution__DependencyResolutionResultSchema = Assert<Eq< z.input< typeof M82.DependencyResolutionResultSchema >, z.infer< typeof M82.DependencyResolutionResultSchema > >>;
+export type Iso_kernel_dependencyResolution__DependencyStatusEnum = Assert<Eq< z.input< typeof M82.DependencyStatusEnum >, z.infer< typeof M82.DependencyStatusEnum > >>;
+export type Iso_kernel_dependencyResolution__RequiredActionSchema = Assert<Eq< z.input< typeof M82.RequiredActionSchema >, z.infer< typeof M82.RequiredActionSchema > >>;
+export type Iso_kernel_dependencyResolution__ResolvedDependencySchema = Assert<Eq< z.input< typeof M82.ResolvedDependencySchema >, z.infer< typeof M82.ResolvedDependencySchema > >>;
+
+// kernel/events/core.zod.ts
+export type Iso_kernel_events_core__EventPriority = Assert<Eq< z.input< typeof M83.EventPriority >, z.infer< typeof M83.EventPriority > >>;
+
+// kernel/events/handlers.zod.ts
+export type Iso_kernel_events_handlers__EventRouteSchema = Assert<Eq< z.input< typeof M84.EventRouteSchema >, z.infer< typeof M84.EventRouteSchema > >>;
+
+// kernel/manifest.zod.ts
+export type Iso_kernel_manifest__ManifestPermissionsSchema = Assert<Eq< z.input< typeof M85.ManifestPermissionsSchema >, z.infer< typeof M85.ManifestPermissionsSchema > >>;
+export type Iso_kernel_manifest__PluginEnginesSchema = Assert<Eq< z.input< typeof M85.PluginEnginesSchema >, z.infer< typeof M85.PluginEnginesSchema > >>;
+export type Iso_kernel_manifest__PluginIntegritySchema = Assert<Eq< z.input< typeof M85.PluginIntegritySchema >, z.infer< typeof M85.PluginIntegritySchema > >>;
+export type Iso_kernel_manifest__PluginPackagingSchema = Assert<Eq< z.input< typeof M85.PluginPackagingSchema >, z.infer< typeof M85.PluginPackagingSchema > >>;
+export type Iso_kernel_manifest__PluginPermissionsSchema = Assert<Eq< z.input< typeof M85.PluginPermissionsSchema >, z.infer< typeof M85.PluginPermissionsSchema > >>;
+export type Iso_kernel_manifest__PluginRuntimeSchema = Assert<Eq< z.input< typeof M85.PluginRuntimeSchema >, z.infer< typeof M85.PluginRuntimeSchema > >>;
+
+// kernel/metadata-customization.zod.ts
+// (Iso408 `CustomizationOriginSchema` / Iso409 `FieldChangeSchema` /
+// Iso410 `MergeConflictSchema` / Iso411 `MergeResultSchema` removed with
+// their module — #13135's ADR-0049 retirement of the paper
+// metadata-customization protocol.)
+
+// kernel/metadata-loader.zod.ts
+export type Iso_kernel_metadataLoader__MetadataFallbackStrategySchema = Assert<Eq< z.input< typeof M87.MetadataFallbackStrategySchema >, z.infer< typeof M87.MetadataFallbackStrategySchema > >>;
+
+// kernel/metadata-plugin.zod.ts
+export type Iso_kernel_metadataPlugin__MetadataBulkResultSchema = Assert<Eq< z.input< typeof M88.MetadataBulkResultSchema >, z.infer< typeof M88.MetadataBulkResultSchema > >>;
+export type Iso_kernel_metadataPlugin__MetadataDependencySchema = Assert<Eq< z.input< typeof M88.MetadataDependencySchema >, z.infer< typeof M88.MetadataDependencySchema > >>;
+export type Iso_kernel_metadataPlugin__MetadataQueryResultSchema = Assert<Eq< z.input< typeof M88.MetadataQueryResultSchema >, z.infer< typeof M88.MetadataQueryResultSchema > >>;
+export type Iso_kernel_metadataPlugin__MetadataTypeSchema = Assert<Eq< z.input< typeof M88.MetadataTypeSchema >, z.infer< typeof M88.MetadataTypeSchema > >>;
+export type Iso_kernel_metadataPlugin__MetadataValidationResultSchema = Assert<Eq< z.input< typeof M88.MetadataValidationResultSchema >, z.infer< typeof M88.MetadataValidationResultSchema > >>;
+
+// kernel/metadata-protection.zod.ts
+export type Iso_kernel_metadataProtection__MetadataLockSchema = Assert<Eq< z.input< typeof M89.MetadataLockSchema >, z.infer< typeof M89.MetadataLockSchema > >>;
+export type Iso_kernel_metadataProtection__MetadataLockSourceSchema = Assert<Eq< z.input< typeof M89.MetadataLockSourceSchema >, z.infer< typeof M89.MetadataLockSourceSchema > >>;
+export type Iso_kernel_metadataProtection__MetadataProvenanceSchema = Assert<Eq< z.input< typeof M89.MetadataProvenanceSchema >, z.infer< typeof M89.MetadataProvenanceSchema > >>;
+
+// kernel/package-artifact.zod.ts
+export type Iso_kernel_packageArtifact__ArtifactFileEntrySchema = Assert<Eq< z.input< typeof M90.ArtifactFileEntrySchema >, z.infer< typeof M90.ArtifactFileEntrySchema > >>;
+export type Iso_kernel_packageArtifact__MetadataCategoryEnum = Assert<Eq< z.input< typeof M90.MetadataCategoryEnum >, z.infer< typeof M90.MetadataCategoryEnum > >>;
+
+// kernel/package-registry.zod.ts
+export type Iso_kernel_packageRegistry__DisablePackageRequestSchema = Assert<Eq< z.input< typeof M91.DisablePackageRequestSchema >, z.infer< typeof M91.DisablePackageRequestSchema > >>;
+export type Iso_kernel_packageRegistry__EnablePackageRequestSchema = Assert<Eq< z.input< typeof M91.EnablePackageRequestSchema >, z.infer< typeof M91.EnablePackageRequestSchema > >>;
+export type Iso_kernel_packageRegistry__GetPackageRequestSchema = Assert<Eq< z.input< typeof M91.GetPackageRequestSchema >, z.infer< typeof M91.GetPackageRequestSchema > >>;
+export type Iso_kernel_packageRegistry__ListPackagesRequestSchema = Assert<Eq< z.input< typeof M91.ListPackagesRequestSchema >, z.infer< typeof M91.ListPackagesRequestSchema > >>;
+export type Iso_kernel_packageRegistry__NamespaceConflictErrorSchema = Assert<Eq< z.input< typeof M91.NamespaceConflictErrorSchema >, z.infer< typeof M91.NamespaceConflictErrorSchema > >>;
+export type Iso_kernel_packageRegistry__NamespaceRegistryEntrySchema = Assert<Eq< z.input< typeof M91.NamespaceRegistryEntrySchema >, z.infer< typeof M91.NamespaceRegistryEntrySchema > >>;
+export type Iso_kernel_packageRegistry__PackageStatusEnum = Assert<Eq< z.input< typeof M91.PackageStatusEnum >, z.infer< typeof M91.PackageStatusEnum > >>;
+export type Iso_kernel_packageRegistry__UninstallPackageRequestSchema = Assert<Eq< z.input< typeof M91.UninstallPackageRequestSchema >, z.infer< typeof M91.UninstallPackageRequestSchema > >>;
+export type Iso_kernel_packageRegistry__UninstallPackageResponseSchema = Assert<Eq< z.input< typeof M91.UninstallPackageResponseSchema >, z.infer< typeof M91.UninstallPackageResponseSchema > >>;
+
+// kernel/package-upgrade.zod.ts
+export type Iso_kernel_packageUpgrade__MetadataChangeTypeSchema = Assert<Eq< z.input< typeof M92.MetadataChangeTypeSchema >, z.infer< typeof M92.MetadataChangeTypeSchema > >>;
+export type Iso_kernel_packageUpgrade__RollbackPackageResponseSchema = Assert<Eq< z.input< typeof M92.RollbackPackageResponseSchema >, z.infer< typeof M92.RollbackPackageResponseSchema > >>;
+export type Iso_kernel_packageUpgrade__UpgradeImpactLevelSchema = Assert<Eq< z.input< typeof M92.UpgradeImpactLevelSchema >, z.infer< typeof M92.UpgradeImpactLevelSchema > >>;
+export type Iso_kernel_packageUpgrade__UpgradePhaseSchema = Assert<Eq< z.input< typeof M92.UpgradePhaseSchema >, z.infer< typeof M92.UpgradePhaseSchema > >>;
+
+// kernel/plugin-capability.zod.ts
+export type Iso_kernel_pluginCapability__CapabilityConformanceLevelSchema = Assert<Eq< z.input< typeof M93.CapabilityConformanceLevelSchema >, z.infer< typeof M93.CapabilityConformanceLevelSchema > >>;
+export type Iso_kernel_pluginCapability__ProtocolReferenceSchema = Assert<Eq< z.input< typeof M93.ProtocolReferenceSchema >, z.infer< typeof M93.ProtocolReferenceSchema > >>;
+export type Iso_kernel_pluginCapability__ProtocolVersionSchema = Assert<Eq< z.input< typeof M93.ProtocolVersionSchema >, z.infer< typeof M93.ProtocolVersionSchema > >>;
+
+// kernel/plugin-lifecycle-advanced.zod.ts
+export type Iso_kernel_pluginLifecycleAdvanced__PluginHealthReportSchema = Assert<Eq< z.input< typeof M94.PluginHealthReportSchema >, z.infer< typeof M94.PluginHealthReportSchema > >>;
+export type Iso_kernel_pluginLifecycleAdvanced__PluginHealthStatusSchema = Assert<Eq< z.input< typeof M94.PluginHealthStatusSchema >, z.infer< typeof M94.PluginHealthStatusSchema > >>;
+
+// kernel/plugin-loading.zod.ts
+// (Iso441 pinned `PluginLoadingStrategySchema`, removed with the rest of the
+// `manifest.loading` block in #4914 — ADR-0049 enforce-or-remove.)
+export type Iso_kernel_pluginLoading__PluginLoadingEventSchema = Assert<Eq< z.input< typeof M95.PluginLoadingEventSchema >, z.infer< typeof M95.PluginLoadingEventSchema > >>;
+
+// kernel/plugin-registry.zod.ts
+export type Iso_kernel_pluginRegistry__PluginInstallConfigSchema = Assert<Eq< z.input< typeof M96.PluginInstallConfigSchema >, z.infer< typeof M96.PluginInstallConfigSchema > >>;
+export type Iso_kernel_pluginRegistry__PluginSearchFiltersSchema = Assert<Eq< z.input< typeof M96.PluginSearchFiltersSchema >, z.infer< typeof M96.PluginSearchFiltersSchema > >>;
+
+// kernel/plugin-security-advanced.zod.ts
+export type Iso_kernel_pluginSecurityAdvanced__PermissionActionSchema = Assert<Eq< z.input< typeof M97.PermissionActionSchema >, z.infer< typeof M97.PermissionActionSchema > >>;
+export type Iso_kernel_pluginSecurityAdvanced__PermissionScopeSchema = Assert<Eq< z.input< typeof M97.PermissionScopeSchema >, z.infer< typeof M97.PermissionScopeSchema > >>;
+export type Iso_kernel_pluginSecurityAdvanced__PluginTrustLevelSchema = Assert<Eq< z.input< typeof M97.PluginTrustLevelSchema >, z.infer< typeof M97.PluginTrustLevelSchema > >>;
+export type Iso_kernel_pluginSecurityAdvanced__ResourceTypeSchema = Assert<Eq< z.input< typeof M97.ResourceTypeSchema >, z.infer< typeof M97.ResourceTypeSchema > >>;
+
+// kernel/plugin-security.zod.ts
+export type Iso_kernel_pluginSecurity__PackageDependencyConflictSchema = Assert<Eq< z.input< typeof M98.PackageDependencyConflictSchema >, z.infer< typeof M98.PackageDependencyConflictSchema > >>;
+export type Iso_kernel_pluginSecurity__VulnerabilitySeverity = Assert<Eq< z.input< typeof M98.VulnerabilitySeverity >, z.infer< typeof M98.VulnerabilitySeverity > >>;
+
+// kernel/plugin-structure.zod.ts
+export type Iso_kernel_pluginStructure__OpsDomainModuleSchema = Assert<Eq< z.input< typeof M99.OpsDomainModuleSchema >, z.infer< typeof M99.OpsDomainModuleSchema > >>;
+export type Iso_kernel_pluginStructure__OpsFilePathSchema = Assert<Eq< z.input< typeof M99.OpsFilePathSchema >, z.infer< typeof M99.OpsFilePathSchema > >>;
+export type Iso_kernel_pluginStructure__OpsPluginStructureSchema = Assert<Eq< z.input< typeof M99.OpsPluginStructureSchema >, z.infer< typeof M99.OpsPluginStructureSchema > >>;
+
+// kernel/plugin-validator.zod.ts
+export type Iso_kernel_pluginValidator__PluginMetadataSchema = Assert<Eq< z.input< typeof M100.PluginMetadataSchema >, z.infer< typeof M100.PluginMetadataSchema > >>;
+export type Iso_kernel_pluginValidator__ValidationErrorSchema = Assert<Eq< z.input< typeof M100.ValidationErrorSchema >, z.infer< typeof M100.ValidationErrorSchema > >>;
+export type Iso_kernel_pluginValidator__ValidationResultSchema = Assert<Eq< z.input< typeof M100.ValidationResultSchema >, z.infer< typeof M100.ValidationResultSchema > >>;
+export type Iso_kernel_pluginValidator__ValidationWarningSchema = Assert<Eq< z.input< typeof M100.ValidationWarningSchema >, z.infer< typeof M100.ValidationWarningSchema > >>;
+
+// kernel/plugin-versioning.zod.ts
+export type Iso_kernel_pluginVersioning__CompatibilityLevelSchema = Assert<Eq< z.input< typeof M101.CompatibilityLevelSchema >, z.infer< typeof M101.CompatibilityLevelSchema > >>;
+export type Iso_kernel_pluginVersioning__DeprecationNoticeSchema = Assert<Eq< z.input< typeof M101.DeprecationNoticeSchema >, z.infer< typeof M101.DeprecationNoticeSchema > >>;
+export type Iso_kernel_pluginVersioning__SemanticVersionSchema = Assert<Eq< z.input< typeof M101.SemanticVersionSchema >, z.infer< typeof M101.SemanticVersionSchema > >>;
+export type Iso_kernel_pluginVersioning__VersionConstraintSchema = Assert<Eq< z.input< typeof M101.VersionConstraintSchema >, z.infer< typeof M101.VersionConstraintSchema > >>;
+
+// kernel/plugin.zod.ts
+export type Iso_kernel_plugin__PluginContextSchema = Assert<Eq< z.input< typeof M102.PluginContextSchema >, z.infer< typeof M102.PluginContextSchema > >>;
+export type Iso_kernel_plugin__PluginSchema = Assert<Eq< z.input< typeof M102.PluginSchema >, z.infer< typeof M102.PluginSchema > >>;
+
+// kernel/service-registry.zod.ts
+export type Iso_kernel_serviceRegistry__ScopeConfigSchema = Assert<Eq< z.input< typeof M103.ScopeConfigSchema >, z.infer< typeof M103.ScopeConfigSchema > >>;
+export type Iso_kernel_serviceRegistry__ScopeInfoSchema = Assert<Eq< z.input< typeof M103.ScopeInfoSchema >, z.infer< typeof M103.ScopeInfoSchema > >>;
+export type Iso_kernel_serviceRegistry__ServiceScopeType = Assert<Eq< z.input< typeof M103.ServiceScopeType >, z.infer< typeof M103.ServiceScopeType > >>;
+
+// kernel/startup-orchestrator.zod.ts
+export type Iso_kernel_startupOrchestrator__PluginStartupResultSchema = Assert<Eq< z.input< typeof M104.PluginStartupResultSchema >, z.infer< typeof M104.PluginStartupResultSchema > >>;
+
+// marketplace/marketplace.zod.ts
+export type Iso_marketplace_marketplace__ArtifactDownloadResponseSchema = Assert<Eq< z.input< typeof M50.ArtifactDownloadResponseSchema >, z.infer< typeof M50.ArtifactDownloadResponseSchema > >>;
+export type Iso_marketplace_marketplace__ListingStatusSchema = Assert<Eq< z.input< typeof M50.ListingStatusSchema >, z.infer< typeof M50.ListingStatusSchema > >>;
+export type Iso_marketplace_marketplace__MarketplaceCategorySchema = Assert<Eq< z.input< typeof M50.MarketplaceCategorySchema >, z.infer< typeof M50.MarketplaceCategorySchema > >>;
+export type Iso_marketplace_marketplace__MarketplaceInstallResponseSchema = Assert<Eq< z.input< typeof M50.MarketplaceInstallResponseSchema >, z.infer< typeof M50.MarketplaceInstallResponseSchema > >>;
+export type Iso_marketplace_marketplace__PricingModelSchema = Assert<Eq< z.input< typeof M50.PricingModelSchema >, z.infer< typeof M50.PricingModelSchema > >>;
+export type Iso_marketplace_marketplace__PublisherVerificationSchema = Assert<Eq< z.input< typeof M50.PublisherVerificationSchema >, z.infer< typeof M50.PublisherVerificationSchema > >>;
+
+// marketplace/package-version.zod.ts
+export type Iso_marketplace_packageVersion__CreatePackageVersionRequestSchema = Assert<Eq< z.input< typeof M51.CreatePackageVersionRequestSchema >, z.infer< typeof M51.CreatePackageVersionRequestSchema > >>;
+export type Iso_marketplace_packageVersion__PackageVersionStatusSchema = Assert<Eq< z.input< typeof M51.PackageVersionStatusSchema >, z.infer< typeof M51.PackageVersionStatusSchema > >>;
+export type Iso_marketplace_packageVersion__PublishPackageVersionRequestSchema = Assert<Eq< z.input< typeof M51.PublishPackageVersionRequestSchema >, z.infer< typeof M51.PublishPackageVersionRequestSchema > >>;
+export type Iso_marketplace_packageVersion__UpdatePackageVersionRequestSchema = Assert<Eq< z.input< typeof M51.UpdatePackageVersionRequestSchema >, z.infer< typeof M51.UpdatePackageVersionRequestSchema > >>;
+
+// marketplace/package.zod.ts
+export type Iso_marketplace_package__CreatePackageRequestSchema = Assert<Eq< z.input< typeof M52.CreatePackageRequestSchema >, z.infer< typeof M52.CreatePackageRequestSchema > >>;
+export type Iso_marketplace_package__PackageCategorySchema = Assert<Eq< z.input< typeof M52.PackageCategorySchema >, z.infer< typeof M52.PackageCategorySchema > >>;
+export type Iso_marketplace_package__PackageLocaleSchema = Assert<Eq< z.input< typeof M52.PackageLocaleSchema >, z.infer< typeof M52.PackageLocaleSchema > >>;
+export type Iso_marketplace_package__PackagePublisherSchema = Assert<Eq< z.input< typeof M52.PackagePublisherSchema >, z.infer< typeof M52.PackagePublisherSchema > >>;
+export type Iso_marketplace_package__PackageTranslationSchema = Assert<Eq< z.input< typeof M52.PackageTranslationSchema >, z.infer< typeof M52.PackageTranslationSchema > >>;
+export type Iso_marketplace_package__PackageTranslationsSchema = Assert<Eq< z.input< typeof M52.PackageTranslationsSchema >, z.infer< typeof M52.PackageTranslationsSchema > >>;
+export type Iso_marketplace_package__PackageVisibilitySchema = Assert<Eq< z.input< typeof M52.PackageVisibilitySchema >, z.infer< typeof M52.PackageVisibilitySchema > >>;
+export type Iso_marketplace_package__UpdatePackageRequestSchema = Assert<Eq< z.input< typeof M52.UpdatePackageRequestSchema >, z.infer< typeof M52.UpdatePackageRequestSchema > >>;
+
+// marketplace/template-manifest.zod.ts
+export type Iso_marketplace_templateManifest__TemplateManifestSchema = Assert<Eq< z.input< typeof M53.TemplateManifestSchema >, z.infer< typeof M53.TemplateManifestSchema > >>;
+
+// qa/testing.zod.ts
+export type Iso_qa_testing__TestActionSchema = Assert<Eq< z.input< typeof M105.TestActionSchema >, z.infer< typeof M105.TestActionSchema > >>;
+export type Iso_qa_testing__TestActionTypeSchema = Assert<Eq< z.input< typeof M105.TestActionTypeSchema >, z.infer< typeof M105.TestActionTypeSchema > >>;
+export type Iso_qa_testing__TestAssertionSchema = Assert<Eq< z.input< typeof M105.TestAssertionSchema >, z.infer< typeof M105.TestAssertionSchema > >>;
+export type Iso_qa_testing__TestAssertionTypeSchema = Assert<Eq< z.input< typeof M105.TestAssertionTypeSchema >, z.infer< typeof M105.TestAssertionTypeSchema > >>;
+export type Iso_qa_testing__TestContextSchema = Assert<Eq< z.input< typeof M105.TestContextSchema >, z.infer< typeof M105.TestContextSchema > >>;
+export type Iso_qa_testing__TestScenarioSchema = Assert<Eq< z.input< typeof M105.TestScenarioSchema >, z.infer< typeof M105.TestScenarioSchema > >>;
+export type Iso_qa_testing__TestStepSchema = Assert<Eq< z.input< typeof M105.TestStepSchema >, z.infer< typeof M105.TestStepSchema > >>;
+export type Iso_qa_testing__TestSuiteSchema = Assert<Eq< z.input< typeof M105.TestSuiteSchema >, z.infer< typeof M105.TestSuiteSchema > >>;
+
+// security/explain.zod.ts
+export type Iso_security_explain__AccessMatrixEntrySchema = Assert<Eq< z.input< typeof M106.AccessMatrixEntrySchema >, z.infer< typeof M106.AccessMatrixEntrySchema > >>;
+export type Iso_security_explain__AuthzPostureSchema = Assert<Eq< z.input< typeof M106.AuthzPostureSchema >, z.infer< typeof M106.AuthzPostureSchema > >>;
+export type Iso_security_explain__ExplainMatchedRuleSchema = Assert<Eq< z.input< typeof M106.ExplainMatchedRuleSchema >, z.infer< typeof M106.ExplainMatchedRuleSchema > >>;
+export type Iso_security_explain__ExplainOperationSchema = Assert<Eq< z.input< typeof M106.ExplainOperationSchema >, z.infer< typeof M106.ExplainOperationSchema > >>;
+export type Iso_security_explain__ExplainRequestSchema = Assert<Eq< z.input< typeof M106.ExplainRequestSchema >, z.infer< typeof M106.ExplainRequestSchema > >>;
+
+// security/permission.zod.ts
+export type Iso_security_permission__EffectiveObjectPermissionSchema = Assert<Eq< z.input< typeof M107.EffectiveObjectPermissionSchema >, z.infer< typeof M107.EffectiveObjectPermissionSchema > >>;
+export type Iso_security_permission__ObjectAccessScopeSchema = Assert<Eq< z.input< typeof M107.ObjectAccessScopeSchema >, z.infer< typeof M107.ObjectAccessScopeSchema > >>;
+
+// security/rls.zod.ts
+export type Iso_security_rls__RLSEvaluationResultSchema = Assert<Eq< z.input< typeof M108.RLSEvaluationResultSchema >, z.infer< typeof M108.RLSEvaluationResultSchema > >>;
+export type Iso_security_rls__RLSOperation = Assert<Eq< z.input< typeof M108.RLSOperation >, z.infer< typeof M108.RLSOperation > >>;
+export type Iso_security_rls__RLSUserContextSchema = Assert<Eq< z.input< typeof M108.RLSUserContextSchema >, z.infer< typeof M108.RLSUserContextSchema > >>;
+
+// security/sharing.zod.ts
+export type Iso_security_sharing__OWDModel = Assert<Eq< z.input< typeof M180.OWDModel >, z.infer< typeof M180.OWDModel > >>;
+export type Iso_security_sharing__ShareRecipientType = Assert<Eq< z.input< typeof M180.ShareRecipientType >, z.infer< typeof M180.ShareRecipientType > >>;
+export type Iso_security_sharing__SharingLevel = Assert<Eq< z.input< typeof M180.SharingLevel >, z.infer< typeof M180.SharingLevel > >>;
+export type Iso_security_sharing__SharingRuleType = Assert<Eq< z.input< typeof M180.SharingRuleType >, z.infer< typeof M180.SharingRuleType > >>;
+
+// shared/connector-auth.zod.ts
+export type Iso_shared_connectorAuth__ConnectorInstanceAPIKeyAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAPIKeyAuthSchema >, z.infer< typeof M109.ConnectorInstanceAPIKeyAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceAuthSchema >, z.infer< typeof M109.ConnectorInstanceAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceBasicAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceBasicAuthSchema >, z.infer< typeof M109.ConnectorInstanceBasicAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceBearerAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceBearerAuthSchema >, z.infer< typeof M109.ConnectorInstanceBearerAuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceNoAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceNoAuthSchema >, z.infer< typeof M109.ConnectorInstanceNoAuthSchema > >>;
+
+// shared/duration.zod.ts — the closed DURATION vocabulary (#18122), step ① of
+// ruling A on #18115 and the counterpart of the `shared/epoch` instant. Both are
+// `z.number().int().nonnegative()`: no default, no transform, the (RISE) case.
+// The refinement is deliberate rather than incidental, so these two pins are
+// what goes red the day someone gives a duration type a `.default()` — which
+// would put the author state and the parsed state on different sides of it.
+export type Iso_shared_duration__DurationMs = Assert<Eq< z.input< typeof M187.DurationMs >, z.infer< typeof M187.DurationMs > >>;
+export type Iso_shared_duration__DurationSeconds = Assert<Eq< z.input< typeof M187.DurationSeconds >, z.infer< typeof M187.DurationSeconds > >>;
+
+// shared/enums.zod.ts
+export type Iso_shared_enums__IsolationLevelEnum = Assert<Eq< z.input< typeof M110.IsolationLevelEnum >, z.infer< typeof M110.IsolationLevelEnum > >>;
+export type Iso_shared_enums__MutationEventEnum = Assert<Eq< z.input< typeof M110.MutationEventEnum >, z.infer< typeof M110.MutationEventEnum > >>;
+export type Iso_shared_enums__SortDirectionEnum = Assert<Eq< z.input< typeof M110.SortDirectionEnum >, z.infer< typeof M110.SortDirectionEnum > >>;
+export type Iso_shared_enums__SortItemSchema = Assert<Eq< z.input< typeof M110.SortItemSchema >, z.infer< typeof M110.SortItemSchema > >>;
+
+// shared/epoch.zod.ts — the shared epoch-millisecond INSTANT (#15676), the
+// first of the two exemptions ruling B on #14478 declares on the schema.
+// `z.number().int()`: no default, no transform, the (RISE) case.
+export type Iso_shared_epoch__EpochMs = Assert<Eq< z.input< typeof M185.EpochMs >, z.infer< typeof M185.EpochMs > >>;
+
+// shared/expression.zod.ts
+export type Iso_shared_expression__ExpressionDialect = Assert<Eq< z.input< typeof M111.ExpressionDialect >, z.infer< typeof M111.ExpressionDialect > >>;
+export type Iso_shared_expression__ExpressionMetaSchema = Assert<Eq< z.input< typeof M111.ExpressionMetaSchema >, z.infer< typeof M111.ExpressionMetaSchema > >>;
+export type Iso_shared_expression__ExpressionSchema = Assert<Eq< z.input< typeof M111.ExpressionSchema >, z.infer< typeof M111.ExpressionSchema > >>;
+export type Iso_shared_expression__PredicateSchema = Assert<Eq< z.input< typeof M111.PredicateSchema >, z.infer< typeof M111.PredicateSchema > >>;
+
+// shared/http.zod.ts
+export type Iso_shared_http__HttpMethod = Assert<Eq< z.input< typeof M112.HttpMethod >, z.infer< typeof M112.HttpMethod > >>;
+export type Iso_shared_http__HttpMethodSubsetSchema = Assert<Eq< z.input< typeof M112.HttpMethodSubsetSchema >, z.infer< typeof M112.HttpMethodSubsetSchema > >>;
+export type Iso_shared_http__StaticMountSchema = Assert<Eq< z.input< typeof M112.StaticMountSchema >, z.infer< typeof M112.StaticMountSchema > >>;
+
+// shared/identifiers.zod.ts
+export type Iso_shared_identifiers__MetadataItemNameSchema = Assert<Eq< z.input< typeof M113.MetadataItemNameSchema >, z.infer< typeof M113.MetadataItemNameSchema > >>;
+export type Iso_shared_identifiers__SnakeCaseIdentifierSchema = Assert<Eq< z.input< typeof M113.SnakeCaseIdentifierSchema >, z.infer< typeof M113.SnakeCaseIdentifierSchema > >>;
+export type Iso_shared_identifiers__SystemIdentifierSchema = Assert<Eq< z.input< typeof M113.SystemIdentifierSchema >, z.infer< typeof M113.SystemIdentifierSchema > >>;
+
+// shared/mapping.zod.ts
+// Graduated INTO the isomorphic set at protocol 17: #5552 retired `transform` and the
+// whole `FieldMappingTransform` union, which is what used to give this schema two shapes.
+export type Iso_shared_mapping__FieldMappingSchema = Assert<Eq< z.input< typeof M169.FieldMappingSchema >, z.infer< typeof M169.FieldMappingSchema > >>;
+
+// shared/metadata-types.zod.ts
+export type Iso_shared_metadataTypes__BaseMetadataRecordSchema = Assert<Eq< z.input< typeof M114.BaseMetadataRecordSchema >, z.infer< typeof M114.BaseMetadataRecordSchema > >>;
+export type Iso_shared_metadataTypes__MetadataFormatSchema = Assert<Eq< z.input< typeof M114.MetadataFormatSchema >, z.infer< typeof M114.MetadataFormatSchema > >>;
+
+// shared/protection.zod.ts
+export type Iso_shared_protection__ProtectionSchema = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer< typeof M115.ProtectionSchema > >>;
 
 // shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
-// `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
+// `SpecifierValueDomainSchema` is an alias of it, so its pin
+// (`Iso_system_settingsManifest__SpecifierValueDomainSchema`) and this one hold
 // or fall together. A `z.enum` has no default or transform, the (RISE) case.
-export type Iso867 = Assert<Eq< z.input< typeof M184.ValueDomainSchema >, z.infer< typeof M184.ValueDomainSchema > >>;
+export type Iso_shared_valueDomain__ValueDomainSchema = Assert<Eq< z.input< typeof M184.ValueDomainSchema >, z.infer< typeof M184.ValueDomainSchema > >>;
 
 // stack.zod.ts
-export type Iso503 = Assert<Eq< z.input< typeof M116.DatasourceMappingRuleSchema >, z.infer< typeof M116.DatasourceMappingRuleSchema > >>;
-export type Iso504 = Assert<Eq< z.input< typeof M116.ConflictStrategySchema >, z.infer< typeof M116.ConflictStrategySchema > >>;
+export type Iso_stack__ConflictStrategySchema = Assert<Eq< z.input< typeof M116.ConflictStrategySchema >, z.infer< typeof M116.ConflictStrategySchema > >>;
+export type Iso_stack__DatasourceMappingRuleSchema = Assert<Eq< z.input< typeof M116.DatasourceMappingRuleSchema >, z.infer< typeof M116.DatasourceMappingRuleSchema > >>;
 
 // studio/flow-builder.zod.ts
-export type Iso505 = Assert<Eq< z.input< typeof M117.FlowNodeShapeSchema >, z.infer< typeof M117.FlowNodeShapeSchema > >>;
-export type Iso506 = Assert<Eq< z.input< typeof M117.FlowCanvasEdgeStyleSchema >, z.infer< typeof M117.FlowCanvasEdgeStyleSchema > >>;
-export type Iso507 = Assert<Eq< z.input< typeof M117.FlowLayoutAlgorithmSchema >, z.infer< typeof M117.FlowLayoutAlgorithmSchema > >>;
-export type Iso508 = Assert<Eq< z.input< typeof M117.FlowLayoutDirectionSchema >, z.infer< typeof M117.FlowLayoutDirectionSchema > >>;
+export type Iso_studio_flowBuilder__FlowCanvasEdgeStyleSchema = Assert<Eq< z.input< typeof M117.FlowCanvasEdgeStyleSchema >, z.infer< typeof M117.FlowCanvasEdgeStyleSchema > >>;
+export type Iso_studio_flowBuilder__FlowLayoutAlgorithmSchema = Assert<Eq< z.input< typeof M117.FlowLayoutAlgorithmSchema >, z.infer< typeof M117.FlowLayoutAlgorithmSchema > >>;
+export type Iso_studio_flowBuilder__FlowLayoutDirectionSchema = Assert<Eq< z.input< typeof M117.FlowLayoutDirectionSchema >, z.infer< typeof M117.FlowLayoutDirectionSchema > >>;
+export type Iso_studio_flowBuilder__FlowNodeShapeSchema = Assert<Eq< z.input< typeof M117.FlowNodeShapeSchema >, z.infer< typeof M117.FlowNodeShapeSchema > >>;
 
 // studio/object-designer.zod.ts
-export type Iso509 = Assert<Eq< z.input< typeof M118.ERLayoutAlgorithmSchema >, z.infer< typeof M118.ERLayoutAlgorithmSchema > >>;
-export type Iso510 = Assert<Eq< z.input< typeof M118.ObjectListDisplayModeSchema >, z.infer< typeof M118.ObjectListDisplayModeSchema > >>;
-export type Iso511 = Assert<Eq< z.input< typeof M118.ObjectSortFieldSchema >, z.infer< typeof M118.ObjectSortFieldSchema > >>;
-export type Iso512 = Assert<Eq< z.input< typeof M118.ObjectDesignerDefaultViewSchema >, z.infer< typeof M118.ObjectDesignerDefaultViewSchema > >>;
+export type Iso_studio_objectDesigner__ERLayoutAlgorithmSchema = Assert<Eq< z.input< typeof M118.ERLayoutAlgorithmSchema >, z.infer< typeof M118.ERLayoutAlgorithmSchema > >>;
+export type Iso_studio_objectDesigner__ObjectDesignerDefaultViewSchema = Assert<Eq< z.input< typeof M118.ObjectDesignerDefaultViewSchema >, z.infer< typeof M118.ObjectDesignerDefaultViewSchema > >>;
+export type Iso_studio_objectDesigner__ObjectListDisplayModeSchema = Assert<Eq< z.input< typeof M118.ObjectListDisplayModeSchema >, z.infer< typeof M118.ObjectListDisplayModeSchema > >>;
+export type Iso_studio_objectDesigner__ObjectSortFieldSchema = Assert<Eq< z.input< typeof M118.ObjectSortFieldSchema >, z.infer< typeof M118.ObjectSortFieldSchema > >>;
 
 // studio/plugin.zod.ts
-export type Iso513 = Assert<Eq< z.input< typeof M119.ViewModeSchema >, z.infer< typeof M119.ViewModeSchema > >>;
-export type Iso514 = Assert<Eq< z.input< typeof M119.ActionContributionLocationSchema >, z.infer< typeof M119.ActionContributionLocationSchema > >>;
-export type Iso515 = Assert<Eq< z.input< typeof M119.MetadataIconContributionSchema >, z.infer< typeof M119.MetadataIconContributionSchema > >>;
-export type Iso516 = Assert<Eq< z.input< typeof M119.CommandContributionSchema >, z.infer< typeof M119.CommandContributionSchema > >>;
+export type Iso_studio_plugin__ActionContributionLocationSchema = Assert<Eq< z.input< typeof M119.ActionContributionLocationSchema >, z.infer< typeof M119.ActionContributionLocationSchema > >>;
+export type Iso_studio_plugin__CommandContributionSchema = Assert<Eq< z.input< typeof M119.CommandContributionSchema >, z.infer< typeof M119.CommandContributionSchema > >>;
+export type Iso_studio_plugin__MetadataIconContributionSchema = Assert<Eq< z.input< typeof M119.MetadataIconContributionSchema >, z.infer< typeof M119.MetadataIconContributionSchema > >>;
+export type Iso_studio_plugin__PanelLocationSchema = Assert<Eq< z.input< typeof M119.PanelLocationSchema >, z.infer< typeof M119.PanelLocationSchema > >>;
+export type Iso_studio_plugin__ViewModeSchema = Assert<Eq< z.input< typeof M119.ViewModeSchema >, z.infer< typeof M119.ViewModeSchema > >>;
 
 // system/auth-config.zod.ts
-export type Iso517 = Assert<Eq< z.input< typeof M120.OidcProviderConfigSchema >, z.infer< typeof M120.OidcProviderConfigSchema > >>;
-export type Iso518 = Assert<Eq< z.input< typeof M120.OidcProvidersConfigSchema >, z.infer< typeof M120.OidcProvidersConfigSchema > >>;
-export type Iso519 = Assert<Eq< z.input< typeof M120.AuthProviderConfigSchema >, z.infer< typeof M120.AuthProviderConfigSchema > >>;
-export type Iso520 = Assert<Eq< z.input< typeof M120.EmailVerificationConfigSchema >, z.infer< typeof M120.EmailVerificationConfigSchema > >>;
-export type Iso521 = Assert<Eq< z.input< typeof M120.AdvancedAuthConfigSchema >, z.infer< typeof M120.AdvancedAuthConfigSchema > >>;
+export type Iso_system_authConfig__AdvancedAuthConfigSchema = Assert<Eq< z.input< typeof M120.AdvancedAuthConfigSchema >, z.infer< typeof M120.AdvancedAuthConfigSchema > >>;
+export type Iso_system_authConfig__AuthProviderConfigSchema = Assert<Eq< z.input< typeof M120.AuthProviderConfigSchema >, z.infer< typeof M120.AuthProviderConfigSchema > >>;
+export type Iso_system_authConfig__EmailVerificationConfigSchema = Assert<Eq< z.input< typeof M120.EmailVerificationConfigSchema >, z.infer< typeof M120.EmailVerificationConfigSchema > >>;
+export type Iso_system_authConfig__OidcProviderConfigSchema = Assert<Eq< z.input< typeof M120.OidcProviderConfigSchema >, z.infer< typeof M120.OidcProviderConfigSchema > >>;
+export type Iso_system_authConfig__OidcProvidersConfigSchema = Assert<Eq< z.input< typeof M120.OidcProvidersConfigSchema >, z.infer< typeof M120.OidcProvidersConfigSchema > >>;
 
 // system/cache.zod.ts
-export type Iso522 = Assert<Eq< z.input< typeof M121.CacheStrategySchema >, z.infer< typeof M121.CacheStrategySchema > >>;
-export type Iso523 = Assert<Eq< z.input< typeof M121.CacheInvalidationSchema >, z.infer< typeof M121.CacheInvalidationSchema > >>;
-export type Iso524 = Assert<Eq< z.input< typeof M121.CacheConsistencySchema >, z.infer< typeof M121.CacheConsistencySchema > >>;
-
+export type Iso_system_cache__CacheConsistencySchema = Assert<Eq< z.input< typeof M121.CacheConsistencySchema >, z.infer< typeof M121.CacheConsistencySchema > >>;
+export type Iso_system_cache__CacheInvalidationSchema = Assert<Eq< z.input< typeof M121.CacheInvalidationSchema >, z.infer< typeof M121.CacheInvalidationSchema > >>;
+export type Iso_system_cache__CacheStrategySchema = Assert<Eq< z.input< typeof M121.CacheStrategySchema >, z.infer< typeof M121.CacheStrategySchema > >>;
 
 // system/collaboration.zod.ts
-export type Iso530 = Assert<Eq< z.input< typeof M123.OTOperationType >, z.infer< typeof M123.OTOperationType > >>;
-export type Iso531 = Assert<Eq< z.input< typeof M123.OTComponentSchema >, z.infer< typeof M123.OTComponentSchema > >>;
-export type Iso532 = Assert<Eq< z.input< typeof M123.OTOperationSchema >, z.infer< typeof M123.OTOperationSchema > >>;
-export type Iso533 = Assert<Eq< z.input< typeof M123.OTTransformResultSchema >, z.infer< typeof M123.OTTransformResultSchema > >>;
-export type Iso534 = Assert<Eq< z.input< typeof M123.CRDTType >, z.infer< typeof M123.CRDTType > >>;
-export type Iso535 = Assert<Eq< z.input< typeof M123.VectorClockSchema >, z.infer< typeof M123.VectorClockSchema > >>;
-export type Iso536 = Assert<Eq< z.input< typeof M123.LWWRegisterSchema >, z.infer< typeof M123.LWWRegisterSchema > >>;
-export type Iso537 = Assert<Eq< z.input< typeof M123.CounterOperationSchema >, z.infer< typeof M123.CounterOperationSchema > >>;
-export type Iso538 = Assert<Eq< z.input< typeof M123.GCounterSchema >, z.infer< typeof M123.GCounterSchema > >>;
-export type Iso539 = Assert<Eq< z.input< typeof M123.PNCounterSchema >, z.infer< typeof M123.PNCounterSchema > >>;
-export type Iso540 = Assert<Eq< z.input< typeof M123.TextCRDTOperationSchema >, z.infer< typeof M123.TextCRDTOperationSchema > >>;
-export type Iso541 = Assert<Eq< z.input< typeof M123.TextCRDTStateSchema >, z.infer< typeof M123.TextCRDTStateSchema > >>;
-export type Iso542 = Assert<Eq< z.input< typeof M123.CursorColorPreset >, z.infer< typeof M123.CursorColorPreset > >>;
-export type Iso543 = Assert<Eq< z.input< typeof M123.CursorSelectionSchema >, z.infer< typeof M123.CursorSelectionSchema > >>;
-export type Iso544 = Assert<Eq< z.input< typeof M123.CursorUpdateSchema >, z.infer< typeof M123.CursorUpdateSchema > >>;
-export type Iso545 = Assert<Eq< z.input< typeof M123.UserActivityStatus >, z.infer< typeof M123.UserActivityStatus > >>;
-export type Iso546 = Assert<Eq< z.input< typeof M123.AwarenessUserStateSchema >, z.infer< typeof M123.AwarenessUserStateSchema > >>;
-export type Iso547 = Assert<Eq< z.input< typeof M123.AwarenessSessionSchema >, z.infer< typeof M123.AwarenessSessionSchema > >>;
-export type Iso548 = Assert<Eq< z.input< typeof M123.AwarenessUpdateSchema >, z.infer< typeof M123.AwarenessUpdateSchema > >>;
-export type Iso549 = Assert<Eq< z.input< typeof M123.AwarenessEventSchema >, z.infer< typeof M123.AwarenessEventSchema > >>;
-export type Iso550 = Assert<Eq< z.input< typeof M123.CollaborationMode >, z.infer< typeof M123.CollaborationMode > >>;
+export type Iso_system_collaboration__AwarenessEventSchema = Assert<Eq< z.input< typeof M123.AwarenessEventSchema >, z.infer< typeof M123.AwarenessEventSchema > >>;
+export type Iso_system_collaboration__AwarenessSessionSchema = Assert<Eq< z.input< typeof M123.AwarenessSessionSchema >, z.infer< typeof M123.AwarenessSessionSchema > >>;
+export type Iso_system_collaboration__AwarenessUpdateSchema = Assert<Eq< z.input< typeof M123.AwarenessUpdateSchema >, z.infer< typeof M123.AwarenessUpdateSchema > >>;
+export type Iso_system_collaboration__AwarenessUserStateSchema = Assert<Eq< z.input< typeof M123.AwarenessUserStateSchema >, z.infer< typeof M123.AwarenessUserStateSchema > >>;
+export type Iso_system_collaboration__CRDTType = Assert<Eq< z.input< typeof M123.CRDTType >, z.infer< typeof M123.CRDTType > >>;
+export type Iso_system_collaboration__CollaborationMode = Assert<Eq< z.input< typeof M123.CollaborationMode >, z.infer< typeof M123.CollaborationMode > >>;
+export type Iso_system_collaboration__CounterOperationSchema = Assert<Eq< z.input< typeof M123.CounterOperationSchema >, z.infer< typeof M123.CounterOperationSchema > >>;
+export type Iso_system_collaboration__CursorColorPreset = Assert<Eq< z.input< typeof M123.CursorColorPreset >, z.infer< typeof M123.CursorColorPreset > >>;
+export type Iso_system_collaboration__CursorSelectionSchema = Assert<Eq< z.input< typeof M123.CursorSelectionSchema >, z.infer< typeof M123.CursorSelectionSchema > >>;
+export type Iso_system_collaboration__CursorUpdateSchema = Assert<Eq< z.input< typeof M123.CursorUpdateSchema >, z.infer< typeof M123.CursorUpdateSchema > >>;
+export type Iso_system_collaboration__GCounterSchema = Assert<Eq< z.input< typeof M123.GCounterSchema >, z.infer< typeof M123.GCounterSchema > >>;
+export type Iso_system_collaboration__LWWRegisterSchema = Assert<Eq< z.input< typeof M123.LWWRegisterSchema >, z.infer< typeof M123.LWWRegisterSchema > >>;
+export type Iso_system_collaboration__OTComponentSchema = Assert<Eq< z.input< typeof M123.OTComponentSchema >, z.infer< typeof M123.OTComponentSchema > >>;
+export type Iso_system_collaboration__OTOperationSchema = Assert<Eq< z.input< typeof M123.OTOperationSchema >, z.infer< typeof M123.OTOperationSchema > >>;
+export type Iso_system_collaboration__OTOperationType = Assert<Eq< z.input< typeof M123.OTOperationType >, z.infer< typeof M123.OTOperationType > >>;
+export type Iso_system_collaboration__OTTransformResultSchema = Assert<Eq< z.input< typeof M123.OTTransformResultSchema >, z.infer< typeof M123.OTTransformResultSchema > >>;
+export type Iso_system_collaboration__PNCounterSchema = Assert<Eq< z.input< typeof M123.PNCounterSchema >, z.infer< typeof M123.PNCounterSchema > >>;
+export type Iso_system_collaboration__TextCRDTOperationSchema = Assert<Eq< z.input< typeof M123.TextCRDTOperationSchema >, z.infer< typeof M123.TextCRDTOperationSchema > >>;
+export type Iso_system_collaboration__TextCRDTStateSchema = Assert<Eq< z.input< typeof M123.TextCRDTStateSchema >, z.infer< typeof M123.TextCRDTStateSchema > >>;
+export type Iso_system_collaboration__UserActivityStatus = Assert<Eq< z.input< typeof M123.UserActivityStatus >, z.infer< typeof M123.UserActivityStatus > >>;
+export type Iso_system_collaboration__VectorClockSchema = Assert<Eq< z.input< typeof M123.VectorClockSchema >, z.infer< typeof M123.VectorClockSchema > >>;
 
 // system/core-services.zod.ts
-export type Iso551 = Assert<Eq< z.input< typeof M124.CoreServiceName >, z.infer< typeof M124.CoreServiceName > >>;
+export type Iso_system_coreServices__CoreServiceName = Assert<Eq< z.input< typeof M124.CoreServiceName >, z.infer< typeof M124.CoreServiceName > >>;
+export type Iso_system_coreServices__KernelServiceMapSchema = Assert<Eq< z.input< typeof M124.KernelServiceMapSchema >, z.infer< typeof M124.KernelServiceMapSchema > >>;
+export type Iso_system_coreServices__KernelServiceStatusSchema = Assert<Eq< z.input< typeof M124.KernelServiceStatusSchema >, z.infer< typeof M124.KernelServiceStatusSchema > >>;
+export type Iso_system_coreServices__ServiceConfigSchema = Assert<Eq< z.input< typeof M124.ServiceConfigSchema >, z.infer< typeof M124.ServiceConfigSchema > >>;
+export type Iso_system_coreServices__ServiceCriticalitySchema = Assert<Eq< z.input< typeof M124.ServiceCriticalitySchema >, z.infer< typeof M124.ServiceCriticalitySchema > >>;
 
 // system/deploy-bundle.zod.ts
-export type Iso552 = Assert<Eq< z.input< typeof M125.DeployStatusEnum >, z.infer< typeof M125.DeployStatusEnum > >>;
-export type Iso553 = Assert<Eq< z.input< typeof M125.SchemaChangeSchema >, z.infer< typeof M125.SchemaChangeSchema > >>;
-export type Iso554 = Assert<Eq< z.input< typeof M125.DeployValidationIssueSchema >, z.infer< typeof M125.DeployValidationIssueSchema > >>;
+export type Iso_system_deployBundle__DeployStatusEnum = Assert<Eq< z.input< typeof M125.DeployStatusEnum >, z.infer< typeof M125.DeployStatusEnum > >>;
+export type Iso_system_deployBundle__DeployValidationIssueSchema = Assert<Eq< z.input< typeof M125.DeployValidationIssueSchema >, z.infer< typeof M125.DeployValidationIssueSchema > >>;
+export type Iso_system_deployBundle__SchemaChangeSchema = Assert<Eq< z.input< typeof M125.SchemaChangeSchema >, z.infer< typeof M125.SchemaChangeSchema > >>;
 
 // system/disaster-recovery.zod.ts
-export type Iso555 = Assert<Eq< z.input< typeof M126.BackupStrategySchema >, z.infer< typeof M126.BackupStrategySchema > >>;
-export type Iso556 = Assert<Eq< z.input< typeof M126.FailoverModeSchema >, z.infer< typeof M126.FailoverModeSchema > >>;
+export type Iso_system_disasterRecovery__BackupStrategySchema = Assert<Eq< z.input< typeof M126.BackupStrategySchema >, z.infer< typeof M126.BackupStrategySchema > >>;
+export type Iso_system_disasterRecovery__FailoverModeSchema = Assert<Eq< z.input< typeof M126.FailoverModeSchema >, z.infer< typeof M126.FailoverModeSchema > >>;
 
 // system/doc.zod.ts
-export type Iso557 = Assert<Eq< z.input< typeof M127.DocSchema >, z.infer< typeof M127.DocSchema > >>;
+export type Iso_system_doc__DocSchema = Assert<Eq< z.input< typeof M127.DocSchema >, z.infer< typeof M127.DocSchema > >>;
 
 // system/email-config.zod.ts
-export type Iso558 = Assert<Eq< z.input< typeof M128.EmailProviderSchema >, z.infer< typeof M128.EmailProviderSchema > >>;
-export type Iso559 = Assert<Eq< z.input< typeof M128.EmailAddressConfigSchema >, z.infer< typeof M128.EmailAddressConfigSchema > >>;
+export type Iso_system_emailConfig__EmailAddressConfigSchema = Assert<Eq< z.input< typeof M128.EmailAddressConfigSchema >, z.infer< typeof M128.EmailAddressConfigSchema > >>;
+export type Iso_system_emailConfig__EmailProviderSchema = Assert<Eq< z.input< typeof M128.EmailProviderSchema >, z.infer< typeof M128.EmailProviderSchema > >>;
 
 // system/email-template.zod.ts
-export type Iso560 = Assert<Eq< z.input< typeof M129.EmailTemplateDefinitionCategorySchema >, z.infer< typeof M129.EmailTemplateDefinitionCategorySchema > >>;
+export type Iso_system_emailTemplate__EmailTemplateDefinitionCategorySchema = Assert<Eq< z.input< typeof M129.EmailTemplateDefinitionCategorySchema >, z.infer< typeof M129.EmailTemplateDefinitionCategorySchema > >>;
 
 // system/encryption.zod.ts
-export type Iso561 = Assert<Eq< z.input< typeof M130.EncryptionAlgorithmSchema >, z.infer< typeof M130.EncryptionAlgorithmSchema > >>;
-export type Iso562 = Assert<Eq< z.input< typeof M130.KeyManagementProviderSchema >, z.infer< typeof M130.KeyManagementProviderSchema > >>;
+export type Iso_system_encryption__EncryptionAlgorithmSchema = Assert<Eq< z.input< typeof M130.EncryptionAlgorithmSchema >, z.infer< typeof M130.EncryptionAlgorithmSchema > >>;
+export type Iso_system_encryption__KeyManagementProviderSchema = Assert<Eq< z.input< typeof M130.KeyManagementProviderSchema >, z.infer< typeof M130.KeyManagementProviderSchema > >>;
 
 // system/environment-artifact.zod.ts
-export type Iso563 = Assert<Eq< z.input< typeof M131.Sha256DigestSchema >, z.infer< typeof M131.Sha256DigestSchema > >>;
+export type Iso_system_environmentArtifact__Sha256DigestSchema = Assert<Eq< z.input< typeof M131.Sha256DigestSchema >, z.infer< typeof M131.Sha256DigestSchema > >>;
 
 // system/http-server.zod.ts
-export type Iso564 = Assert<Eq< z.input< typeof M132.MiddlewareType >, z.infer< typeof M132.MiddlewareType > >>;
-
+export type Iso_system_httpServer__MiddlewareType = Assert<Eq< z.input< typeof M132.MiddlewareType >, z.infer< typeof M132.MiddlewareType > >>;
 
 // system/job.zod.ts
-export type Iso573 = Assert<Eq< z.input< typeof M134.IntervalScheduleSchema >, z.infer< typeof M134.IntervalScheduleSchema > >>;
-export type Iso574 = Assert<Eq< z.input< typeof M134.OnceScheduleSchema >, z.infer< typeof M134.OnceScheduleSchema > >>;
-export type Iso575 = Assert<Eq< z.input< typeof M134.JobExecutionStatus >, z.infer< typeof M134.JobExecutionStatus > >>;
-export type Iso576 = Assert<Eq< z.input< typeof M134.JobExecutionSchema >, z.infer< typeof M134.JobExecutionSchema > >>;
+export type Iso_system_job__IntervalScheduleSchema = Assert<Eq< z.input< typeof M134.IntervalScheduleSchema >, z.infer< typeof M134.IntervalScheduleSchema > >>;
+export type Iso_system_job__JobExecutionSchema = Assert<Eq< z.input< typeof M134.JobExecutionSchema >, z.infer< typeof M134.JobExecutionSchema > >>;
+export type Iso_system_job__JobExecutionStatus = Assert<Eq< z.input< typeof M134.JobExecutionStatus >, z.infer< typeof M134.JobExecutionStatus > >>;
+export type Iso_system_job__OnceScheduleSchema = Assert<Eq< z.input< typeof M134.OnceScheduleSchema >, z.infer< typeof M134.OnceScheduleSchema > >>;
 
 // system/license.zod.ts
-export type Iso577 = Assert<Eq< z.input< typeof M135.LicenseMetricType >, z.infer< typeof M135.LicenseMetricType > >>;
-export type Iso578 = Assert<Eq< z.input< typeof M135.LicenseSchema >, z.infer< typeof M135.LicenseSchema > >>;
+export type Iso_system_license__LicenseMetricType = Assert<Eq< z.input< typeof M135.LicenseMetricType >, z.infer< typeof M135.LicenseMetricType > >>;
+export type Iso_system_license__LicenseSchema = Assert<Eq< z.input< typeof M135.LicenseSchema >, z.infer< typeof M135.LicenseSchema > >>;
 
 // system/logging.zod.ts
-export type Iso579 = Assert<Eq< z.input< typeof M136.LogLevel >, z.infer< typeof M136.LogLevel > >>;
-export type Iso580 = Assert<Eq< z.input< typeof M136.LogFormat >, z.infer< typeof M136.LogFormat > >>;
-export type Iso581 = Assert<Eq< z.input< typeof M136.LogEntrySchema >, z.infer< typeof M136.LogEntrySchema > >>;
-export type Iso582 = Assert<Eq< z.input< typeof M136.ExtendedLogLevel >, z.infer< typeof M136.ExtendedLogLevel > >>;
-export type Iso583 = Assert<Eq< z.input< typeof M136.LogDestinationType >, z.infer< typeof M136.LogDestinationType > >>;
-export type Iso584 = Assert<Eq< z.input< typeof M136.ExternalServiceDestinationConfigSchema >, z.infer< typeof M136.ExternalServiceDestinationConfigSchema > >>;
-export type Iso585 = Assert<Eq< z.input< typeof M136.StructuredLogEntrySchema >, z.infer< typeof M136.StructuredLogEntrySchema > >>;
+export type Iso_system_logging__ExtendedLogLevel = Assert<Eq< z.input< typeof M136.ExtendedLogLevel >, z.infer< typeof M136.ExtendedLogLevel > >>;
+export type Iso_system_logging__ExternalServiceDestinationConfigSchema = Assert<Eq< z.input< typeof M136.ExternalServiceDestinationConfigSchema >, z.infer< typeof M136.ExternalServiceDestinationConfigSchema > >>;
+export type Iso_system_logging__LogDestinationType = Assert<Eq< z.input< typeof M136.LogDestinationType >, z.infer< typeof M136.LogDestinationType > >>;
+export type Iso_system_logging__LogEntrySchema = Assert<Eq< z.input< typeof M136.LogEntrySchema >, z.infer< typeof M136.LogEntrySchema > >>;
+export type Iso_system_logging__LogFormat = Assert<Eq< z.input< typeof M136.LogFormat >, z.infer< typeof M136.LogFormat > >>;
+export type Iso_system_logging__LogLevel = Assert<Eq< z.input< typeof M136.LogLevel >, z.infer< typeof M136.LogLevel > >>;
+export type Iso_system_logging__StructuredLogEntrySchema = Assert<Eq< z.input< typeof M136.StructuredLogEntrySchema >, z.infer< typeof M136.StructuredLogEntrySchema > >>;
 
 // system/message-queue.zod.ts — retired whole (#8075, ADR-0049); its pin left with it.
 
 // system/metadata-persistence.zod.ts
-export type Iso587 = Assert<Eq< z.input< typeof M138.MetadataScopeSchema >, z.infer< typeof M138.MetadataScopeSchema > >>;
-export type Iso588 = Assert<Eq< z.input< typeof M138.PackagePublishResultSchema >, z.infer< typeof M138.PackagePublishResultSchema > >>;
-export type Iso589 = Assert<Eq< z.input< typeof M138.MetadataStatsSchema >, z.infer< typeof M138.MetadataStatsSchema > >>;
-export type Iso590 = Assert<Eq< z.input< typeof M138.MetadataLoadOptionsSchema >, z.infer< typeof M138.MetadataLoadOptionsSchema > >>;
-export type Iso591 = Assert<Eq< z.input< typeof M138.MetadataLoadResultSchema >, z.infer< typeof M138.MetadataLoadResultSchema > >>;
-export type Iso592 = Assert<Eq< z.input< typeof M138.MetadataSaveResultSchema >, z.infer< typeof M138.MetadataSaveResultSchema > >>;
-export type Iso593 = Assert<Eq< z.input< typeof M138.MetadataWatchEventSchema >, z.infer< typeof M138.MetadataWatchEventSchema > >>;
-export type Iso594 = Assert<Eq< z.input< typeof M138.MetadataCollectionInfoSchema >, z.infer< typeof M138.MetadataCollectionInfoSchema > >>;
-export type Iso595 = Assert<Eq< z.input< typeof M138.MetadataSourceSchema >, z.infer< typeof M138.MetadataSourceSchema > >>;
-export type Iso596 = Assert<Eq< z.input< typeof M138.MetadataHistoryRecordSchema >, z.infer< typeof M138.MetadataHistoryRecordSchema > >>;
-export type Iso597 = Assert<Eq< z.input< typeof M138.MetadataHistoryQueryResultSchema >, z.infer< typeof M138.MetadataHistoryQueryResultSchema > >>;
-export type Iso598 = Assert<Eq< z.input< typeof M138.MetadataDiffResultSchema >, z.infer< typeof M138.MetadataDiffResultSchema > >>;
+export type Iso_system_metadataPersistence__MetadataCollectionInfoSchema = Assert<Eq< z.input< typeof M138.MetadataCollectionInfoSchema >, z.infer< typeof M138.MetadataCollectionInfoSchema > >>;
+export type Iso_system_metadataPersistence__MetadataDiffResultSchema = Assert<Eq< z.input< typeof M138.MetadataDiffResultSchema >, z.infer< typeof M138.MetadataDiffResultSchema > >>;
+export type Iso_system_metadataPersistence__MetadataHistoryQueryResultSchema = Assert<Eq< z.input< typeof M138.MetadataHistoryQueryResultSchema >, z.infer< typeof M138.MetadataHistoryQueryResultSchema > >>;
+export type Iso_system_metadataPersistence__MetadataHistoryRecordSchema = Assert<Eq< z.input< typeof M138.MetadataHistoryRecordSchema >, z.infer< typeof M138.MetadataHistoryRecordSchema > >>;
+export type Iso_system_metadataPersistence__MetadataLoadOptionsSchema = Assert<Eq< z.input< typeof M138.MetadataLoadOptionsSchema >, z.infer< typeof M138.MetadataLoadOptionsSchema > >>;
+export type Iso_system_metadataPersistence__MetadataLoadResultSchema = Assert<Eq< z.input< typeof M138.MetadataLoadResultSchema >, z.infer< typeof M138.MetadataLoadResultSchema > >>;
+export type Iso_system_metadataPersistence__MetadataSaveResultSchema = Assert<Eq< z.input< typeof M138.MetadataSaveResultSchema >, z.infer< typeof M138.MetadataSaveResultSchema > >>;
+export type Iso_system_metadataPersistence__MetadataScopeSchema = Assert<Eq< z.input< typeof M138.MetadataScopeSchema >, z.infer< typeof M138.MetadataScopeSchema > >>;
+export type Iso_system_metadataPersistence__MetadataSourceSchema = Assert<Eq< z.input< typeof M138.MetadataSourceSchema >, z.infer< typeof M138.MetadataSourceSchema > >>;
+export type Iso_system_metadataPersistence__MetadataStateSchema = Assert<Eq< z.input< typeof M138.MetadataStateSchema >, z.infer< typeof M138.MetadataStateSchema > >>;
+export type Iso_system_metadataPersistence__MetadataStatsSchema = Assert<Eq< z.input< typeof M138.MetadataStatsSchema >, z.infer< typeof M138.MetadataStatsSchema > >>;
+export type Iso_system_metadataPersistence__MetadataWatchEventSchema = Assert<Eq< z.input< typeof M138.MetadataWatchEventSchema >, z.infer< typeof M138.MetadataWatchEventSchema > >>;
+export type Iso_system_metadataPersistence__PackagePublishResultSchema = Assert<Eq< z.input< typeof M138.PackagePublishResultSchema >, z.infer< typeof M138.PackagePublishResultSchema > >>;
 
 // system/metrics.zod.ts
-export type Iso599 = Assert<Eq< z.input< typeof M139.MetricType >, z.infer< typeof M139.MetricType > >>;
-export type Iso600 = Assert<Eq< z.input< typeof M139.MetricUnit >, z.infer< typeof M139.MetricUnit > >>;
-export type Iso601 = Assert<Eq< z.input< typeof M139.MetricAggregationType >, z.infer< typeof M139.MetricAggregationType > >>;
-export type Iso602 = Assert<Eq< z.input< typeof M139.HistogramBucketConfigSchema >, z.infer< typeof M139.HistogramBucketConfigSchema > >>;
-export type Iso603 = Assert<Eq< z.input< typeof M139.MetricLabelsSchema >, z.infer< typeof M139.MetricLabelsSchema > >>;
-export type Iso604 = Assert<Eq< z.input< typeof M139.MetricDataPointSchema >, z.infer< typeof M139.MetricDataPointSchema > >>;
-export type Iso605 = Assert<Eq< z.input< typeof M139.TimeSeriesDataPointSchema >, z.infer< typeof M139.TimeSeriesDataPointSchema > >>;
-export type Iso606 = Assert<Eq< z.input< typeof M139.TimeSeriesSchema >, z.infer< typeof M139.TimeSeriesSchema > >>;
+export type Iso_system_metrics__HistogramBucketConfigSchema = Assert<Eq< z.input< typeof M139.HistogramBucketConfigSchema >, z.infer< typeof M139.HistogramBucketConfigSchema > >>;
+export type Iso_system_metrics__MetricAggregationType = Assert<Eq< z.input< typeof M139.MetricAggregationType >, z.infer< typeof M139.MetricAggregationType > >>;
+export type Iso_system_metrics__MetricDataPointSchema = Assert<Eq< z.input< typeof M139.MetricDataPointSchema >, z.infer< typeof M139.MetricDataPointSchema > >>;
+export type Iso_system_metrics__MetricLabelsSchema = Assert<Eq< z.input< typeof M139.MetricLabelsSchema >, z.infer< typeof M139.MetricLabelsSchema > >>;
+export type Iso_system_metrics__MetricType = Assert<Eq< z.input< typeof M139.MetricType >, z.infer< typeof M139.MetricType > >>;
+export type Iso_system_metrics__MetricUnit = Assert<Eq< z.input< typeof M139.MetricUnit >, z.infer< typeof M139.MetricUnit > >>;
+export type Iso_system_metrics__TimeSeriesDataPointSchema = Assert<Eq< z.input< typeof M139.TimeSeriesDataPointSchema >, z.infer< typeof M139.TimeSeriesDataPointSchema > >>;
+export type Iso_system_metrics__TimeSeriesSchema = Assert<Eq< z.input< typeof M139.TimeSeriesSchema >, z.infer< typeof M139.TimeSeriesSchema > >>;
 
 // system/migration.zod.ts
-export type Iso607 = Assert<Eq< z.input< typeof M140.DataMigrationFlagSchema >, z.infer< typeof M140.DataMigrationFlagSchema > >>;
-export type Iso608 = Assert<Eq< z.input< typeof M140.MigrationJournalEventSchema >, z.infer< typeof M140.MigrationJournalEventSchema > >>;
+export type Iso_system_migration__DataMigrationFlagSchema = Assert<Eq< z.input< typeof M140.DataMigrationFlagSchema >, z.infer< typeof M140.DataMigrationFlagSchema > >>;
+export type Iso_system_migration__DeleteObjectOperation = Assert<Eq< z.input< typeof M140.DeleteObjectOperation >, z.infer< typeof M140.DeleteObjectOperation > >>;
+export type Iso_system_migration__ExecuteSqlOperation = Assert<Eq< z.input< typeof M140.ExecuteSqlOperation >, z.infer< typeof M140.ExecuteSqlOperation > >>;
+export type Iso_system_migration__MigrationDependencySchema = Assert<Eq< z.input< typeof M140.MigrationDependencySchema >, z.infer< typeof M140.MigrationDependencySchema > >>;
+export type Iso_system_migration__MigrationJournalEventSchema = Assert<Eq< z.input< typeof M140.MigrationJournalEventSchema >, z.infer< typeof M140.MigrationJournalEventSchema > >>;
+export type Iso_system_migration__ModifyFieldOperation = Assert<Eq< z.input< typeof M140.ModifyFieldOperation >, z.infer< typeof M140.ModifyFieldOperation > >>;
+export type Iso_system_migration__RemoveFieldOperation = Assert<Eq< z.input< typeof M140.RemoveFieldOperation >, z.infer< typeof M140.RemoveFieldOperation > >>;
+export type Iso_system_migration__RenameObjectOperation = Assert<Eq< z.input< typeof M140.RenameObjectOperation >, z.infer< typeof M140.RenameObjectOperation > >>;
 
 // system/notification.zod.ts
-export type Iso609 = Assert<Eq< z.input< typeof M141.NotificationChannelSchema >, z.infer< typeof M141.NotificationChannelSchema > >>;
+export type Iso_system_notification__NotificationChannelSchema = Assert<Eq< z.input< typeof M141.NotificationChannelSchema >, z.infer< typeof M141.NotificationChannelSchema > >>;
 
 // system/object-storage.zod.ts
-export type Iso610 = Assert<Eq< z.input< typeof M142.StorageScopeSchema >, z.infer< typeof M142.StorageScopeSchema > >>;
-export type Iso611 = Assert<Eq< z.input< typeof M142.FileMetadataSchema >, z.infer< typeof M142.FileMetadataSchema > >>;
-export type Iso612 = Assert<Eq< z.input< typeof M142.StorageProviderSchema >, z.infer< typeof M142.StorageProviderSchema > >>;
-export type Iso613 = Assert<Eq< z.input< typeof M142.StorageAclSchema >, z.infer< typeof M142.StorageAclSchema > >>;
-export type Iso614 = Assert<Eq< z.input< typeof M142.StorageClassSchema >, z.infer< typeof M142.StorageClassSchema > >>;
-export type Iso615 = Assert<Eq< z.input< typeof M142.LifecycleActionSchema >, z.infer< typeof M142.LifecycleActionSchema > >>;
-export type Iso616 = Assert<Eq< z.input< typeof M142.ObjectMetadataSchema >, z.infer< typeof M142.ObjectMetadataSchema > >>;
-export type Iso617 = Assert<Eq< z.input< typeof M142.PresignedUrlConfigSchema >, z.infer< typeof M142.PresignedUrlConfigSchema > >>;
+export type Iso_system_objectStorage__FileMetadataSchema = Assert<Eq< z.input< typeof M142.FileMetadataSchema >, z.infer< typeof M142.FileMetadataSchema > >>;
+export type Iso_system_objectStorage__LifecycleActionSchema = Assert<Eq< z.input< typeof M142.LifecycleActionSchema >, z.infer< typeof M142.LifecycleActionSchema > >>;
+export type Iso_system_objectStorage__ObjectMetadataSchema = Assert<Eq< z.input< typeof M142.ObjectMetadataSchema >, z.infer< typeof M142.ObjectMetadataSchema > >>;
+export type Iso_system_objectStorage__PresignedUrlConfigSchema = Assert<Eq< z.input< typeof M142.PresignedUrlConfigSchema >, z.infer< typeof M142.PresignedUrlConfigSchema > >>;
+export type Iso_system_objectStorage__StorageAclSchema = Assert<Eq< z.input< typeof M142.StorageAclSchema >, z.infer< typeof M142.StorageAclSchema > >>;
+export type Iso_system_objectStorage__StorageClassSchema = Assert<Eq< z.input< typeof M142.StorageClassSchema >, z.infer< typeof M142.StorageClassSchema > >>;
+export type Iso_system_objectStorage__StorageProviderSchema = Assert<Eq< z.input< typeof M142.StorageProviderSchema >, z.infer< typeof M142.StorageProviderSchema > >>;
+export type Iso_system_objectStorage__StorageScopeSchema = Assert<Eq< z.input< typeof M142.StorageScopeSchema >, z.infer< typeof M142.StorageScopeSchema > >>;
 
 // system/registry-config.zod.ts
-export type Iso618 = Assert<Eq< z.input< typeof M143.RegistrySyncPolicySchema >, z.infer< typeof M143.RegistrySyncPolicySchema > >>;
+export type Iso_system_registryConfig__RegistrySyncPolicySchema = Assert<Eq< z.input< typeof M143.RegistrySyncPolicySchema >, z.infer< typeof M143.RegistrySyncPolicySchema > >>;
 
 // system/search-engine.zod.ts
-export type Iso619 = Assert<Eq< z.input< typeof M144.SearchProviderSchema >, z.infer< typeof M144.SearchProviderSchema > >>;
-export type Iso620 = Assert<Eq< z.input< typeof M144.AnalyzerConfigSchema >, z.infer< typeof M144.AnalyzerConfigSchema > >>;
+export type Iso_system_searchEngine__AnalyzerConfigSchema = Assert<Eq< z.input< typeof M144.AnalyzerConfigSchema >, z.infer< typeof M144.AnalyzerConfigSchema > >>;
+export type Iso_system_searchEngine__SearchProviderSchema = Assert<Eq< z.input< typeof M144.SearchProviderSchema >, z.infer< typeof M144.SearchProviderSchema > >>;
 
 // system/security-context.zod.ts
-export type Iso621 = Assert<Eq< z.input< typeof M145.DataClassificationSchema >, z.infer< typeof M145.DataClassificationSchema > >>;
-export type Iso622 = Assert<Eq< z.input< typeof M145.ComplianceFrameworkSchema >, z.infer< typeof M145.ComplianceFrameworkSchema > >>;
+export type Iso_system_securityContext__ComplianceFrameworkSchema = Assert<Eq< z.input< typeof M145.ComplianceFrameworkSchema >, z.infer< typeof M145.ComplianceFrameworkSchema > >>;
+export type Iso_system_securityContext__DataClassificationSchema = Assert<Eq< z.input< typeof M145.DataClassificationSchema >, z.infer< typeof M145.DataClassificationSchema > >>;
 
 // system/settings-client.zod.ts
-export type Iso623 = Assert<Eq< z.input< typeof M146.SettingsChangeEventSchema >, z.infer< typeof M146.SettingsChangeEventSchema > >>;
+export type Iso_system_settingsClient__SettingsChangeEventSchema = Assert<Eq< z.input< typeof M146.SettingsChangeEventSchema >, z.infer< typeof M146.SettingsChangeEventSchema > >>;
 
 // system/settings-manifest.zod.ts
-export type Iso624 = Assert<Eq< z.input< typeof M147.SpecifierType >, z.infer< typeof M147.SpecifierType > >>;
-export type Iso625 = Assert<Eq< z.input< typeof M147.SpecifierOptionSchema >, z.infer< typeof M147.SpecifierOptionSchema > >>;
-export type Iso626 = Assert<Eq< z.input< typeof M147.SpecifierScopeSchema >, z.infer< typeof M147.SpecifierScopeSchema > >>;
-export type Iso627 = Assert<Eq< z.input< typeof M147.SettingsActionResultSchema >, z.infer< typeof M147.SettingsActionResultSchema > >>;
-export type Iso758 = Assert<Eq< z.input< typeof M147.SpecifierValueDomainSchema >, z.infer< typeof M147.SpecifierValueDomainSchema > >>;
+export type Iso_system_settingsManifest__SettingsActionResultSchema = Assert<Eq< z.input< typeof M147.SettingsActionResultSchema >, z.infer< typeof M147.SettingsActionResultSchema > >>;
+export type Iso_system_settingsManifest__SpecifierOptionSchema = Assert<Eq< z.input< typeof M147.SpecifierOptionSchema >, z.infer< typeof M147.SpecifierOptionSchema > >>;
+export type Iso_system_settingsManifest__SpecifierScopeSchema = Assert<Eq< z.input< typeof M147.SpecifierScopeSchema >, z.infer< typeof M147.SpecifierScopeSchema > >>;
+export type Iso_system_settingsManifest__SpecifierType = Assert<Eq< z.input< typeof M147.SpecifierType >, z.infer< typeof M147.SpecifierType > >>;
+export type Iso_system_settingsManifest__SpecifierValueDomainSchema = Assert<Eq< z.input< typeof M147.SpecifierValueDomainSchema >, z.infer< typeof M147.SpecifierValueDomainSchema > >>;
 
 // system/supplier-security.zod.ts
-export type Iso628 = Assert<Eq< z.input< typeof M148.SupplierRiskLevelSchema >, z.infer< typeof M148.SupplierRiskLevelSchema > >>;
-export type Iso629 = Assert<Eq< z.input< typeof M148.SupplierAssessmentStatusSchema >, z.infer< typeof M148.SupplierAssessmentStatusSchema > >>;
+export type Iso_system_supplierSecurity__SupplierAssessmentStatusSchema = Assert<Eq< z.input< typeof M148.SupplierAssessmentStatusSchema >, z.infer< typeof M148.SupplierAssessmentStatusSchema > >>;
+export type Iso_system_supplierSecurity__SupplierRiskLevelSchema = Assert<Eq< z.input< typeof M148.SupplierRiskLevelSchema >, z.infer< typeof M148.SupplierRiskLevelSchema > >>;
 
 // system/tenant.zod.ts
-export type Iso630 = Assert<Eq< z.input< typeof M149.TenantIsolationLevel >, z.infer< typeof M149.TenantIsolationLevel > >>;
-export type Iso631 = Assert<Eq< z.input< typeof M149.DatabaseProviderSchema >, z.infer< typeof M149.DatabaseProviderSchema > >>;
-export type Iso632 = Assert<Eq< z.input< typeof M149.TenantConnectionConfigSchema >, z.infer< typeof M149.TenantConnectionConfigSchema > >>;
-export type Iso633 = Assert<Eq< z.input< typeof M149.TenantQuotaSchema >, z.infer< typeof M149.TenantQuotaSchema > >>;
-export type Iso634 = Assert<Eq< z.input< typeof M149.QuotaEnforcementResultSchema >, z.infer< typeof M149.QuotaEnforcementResultSchema > >>;
-export type Iso635 = Assert<Eq< z.input< typeof M149.TenantSchema >, z.infer< typeof M149.TenantSchema > >>;
+export type Iso_system_tenant__DatabaseProviderSchema = Assert<Eq< z.input< typeof M149.DatabaseProviderSchema >, z.infer< typeof M149.DatabaseProviderSchema > >>;
+export type Iso_system_tenant__QuotaEnforcementResultSchema = Assert<Eq< z.input< typeof M149.QuotaEnforcementResultSchema >, z.infer< typeof M149.QuotaEnforcementResultSchema > >>;
+export type Iso_system_tenant__TenantConnectionConfigSchema = Assert<Eq< z.input< typeof M149.TenantConnectionConfigSchema >, z.infer< typeof M149.TenantConnectionConfigSchema > >>;
+export type Iso_system_tenant__TenantIsolationLevel = Assert<Eq< z.input< typeof M149.TenantIsolationLevel >, z.infer< typeof M149.TenantIsolationLevel > >>;
+export type Iso_system_tenant__TenantQuotaSchema = Assert<Eq< z.input< typeof M149.TenantQuotaSchema >, z.infer< typeof M149.TenantQuotaSchema > >>;
+export type Iso_system_tenant__TenantSchema = Assert<Eq< z.input< typeof M149.TenantSchema >, z.infer< typeof M149.TenantSchema > >>;
 
 // system/tracing.zod.ts
-export type Iso636 = Assert<Eq< z.input< typeof M150.TraceStateSchema >, z.infer< typeof M150.TraceStateSchema > >>;
-export type Iso637 = Assert<Eq< z.input< typeof M150.TraceFlagsSchema >, z.infer< typeof M150.TraceFlagsSchema > >>;
-export type Iso638 = Assert<Eq< z.input< typeof M150.SpanKind >, z.infer< typeof M150.SpanKind > >>;
-export type Iso639 = Assert<Eq< z.input< typeof M150.SpanStatus >, z.infer< typeof M150.SpanStatus > >>;
-export type Iso640 = Assert<Eq< z.input< typeof M150.SpanAttributeValueSchema >, z.infer< typeof M150.SpanAttributeValueSchema > >>;
-export type Iso641 = Assert<Eq< z.input< typeof M150.SpanAttributesSchema >, z.infer< typeof M150.SpanAttributesSchema > >>;
-export type Iso642 = Assert<Eq< z.input< typeof M150.SpanEventSchema >, z.infer< typeof M150.SpanEventSchema > >>;
-export type Iso643 = Assert<Eq< z.input< typeof M150.SamplingDecision >, z.infer< typeof M150.SamplingDecision > >>;
-export type Iso644 = Assert<Eq< z.input< typeof M150.SamplingStrategyType >, z.infer< typeof M150.SamplingStrategyType > >>;
-export type Iso645 = Assert<Eq< z.input< typeof M150.TracePropagationFormat >, z.infer< typeof M150.TracePropagationFormat > >>;
-export type Iso646 = Assert<Eq< z.input< typeof M150.OtelExporterType >, z.infer< typeof M150.OtelExporterType > >>;
-
+export type Iso_system_tracing__OtelExporterType = Assert<Eq< z.input< typeof M150.OtelExporterType >, z.infer< typeof M150.OtelExporterType > >>;
+export type Iso_system_tracing__SamplingDecision = Assert<Eq< z.input< typeof M150.SamplingDecision >, z.infer< typeof M150.SamplingDecision > >>;
+export type Iso_system_tracing__SamplingStrategyType = Assert<Eq< z.input< typeof M150.SamplingStrategyType >, z.infer< typeof M150.SamplingStrategyType > >>;
+export type Iso_system_tracing__SpanAttributeValueSchema = Assert<Eq< z.input< typeof M150.SpanAttributeValueSchema >, z.infer< typeof M150.SpanAttributeValueSchema > >>;
+export type Iso_system_tracing__SpanAttributesSchema = Assert<Eq< z.input< typeof M150.SpanAttributesSchema >, z.infer< typeof M150.SpanAttributesSchema > >>;
+export type Iso_system_tracing__SpanEventSchema = Assert<Eq< z.input< typeof M150.SpanEventSchema >, z.infer< typeof M150.SpanEventSchema > >>;
+export type Iso_system_tracing__SpanKind = Assert<Eq< z.input< typeof M150.SpanKind >, z.infer< typeof M150.SpanKind > >>;
+export type Iso_system_tracing__SpanStatus = Assert<Eq< z.input< typeof M150.SpanStatus >, z.infer< typeof M150.SpanStatus > >>;
+export type Iso_system_tracing__TraceFlagsSchema = Assert<Eq< z.input< typeof M150.TraceFlagsSchema >, z.infer< typeof M150.TraceFlagsSchema > >>;
+export type Iso_system_tracing__TracePropagationFormat = Assert<Eq< z.input< typeof M150.TracePropagationFormat >, z.infer< typeof M150.TracePropagationFormat > >>;
+export type Iso_system_tracing__TraceStateSchema = Assert<Eq< z.input< typeof M150.TraceStateSchema >, z.infer< typeof M150.TraceStateSchema > >>;
 
 // system/translation.zod.ts
-export type Iso650 = Assert<Eq< z.input< typeof M152.FieldTranslationSchema >, z.infer< typeof M152.FieldTranslationSchema > >>;
-export type Iso651 = Assert<Eq< z.input< typeof M152.ActionResultDialogTranslationSchema >, z.infer< typeof M152.ActionResultDialogTranslationSchema > >>;
-export type Iso652 = Assert<Eq< z.input< typeof M152.ObjectTranslationDataSchema >, z.infer< typeof M152.ObjectTranslationDataSchema > >>;
-export type Iso653 = Assert<Eq< z.input< typeof M152.TranslationDataSchema >, z.infer< typeof M152.TranslationDataSchema > >>;
-export type Iso654 = Assert<Eq< z.input< typeof M152.TranslationBundleSchema >, z.infer< typeof M152.TranslationBundleSchema > >>;
-// #15178 split the bundle type in two. The platform face is the per-app shape
+// #15178 split the bundle type in two (`PlatformTranslationDataSchema`,
+// `PlatformTranslationBundleSchema`). The platform face is the per-app shape
 // plus one more optional group, so its two states coincide exactly as the
 // per-app face's do — pinned rather than given a permanent `XParsed` synonym.
-export type Iso880 = Assert<Eq< z.input< typeof M152.PlatformTranslationDataSchema >, z.infer< typeof M152.PlatformTranslationDataSchema > >>;
-export type Iso881 = Assert<Eq< z.input< typeof M152.PlatformTranslationBundleSchema >, z.infer< typeof M152.PlatformTranslationBundleSchema > >>;
-export type Iso655 = Assert<Eq< z.input< typeof M152.TranslationConfigSchema >, z.infer< typeof M152.TranslationConfigSchema > >>;
-export type Iso656 = Assert<Eq< z.input< typeof M152.TranslationItemSchema >, z.infer< typeof M152.TranslationItemSchema > >>;
-export type Iso657 = Assert<Eq< z.input< typeof M152.TranslationDiffStatusSchema >, z.infer< typeof M152.TranslationDiffStatusSchema > >>;
-export type Iso658 = Assert<Eq< z.input< typeof M152.TranslationDiffItemSchema >, z.infer< typeof M152.TranslationDiffItemSchema > >>;
-export type Iso659 = Assert<Eq< z.input< typeof M152.CoverageBreakdownEntrySchema >, z.infer< typeof M152.CoverageBreakdownEntrySchema > >>;
-export type Iso660 = Assert<Eq< z.input< typeof M152.TranslationCoverageResultSchema >, z.infer< typeof M152.TranslationCoverageResultSchema > >>;
+export type Iso_system_translation__ActionResultDialogTranslationSchema = Assert<Eq< z.input< typeof M152.ActionResultDialogTranslationSchema >, z.infer< typeof M152.ActionResultDialogTranslationSchema > >>;
+export type Iso_system_translation__CoverageBreakdownEntrySchema = Assert<Eq< z.input< typeof M152.CoverageBreakdownEntrySchema >, z.infer< typeof M152.CoverageBreakdownEntrySchema > >>;
+export type Iso_system_translation__FieldTranslationSchema = Assert<Eq< z.input< typeof M152.FieldTranslationSchema >, z.infer< typeof M152.FieldTranslationSchema > >>;
+export type Iso_system_translation__LocaleSchema = Assert<Eq< z.input< typeof M152.LocaleSchema >, z.infer< typeof M152.LocaleSchema > >>;
+export type Iso_system_translation__ObjectTranslationDataSchema = Assert<Eq< z.input< typeof M152.ObjectTranslationDataSchema >, z.infer< typeof M152.ObjectTranslationDataSchema > >>;
+export type Iso_system_translation__PlatformTranslationBundleSchema = Assert<Eq< z.input< typeof M152.PlatformTranslationBundleSchema >, z.infer< typeof M152.PlatformTranslationBundleSchema > >>;
+export type Iso_system_translation__PlatformTranslationDataSchema = Assert<Eq< z.input< typeof M152.PlatformTranslationDataSchema >, z.infer< typeof M152.PlatformTranslationDataSchema > >>;
+export type Iso_system_translation__TranslationBundleSchema = Assert<Eq< z.input< typeof M152.TranslationBundleSchema >, z.infer< typeof M152.TranslationBundleSchema > >>;
+export type Iso_system_translation__TranslationConfigSchema = Assert<Eq< z.input< typeof M152.TranslationConfigSchema >, z.infer< typeof M152.TranslationConfigSchema > >>;
+export type Iso_system_translation__TranslationCoverageResultSchema = Assert<Eq< z.input< typeof M152.TranslationCoverageResultSchema >, z.infer< typeof M152.TranslationCoverageResultSchema > >>;
+export type Iso_system_translation__TranslationDataSchema = Assert<Eq< z.input< typeof M152.TranslationDataSchema >, z.infer< typeof M152.TranslationDataSchema > >>;
+export type Iso_system_translation__TranslationDiffItemSchema = Assert<Eq< z.input< typeof M152.TranslationDiffItemSchema >, z.infer< typeof M152.TranslationDiffItemSchema > >>;
+export type Iso_system_translation__TranslationDiffStatusSchema = Assert<Eq< z.input< typeof M152.TranslationDiffStatusSchema >, z.infer< typeof M152.TranslationDiffStatusSchema > >>;
+export type Iso_system_translation__TranslationItemSchema = Assert<Eq< z.input< typeof M152.TranslationItemSchema >, z.infer< typeof M152.TranslationItemSchema > >>;
 
 // system/worker.zod.ts
-export type Iso661 = Assert<Eq< z.input< typeof M153.TaskPriority >, z.infer< typeof M153.TaskPriority > >>;
-export type Iso662 = Assert<Eq< z.input< typeof M153.TaskStatus >, z.infer< typeof M153.TaskStatus > >>;
-export type Iso663 = Assert<Eq< z.input< typeof M153.TaskExecutionResultSchema >, z.infer< typeof M153.TaskExecutionResultSchema > >>;
-export type Iso664 = Assert<Eq< z.input< typeof M153.WorkerStatsSchema >, z.infer< typeof M153.WorkerStatsSchema > >>;
+export type Iso_system_worker__TaskExecutionResultSchema = Assert<Eq< z.input< typeof M153.TaskExecutionResultSchema >, z.infer< typeof M153.TaskExecutionResultSchema > >>;
+export type Iso_system_worker__TaskPriority = Assert<Eq< z.input< typeof M153.TaskPriority >, z.infer< typeof M153.TaskPriority > >>;
+export type Iso_system_worker__TaskStatus = Assert<Eq< z.input< typeof M153.TaskStatus >, z.infer< typeof M153.TaskStatus > >>;
+export type Iso_system_worker__WorkerStatsSchema = Assert<Eq< z.input< typeof M153.WorkerStatsSchema >, z.infer< typeof M153.WorkerStatsSchema > >>;
 
 // ui/action-params.zod.ts
-export type Iso665 = Assert<Eq< z.input< typeof M154.ActionSessionSchema >, z.infer< typeof M154.ActionSessionSchema > >>;
+export type Iso_ui_actionParams__ActionSessionSchema = Assert<Eq< z.input< typeof M154.ActionSessionSchema >, z.infer< typeof M154.ActionSessionSchema > >>;
 
 // ui/action.zod.ts
-export type Iso666 = Assert<Eq< z.input< typeof M155.ActionLocationSchema >, z.infer< typeof M155.ActionLocationSchema > >>;
+export type Iso_ui_action__ActionLocationSchema = Assert<Eq< z.input< typeof M155.ActionLocationSchema >, z.infer< typeof M155.ActionLocationSchema > >>;
+export type Iso_ui_action__ActionType = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< typeof M155.ActionType > >>;
 
 // ui/app.zod.ts
-export type Iso667 = Assert<Eq< z.input< typeof M156.AppBrandingSchema >, z.infer< typeof M156.AppBrandingSchema > >>;
+export type Iso_ui_app__AppBrandingSchema = Assert<Eq< z.input< typeof M156.AppBrandingSchema >, z.infer< typeof M156.AppBrandingSchema > >>;
 
 // ui/bulk-action.zod.ts
-export type Iso668 = Assert<Eq< z.input< typeof M157.BulkActionOperationSchema >, z.infer< typeof M157.BulkActionOperationSchema > >>;
-export type Iso669 = Assert<Eq< z.input< typeof M157.BulkActionExecutionSchema >, z.infer< typeof M157.BulkActionExecutionSchema > >>;
-export type Iso670 = Assert<Eq< z.input< typeof M157.BulkActionParamSchema >, z.infer< typeof M157.BulkActionParamSchema > >>;
+export type Iso_ui_bulkAction__BulkActionExecutionSchema = Assert<Eq< z.input< typeof M157.BulkActionExecutionSchema >, z.infer< typeof M157.BulkActionExecutionSchema > >>;
+export type Iso_ui_bulkAction__BulkActionOperationSchema = Assert<Eq< z.input< typeof M157.BulkActionOperationSchema >, z.infer< typeof M157.BulkActionOperationSchema > >>;
+export type Iso_ui_bulkAction__BulkActionParamSchema = Assert<Eq< z.input< typeof M157.BulkActionParamSchema >, z.infer< typeof M157.BulkActionParamSchema > >>;
 
 // ui/chart.zod.ts
-export type Iso671 = Assert<Eq< z.input< typeof M158.ChartTypeSchema >, z.infer< typeof M158.ChartTypeSchema > >>;
-export type Iso672 = Assert<Eq< z.input< typeof M158.ChartAggregateSchema >, z.infer< typeof M158.ChartAggregateSchema > >>;
-export type Iso673 = Assert<Eq< z.input< typeof M158.ChartAggregateFunctionSchema >, z.infer< typeof M158.ChartAggregateFunctionSchema > >>;
-export type Iso674 = Assert<Eq< z.input< typeof M158.ChartGroupBySchema >, z.infer< typeof M158.ChartGroupBySchema > >>;
-export type Iso675 = Assert<Eq< z.input< typeof M158.ChartDrillDownSchema >, z.infer< typeof M158.ChartDrillDownSchema > >>;
+export type Iso_ui_chart__ChartAggregateFunctionSchema = Assert<Eq< z.input< typeof M158.ChartAggregateFunctionSchema >, z.infer< typeof M158.ChartAggregateFunctionSchema > >>;
+export type Iso_ui_chart__ChartAggregateSchema = Assert<Eq< z.input< typeof M158.ChartAggregateSchema >, z.infer< typeof M158.ChartAggregateSchema > >>;
+export type Iso_ui_chart__ChartDrillDownSchema = Assert<Eq< z.input< typeof M158.ChartDrillDownSchema >, z.infer< typeof M158.ChartDrillDownSchema > >>;
+export type Iso_ui_chart__ChartGroupBySchema = Assert<Eq< z.input< typeof M158.ChartGroupBySchema >, z.infer< typeof M158.ChartGroupBySchema > >>;
+export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.ChartTypeSchema >, z.infer< typeof M158.ChartTypeSchema > >>;
+
+// ui/component.zod.ts
+// #5775 — `PageContainerProps`, the shared `children` contract for
+// `page:section`/`page:footer`/`page:sidebar`. A lone optional array with no
+// default, transform, catch or pipe anywhere in its tree, so the two shapes
+// coincide and the phase-2 flip of the bare name changes nothing.
+// `check:spec-parsed-alias` sent it here rather than to a
+// `PageContainerPropsParsed`, which would be a permanent synonym.
+// `ElementNumberPropsSchema` (Iso818) left the family on the ui#6206
+// convergence: its `filter` now carries `z.array(ViewFilterRuleSchema)`, whose
+// own input ≠ infer (`operator` is normalized on parse — `ViewFilterRuleParsed`
+// exists for exactly that reason), so `ElementNumberPropsParsed` is declared
+// and the pin deleted.
+// `ElementRecordPickerPropsSchema` (Iso819) left the family the same way on
+// #14406 — the LAST record-form `filter` in `ComponentPropsMap`: its `filter`
+// now carries `z.array(ViewFilterRuleSchema)` too, so `ElementRecordPickerPropsParsed`
+// is declared and this pin deleted.
+// `record:reference_rail` (#8691: `ReferenceRailEntrySchema`,
+// `RecordReferenceRailProps`) — deliberately default-free on the same
+// principle as the object-* family: the renderer's `limit ?? 3` /
+// `hideEmpty !== false` fallbacks stay the renderer's facts, so "the author
+// said nothing" survives the parse, and input === infer holds for both shapes.
+// #8744 — the three record types the rail fix left behind
+// (`RecordAlertActionSchema`, `RecordQuickActionsProps`, `RecordHistoryProps`),
+// default-free on the same principle. `RecordAlertProps` itself is
+// deliberately NOT pinned: its `visible` carries `ExpressionInputSchema`, whose
+// bare-string arm TRANSFORMS to the canonical `{ dialect, source }` envelope,
+// so input ≠ infer by construction — the alias stays `z.input` (the authoring
+// face), per the convention's own rule for Expression-carrying shapes.
+// The object-* block family (#7751; `ObjectFormPropsSchema` and
+// `ObjectMasterDetailFormPropsSchema` are the members still pinned) —
+// deliberately default-free in its first, warning-tier step ("the author said
+// nothing" must stay distinguishable from "the author asked for the renderer's
+// fallback"), so input === infer holds. A default added to any of them goes
+// red here, and the fix is the ADR's: declare the XParsed alias and delete the
+// pin line.
+// `ObjectGridPropsSchema` (Iso839) left the family exactly that way on the
+// ui#6207 convergence: its `data` now carries `ViewDataSchema`, whose own
+// input ≠ infer, so `ObjectGridPropsParsed` is declared and the pin deleted.
+// `ObjectMetricPropsSchema` (Iso840), `ObjectKanbanPropsSchema` (Iso841) and
+// `ObjectCalendarPropsSchema` (Iso842) left the same way on #15449 — the
+// ui#6206-B filter orthography reaching the four `object-*` `filter` doors:
+// each now carries `z.array(ViewFilterRuleSchema)` (input ≠ infer), so the
+// three `XParsed` aliases are declared and the three pins deleted.
+export type Iso_ui_component__ObjectFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
+export type Iso_ui_component__ObjectMasterDetailFormPropsSchema = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
+export type Iso_ui_component__PageContainerProps = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
+export type Iso_ui_component__RecordAlertActionSchema = Assert<Eq< z.input< typeof M170.RecordAlertActionSchema >, z.infer< typeof M170.RecordAlertActionSchema > >>;
+export type Iso_ui_component__RecordHighlightsField = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
+export type Iso_ui_component__RecordHistoryProps = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.infer< typeof M170.RecordHistoryProps > >>;
+export type Iso_ui_component__RecordPathProps = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
+export type Iso_ui_component__RecordQuickActionsProps = Assert<Eq< z.input< typeof M170.RecordQuickActionsProps >, z.infer< typeof M170.RecordQuickActionsProps > >>;
+export type Iso_ui_component__RecordReferenceRailProps = Assert<Eq< z.input< typeof M170.RecordReferenceRailProps >, z.infer< typeof M170.RecordReferenceRailProps > >>;
+export type Iso_ui_component__ReferenceRailEntrySchema = Assert<Eq< z.input< typeof M170.ReferenceRailEntrySchema >, z.infer< typeof M170.ReferenceRailEntrySchema > >>;
 
 // ui/dashboard.zod.ts
-export type Iso676 = Assert<Eq< z.input< typeof M159.DashboardWidgetOptionsSchema >, z.infer< typeof M159.DashboardWidgetOptionsSchema > >>;
-export type Iso677 = Assert<Eq< z.input< typeof M159.DashboardHeaderActionSchema >, z.infer< typeof M159.DashboardHeaderActionSchema > >>;
-export type Iso678 = Assert<Eq< z.input< typeof M159.WidgetColorVariantSchema >, z.infer< typeof M159.WidgetColorVariantSchema > >>;
-export type Iso679 = Assert<Eq< z.input< typeof M159.WidgetActionTypeSchema >, z.infer< typeof M159.WidgetActionTypeSchema > >>;
-export type Iso680 = Assert<Eq< z.input< typeof M159.GlobalFilterOptionsFromSchema >, z.infer< typeof M159.GlobalFilterOptionsFromSchema > >>;
+export type Iso_ui_dashboard__DashboardHeaderActionSchema = Assert<Eq< z.input< typeof M159.DashboardHeaderActionSchema >, z.infer< typeof M159.DashboardHeaderActionSchema > >>;
+export type Iso_ui_dashboard__DashboardWidgetOptionsSchema = Assert<Eq< z.input< typeof M159.DashboardWidgetOptionsSchema >, z.infer< typeof M159.DashboardWidgetOptionsSchema > >>;
+export type Iso_ui_dashboard__GlobalFilterOptionsFromSchema = Assert<Eq< z.input< typeof M159.GlobalFilterOptionsFromSchema >, z.infer< typeof M159.GlobalFilterOptionsFromSchema > >>;
+export type Iso_ui_dashboard__WidgetActionTypeSchema = Assert<Eq< z.input< typeof M159.WidgetActionTypeSchema >, z.infer< typeof M159.WidgetActionTypeSchema > >>;
+export type Iso_ui_dashboard__WidgetColorVariantSchema = Assert<Eq< z.input< typeof M159.WidgetColorVariantSchema >, z.infer< typeof M159.WidgetColorVariantSchema > >>;
 
 // ui/dataset.zod.ts
-export type Iso681 = Assert<Eq< z.input< typeof M160.DatasetDimensionSchema >, z.infer< typeof M160.DatasetDimensionSchema > >>;
-export type Iso682 = Assert<Eq< z.input< typeof M160.DatasetMeasureSchema >, z.infer< typeof M160.DatasetMeasureSchema > >>;
-export type Iso683 = Assert<Eq< z.input< typeof M160.DerivedMeasureOp >, z.infer< typeof M160.DerivedMeasureOp > >>;
-export type Iso684 = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< typeof M160.DatasetSchema > >>;
+export type Iso_ui_dataset__DatasetDimensionSchema = Assert<Eq< z.input< typeof M160.DatasetDimensionSchema >, z.infer< typeof M160.DatasetDimensionSchema > >>;
+export type Iso_ui_dataset__DatasetMeasureSchema = Assert<Eq< z.input< typeof M160.DatasetMeasureSchema >, z.infer< typeof M160.DatasetMeasureSchema > >>;
+export type Iso_ui_dataset__DatasetSchema = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< typeof M160.DatasetSchema > >>;
+export type Iso_ui_dataset__DerivedMeasureOp = Assert<Eq< z.input< typeof M160.DerivedMeasureOp >, z.infer< typeof M160.DerivedMeasureOp > >>;
 
 // ui/i18n.zod.ts
-export type Iso686 = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
-export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
 // `InlineLocaleMapSchema` carried an isomorphism pin here (`Iso759`, #5728)
 // while its alias was a bare `z.input<…>` derivation. #9925 hand-tied the
 // alias (`Record<string, string> & { key?: never; defaultValue?: never }`,
@@ -1324,310 +1537,64 @@ export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer<
 // ADR-0122 gate itself ordered the pin line deleted as no longer load-bearing.
 // Input and output remain identical by construction — both halves of the
 // annotation spell the same type.
+export type Iso_ui_i18n__AriaPropsSchema = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
+export type Iso_ui_i18n__I18nLabelSchema = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
 
 // ui/notification.zod.ts
-export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
-export type Iso691 = Assert<Eq< z.input< typeof M162.NotificationSeveritySchema >, z.infer< typeof M162.NotificationSeveritySchema > >>;
-export type Iso692 = Assert<Eq< z.input< typeof M162.NotificationPositionSchema >, z.infer< typeof M162.NotificationPositionSchema > >>;
+export type Iso_ui_notification__NotificationPositionSchema = Assert<Eq< z.input< typeof M162.NotificationPositionSchema >, z.infer< typeof M162.NotificationPositionSchema > >>;
+export type Iso_ui_notification__NotificationSeveritySchema = Assert<Eq< z.input< typeof M162.NotificationSeveritySchema >, z.infer< typeof M162.NotificationSeveritySchema > >>;
+export type Iso_ui_notification__NotificationTypeSchema = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
 
 // ui/page.zod.ts
-export type Iso693 = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
 // `ElementDataSourceSchema` (Iso694) left the family on #15442 — the ui#6206-B
 // filter orthography reaching the binding-level `dataSource.filter`: it now
 // carries `z.array(ViewFilterRuleSchema)`, whose own input ≠ infer (`operator`
 // is normalized on parse), so `ElementDataSourceParsed` is declared and this
 // pin deleted.
+export type Iso_ui_page__PageComponentType = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
+export type Iso_ui_page__PageTypeSchema = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
 
 // ui/report.zod.ts
-export type Iso695 = Assert<Eq< z.input< typeof M164.JoinedReportBlockSchema >, z.infer< typeof M164.JoinedReportBlockSchema > >>;
+export type Iso_ui_report__JoinedReportBlockSchema = Assert<Eq< z.input< typeof M164.JoinedReportBlockSchema >, z.infer< typeof M164.JoinedReportBlockSchema > >>;
+export type Iso_ui_report__ReportType = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< typeof M164.ReportType > >>;
 
 // ui/responsive.zod.ts
 // (Iso696 `BreakpointName` / Iso697 `ResponsiveConfigSchema` removed with
 // their schemas — #11027's ADR-0049 retirement of the responsive layout
-// vocabulary. The Iso numbers are positional and stay vacant.)
-export type Iso698 = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
-export type Iso699 = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
-
-// ui/theme.zod.ts (Iso700–Iso704) left with the module at #10485 — the Iso
-// numbers are positional and stay vacant.
-
-// ui/view.zod.ts
-export type Iso705 = Assert<Eq< z.input< typeof M167.FormButtonConfigSchema >, z.infer< typeof M167.FormButtonConfigSchema > >>;
-export type Iso706 = Assert<Eq< z.input< typeof M167.ViewItemSchema >, z.infer< typeof M167.ViewItemSchema > >>;
-export type Iso707 = Assert<Eq< z.input< typeof M167.ViewItemWireSchema >, z.infer< typeof M167.ViewItemWireSchema > >>;
-export type Iso708 = Assert<Eq< z.input< typeof M167.ViewScopeSchema >, z.infer< typeof M167.ViewScopeSchema > >>;
-export type Iso709 = Assert<Eq< z.input< typeof M167.ViewKindSchema >, z.infer< typeof M167.ViewKindSchema > >>;
-export type Iso710 = Assert<Eq< z.input< typeof M167.ColumnSummarySchema >, z.infer< typeof M167.ColumnSummarySchema > >>;
-export type Iso711 = Assert<Eq< z.input< typeof M167.ColumnSummaryConfigSchema >, z.infer< typeof M167.ColumnSummaryConfigSchema > >>;
-export type Iso712 = Assert<Eq< z.input< typeof M167.RowHeightSchema >, z.infer< typeof M167.RowHeightSchema > >>;
-export type Iso713 = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.infer< typeof M167.RowColorConfigSchema > >>;
-export type Iso714 = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
-export type Iso715 = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
-
-// ui/component.zod.ts
-// #5775 — the shared `children` contract for `page:section`/`page:footer`/
-// `page:sidebar`. A lone optional array with no default, transform, catch or
-// pipe anywhere in its tree, so the two shapes coincide and the phase-2 flip of
-// the bare name changes nothing. `check:spec-parsed-alias` sent it here rather
-// than to a `PageContainerPropsParsed`, which would be a permanent synonym.
-export type Iso719 = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
-
-// ---------------------------------------------------------------------------
-// Phase 2 (#6083) additions. These 35 schemas were never in phase 1's
-// population: their bare alias already read `z.input` before the flip, so the
-// phase-1 gate — which only looked at bare `z.infer` aliases — never asked
-// whether their parsed state was named. The inverted gate does ask, and the
-// same probe that chose phase 1's split (with the same deliberate control
-// assertion, so a vacuous pass could not be mistaken for isomorphism) says
-// these 35 coincide. The other 22 it found got an `XParsed` instead.
-// ---------------------------------------------------------------------------
-
-// api/protocol.zod.ts
-export type Iso720 = Assert<Eq< z.input< typeof M28.GetDataRequestSchema >, z.infer< typeof M28.GetDataRequestSchema > >>;
-export type Iso721 = Assert<Eq< z.input< typeof M28.CreateDataRequestSchema >, z.infer< typeof M28.CreateDataRequestSchema > >>;
-export type Iso722 = Assert<Eq< z.input< typeof M28.UpdateDataRequestSchema >, z.infer< typeof M28.UpdateDataRequestSchema > >>;
-export type Iso723 = Assert<Eq< z.input< typeof M28.DeleteDataRequestSchema >, z.infer< typeof M28.DeleteDataRequestSchema > >>;
-export type Iso724 = Assert<Eq< z.input< typeof M28.CreateManyDataRequestSchema >, z.infer< typeof M28.CreateManyDataRequestSchema > >>;
-export type Iso728 = Assert<Eq< z.input< typeof M28.CheckPermissionRequestSchema >, z.infer< typeof M28.CheckPermissionRequestSchema > >>;
-export type Iso729 = Assert<Eq< z.input< typeof M28.GetObjectPermissionsRequestSchema >, z.infer< typeof M28.GetObjectPermissionsRequestSchema > >>;
-export type Iso730 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsRequestSchema >, z.infer< typeof M28.GetEffectivePermissionsRequestSchema > >>;
-export type Iso731 = Assert<Eq< z.input< typeof M28.RealtimeConnectRequestSchema >, z.infer< typeof M28.RealtimeConnectRequestSchema > >>;
-export type Iso732 = Assert<Eq< z.input< typeof M28.RealtimeDisconnectRequestSchema >, z.infer< typeof M28.RealtimeDisconnectRequestSchema > >>;
-export type Iso733 = Assert<Eq< z.input< typeof M28.RealtimeSubscribeRequestSchema >, z.infer< typeof M28.RealtimeSubscribeRequestSchema > >>;
-export type Iso734 = Assert<Eq< z.input< typeof M28.RealtimeUnsubscribeRequestSchema >, z.infer< typeof M28.RealtimeUnsubscribeRequestSchema > >>;
-export type Iso735 = Assert<Eq< z.input< typeof M28.SetPresenceRequestSchema >, z.infer< typeof M28.SetPresenceRequestSchema > >>;
-export type Iso736 = Assert<Eq< z.input< typeof M28.GetPresenceRequestSchema >, z.infer< typeof M28.GetPresenceRequestSchema > >>;
-export type Iso737 = Assert<Eq< z.input< typeof M28.RegisterDeviceRequestSchema >, z.infer< typeof M28.RegisterDeviceRequestSchema > >>;
-export type Iso738 = Assert<Eq< z.input< typeof M28.UnregisterDeviceRequestSchema >, z.infer< typeof M28.UnregisterDeviceRequestSchema > >>;
-export type Iso739 = Assert<Eq< z.input< typeof M28.GetNotificationPreferencesRequestSchema >, z.infer< typeof M28.GetNotificationPreferencesRequestSchema > >>;
-export type Iso740 = Assert<Eq< z.input< typeof M28.MarkNotificationsReadRequestSchema >, z.infer< typeof M28.MarkNotificationsReadRequestSchema > >>;
-export type Iso741 = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadRequestSchema >, z.infer< typeof M28.MarkAllNotificationsReadRequestSchema > >>;
-export type Iso742 = Assert<Eq< z.input< typeof M28.AiMessageSchema >, z.infer< typeof M28.AiMessageSchema > >>;
-export type Iso743 = Assert<Eq< z.input< typeof M28.AiChatRequestSchema >, z.infer< typeof M28.AiChatRequestSchema > >>;
-export type Iso744 = Assert<Eq< z.input< typeof M28.AiCompleteRequestSchema >, z.infer< typeof M28.AiCompleteRequestSchema > >>;
-export type Iso745 = Assert<Eq< z.input< typeof M28.CreateAiConversationRequestSchema >, z.infer< typeof M28.CreateAiConversationRequestSchema > >>;
-export type Iso746 = Assert<Eq< z.input< typeof M28.ListAiConversationsRequestSchema >, z.infer< typeof M28.ListAiConversationsRequestSchema > >>;
-export type Iso747 = Assert<Eq< z.input< typeof M28.UpdateAiConversationRequestSchema >, z.infer< typeof M28.UpdateAiConversationRequestSchema > >>;
-export type Iso748 = Assert<Eq< z.input< typeof M28.AiAgentChatRequestSchema >, z.infer< typeof M28.AiAgentChatRequestSchema > >>;
-export type Iso749 = Assert<Eq< z.input< typeof M28.ListAiPendingActionsRequestSchema >, z.infer< typeof M28.ListAiPendingActionsRequestSchema > >>;
-export type Iso750 = Assert<Eq< z.input< typeof M28.GetLocalesRequestSchema >, z.infer< typeof M28.GetLocalesRequestSchema > >>;
-export type Iso751 = Assert<Eq< z.input< typeof M28.GetTranslationsRequestSchema >, z.infer< typeof M28.GetTranslationsRequestSchema > >>;
-export type Iso752 = Assert<Eq< z.input< typeof M28.GetFieldLabelsRequestSchema >, z.infer< typeof M28.GetFieldLabelsRequestSchema > >>;
-export type Iso755 = Assert<Eq< z.input< typeof M28.ValidateDataIssueSchema >, z.infer< typeof M28.ValidateDataIssueSchema > >>;
-export type Iso756 = Assert<Eq< z.input< typeof M28.ValidateDataRequestSchema >, z.infer< typeof M28.ValidateDataRequestSchema > >>;
-export type Iso757 = Assert<Eq< z.input< typeof M28.ValidateDataResponseSchema >, z.infer< typeof M28.ValidateDataResponseSchema > >>;
-
-// automation/builtin-node-config.zod.ts
-export type Iso753 = Assert<Eq< z.input< typeof M172.ScreenFieldConfigSchema >, z.infer< typeof M172.ScreenFieldConfigSchema > >>;
-
-// automation/schemaless-node-config.zod.ts
-export type Iso754 = Assert<Eq< z.input< typeof M173.DecisionConditionSchema >, z.infer< typeof M173.DecisionConditionSchema > >>;
-
-
-// ---------------------------------------------------------------------------
-// #4593 — the documented-schema type-alias backfill (2026-08-08).
-//
-// Every schema below already had a published JSON Schema and a reference page,
-// and the page's `import type { X }` line was being dropped because no alias
-// carried the name (`docs-import-surface.baseline.json`, "no type export").
-// The backfill declares the bare alias; each schema here measured isomorphic, so
-// it takes a pin rather than an `XParsed` synonym — the (RISE) case, and the
-// largest single rise this file has taken.
-// ---------------------------------------------------------------------------
-
-// ai/conversation.zod.ts
-export type Iso760 = Assert<Eq< z.input< typeof M1.FileContentSchema >, z.infer< typeof M1.FileContentSchema > >>;
-export type Iso761 = Assert<Eq< z.input< typeof M1.TextContentSchema >, z.infer< typeof M1.TextContentSchema > >>;
-
-// api/analytics.zod.ts
-export type Iso762 = Assert<Eq< z.input< typeof M11.GetAnalyticsMetaRequestSchema >, z.infer< typeof M11.GetAnalyticsMetaRequestSchema > >>;
-
-// api/endpoint.zod.ts
-export type Iso763 = Assert<Eq< z.input< typeof M174.ApiMappingSchema >, z.infer< typeof M174.ApiMappingSchema > >>;
-
-// api/metadata.zod.ts
-export type Iso764 = Assert<Eq< z.input< typeof M24.MetadataBulkUnregisterRequestSchema >, z.infer< typeof M24.MetadataBulkUnregisterRequestSchema > >>;
-export type Iso765 = Assert<Eq< z.input< typeof M24.MetadataValidateRequestSchema >, z.infer< typeof M24.MetadataValidateRequestSchema > >>;
-
-// api/realtime.zod.ts
-export type Iso766 = Assert<Eq< z.input< typeof M31.SubscriptionEventSchema >, z.infer< typeof M31.SubscriptionEventSchema > >>;
-
-// automation/approval.zod.ts
-export type Iso767 = Assert<Eq< z.input< typeof M37.ApproverType >, z.infer< typeof M37.ApproverType > >>;
-
-// automation/flow.zod.ts
-export type Iso768 = Assert<Eq< z.input< typeof M175.FlowNodeAction >, z.infer< typeof M175.FlowNodeAction > >>;
-
-// automation/state-machine.zod.ts
-export type Iso769 = Assert<Eq< z.input< typeof M42.GuardRefSchema >, z.infer< typeof M42.GuardRefSchema > >>;
-export type Iso770 = Assert<Eq< z.input< typeof M42.StateNodeSchema >, z.infer< typeof M42.StateNodeSchema > >>;
-
-// data/analytics.zod.ts
-export type Iso771 = Assert<Eq< z.input< typeof M55.AggregationMetricType >, z.infer< typeof M55.AggregationMetricType > >>;
-export type Iso772 = Assert<Eq< z.input< typeof M55.DimensionType >, z.infer< typeof M55.DimensionType > >>;
-export type Iso773 = Assert<Eq< z.input< typeof M55.TimeUpdateInterval >, z.infer< typeof M55.TimeUpdateInterval > >>;
-// [#16041] Added after the generated corpus (numbers continue from the file's
-// end, see the #4395 note above). The closed `timeDimensions[].dateRange`
-// vocabulary: a bare `z.enum` derived from `DATE_RANGE_PRESETS`, and the union
-// of that enum with `z.array(z.string())` — no default, no transform on either
-// arm, so author and parsed states coincide.
-export type Iso869 = Assert<Eq< z.input< typeof M55.AnalyticsDateRangePresetSchema >, z.infer< typeof M55.AnalyticsDateRangePresetSchema > >>;
-export type Iso870 = Assert<Eq< z.input< typeof M55.AnalyticsDateRangeSchema >, z.infer< typeof M55.AnalyticsDateRangeSchema > >>;
-
-// data/context-tokens.zod.ts
-export type Iso774 = Assert<Eq< z.input< typeof M176.ContextTokenPlaceholderSchema >, z.infer< typeof M176.ContextTokenPlaceholderSchema > >>;
-
-// data/data-engine.zod.ts
-export type Iso775 = Assert<Eq< z.input< typeof M56.DataEngineExecuteRequestSchema >, z.infer< typeof M56.DataEngineExecuteRequestSchema > >>;
-export type Iso776 = Assert<Eq< z.input< typeof M56.DataEngineInsertRequestSchema >, z.infer< typeof M56.DataEngineInsertRequestSchema > >>;
-export type Iso777 = Assert<Eq< z.input< typeof M56.DataEngineVectorFindRequestSchema >, z.infer< typeof M56.DataEngineVectorFindRequestSchema > >>;
-
-// data/datasource.zod.ts
-export type Iso778 = Assert<Eq< z.input< typeof M57.DriverType >, z.infer< typeof M57.DriverType > >>;
-
-// data/date-macros.zod.ts
-export type Iso779 = Assert<Eq< z.input< typeof M177.DateMacroPlaceholderSchema >, z.infer< typeof M177.DateMacroPlaceholderSchema > >>;
-
-// data/driver/common.zod.ts
-export type Iso780 = Assert<Eq< z.input< typeof M61.DriverSslToggleSchema >, z.infer< typeof M61.DriverSslToggleSchema > >>;
-
-// data/field-value.zod.ts
-export type Iso781 = Assert<Eq< z.input< typeof M178.AddressValueSchema >, z.infer< typeof M178.AddressValueSchema > >>;
-export type Iso782 = Assert<Eq< z.input< typeof M178.CalendarDateValueSchema >, z.infer< typeof M178.CalendarDateValueSchema > >>;
-export type Iso783 = Assert<Eq< z.input< typeof M178.ClockTimeValueSchema >, z.infer< typeof M178.ClockTimeValueSchema > >>;
-export type Iso784 = Assert<Eq< z.input< typeof M178.FileLikeValueSchema >, z.infer< typeof M178.FileLikeValueSchema > >>;
-export type Iso785 = Assert<Eq< z.input< typeof M178.FileReferenceIdValueSchema >, z.infer< typeof M178.FileReferenceIdValueSchema > >>;
-export type Iso786 = Assert<Eq< z.input< typeof M178.FileValueSchema >, z.infer< typeof M178.FileValueSchema > >>;
-export type Iso787 = Assert<Eq< z.input< typeof M178.InstantValueSchema >, z.infer< typeof M178.InstantValueSchema > >>;
-export type Iso788 = Assert<Eq< z.input< typeof M178.LocationValueSchema >, z.infer< typeof M178.LocationValueSchema > >>;
-export type Iso789 = Assert<Eq< z.input< typeof M178.ReferenceIdValueSchema >, z.infer< typeof M178.ReferenceIdValueSchema > >>;
-
-// data/mapping.zod.ts
-export type Iso790 = Assert<Eq< z.input< typeof M179.TransformType >, z.infer< typeof M179.TransformType > >>;
-
-// data/query.zod.ts
-export type Iso791 = Assert<Eq< z.input< typeof M71.AggregationFunction >, z.infer< typeof M71.AggregationFunction > >>;
-
-// integration/connector.zod.ts
-export type Iso792 = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
-export type Iso793 = Assert<Eq< z.input< typeof M78.ConnectorTriggerSchema >, z.infer< typeof M78.ConnectorTriggerSchema > >>;
-
-// qa/testing.zod.ts
-export type Iso794 = Assert<Eq< z.input< typeof M105.TestActionTypeSchema >, z.infer< typeof M105.TestActionTypeSchema > >>;
-export type Iso795 = Assert<Eq< z.input< typeof M105.TestAssertionTypeSchema >, z.infer< typeof M105.TestAssertionTypeSchema > >>;
-export type Iso796 = Assert<Eq< z.input< typeof M105.TestContextSchema >, z.infer< typeof M105.TestContextSchema > >>;
-
-// security/sharing.zod.ts
-export type Iso797 = Assert<Eq< z.input< typeof M180.OWDModel >, z.infer< typeof M180.OWDModel > >>;
-export type Iso798 = Assert<Eq< z.input< typeof M180.ShareRecipientType >, z.infer< typeof M180.ShareRecipientType > >>;
-export type Iso799 = Assert<Eq< z.input< typeof M180.SharingLevel >, z.infer< typeof M180.SharingLevel > >>;
-export type Iso800 = Assert<Eq< z.input< typeof M180.SharingRuleType >, z.infer< typeof M180.SharingRuleType > >>;
-
-// shared/connector-auth.zod.ts
-export type Iso801 = Assert<Eq< z.input< typeof M109.ConnectorInstanceAPIKeyAuthSchema >, z.infer< typeof M109.ConnectorInstanceAPIKeyAuthSchema > >>;
-export type Iso802 = Assert<Eq< z.input< typeof M109.ConnectorInstanceBasicAuthSchema >, z.infer< typeof M109.ConnectorInstanceBasicAuthSchema > >>;
-export type Iso803 = Assert<Eq< z.input< typeof M109.ConnectorInstanceBearerAuthSchema >, z.infer< typeof M109.ConnectorInstanceBearerAuthSchema > >>;
-export type Iso804 = Assert<Eq< z.input< typeof M109.ConnectorInstanceNoAuthSchema >, z.infer< typeof M109.ConnectorInstanceNoAuthSchema > >>;
-
-// studio/plugin.zod.ts
-export type Iso805 = Assert<Eq< z.input< typeof M119.PanelLocationSchema >, z.infer< typeof M119.PanelLocationSchema > >>;
-
-// system/core-services.zod.ts
-export type Iso806 = Assert<Eq< z.input< typeof M124.KernelServiceMapSchema >, z.infer< typeof M124.KernelServiceMapSchema > >>;
-export type Iso807 = Assert<Eq< z.input< typeof M124.ServiceConfigSchema >, z.infer< typeof M124.ServiceConfigSchema > >>;
-export type Iso808 = Assert<Eq< z.input< typeof M124.ServiceCriticalitySchema >, z.infer< typeof M124.ServiceCriticalitySchema > >>;
-export type Iso835 = Assert<Eq< z.input< typeof M124.KernelServiceStatusSchema >, z.infer< typeof M124.KernelServiceStatusSchema > >>;
-
-// system/metadata-persistence.zod.ts
-export type Iso809 = Assert<Eq< z.input< typeof M138.MetadataStateSchema >, z.infer< typeof M138.MetadataStateSchema > >>;
-
-// system/migration.zod.ts
-export type Iso810 = Assert<Eq< z.input< typeof M140.DeleteObjectOperation >, z.infer< typeof M140.DeleteObjectOperation > >>;
-export type Iso811 = Assert<Eq< z.input< typeof M140.ExecuteSqlOperation >, z.infer< typeof M140.ExecuteSqlOperation > >>;
-export type Iso812 = Assert<Eq< z.input< typeof M140.MigrationDependencySchema >, z.infer< typeof M140.MigrationDependencySchema > >>;
-export type Iso813 = Assert<Eq< z.input< typeof M140.ModifyFieldOperation >, z.infer< typeof M140.ModifyFieldOperation > >>;
-export type Iso814 = Assert<Eq< z.input< typeof M140.RemoveFieldOperation >, z.infer< typeof M140.RemoveFieldOperation > >>;
-export type Iso815 = Assert<Eq< z.input< typeof M140.RenameObjectOperation >, z.infer< typeof M140.RenameObjectOperation > >>;
-
-// system/translation.zod.ts
-export type Iso816 = Assert<Eq< z.input< typeof M152.LocaleSchema >, z.infer< typeof M152.LocaleSchema > >>;
-
-// ui/action.zod.ts
-export type Iso817 = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< typeof M155.ActionType > >>;
-
-// ui/component.zod.ts
-// `ElementNumberPropsSchema` (Iso818) left the family on the ui#6206
-// convergence: its `filter` now carries `z.array(ViewFilterRuleSchema)`, whose
-// own input ≠ infer (`operator` is normalized on parse — `ViewFilterRuleParsed`
-// exists for exactly that reason), so `ElementNumberPropsParsed` is declared
-// and the pin deleted.
-// `ElementRecordPickerPropsSchema` (Iso819) left the family the same way on
-// #14406 — the LAST record-form `filter` in `ComponentPropsMap`: its `filter`
-// now carries `z.array(ViewFilterRuleSchema)` too, so `ElementRecordPickerPropsParsed`
-// is declared and this pin deleted.
-export type Iso820 = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
-export type Iso821 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
-// `record:reference_rail` (#8691) — deliberately default-free on the same
-// principle as the object-* family below: the renderer's `limit ?? 3` /
-// `hideEmpty !== false` fallbacks stay the renderer's facts, so "the author
-// said nothing" survives the parse, and input === infer holds for both shapes.
-export type Iso845 = Assert<Eq< z.input< typeof M170.ReferenceRailEntrySchema >, z.infer< typeof M170.ReferenceRailEntrySchema > >>;
-export type Iso846 = Assert<Eq< z.input< typeof M170.RecordReferenceRailProps >, z.infer< typeof M170.RecordReferenceRailProps > >>;
-// #8744 — the three record types the rail fix left behind, default-free on
-// the same principle. `RecordAlertProps` itself is deliberately NOT pinned:
-// its `visible` carries `ExpressionInputSchema`, whose bare-string arm
-// TRANSFORMS to the canonical `{ dialect, source }` envelope, so
-// input ≠ infer by construction — the alias stays `z.input` (the authoring
-// face), per the convention's own rule for Expression-carrying shapes.
-export type Iso847 = Assert<Eq< z.input< typeof M170.RecordAlertActionSchema >, z.infer< typeof M170.RecordAlertActionSchema > >>;
-export type Iso848 = Assert<Eq< z.input< typeof M170.RecordQuickActionsProps >, z.infer< typeof M170.RecordQuickActionsProps > >>;
-export type Iso849 = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.infer< typeof M170.RecordHistoryProps > >>;
-// The object-* block family (#7751) — deliberately default-free in its first,
-// warning-tier step ("the author said nothing" must stay distinguishable from
-// "the author asked for the renderer's fallback"), so input === infer holds.
-// A default added to any of these goes red here, and the fix is the ADR's:
-// declare the XParsed alias and delete the pin line.
-// `ObjectGridPropsSchema` (Iso839) left the family exactly that way on the
-// ui#6207 convergence: its `data` now carries `ViewDataSchema`, whose own
-// input ≠ infer, so `ObjectGridPropsParsed` is declared and the pin deleted.
-// `ObjectMetricPropsSchema` (Iso840), `ObjectKanbanPropsSchema` (Iso841) and
-// `ObjectCalendarPropsSchema` (Iso842) left the same way on #15449 — the
-// ui#6206-B filter orthography reaching the four `object-*` `filter` doors:
-// each now carries `z.array(ViewFilterRuleSchema)` (input ≠ infer), so the
-// three `XParsed` aliases are declared and the three pins deleted.
-export type Iso843 = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
-export type Iso844 = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
-
-// ui/page.zod.ts
-export type Iso822 = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
-
-// ui/report.zod.ts
-export type Iso823 = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< typeof M164.ReportType > >>;
-
-// ui/responsive.zod.ts
+// vocabulary.)
 // (Iso824 `BreakpointColumnMapSchema` / Iso825 `BreakpointOrderMapSchema`
 // removed with their schemas — #11027, see the Iso696/Iso697 note above.)
+export type Iso_ui_responsive__ResponsiveStylesSchema = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
+export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
+
+// ui/theme.zod.ts — its five pins (Iso700–Iso704) left with the module at #10485.
 
 // ui/view.zod.ts
-export type Iso826 = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
-export type Iso827 = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
-export type Iso828 = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
 // (Iso829 `KanbanConfigSchema` left this list in #17393: the author-settable
 // row ceiling `limit` APPLIES its default, which is exactly the "a nested field
 // gains a `.default()`" event this file exists to catch — so the schema now has
 // two shapes and `KanbanConfigParsed` is declared beside the bare alias, as
 // ADR-0122 prescribes. Its two page-shaped siblings needed no line moved: both
 // already carried defaults and therefore both halves of the pair.)
-export type Iso851 = Assert<Eq< z.input< typeof M167.ListMapConfigSchema >, z.infer< typeof M167.ListMapConfigSchema > >>;
-export type Iso830 = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
-export type Iso831 = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
-export type Iso832 = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
+export type Iso_ui_view__CalendarConfigSchema = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
+export type Iso_ui_view__ColumnSummaryConfigSchema = Assert<Eq< z.input< typeof M167.ColumnSummaryConfigSchema >, z.infer< typeof M167.ColumnSummaryConfigSchema > >>;
+export type Iso_ui_view__ColumnSummarySchema = Assert<Eq< z.input< typeof M167.ColumnSummarySchema >, z.infer< typeof M167.ColumnSummarySchema > >>;
+export type Iso_ui_view__FormButtonConfigSchema = Assert<Eq< z.input< typeof M167.FormButtonConfigSchema >, z.infer< typeof M167.FormButtonConfigSchema > >>;
+export type Iso_ui_view__GanttConfigSchema = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
+export type Iso_ui_view__GanttQuickFilterSchema = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
+export type Iso_ui_view__ListMapConfigSchema = Assert<Eq< z.input< typeof M167.ListMapConfigSchema >, z.infer< typeof M167.ListMapConfigSchema > >>;
+export type Iso_ui_view__NavigationModeSchema = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
+export type Iso_ui_view__RowColorConfigSchema = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.infer< typeof M167.RowColorConfigSchema > >>;
+export type Iso_ui_view__RowHeightSchema = Assert<Eq< z.input< typeof M167.RowHeightSchema >, z.infer< typeof M167.RowHeightSchema > >>;
+export type Iso_ui_view__TreeConfigSchema = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
+export type Iso_ui_view__UserFilterFieldSchema = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
+export type Iso_ui_view__ViewItemNameSchema = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
+export type Iso_ui_view__ViewItemSchema = Assert<Eq< z.input< typeof M167.ViewItemSchema >, z.infer< typeof M167.ViewItemSchema > >>;
+export type Iso_ui_view__ViewItemWireSchema = Assert<Eq< z.input< typeof M167.ViewItemWireSchema >, z.infer< typeof M167.ViewItemWireSchema > >>;
+export type Iso_ui_view__ViewKindSchema = Assert<Eq< z.input< typeof M167.ViewKindSchema >, z.infer< typeof M167.ViewKindSchema > >>;
+export type Iso_ui_view__ViewScopeSchema = Assert<Eq< z.input< typeof M167.ViewScopeSchema >, z.infer< typeof M167.ViewScopeSchema > >>;
+export type Iso_ui_view__VisualizationTypeSchema = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
 
-// [#10235] api/sortability.zod.ts — the served projection carries no defaults
-// or transforms by design (it is a serve-time computation, never parsed from
-// an author), so input and parsed coincide and the bare aliases stand alone.
-export type Iso854 = Assert<Eq< z.input< typeof M183.FieldSortabilitySchema >, z.infer< typeof M183.FieldSortabilitySchema > >>;
-export type Iso855 = Assert<Eq< z.input< typeof M183.ObjectSortabilitySchema >, z.infer< typeof M183.ObjectSortabilitySchema > >>;
 // ---------------------------------------------------------------------------
 // Representative spot-checks on the phase-2 FLIP.
 //
@@ -2148,7 +2115,7 @@ describe('ADR-0122 type-alias convention', () => {
     // post-merge base after #14168's +1 landed first — the two changes touch
     // disjoint pins.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
-    const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
+    const pins = self.match(/^export type Iso\w+ = Assert</gm) ?? [];
     // 828 -> 826 is #14676's ADR-0049 retirement of `connector.errorMapping`:
     // `ErrorMappingRuleSchema` and `ConnectorErrorCategorySchema` left whole
     // with the key (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so the
@@ -2301,6 +2268,19 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso877/Iso878; #17551 landed on main first, so its ids stand and this
     // card's pins renumbered to Iso880/Iso881 — ids are claims about pins, not
     // positions, so the renumbering asserts nothing new.
+    //
+    // 789 -> 789 is #19665, which moves no pin in or out: it RENAMES every
+    // pin. The dense counter these receipts allocate from — "the next free id"
+    // — let two branches off one base give one name to two different schemas,
+    // and git merged each pair cleanly because the two insertion points sat far
+    // apart: `Iso871` above, then `Iso877` / `Iso878` — each a duplicate
+    // identifier that no merge flags and only the type-check of this file
+    // reports. So each pin is now named for its module and schema, and the
+    // block is sorted by that name (the rule is written at the head of the
+    // list). Every `IsoNNN` cited above is a pin's former name,
+    // true of the file when its entry was written, like the counts beside it.
+    // The set `check:spec-parsed-alias` reads is identical member for member,
+    // and so is each assertion — only the names moved. +0.
     expect(pins).toHaveLength(789);
 
     // The count is stated in PROSE twice as well — this case's title and the
