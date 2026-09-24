@@ -1463,12 +1463,18 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *
  * ⚠️ WHAT THIS VIEW-FACE KEY REACHES TODAY — recorded, not repaired (#19228).
  * Measured first-hand at the pin this repo builds against (`.objectui-sha` =
- * `62597c588`), with TWO instruments, because one was not enough and the
+ * `f8a9d0fb0`), with TWO instruments, because one was not enough and the
  * first one's answer was wrong. First taken at `87af769e9` 2026-09-21T09:15Z;
- * re-taken at `62597c588` 2026-09-23, where instrument 1 returns the SAME hit
- * set line for line (probe 0; control 13 lines, 6 files) and all nine
- * objectui files cited below are byte-identical to `87af769e9`, so every
- * anchor and both verdicts stand unmoved:
+ * re-taken at `62597c588` 2026-09-23, where instrument 1 returned the SAME
+ * hit set line for line (probe 0; control 13 lines, 6 files) and all nine
+ * objectui files cited below were byte-identical to `87af769e9`; re-taken
+ * again at `f8a9d0fb0` 2026-09-24, where the probe is still 0, the control
+ * gains ONE line in a seventh file (a test, below), instrument 2 returns the
+ * same four flattening spreads and the same exclusions, and every anchor in
+ * the six cited files that changed (both `ObjectView.tsx`, `ListView.tsx`,
+ * `ObjectKanban.tsx`, `ObjectGallery.tsx`; `ObjectTimeline.tsx` and the
+ * three cited tests are byte-identical) MOVED with its cited text
+ * byte-identical — so both verdicts stand unmoved, at the numbers below:
  *
  *  1. PROPERTY-ACCESS spellings. ⛔ Published as its EXPRESSION, not as a
  *     number — this card exists because a confident count was wrong once, so
@@ -1476,21 +1482,23 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *     an objectui checkout, over every tracked file:
  *       probe:   git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.limit\b'
  *       control: git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.(groupByField|scale|coverField)\b'
- *     Probe: **0** lines, 0 files. Control: **13** lines across **6** files —
+ *     Probe: **0** lines, 0 files. Control: **14** lines across **7** files —
  *     `app-shell/src/views/ObjectView.galleryBinding-7547.test.tsx:41`,
- *     `app-shell/src/views/ObjectView.tsx:450`,
- *     `plugin-list/src/ListView.tsx:2538`, `:2540`, `:2547`, `:3057`, `:3114`,
- *     `:3116`,
+ *     `app-shell/src/views/ObjectView.tsx:451`,
+ *     `plugin-detail/src/__tests__/RelatedList.selectFls-10186.test.tsx:314`
+ *     (new at this pin, an executable test line),
+ *     `plugin-list/src/ListView.tsx:2551`, `:2553`, `:2560`, `:3145`, `:3202`,
+ *     `:3204`,
  *     `plugin-list/src/__tests__/ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`,
- *     `:99`, `plugin-view/src/ObjectView.tsx:1695`, and
+ *     `:99`, `plugin-view/src/ObjectView.tsx:1723`, and
  *     `types/src/__tests__/object-kanban-group-by-limit-7322.test.ts:146`, `:148`.
  *     ⚠️ Filtering changes that number and the filter must be stated with it.
- *     Of the 13: **2 are COMMENTS** (`ObjectView.galleryBinding-7547.test.tsx:41`,
+ *     Of the 14: **2 are COMMENTS** (`ObjectView.galleryBinding-7547.test.tsx:41`,
  *     `ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`), **1 is an
  *     `it()` TITLE string** (same file, `:99` — ⛔ not a comment), and **2 are
  *     lines inside a QUOTED source-text pin**
  *     (`object-kanban-group-by-limit-7322.test.ts:146`, `:148`). So a reader
- *     counting executable reads only gets **8**. All three readings are of one
+ *     counting executable reads only gets **9** (8 at `62597c588`). All three readings are of one
  *     hit set. A live instrument — and a WRONG answer.
  *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
  *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
@@ -1501,46 +1509,46 @@ type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
  *     excludes). A grep broad enough to find these also returns the nested
  *     merges, so the rule, not the number, is what makes it reproducible.
  *     ⛔ And name what the predicate EXCLUDES, or the next reader re-finds
- *     it and wonders: `app-shell/src/views/ObjectView.tsx:206` and `:342`
- *     ARE spreads of a view block, inside `timelineViewOptions` (`:201`) and
- *     `galleryViewOptions` (`:334`). They build an OPTIONS BAG that feeds
+ *     it and wonders: `app-shell/src/views/ObjectView.tsx:207` and `:343`
+ *     ARE spreads of a view block, inside `timelineViewOptions` (`:202`) and
+ *     `galleryViewOptions` (`:335`). They build an OPTIONS BAG that feeds
  *     `ListView`'s nested forward, not the object literal an adapter returns
  *     as the node, so the predicate excludes them — deliberately, not by
  *     oversight. Two more the predicate excludes for their own reasons:
- *     `plugin-list/src/ListView.tsx:3044-3046` (`mergedGallery`) builds a
+ *     `plugin-list/src/ListView.tsx:3132-3134` (`mergedGallery`) builds a
  *     NESTED gallery prop, the `...mergedTimeline` family; and
- *     `app-shell/src/views/ObjectView.tsx:1284`
+ *     `app-shell/src/views/ObjectView.tsx:1406`
  *     (`spec.kanban = { ...(spec.kanban || {}), columns }`) writes back into a
  *     VIEW document's own block — a metadata write, not a node build.
  *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
- *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
- *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
- *       `plugin-view/src/ObjectView.tsx:1697`  `...(viewOptions.gallery || {})`
- *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.timeline || {})`
- *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:2952`,
- *     `ObjectView.tsx:1579`), so a VIEW's per-kind `limit` — INCLUDING the 100
+ *       `plugin-list/src/ListView.tsx:3067`   `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1666`  `...restKanban`
+ *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.gallery || {})`
+ *       `plugin-view/src/ObjectView.tsx:1753`  `...(viewOptions.timeline || {})`
+ *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:3040`,
+ *     `ObjectView.tsx:1607`), so a VIEW's per-kind `limit` — INCLUDING the 100
  *     this applied default materializes — becomes the generated node's
  *     ELEMENT-face flat `limit`, which is the key the renderers read.
  *
  * ⇒ **A view's `kanban.limit`: flattened on BOTH adapter routes, and read.**
- *   `ObjectKanban.tsx:553` runs `describeRefusedRowLimit(schema.limit, …)`
+ *   `ObjectKanban.tsx:554` runs `describeRefusedRowLimit(schema.limit, …)`
  *   unconditionally.
  * ⇒ **A view's `timeline.limit`: ROUTE-DEPENDENT.** `plugin-view` flattens it
- *   (`ObjectView.tsx:1725`) and the node it returns carries no `timeline`
+ *   (`ObjectView.tsx:1753`) and the node it returns carries no `timeline`
  *   block at all, so the value arrives as the node's flat `limit` and
  *   `ObjectTimeline.tsx:279` reads it. `plugin-list` instead forwards the
- *   block NESTED (`ListView.tsx:3084`), where nothing reads it.
- * ⇒ **A view's `gallery.limit`: flattened by `ObjectView.tsx:1697` and read by
+ *   block NESTED (`ListView.tsx:3172`), where nothing reads it.
+ * ⇒ **A view's `gallery.limit`: flattened by `ObjectView.tsx:1725` and read by
  *   NOBODY** — `ObjectGallery.tsx` contains no `limit` at all (0 occurrences,
  *   case-insensitive, against a lit control `schema.imageField` /
  *   `schema.titleField` at `:340` / `:348`). ⛔ Do not generalise that
  *   asymmetry to the other two; it is gallery's alone.
  *
- * ⚠️ Where it IS read, the `$top` it would govern (`ObjectKanban.tsx:676`,
+ * ⚠️ Where it IS read, the `$top` it would govern (`ObjectKanban.tsx:687`,
  * `ObjectTimeline.tsx:407`) is still not issued on either adapter route today:
- * both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
- * `ObjectView.tsx:2319`) and both children short-circuit their own fetch on it
- * (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). ⛔ That is a statement
+ * both hosts hand rows down as a React `data` prop (`ListView.tsx:4815`,
+ * `ObjectView.tsx:2347`) and both children short-circuit their own fetch on it
+ * (`ObjectKanban.tsx:565`, `ObjectTimeline.tsx:420`). ⛔ That is a statement
  * about the QUERY, not about the key being unread.
  *
  * ⚠️ A consequence of APPLIED that the open decision needs: through those
@@ -2193,14 +2201,20 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `map: { style }`, which the flatten whitelist carries out as `mapStyle`),
  * while `getMapConfig` itself is byte-identical, so both read points moved 19
  * lines and neither changed what it does; the other five anchors sit in files
- * byte-identical to `87af769e9`. Each anchor quotes the line it was read at,
+ * byte-identical to `87af769e9`. RE-READ again at pin `f8a9d0fb0` on
+ * 2026-09-24: that bump redded three anchors, and each MOVED with the block it
+ * opens byte-identical — `ObjectView.tsx`'s `case 'map':` `1764` -> `1792`
+ * (17 lines), `ObjectMapConfigSchema` `1574` -> `1589` (the whole 47-line
+ * declaration) and `LIST_VIEW_LOCAL_OVERRIDES` `734` -> `741` (the whole
+ * list, still without `map`); `ObjectMap.tsx` and the `ListView.tsx` anchors
+ * did not move. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:146` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1764` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1792` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
  *   (`packages/plugin-list/src/ListView.tsx:85` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
@@ -2212,7 +2226,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:1574` first line
+ *   `packages/types/src/zod/objectql.zod.ts:1589` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. `getMapConfig` consults that `safeParse`
@@ -2228,7 +2242,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * checker at all: it dies in the whitelist without a word, and the one schema
  * that could have reported it is open and warn-only. And this parse is the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:734`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:741`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -2242,8 +2256,10 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (2026-09-23: `objectql.zod.ts` and `plugin-map.mdx` are byte-identical to
  * `87af769e9`, and the `ObjectMap.tsx` read MOVED `377` -> `396` with its line
  * byte-identical; at `87af769e9`, 2026-09-20, each of these three had moved
- * and each was re-READ):
- * `packages/types/src/zod/objectql.zod.ts:1574` declares the eight keys,
+ * and each was re-READ; at `f8a9d0fb0`, 2026-09-24, `ObjectMap.tsx` and
+ * `plugin-map.mdx` are byte-identical to `62597c588` and the declaration MOVED
+ * `1574` -> `1589` byte-identical):
+ * `packages/types/src/zod/objectql.zod.ts:1589` declares the eight keys,
  * `packages/plugin-map/src/ObjectMap.tsx:396` reads
  * `schema.mapStyle || schema.map?.style`, and objectui's own
  * `content/docs/plugins/plugin-map.mdx:143` documents `style` in the block —
@@ -3384,10 +3400,13 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `62597c588`, re-read 2026-09-23: `form.tsx` is
-   * byte-identical to `87af769e9`, so `spanLadderFor` still emits the ladder).
+   * (`.objectui-sha` = `f8a9d0fb0`, re-read 2026-09-24: `form.tsx` changed on
+   * this hop only in its registration's input list, objectui#9910's
+   * `children` slot, and `spanLadderFor` at `:204-231` is byte-identical, so it
+   * still emits the ladder; `plugin-form`'s `autoLayout.ts` is byte-identical
+   * to `62597c588`, where `form.tsx` was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `62597c588`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f8a9d0fb0596`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
