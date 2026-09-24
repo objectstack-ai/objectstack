@@ -1,0 +1,29 @@
+{
+  "number": 19973,
+  "kind": "issue",
+  "title": "Restore the needs:contract-review label as the marker for a PR awaiting its at-tier contract review — the maintainer's direct instruction, quoted verbatim",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T13:53:13Z",
+  "updated_at": "2026-09-24T13:54:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19973",
+  "body": "Filing gate: **③ a direct maintainer task**, routed to `domain:skills` by the maintainer's own words. Filed by `domain:spec` execution seat 1 (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017, signed off and acting only on this instruction). ⛔ Not a claim.\n\n## The instruction, with provenance\n\n- **Who:** the maintainer.\n- **Words, verbatim:** 「恢复 needs:contract-review，把这句原话写进一张 skills 车道的卡」\n- **Where:** the live PM chat of `session_013RDBh5DqXd2xnLwvHLgLFr`, 2026-09-24.\n- **The question it answered, verbatim:** 「您一句话就够了，比如：「恢复 `needs:contract-review`，只作等复核标记，不作闸门」。… 恢复吗？是 / 否。」\n\n⚠️ **Scope.** The maintainer's words say 「恢复」. The question they answered proposed a **marker only, ⛔ not a gate**. If the executing seat reads the instruction as restoring any of the retired gate machinery, it asks the maintainer, and ⛔ never widens the scope on its own reading.\n\n## What it changes\n\nRuling B on #19061 (record `5770886272`, 2026-09-22, 「其他同意」) retired three layers:\n- the label's gate role and its hang/clear discipline on two carriers;\n- the `--pair` pre-check;\n- the independence-pair requirement.\n\nIts step ③ then removed the label from the tree (#19737). **This instruction brings back the label only.** The rest of ruling B stands:\n- ⛔ no queue-guard refusal on the label;\n- ⛔ no `--pair`;\n- ⛔ no double carrier;\n- ⛔ no independence requirement.\n\nThe enqueue gate still decides on the `## Contract review` record, not on the label.\n\n## Why it was asked for, measured this shift\n\nFrom 2026-09-23T12:00Z, every `model: fable` reviewer died on HTTP 429, thirteen tries in all. Twelve CI-green PRs waited on an at-tier record. That waiting state was visible only in seat post #6017's hand-written table. The maintainer had to ask for the list, and a handover to another PM needed the seat post read first. `needs:contract-review` was the one marker a PR-list filter could have shown. It was retired with the gate, and nothing replaced its visibility.\n\n## The seat's proposal for the semantics — ⛔ a proposal, not a ruling\n\n- **Hang** it on the **PR** when the PR owes an at-tier `## Contract review` PASS under the current enqueue gate, and none is on file for its current head. Since #19948, that means the path limb (`packages/spec/src/**` non-test) or `Clause-②: yes`.\n- **Clear** it when the PASS record lands on the head that will land, or when the PR merges or closes.\n- **Named readers** (a label exists only with one): the maintainer's PR-list filter, and each seat's patrol and handover.\n- ⛔ **No check reads it.** Say so in the rule text, so the label does not drift back into a gate.\n\n## Surfaces the executing seat should re-read — derived here, ⛔ not a census\n\n- `.claude/skills/pm-dispatch/SKILL.md`, the state-model and label rows.\n- `references/landing-operations.md`, the line 「子代理起不来 ⇒ 复核缺席,PR 留 draft 队列外等档;唯一旁路是维护者亲审,逐次为准」, which is the natural place to name the marker.\n- `references/contract-review.md`.\n- `scripts/pm/ensure-pm-labels.sh`: the label is not in the roster today (`git grep` on `origin/main`: 0 hits).\n- The label object still exists: `GET /labels/needs:contract-review` answers 200. Re-read its description.\n- Four scripts on `origin/main` mention the label as retired, in comments: `scripts/pm/check-half-states.mjs`, `check-skill-line-ratchet.mjs`, `check-widening-tells.mjs` and `clause2-line.mjs`. Re-read each; ⛔ none of them becomes a reader of it as a gate.\n- ⚠️ **Durability of a PR-only label.** #9251 recorded this label stripped from a PR twice in 40 minutes with no push between. #19179 records objectui's labeler running with `sync-labels: true`. Measure what strips PR labels on this repo today before relying on a single carrier.\n- Governed surface (`.claude/**`) ⇒ Tier H: the maintainer merges.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, 2026-09-24:\n- 「restore needs:contract-review label as a marker for PRs awaiting at-tier contract review」 → 0.\n- 「needs:contract-review label restore marker awaiting review」 → 0.\n- 「bring back the contract review label so PRs waiting for the fable review are visible」 → 11, all closed. The nearest are #10972, #9251, #17040 and #17510, all on the retired gate's mechanics.\n- Control 「Retire the in-seat clause-② contract review — the rule, its gate label, and the checker's gate role」 → 137, with #19061 among the top 5. The instrument reaches this subject.\n\nNo open card carries this ask."
+}

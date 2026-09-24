@@ -13,19 +13,21 @@
   "labels": [
     "bug",
     "domain:services",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T04:07:06Z",
-  "updated_at": "2026-09-24T04:32:44Z",
+  "updated_at": "2026-09-24T13:46:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19950",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the at-tier review of PR #19946 (record `5807410719`, ③, \"Not carried at all\"). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The runtime\n\n`packages/plugins/plugin-security/src/security-plugin.ts:3007-3014` (the seat read it on `origin/main` `aeaaa44292`). For an update, the post-image `check` runs only when `extractSingleId(opCtx)` finds one id. A bulk update takes the branch that logs `[Security] RLS check on bulk update '<object>' is not post-image validated (governed by the using-scoped where); single-id writes are checked.` and sets the post-image to `null`. The code comment gives the reason: \"A bulk update (no single id) cannot form a post-image here — it is governed by the using-based AST scoping (step 3); we log and skip rather than guess.\"\n\n## The gap\n\nThat reasoning assumes the policy has a `using`. `RowLevelSecurityPolicySchema` accepts a policy that declares only `check`. For such a policy nothing scopes a bulk update's `where`, and nothing checks its post-image.\n\n**Measured by the #19946 round-2 reviewer** on driver-sql through the real `SecurityPlugin` + `ObjectQL`, at `ba90ddb578`: under a `check`-only policy, `update(…, { where, multi: true })` as the caller was admitted and stored (`b1: open → closed`), a transition the `check` was written to refuse.\n\n## Why it matters\n\nA `check` is the write-side guarantee of a row-level policy. Today the guarantee holds for inserts and single-id updates, but a bulk update by `where` escapes it whenever the policy has no `using`. Related, not duplicates:\n- #8059 (closed) fixed the by-id path for a `check`-only `update` policy;\n- #19942 is the opposite case: a `using`-only policy never gates an insert.\n\nSeam: `spec:RowLevelSecurityPolicySchema.check` → runtime: `plugin-security` update post-image check (`extractSingleId` == null branch).\n\nDedupe words: `bulk update check not validated` · `multi true update rls check skipped` · `check-only policy bulk write admitted` · `governed by the using-scoped where`"

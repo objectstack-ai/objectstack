@@ -1,0 +1,35 @@
+{
+  "number": 19960,
+  "kind": "pull_request",
+  "title": "fix(spec)!: refuse a blank string in a flow node's predicate slot — decision branch `expression`, screen field `visibleWhen` (#17493)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T09:08:36Z",
+  "updated_at": "2026-09-24T12:15:06Z",
+  "closed_at": "2026-09-24T12:15:04Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-24T12:15:04Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19960",
+  "body": "Fixes #17493\nClause-②: no (narrowing)\n\nExecutes ruling A (`5651023407`). A string that is blank after trimming is refused in two flow-node predicate slots: `decision` `config.conditions[].expression` and `screen` `config.fields[].visibleWhen`. The refusal fires at `FlowSchema.parse`, `AutomationEngine.registerFlow` and `objectstack validate`, with a message led by `PREDICATE_SLOT_STRING_REFUSAL`.\n\n- **Census first** (ruling item 1): at base `3b5607019f`, the dev found no flow in the tree or in the example stacks carrying either blank. The method is in report `5811268231`.\n- **Code:**\n  - `flow.zod.ts`: a `FlowSchema` refinement over the ledger predicate slots.\n  - `flow-node-expression-paths.ts`: the resolver emits a blank predicate string, and `predicateSlotRefusal` refuses it.\n  - `engine.ts` and `validate-expressions.ts`: comments only.\n- **Card item 1:** the `structuralConditionRefusal` docblock now records that ruling A answered its open question, and its doors line is corrected for the node slot.\n- **Card item 2:** a new ADR-0087 entry, `flow-predicate-slot-blank-string-refused`; `registry.ts` is regenerated.\n- **Pins:** one file per door, plus re-judged existing pins. The dev ablated each refusal red (report `5811268231`). `predicate-slot-blank.test.ts` also pins, on the real decision executor, that `'false'` runs what the blank ran, and that dropping the only branch runs the out-edge it labelled. Both were ablated red (report `5812924875`).\n- **Seat rulings** (`5811310916`, corrected by `5811904464` and `5812959979`): the parse door stays although `config.condition` has none. On a decision branch, the prescription that keeps the run is `expression: 'false'`, the value the blank evaluated to. Dropping a decision's only branch is named as the thing not to do.\n\nChangeset: `@objectstack/spec`, `@objectstack/service-automation` and `@objectstack/lint` at `minor`, plus **BREAKING** (the launch window refuses `major`), with an ADR-0087 `registered` marker.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

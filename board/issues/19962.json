@@ -1,0 +1,31 @@
+{
+  "number": 19962,
+  "kind": "pull_request",
+  "title": "fix(spec, lint): state the RLS check default per operation across the applicable policies, as the runtime applies it",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs:contract-review",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T10:53:49Z",
+  "updated_at": "2026-09-24T12:14:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19962",
+  "body": "Fixes #19953\nClause-②: no\n\nContract text only; no schema shape, accepted value or runtime behaviour changes (triage direction A, `5808181305`). The published `RowLevelSecurityPolicySchema.check` said it \"defaults to USING clause if not specified\", which reads per policy. The write gate (`writeCheckPolicies`, since #19952) decides the default once per write operation across the applicable policies. The texts now say so. They also say the check runs on the new row of a single-record insert and of a by-id update. An array insert and a `multi: true` update are not post-image checked (#19964, #19950). Round 2 made that change after the review FAIL `5813145732`, and limited the old 「OR-combine (most permissive wins)」 wording to reads.\n\n- `packages/spec/src/security/rls.zod.ts`: the `check` describe and TSDoc. The two reference pages under `content/docs/references/security/` are regenerated from the describe.\n- `content/docs/permissions/rls.mdx`: two sentences.\n- `packages/lint/src/validate-rls-predicate-enforceability.ts` (`domain:devx`, declared on the claim): the header, and the consequence texts for `using` and `check`.\n- Changeset: `@objectstack/spec` and `@objectstack/lint` at `patch`.\n\nThe dev measured the runtime composition before writing; the table is in report `5812757565`. The ADR-0058 D4 clarifying note was reverted out of this PR (seat ruling `5812826208`), because `docs/adr/**` is governed; it stays owed separately. Filed from the measurement: #19964 (an array insert runs no row-level check) and #19965 (a `check` on a `select` / `delete` policy is never evaluated).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

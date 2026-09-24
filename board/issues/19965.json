@@ -1,0 +1,32 @@
+{
+  "number": 19965,
+  "kind": "issue",
+  "title": "[finding] A `check` on a `select` or `delete` row-level policy is accepted by `RowLevelSecurityPolicySchema` and never evaluated — and it does not suppress the `using` default either; no lint reports it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T11:01:27Z",
+  "updated_at": "2026-09-24T11:26:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19965",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #19953 dev (PR #19962, class c). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The defect\n\n`RowLevelSecurityPolicySchema` (`packages/spec/src/security/rls.zod.ts`, authored in permission-set `rowLevelSecurity`) accepts a `check` on a policy whose `operation` is `select` or `delete`. That `check` is authored, stored and silently never evaluated.\n\n**Read by this seat** on `main` `3b5607019f`: `packages/plugins/plugin-security/src/security-plugin.ts:2997-3004` evaluates the post-image check only for `insert` and `update` operations.\n\n**Measured by the #19953 dev** (the harness described in PR #19962's report):\n- A sole `check` of `record.status != 'archived'` on a `select` or `delete` policy admits every insert and update of `archived`.\n- Beside a USING-only `all` sibling, a `check` on a `select` or `delete` policy does not suppress the sibling's `using` default. Only a `check` on an `insert` / `update` / `all` policy does.\n\nThe dev found no lint rule in `packages/lint/src` that reads `operation` beside `check`.\n\nThis is declared, not enforced (ADR-0049). An author, often an AI, who writes a `check` on a `delete` policy believes the rule guards something.\n\nSeam: `spec:RowLevelSecurityPolicySchema.check` (`operation: select | delete`) → runtime: `plugin-security` step 3.6 (insert / update only) | consumer: none.\n\nDedupe words: `RLS check on delete policy ignored` · `check select operation never evaluated` · `rowLevelSecurity check operation inert` · `check with operation select`"
+}

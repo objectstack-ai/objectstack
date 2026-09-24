@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T03:22:37Z",
-  "updated_at": "2026-09-24T04:54:47Z",
+  "updated_at": "2026-09-24T12:59:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19949",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #19886 stage-2c dev (report `5806886759`, class a). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The defect\n\n`compileCelToFilter` lowers a field-to-field comparison such as `record.s != record.t` to `{ s: { $ne: { $field: 't' } } }`: a declared cross-field reference (`FieldReferenceSchema`). `packages/drivers/driver-mongodb/src/mongodb-filter.ts` has no `$field` handling. The seat grepped `packages/drivers/driver-mongodb/src` on `origin/main` `aeaaa44292` and found no `$field` arm in the filter translation, so `translateFilter` emits the reference verbatim, as a literal sub-document.\n\n**Measured by the #19886 stage-2c dev** at `10efa63fb1`, through `translateFilter` plus mingo 7.2.4 as the proxy (live `mongod` NOT MEASURED), over the rows `{s:'a', t:'a'}` and `{s:'a', t:'b'}`:\n- `$ne` against the reference selects BOTH rows, including the one where `s` equals `t`;\n- `$eq` selects none.\n\n## Why it matters\n\nA row-level `using` that compares two fields with `!=` is a read restriction. On driver-mongodb it widens to every row. The SQL family compiles `$field` to a column-to-column comparison (#5222).\n\nSeam: `spec:FieldReferenceSchema` `{ $field }` → runtime: driver-mongodb `translateFilter` (no lowering).\n\nDedupe words: `mongodb field reference $field not lowered` · `rls field-to-field ne mongodb every row` · `translateFilter $field`"

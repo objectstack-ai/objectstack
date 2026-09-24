@@ -1,0 +1,31 @@
+{
+  "number": 19967,
+  "kind": "issue",
+  "title": "[finding] After PR #19962 rewrites the RLS `check` describe, three texts still quote the old \"defaults to USING clause if not specified\" contract, and the `using` text never says it is the insert check when no `check` is declared",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T11:28:46Z",
+  "updated_at": "2026-09-24T12:21:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19967",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the at-tier review record `5813145732` on PR #19962 (#19953), ①.5b and ①.5c. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\nPR #19962 (open) rewrites `RowLevelSecurityPolicySchema.check`'s describe to state the per-operation `using` → `check` default. The texts below sit outside its file surface. The dev and the reviewer both named them, and no card carries them.\n\n## Stale quotes of the old describe\n\n**Read by this seat** on `main` `3b5607019f`:\n- `packages/plugins/plugin-security/src/security-plugin.ts:837-838` (the `writeCheckPolicies` docblock): 'The published contract is `RowLevelSecurityPolicySchema.check`: \"defaults to USING clause if not specified\".'\n- `packages/plugins/plugin-security/src/rls-check-defaults-to-using.test.ts:5-7` quotes the same sentence as what the schema \"publishes\".\n- `packages/spec/liveness/permission.json:204`: the `evidence` for the check/using row cites `rls-compiler.ts#compileFilter` with `check ?? policy.using`. Per report `5812757565`, that is the pre-#19952 expression; the write-side selector is now `writeCheckPolicies`.\n\nThese quotes go stale once PR #19962 lands.\n\n## The `using` text is incomplete\n\n`packages/spec/src/security/rls.zod.ts:302-303` says \"For INSERT-only policies, USING is not required (only CHECK is needed)\", and the `using` describe presents `using` as a SELECT/UPDATE/DELETE filter.\n\nThe reviewer measured (case A1) that a USING-only `insert` policy's `using` IS the insert check when no applicable policy declares `check`. The reviewer called the text incomplete rather than contradictory.\n\nSeam: `spec:RowLevelSecurityPolicySchema.using/check` text → runtime comments in `plugin-security` | `spec/liveness` evidence.\n\nDedupe words: `defaults to USING clause if not specified stale quote` · `writeCheckPolicies docblock published contract` · `liveness permission check ?? policy.using` · `using is the insert check`"
+}

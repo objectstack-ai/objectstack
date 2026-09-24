@@ -1,0 +1,31 @@
+{
+  "number": 19966,
+  "kind": "issue",
+  "title": "[finding] The landed ADR-0087 entry `flow-edge-condition-evaluated-slot-source-required` and its pending changeset name `POST /flows`, a route that does not exist — the upgrade guide renders it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T11:13:40Z",
+  "updated_at": "2026-09-24T11:27:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19966",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #17493 round-2 dev (report `5812924875`, class a). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The defect\n\n**Read by this seat** on `main` `3b5607019f`: `POST /flows` appears in:\n- `packages/spec/src/migrations/entries/semantic/18.flow-edge-condition-evaluated-slot-source-required.ts:21` (`surface`: \"… a POST /flows body, and a flow row already sitting in sys_metadata\") and `:63` (`acceptanceCriteria`);\n- its generated mirror `packages/spec/src/migrations/registry.ts:8994` and `:9036`;\n- the pending `.changeset/flow-edge-condition-evaluated-slot.md:83`.\n\n**Measured by the dev:** zero route rows match `/flows` across `packages`. Control: `route: 'POST /automation'` has one hit in `packages/runtime/src/route-ledger.ts`. The #17493 at-tier review (`5811874589`, N1) found the same wrong route in #17493's own entry, where it was cut.\n\n**Why it matters:** the dev reports that the entry's `surface` is the field the upgrade guide renders (`build-upgrade-guide.ts`), and the next release compiles the pending changeset into `CHANGELOG`. An author following either would look for a route that does not exist.\n\n**Fix shape** (for whoever takes it): correct the route to the one verified on a composed runtime, or cut it. The #17493 dev did not verify the wire prefix: the route ledger says to prepend `/api/v1`, while spec `AutomationApiContracts` says `/api/automation`. Editing the pending changeset of another card is a #17712 deliberate correction.\n\nSeam: `spec:migrations entry surface` → the upgrade guide | `CHANGELOG` (next release).\n\nDedupe words: `POST /flows` · `flow-edge-condition-evaluated-slot-source-required surface route` · `migration entry nonexistent route` · `flow-edge-condition-evaluated-slot changeset`"
+}
