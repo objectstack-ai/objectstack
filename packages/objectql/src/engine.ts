@@ -2235,8 +2235,12 @@ export interface OperationContext {
    * are the rows the COMPOSED AST selects, and that AST is complete only after
    * every middleware has run. So {@link ObjectQL.update} calls it on that path,
    * once the payload is final, with every matched row merged with the payload.
-   * A by-id `update` is never handed to the seam: the middleware judges that
-   * one row itself, by merging its pre-image with the change set.
+   *
+   * [#19989] A by-id `update` uses it too. A middleware can read that one row,
+   * but only BEFORE the `beforeUpdate` chain runs, so its image is the change
+   * set as sent and a hook that rewrites a judged field is never judged. So
+   * {@link ObjectQL.update} calls it on the by-id path as well, once the
+   * payload is final, with the prior row merged with the payload.
    *
    * ABSENT is the ordinary state — no enforcement layer is mounted, or the
    * write is one it does not gate. The engine never invents one.
@@ -2253,7 +2257,8 @@ export interface OperationContext {
  * chain left them, only the live ones (a row the declared-field door culled
  * from a partial batch is never judged: it will not be written). On a
  * predicate `update` they are the matched rows, each merged with the final
- * payload. It is called at most once per operation.
+ * payload; on a by-id `update` ([#19989]) the one prior row merged with the
+ * final payload. It is called at most once per operation.
  *
  * `honoured` is set by the engine immediately before `evaluate` runs. It exists
  * so the installer can fail CLOSED on a seam that was never called: an
@@ -13420,6 +13425,41 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
+               // ── [#19989] The post-image seam on the BY-ID path ─────────────
+               //
+               // The by-id twin of the predicate-path call below, placed at the
+               // same point and for the same reason: the payload is FINAL here.
+               // The `beforeUpdate` chain, the hand-back, both readonly strips
+               // and the strict-drop refusal have all run, and nothing below
+               // changes a value before the statement.
+               //
+               // An enforcement layer used to judge this row only in its own
+               // middleware, on its read of the row merged with the change set
+               // AS SENT. That image is taken before `next()` runs the hooks, so
+               // a `beforeUpdate` that rewrote a checked field (a scoping column
+               // derived from a re-pointed parent, a status derived from another
+               // field) was never judged, and the row it produced was stored
+               // unjudged. The layer keeps that earlier judgement and installs
+               // this seam as well, so the row the driver stores is judged too.
+               //
+               // The image is the prior row (read once, above, under the
+               // not-found gate, so it is present) merged with the final
+               // payload: the row `driver.update` is about to produce, and the
+               // shape the predicate path hands over per matched row. The
+               // credential channel runs above on this branch too, so a `check`
+               // naming a secret field judges the stored reference, as on the
+               // predicate path.
+               //
+               // `honoured` is set BEFORE `evaluate`: it answers "did the seam
+               // run", never "did the write pass".
+               const byIdImageCheck = opCtx.postHookWriteImageCheck;
+               if (byIdImageCheck) {
+                   byIdImageCheck.honoured = true;
+                   const payload = hookContext.input.data as Record<string, unknown>;
+                   await byIdImageCheck.evaluate([
+                     coerceBooleanFields(updateSchema as any, { ...priorRecord, ...payload } as any) as Record<string, unknown>,
+                   ]);
+               }
                // [#18682] The reference FK a predicate traverses may come from
                // the PATCH or from the stored row, so the id is read off the
                // POST-strip merged view `evaluateValidationRules` evaluates.
@@ -13629,9 +13669,11 @@ export class ObjectQL implements IObjectQLEngine {
                //
                // An enforcement layer's write `check` must hold for EVERY row a
                // write stores (ADR-0058 D4: "and on the AST-injected bulk
-               // path"). For a by-id update the enforcement middleware can judge
-               // the new row itself: it knows the one row and reads it. For a
-               // predicate update it cannot: the rows are the ones the
+               // path"). For a by-id update the enforcement middleware knows the
+               // one row, but can read it only before the hooks run, so that
+               // path hands the final row to the same seam ([#19989], the by-id
+               // branch above). For a predicate update the middleware cannot
+               // even name the rows: they are the ones the
                // middleware-COMPOSED AST selects, and that AST is complete only
                // once every middleware has run (the enforcement layer's own
                // scope, a sharing layer's editable-rows filter, the tenant

@@ -26,7 +26,7 @@ Both shapes are now judged row by row. An array insert judges each row on the im
 
 **What does not change.**
 
-- A by-id update and a single-row insert are judged exactly as before.
+- A single-row insert is judged exactly as before. A by-id update is not changed by this entry; its judgement on the row it stores is its own entry (#19989).
 - A predicate update still touches only the rows its scoped `where` selects. The check refuses a write; it never changes which rows are selected.
 - A predicate update or array insert whose rows all pass is admitted as before.
 - A system-context write is not gated.
