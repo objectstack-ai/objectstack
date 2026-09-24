@@ -21,9 +21,6 @@ import { RecordStagePackageBodySchema } from '../stack.zod';
  * @example Endpoints
  * ```
  * POST   /api/v1/packages                      — Install a package
- * POST   /api/v1/packages/upgrade              — Upgrade a package
- * POST   /api/v1/packages/resolve-dependencies — Resolve dependencies
- * POST   /api/v1/packages/upload               — Upload an artifact
  * GET    /api/v1/packages                      — List installed packages
  * GET    /api/v1/packages/:packageId           — Get package details
  * POST   /api/v1/packages/:packageId/rollback  — Rollback a package
@@ -563,13 +560,14 @@ export type PackageInstallResponse = z.input<typeof PackageInstallResponseSchema
 export type PackageInstallResponseParsed = z.infer<typeof PackageInstallResponseSchema>;
 
 // ==========================================
-// 5. Upgrade Package (POST /api/v1/packages/upgrade)
+// 5. Upgrade Package (request/response shapes — bound to no route, see §11)
 // ==========================================
 
 /**
- * Request body for upgrading a package.
+ * Request body for upgrading a package. No route accepts it — see the note in
+ * `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/upgrade
+ * @example
  * { packageId: 'com.acme.crm', targetVersion: '2.0.0', createSnapshot: true }
  */
 export const PackageUpgradeRequestSchema = lazySchema(() => z.object({
@@ -629,13 +627,14 @@ export type PackageUpgradeResponse = z.input<typeof PackageUpgradeResponseSchema
 export type PackageUpgradeResponseParsed = z.infer<typeof PackageUpgradeResponseSchema>;
 
 // ==========================================
-// 6. Resolve Dependencies (POST /api/v1/packages/resolve-dependencies)
+// 6. Resolve Dependencies (request/response shapes — bound to no route, see §11)
 // ==========================================
 
 /**
- * Request body for resolving package dependencies.
+ * Request body for resolving package dependencies. No route accepts it — see the
+ * note in `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/resolve-dependencies
+ * @example
  * { manifest: {...}, platformVersion: '3.2.0' }
  */
 export const ResolveDependenciesRequestSchema = lazySchema(() => z.object({
@@ -661,14 +660,14 @@ export type ResolveDependenciesResponse = z.input<typeof ResolveDependenciesResp
 export type ResolveDependenciesResponseParsed = z.infer<typeof ResolveDependenciesResponseSchema>;
 
 // ==========================================
-// 7. Upload Artifact (POST /api/v1/packages/upload)
+// 7. Upload Artifact (request/response shapes — bound to no route, see §11)
 // ==========================================
 
 /**
- * Request body for uploading a package artifact.
+ * Request body for uploading a package artifact. No route accepts it — see the
+ * note in `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/upload
- * Content-Type: multipart/form-data
+ * @example
  * { artifact: <metadata>, file: <binary> }
  */
 export const UploadArtifactRequestSchema = lazySchema(() => z.object({
@@ -851,24 +850,16 @@ export const PackageApiContracts = {
     input: PackageInstallBodySchema,
     output: PackageInstallResponseSchema,
   },
-  upgradePackage: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/upgrade',
-    input: PackageUpgradeRequestSchema,
-    output: PackageUpgradeResponseSchema,
-  },
-  resolveDependencies: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/resolve-dependencies',
-    input: ResolveDependenciesRequestSchema,
-    output: ResolveDependenciesResponseSchema,
-  },
-  uploadArtifact: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/upload',
-    input: UploadArtifactRequestSchema,
-    output: UploadArtifactResponseSchema,
-  },
+  // `upgradePackage`, `resolveDependencies` and `uploadArtifact` REMOVED
+  // (#19116, ADR-0087 semantic entry
+  // `package-api-contracts-unmounted-entries-retired`) — they bound
+  // `POST /api/v1/packages/upgrade`, `/resolve-dependencies` and `/upload`,
+  // three paths the composed runtime mounts nowhere (the dispatcher answers
+  // `handled=false`; `packages/rest` mounts only `/packages/publish`), and no
+  // serving door existed to rebind them onto as `installPackage` was. Their
+  // request/response schemas (sections 5–7) stay published, bound to no route.
+  // ⛔ A package upgrade / dependency-resolution / upload route is declared
+  // here only in the same change that MOUNTS it — never ahead of its door.
   // `rollbackPackage` RETIRED (#12038 3A) — it bound the version-rollback
   // schemas to the live `/api/v1/packages/:packageId/rollback` path, which
   // actually serves the ADR-0067 COMMIT rollback (`rollbackToPackageCommit`).

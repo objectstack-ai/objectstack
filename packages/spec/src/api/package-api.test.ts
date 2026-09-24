@@ -505,9 +505,6 @@ describe('PackageApiContracts', () => {
     expect(PackageApiContracts.listPackages).toBeDefined();
     expect(PackageApiContracts.getPackage).toBeDefined();
     expect(PackageApiContracts.installPackage).toBeDefined();
-    expect(PackageApiContracts.upgradePackage).toBeDefined();
-    expect(PackageApiContracts.resolveDependencies).toBeDefined();
-    expect(PackageApiContracts.uploadArtifact).toBeDefined();
     expect(PackageApiContracts.uninstallPackage).toBeDefined();
   });
 
@@ -515,9 +512,6 @@ describe('PackageApiContracts', () => {
     expect(PackageApiContracts.listPackages.method).toBe('GET');
     expect(PackageApiContracts.getPackage.method).toBe('GET');
     expect(PackageApiContracts.installPackage.method).toBe('POST');
-    expect(PackageApiContracts.upgradePackage.method).toBe('POST');
-    expect(PackageApiContracts.resolveDependencies.method).toBe('POST');
-    expect(PackageApiContracts.uploadArtifact.method).toBe('POST');
     expect(PackageApiContracts.uninstallPackage.method).toBe('DELETE');
   });
 
@@ -530,9 +524,6 @@ describe('PackageApiContracts', () => {
     // distinguished from `listPackages` by method, not by path.
     expect(PackageApiContracts.installPackage.path).toBe('/api/v1/packages');
     expect(PackageApiContracts.installPackage.path).not.toContain('install');
-    expect(PackageApiContracts.upgradePackage.path).toBe('/api/v1/packages/upgrade');
-    expect(PackageApiContracts.resolveDependencies.path).toBe('/api/v1/packages/resolve-dependencies');
-    expect(PackageApiContracts.uploadArtifact.path).toBe('/api/v1/packages/upload');
     expect(PackageApiContracts.uninstallPackage.path).toBe('/api/v1/packages/:packageId');
   });
 
@@ -543,6 +534,61 @@ describe('PackageApiContracts', () => {
       expect(contract.method).toBeDefined();
       expect(contract.path).toBeDefined();
     });
+  });
+});
+
+// ==========================================
+// Unmounted contract-map entries removed (#19116)
+// ==========================================
+
+describe('the three unmounted `PackageApiContracts` entries are removed (#19116)', () => {
+  // The paths the removed entries bound. Nothing in the composed runtime
+  // mounts any of them, and no serving door existed to rebind them onto.
+  const UNMOUNTED_PATHS = [
+    '/api/v1/packages/upgrade',
+    '/api/v1/packages/resolve-dependencies',
+    '/api/v1/packages/upload',
+  ];
+
+  it('no longer carries the `upgradePackage`, `resolveDependencies` or `uploadArtifact` keys', () => {
+    for (const key of ['upgradePackage', 'resolveDependencies', 'uploadArtifact']) {
+      expect(Object.prototype.hasOwnProperty.call(PackageApiContracts, key)).toBe(false);
+    }
+  });
+
+  it('binds no entry, under any key, to one of the three unmounted paths', () => {
+    // The whole map, so a phantom cannot come back under a different key.
+    const claimants = Object.entries(PackageApiContracts)
+      .filter(([, c]) => UNMOUNTED_PATHS.includes(c.path))
+      .map(([key]) => key);
+    expect(claimants).toEqual([]);
+  });
+
+  it('keeps exactly the four entries whose doors serve', () => {
+    // Anti-vacuity for the two absence pins above, and the declare-with-mount
+    // rule made visible: a new entry lands here only with the mount it names.
+    expect(Object.keys(PackageApiContracts).sort()).toEqual([
+      'getPackage',
+      'installPackage',
+      'listPackages',
+      'uninstallPackage',
+    ]);
+  });
+
+  it('leaves the request/response schemas published, bound to no route', async () => {
+    // The ruling removed the map entries only; the per-route schemas are a
+    // separate question and still resolve from the namespace.
+    const ns = (await import('./index')) as unknown as Record<string, unknown>;
+    for (const name of [
+      'PackageUpgradeRequestSchema',
+      'PackageUpgradeResponseSchema',
+      'ResolveDependenciesRequestSchema',
+      'ResolveDependenciesResponseSchema',
+      'UploadArtifactRequestSchema',
+      'UploadArtifactResponseSchema',
+    ]) {
+      expect(Object.prototype.hasOwnProperty.call(ns, name)).toBe(true);
+    }
   });
 });
 
