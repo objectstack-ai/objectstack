@@ -15,6 +15,7 @@
     ".",
     "./ai",
     "./api",
+    "./api-assembled",
     "./automation",
     "./data",
     "./identity",
