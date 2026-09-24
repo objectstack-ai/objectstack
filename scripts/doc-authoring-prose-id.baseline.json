@@ -678,8 +678,8 @@
  },
  "packages/plugins/plugin-webhooks/src/auto-enqueuer.ts": {
   "#3196": 1,
-  "#7799": 3,
-  "#7986": 3,
+  "#7799": 2,
+  "#7986": 2,
   "#8022": 4,
   "#8069": 3
  },

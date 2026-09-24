@@ -16,6 +16,10 @@ import {
     readLegacyHeaders,
     resolveWebhookHeaders,
 } from './webhook-headers.js';
+import {
+    WebhookLegacyCleartextError,
+    type LegacyDefinitionCredentialKey,
+} from './webhook-legacy-cleartext.js';
 
 /**
  * The authored trigger vocabulary, taken from the spec rather than restated
@@ -555,9 +559,10 @@ export class AutoEnqueuer {
      *     returns a mask, so presence is decidable here but the value is not;
      *     `resolveWebhookSecret` dereferences it server-side.
      *  2. `definition_json.secret` — a row not yet swept by
-     *     `migrateLegacyWebhookSecrets` (or hand-edited back in). Still honoured
-     *     so an un-migrated deployment keeps signing, and warned about once per
-     *     refresh so the exposure is visible rather than silently permanent.
+     *     `migrateLegacyWebhookSecrets` (or hand-edited back in). No longer
+     *     honoured: the subscription is PARKED with a dated refusal
+     *     ({@link refuseLegacyCleartext}). It used to sign from the cleartext
+     *     with a warning, which kept the exposure alive indefinitely.
      *  3. Neither — an unsigned webhook, which is a legitimate authored choice
      *     (`secret` is optional on the envelope).
      *
@@ -589,16 +594,11 @@ export class AutoEnqueuer {
             return false;
         }
 
-        const legacy = readLegacySecret(row?.definition_json);
-        if (legacy) {
-            this.logger?.warn?.(
-                `[webhook-auto-enqueuer] webhook '${sub.name}' still carries its signing secret as ` +
-                    `CLEARTEXT in definition_json, readable over the data API (#7799). Signing continues ` +
-                    `from it; run the boot sweep (migrateLegacyWebhookSecrets) with a CryptoProvider wired ` +
-                    `to move it into sys_secret.`,
-                { id: sub.id },
-            );
-            sub.secret = legacy;
+        // A key that exists ONLY as legacy cleartext in the blob is refused,
+        // not honoured — see `webhook-legacy-cleartext.ts`.
+        if (readLegacySecret(row?.definition_json)) {
+            this.refuseLegacyCleartext(sub, 'secret');
+            return false;
         }
         return true;
     }
@@ -644,19 +644,64 @@ export class AutoEnqueuer {
             return false;
         }
 
-        const legacy = readLegacyHeaders(row?.definition_json);
-        if (legacy) {
-            this.logger?.warn?.(
-                `[webhook-auto-enqueuer] webhook '${sub.name}' still carries its custom headers as ` +
-                    `CLEARTEXT in definition_json, readable over the data API (#7986) — that map is the ` +
-                    `ordinary place an Authorization header goes. Delivery continues from it; run the boot ` +
-                    `sweep (migrateLegacyWebhookSecrets) with a CryptoProvider wired to move them into ` +
-                    `sys_secret.`,
-                { id: sub.id },
-            );
-            sub.headers = legacy;
+        // Same refusal as the signing secret's, in the same stroke: refusing
+        // one passenger while honouring the other would leave half the retired
+        // location alive.
+        if (readLegacyHeaders(row?.definition_json)) {
+            this.refuseLegacyCleartext(sub, 'headers');
+            return false;
         }
         return true;
+    }
+
+    /**
+     * Refuse a credential whose ONLY copy is the retired cleartext key in
+     * `definition_json` — PARK the subscription, the same fail-closed shape as
+     * an unrecoverable encrypted credential: nothing is sent, and every matching
+     * event is recorded as a dead `sys_http_delivery` row carrying the refusal.
+     *
+     * This replaced warn-and-accept. The warning said the right thing and
+     * changed nothing: the delivery still went out with a credential that
+     * `GET /api/v1/data/sys_webhook` hands to every persona that can read the
+     * object, and a warning nobody acts on is declared-but-not-enforced.
+     *
+     * Why `error`, said once: after the refusal `sys_webhook` still reads
+     * `active: true` while every matching record change goes undelivered — the
+     * AGENTS.md "Degradation log levels" question answers yes. The say-once
+     * ledger is the one {@link reportDrop} uses, on purpose: a subscription is
+     * either armed or parked, whichever credential parked it.
+     */
+    private refuseLegacyCleartext(sub: CachedSubscription, key: LegacyDefinitionCredentialKey): void {
+        const refusal = new WebhookLegacyCleartextError('delivery', [key], {
+            object: this.subscriptionsObject,
+            webhook: sub.name,
+        });
+        const meta = {
+            id: sub.id,
+            webhook: sub.name,
+            field: refusal.field,
+            keys: refusal.keys,
+            code: refusal.code,
+            status: refusal.status,
+        };
+        if (this.droppedForSecret.has(sub.id)) {
+            this.logger?.debug?.(
+                `[webhook-auto-enqueuer] webhook '${sub.name}' is still parked: its ${key} exists only as `
+                    + 'retired cleartext in definition_json',
+                meta,
+            );
+        } else {
+            this.droppedForSecret.add(sub.id);
+            const message = `[webhook-auto-enqueuer] ${refusal.message}`;
+            if (typeof this.logger?.error === 'function') {
+                this.logger?.error(message, refusal, meta);
+            } else {
+                this.logger?.warn?.(message, meta);
+            }
+        }
+        sub.secret = undefined;
+        sub.headers = undefined;
+        sub.parkedReason = `[${refusal.code}/${refusal.status}] ${refusal.message}`;
     }
 
     /**

@@ -7,7 +7,7 @@
 - fork PR = 提案,席位永不放行;采纳 diff 内部落地,见 `references/external-contributions.md`。
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
-- 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
+- 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 交付后复核按面欠 ⛔ 不按车道(五面见 `references/contract-review.md`);双肢命中即 spec 车道。
 - 子代理起不来 ⇒ 复核缺席,PR 留 draft 队列外等档;唯一旁路是维护者亲审,逐次为准。
