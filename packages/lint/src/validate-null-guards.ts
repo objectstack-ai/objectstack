@@ -119,15 +119,16 @@
  *
  *    Two facts to carry into that widening; neither is bookkeeping:
  *
- *      1. **The fail policy is the OPPOSITE of the two surfaces #4763 wired.**
- *         Validation rules and hook `condition`s are fail-CLOSED. A faulting
- *         `readonlyWhen` is fail-OPEN: `isReadonlyWhenLocked` logs
- *         `failed to evaluate — change allowed through`, and the field the
- *         author declared frozen is WRITTEN. (One exception, #4889 — a fault
- *         naming an UNBOUND ROOT resolves to LOCKED.) So this face wants
- *         {@link nullGuardMessage}'s `'fail-open'` outcome for the same reason
- *         the `requiredWhen` row already carries it: the damage is a declared
- *         lock that silently enforces nothing, not a rejected write.
+ *      1. **The fail policy is now the SAME as the two surfaces #4763 wired.**
+ *         Validation rules and hook `condition`s are fail-CLOSED, and since
+ *         ADR-0137 D2 so is a faulting `readonlyWhen`: `isReadonlyWhenLocked`
+ *         refuses the write, naming the field and the rule. (Until then it
+ *         logged `failed to evaluate — change allowed through` and the field
+ *         the author declared frozen was WRITTEN. One exception stands, #4889:
+ *         a fault naming an UNBOUND ROOT resolves to LOCKED.) So this face
+ *         wants {@link nullGuardMessage}'s `'fail-closed'` outcome, as the
+ *         `requiredWhen` row does since the same decision: the damage is a
+ *         refused write, not a declared lock that silently enforces nothing.
  *      2. **Making the binding total moved one verdict the OTHER way.** On a
  *         total record `has(record.<declared>)` is uniformly TRUE and
  *         `!has(record.<declared>)` uniformly FALSE, so a lock spelled
@@ -581,7 +582,14 @@ export function findUnguardedNullableOperands(
 export type NullGuardOutcome =
   /** Validation rules + hook conditions: the fault propagates, the write is refused (#4761). */
   | 'fail-closed'
-  /** Field `requiredWhen`: `rule-validator.ts` logs and skips, so nothing is enforced (#4811). */
+  /**
+   * A surface whose runtime logs and SKIPS the aborted predicate, so nothing is
+   * enforced. Written for the field `requiredWhen` (#4811), which no longer
+   * behaves this way: since ADR-0137 D2 a faulting `requiredWhen` refuses the
+   * write and takes `'fail-closed'`. No surface passes this outcome today, and
+   * its clause below still describes the `requiredWhen` runtime it was written
+   * for — re-word it before a surface that genuinely skips adopts it.
+   */
   | 'fail-open';
 
 const OUTCOME_CLAUSE: Record<NullGuardOutcome, string> = {
