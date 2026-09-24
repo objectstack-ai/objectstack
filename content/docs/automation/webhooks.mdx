@@ -156,8 +156,9 @@ no `CryptoProvider` wired, where the encrypted write is refused and the row is
 deliberately left intact — is **not** delivered: the subscription is parked and
 each event is recorded in `sys_http_delivery` as a dead row carrying a dated
 refusal, and a write that puts `secret` or `headers` into `definition_json` is
-refused (`VALIDATION_ERROR` / `400`). Register a `CryptoProvider` so the sweep
-can convert the row, or move the values into their encrypted columns. Never type a token into
+refused (`VALIDATION_ERROR` / `400`). Both remedies need a registered
+`CryptoProvider`. With one registered, either restart so the sweep converts the
+row, or move the values into their encrypted columns yourself. Never type a token into
 `definition_json`: it is returned in full by the generic data API, and nothing
 ages it out.
 </Callout>

@@ -23,21 +23,30 @@ that cleartext with a `warn`. It is now refused, dated `2026-09-23`:
   `[VALIDATION_ERROR/400]`, and the drop is reported once at `error`, with
   `code: 'VALIDATION_ERROR'`, `status: 400`, `field: 'definition_json'` and the
   refused `keys` in the log meta.
-- **Write door.** A `sys_webhook` insert or update whose `definition_json` carries a
-  `secret` or `headers` key, whatever its value, is refused before anything is
-  stored (`VALIDATION_ERROR` / `400`, with `object`, `field` and `keys` on the
-  error). That covers a raw `PATCH /api/v1/data/sys_webhook`. It also covers a
-  Setup-form save that echoes back a legacy blob unchanged. Omitting
-  `definition_json`, or writing one without those keys, is unaffected.
+- **Write door** (when `WebhookOutboxPlugin` is mounted, the standard mount). A
+  `sys_webhook` insert or update whose `definition_json` carries a `secret` or
+  `headers` key, whatever its value, is refused before anything is stored
+  (`VALIDATION_ERROR` / `400`, with `object`, `field` and `keys` on the error).
+  That covers a raw `PATCH /api/v1/data/sys_webhook`. It also covers a Setup-form
+  save that echoes back a legacy blob unchanged. Omitting `definition_json`, or
+  writing one without those keys, is unaffected. The plugin binds this refusal
+  itself, and it is not exported from the package entry: a host that composes
+  `AutoEnqueuer` on its own still gets the delivery-path refusal above, but not
+  this write-door refusal.
 
-**Fix.** Register a `CryptoProvider` (`engine.setCryptoProvider` —
-`LocalCryptoProvider` in dev, KMS/Vault in production) and restart. The boot sweep
-`migrateLegacyWebhookSecrets` then moves both values into their encrypted columns
-and strips them from `definition_json` in one update, and the subscription
-re-arms at the next refresh. Or re-author the webhook yourself. Write the key into
-`signing_secret` and the header map into `headers_secret` (a JSON object of string
-values), then remove both keys from `definition_json`. There is no transition path
-for a deployment that runs with no `CryptoProvider`.
+**Fix.** Both remedies need a registered `CryptoProvider`
+(`engine.setCryptoProvider` — `LocalCryptoProvider` in dev, KMS/Vault in
+production), because writing a `secret`-typed column is itself refused without
+one. With a provider registered, either:
+
+- restart, and the boot sweep `migrateLegacyWebhookSecrets` moves both values into
+  their encrypted columns and strips them from `definition_json` in one update. The
+  subscription re-arms at the next refresh.
+- or re-author the webhook yourself. Write the key into `signing_secret` and the
+  header map into `headers_secret` (a JSON object of string values), then remove
+  both keys from `definition_json`.
+
+There is no transition path for a deployment that runs with no `CryptoProvider`.
 
 Unchanged: authoring. `defineWebhook({ secret, headers })` is written exactly as
 before, and the boot materializer still routes each value to its encrypted column.
