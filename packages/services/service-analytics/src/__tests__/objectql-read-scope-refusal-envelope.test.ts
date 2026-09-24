@@ -66,7 +66,7 @@ import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { DatasetSchema } from '@objectstack/spec/ui';
 
-import { AnalyticsService } from '../analytics-service.js';
+import { AnalyticsService, type AnalyticsServiceConfig } from '../analytics-service.js';
 import { compileDataset } from '../dataset-compiler.js';
 
 const BASE = 'deal';
@@ -232,7 +232,7 @@ describe('[#19995] ObjectQL execute face — a read scope the engine refuses is 
     engine.registerObject({ name: REF, label: 'Account', fields: REF_FIELDS } as never);
 
     const compiled = compileDataset(dataset);
-    service = new AnalyticsService({
+    const config: AnalyticsServiceConfig = {
       cubes: [compiled.cube],
       logger: quiet,
       // ObjectQL only — the face `compileScopedFilterToSql` never sees.
@@ -255,7 +255,8 @@ describe('[#19995] ObjectQL execute face — a read scope the engine refuses is 
           timezone: options.timezone,
           context: options.context,
         } as never)) as Record<string, unknown>[],
-    } as never);
+    };
+    service = new AnalyticsService(config);
   });
 
   afterAll(async () => {
