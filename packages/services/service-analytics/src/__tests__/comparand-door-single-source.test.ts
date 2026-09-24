@@ -285,9 +285,21 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
       'string', 'number', 'bigint', 'boolean', 'null', 'Date',
     ]);
     for (const row of doorTypes) {
-      for (const cell of [row.whereLike, row.whereIn, row.whereEq,
-                          row.scopeLike, row.scopeIn, row.scopeEq]) {
-        expect(cell, row.label).toBe(OK);
+      const cells = {
+        whereLike: row.whereLike, whereIn: row.whereIn, whereEq: row.whereEq,
+        scopeLike: row.scopeLike, scopeIn: row.scopeIn, scopeEq: row.scopeEq,
+      };
+      for (const [position, cell] of Object.entries(cells)) {
+        // [#20018] The one cell a SHAPE ruling moved, not a TYPE verdict: `null`
+        // is an accepted comparand type, and the null-member ruling (2026-08-31)
+        // refuses it as an `$in` MEMBER at the shared list-shape face, which the
+        // read-scope lowering now runs. Named here so no other cell can move
+        // under this sentence.
+        if (row.label === 'null' && position === 'scopeIn') {
+          expect(cell, `${row.label} ${position}`).toBe(REFUSED_SCOPE);
+          continue;
+        }
+        expect(cell, `${row.label} ${position}`).toBe(OK);
       }
     }
   });
