@@ -25,11 +25,17 @@
  * surface (`sys_scim_connection_credential`, `manage_platform_settings`) is
  * gated to.
  *
- * Driven on the real `SecurityPlugin` + `ObjectQL` over a real `SqlDriver`, under
- * the `isolated` posture, with the SHIPPED permission sets (no copy): rows for
- * two organizations' SCIM connections are written straight into the tables,
- * past every scope, and each shipped persona of organization X reads every
- * table through the generic data path.
+ * Driven on the real `SecurityPlugin` + `ObjectQL` over a real `SqlDriver`, with
+ * the SHIPPED permission sets (no copy): rows for two organizations' SCIM
+ * connections are written straight into the tables, past every scope, and each
+ * shipped persona of organization X reads every table through the generic data
+ * path. Three deployment shapes:
+ *   - `isolated` with the platform baseline composed — the stock walled shape;
+ *   - `isolated` with NO baseline — each persona resolves only the set it
+ *     names, so a set that carried no scope of its own would read every row
+ *     here even while the stock shape stayed green through `member_default`;
+ *   - `single` — the policies carry no tenant token, so the posture's strip of
+ *     the platform's tenant policies (ADR-0105 D3) must leave them in force.
  */
 
 import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
@@ -143,11 +149,27 @@ function fixtureRows(): Record<string, Array<Record<string, unknown>>> {
 /** The driver's own query builder, reached past its `protected` modifier. */
 type Table = (name: string) => { insert(rows: Array<Record<string, unknown>>): Promise<unknown> };
 
-let engine: ObjectQL;
+/**
+ * One deployment shape. `composedBaseline: false` boots with no platform
+ * baseline (`fallbackPermissionSet: null`), so each persona resolves ONLY the
+ * set it names — which is what proves every shipped set carries the scope
+ * itself, rather than borrowing it from `member_default`.
+ */
+interface Shape {
+  label: string;
+  posture: 'isolated' | 'single';
+  composedBaseline: boolean;
+}
 
-beforeAll(async () => {
+const SHAPES: Shape[] = [
+  { label: 'isolated posture, platform baseline composed (the stock shape)', posture: 'isolated', composedBaseline: true },
+  { label: 'isolated posture, no platform baseline (each set on its own)', posture: 'isolated', composedBaseline: false },
+  { label: 'single posture, platform baseline composed', posture: 'single', composedBaseline: true },
+];
+
+async function boot(shape: Shape): Promise<ObjectQL> {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
-  engine = new ObjectQL();
+  const engine = new ObjectQL();
   engine.registerDriver(driver as never, true);
   await engine.init();
   engine.registerApp({
@@ -161,8 +183,8 @@ beforeAll(async () => {
   await engine.syncSchemas();
 
   const services: Record<string, unknown> = {
-    'org-scoping': { name: 'com.objectstack.org-scoping' },
-    tenancy: { posture: 'isolated' },
+    ...(shape.posture === 'isolated' ? { 'org-scoping': { name: 'com.objectstack.org-scoping' } } : {}),
+    tenancy: { posture: shape.posture },
     manifest: { register: vi.fn() },
     objectql: engine,
     // `list` answers nothing, so every set name resolves from the plugin's
@@ -177,7 +199,7 @@ beforeAll(async () => {
       return services[name];
     },
   };
-  const plugin = new SecurityPlugin();
+  const plugin = new SecurityPlugin(shape.composedBaseline ? {} : { fallbackPermissionSet: null });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
@@ -196,23 +218,20 @@ beforeAll(async () => {
       role: id === PEOPLE.admin ? 'admin' : 'member',
     })),
   );
-});
-
-afterAll(async () => {
-  try { await engine?.destroy(); } catch { /* noop */ }
-});
+  return engine;
+}
 
 /** Organization X's co-members, as the authz resolver pre-resolves them. */
 const ORG_X_USERS = Object.values(PEOPLE).filter((id) => ORG_OF[id] === 'org_x');
 
 /**
  * Each shipped set that holds the managed-object read grant, carried by a
- * principal of organization X exactly as the authz resolver shapes it.
- * `member_default` is the additive baseline and resolves for every one of them.
+ * principal of organization X exactly as the authz resolver shapes it — each
+ * naming its set explicitly, so it resolves even where no baseline is composed.
  */
 const PERSONAS = {
   member_default: {
-    userId: PEOPLE.member, tenantId: 'org_x', positions: ['org_member'], permissions: [],
+    userId: PEOPLE.member, tenantId: 'org_x', positions: ['org_member'], permissions: ['member_default'],
     posture: 'MEMBER', org_user_ids: ORG_X_USERS, email: `${PEOPLE.member}@example.test`,
   },
   viewer_readonly: {
@@ -229,6 +248,7 @@ const PERSONAS = {
   },
   // The MCP write ceiling holds the grant too; it carries no row policy of its
   // own by design (ADR-0090 D10), so its bound is the delegating member's sets.
+  // Those resolve from the baseline, so this persona runs where one is composed.
   mcp_agent_data_write: {
     userId: 'agent_x', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_write'],
     principalKind: 'agent', onBehalfOf: { userId: PEOPLE.member }, org_user_ids: ORG_X_USERS,
@@ -249,22 +269,34 @@ const PLATFORM_ADMIN = {
   userId: 'p_admin', tenantId: 'org_x', positions: [], permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN',
 };
 
-async function idsRead(object: string, context: object): Promise<string[]> {
+async function idsRead(engine: ObjectQL, object: string, context: object): Promise<string[]> {
   const rows = (await engine.find(object, { context } as never)) as Array<{ id: string }>;
   return rows.map((r) => r.id).sort();
 }
 
 /** Everything `context` reads of the seven SCIM tables, one sorted id list per table. */
-async function scimTable(context: object): Promise<Record<ScimObject, string[]>> {
+async function scimTable(engine: ObjectQL, context: object): Promise<Record<ScimObject, string[]>> {
   const out = {} as Record<ScimObject, string[]>;
-  for (const object of SCIM_OBJECTS) out[object] = await idsRead(object, context);
+  for (const object of SCIM_OBJECTS) out[object] = await idsRead(engine, object, context);
   return out;
 }
 
-describe('SCIM projection tables — no shipped set below platform admin reads another organization’s rows', () => {
-  for (const persona of Object.keys(PERSONAS) as Persona[]) {
+describe.each(SHAPES)('SCIM projection tables — $label', (shape) => {
+  let engine: ObjectQL;
+  beforeAll(async () => {
+    engine = await boot(shape);
+  });
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  const personas = (Object.keys(PERSONAS) as Persona[]).filter(
+    (p) => shape.composedBaseline || p !== 'mcp_agent_data_write',
+  );
+
+  for (const persona of personas) {
     it(`${persona}: reads the SCIM rows about itself, and nothing another organization provisioned`, async () => {
-      const seen = await scimTable(PERSONAS[persona]);
+      const seen = await scimTable(engine, PERSONAS[persona]);
 
       const self = SELF_OF[persona];
       const expected = {} as Record<ScimObject, string[]>;
@@ -285,11 +317,9 @@ describe('SCIM projection tables — no shipped set below platform admin reads a
       }
     });
   }
-});
 
-describe('SCIM projection tables — controls', () => {
   it('CONTROL: the fixture really holds both organizations’ rows — the platform admin reads every one', async () => {
-    const seen = await scimTable(PLATFORM_ADMIN);
+    const seen = await scimTable(engine, PLATFORM_ADMIN);
     const rows = fixtureRows();
     const expected = {} as Record<ScimObject, string[]>;
     for (const object of SCIM_OBJECTS) expected[object] = rows[object].map((r) => String(r.id)).sort();
@@ -301,13 +331,15 @@ describe('SCIM projection tables — controls', () => {
 
   it('CONTROL: a co-member’s own SCIM rows are readable to that co-member — the scope is per person, not a blanket deny', async () => {
     const peer = { ...PERSONAS.member_default, userId: PEOPLE.peer, email: `${PEOPLE.peer}@example.test` };
-    const seen = await scimTable(peer);
+    const seen = await scimTable(engine, peer);
     for (const object of USER_KEYED) expect(seen[object], object).toEqual([rowAbout(object, PEOPLE.peer)]);
   });
 
-  it('CONTROL: an unrelated managed object keeps its own scope — `sys_member` reads organization X’s memberships', async () => {
-    const orgX = ORG_X_USERS.map((id) => `sys_member:${id}`).sort();
-    expect(await idsRead('sys_member', PERSONAS.member_default)).toEqual(orgX);
-    expect(await idsRead('sys_member', PERSONAS.organization_admin)).toEqual(orgX);
-  });
+  if (shape.posture === 'isolated') {
+    it('CONTROL: an unrelated managed object keeps its own scope — `sys_member` reads organization X’s memberships', async () => {
+      const orgX = ORG_X_USERS.map((id) => `sys_member:${id}`).sort();
+      expect(await idsRead(engine, 'sys_member', PERSONAS.member_default)).toEqual(orgX);
+      expect(await idsRead(engine, 'sys_member', PERSONAS.organization_admin)).toEqual(orgX);
+    });
+  }
 });

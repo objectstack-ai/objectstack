@@ -135,6 +135,19 @@ describe('default permission sets', () => {
       'sys_oauth_consent_self',
       'sys_oauth_refresh_token_self',
       'sys_organization_self',
+      // [#20001] The SCIM projection tables' row scope — re-judged here, not a
+      // drift: none of the seven carries a tenant column, so Layer 0 is inert
+      // on them and the managed-object blanket read every organization's rows.
+      // `_self` on the four that name a user; `_none` (`id == null`, no row) on
+      // the three that name none. Their behaviour is pinned end to end in
+      // `scim-projection-row-scope.test.ts`; this list only records presence.
+      'sys_scim_connection_binding_none',
+      'sys_scim_group_member_none',
+      'sys_scim_group_none',
+      'sys_scim_identity_tombstone_self',
+      'sys_scim_projection_grant_self',
+      'sys_scim_subject_self',
+      'sys_scim_user_self',
       'sys_session_self',
       'sys_team_member_self',
       'sys_two_factor_self',
