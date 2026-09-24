@@ -295,7 +295,9 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
       // measured on this fixture, the unescaped pattern `*a*b*` returns rows
       // 7, 8 and 9 where the escaped one returns none of them. No fixture row
       // holds these characters, so the observable claim is that the pattern
-      // stays literal and selects nothing rather than expanding.
+      // stays literal and selects nothing rather than expanding. [#20024] Both
+      // operators compile to `instr()` now, literal by construction; the GLOB
+      // escape class still carries `$startsWith`.
       expect(await ids({ name: { $contains: comparand } })).toEqual([]);
       expect(await ids({ name: { $icontains: comparand } })).toEqual([]);
     });
@@ -303,20 +305,20 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
 
   it('compiles the case-exact SQLite construct, on both operators', async () => {
     // Identifier quoting is the dialect's (knex renders backticks on the sqlite
-    // clients), so the assertion is on the SHAPE. `[` / `]` are NOT stripped
-    // here the way #5702's version stripped them: under GLOB they are the
-    // escape mechanism, so erasing them would erase what is being pinned.
+    // clients), so the assertion is on the SHAPE. [#20024] Both operators
+    // compile to `instr()`, which reads the whole stored value (GLOB cut it at
+    // its first U+0000) and has no pattern language, so the comparand is bound
+    // raw — no `*` wrapper and no `[…]` escape class.
     const unquote = (sql: string) => sql.replace(/[`"]/g, '');
 
     const icontainsSql = unquote(driver.compileWhere({ name: { $icontains: 'acme' } }));
-    expect(icontainsSql).toContain('lower(name) GLOB lower(');
-    expect(icontainsSql).toContain('*acme*');
-    // GLOB has no ESCAPE clause in SQLite's grammar; emitting one is a syntax
-    // error, so its absence is part of the construct rather than a detail.
+    expect(icontainsSql).toContain("instr(lower(name), lower('acme')) > 0");
+    expect(icontainsSql).not.toContain('GLOB');
+    // `instr()` takes no ESCAPE clause, and neither did the GLOB it replaced.
     expect(icontainsSql).not.toContain('ESCAPE');
 
     const containsSql = unquote(driver.compileWhere({ name: { $contains: 'acme' } }));
-    expect(containsSql).toContain('name GLOB');
+    expect(containsSql).toContain("instr(name, 'acme') > 0");
     expect(containsSql).not.toContain('lower');
     expect(containsSql).not.toContain('LIKE');
   });
