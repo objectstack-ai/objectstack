@@ -21,9 +21,6 @@ import { RecordStagePackageBodySchema } from '../stack.zod';
  * @example Endpoints
  * ```
  * POST   /api/v1/packages                      — Install a package
- * POST   /api/v1/packages/upgrade              — Upgrade a package
- * POST   /api/v1/packages/resolve-dependencies — Resolve dependencies
- * POST   /api/v1/packages/upload               — Upload an artifact
  * GET    /api/v1/packages                      — List installed packages
  * GET    /api/v1/packages/:packageId           — Get package details
  * POST   /api/v1/packages/:packageId/rollback  — Rollback a package
@@ -478,10 +475,15 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *
  * ⚠️ What those two drives post is NOT covered by this branch, and saying so
  * is the point. Measured: `{ id, name: id, namespace, version: '1.0.0' }` and
- * `{ id: 'pkg-a', name: 'A' }` are both refused here (`invalid_union`) because
- * neither carries `type`, and the second carries no `version` either. They are
- * bare in FORM and incomplete in CONTENT — the form is declared, the content
- * is part of the residual below, and they are pinned as REFUSED in
+ * `{ id: 'com.example.pkg-a', name: 'A', version: '1.0.0' }` are both refused
+ * here (`invalid_union`) on `type` alone, and the door answers both `201` (the
+ * second on the `?overwrite=true` limb of its duplicate-id case). The second
+ * was repaired twice, each time by the PR that made the door parse the leg it
+ * broke: PR #19326 gave it the `version` it lacked (clause 1a below), and
+ * PR #19473 replaced its id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The
+ * door answers that old body `400` now, so it is no part of the residual. They
+ * are bare in FORM and incomplete in CONTENT — the form is declared, the
+ * content is part of the residual below, and they are pinned as REFUSED in
  * `package-api.test.ts` rather than dressed up as green fixtures.
  *
  * ## The two branches are disjoint — but only ONE of them is closed
@@ -510,9 +512,18 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *
  * This is a SUBSET description of the live door, deliberately. Measured
  * through `HttpDispatcher.handlePackages`, the door additionally answers `201`
- * to five classes this schema refuses:
+ * to five classes this schema refuses — class 1 in its `type` half only,
+ * since PR #19326:
  *
- * 1. a manifest missing `type` and/or `version` (both door drives above);
+ * 1. a manifest missing `type` or `version` — recorded as one class until
+ *    PR #19326, split since, because its two halves no longer answer alike:
+ *    - 1a. missing `version` — ✅ CLOSED by PR #19326, no longer residual: the
+ *      door parses `ManifestSchema.shape.version` by reference and answers
+ *      `400` / `VALIDATION_ERROR` without installing, so declaration and door
+ *      agree (door-side pin:
+ *      `packages/runtime/src/domains/packages-install-manifest-version.test.ts`);
+ *    - 1b. missing `type` — still OPEN, answered `201` (both door drives
+ *      above);
  * 2. unknown keys on either form — refused by name on the bare branch,
  *    silently dropped on the wrapped one, `201` either way;
  * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
@@ -563,13 +574,14 @@ export type PackageInstallResponse = z.input<typeof PackageInstallResponseSchema
 export type PackageInstallResponseParsed = z.infer<typeof PackageInstallResponseSchema>;
 
 // ==========================================
-// 5. Upgrade Package (POST /api/v1/packages/upgrade)
+// 5. Upgrade Package (request/response shapes — bound to no route, see §11)
 // ==========================================
 
 /**
- * Request body for upgrading a package.
+ * Request body for upgrading a package. No route accepts it — see the note in
+ * `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/upgrade
+ * @example
  * { packageId: 'com.acme.crm', targetVersion: '2.0.0', createSnapshot: true }
  */
 export const PackageUpgradeRequestSchema = lazySchema(() => z.object({
@@ -629,13 +641,14 @@ export type PackageUpgradeResponse = z.input<typeof PackageUpgradeResponseSchema
 export type PackageUpgradeResponseParsed = z.infer<typeof PackageUpgradeResponseSchema>;
 
 // ==========================================
-// 6. Resolve Dependencies (POST /api/v1/packages/resolve-dependencies)
+// 6. Resolve Dependencies (request/response shapes — bound to no route, see §11)
 // ==========================================
 
 /**
- * Request body for resolving package dependencies.
+ * Request body for resolving package dependencies. No route accepts it — see the
+ * note in `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/resolve-dependencies
+ * @example
  * { manifest: {...}, platformVersion: '3.2.0' }
  */
 export const ResolveDependenciesRequestSchema = lazySchema(() => z.object({
@@ -661,14 +674,14 @@ export type ResolveDependenciesResponse = z.input<typeof ResolveDependenciesResp
 export type ResolveDependenciesResponseParsed = z.infer<typeof ResolveDependenciesResponseSchema>;
 
 // ==========================================
-// 7. Upload Artifact (POST /api/v1/packages/upload)
+// 7. Upload Artifact (request/response shapes — bound to no route, see §11)
 // ==========================================
 
 /**
- * Request body for uploading a package artifact.
+ * Request body for uploading a package artifact. No route accepts it — see the
+ * note in `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/upload
- * Content-Type: multipart/form-data
+ * @example
  * { artifact: <metadata>, file: <binary> }
  */
 export const UploadArtifactRequestSchema = lazySchema(() => z.object({
@@ -851,24 +864,16 @@ export const PackageApiContracts = {
     input: PackageInstallBodySchema,
     output: PackageInstallResponseSchema,
   },
-  upgradePackage: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/upgrade',
-    input: PackageUpgradeRequestSchema,
-    output: PackageUpgradeResponseSchema,
-  },
-  resolveDependencies: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/resolve-dependencies',
-    input: ResolveDependenciesRequestSchema,
-    output: ResolveDependenciesResponseSchema,
-  },
-  uploadArtifact: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/upload',
-    input: UploadArtifactRequestSchema,
-    output: UploadArtifactResponseSchema,
-  },
+  // `upgradePackage`, `resolveDependencies` and `uploadArtifact` REMOVED
+  // (#19116, ADR-0087 semantic entry
+  // `package-api-contracts-unmounted-entries-retired`) — they bound
+  // `POST /api/v1/packages/upgrade`, `/resolve-dependencies` and `/upload`,
+  // three paths the composed runtime mounts nowhere (the dispatcher answers
+  // `handled=false`; `packages/rest` mounts only `/packages/publish`), and no
+  // serving door existed to rebind them onto as `installPackage` was. Their
+  // request/response schemas (sections 5–7) stay published, bound to no route.
+  // ⛔ A package upgrade / dependency-resolution / upload route is declared
+  // here only in the same change that MOUNTS it — never ahead of its door.
   // `rollbackPackage` RETIRED (#12038 3A) — it bound the version-rollback
   // schemas to the live `/api/v1/packages/:packageId/rollback` path, which
   // actually serves the ADR-0067 COMMIT rollback (`rollbackToPackageCommit`).

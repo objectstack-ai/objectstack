@@ -4223,8 +4223,17 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
 function nullGuardForFieldSpec(spec: unknown): NullGuard {
   // `{ field: null }` compiles to `IS NULL` — already total.
   if (spec === null) return 'none';
-  // A scalar / Date / array comparand is an implicit `=`; a NULL column fails it.
-  if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
+  // Every comparand that is not an operator map — a scalar, a Date, an array, a
+  // binary value — is an implicit `=`; a NULL column fails it.
+  //
+  // [#19885] "Not an operator map" is {@link isFilterNode}'s reading, the one the
+  // emitter and the validating walk use. This test used to name the exceptions
+  // one by one (`Date`, array) and read every other object as a map, so a binary
+  // comparand was guarded by accident: a non-empty one's byte indices fell to
+  // the per-operator default below, and an EMPTY one had no entries, came out
+  // `'none'`, and `{ $not: { data: <empty buffer> } }` compiled to a bare
+  // `NOT (data = ?)` that dropped every NULL row.
+  if (!isFilterNode(spec)) return 'requireValue';
   const entries = Object.entries(spec as Record<string, unknown>);
   // [#5240, was #5146] The `entries.length === 0` escape that used to sit here —
   // "`{ field: {} }` compiles to no SQL, so guarding it would turn a shape that
@@ -15399,7 +15408,25 @@ export class SqlDriver implements IDataDriver {
           // refusals (raised on the ORIGINAL nodes, eagerly) are unaffected.
           this.withWithheldFilterLog(root, () => this.applyFilterCondition(qb, negated, 'and', table, root));
         });
-      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      } else if (isFilterNode(value)) {
+        // [#19885] An OPERATOR MAP is a plain object — the walk's own reading
+        // ({@link isFilterNode}, which {@link classifyFilterKey} and the
+        // top-level `{ field: value }` loop in `compileFilters` agree with). This
+        // test used to be "any non-array object", so a `Date` or binary comparand
+        // landed here and was read as an operator map, with a different wrong
+        // answer per shape:
+        //
+        // - a `Date` has no own entries, so its leaf was DROPPED:
+        //   `{ $and: [{ d: <Date> }] }` answered every row on SQLite and Postgres
+        //   while the same `{ d: <Date> }` at top level answered the one matching row;
+        // - a NON-EMPTY binary comparand (`Buffer` / `Uint8Array`) had its byte
+        //   indices read as operator names, so it was REFUSED — `INVALID_FILTER` /
+        //   400, `Unsupported filter operator "0"` — a comparand the top level binds;
+        // - an EMPTY binary comparand has no entries either, so it was dropped
+        //   like the `Date`.
+        //
+        // Each is a comparand, and it now takes the bare-value branch below, the
+        // same compilation the top-level loop gives it.
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
@@ -15642,6 +15669,19 @@ export class SqlDriver implements IDataDriver {
         // one condition must not have two verdicts depending on its siblings.
         // [#8197] A bare comparand is usually a primitive, so `condition` — this
         // node, an ARM of the merge when one happened — is what carries the mark.
+        //
+        // [#19885] The comparand gate first, in the order the top-level loop
+        // runs its two: this branch is the third of the three positions
+        // {@link SqlDriver.assertOperatorAppliesToColumn}'s docblock names, and
+        // it carried the column gate without the comparand one. So an array in
+        // the equality slot passed here unrefused whenever the leaf sat under
+        // `$and` / `$or` / `$not` — or beside a sibling key that carries an
+        // operator, which routes the whole node here too. SQLite then refused
+        // the bind (a 500 `DATABASE_ERROR` for a filter the caller can fix) and
+        // Postgres bound the array as its array-literal text (`{"a"}`) and
+        // silently answered the wrong rows. Same gate, same `INVALID_FILTER` /
+        // 400, as the same leaf gets at top level.
+        assertCompilableComparand(field, '=', value, condition);
         this.assertOperatorAppliesToColumn(
           table, localField, field, '=', true, refusalSubtree(value, condition),
         );

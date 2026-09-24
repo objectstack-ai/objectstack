@@ -406,7 +406,9 @@ Three rules the shape enforces, all of them closed since #4001:
   it.** It is keyed by `SettingsManifest.namespace`, and only platform code
   declares a manifest — so the only namespaces an application could ever
   address are the platform's own. Writing it in `stack.translations` (or in
-  `defineTranslationBundle`) is refused by name with that prescription; the
+  `defineTranslationBundle`) is refused by name with that prescription, and so
+  is writing it on a `translation` metadata item (`defineTranslation`, or a save
+  through the metadata API) — the item door takes the same per-app face; the
   platform's own bundles author it against `PlatformTranslationData`, and the
   served document (`GET /i18n/translations/:locale`) carries it because it is
   the merge of every loaded bundle.

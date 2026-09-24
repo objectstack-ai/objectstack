@@ -97,7 +97,7 @@ describe('PackageSchema.namespace (ADR-0048 addendum Phase A1)', () => {
     expect(issues[0].code).toBe('invalid_format');
     expect(issues[0].path).toEqual(['namespace']);
     expect(issues[0].message).toBe(
-      'Namespace must be 2-20 chars, lowercase alphanumeric + underscore',
+      'Namespace must be 2-20 chars, start with a lowercase letter, and contain only lowercase letters, digits and underscores',
     );
   });
 
@@ -157,6 +157,23 @@ describe('two gates, one vocabulary (§A.7)', () => {
     )).toEqual([]);
   });
 
+  it('every field refuses with the SAME sentence, so both sides prescribe the same rule', () => {
+    // The verdict table above cannot see the prose: two declarations can agree
+    // on every value and still tell a refused author two different rules. Read
+    // the sentence off each field for a value only the leading-letter clause
+    // refuses, and hold all four to manifest.namespace's.
+    const sentenceOf = (field: { safeParse: (v: unknown) => { success: boolean; error?: { issues: Array<{ message: string }> } } }) => {
+      const r = field.safeParse('1leave');
+      expect(r.success).toBe(false);
+      return r.error?.issues[0]?.message;
+    };
+    const manifestSentence = sentenceOf(ManifestSchema.shape.namespace);
+    expect(manifestSentence).toMatch(/start with a lowercase letter/);
+    expect(sentenceOf(PackageSchema.shape.namespace)).toBe(manifestSentence);
+    expect(sentenceOf(CreatePackageRequestSchema.shape.namespace)).toBe(manifestSentence);
+    expect(sentenceOf(TemplateManifestSchema.shape.namespace)).toBe(manifestSentence);
+  });
+
   it('every field is optional, so "absent" means the same thing on all sides', () => {
     expect(ManifestSchema.shape.namespace.safeParse(undefined).success).toBe(true);
     expect(PackageSchema.shape.namespace.safeParse(undefined).success).toBe(true);
@@ -208,7 +225,7 @@ describe('TemplateManifestSchema declares namespace as a scaffold-only extra (#6
     expect(issues[0].code).toBe('invalid_format');
     expect(issues[0].path).toEqual(['namespace']);
     expect(issues[0].message).toBe(
-      'Namespace must be 2-20 chars, lowercase alphanumeric + underscore',
+      'Namespace must be 2-20 chars, start with a lowercase letter, and contain only lowercase letters, digits and underscores',
     );
   });
 

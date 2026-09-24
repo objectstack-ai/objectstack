@@ -236,7 +236,7 @@ export interface ScreenFieldContract {
 export interface HeadlessScreenVerdict {
   /** `true` ⇒ the run may continue past this screen without suspending. */
   satisfied: boolean;
-  /** Declared field names whose value this run's CALLER supplied (provenance-checked). */
+  /** Declared field names whose value this run's CALLER supplied (per `callerParamKeys`, else inferred). */
   supplied: string[];
   /** Required fields with no usable bound value — the reason a candidate was refused. */
   missing: string[];
@@ -245,8 +245,46 @@ export interface HeadlessScreenVerdict {
 const NOTHING_SUPPLIED: HeadlessScreenVerdict = { satisfied: false, supplied: [], missing: [] };
 
 /**
+ * The slice of the run's `AutomationContext` the headless verdict reads.
+ * `callerParamKeys` is typed loosely on purpose: it arrives from a producer, and
+ * after a durable pause from `JSON.parse`, so its shape is checked where it is
+ * read rather than trusted from the type.
+ */
+export interface HeadlessScreenContext {
+  params?: Record<string, unknown>;
+  record?: Record<string, unknown>;
+  object?: string;
+  callerParamKeys?: unknown;
+}
+
+/**
  * Whether a screen field's value in `context.params` came from the run's
  * CALLER rather than from the subject record the dispatcher seeded.
+ *
+ * ## The explicit signal comes first (#19846)
+ *
+ * When the door that started the run stated `context.callerParamKeys`, that
+ * list IS the answer, and nothing below it runs: a field is caller-supplied
+ * exactly when its name is in the list and `params` holds a value for it. Both
+ * doors that start a flow on a caller's behalf fill it from the caller's own
+ * bag before they seed anything — `dispatchFlowAction` and
+ * `buildAutomationContext` in `@objectstack/runtime` — and leave their row-id
+ * keys out of it. That is what closes the class the inference below could not
+ * finish: each review of #15787 found a seed construction the previous one had
+ * missed, and the two it ended on (a non-default `recordIdField` with a
+ * `recordIdParam` naming a key the record lacks) still skipped.
+ *
+ * A present value that is not an array names nothing, so the screen pauses —
+ * this module's standing failure direction. ⛔ It is NOT read as absent: an
+ * unreadable signal is not an older producer.
+ *
+ * ## Absent: the inference, kept for producers that state nothing
+ *
+ * A record-change, time-relative or webhook trigger, a `subflow` / `map` child
+ * run, or code calling the engine directly carries no signal, and for those the
+ * verdict below still infers — unchanged, and failing toward a pause. (The
+ * schedule trigger has no caller and states `[]`, #19900, so its `jobId` /
+ * `flowName` / `schedule` seeds never reach the inference.)
  *
  * This distinction is the whole safety story of {@link judgeHeadlessScreen},
  * because the params bag a flow action reaches the engine with is NOT the
@@ -310,12 +348,14 @@ const NOTHING_SUPPLIED: HeadlessScreenVerdict = { satisfied: false, supplied: []
  * by construction (`params.recordId` is seeded as one, `record.id` is one), so
  * serialisation cannot defeat it and there is nothing there to widen.
  */
-function callerSupplied(
-  name: string,
-  context: { params?: Record<string, unknown>; record?: Record<string, unknown>; object?: string } | undefined,
-): boolean {
+function callerSupplied(name: string, context: HeadlessScreenContext | undefined): boolean {
   const params = context?.params;
   if (!params || params[name] === undefined) return false;
+  // [#19846] The door said which keys its caller supplied — read that, and
+  // never the inference below. Anything but an array names nothing (pause).
+  const declared = context?.callerParamKeys;
+  if (declared !== undefined) return Array.isArray(declared) && declared.includes(name);
+  // ── No signal: an older producer, so provenance is inferred ────────────
   // Row-id seeds first: neither leg below can disprove them, because the
   // trigger door sets no record and none of these names is a column.
   const objectName = typeof context?.object === 'string' ? context.object.trim() : '';
@@ -369,9 +409,10 @@ function callerSupplied(
  * the verdict is `false` the moment any of them is unproven:
  *
  *  1. **The caller supplied at least one of THIS screen's declared fields**
- *     ({@link callerSupplied}) — which refuses the row-id keys both dispatch
- *     doors seed, so a launch that carried only a `recordId` has supplied
- *     nothing. Without this leg a screen whose fields are all
+ *     ({@link callerSupplied}) — read off the door's `callerParamKeys` when
+ *     the run carries it, inferred otherwise; either way the row-id keys both
+ *     dispatch doors seed are not the caller speaking, so a launch that
+ *     carried only a `recordId` has supplied nothing. Without this leg a screen whose fields are all
  *     optional would be vacuously "satisfied" and would stop rendering for
  *     everyone — the loudest way to break the interactive path. A run that
  *     named none of this screen's fields is not driving it, so it pauses.
@@ -396,7 +437,7 @@ function callerSupplied(
 export function judgeHeadlessScreen(
   fields: readonly ScreenFieldContract[],
   variables: ReadonlyMap<string, unknown>,
-  context: { params?: Record<string, unknown>; record?: Record<string, unknown>; object?: string } | undefined,
+  context: HeadlessScreenContext | undefined,
 ): HeadlessScreenVerdict {
   const declared = fields.filter((f) => typeof f?.name === 'string' && f.name.length > 0);
   if (declared.length === 0) return NOTHING_SUPPLIED;

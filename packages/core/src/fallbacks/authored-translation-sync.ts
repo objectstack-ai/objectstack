@@ -41,8 +41,19 @@
  * surface authored rows nowhere else, and the i18n map is process-wide so
  * rows are taken across all organizations. Best-effort: a failed read keeps
  * the currently applied authored layer.
+ *
+ * Reading the table directly makes this a stored-metadata REHYDRATION seam,
+ * so each row replays the full ADR-0087 conversion chain before it is merged
+ * (`applyConversionsToStoredItem`, retired entries included — the same policy
+ * as `protocol.loadMetaFromDb` and the objectql authored-hook re-sync). This
+ * layer is read OVER the shipped bundles, so a group a later protocol took
+ * off the item door would otherwise go on overriding them from a row written
+ * before the door closed: `settings`, the platform-only group, is the case
+ * that made the seam necessary (#19620). Each conversion is logged once per
+ * row per wiring, never per sync.
  */
 
+import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { LEGACY_OBJECT_FIRST_KEYS } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 
@@ -85,6 +96,17 @@ interface AuthoredTranslationSink {
 // like `my_custom_strings` as locales.
 const LOCALE_LIKE = /^[a-z]{2,3}([_-]([A-Za-z]{4}|[A-Za-z]{2}|[0-9]{3}))?$/;
 
+/** Options for {@link readAuthoredTranslationLayer}. */
+export interface ReadAuthoredTranslationLayerOptions {
+  /**
+   * Dedupe set for the stored-row conversion warning, keyed
+   * `<conversionId>|<row name>`. The sync re-reads every row on each publish,
+   * so a caller that syncs repeatedly passes one set for its lifetime and
+   * each legacy row warns once; omitted, every call warns.
+   */
+  warnedConversions?: Set<string>;
+}
+
 /**
  * Read ACTIVE `translation` metadata rows and compute the authored layer,
  * keyed by locale. Returns `null` when the read failed (callers must keep
@@ -93,6 +115,7 @@ const LOCALE_LIKE = /^[a-z]{2,3}([_-]([A-Za-z]{4}|[A-Za-z]{2}|[0-9]{3}))?$/;
 export async function readAuthoredTranslationLayer(
   engine: { find(object: string, opts?: AnyRecord): Promise<any[]> },
   logger?: MinimalCtx['logger'],
+  options: ReadAuthoredTranslationLayerOptions = {},
 ): Promise<Record<string, Record<string, unknown>> | null> {
   let rows: any[];
   try {
@@ -136,6 +159,26 @@ export async function readAuthoredTranslationLayer(
       );
       continue;
     }
+
+    // Stored-row rehydration (see the module doc): replay the full ADR-0087
+    // chain so a group a later protocol took off the item door is dropped
+    // here, loudly, instead of overriding the shipped bundles from the raw row.
+    const rowName = String(row?.name ?? '<unnamed>');
+    data = applyConversionsToStoredItem('translation', data as AnyRecord, {
+      onNotice: (n: ConversionNotice) => {
+        const key = `${n.conversionId}|${rowName}`;
+        if (options.warnedConversions?.has(key)) return;
+        options.warnedConversions?.add(key);
+        logger?.warn?.(
+          `[i18n] authored translation '${rowName}' carries a shape protocol ${n.toMajor} retired; `
+          + `${n.message} That content is dropped before the merge and is not served: what renders `
+          + 'at that path is what the shipped bundles carry, or the source literal where they carry '
+          + 'nothing. The row itself is unchanged — re-save it (Studio edit → save) or run '
+          + '"os migrate meta --stored --apply" to persist the canonical shape; '
+          + `"os migrate meta --from ${n.toMajor - 1}" prints what the change means.`,
+        );
+      },
+    });
 
     const locale: string | undefined =
       (typeof data?.locale === 'string' && data.locale)
@@ -186,6 +229,10 @@ export function wireAuthoredTranslationSync(ctx: MinimalCtx): void {
     return current === token ? i18n : null; // another wirer owns this instance
   };
 
+  // One dedupe set per wiring: every sync re-reads every row, so a legacy row
+  // would otherwise re-warn on each publish.
+  const warnedConversions = new Set<string>();
+
   // Serialized: overlapping publishes must not finish out of order and leave
   // the older authored snapshot applied.
   let chain: Promise<void> = Promise.resolve();
@@ -196,7 +243,7 @@ export function wireAuthoredTranslationSync(ctx: MinimalCtx): void {
       let engine: IDataEngine | undefined;
       try { engine = ctx.getService('objectql'); } catch { return; }
       if (!engine || typeof engine.find !== 'function') return;
-      const layer = await readAuthoredTranslationLayer(engine, ctx.logger);
+      const layer = await readAuthoredTranslationLayer(engine, ctx.logger, { warnedConversions });
       if (layer === null) return; // failed read — keep current layer
       i18n.replaceAuthoredTranslations(layer);
       ctx.logger.info?.('[i18n] synced runtime-authored translations', {

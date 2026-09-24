@@ -195,11 +195,12 @@ export const PackageSchema = lazySchema(() => z.object({
    */
   namespace: z
     .string()
-    // Kept byte-identical to `ManifestSchema.shape.namespace`'s pattern; the
-    // two are pinned against each other by `package-namespace.test.ts` so the
-    // publish payload and the manifest cannot drift into disagreeing about
-    // what a namespace is (addendum §A.7 "two gates, one vocabulary").
-    .regex(/^[a-z][a-z0-9_]{1,19}$/, 'Namespace must be 2-20 chars, lowercase alphanumeric + underscore')
+    // Kept byte-identical to `ManifestSchema.shape.namespace`'s pattern and
+    // refusal sentence; the two are pinned against each other by
+    // `package-namespace.test.ts` so the publish payload and the manifest
+    // cannot drift into disagreeing about what a namespace is, or into
+    // prescribing it differently (addendum §A.7 "two gates, one vocabulary").
+    .regex(/^[a-z][a-z0-9_]{1,19}$/, 'Namespace must be 2-20 chars, start with a lowercase letter, and contain only lowercase letters, digits and underscores')
     .optional()
     .describe('Metadata namespace claimed by the package (mirrors manifest.namespace; e.g. "crm" → object names "crm_account")'),
 

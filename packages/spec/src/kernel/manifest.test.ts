@@ -675,3 +675,44 @@ describe('manifest.id — reverse-domain identifier', () => {
     }
   });
 });
+
+describe('manifest.namespace — the refusal states the rule the regex enforces', () => {
+  // The pattern is `^[a-z][a-z0-9_]{1,19}$`: the FIRST character must be a
+  // lowercase letter. A refusal sentence that only says "2-20 chars, lowercase
+  // alphanumeric + underscore" is satisfied by `1leave` and `_leave`, so the
+  // author it refuses is told a rule they already follow. The sentence is also
+  // surfaced verbatim by other doors (e.g. `duplicatePackage`'s explicit
+  // `targetNamespace`), so it has to carry the whole rule on its own.
+  const namespaceRefusal = (value: string) => {
+    const r = ManifestSchema.shape.namespace.safeParse(value);
+    expect(r.success, `'${value}' must be refused`).toBe(false);
+    const issues = r.success ? [] : r.error.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('invalid_format');
+    return issues[0].message;
+  };
+
+  it.each([
+    ['1leave', 'a leading digit'],
+    ['_leave', 'a leading underscore'],
+  ])('refuses %s (%s) with a sentence naming the leading-letter rule', (value) => {
+    expect(namespaceRefusal(value)).toMatch(/start with a lowercase letter/);
+  });
+
+  it('the same sentence still names the length and the charset', () => {
+    const msg = namespaceRefusal('1leave');
+    expect(msg).toMatch(/2-20 chars/);
+    expect(msg).toMatch(/lowercase letters, digits and underscores/);
+  });
+
+  it.each(['leave', 'crm', 'my_app_2', 'a1', 'abcdefghijklmnopqrst'])(
+    'lit control — %s still parses',
+    (value) => {
+      expect(ManifestSchema.shape.namespace.safeParse(value).success).toBe(true);
+      expect(
+        ManifestSchema.safeParse({ id: 'com.example.leave', version: '1.0.0', type: 'app', name: 'X', namespace: value })
+          .success,
+      ).toBe(true);
+    },
+  );
+});

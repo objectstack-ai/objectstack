@@ -229,6 +229,9 @@ import {
 import { UnscopedHookApi, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+// [#19911] The settlement's question "does judging the FK's own lock need the
+// header it names?" — asked of the same root reader the strips use.
+import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
@@ -2504,6 +2507,11 @@ function isEmptyReferenceValue(v: unknown): boolean {
  * judged against the master it lands on), else the prior row's. Only a scalar
  * id counts — an expanded relation object or an array is not an id this read
  * can bind, and guessing one would be worse than leaving `parent` unbound.
+ *
+ * [#19853] "Carries one" means the write STORES it: the UPDATE paths hand this
+ * the payload view `settleMasterDetailLanding` returns, which no longer holds
+ * an FK a later strip would have taken back out, so the prior row's FK — the
+ * header the row keeps — answers instead.
  */
 function masterIdOf(
   fk: string,
@@ -2514,6 +2522,79 @@ function masterIdOf(
   if (typeof raw === 'string') return raw === '' ? undefined : raw;
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
   return undefined;
+}
+
+/**
+ * [#19853] `data` without `key`, as a COPY — the payloads this is applied to
+ * are shared with hooks and with the strip reports' before/after diffs, so
+ * none of them may lose a key in place. The same reference when `key` is
+ * absent, which is the "nothing changed" signal every strip here keeps.
+ */
+function withoutKey<T extends Record<string, unknown>>(data: T, key: string): T {
+  if (!Object.prototype.hasOwnProperty.call(data, key)) return data;
+  const { [key]: _omitted, ...rest } = data;
+  return rest as T;
+}
+
+/**
+ * [#19853] Will the static `readonly` strip take `key` back out of this
+ * UPDATE payload? Asked before the write's `parent` is resolved, because a
+ * master-detail FK that strip takes is a repoint that never lands.
+ *
+ * Answered by the SAME function the strip runs, over the same `supplied`
+ * snapshot, the same hook-write record and the same two exemptions — never by
+ * re-deriving "is this FK read-only" from its declaration, which is a second
+ * opinion that disagrees the moment either exemption applies. `runs` is the
+ * strip's own gate (a system caller skips it), handed in as the value the
+ * strip's call site reads once and consumes itself, so the two cannot
+ * disagree about whether it runs; `preserveAudit` keeps a preservable column.
+ * Silent: no logger, because the strip itself owns every word said about the
+ * key, and `strictReadonlyWrites` / `addressKey` shape only that wording,
+ * never the verdict.
+ */
+function staticReadonlyStripTakes(
+  schema: unknown,
+  data: Record<string, unknown>,
+  key: string,
+  supplied: Readonly<Record<string, unknown>>,
+  strip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined },
+): boolean {
+  if (!strip.runs) return false;
+  return !(key in staticReadonlyStoredView(schema, data, supplied, strip));
+}
+
+/**
+ * [#19887] The UPDATE payload as the static `readonly` strip will leave it —
+ * `data` without every key that strip takes back out — which is the view a
+ * `readonlyWhen` predicate's `record` binding is built from
+ * (`ReadonlyWhenStripOptions.stored`).
+ *
+ * The conditional strip runs BEFORE the static one, so the payload it is
+ * handed still holds a value a non-system caller forged for a statically
+ * `readonly` field. Judged over that payload, `amount` locked by
+ * `record.status == 'closed'` read the forged `status: 'open'`, stayed
+ * writable, and the static strip then removed the `status`: the closed row
+ * committed with its locked amount rewritten. The strips keep their order —
+ * each still reports its own fields under its own reason — and only what the
+ * predicate reads moves.
+ *
+ * The same verdict {@link staticReadonlyStripTakes} asks for one key, asked
+ * for all of them by the same function with the same arguments: `data` itself
+ * when the strip does not run (a system caller), and a key a hook wrote, a
+ * value a hook overwrote or a column `preserveAudit` keeps all stay, because
+ * the write stores them. Silent for the same reason.
+ */
+function staticReadonlyStoredView(
+  schema: unknown,
+  data: Record<string, unknown>,
+  supplied: Readonly<Record<string, unknown>>,
+  strip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined },
+): Record<string, unknown> {
+  if (!strip.runs) return data;
+  return stripReadonlyFields(
+    schema as any, data, supplied, undefined,
+    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
+  ) ?? data;
 }
 
 /**
@@ -6812,6 +6893,101 @@ export class ObjectQL implements IObjectQLEngine {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * [#19853] Settle whether an UPDATE lands the master-detail FK its payload
+   * names, BEFORE any `parent`-scoped lock is judged — so `parent` is the
+   * header the write STORES, not merely the one it NAMES. Shared by the by-id
+   * and bulk paths, which differ only in how a header is resolved and how the
+   * FK's own lock is judged (one row, or "locked in ≥1 matched row").
+   *
+   * #4889's rule — a repoint is judged against the master it lands on — is
+   * right only when the repoint LANDS. Two strips can take the FK back out
+   * after `parent` was resolved from it, and the row then keeps the header it
+   * had while every other parent-scoped lock was judged against one it never
+   * reached. Measured on the card's shape: `update(l1, { amount: 999, invoice:
+   * 'inv_b' })` with `invoice` statically `readonly` and `l1` under a PAID
+   * `inv_a` committed `{ amount: 999, invoice: 'inv_a' }` — the frozen line
+   * rewritten, still under the paid invoice. The strips, in the order they run
+   * after this point:
+   *
+   *  ① the FK's OWN `readonlyWhen` lock. Judged here first, against the
+   *    header the FK names — #4889's rule for the FK itself, unmoved.
+   *    [#19911] Judged WITH the other caller-supplied locks, not alone, and
+   *    settled with them (`settleReadonlyWhenDrops`), so a value one of them
+   *    drops can no longer unlock it — but only the FK is TAKEN here (`only`).
+   *    That moves the FK's verdict in BOTH directions: a repoint its lock
+   *    used to let through can now stay home, and a repoint it used to hold
+   *    can now LAND, when the value its `record` lock reads is itself locked
+   *    under the header the FK names — that value is dropped, the FK's lock
+   *    reads the stored one, and the rest are then judged under the header
+   *    the row lands on. When that verdict keeps the FK off the landing it is final:
+   *    the returned `supplied` no longer holds the FK, so the strip that
+   *    judges the other fields never re-asks it against the header the row
+   *    keeps, where it could flip and land the FK after the rest were judged
+   *    against the header it left. When the FK lands, that strip re-judges it
+   *    on the same landing and reaches the same verdict.
+   *  ② the static `readonly` strip (`staticReadonlyStripTakes`), which runs
+   *    after the conditional one and takes a non-system caller's forged FK.
+   *
+   * Nothing else on either path moves the FK after this point, and what moves
+   * it before this point (a `beforeUpdate` hook, the post-hook payload) is
+   * already in `data`. Field-level security refuses a forbidden FK outright
+   * rather than stripping it, so it never leaves a payload that names one
+   * header and stores another.
+   *
+   * Returns:
+   *  - `subject` — the payload the `readonlyWhen` strip judges next: `data`,
+   *    or `data` without the FK when ①'s verdict locked it;
+   *  - `supplied` — the entry snapshot that strip judges against: without the
+   *    FK when the FK does not land (its verdict is in), whole when it does;
+   *  - `view` — the payload the header id is read from: `data` when the FK
+   *    lands, else `data` without it, so `masterIdOf` falls through to the
+   *    prior row's FK;
+   *  - `header` — what `resolve(view)` answers. ① needs the NAMED header only
+   *    when judging the FK's lock reads `parent` — its own predicate, or
+   *    [#19911] a `record`-reading one whose view another payload key's
+   *    `parent`-scoped lock shapes (`readonlyWhenFkJudgementReadsParent`);
+   *    when the FK then lands that is the same header and is reused, so the
+   *    write still reads one header — two only when ① read the named header
+   *    and the FK does not land.
+   */
+  private async settleMasterDetailLanding<H>(args: {
+    schema: unknown;
+    data: Record<string, unknown>;
+    supplied: Readonly<Record<string, unknown>>;
+    staticStrip: { runs: boolean; preserveAudit: boolean; hookWrittenKeys: ReadonlySet<string> | undefined };
+    resolve: (view: Record<string, unknown>) => Promise<H>;
+    judgeFkLock: (named: H | undefined, fk: string) => Record<string, unknown>;
+  }): Promise<{
+    subject: Record<string, unknown>;
+    supplied: Readonly<Record<string, unknown>>;
+    view: Record<string, unknown>;
+    header: H;
+  }> {
+    const { schema, data, supplied, staticStrip, resolve, judgeFkLock } = args;
+    const fk = resolveMasterDetailRelation(schema as any)?.fk;
+    if (fk === undefined || !(fk in data)) {
+      return { subject: data, supplied, view: data, header: await resolve(data) };
+    }
+    // ① Whether the FK is still the caller's is the strip's own question
+    // (`isCallerSuppliedValue`, own-property): a hook-written FK is not judged.
+    const namedNeeded = readonlyWhenFkJudgementReadsParent(schema as any, data, fk);
+    const named = namedNeeded ? await resolve(data) : undefined;
+    const subject = judgeFkLock(named, fk);
+    const rest = withoutKey(supplied as Record<string, unknown>, fk);
+    // ②
+    const lands = fk in subject && !staticReadonlyStripTakes(schema, subject, fk, supplied, staticStrip);
+    if (lands) {
+      // [#19911] A landing FK stays in `supplied`: the strip that judges the
+      // rest re-judges it on the SAME landing — the header ① read, or one its
+      // verdict never reads — so it reaches ①'s verdict again, now over the
+      // same drops as everything else, and says it once.
+      return { subject, supplied, view: data, header: namedNeeded ? (named as H) : await resolve(data) };
+    }
+    const view = withoutKey(data, fk);
+    return { subject, supplied: rest, view, header: await resolve(view) };
   }
 
   /**
@@ -12743,26 +12919,46 @@ export class ObjectQL implements IObjectQLEngine {
                // a header read — and, more importantly, so a single write can
                // never judge its lock and its requirement against two different
                // headers. Payload-FK-first for both (#4889's rule: a repoint is
-               // judged against the master it lands on).
+               // judged against the master it lands on) — [#19853] provided it
+               // LANDS: `settleMasterDetailLanding` judges the FK's own fate
+               // first and hands back the view the write STORES, so a repoint a
+               // later strip takes back out is judged against the header the
+               // row keeps.
                const schemaHasParentRequiredWhen = hasParentScopedRequiredWhen(updateSchema as any);
                const wantsParentBinding =
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen) ||
                    schemaHasParentRequiredWhen;
-               const roWhenParent = wantsParentBinding
-                   ? await this.resolveMasterDetailParent(updateSchema, preRoWhen, priorRecord, opCtx.context)
+               // [#19853] The static strip's gate, read ONCE and consumed by
+               // both the settlement below and the strip itself (#2948, further
+               // down), so the two cannot disagree about whether it runs.
+               const staticReadonlyStripRuns = !opCtx.context?.isSystem;
+               // [#19887] The static strip's verdict, described once: the
+               // settlement asks it of the FK, and both `readonlyWhen` strips
+               // build their `record` view from the payload it leaves.
+               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys };
+               const landing = wantsParentBinding
+                   ? await this.settleMasterDetailLanding({
+                       schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
+                       staticStrip,
+                       resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
+                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: suppliedValues, only: fk, stored: staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip) }) as Record<string, unknown>,
+                     })
                    : undefined;
+               const roWhenParent = landing?.header;
                // [#4977] The ADR-0113 non-regression pre-check asks whether the
                // STORED row already violated, so for a REPOINT it must read the
                // header the row hung off BEFORE the write — not the one it is
                // landing on. Resolved only when the payload actually moves the
                // detail to another master; otherwise the two are the same row
                // and `evaluateValidationRules` reuses `parent` for both.
+               // [#19853] "Actually moves" is asked of the view the write
+               // stores: a repoint that never lands moves nothing.
                const mdRel = schemaHasParentRequiredWhen ? resolveMasterDetailRelation(updateSchema as any) : null;
                const priorMasterId = mdRel ? masterIdOf(mdRel.fk, null, priorRecord) : undefined;
                const repointsMaster =
                    mdRel != null &&
                    priorMasterId != null &&
-                   masterIdOf(mdRel.fk, preRoWhen, priorRecord) !== priorMasterId;
+                   masterIdOf(mdRel.fk, landing?.view ?? preRoWhen, priorRecord) !== priorMasterId;
                const roWhenPreviousParent = repointsMaster
                    ? await this.resolveMasterDetailParent(updateSchema, null, priorRecord, opCtx.context)
                    : undefined;
@@ -12776,7 +12972,14 @@ export class ObjectQL implements IObjectQLEngine {
                // is unchanged — a caller cannot make its own value look
                // hook-written (see `ReadonlyWhenStripOptions`) — and `isSystem`
                // is still NOT an exemption here, unlike the static strip below.
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent, { supplied: suppliedValues }) as any;
+               // [#19853] `landing` has already judged the FK's own lock; this
+               // judges the rest, and reports against `preRoWhen` so both
+               // verdicts arrive as one `readonly_when` event.
+               // [#19887] `stored` — `record` is the payload the write STORES,
+               // so a value forged for a static `readonly` field (stripped
+               // below) cannot unlock a field whose predicate reads it.
+               const roWhenSubject = landing?.subject ?? preRoWhen;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? suppliedValues, stored: staticReadonlyStoredView(updateSchema, roWhenSubject, suppliedValues, staticStrip) }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -12794,7 +12997,7 @@ export class ObjectQL implements IObjectQLEngine {
                // only the WARN that called the address a caller forgery is gone.
                // Undefined on every other path (the multi branch below, and the
                // insert-side sibling), which is what keeps those byte-identical.
-               if (!opCtx.context?.isSystem) {
+               if (staticReadonlyStripRuns) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
                    // [#8214] `strictReadonlyWrites` is threaded INTO the strip
                    // rather than consulted only at `assertNoStrictDrops()`
@@ -12949,20 +13152,38 @@ export class ObjectQL implements IObjectQLEngine {
                // no `readonlyWhen` field at all. One resolution, both consumers,
                // so a bulk write cannot judge its lock and its requirement
                // against different headers.
+               //
+               // [#19853] The same settlement as the by-id branch, per row: a
+               // repoint a later strip takes back out leaves every matched row
+               // under its OWN header, and that is the one each row is judged
+               // against. The FK's own lock is judged as the bulk strip judges
+               // any field — locked in ≥1 matched row keeps it out of all.
                const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
                const schemaHasParentRequiredWhenMulti = hasParentScopedRequiredWhen(updateSchema as any);
-               const parentForRow =
+               // [#19853] One read of the static strip's gate, both consumers —
+               // as on the by-id branch.
+               const staticReadonlyStripRunsMulti = !opCtx.context?.isSystem;
+               // [#19887] Described once, three consumers — as on the by-id
+               // branch.
+               const staticStripMulti = { runs: staticReadonlyStripRunsMulti, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys };
+               const landingMulti =
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
                    schemaHasParentRequiredWhenMulti
-                       ? await this.resolveMasterDetailParents(updateSchema, preRoWhenMulti, priorRows, opCtx.context)
+                       ? await this.settleMasterDetailLanding({
+                           schema: updateSchema, data: preRoWhenMulti, supplied: suppliedValues,
+                           staticStrip: staticStripMulti,
+                           resolve: (view) => this.resolveMasterDetailParents(updateSchema, view, priorRows, opCtx.context),
+                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: suppliedValues, only: fk, stored: staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti) }) as Record<string, unknown>,
+                         })
                        : undefined;
+               const parentForRow = landingMulti?.header;
                // [#4977] Pre-check headers for the ADR-0113 non-regression test,
                // resolved only when the payload REPOINTS the matched rows at
                // another master (see the single-id branch for why the stored
                // row's own header is the one that question needs).
                const mdRelMulti = schemaHasParentRequiredWhenMulti ? resolveMasterDetailRelation(updateSchema as any) : null;
                const previousParentForRow =
-                   mdRelMulti != null && masterIdOf(mdRelMulti.fk, preRoWhenMulti, undefined) != null
+                   mdRelMulti != null && masterIdOf(mdRelMulti.fk, landingMulti?.view ?? preRoWhenMulti, undefined) != null
                        ? await this.resolveMasterDetailParents(updateSchema, null, priorRows, opCtx.context)
                        : undefined;
                if (payloadHasReadonlyWhen) {
@@ -12970,14 +13191,17 @@ export class ObjectQL implements IObjectQLEngine {
                    // by-id branch above — "both call sites" is the #3106 /
                    // #4441 shape that gets missed, and a bulk write must not
                    // reach a different verdict about who wrote a key.
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow, { supplied: suppliedValues }) as any;
+                   // [#19887] Nor read a different payload: each matched row's
+                   // `record` is the payload the write stores, over that row.
+                   const roWhenSubjectMulti = landingMulti?.subject ?? preRoWhenMulti;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? suppliedValues, stored: staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, suppliedValues, staticStripMulti) }) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
                // a forged read-only column in a multi-row update is dropped for
                // non-system callers (a foreign `organization_id` is additionally
                // rejected upstream by the tenant write wall, #2946).
-               if (!opCtx.context?.isSystem) {
+               if (staticReadonlyStripRunsMulti) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
                    // [#8214] Same threading as the by-id branch; the multi
                    // branch still passes no `addressKey` (nothing addresses a

@@ -13,8 +13,9 @@
  *
  * `.github/workflows/fleet-write.yml` runs this as its last step, after the
  * validator refused nothing and `actions/create-github-app-token` minted an
- * installation token narrowed to `payload.repo` and to `PERMISSIONS`
- * (`ops.mjs`). That token arrives in `GITHUB_TOKEN`, from the environment
+ * installation token narrowed to `payload.repo` — plus, for a `transfer`
+ * stroke alone, the transfer's one target (`tokenRepositoriesOf` in
+ * `validate.mjs`) — and to `PERMISSIONS` (`ops.mjs`). That token arrives in `GITHUB_TOKEN`, from the environment
  * only: it is never printed, never written to a file, never placed in an
  * argument; every string this file emits is scrubbed of it, and the runner's
  * own secret masking is the second net, not the first. The App's private key
@@ -31,13 +32,21 @@
  * There is no sender allowlist: GitHub's write permission on the target IS
  * the authorization, so a seat that can push to a repo can write to it as the
  * fleet, and one that cannot, cannot — whichever repo the dispatch landed on.
+ * The gate runs on EVERY repository the token reaches: a transfer stroke is
+ * refused unless the sender holds write on the source AND the target, the
+ * same pair GitHub itself requires of a person who transfers a card.
  *
  * ## The run
  *
  * Every action is validated AGAIN here (defence in depth: the executor trusts
  * the validator's rule, not the step that ran it), then its requests are
  * issued in order with the App token: REST calls straight from the op table;
- * the pull-request GraphQL ops resolve the pull's node id with one GET first.
+ * the pull-request GraphQL ops resolve the pull's node id with one GET first;
+ * a `transfer` reads the issue (refusing a pull request, or a card that no
+ * longer answers from the source — already moved) and the target repository,
+ * then sends `transferIssue` with both node ids and accepts only an answer
+ * that places the card on the target. A transfer that fails prints the
+ * installation remedy `transferRemedy` spells, in the log and the summary.
  * The FIRST failure stops the run — later actions are NOT attempted, and the
  * summary says which — because a seat that dispatched five related writes
  * must be able to read exactly where the board was left. A 404 on a directed
@@ -76,8 +85,8 @@ import { isEntrypoint } from '../../invoked-as.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
-import { OPS, PERMISSIONS } from './ops.mjs';
-import { PAYLOAD_ENV, refusalText, validatePayload } from './validate.mjs';
+import { OPS, PERMISSIONS, transferRemedy } from './ops.mjs';
+import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_API = 'https://api.github.com';
@@ -116,12 +125,25 @@ export function senderVerdict({ status, json } = {}) {
   return { verdict: 'prerequisite', role: '', permission: '', roleName: '' };
 }
 
+/** `owner/name` from an issue's `repository_url`, or null — where the card answers from NOW. */
+export function repoOfIssue(json) {
+  const m = /\/repos\/([^/]+\/[^/]+)$/.exec(String(json?.repository_url ?? ''));
+  return m ? m[1] : null;
+}
+
 /** Did this answer land the request? A 404 on a directed label DELETE is the label already being gone. */
 export function requestLanded(req, { status, json } = {}) {
   if (req.graphql) {
     if (status !== 200 || !json || typeof json !== 'object') return { ok: false, why: `HTTP ${status}` };
     if (Array.isArray(json.errors) && json.errors.length) return { ok: false, why: `GraphQL: ${json.errors.map((e) => e?.message ?? 'error').join('; ')}` };
     if (!json.data) return { ok: false, why: 'GraphQL: no data' };
+    if (req.graphql.target_repo !== undefined) {
+      // A transfer lands only when the answer places the card on the target.
+      const moved = json.data[req.graphql.mutation]?.issue;
+      const where = moved?.repository?.nameWithOwner;
+      if (!moved || !Number.isInteger(moved.number)) return { ok: false, why: 'GraphQL: the answer carries no transferred issue' };
+      if (String(where ?? '').toLowerCase() !== req.graphql.target_repo.toLowerCase()) return { ok: false, why: `GraphQL: the answer places the issue on ${where ?? 'no repository'}, not ${req.graphql.target_repo}` };
+    }
     return { ok: true, why: '' };
   }
   if (status >= 200 && status < 300) return { ok: true, why: '' };
@@ -132,6 +154,8 @@ export function requestLanded(req, { status, json } = {}) {
 /** The one thing a seat needs from an answer: the id / number / url of what was written. */
 export function resultOf(req, json) {
   if (req.graphql) {
+    const moved = json?.data?.[req.graphql.mutation]?.issue;
+    if (moved) return [`#${moved.number}`, moved.url, moved.repository?.nameWithOwner ? `(now on ${moved.repository.nameWithOwner})` : ''].filter(Boolean).join(' ');
     const pr = json?.data?.[req.graphql.mutation]?.pullRequest;
     if (!pr) return 'ok';
     const bits = [`#${pr.number}`];
@@ -149,9 +173,10 @@ export function resultOf(req, json) {
 }
 
 /** The summary table, as markdown lines. */
-export function summaryText({ payload, sender, role, rows, stoppedAt = null, notAttempted = 0, refusal = null }) {
+export function summaryText({ payload, sender, role, rows, stoppedAt = null, notAttempted = 0, refusal = null, remedy = null, reaches = null }) {
   const lines = [`### fleet-write \`${payload?.request_id ?? '?'}\``, ''];
-  lines.push(`- sender: \`${sender ?? '?'}\`${role ? ` (${role})` : ''} · session: \`${payload?.session ?? '?'}\` · target: \`${payload?.repo ?? '?'}\` · ${payload?.actions?.length ?? 0} action(s)`);
+  const also = Array.isArray(reaches) && reaches.length > 1 ? ` · the token also reaches ${reaches.slice(1).map((r) => `\`${r}\``).join(', ')}` : '';
+  lines.push(`- sender: \`${sender ?? '?'}\`${role ? ` (${role})` : ''} · session: \`${payload?.session ?? '?'}\` · target: \`${payload?.repo ?? '?'}\`${also} · ${payload?.actions?.length ?? 0} action(s)`);
   if (refusal) {
     lines.push('', `⛔ ${refusal} — zero writes.`);
     return `${lines.join('\n')}\n`;
@@ -161,6 +186,7 @@ export function summaryText({ payload, sender, role, rows, stoppedAt = null, not
   lines.push('');
   if (stoppedAt === null) lines.push(`✓ ${rows.length} request(s) landed, every action done.`);
   else lines.push(`✗ stopped at action ${stoppedAt.action} (\`${stoppedAt.op}\`): ${stoppedAt.why}. ${notAttempted} later action(s) NOT attempted.`);
+  if (remedy) lines.push('', `Remedy: ${remedy}`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -210,6 +236,32 @@ async function rest(api, path, { method = 'GET', body = null } = {}, deps = {}) 
 }
 
 /**
+ * The node ids a GraphQL request needs, read before the mutation. Returns
+ * `{ variables }`, or `{ fail: { call, status, result, why } }`; never throws.
+ */
+async function graphqlVariables(req, payload, api, t) {
+  const g = req.graphql;
+  const unread = (r, what) => ({ fail: { call: r.call, status: r.status, result: 'no node id', why: `${r.call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}: ${what} could not be read` } });
+  if (g.pull !== undefined) {
+    const pr = await rest(api, `/repos/${payload.repo}/pulls/${g.pull}`, {}, t);
+    if (pr.status !== 200 || typeof pr.json?.node_id !== 'string') return unread(pr, "the pull's node id");
+    return { variables: { id: pr.json.node_id } };
+  }
+  // transferIssue: the card on THIS repository — never a pull request, never one already moved — then the target.
+  const issue = await rest(api, `/repos/${payload.repo}/issues/${g.issue}`, {}, t);
+  if (issue.status !== 200 || typeof issue.json?.node_id !== 'string') return unread(issue, "the issue's node id");
+  if (issue.json.pull_request) return { fail: { call: issue.call, status: issue.status, result: 'a pull request', why: `#${g.issue} on ${payload.repo} is a pull request — only an issue transfers` } };
+  const at = repoOfIssue(issue.json);
+  if (!at || at.toLowerCase() !== payload.repo.toLowerCase()) {
+    const there = at ? `it answers from ${at}${Number.isInteger(issue.json.number) ? ` as #${issue.json.number}` : ''} — already transferred` : 'its repository could not be read';
+    return { fail: { call: issue.call, status: issue.status, result: 'not on the source', why: `#${g.issue} no longer answers from ${payload.repo}: ${there}` } };
+  }
+  const target = await rest(api, `/repos/${g.target_repo}`, {}, t);
+  if (target.status !== 200 || typeof target.json?.node_id !== 'string') return unread(target, `the target repository ${g.target_repo}'s node id`);
+  return { variables: { issueId: issue.json.node_id, repositoryId: target.json.node_id } };
+}
+
+/**
  * The run. Returns `{ exit, rows, summary, lines }`; never throws on a status.
  *
  * @param {{ payload: unknown, sender: string, token: string, api?: string }} input
@@ -238,19 +290,25 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
     return { exit: EXIT_PREREQUISITE, rows: [], summary: summaryText({ payload, sender, rows: [], refusal: 'no sender' }), lines };
   }
 
-  // ── the sender gate ───────────────────────────────────────────────────────
-  const permPath = `/repos/${payload.repo}/collaborators/${encodeURIComponent(sender)}/permission`;
-  const perm = await rest(api, permPath, {}, t);
-  const gate = senderVerdict(perm);
-  if (gate.verdict === 'prerequisite') {
-    log(`fleet-write/execute: PREREQUISITE NOT MET — ${perm.call} -> HTTP ${perm.status}${perm.detail ? ` (${perm.detail})` : ''}; the sender's permission could not be read. ⛔ zero writes.`);
-    return { exit: EXIT_PREREQUISITE, rows: [], summary: summaryText({ payload, sender, rows: [], refusal: `the permission read answered HTTP ${perm.status}` }), lines };
+  // ── the sender gate — on EVERY repository the token reaches ───────────────
+  const reaches = tokenRepositoriesOf(payload);
+  const roles = [];
+  for (const repo of reaches) {
+    const permPath = `/repos/${repo}/collaborators/${encodeURIComponent(sender)}/permission`;
+    const perm = await rest(api, permPath, {}, t);
+    const gate = senderVerdict(perm);
+    if (gate.verdict === 'prerequisite') {
+      log(`fleet-write/execute: PREREQUISITE NOT MET — ${perm.call} -> HTTP ${perm.status}${perm.detail ? ` (${perm.detail})` : ''}; the sender's permission on ${repo} could not be read. ⛔ zero writes.`);
+      return { exit: EXIT_PREREQUISITE, rows: [], summary: summaryText({ payload, sender, rows: [], reaches, refusal: `the permission read on ${repo} answered HTTP ${perm.status}` }), lines };
+    }
+    if (gate.verdict === 'refused') {
+      log(`fleet-write/execute: SENDER REFUSED — \`${sender}\` is ${gate.role} on ${repo}; the relay writes only for a sender with write, maintain or admin on every repository the stroke reaches. ⛔ zero writes.`);
+      return { exit: EXIT_SENDER_REFUSED, rows: [], summary: summaryText({ payload, sender, role: gate.role, rows: [], reaches, refusal: `sender \`${sender}\` is ${gate.role} on ${repo === payload.repo ? 'the target' : repo}` }), lines };
+    }
+    roles.push({ repo, role: gate.role });
   }
-  if (gate.verdict === 'refused') {
-    log(`fleet-write/execute: SENDER REFUSED — \`${sender}\` is ${gate.role} on ${payload.repo}; the relay writes only for a sender with write, maintain or admin there. ⛔ zero writes.`);
-    return { exit: EXIT_SENDER_REFUSED, rows: [], summary: summaryText({ payload, sender, role: gate.role, rows: [], refusal: `sender \`${sender}\` is ${gate.role} on the target` }), lines };
-  }
-  log(`fleet-write/execute: request ${payload.request_id} · sender ${sender} (${gate.role}) · session ${payload.session} · target ${payload.repo} · ${payload.actions.length} action(s)`);
+  const role = roles.length === 1 ? roles[0].role : roles.map((r) => `${r.role} on ${r.repo}`).join(', ');
+  log(`fleet-write/execute: request ${payload.request_id} · sender ${sender} (${role}) · session ${payload.session} · target ${payload.repo}${reaches.length > 1 ? ` · the token also reaches ${reaches.slice(1).join(', ')}` : ''} · ${payload.actions.length} action(s)`);
 
   // ── the actions, in order ─────────────────────────────────────────────────
   const rows = [];
@@ -261,15 +319,15 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
     for (const req of requests) {
       let body = req.body ?? null;
       if (req.graphql) {
-        const pr = await rest(api, `/repos/${payload.repo}/pulls/${req.graphql.pull}`, {}, t);
-        if (pr.status !== 200 || typeof pr.json?.node_id !== 'string') {
-          const why = `${pr.call} -> HTTP ${pr.status}${pr.detail ? ` (${pr.detail})` : ''}: the pull's node id could not be read`;
-          rows.push({ action: i + 1, op: action.op, call: pr.call, status: pr.status, result: 'no node id' });
+        const resolved = await graphqlVariables(req, payload, api, t);
+        if (resolved.fail) {
+          const why = scrub(resolved.fail.why, [token]);
+          rows.push({ action: i + 1, op: action.op, call: resolved.fail.call, status: resolved.fail.status, result: resolved.fail.result });
           stoppedAt = { action: i + 1, op: action.op, why };
           log(`  ✗ action ${i + 1} ${action.op}: ${why}`);
           break;
         }
-        body = { query: req.graphql.query, variables: { id: pr.json.node_id } };
+        body = { query: req.graphql.query, variables: resolved.variables };
       }
       // The GraphQL leg is spelled with its literal verb: every mutation is a POST to one path.
       const r = req.graphql ? await rest(api, '/graphql', { method: 'POST', body }, t) : await rest(api, req.path, { method: req.verb, body }, t);
@@ -285,10 +343,13 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
     }
   }
   const notAttempted = stoppedAt ? payload.actions.length - stoppedAt.action : 0;
-  const summary = summaryText({ payload, sender, role: gate.role, rows, stoppedAt, notAttempted });
+  const failedAction = stoppedAt ? payload.actions[stoppedAt.action - 1] : null;
+  const remedy = failedAction && OPS[failedAction.op].secondRepo ? transferRemedy(payload.repo, failedAction[OPS[failedAction.op].secondRepo]) : null;
+  const summary = summaryText({ payload, sender, role, rows, stoppedAt, notAttempted, remedy, reaches });
   if (stoppedAt) log(`fleet-write/execute: ✗ stopped at action ${stoppedAt.action} (${stoppedAt.op}); ${notAttempted} later action(s) NOT attempted. The board holds what the rows above say landed.`);
   else log(`fleet-write/execute: ✓ ${rows.length} request(s) landed, every action done.`);
-  return { exit: stoppedAt ? EXIT_ACTION_FAILED : EXIT_OK, rows, summary, lines, role: gate.role };
+  if (remedy) log(`fleet-write/execute: remedy — ${remedy}`);
+  return { exit: stoppedAt ? EXIT_ACTION_FAILED : EXIT_OK, rows, summary, lines, role };
 }
 
 // ---------------------------------------------------------------------------
@@ -305,8 +366,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'redaction: the token reaches no summary line, log line or error': 3,
   'the wiring: both halves around every write verb, on the roster': 4,
   'the CLI: environment inputs, the payload refusal, the exit ladder': 7,
+  'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -468,6 +530,42 @@ export async function selfTest() {
       t('a pull whose node id cannot be read is a failed action with no mutation sent', [noNode.exit, noNode.seen.some((s) => s.call === 'POST /graphql')], [EXIT_ACTION_FAILED, false]);
     }
 
+    // ── the transfer ────────────────────────────────────────────────────────
+    battery('the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure');
+    {
+      const UI = 'objectstack-ai/objectui';
+      const PERM_UI = `GET /repos/${UI}/collaborators/os-support-ai/permission`;
+      const issueAt = (repo, extra = {}) => ({ status: 200, json: { number: 7, node_id: 'I_kwDO7', repository_url: `https://api.github.test/repos/${repo}`, ...extra } });
+      const landedOn = (where) => ({ data: { transferIssue: { issue: { number: 31, url: `https://github.test/${where}/issues/31`, repository: { nameWithOwner: where } } } } });
+      const happyT = {
+        ...allowed,
+        [PERM_UI]: { status: 200, json: { permission: 'write', role_name: 'maintain' } },
+        [`GET /repos/${REPO}/issues/7`]: issueAt(REPO),
+        [`GET /repos/${UI}`]: { status: 200, json: { node_id: 'R_kgDOui', full_name: UI } },
+        'POST /graphql': { status: 200, json: landedOn(UI) },
+      };
+      const move = base([{ op: 'transfer', issue: 7, target_repo: UI }]);
+      const ok = await run(move, happyT, { file: paceFile });
+      t('a transfer gates the sender on the source AND the target, reads the issue and the target, then sends ONE mutation', [ok.exit, ok.seen.map((s) => s.call)], [EXIT_OK, [PERM, PERM_UI, `GET /repos/${REPO}/issues/7`, `GET /repos/${UI}`, 'POST /graphql']], ok.logs.join(' | '));
+      t('…with both node ids as its variables, under the transferIssue query', [ok.seen[4]?.body?.variables, ok.seen[4]?.body?.query.includes('transferIssue(')], [{ issueId: 'I_kwDO7', repositoryId: 'R_kgDOui' }, true]);
+      t('…and the row reads the new number, url and repository; the summary names both repositories and both roles', [ok.rows[0]?.result, ok.summary.includes(`the token also reaches \`${UI}\``), ok.summary.includes(`write on ${REPO}, maintain on ${UI}`)], [`#31 https://github.test/${UI}/issues/31 (now on ${UI})`, true, true]);
+      const noTarget = await run(move, { ...happyT, [PERM_UI]: { status: 200, json: { permission: 'read', role_name: 'read' } } });
+      t('⛔ a sender with write on the source but not on the target is refused: exit 4, zero writes, the target named', [noTarget.exit, writes(noTarget.seen).length, noTarget.logs.some((l) => l.includes(`is read on ${UI}`))], [EXIT_SENDER_REFUSED, 0, true]);
+      const pullT = await run(move, { ...happyT, [`GET /repos/${REPO}/issues/7`]: issueAt(REPO, { pull_request: { url: 'https://api.github.test/pulls/7' } }) });
+      t('a number that is a pull request is refused before the mutation', [pullT.exit, pullT.seen.some((s) => s.call === 'POST /graphql'), pullT.rows[0]?.result], [EXIT_ACTION_FAILED, false, 'a pull request']);
+      const already = await run(move, { ...happyT, [`GET /repos/${REPO}/issues/7`]: issueAt(UI, { number: 31 }) });
+      t('a card that already answers from another repository (the platform followed its redirect) is refused before the mutation', [already.exit, already.seen.some((s) => s.call === 'POST /graphql'), already.logs.some((l) => l.includes(`it answers from ${UI} as #31 — already transferred`))], [EXIT_ACTION_FAILED, false, true]);
+      const uncovered = await run(move, { ...happyT, [`GET /repos/${UI}`]: { status: 404, json: { message: 'Not Found' } } });
+      t('a target whose node id cannot be read stops before the mutation, and the summary names the installation remedy', [uncovered.exit, uncovered.seen.some((s) => s.call === 'POST /graphql'), uncovered.summary.includes('Remedy:') && uncovered.summary.includes("objectstack-fleet App's repository access")], [EXIT_ACTION_FAILED, false, true]);
+      const denied = await run(move, { ...happyT, 'POST /graphql': { status: 200, json: { data: { transferIssue: null }, errors: [{ message: 'Resource not accessible by integration' }] } } });
+      t('a mutation the platform refuses is exit 5 with its sentence, and the remedy in the log and the summary', [denied.exit, denied.rows[0]?.result.includes('Resource not accessible by integration'), denied.logs.some((l) => l.includes('remedy —')), denied.summary.includes('Remedy:')], [EXIT_ACTION_FAILED, true, true, true]);
+      const req = OPS.transfer.requests({ op: 'transfer', issue: 7, target_repo: UI })[0];
+      t('⛔ an answer that places the card anywhere but the target is not a landing', requestLanded(req, { status: 200, json: landedOn('objectstack-ai/cloud') }).ok, false);
+      t('…nor is one that carries no issue', requestLanded(req, { status: 200, json: { data: { transferIssue: { issue: null } } } }).ok, false);
+      const plain = await run(base([{ op: 'comment', issue: 1, body: 'x' }]), { ...allowed, [`POST /repos/${REPO}/issues/1/comments`]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('a failure that is not a transfer carries no transfer remedy, and its token reached one repository only', [plain.exit, plain.summary.includes('Remedy:'), plain.summary.includes('the token also reaches')], [EXIT_ACTION_FAILED, false, false]);
+    }
+
     // ── the summary ─────────────────────────────────────────────────────────
     battery('the summary: request, sender and role, session, target, one row per request');
     {
@@ -566,7 +664,8 @@ export async function selfTest() {
   console.log(
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
-      'ops behind a node-id read, one summary row per request, and a known token that came back out of NO summary, log or error.',
+      'ops behind a node-id read, a transfer gated on both repositories and landing only on its target, one summary row per request, and a known ' +
+      'token that came back out of NO summary, log or error.',
   );
   selfTestReachedVerdict = true;
   return 0;
