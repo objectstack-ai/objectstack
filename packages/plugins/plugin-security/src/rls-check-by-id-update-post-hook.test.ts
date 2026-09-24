@@ -30,7 +30,11 @@
  *   only ever refuses MORE); the predicate update gives the same answer as
  *   its by-id twin;
  * - fail-closed: a host that never runs the installed judgement on a by-id
- *   update is refused rather than vouched for.
+ *   update is refused rather than vouched for;
+ * - one row address: a FALSY payload id beside a truthy `where.id` makes the
+ *   engine write the `where.id` row while the middleware judged the payload
+ *   id. That write used to reach the store and be refused only afterwards;
+ *   it is now refused before anything is stored.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -390,6 +394,38 @@ for (const [driverName, makeDriver] of DRIVERS) {
       );
       expect(seen, 'the judgement was installed for the by-id update').toBeTruthy();
       expect(seen?.honoured).not.toBe(true);
+    });
+  });
+
+  describe(`[#19989] one row address — ${driverName}`, () => {
+    // The engine reads a falsy payload id as no row address and writes the row
+    // a truthy `where.id` names; the middleware's by-id gates read the payload
+    // id. Measured before this change: refused with the "executed without the
+    // row-level CHECK" 403 AFTER the driver had stored the row.
+    const FALSY_IDS: Array<[string, unknown]> = [["''", ''], ['0', 0]];
+    for (const [label, falsyId] of FALSY_IDS) {
+      it(`a payload id of ${label} beside a truthy where.id is refused before anything is stored`, async () => {
+        const b = await boot(makeDriver);
+
+        const outcome = await attempt(() =>
+          b.engine.update('qa_ticket', { id: falsyId, title: 'renamed' } as never, { where: { id: 't1' }, context: CALLER } as never));
+
+        expect(outcome.ok, 'the row the gate judged is not the row the engine writes').toBe(false);
+        expect(outcome.code).toBe('PERMISSION_DENIED');
+        expect(outcome.status).toBe(403);
+        expect(outcome.developerMessage).toContain('the row this gate judged is not the row that would be stored');
+        expect(await b.table('qa_ticket', TICKET_COLUMNS), 'refused BEFORE the store, so nothing moved').toEqual(SEEDED_TICKETS);
+      });
+    }
+
+    it('⭐ control: a falsy payload id with NO where.id is still a predicate update, judged per matched row', async () => {
+      const b = await boot(makeDriver);
+
+      const outcome = await attempt(() =>
+        b.engine.update('qa_ticket', { id: '', title: 'renamed' } as never, { where: { priority: 'low' }, multi: true, context: CALLER } as never));
+
+      expect(outcome.ok, `expected the predicate update to be admitted: ${outcome.developerMessage ?? outcome.message}`).toBe(true);
+      expect((await b.table('qa_ticket', TICKET_COLUMNS)).map((r) => r.title)).toEqual(['renamed', 'renamed']);
     });
   });
 }
