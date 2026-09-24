@@ -19,6 +19,7 @@ Guard the rule on `account` being set: make it the `then` of a `conditional` rul
 with the crm_account, 'restrict' refuses the delete while they exist.
 ```
 
-- **The guard** is offered only when the cleanup empties the reference, which is the only case where it skips the rule. It applies whether the rule reads through the cleared reference or through another one. The guarded rule is still judged on every write where the reference is set.
+- **The guard** is offered only to a rule that reads through the reference the cleanup empties. Such a rule already refuses every write that leaves that reference empty (`no single related record`), so the guard only lets those writes through. The guarded rule is still judged on every write where the reference is set.
+- **A rule that reads only through another reference** is offered only `deleteBehavior`. A guard on the cleared reference would stop judging that rule on every record whose cleared reference is empty, on every insert and update.
 - **On a multi-value reference** the cleanup removes the deleted record and keeps the other members, so the guard would still run the rule. There, only `deleteBehavior` is offered.
-- **Unchanged:** a rule whose fault is in its own columns, a rule that reads through no reference, and every write that is not a delete's reference cleanup keep today's text byte for byte.
+- **Unchanged:** a rule whose fault is its own keeps today's text byte for byte. That covers a key the rule reads from `record` or `previous` directly, or through a field that is not a reference, which the record does not hold, even when the rule also reads a column of that name through a reference. So does a rule that reads through no reference, and every write that is not a delete's reference cleanup.

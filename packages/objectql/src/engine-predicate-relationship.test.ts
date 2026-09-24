@@ -568,21 +568,27 @@ describe('#20006 — a cascade reference clear refused by a traversing rule says
     expect(deal?.account).toBe('acc_1');
   });
 
+  // An ordinary insert of a deal with NO account, in a secret region.
+  async function insertAccountless(validations: unknown[], deleteBehavior?: string) {
+    const { engine } = await boot(validations);
+    if (deleteBehavior) {
+      const deal = engine.registry.getObject('crm_deal') as any;
+      engine.registry.registerObject({
+        ...deal,
+        fields: { ...deal.fields, account: { ...deal.fields.account, deleteBehavior } },
+      }, 'test-package');
+    }
+    return engine
+      .insert('crm_deal', { id: 'deal_2', name: 'E', amount: 5, region: 'reg_1' }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: any) => e?.message as string);
+  }
+
+  it('the guard gives up nothing a rule on the CLEARED reference enforced: unguarded, it refuses an account-less write anyway', async () => {
+    expect(await insertAccountless([readsCleared])).toContain('no single related record');
+    expect(await insertAccountless([guarded(readsCleared)])).toBe(null);
+  });
+
   it('keeps a rule on ANOTHER reference judged on account-less records — why the guard is not offered for it', async () => {
-    // An ordinary insert of a deal with NO account, in a secret region.
-    const insertAccountless = async (validations: unknown[], deleteBehavior?: string) => {
-      const { engine } = await boot(validations);
-      if (deleteBehavior) {
-        const deal = engine.registry.getObject('crm_deal') as any;
-        engine.registry.registerObject({
-          ...deal,
-          fields: { ...deal.fields, account: { ...deal.fields.account, deleteBehavior } },
-        }, 'test-package');
-      }
-      return engine
-        .insert('crm_deal', { id: 'deal_2', name: 'E', amount: 5, region: 'reg_1' }, { context: { isSystem: true } } as any)
-        .then(() => null, (e: any) => e?.message as string);
-    };
     // What the refusal offers — `deleteBehavior` — leaves the rule judging such a deal.
     expect(await insertAccountless([readsOther])).toBe(SECRET_MESSAGE);
     expect(await insertAccountless([readsOther], 'restrict')).toBe(SECRET_MESSAGE);

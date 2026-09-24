@@ -3578,6 +3578,53 @@ function referenceGuardRepair(field: string): string {
 }
 
 /**
+ * [#20006] Can `key` fault somewhere OTHER than a read through a reference —
+ * on a column of the rule's own object? Then a `No such key: KEY` fault on the
+ * cleanup is not attributable to the cleanup, and the generic text stands.
+ *
+ * Decided from where the predicate reads `key`, against what those places hold
+ * on this write. Each of these reads faults exactly when its holder lacks the
+ * key, so each counts only then:
+ *
+ *  - `record.KEY` — the record is made total over its DECLARED fields, so this
+ *    faults only on an undeclared key, and does so on every write;
+ *  - `record.FIELD.KEY` through a field that is not a reference, which nothing
+ *    hydrates;
+ *  - `previous.KEY` and `previous.FIELD.KEY` — the `previous` root is never
+ *    hydrated, so a read through a reference there faults on its bare id.
+ *
+ * ⛔ Not a re-evaluation with the traversals served: measured, CEL's `&&` and
+ * `||` absorb an error when the other side decides, so `record.status == 'x'
+ * && record.account.status == 'closed'` evaluates to `false` once `account`
+ * holds a row, and a counterfactual run would pin the bare fault on the
+ * traversal.
+ */
+function readsKeyOffTheTraversal(
+  source: string,
+  key: string,
+  record: Record<string, unknown>,
+  previous: Record<string, unknown> | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): boolean {
+  const lacks = (holder: unknown): boolean => !(holder && typeof holder === 'object' && key in holder);
+  const faultsOn = (
+    analysis: RelationshipTraversalAnalysis | null,
+    holder: Record<string, unknown> | undefined,
+    skipReferences: boolean,
+  ): boolean => {
+    if (!analysis) return false;
+    if (analysis.bareFields.has(key) && lacks(holder)) return true;
+    for (const [through, columns] of analysis.traversals) {
+      if (!columns.has(key) || (skipReferences && referenceTargetOf(fields?.[through]))) continue;
+      if (lacks(holder?.[through])) return true;
+    }
+    return false;
+  };
+  return faultsOn(analysisFor(source), record, true)
+    || faultsOn(analyzeRelationshipTraversals(source, 'previous'), previous, false);
+}
+
+/**
  * [#20006] The refusal a traversing rule gives when it faults on a delete's
  * reference cleanup — or `null` when this fault is not that one, and the
  * generic {@link unevaluableRuleError} text stands unchanged.
@@ -3594,43 +3641,57 @@ function referenceGuardRepair(field: string): string {
  * predicate faulted — and the machine-readable half (`code`, `constraint`) is
  * the generic one, byte for byte.
  *
- * The fault is attributed to the cleanup only when its missing key is a column
- * the rule reads THROUGH a reference: that is the read the cleanup leaves
- * unresolved. A fault anywhere else is the rule's own on every write, and keeps
- * its own text.
+ * The fault is attributed to the cleanup only when the missing key is a column
+ * the rule reads through a reference AND can fault nowhere else. A key NAME is
+ * not a location: `record.status == 'x' && record.account.status == 'closed'`
+ * on an object declaring no `status` faults on its own bare `record.status`
+ * too, and that rule is its author's to fix whatever the cleanup does — see
+ * {@link readsKeyOffTheTraversal}. Such a fault, and a fault on any other key,
+ * keeps the generic text.
  */
 function referentialClearRefusal(
   ruleName: string,
-  source: string,
+  expr: Expression,
   fault: FieldValidationError,
   record: Record<string, unknown>,
+  previous: Record<string, unknown> | undefined,
   related: RelatedRecordBinding | undefined,
   fields: Record<string, ConditionalFieldDef> | undefined,
 ): FieldValidationError | null {
   const cause = related ? referentialClearCauses.get(related) : undefined;
   const missingKey = fault.constraint?.missingKey;
-  const analysis = cause && typeof missingKey === 'string' ? analysisFor(source) : null;
+  const analysis = cause && typeof missingKey === 'string' && typeof expr.source === 'string'
+    ? analysisFor(expr.source)
+    : null;
   if (!cause || !analysis) return null;
 
   const reads: string[] = [];
-  let attributed = false;
-  for (const [through, named] of analysis.traversals) {
+  const traversed = new Set<string>();
+  let named = false;
+  for (const [through, columns] of analysis.traversals) {
     if (!referenceTargetOf(fields?.[through])) continue;
-    if (named.has(missingKey as string)) attributed = true;
-    const columns = [...named].sort().map((n) => `'${n}'`).join(', ');
-    reads.push(`${columns} through \`${through}\``);
+    traversed.add(through);
+    if (columns.has(missingKey as string)) named = true;
+    reads.push(`${[...columns].sort().map((n) => `'${n}'`).join(', ')} through \`${through}\``);
   }
-  if (!attributed) return null;
+  if (!named || readsKeyOffTheTraversal(expr.source as string, missingKey as string, record, previous, fields)) {
+    return null;
+  }
 
   const { object, id, referencingObject, field } = cause;
   const cleared = record[field];
-  // A multi-value reference keeps its other members, so the guard below would
-  // never skip the rule on it: only the delete behaviour is offered there.
+  // The guard skips the rule wherever `field` is empty, so it is offered only
+  // where that costs nothing the rule still does: when the rule reads through
+  // `field` itself, it already refuses every write that leaves `field` empty
+  // ("no single related record"). A rule reading only ANOTHER reference is
+  // still judged on those records, and a guard on `field` would stop that. A
+  // multi-value reference keeps its other members, so there the guard would
+  // not even skip the rule. Both are offered the delete behaviour alone.
   const clears = Array.isArray(cleared) ? `removes it from \`${field}\`` : `clears \`${field}\``;
   const deleteBehavior =
     ` \`deleteBehavior\` on ${referencingObject}.${field}: 'cascade' deletes those records with the ${object},`
     + ` 'restrict' refuses the delete while they exist.`;
-  const repair = cleared == null
+  const repair = cleared == null && traversed.has(field)
     ? `Guard the rule on \`${field}\` being set: ${referenceGuardRepair(field)}. Or change${deleteBehavior}`
     : `Change${deleteBehavior}`;
   return {
@@ -3689,8 +3750,8 @@ function checkPredicate(
     );
     const unevaluable = unevaluableRuleError(rule.name, field, result.error, 'predicate');
     // [#20006] Same verdict; on a delete's reference cleanup, a text that names it.
-    const onCleanup = typeof expr.source === 'string' && expr.dialect === 'cel'
-      ? referentialClearRefusal(rule.name, expr.source, unevaluable, record, related, fields)
+    const onCleanup = expr.dialect === 'cel'
+      ? referentialClearRefusal(rule.name, expr, unevaluable, record, previous, related, fields)
       : null;
     return onCleanup ?? unevaluable;
   }
