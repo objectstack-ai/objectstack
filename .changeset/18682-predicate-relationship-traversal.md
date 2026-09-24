@@ -60,9 +60,12 @@ is empty, which evaluates as `null`.
 
 A related object no organization wall scopes — no tenant column (`sys_user`
 behind a `user` field), `tenancy.enabled: false`, or `external` — is bounded by
-row as well: for a user caller, only a row the caller's own read of that object
-returns. A reference to any other row refuses the write as not readable,
-whatever that row holds.
+row as well: for any caller that is not system (a user, a public-form
+submitter, a caller with no principal), only a row the caller's own read of that
+object returns. A reference to any other row refuses the write as not readable,
+whatever that row holds. Under a walled posture (`group` or `isolated`), such a
+caller with no active organization gets no related read at all: a rule reading
+through a stored reference refuses the write as not found.
 
 ⚠️ **The accepted cost, stated plainly.** A caller can *infer* a related value
 they cannot see by observing which writes are refused. The value itself never

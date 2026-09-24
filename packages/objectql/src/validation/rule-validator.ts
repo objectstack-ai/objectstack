@@ -577,7 +577,9 @@ export type RelatedUnavailableReason =
  * ⚠️ The related row is read under SYSTEM authority — a validation rule's output
  * is a pass/fail the system enforces, not data handed to the caller. The read is
  * bounded by its PROJECTION (only the columns the predicate names, intersected
- * with the related object's declared fields). ⛔ This
+ * with the related object's declared fields) and, on a related object no
+ * organization wall scopes, by the ROWS the own read of a caller that is not
+ * system returns. ⛔ This
  * applies to validation rules alone; RLS and UI predicates are out of the
  * capability entirely.
  */
@@ -585,8 +587,8 @@ export interface RelatedFieldBinding {
   /** The object this reference field points at — named in the refusal text. */
   readonly object: string;
   /**
-   * The related row, materialised to `null` over the readable declared fields
-   * the predicate names. Present iff the row is usable.
+   * The related row, materialised to `null` over the declared fields the
+   * predicate names. Present iff the row is usable.
    */
   readonly row?: Record<string, unknown>;
   /** Why `row` is absent. Present iff `row` is absent. */
