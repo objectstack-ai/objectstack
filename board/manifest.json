@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-09-23T20:26:17.275Z",
-  "walk_phase": "history",
+  "generated_at": "2026-09-24T02:32:18.466Z",
+  "walk_phase": "incremental",
   "walk": {
     "open_set": {
       "complete": true,
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-09-23T20:23:28Z",
-      "since": "2026-09-23T14:23:59Z",
+      "cursor": "2026-09-24T02:31:10Z",
+      "since": "2026-09-23T20:23:28Z",
       "slice": 300
     },
     "history": {
@@ -20,27 +20,27 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-09-22T20:18:25Z",
-  "since_reason": "the open set is complete — the closed history resumes at 2026-09-22T20:18:25Z",
-  "next_since": "2026-09-23T20:23:28Z",
+  "since": "2026-09-23T20:23:28Z",
+  "since_reason": "incremental from the previous run's next_since (2026-09-23T20:23:28Z)",
+  "next_since": "2026-09-24T02:31:10Z",
   "resume": null,
   "counts": {
-    "issues_open": 305,
-    "issues_closed": 8278,
-    "pulls_open": 40,
-    "pulls_closed": 9202,
-    "records": 17825
+    "issues_open": 302,
+    "issues_closed": 8289,
+    "pulls_open": 43,
+    "pulls_closed": 9210,
+    "records": 17844
   },
   "board": {
     "open_issues_count": 292,
-    "open_pull_requests": 35,
-    "read_at": "2026-09-23T20:23:51.972Z"
+    "open_pull_requests": 38,
+    "read_at": "2026-09-24T02:32:17.835Z"
   },
   "count_check": {
     "verdict": "surplus",
     "reason": null,
-    "expected": 257,
-    "archived": 305,
+    "expected": 254,
+    "archived": 302,
     "shortfall": 0,
     "surplus": 48,
     "gone_ledger": 0,
@@ -51,14 +51,14 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 666,
+  "requests": 96,
   "run": {
-    "numbers_read": 411,
-    "files_written": 233,
+    "numbers_read": 57,
+    "files_written": 108,
     "walk_complete": true,
     "open_set_completed_here": false,
-    "delta_ran": true,
-    "delta_completed_here": true,
-    "delta_requests": 200
+    "delta_ran": false,
+    "delta_completed_here": false,
+    "delta_requests": 0
   }
 }

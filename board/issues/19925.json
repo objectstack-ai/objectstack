@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T20:01:42Z",
-  "updated_at": "2026-09-23T20:22:59Z",
+  "updated_at": "2026-09-23T20:57:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19925",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #15293 dev (report `5801982470`; PR #19924). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The rule this misses\n\nRuling A on #15293 (`5634034754`): a present `packages` that is not an array (`{}`, `0`, `'x'`) is malformed, not absent, and every reader refuses it. PR #19924 brings the runtime reader in line. The readers in `@objectstack/cli` were not in that ruling's designated file surface.\n\n## The sites (read by this seat on `origin/main` `beac798026`)\n\n- `packages/cli/src/utils/stack-collections.ts:99`, `packageBodies`: `if (!Array.isArray(declared) || declared.length === 0) return [];`\n- `packages/cli/src/utils/collect-docs.ts:386` (`docsPackageRefs`) and `:1054` (`bodyDocsOf`): `if (!Array.isArray(packages)) return [];`\n- `packages/cli/src/utils/collect-docs.ts:1253` (`attachPackageDocs`): `if (!Array.isArray(packages) || sets.length === 0) return packages;`\n\nFor `{}`, `0` and `'x'`, the dev measured `[]` or the same reference back. Lit controls: a well-formed entry gives `['a_acct']`, and an inlined entry refuses with `INVALID_ARTIFACT_PACKAGE_ENTRY`. ⚠️ This seat read the four guards but did not re-run the probe.\n\n## Why it matters\n\nThe same artifact is refused by the runtime (after PR #19924), by `@objectstack/core`, and by the two plugin readers. The cli readers answer \"no packages\" for it instead. That is the split #15293 exists to close: readers must not disagree about what an artifact contains. The dev measured that nothing emits the shape today (`composeStacks` and `os build` / `os validate` refuse it first), so the cheap moment to align is now.\n\n## Seam\n\n`spec:ObjectStackDefinitionSchema.packages` → `cli:packages/cli/src/utils/stack-collections.ts packageBodies` | `cli:packages/cli/src/utils/collect-docs.ts`\n\nDedupe words: `resolveStackCollection non-array packages` · `packageBodies Array.isArray fall-through` · `docsPackageRefs packages not array` · `cli INVALID_ARTIFACT_PACKAGES`"

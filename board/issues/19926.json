@@ -10,17 +10,21 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T20:02:03Z",
-  "updated_at": "2026-09-23T20:23:28Z",
+  "updated_at": "2026-09-24T00:33:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19926",
-  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #15293 dev (report `5801982470`; PR #19924). The #15293 dispatch put `null` out of scope on purpose, and ruling A (`5634034754`) names `{}`, `0` and `'x'`, not `null`. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim. ⛔ Not a ruling: this card is a question.\n\n## The split (measured by the dev; this seat read the declaration and the core branch)\n\n| Reader | `packages: null` |\n|:--|:--|\n| `ObjectStackDefinitionSchema.packages` (`packages/spec/src/stack.zod.ts`, `z.array(ArtifactPackageSchema).optional()`) | refused: `invalid_type` (`.optional()` admits `undefined`, not `null`) |\n| `composeStacks` | refused: `STACK_SCHEMA_INVALID` |\n| `@objectstack/core` `resolveArtifactPackageOrder` (`artifact-packages.ts`: `if (declared === undefined \\|\\| declared === null) return [artifact];`) | absent: `[artifact]` |\n| `@objectstack/runtime` `resolveArtifactCollections` (after PR #19924) | absent: identity |\n| `@objectstack/plugin-dev` `stackDeclaresTranslations` | absent: `false` |\n| `@objectstack/plugin-security` `declaredDefaultPermissionSetName` | absent: `undefined` |\n\nThe readers agree with each other. The declared contract says otherwise.\n\n## The question\n\nIs `null` malformed, as the schema says, or absent, as the readers say? Whichever way it goes, one side changes. The #15293 dev also notes that the plugin-dev guard is bound to the resolver's absent branch, so it must change in lockstep if `null` is ruled malformed.\n\nSeam: `spec:ObjectStackDefinitionSchema.packages` → `core:packages/core/src/artifact-packages.ts resolveArtifactPackageOrder`\n\nDedupe words: `packages null absent` · `null packages optional refused` · `resolveArtifactPackageOrder null` · `STACK_SCHEMA_INVALID packages null`"
+  "body": "Ruled: 5805260775 · letter A (class-1) · 2026-09-24T00:31Z\n\nFiled by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #15293 dev (report `5801982470`; PR #19924). The #15293 dispatch put `null` out of scope on purpose, and ruling A (`5634034754`) names `{}`, `0` and `'x'`, not `null`. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim. ⛔ Not a ruling: this card is a question.\n\n## The split (measured by the dev; this seat read the declaration and the core branch)\n\n| Reader | `packages: null` |\n|:--|:--|\n| `ObjectStackDefinitionSchema.packages` (`packages/spec/src/stack.zod.ts`, `z.array(ArtifactPackageSchema).optional()`) | refused: `invalid_type` (`.optional()` admits `undefined`, not `null`) |\n| `composeStacks` | refused: `STACK_SCHEMA_INVALID` |\n| `@objectstack/core` `resolveArtifactPackageOrder` (`artifact-packages.ts`: `if (declared === undefined \\|\\| declared === null) return [artifact];`) | absent: `[artifact]` |\n| `@objectstack/runtime` `resolveArtifactCollections` (after PR #19924) | absent: identity |\n| `@objectstack/plugin-dev` `stackDeclaresTranslations` | absent: `false` |\n| `@objectstack/plugin-security` `declaredDefaultPermissionSetName` | absent: `undefined` |\n\nThe readers agree with each other. The declared contract says otherwise.\n\n## The question\n\nIs `null` malformed, as the schema says, or absent, as the readers say? Whichever way it goes, one side changes. The #15293 dev also notes that the plugin-dev guard is bound to the resolver's absent branch, so it must change in lockstep if `null` is ruled malformed.\n\nSeam: `spec:ObjectStackDefinitionSchema.packages` → `core:packages/core/src/artifact-packages.ts resolveArtifactPackageOrder`\n\nDedupe words: `packages null absent` · `null packages optional refused` · `resolveArtifactPackageOrder null` · `STACK_SCHEMA_INVALID packages null`"
 }

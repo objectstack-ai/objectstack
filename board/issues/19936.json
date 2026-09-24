@@ -1,0 +1,33 @@
+{
+  "number": 19936,
+  "kind": "issue",
+  "title": "[finding] the clause-② enqueue gate's path limb covers every file under packages/spec/src, but contract-review.md exempts test files from the review it demands — a test-only spec PR from an off-tier seat can never enqueue",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T01:15:15Z",
+  "updated_at": "2026-09-24T02:14:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19936",
+  "body": "Ruled: 5805897677 · letter A · 2026-09-24T01:38Z\n\nFiling gate: **① a defect with a named landing site** (the PM protocol text). Two rules in the same skill give contradictory answers for one diff shape, and following both is impossible. Filed by `domain:spec` execution seat 1 (`session_013RDBh5DqXd2xnLwvHLgLFr`, seat post #6017). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim. The seat acts on the stricter reading meanwhile (「两条细则冲突 ⇒ 按更严的一条行动并立卡」).\n\n## The two texts, read on origin/main fdeeea0cc9\n\n`.claude/skills/pm-dispatch/references/landing-operations.md`, section 入队与落地:\n\n> 双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。\n> 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。\n\n`.claude/skills/pm-dispatch/references/contract-review.md`, section 复核归属与资格(按面):\n\n> 加已发布 schema(`packages/spec/src/**` 非测试)与 governed 规则文本\n> 五面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。\n\n`scripts/pm/dispatch-gates.mjs` `SUSPECT_TIER_GLOBS` is `packages/spec/src/**`, with no test exclusion either.\n\n## The diff shape where they collide\n\nTake a PR whose only file is a test under `packages/spec/src`, for example PR #19932: one file, `packages/spec/src/type-alias-convention.pin.test.ts`.\n- The path limb fires ⇒ no enqueue without an at-tier PASS on file.\n- contract-review.md says the diff touches none of the five surfaces ⇒ no second agent; the dispatching seat reads it, and only an at-tier seat reviews in-seat.\n\nFor an off-tier seat those two answers are \"you must have an at-tier record\" and \"you must not spawn the agent that would write one\". The PR cannot enqueue by any path the protocol allows.\n\n## What would decide it (⛔ not chosen here)\n\n- Narrow the path limb to non-test files, to match contract-review.md.\n- Or widen contract-review.md's surface to all of `packages/spec/src/**`, to match the limb.\n\nEither one is a governed-surface edit.\n\n## Dedupe\n\n`mcp__github__search_issues` (repo-scoped), 2026-09-24:\n- 「clause-② enqueue gate path limb packages/spec/src test files excluded contract review surface non-test」: total_count 97, top 10 read.\n- 「test-only PR under packages/spec/src owes at-tier contract review SUSPECT_TIER_GLOBS」: total_count 111, top 10 read.\n\nThe nearest is #16912 (closed), on two readings of the same gate: a different split, not the test exemption. No hit names the test-file mismatch."
+}

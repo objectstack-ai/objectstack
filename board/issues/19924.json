@@ -2,9 +2,9 @@
   "number": 19924,
   "kind": "pull_request",
   "title": "fix(runtime): refuse a non-array `packages` in resolveArtifactCollections",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
     "size/m",
     "tests",
     "tooling"
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T19:55:54Z",
-  "updated_at": "2026-09-23T20:03:58Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-09-23T22:23:05Z",
+  "closed_at": "2026-09-23T22:23:03Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-23T22:23:03Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19924",
   "body": "Fixes #15293\n\nClause-②: no\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-23T20:02Z). The dev report is on #15293 (`5801982470`); the earlier long body is in the edit history.</sub>\n\nRuling A (`5634034754`): a release artifact's `packages` that is present but is not an array (`{}`, `0`, `'x'`) is malformed, not absent, and every reader refuses it. `ObjectStackDefinitionSchema` already declares `packages: z.array(ArtifactPackageSchema).optional()`, so this narrows an accept set back to the declaration.\n\n## What changed\n\n- **runtime** (the behaviour change): `resolveArtifactCollections` used to return the artifact for any non-array `packages`. It now treats only `undefined` / `null` as absent. Anything else reaches `resolveArtifactPackageOrder`, which refuses with `INVALID_ARTIFACT_PACKAGES` (422).\n- **spec**: the rule is stated once, beside `AssembledPackageBodySchema`. The docblocks in core and the two plugin readers point at it.\n- **plugin-security**: its private guard is dropped. Dropping it is behaviour-equal on the dev's 29-input differential.\n- **plugin-dev**: its private guard is kept, and the reason is written at the site. Dropping it turns an existing pin red.\n- **Pins**: `{}`, `0` and `'x'` at all three call sites, with lit controls. Reverting the runtime line turns the three runtime pins red.\n- **changeset**: `@objectstack/runtime` patch.\n\n## Not in this PR\n\n- The `@objectstack/cli` readers still return nothing for a non-array `packages`: #19925.\n- `packages: null` is refused by the schema but read as absent by every reader: #19926.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"

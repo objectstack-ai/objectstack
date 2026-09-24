@@ -1,0 +1,31 @@
+{
+  "number": 19930,
+  "kind": "issue",
+  "title": "spec: the documented emergency rollback `OS_EAGER_SCHEMAS=1` crashes the published `@objectstack/spec/api` and `/data` entries at import, due to a filter.zod → strict-object → suggestions.zod → field.zod cycle",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T00:10:07Z",
+  "updated_at": "2026-09-24T02:08:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19930",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the out-of-scope findings of the #19101 dev (report `5805027961`, class a). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The defect\n\n`content/docs/deployment/environment-variables.mdx:30` documents `OS_EAGER_SCHEMAS=1` as \"an emergency rollback of the lazy-schema memory optimization\". With it set, the published `@objectstack/spec/api` and `@objectstack/spec/data` entries throw at import.\n\n**Measured by the #19101 dev** at `fdeeea0cc9`, after an `OS_SKIP_DTS=1` spec build:\n- `OS_EAGER_SCHEMAS=1 node -e \"require('./dist/data/index.js')\"` exits 1 with `TypeError: Cannot read properties of undefined (reading 'optional')` at `dist/data/index.js:1989` (`relatedListFilter: FilterConditionSchema.optional()`).\n- The same happens for `dist/api/index.js` and both `.mjs` files.\n- Controls: the same entries without the flag exit 0. `dist/index`, `kernel`, `ui`, `automation`, `system` and `shared` exit 0 under the flag.\n- From source, `tsx scripts/build-openapi.ts` under the flag fails with `ReferenceError: Cannot access 'FilterConditionSchema' before initialization` (`src/data/field.zod.ts:1529`, reached through the eager `lazySchema` at `:1000`).\n\n## The cycle\n\nThis seat read the imports on `origin/main` `fdeeea0cc9`; the load-order trace is the dev's:\n- `packages/spec/src/data/filter.zod.ts:4` imports `closedObject` from `../shared/strict-object`;\n- `packages/spec/src/shared/strict-object.ts:83` imports from `./suggestions.zod`;\n- `packages/spec/src/shared/suggestions.zod.ts:4` imports the `FieldType` value from `../data/field.zod`;\n- the eager `FieldSchema` factory in `field.zod.ts` then reads `FilterConditionSchema` while `filter.zod.ts` is still in its import phase.\n\nIn lazy mode, the default, the factory runs later, so nothing crashes. Only the documented rollback path breaks, and it breaks for any host whose first spec import is `/api` or `/data`.\n\n## Why it matters\n\nA rollback switch that crashes the process is worse than having none. The one time an operator reaches for it is when the lazy path is itself suspected. It also blocks #19101's option of generating `openapi.json` eagerly.\n\nSeam: `spec:lazySchema` eager branch (`src/shared/lazy-schema.ts:22`) → runtime: any host whose first spec import is `@objectstack/spec/api` or `/data`.\n\nDedupe words: `OS_EAGER_SCHEMAS crash import` · `FilterConditionSchema before initialization` · `emergency rollback eager schemas broken` · `suggestions.zod field.zod cycle` · `relatedListFilter undefined optional`"
+}

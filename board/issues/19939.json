@@ -1,0 +1,30 @@
+{
+  "number": 19939,
+  "kind": "issue",
+  "title": "[v18] retire the `{var}` template dialect in flow assignment slots: refuse at registration with per-spelling remedies (the C half of #11182 ruling D, on the v18 train)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "pm:on-hold",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T01:23:39Z",
+  "updated_at": "2026-09-24T01:23:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/19939",
+  "body": "Restart-when: closed objectstack-ai/objectstack#11182\n\nFiled by the director seat, summon #28 (续) (`session_01GLdRPcbaCBQCTvVmU6YEUY`), under ruling **batch #218 item 1 · letter D** on objectstack-ai/objectstack#11182 (record: the `Ruling:` comment on that card, maintainer 「11182 D 其他同意」). This is the carrier for the half of the ruling the maintainer put on the **v18 train**, so it is not dropped silently. ⛔ Not a claim. `pm:on-hold` by the ruling; it returns to the decision box when #11182's A leg lands (the `Restart-when:` above), for the timing ruling — ⛔ do not implement from this card without that second ruling.\n\n## What rides here (when v18 opens)\n\n1. **C — refuse the template dialect at registration.** A flow assignment / `fields.*` value written in the `{var}` template dialect is refused at registration with a per-spelling remedy, in #11060 A's loud shape: `round(x * 100) / 100` → `/ 100.0` (CEL integer division would truncate money); an absent key → a `has()` guard (CEL faults where the template gave `undefined`); `NOW()` / `TODAY()` in a text slot → the string form (the round measured that CEL yields a Timestamp and this engine has no `string(timestamp)` — a `packages/formula` sub-card if v18 needs it).\n2. **B, only where lossless.** An ADR-0087 D2 conversion for the spellings the #11182 round measured as SAME under both engines (13 of 25); the 12 DIFF spellings are ⛔ never auto-converted (a semantic rewrite is not a conversion).\n3. **HotCRM's 92 sites** migrate against this card behind HotCRM's pin (a hotcrm card at that time); this repo's 21 sites migrate in the same wave.\n\nReadings this carrier rests on: the #11182 measurement 5795796051 / 5795832575 (113 sites; 106 in `fields.*`; 13 SAME / 12 DIFF; the three DIFF classes above). ADR-0087 D2 is why B cannot ride 17.x.\n\nDedupe: `template dialect retire v18` · `{var} refuse registration remedy` · `#11182 C half`."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 19934,
+  "kind": "pull_request",
+  "title": "fix(spec): a lazySchema reference keeps its authored description in z.toJSONSchema",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T00:57:17Z",
+  "updated_at": "2026-09-24T02:12:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19934",
+  "body": "Fixes #19101\n\nClause-②: no\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-24T01:31Z; one count cut after record `5805815738`). The dev reports are on #19101 (`5805027961`, `5805539465`), and the seat ruling is `5805064236`.</sub>\n\nA schema referenced through a `lazySchema` Proxy lost its authored `.describe()` text in `z.toJSONSchema`. zod reads metadata from a registry keyed on object identity; the node it holds is the Proxy, while the description was registered on the real instance. The shipped JSON Schemas were therefore built lazily and missed those descriptions. Under `OS_EAGER_SCHEMAS=1`, where there is no Proxy, they were present.\n\n## What changed\n\n- `packages/spec/src/shared/lazy-schema.ts`: the facade's `processJSONSchema` wrapper registers the real instance's metadata on the Proxy in the registry the conversion reads. It does this once, never over an existing entry, and leaves out `id`: aliasing `id` makes zod throw \"Duplicate schema id\".\n- Measured by the dev, lazy after the fix against eager, leaf by leaf, with 0 diffs in each corpus:\n  - the `openapi.json` components gain 2 descriptions;\n  - the `os generate` IDE schema gains 445.\n\n  Only `description` moves, and eager output is unchanged.\n- Pins in `lazy-schema.test.ts`. Deleting the alias call turns 4 of them red; deleting the `id` exclusion turns the `id` pin red.\n- Changeset: `@objectstack/spec` patch.\n\n## Not in this PR\n\n- An eager run of `gen:openapi` still crashes on a `src` import cycle, and the same cycle crashes the published `/api` and `/data` entries under `OS_EAGER_SCHEMAS=1`: #19930.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}
