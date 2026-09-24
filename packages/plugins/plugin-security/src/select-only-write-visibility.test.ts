@@ -279,12 +279,23 @@ function makeEngine() {
     },
     // Both write verbs open with the PRODUCER's own dispatch predicate
     // (#4550 / #5480 / #6277), never a hand-mirrored guard.
-    async update(object: string, data: any, options?: any) {
+    //
+    // [#19989] `opCtx` is the operation the middleware chain ran on. The engine
+    // runs an installed write-image check on every update before it writes
+    // (the rows it will store, each merged with the payload), so this double
+    // does too: one that skipped it would be refused, fail-closed, by the
+    // security middleware.
+    async update(object: string, data: any, options?: any, opCtx?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);
       const rows = (tables[object] ??= []);
       const targets = dispatch.kind === 'by-id'
         ? rows.filter((r) => r.id === dispatch.id)
         : rows.filter((r) => matches(r, options?.where));
+      const seam = opCtx?.postHookWriteImageCheck;
+      if (seam) {
+        seam.honoured = true;
+        await seam.evaluate(targets.map((r) => ({ ...r, ...data })));
+      }
       for (const r of targets) Object.assign(r, data);
       return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
@@ -380,7 +391,7 @@ async function makeStack(opts: { orgScoping?: boolean } = {}): Promise<Stack> {
         await sharingMw(opCtx, async () => {
           if (opCtx.operation === 'delete') await engine.delete(opCtx.object, opCtx.options);
           else if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data);
-          else await engine.update(opCtx.object, opCtx.data, opCtx.options);
+          else await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
           reached = true;
         });
       });
