@@ -29,10 +29,17 @@
  *     on that object then matches zero rows. If other policies also applied,
  *     this one is simply dropped out of the OR and the access it was written to
  *     grant does not exist.
- *  4. **Write path (`check`, ADR-0058 D4).** `computeWriteCheckFilter` collects
- *     only the policies that declare a `check`; the same drop makes the
- *     post-image predicate the deny sentinel, `matchesFilterCondition` fails,
- *     and the write raises `PermissionDeniedError`.
+ *  4. **Write path (`check`, ADR-0058 D4).** `computeWriteCheckFilter` takes
+ *     its set from `writeCheckPolicies`, per insert / update and per caller:
+ *     the applicable policies that declare a `check` when any does (a
+ *     USING-only sibling then adds nothing), otherwise every applicable policy
+ *     with a `using`, that `using` compiled as its check. So an unlowerable
+ *     `check` always reaches this path, and an unlowerable `using` on an
+ *     `insert` / `update` / `all` policy reaches it whenever no applicable
+ *     policy for that operation declares a `check`. When nothing else in the
+ *     set compiles, the same drop makes the post-image predicate the deny
+ *     sentinel, `matchesFilterCondition` fails, and the write raises
+ *     `PermissionDeniedError`; when something else compiles, it alone decides.
  *
  * So this is not a hole — the runtime fails CLOSED, which is why it has been
  * survivable. It is a policy that reads as an authorization and behaves as a
@@ -246,6 +253,36 @@ function quote(source: string): string {
   return source.length > 200 ? `${source.slice(0, 197)}...` : source;
 }
 
+/**
+ * The INSERT half of a dropped `using`, appended to every `using` consequence
+ * below. The ADR-0058 D4 write check takes its set from `writeCheckPolicies`:
+ * when no applicable policy for the insert declares a `check`, every applicable
+ * policy's `using` is compiled as its check, so the same drop reaches the insert
+ * too. Measured through the real `SecurityPlugin` on an `insert` and an `all`
+ * policy, for all three kinds of drop (an unlowerable shape, an unresolved
+ * `current_user.*`, an undeclared column): with nothing else compiling in that
+ * set, every single-record insert is refused (403); with another applicable
+ * policy's `using` compiling, that one alone decides; with a declared `check`
+ * beside it, the declared check alone decides and this `using` takes no part.
+ */
+const USING_INSERT_CONSEQUENCE =
+  ' On an `insert` or `all` policy the same `using` is also the INSERT check whenever no applicable ' +
+  'policy for the insert declares a `check` (ADR-0058 D4): when nothing else in that set compiles, ' +
+  'every single-record insert it governs fails with `PermissionDeniedError`; when another ' +
+  "policy's `using` compiles, that one alone decides the insert.";
+
+/**
+ * Qualifies every `check` consequence below. The write check OR-combines the
+ * declared checks of all the applicable policies for the operation, so a
+ * dropped `check` is a blanket refusal only when no other declared `check` in
+ * that set compiles (measured: beside a compiling declared `check`, that one
+ * alone decided; beside a USING-only sibling, every write was refused, because
+ * a USING-only sibling takes no part once any policy declares a `check`).
+ */
+const CHECK_SET_QUALIFIER =
+  ' That holds when no other applicable policy for the operation declares a `check` that compiles; ' +
+  'when one does, that `check` alone decides and this one contributes nothing.';
+
 /** What the runtime does with a predicate it cannot compile, per clause. */
 function consequence(clause: 'using' | 'check'): string {
   const dropped =
@@ -256,11 +293,14 @@ function consequence(clause: 'using' | 'check'): string {
         'When it is the only applicable policy for that object and operation, `compileFilter` returns the ' +
         '`RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause: every select / update / ' +
         'delete on the object matches ZERO rows. When other policies also apply, this one just vanishes ' +
-        'from the OR and grants none of the access it appears to.'
+        'from the OR and grants none of the access it appears to.' +
+        USING_INSERT_CONSEQUENCE
     : dropped +
         'On the ADR-0058 D4 write path that leaves the post-image `check` as the `RLS_DENY_FILTER` ' +
-        'sentinel, which no record can satisfy: every insert / update the policy governs fails with ' +
-        '`PermissionDeniedError`. The policy reads as a write rule and behaves as a blanket refusal.';
+        'sentinel, which no record can satisfy: every single-record insert and by-id update the policy ' +
+        'governs fails with `PermissionDeniedError`. The policy reads as a write rule and behaves as a ' +
+        'blanket refusal.' +
+        CHECK_SET_QUALIFIER;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -532,11 +572,14 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
           'delete matches ZERO rows, so the object DISAPPEARS for every holder of this permission set — ' +
           'not because they were denied, but because the narrowing they were granted resolves to nothing. ' +
           'When other policies also apply, this one vanishes from the OR and grants none of the access it ' +
-          'appears to.'
+          'appears to.' +
+          USING_INSERT_CONSEQUENCE
       : dropped +
-          'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every insert / ' +
-          'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule ' +
-          'and behaves as a blanket refusal for every holder of this permission set.';
+          'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every ' +
+          'single-record insert and by-id update the policy governs fails with `PermissionDeniedError`. ' +
+          'The policy reads as a write rule and behaves as a blanket refusal for every holder of this ' +
+          'permission set.' +
+          CHECK_SET_QUALIFIER;
   }
 
   // ── The FIELD half. ONE direction, in every position and every polarity,
@@ -555,11 +598,15 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
         '`RLS_DENY_FILTER` sentinel: every select / update / delete matches ZERO rows, so the object ' +
         'DISAPPEARS for every holder of this permission set — not because they were denied, but because ' +
         'the narrowing they were granted names a column that is not there. When other policies also ' +
-        'apply, this one vanishes from the OR and grants none of the access it appears to.'
+        'apply, this one vanishes from the OR and grants none of the access it appears to.' +
+        USING_INSERT_CONSEQUENCE
     : dropped +
-        'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every insert / ' +
-        'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule ' +
-        'and behaves as a blanket refusal for every holder of this permission set. ⚠️ On a runtime older ' +
+        'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every ' +
+        'single-record insert and by-id update the policy governs fails with `PermissionDeniedError`. ' +
+        'The policy reads as a write rule and behaves as a blanket refusal for every holder of this ' +
+        'permission set.' +
+        CHECK_SET_QUALIFIER +
+        ' ⚠️ On a runtime older ' +
         'than that guard this clause failed OPEN rather than closed — the write path had no ' +
         'field-existence check at all, so a negated miss was satisfied VACUOUSLY by the post-image and ' +
         'PERMITTED exactly the writes the policy was written to refuse, on every driver. Fix the name ' +
