@@ -218,14 +218,19 @@ whichever comes first: `maxBatchSize` views buffered, or `flushIntervalMs` since
 the batch's first view. The plugin's `destroy()` drains the tail, so a clean
 shutdown does not take the last batch with it.
 
-Both degradations are reported **once per process** and never retried — a retry
-storm against an unreachable table turns a degradation into an outage:
+Neither degradation is retried — a retry storm against an unreachable table
+turns a degradation into an outage — and each is reported once, though not at the
+same granularity:
 
 - **Buffer overflow.** Past a fixed ceiling of 10,000 buffered views the
-  **oldest** are dropped and a `warn` is logged once.
-- **A failed ledger write.** The batch is lost and the failure is reported once,
-  at `error` where the host's logger provides one and at `warn` where it does
-  not — never dropped into silence.
+  **oldest** are dropped and a `warn` is logged **once per process**; later
+  overflows drop to `debug`.
+- **A failed ledger write.** The batch is lost and the failure is reported
+  **once per cause**, at `error` where the host's logger provides one and at
+  `warn` where it does not — never dropped into silence. A cause is the error's
+  `code` (every uncoded failure collapses into one bucket), so a repeat of an
+  already-reported cause drops to `debug` while a **new** cause gets its own
+  line, once.
 
 <Callout type="warn">
 **Both failures are invisible from everywhere else.** The reads themselves

@@ -20,6 +20,11 @@
 > "frontend-only" as "the registry declared an input the spec did not", not as
 > "the component accepts it". Evidence about the render path comes from
 > objectui's `public-block-binding-reach.test.tsx`; see the ADR-0082 addendum.
+>
+> **Retired (2026-09-18, maintainer ruling on #17735).** `check:react-declaration-parity`,
+> its script, test and baseline, and the `pnpm sdui:manifest` browser dump no longer
+> exist; the commands below are a record of how this audit ran, not something to
+> run. The status line on ADR-0082 decision 4 carries the ruling.
 
 **Question** (raised in review): we can't guarantee the frontend (objectui)
 components actually implement the props the backend spec protocol declares —

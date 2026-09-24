@@ -32,11 +32,12 @@
         {
           "name": "pagination",
           "type": "object",
-          "description": "Pagination config, `{ pageSize, pageSizeOptions, … }`. Its presence is what enables paging; prefer it over the deprecated flat `pageSize` / `showPagination` pair."
+          "description": "Pagination config, `{ pageSize, pageSizeOptions, … }`. Presence enables paging with the object's settings, and an explicit off wins — the deprecated flat `showPagination: false` turns paging off even beside this object, because this object declares no off switch of its own. Prefer it over the deprecated flat `pageSize` / `showPagination` pair."
         },
         {
           "name": "searchableFields",
           "type": "array",
+          "of": "string",
           "description": "Fields the toolbar search box queries. A non-empty list is what enables search — prefer it over the deprecated boolean `showSearch`, which cannot say WHICH fields to search."
         },
         {
@@ -99,7 +100,7 @@
         {
           "name": "selection",
           "type": "object",
-          "description": "Selection config, `{ type: \"none\" | \"single\" | \"multiple\" }`. The canonical spelling — the deprecated boolean/string `selectable` is only read when this is absent."
+          "description": "Selection config, `{ type: \"none\" | \"single\" | \"multiple\" }`. Presence enables selection — an object with no `type` selects multiple rows — and an explicit off wins: `type: \"none\"` turns selection off even beside a declared `bulkActions`. The canonical spelling — the deprecated boolean/string `selectable` is only read when this is absent."
         },
         {
           "name": "rowActions",
@@ -144,7 +145,13 @@
         {
           "name": "exportOptions",
           "type": "object",
-          "description": "Export config, `{ formats, maxRecords, includeHeaders, fileNamePrefix }`. Needs `operations.export` to be reachable from the toolbar."
+          "description": "Export config, `{ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }`. `streaming` (default true) picks server-side streaming vs browser-side assembly for the export — a behaviour fork, not decoration; set it to `false` to force browser-side assembly. Needs `operations.export` to be reachable from the toolbar."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -188,6 +195,14 @@
             {
               "label": "Map",
               "value": "map"
+            },
+            {
+              "label": "Chart",
+              "value": "chart"
+            },
+            {
+              "label": "Tree",
+              "value": "tree"
             }
           ]
         },
@@ -206,6 +221,12 @@
         {
           "name": "options",
           "type": "object"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -220,7 +241,8 @@
         },
         {
           "name": "fields",
-          "type": "array"
+          "type": "array",
+          "description": "Bare field names to show, in order (each looked up in the object schema; `{ name }` is tolerated). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (SimpleObjectForm in ObjectForm.tsx; buildFlatFields in flatFields.ts for the drawer/modal presentations)."
         },
         {
           "name": "mode",
@@ -369,7 +391,7 @@
         {
           "name": "initialData",
           "type": "object",
-          "description": "Alternate spelling of `initialValues` that the drawer/modal presentations read FIRST (`schema.initialData || schema.initialValues`). Prefer `initialValues` in new schemas."
+          "description": "Alternate spelling of `initialValues` that the drawer/modal presentations read FIRST — PER MEMBER (`{ ...initialValues, ...initialData }`), so a member this key says nothing about keeps its `initialValues` value. Prefer `initialValues` in new schemas."
         },
         {
           "name": "readOnly",
@@ -430,6 +452,12 @@
           "name": "mobile",
           "type": "object",
           "description": "Phone-only presentation overrides, e.g. `{ stepper: \"auto\", stepperMinFields: 8, fullscreenLongText: true }`."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -457,11 +485,18 @@
         },
         {
           "name": "fields",
-          "type": "array"
+          "type": "array",
+          "description": "Bare field names to show, in order (each looked up in the object schema; `{ name }` is tolerated). NOT the same vocabulary as `sections[].fields`, which also accepts the spec `FormFieldSchema` object (identity key `field`, e.g. `{ field: \"note\", colSpan: 2 }`) — that shape resolves to no name HERE and is silently skipped (`EmbeddableForm` passes this array straight through to `<ObjectForm>` with no `sections`, so it renders through the same `SimpleObjectForm` as `object-form` above — see its `fields` description)."
         },
         {
           "name": "allowMultiple",
           "type": "boolean"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -498,13 +533,17 @@
         },
         {
           "name": "formType",
-          "type": "string",
+          "type": "enum",
+          "enum": [
+            "simple",
+            "tabbed"
+          ],
           "description": "How the PARENT half of the form is presented. The detail grids below it are unaffected."
         },
         {
           "name": "fields",
           "type": "array",
-          "description": "Which parent fields to show, in order. Ignored when `sections` is given — sections carry their own field lists."
+          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key is also the parent pool for values, create defaults and the submitted set. Author one or the other, or list every section member here too. Members are bare field names (`{ name }` tolerated); NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
         },
         {
           "name": "title",
@@ -531,12 +570,18 @@
         {
           "name": "initialData",
           "type": "object",
-          "description": "Alternate spelling of `initialValues` the renderer also reads (MasterDetailForm.tsx:602). Prefer `initialValues` in new schemas."
+          "description": "Alternate spelling of `initialValues` the renderer also reads: the `parentSchema` memo carries both keys onto the parent form, which merges them PER MEMBER with this one winning. Prefer `initialValues` in new schemas."
         },
         {
           "name": "taxRateField",
           "type": "string",
           "description": "Name of the field ON THE CHILD object that holds each line’s tax rate. Feeds the line-items totals row; leave unset when the detail rows carry no tax."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -552,6 +597,67 @@
         {
           "name": "columns",
           "type": "array"
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Filter criteria in JSON-rules form, narrowing the records the board fetches. Lowered to `$filter` on the query."
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": "Row cap — the most records the board fetches, lowered to the query’s top-level `$top` (renderer default 100). The board renders every fetched record into a lane and offers no pagination, so this is the author’s window on the object rather than a page size. PRECEDENCE: a node-level `dataSource` binding’s own `limit` wins outright; the `pagination.pageSize` of a view that binding names fills this key only when the node leaves it unset."
+        },
+        {
+          "name": "groupBy",
+          "type": "string",
+          "description": "Record field whose value buckets cards into lanes. Its picklist options become the lanes when `columns` is absent, and a drag between lanes writes the target lane’s value back to the record. A value matching no lane lands in the trailing “Uncategorized” lane rather than disappearing."
+        },
+        {
+          "name": "cardTitle",
+          "type": "string",
+          "description": "Record field rendered as the card title. Read AHEAD of `titleField`, which is the legacy spelling of the same choice; when neither yields a value the shared record-display resolver names the card."
+        },
+        {
+          "name": "titleField",
+          "type": "string",
+          "description": "Legacy spelling of `cardTitle` — the record field rendered as the card title. `cardTitle` wins when both are authored."
+        },
+        {
+          "name": "swimlaneField",
+          "type": "string",
+          "description": "Record field that splits the board into horizontal swimlanes. When absent the board falls back to `grouping.fields[0].field`."
+        },
+        {
+          "name": "coverImageField",
+          "type": "string",
+          "description": "Record field holding a card cover image — a URL string, or a file object carrying a `url`. Any other value leaves the card without a cover."
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "description": "Inline records to render instead of fetching. Authoring it SUPPRESSES the board’s own query entirely. Members are records: the board reads `id` (or `_id`) as the card identity, the `groupBy` field’s value as the lane, the card-title field, `coverImageField`, and every `cardFields` entry. Records handed down by a parent view and a `bind` expression both take priority over it."
+        },
+        {
+          "name": "cardFields",
+          "type": "array",
+          "description": "Record field NAMES rendered as cells on each card, in the order written. Members are bare names, not entry objects. An explicit list wins over the object’s `highlightFields` role; unlike that fallback it is NOT filtered against the object definition, so a name the object no longer declares simply renders no cell. An empty array reads as omitted."
+        },
+        {
+          "name": "grouping",
+          "type": "object",
+          "description": "Only `grouping.fields[0].field` is read, and only as the FALLBACK for `swimlaneField`: it names the record field that splits the board into horizontal swimlanes when no `swimlaneField` is authored. An explicit `swimlaneField` wins. Every other position inside `grouping`, later `fields` entries included, is inert on this board."
+        },
+        {
+          "name": "conditionalFormatting",
+          "type": "array",
+          "description": "Per-card style rules, each evaluated against that card’s own record. Two member dialects are accepted: the native `{ field, operator, value, backgroundColor?, borderColor? }` and the spec CEL `{ condition, backgroundColor?, borderColor? }`. A matching rule colours that card alone. A rule comparing a relation field sees the stored foreign key rather than the expanded record."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -568,6 +674,52 @@
           "name": "calendar",
           "type": "object",
           "description": "startDateField, endDateField, titleField, colorField"
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Filter criteria in JSON-rules form, narrowing the records the calendar fetches. Lowered to `$filter` on the query."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Sort order in `[{ field, order }]` form, ordering the records the calendar fetches. Lowered to `$orderby` on the query."
+        },
+        {
+          "name": "defaultView",
+          "type": "enum",
+          "enum": [
+            "month",
+            "week",
+            "day"
+          ],
+          "description": "The grid the calendar opens on. A narrow viewport downgrades `day` to `month`; the author’s choice is otherwise honoured on first render."
+        },
+        {
+          "name": "locale",
+          "type": "string",
+          "description": "BCP-47 tag used to format the dates and times this calendar renders. A tag `Intl` refuses is dropped — the same answer as an absent key — rather than passed through to throw out of render."
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "description": "Pre-fetched records drawn as-is, IN PLACE OF the calendar’s own query — `objectName`, `filter` and `sort` are then unused and `staticData` is never reached. Each member is a RECORD, read for the fields the `calendar` config names plus its `id`; a member with no value in the start field is counted in the unscheduled area rather than dropped."
+        },
+        {
+          "name": "staticData",
+          "type": "array",
+          "description": "Inline records, read SECOND on the record-source ladder: an authored `data` wins and this key is then never reached, while `objectName` is read AFTER it, so a calendar carrying both draws these rows and issues no query. Members are records read exactly as `data`’s are."
+        },
+        {
+          "name": "loading",
+          "type": "boolean",
+          "description": "External loading state, honoured ONLY alongside an array `data`: it then replaces the calendar with its loading placeholder. On a calendar fed by `staticData` or by `objectName` it is dropped, because that calendar owns its own loading state."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -584,6 +736,12 @@
           "name": "gantt",
           "type": "object",
           "description": "startDateField, endDateField, titleField, progressField, percentageField, colorField, dependenciesField"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -604,6 +762,12 @@
             "horizontal",
             "gantt"
           ]
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -620,6 +784,28 @@
           "name": "map",
           "type": "object",
           "description": "latitudeField, longitudeField, titleField"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
+        }
+      ]
+    },
+    "object-tree": {
+      "type": "object-tree",
+      "namespace": "plugin-tree",
+      "inputs": [
+        {
+          "name": "objectName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "tree",
+          "type": "object",
+          "description": "parentField, labelField, fields, defaultExpandedDepth"
         }
       ]
     },
@@ -728,6 +914,12 @@
           "name": "drillDown",
           "type": "object",
           "description": "Click-through config that opens the records behind the number."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -758,12 +950,18 @@
           "name": "drillDown",
           "type": "object",
           "description": "Segment drill config: { enabled?, filter?, title?, target?: 'drawer' | 'dialog', columns?, maxRows? }. Present = on; {} is enough. Clicking a segment opens the underlying records filtered by the clicked category."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
     "dashboard": {
       "type": "dashboard",
-      "namespace": "view",
+      "namespace": "plugin-dashboard",
       "inputs": [
         {
           "name": "widgets",
@@ -802,7 +1000,7 @@
           "description": "Built-in date-range filter: { field?, defaultRange?, allowCustomRange? }. `defaultRange` takes the spec’s date presets plus \"custom\"; the bound field defaults to created_at."
         },
         {
-          "name": "refreshInterval",
+          "name": "refreshIntervalSeconds",
           "type": "number",
           "description": "Auto-refresh period in seconds. Zero or a negative value disables the timer, and it only runs when the host wires an onRefresh handler."
         },
@@ -889,6 +1087,12 @@
         {
           "name": "format",
           "type": "string"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -910,16 +1114,19 @@
         {
           "name": "sections",
           "type": "array",
-          "description": "Field groups rendered as the detail body, in order. Every entry is an OBJECT — `{ name?, label?, columns?, fields }` — a bare section-id string is NOT accepted (the spec retired that spelling in objectstack#5611, and the renderer reads name/label/fields off each entry, so a string entry renders no fields at all). `fields` (required) are the field names shown in this section, in order. `label` is the section heading; omit it for an untitled, borderless section. `name` is a stable snake_case identifier and the i18n anchor — the heading resolves through objects.<object>._sections.<name>.label, so a section without a name shows its authored label in every locale. `columns` (1-4) is THIS section's field-grid width; omit it and the renderer derives the width. Authoring `sections` at all makes it the only source of the detail body; omit it and the body falls back to the object's highlightFields."
+          "of": "object",
+          "description": "Field groups rendered as the detail body, in order. Every entry is an OBJECT — `{ name?, label?, columns?, fields }` — a bare section-id string is NOT accepted (the spec retired that spelling in objectstack#5611, and the renderer reads name/label/fields off each entry, so a string entry renders no fields at all). `fields` are the field names shown in this section, in order — required unless `group` supplies the members instead (the spec refuses a section carrying neither, and refuses one carrying both). `label` is the section heading; omit it for an untitled, borderless section. `name` is a stable snake_case identifier and the i18n anchor — the heading resolves through objects.<object>._sections.<name>.label, so a section without a name shows its authored label in every locale. `columns` (1-4) is THIS section's field-grid width; omit it and the renderer derives the width. Authoring `sections` at all makes it the only source of the detail body; omit it and the body falls back to the object's highlightFields. @objectstack/spec 17.3.0 declares eight more member keys on an entry, and this renderer honours all eight: `icon` (a Lucide name on the section header), `description` (sub-heading copy under the heading), `collapsible` and `defaultCollapsed` (a foldable section and its initial state), `showBorder` (force the Card wrapper on or off, overriding the heading-derived default) and `headerColor` (a header tint from the shared palette) through DetailSection, plus `group` — the ADR-0085 §5 REFERENCE form, the alternative to enumerating `fields`. `{ group: 'contact_info' }` inherits the object's `fieldGroups` entry with that key: its members (every visible field pointing at it, in declaration order) and its presentation (label, icon, description, collapse) all come from the group, so the section restates none of it and the spec refuses those keys beside `group`; `columns`, `showBorder` and `headerColor` stay yours because they are how THIS page lays the section out. A `group` naming no declared group renders nothing and is reported to the console (`@objectstack/lint` flags it as `page-section-group-unknown`). `hideEmpty` is the eighth, and it decides whether an ALL-empty section exists: it defaults to on, so a section whose fields are every one of them empty renders nothing at all — no heading, no skeleton — and `hideEmpty: false` is the spelling that keeps that heading and its label skeleton on a brand-new record. It decides ONLY the all-empty case; the empty rows of a section that still has a filled one belong to DetailSection's auto-hide heuristic plus the reader's show-empty toggle, which no authored value overrides in either polarity (objectui#7129 Q2-C), and inline-edit mode renders the section either way so its fields stay reachable. Restored under objectui#8603 (maintainer 2026-09-15) after objectui#7129 retired it on the premise, since falsified upstream, that the spec refused the key. None of the eight has a designer control yet; they are authorable in source mode only, tracked as a deferred feature."
         },
         {
           "name": "fields",
           "type": "array",
+          "of": "string",
           "description": "Explicit field list (overrides highlightFields)"
         },
         {
           "name": "hideFields",
           "type": "array",
+          "of": "string",
           "description": "Field names to omit from the body — applied to the top-level `fields` list AND to every section's `fields`. Bare field names only. Authors rarely need it: the synth pipeline fills it with the fields already shown in `record:highlights`, and hand-authored pages get the same dedup live from HighlightFieldsContext, so its purpose is suppressing a field you do not want repeated (the page H1 title field is dropped for you too). Hiding every field of a section leaves that section out entirely."
         },
         {
@@ -942,7 +1149,7 @@
           "name": "fields",
           "type": "array",
           "required": true,
-          "description": "Key fields to highlight (1-7), bare names or {name,label?,icon?,type?,readonly?}. Set readonly: true on an entry to render that chip read-only — it suppresses the inline-edit affordance and the HeaderHighlight editability gate enforces it. Use it for hook/automation-maintained columns that must not be hand-edited from the record header; marking the OBJECT field readonly instead would also strip the hook's own write-back."
+          "description": "Key fields to highlight (1-7), bare names or {name,label?,type?,readonly?}. Set readonly: true on an entry to render that chip read-only — it suppresses the inline-edit affordance and the HeaderHighlight editability gate enforces it. Use it for hook/automation-maintained columns that must not be hand-edited from the record header; marking the OBJECT field readonly instead would also strip the hook's own write-back."
         },
         {
           "name": "layout",
@@ -979,6 +1186,7 @@
         {
           "name": "columns",
           "type": "array",
+          "of": "string",
           "required": true,
           "description": "Fields to display in the related list"
         },
@@ -994,6 +1202,7 @@
         {
           "name": "filter",
           "type": "array",
+          "of": "object",
           "description": "Additional filter criteria, as spec `ViewFilterRule` entries (`[{ field, operator, value }]`). AND-combined with the parent relationship condition, never a replacement for it: it can only narrow this record's children. Also the key a per-element `dataSource` binding's composed filter lands on."
         },
         {
@@ -1007,12 +1216,19 @@
         {
           "name": "actions",
           "type": "array",
+          "of": "string",
           "description": "Action IDs available for related records"
         },
         {
           "name": "add",
           "type": "object",
           "description": "Adds an \"Add\" button that assigns EXISTING records instead of creating one — the m2m/junction case. Shape: `{ picker: { object, valueField?, labelField?, filter? }, linkField?, label? }`. `picker.object` (required) is the object whose records the dialog offers. `picker.valueField` is the field of the picked record used as the link value (default \"id\"); `picker.labelField` is the column shown in the picker rows (default \"name\", and the other columns are derived from that object's schema). With `linkField` set, selecting records CREATES rows in this list's own object as `{ [relationshipField]: parentValue, [linkField]: pickedId }` — the junction case; omit `linkField` and the picked child is RE-PARENTED instead, by setting its own `relationshipField` to this parent. `label` is the button text (default \"Add\", localizable inline). Setting `add` also enables generic link removal on rows when no host delete handler is wired. `picker.filter` restricts which records the dialog offers — a list of `{ field, operator, value }` rules in the same vocabulary as this list's own `filter`, applied as a hard constraint the user cannot widen (it never appears as an editable filter row)."
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -1029,6 +1245,7 @@
         {
           "name": "stages",
           "type": "array",
+          "of": "object",
           "description": "Explicit stage definitions [{ value, label }] (else derived from field metadata)"
         }
       ]
@@ -1059,6 +1276,12 @@
         {
           "name": "amountField",
           "type": "string"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },
@@ -1069,6 +1292,7 @@
         {
           "name": "types",
           "type": "array",
+          "of": "string",
           "description": "Allow-list of feed item types to show (comment, field_change, task, event, email, call, note, file, record_create, record_delete, approval, sharing, system). Omit for all; unrecognised entries are ignored."
         },
         {
@@ -1159,7 +1383,7 @@
         {
           "name": "feed",
           "type": "object",
-          "description": "Activity-feed config nested inside the panel — same shape as record:activity"
+          "description": "Activity-feed configuration nested inside the panel — the same shape as record:activity. The spec declares this key as RecordActivityProps (RecordChatterProps.feed), so its members are the inputs record:activity declares; see that block for what each one does."
         }
       ]
     },
@@ -1191,11 +1415,13 @@
         {
           "name": "actionNames",
           "type": "array",
+          "of": "string",
           "description": "Action names to expose, in order — resolved from the actions declared on the object. With no names (and no host-supplied actions) nothing is looked up and the bar renders its empty placeholder"
         },
         {
           "name": "requiredPermissions",
           "type": "array",
+          "of": "string",
           "description": "Hide the whole bar unless the user holds these permissions"
         },
         {
@@ -1280,8 +1506,12 @@
         },
         {
           "name": "visible",
-          "type": "string",
-          "description": "Expression gating the banner against the current record"
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Gates the banner against the current record: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope"
         },
         {
           "name": "icon",
@@ -1312,6 +1542,7 @@
         {
           "name": "items",
           "type": "array",
+          "of": "object",
           "required": true,
           "description": "Tab definitions [{ label, value?, icon?, count?, visibleWhen?, children }] — value is the stable ?tab= URL token, count auto-derives from record:related_list descendants when omitted"
         },
@@ -1375,6 +1606,7 @@
         {
           "name": "items",
           "type": "array",
+          "of": "object",
           "required": true,
           "description": "Panel definitions [{ label, icon?, collapsed?, children }] — collapsed: false opens a panel by default"
         },
@@ -1653,7 +1885,7 @@
           "type": "string"
         },
         {
-          "name": "type",
+          "name": "actionType",
           "type": "enum",
           "enum": [
             "script",
@@ -1796,7 +2028,7 @@
           "type": "string"
         },
         {
-          "name": "type",
+          "name": "actionType",
           "type": "enum",
           "enum": [
             "script",
@@ -1830,6 +2062,7 @@
     "flex": {
       "type": "flex",
       "namespace": "ui",
+      "isContainer": true,
       "inputs": [
         {
           "name": "direction",
@@ -2112,6 +2345,17 @@
         }
       ]
     },
+    "box": {
+      "type": "box",
+      "namespace": "ui",
+      "isContainer": true,
+      "inputs": [
+        {
+          "name": "className",
+          "type": "string"
+        }
+      ]
+    },
     "page:header": {
       "type": "page:header",
       "namespace": "page",
@@ -2135,7 +2379,8 @@
         {
           "name": "actions",
           "type": "array",
-          "description": "Action buttons rendered in the header, before any host-injected system actions"
+          "of": "string",
+          "description": "Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record_header nor record_more in its locations renders nowhere."
         },
         {
           "name": "breadcrumb",
@@ -2174,6 +2419,31 @@
           "name": "content",
           "type": "string",
           "required": true
+        },
+        {
+          "name": "variant",
+          "type": "enum",
+          "enum": [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "body",
+            "caption",
+            "overline"
+          ]
+        },
+        {
+          "name": "align",
+          "type": "enum",
+          "enum": [
+            "left",
+            "center",
+            "right",
+            "justify"
+          ]
         }
       ]
     },

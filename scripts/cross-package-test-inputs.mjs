@@ -1412,7 +1412,6 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/git-env.mjs',
       '.github/workflows/scaffold-e2e.yml',
       'packages/cli/src/commands/serve.ts',
-      'scripts/gen-sdui-manifest.sh',
       'scripts/publish-smoke.sh',
       'packages/cli/src/commands/init.ts',
     ],

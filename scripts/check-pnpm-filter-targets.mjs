@@ -64,9 +64,9 @@
  *
  * ## Foreign workspaces are a declared exemption, not a hole
  *
- * `scripts/build-console.sh` and `scripts/gen-sdui-manifest.sh` filter
- * `@object-ui/console`, which is not in this workspace and never will be -- they
- * run those commands inside a checkout of `objectstack-ai/objectui`. That scope
+ * `scripts/build-console.sh` filters `@object-ui/console`, which is not in this
+ * workspace and never will be -- it runs those commands inside a checkout of
+ * `objectstack-ai/objectui`. That scope
  * is declared in the resolver's `FOREIGN_SCOPES`, with the reason. A new
  * foreign scope has to be added there deliberately.
  */
