@@ -6249,8 +6249,7 @@ const step18: MigrationStep = {
         'Grep the rowLevelSecurity using and check predicates of your permission sets, and the '
         + 'condition of your sharing rules, for != or == whose other side is a list literal or a '
         + 'current_user membership set, and for the negation of such an ==, then rewrite each with in '
-        + 'or its negation. A policy that still carries the shape reads no rows and refuses every write '
-        + 'it governs, so one read under each policy finds every such predicate left. On driver-mongodb, '
+        + 'or its negation. On driver-mongodb, '
         + 'grep stored query filters for $ne with an array value and rewrite each with $nin.',
     },
     {
