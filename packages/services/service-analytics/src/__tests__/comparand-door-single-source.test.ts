@@ -153,11 +153,14 @@ const MATRIX: readonly Row[] = [
   // [#19975] One cell of this row moved AFTER the #8186 measurement, on
   // purpose: ruling 乙 (#19757) refuses a list in the equality slot, and the
   // read-scope lowering now refuses it under `$eq` instead of binding the list
-  // as one parameter (`read-scope-eq-array-refusal.test.ts`). The `where`
-  // door's `$eq` cell is not that change's and keeps its measured answer.
+  // as one parameter (`read-scope-eq-array-refusal.test.ts`).
+  // [#19888] And the `where` door's `$eq` cell, for the same ruling: the list
+  // is handed to the shared face's equality arm and refused INVALID_FILTER /
+  // 400, where it used to compile to `qty = 'al'` with `'be'` dropped in
+  // silence (`where-equality-slot-list-refusal.test.ts`).
   { label: 'array', value: ['al', 'be'],
     bindable: false, renderable: false,
-    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: OK,
+    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // A `$field` scalar comparand is SERVED on the `where` door since the
   // 2026-08-12 ruling (NativeSQLStrategy declines, the engine path runs it) and

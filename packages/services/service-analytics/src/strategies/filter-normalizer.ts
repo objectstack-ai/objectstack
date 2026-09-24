@@ -332,6 +332,20 @@
  * (`compileField`'s non-`$`-key check) and is not touched — this change makes
  * the two doors give one answer.
  *
+ * # A LIST in the equality slot is refused, never read as `IN` (#19888)
+ *
+ * Ruling 乙 on #19757 refuses a list in the equality slot — `{ f: [...] }` and
+ * `{ f: { $eq: [...] } }` — at the shared comparand-shape face, for every
+ * driver at once. This door reached that face only for the `FilterArray`
+ * spelling (inside `parseFilterAST`); the object spelling read `{ f: [...] }`
+ * as `f IN (...)`, `{ f: [] }` as the FALSE constant, `{ f: { $eq: [a, b] } }`
+ * as `f = a` with `b` dropped, and `{ f: { $eq: [] } }` as no predicate at all.
+ * {@link assertNoListInEqualitySlot} now hands each such list to the face in
+ * {@link lowerAnalyticsWhere}, so both spellings get the face's own
+ * `INVALID_FILTER` / 400 and its `$in` prescription. The remedy is
+ * `{ f: { $in: [...] } }` for "one of these values". `$ne` with a list is not
+ * this ruling's.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -344,10 +358,17 @@
  * `filter-normalizer-undefined-comparand.test.ts` for the `undefined` refusal and
  * its `null` control group (#6386), and
  * `filter-normalizer-mixed-wrapper.test.ts` for the mixed `$`/non-`$` wrapper
- * refusal and its pure-shape control groups (#6444).
+ * refusal and its pure-shape control groups (#6444), and
+ * `where-equality-slot-list-refusal.test.ts` for the equality-slot list refusal
+ * on every analytics face and its neighbouring shapes (#19888).
  */
 
-import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import {
+  assertListComparandShapes,
+  isFilterAST,
+  parseFilterAST,
+  VALID_AST_OPERATORS,
+} from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
@@ -458,8 +479,9 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
  *
  * {@link assertDefinedComparands} refuses an `undefined` before any comparand is
  * read, and it covers every call site of this function — the `$between` bounds,
- * the operator value and its array members, the bare-array `$in` and the implicit
- * `=` — so nothing can arrive here holding `undefined` any more. The refusal
+ * the operator value and its array members, and the implicit `=` (the bare-array
+ * `$in` that used to be a fifth call site is refused whole since #19888) — so
+ * nothing can arrive here holding `undefined` any more. The refusal
  * tests enumerate exactly that set of positions, which is what makes the claim
  * checkable rather than asserted.
  *
@@ -726,10 +748,13 @@ function undefinedComparandError(field: string, path: string): Error {
  *     `"profile.verified"` — the member the leaf would have carried, not the
  *     relation. (`read-scope-sql`'s twin has no such case: it refuses nested
  *     relations outright.)
- *   - a MEMBER of the bare-array implicit `$in` — `{d: [1, undefined]}`. The
- *     array itself is a legitimate comparand here, so its elements are comparands
- *     in their own right. This is the deliberate divergence from that twin, which
- *     refuses a bare array as a whole and so must not relabel it.
+ *   - [#19888] ⛔ NOT a member of a bare array — `{d: [1, undefined]}`. That
+ *     position used to be swept here, because the bare array was read as an
+ *     implicit `$in` and its elements were comparands in their own right. Ruling
+ *     乙 (#19757) refuses a list in the equality slot, so the array is now refused
+ *     as a whole by {@link assertNoListInEqualitySlot}, before this gate runs —
+ *     the list is diagnosed as the list, not by one of its members, which is the
+ *     order the shared face and the sibling twin already use.
  *   - an OPERATOR's comparand — `{d: {$gt: undefined}}`, `$eq`, `$ne`, the LIKE
  *     family, every other single-value operator;
  *   - a MEMBER of a list operator's array — `{d: {$in: [undefined]}}`, `$nin`,
@@ -774,12 +799,6 @@ function undefinedComparandError(field: string, path: string): Error {
 function assertDefinedComparands(field: string, spec: unknown): void {
   const root = `"${field}"`;
   if (spec === undefined) throw undefinedComparandError(field, root);
-  if (Array.isArray(spec)) {
-    spec.forEach((member, index) => {
-      if (member === undefined) throw undefinedComparandError(field, `${root}[${index}]`);
-    });
-    return;
-  }
   if (!isFilterObject(spec)) return;
   for (const [op, opValue] of Object.entries(spec)) {
     if (!op.startsWith('$') || op === '$null' || op === '$exists') continue;
@@ -1075,12 +1094,12 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
     return out;
   }
 
-  // Implicit equality / array → in. An empty array is the same constant its
-  // explicit `{$in: []}` spelling is — see the note at that branch.
-  if (Array.isArray(raw)) {
-    if (raw.length === 0) out.push({ kind: 'const', value: false });
-    else leaf('in', raw.map(comparand));
-  } else leaf('equals', [comparand(raw)]);
+  // Implicit equality. [#19888] Never a LIST: this arm used to read
+  // `{ field: [...] }` as `in` (and `{ field: [] }` as the FALSE constant),
+  // which ruling 乙 (#19757) refuses. {@link assertNoListInEqualitySlot} refuses
+  // it in `lowerAnalyticsWhere`, before any node is built, so only a single
+  // comparand reaches this line.
+  leaf('equals', [comparand(raw)]);
   return out;
 }
 
@@ -1344,8 +1363,8 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
 function nullGuardForFieldSpec(spec: unknown): NullGuard {
   // `{field: null}` compiles to `notSet` (`IS NULL`) — already total.
   if (spec === null) return 'none';
-  // A bare array is an implicit `$in`; an EMPTY one is the FALSE constant.
-  if (Array.isArray(spec)) return spec.length === 0 ? 'none' : 'requireValue';
+  // [#19888] No bare-array arm: a list in the equality slot is refused by
+  // `assertNoListInEqualitySlot` before this rewrite runs.
   // A scalar / Date is an implicit `=`; a NULL column fails it.
   if (typeof spec !== 'object' || spec instanceof Date) return 'requireValue';
   const entries = Object.entries(spec as Record<string, unknown>);
@@ -1488,6 +1507,92 @@ function filterArrayNotLowerableError(where: unknown[]): Error {
   );
 }
 
+// ── [#19888] A LIST in the equality slot ─────────────────────────────────────
+
+/**
+ * [#19888] Refuse every LIST in the EQUALITY slot of an object-form `where` —
+ * implicit (`{ f: [...] }`) and `$eq` (`{ f: { $eq: [...] } }`) — through the
+ * shared comparand-shape face, before any node is built.
+ *
+ * ## Why
+ *
+ * Ruling 乙 on #19757 (record 5793368540): 「an array in the implicit-equality
+ * slot is refused at the shared face, for every driver at once」. The shared
+ * face is `assertListComparandShapes` (`@objectstack/spec/data`). This door
+ * met it for the `FilterArray` spelling only, inside `parseFilterAST`; the
+ * object spelling went straight to {@link buildNode}, which read the same
+ * condition three ways, measured on a real engine before this gate:
+ *
+ *   | `where`                    | compiled to                         | rows |
+ *   |---|---|---|
+ *   | `{ f: ['a', 'b'] }`        | `f IN (a, b)`, and `{ f: { $in } }` on the engine path | membership |
+ *   | `{ f: { $eq: ['a', 'b'] } }` | `f = a` — `b` dropped in silence  | a subset of what was named |
+ *   | `{ f: { $eq: [] } }`       | no predicate at all                  | EVERY row |
+ *   | `{ f: [] }`                | the FALSE constant                   | none |
+ *
+ * while `['f', '=', ['a', 'b']]` — the same condition in the array spelling —
+ * was already refused `INVALID_FILTER` / 400 by the face. One condition, two
+ * answers on one door, and the ObjectQL path laundered the implicit list into
+ * a `$in` before the engine's own shared-face seam could see it.
+ *
+ * ## How
+ *
+ * The walk mirrors the face's traversal (`$and` / `$or` arrays, `$not`, field
+ * entries) with the SAME path seed, `where`, and hands each equality-slot list
+ * to the face as a one-entry node. That node carries nothing but the list, so
+ * only the face's equality arm can fire: this gate imports the refusal — its
+ * `INVALID_FILTER` / 400 envelope, its wording and its `$in` prescription —
+ * and none of the face's other arms (list-operator shapes, null members, null
+ * ordering comparands, `$between` bounds), which this door does not run and
+ * this ruling does not move. The object spelling therefore gets the array
+ * spelling's refusal byte for byte.
+ *
+ * One step past the face: a NESTED-RELATION object (`{ acct: { region: [...] } }`,
+ * no `$` key) is descended. The face leaves one alone, because to a driver it
+ * is a deep-equality comparand or another object's condition. Here it is
+ * neither: {@link fieldLeaves} flattens it to the dotted member `acct.region`,
+ * whose implicit-equality slot is the one the list sits in.
+ *
+ * It runs before every other gate of this module, so a list is diagnosed as
+ * the list and not by one of its members (`{ f: [1, undefined] }`), the order
+ * the face and `read-scope-sql.ts`'s twin use.
+ *
+ * ⛔ `$ne` is not judged: the ruling names equality, and `$ne` with a list is
+ * #19886's ruling A, carried on that card. The list operators keep their
+ * lists, `$in: []` / `$nin: []` included, and every scalar — `null` above all —
+ * passes exactly as before.
+ *
+ * EXPORTED for the one other face in this package that evaluates a `where`
+ * without this door: the draft-data preview (`preview-evaluator.ts`), which
+ * calls it so a drafted chart refuses what the published one refuses, rather
+ * than spelling the rule a second time.
+ */
+export function assertNoListInEqualitySlot(node: unknown, path = 'where'): void {
+  if (!isFilterObject(node)) return;
+  for (const [key, spec] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      // A non-array operand is refused by `buildNode` with its own message.
+      if (Array.isArray(spec)) {
+        spec.forEach((child, index) => assertNoListInEqualitySlot(child, `${here}[${index}]`));
+      }
+      continue;
+    }
+    if (key === '$not') {
+      assertNoListInEqualitySlot(spec, here);
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    if (Array.isArray(spec)) assertListComparandShapes({ [key]: spec }, undefined, path);
+    if (!isFilterObject(spec)) continue;
+    if (!Object.keys(spec).some((k) => k.startsWith('$'))) {
+      assertNoListInEqualitySlot(spec, here);
+      continue;
+    }
+    if (Array.isArray(spec.$eq)) assertListComparandShapes({ [key]: { $eq: spec.$eq } }, undefined, path);
+  }
+}
+
 /**
  * Lower an analytics query's `where` to the CANONICAL `FilterCondition` object,
  * before any node is built. `null` when the query carries no `where`.
@@ -1533,6 +1638,9 @@ export function lowerAnalyticsWhere(
     return condition as Record<string, unknown>;
   }
 
+  // [#19888] The object spelling meets the shared face's equality arm here, the
+  // way the array spelling met it inside `parseFilterAST` just above.
+  assertNoListInEqualitySlot(where);
   return where as Record<string, unknown>;
 }
 
