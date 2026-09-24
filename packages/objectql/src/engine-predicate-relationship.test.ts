@@ -654,6 +654,34 @@ describe('#20006 — a cascade reference clear refused by a traversing rule says
     );
   });
 
+  // When BOTH operands of `&&` / `||` fault, this CEL front end reports the
+  // RIGHT one's key — here `status`, the traversal's. The rule's own
+  // undeclared `kind` must still decide the text, whichever side it sits on.
+  it.each([
+    ['&&', "record.kind == 'x' && record.account.status == 'closed'"],
+    ['||', "record.kind == 'x' || record.account.status == 'closed'"],
+    ['previous', "previous.kind == 'x' && record.account.status == 'closed'"],
+  ])('CONTROL: an own read the record lacks keeps the text, whatever key CEL reports — %s', async (_leg, condition) => {
+    const { err } = await deleteAccount([{ ...readsCleared, condition }]);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'closed_account_frozen' could not be evaluated (runtime: No such key: status) — write rejected."
+      + " The predicate reads 'status', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
+  it('CONTROL: that rule is broken on every write — a linked deal refuses it on its own `kind`', async () => {
+    const { engine } = await boot([{ ...readsCleared, condition: "record.kind == 'x' && record.account.status == 'closed'" }]);
+    const err: any = await engine
+      .update('crm_deal', { id: 'deal_1', amount: 60 }, { context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.message).toBe(
+      "Validation rule 'closed_account_frozen' could not be evaluated (runtime: No such key: kind) — write rejected."
+      + " The predicate reads 'kind', which this object does not declare — fix the rule's condition, or declare the field.",
+    );
+  });
+
   it('CONTROL: an ordinary write keeps its text byte for byte', async () => {
     const { engine } = await boot([{
       name: 'broken', type: 'script', severity: 'error', message: 'never shown',
