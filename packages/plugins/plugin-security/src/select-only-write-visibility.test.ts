@@ -612,8 +612,11 @@ describe('[#7665] the bulk write path is scoped by the same derived visibility',
       ast: { where: {} },
     };
     const securityMw = stack.engine._middlewares[0];
+    // [#20013] `opCtx` rides along so the double runs the installed stored-row
+    // seam over the matched rows, as the engine does: the Layer 0 tenant wall
+    // installs it on this walled predicate update.
     await securityMw(opCtx, async () => {
-      await stack.engine.update(opCtx.object, opCtx.data, { ...opCtx.options, where: opCtx.ast.where, multi: true });
+      await stack.engine.update(opCtx.object, opCtx.data, { ...opCtx.options, where: opCtx.ast.where, multi: true }, opCtx);
     });
     expect(rowById(stack, 'qa_ticket', TICKET_C2.id)?.next_step).toBe('bulk-edit');
     expect(rowById(stack, 'qa_ticket', TICKET_C1.id)?.next_step, 'the unreadable row must stay untouched').toBe('call');

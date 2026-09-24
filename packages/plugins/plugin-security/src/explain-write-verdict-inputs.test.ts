@@ -172,12 +172,24 @@ function makeEngine(schema: Record<string, unknown>, rowOverrides: Partial<Recor
     // Both write verbs open with the PRODUCER's dispatch predicate (#6277), so
     // a call shape `ObjectQL` would refuse fails loudly instead of collecting
     // a green from gates that never ran.
-    async update(object: string, data: any, options?: any) {
+    //
+    // [#20013] `opCtx` is the operation the middleware chain ran on. The
+    // engine hands an installed write-image check the rows it is about to
+    // store — the by-id row, or every matched row, merged with the payload —
+    // before it writes. The Layer 0 tenant wall installs that seam on every
+    // walled update (this stack is walled), and a double that skipped it would
+    // be refused, fail-closed, by the security middleware.
+    async update(object: string, data: any, options?: any, opCtx?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);
       const rows = (tables[object] ??= []);
       const targets = dispatch.kind === 'by-id'
         ? rows.filter((r) => r.id === dispatch.id)
         : rows.filter((r) => matches(r, options?.where));
+      const seam = opCtx?.postHookWriteImageCheck;
+      if (seam) {
+        seam.honoured = true;
+        await seam.evaluate(targets.map((r) => ({ ...r, ...data })));
+      }
       for (const r of targets) Object.assign(r, data);
       return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
@@ -265,7 +277,7 @@ async function makeStack(
         await securityMw(opCtx, async () => {
           await sharingMw(opCtx, async () => {
             if (operation === 'delete') await engine.delete(opCtx.object, opCtx.options);
-            else await engine.update(opCtx.object, opCtx.data, opCtx.options);
+            else await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
             reached = true;
           });
         });
