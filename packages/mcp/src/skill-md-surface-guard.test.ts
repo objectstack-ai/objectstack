@@ -56,6 +56,11 @@ function makeFullBridge(): McpDataBridge & McpActionBridge {
     async runAction() {
       return {};
     },
+    // [#15705] Optional on the bridge, and present here so `resume_run` is on
+    // the surface this guard reads: a full host implements it.
+    async resumeRun() {
+      return {};
+    },
   };
 }
 
