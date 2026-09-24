@@ -846,7 +846,9 @@ describe('#20007 — an optional lookup guarded in a traversing rule', () => {
     const err = await insert({ id: 'o_secret', line: 'line_secret' });
     expect(err?.code).toBe('VALIDATION_FAILED');
     expect(err.fields).toHaveLength(1);
-    expect(err.fields[0]).toMatchObject({ code: 'rule_violation' });
+    // The nested rule's own verdict: a violation, not an unevaluable fault.
+    expect(err.fields[0]).toMatchObject({ field: '_record', code: 'rule_violation', message: SECRET_MESSAGE });
+    expect(err.fields[0].constraint?.reason).toBeUndefined();
     expect(err.message).toBe(SECRET_MESSAGE);
     expect(d.storeFor('qa_order').has('o_secret')).toBe(false);
     // The UPDATE door: repointing an empty order at a secret line is refused,
