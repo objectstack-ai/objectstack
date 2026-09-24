@@ -56,9 +56,14 @@
  */
 
 import type { Client, ResultSet } from '@libsql/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createTursoDriver } from './index.js';
+import { replicaFiles } from './replica-file.testkit.js';
 import { TursoDriver } from './turso-driver.js';
+
+// A replica is a local FILE: the constructor refuses one on `:memory:`.
+const files = replicaFiles();
+afterAll(() => files.removeAll());
 
 type Refusal = Error & { code?: string; status?: number };
 
@@ -261,7 +266,7 @@ describe('CONTROLS — what the refusal must leave accepted', () => {
 
   it('THE REPLICA ARM IS UNTOUCHED: client + timeout is accepted there, and sync() is still bounded', async () => {
     const driver = new TursoDriver({
-      url: ':memory:',
+      url: files.next(),
       syncUrl: PRIMARY_URL,
       authToken: 'token',
       client: stalledSyncClient(),
