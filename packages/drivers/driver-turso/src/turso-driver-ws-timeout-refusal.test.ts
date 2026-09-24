@@ -24,8 +24,10 @@
  * would satisfy. And the refusal's WIDTH, by controls that must stay accepted:
  * the same url without `timeout`; with `timeout: 0` (the documented "no
  * bound"); every HTTP-side scheme WITH a window (`libsql://`, `https://`,
- * `http://`); and the replica arm, where `sync()` is bounded whatever the url's
- * scheme. A refusal that took any of those would be wider than the gap.
+ * `http://`); and the replica arm, where `sync()` is bounded (a replica's url is
+ * a local `file:`; a remote url beside `syncUrl` is refused on other grounds,
+ * pinned in `turso-driver-remote-url-replica-refusal.test.ts`). A refusal that
+ * took any of those would be wider than the gap.
  *
  * # Reverse verification — direction predicted before it was run
  *
@@ -116,23 +118,18 @@ describe('CONTROLS — what the refusal must leave accepted', () => {
     },
   );
 
-  it('the replica arm keeps timeout whatever the url scheme — sync() is bounded there', () => {
+  it('the replica arm keeps timeout — sync() is bounded there', () => {
+    // A replica's url is a local `file:`. A `wss://` url beside `syncUrl` used to
+    // be a second case here; that pair is now refused on its own grounds (the
+    // local engine would have run on `:memory:`), and the refusal that owns it,
+    // not this one, is pinned in turso-driver-remote-url-replica-refusal.test.ts.
     const fileReplica = new TursoDriver({
-      url: ':memory:',
+      url: 'file:./data/replica.db',
       syncUrl: PRIMARY_URL,
       timeout: WINDOW_MS,
       sync: { onConnect: false },
     });
     expect(fileReplica.transportMode).toBe('replica');
     expect(fileReplica.getTursoConfig().timeout).toBe(WINDOW_MS);
-
-    const wsReplica = new TursoDriver({
-      url: WSS_URL,
-      syncUrl: PRIMARY_URL,
-      timeout: WINDOW_MS,
-      sync: { onConnect: false },
-    });
-    expect(wsReplica.transportMode).toBe('replica');
-    expect(wsReplica.getTursoConfig().timeout).toBe(WINDOW_MS);
   });
 });

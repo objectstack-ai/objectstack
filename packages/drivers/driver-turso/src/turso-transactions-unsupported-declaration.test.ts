@@ -30,9 +30,11 @@ import { TursoDriver } from './turso-driver.js';
 
 const remote = () => new TursoDriver({ url: 'libsql://probe.turso.io', authToken: 't' });
 const local = () => new TursoDriver({ url: ':memory:' });
+// A replica is a local FILE: the constructor refuses one on `:memory:`.
+// Construct-only, and Knex opens lazily, so the path is never created.
 const replica = () =>
   new TursoDriver({
-    url: ':memory:',
+    url: 'file:./data/replica.db',
     syncUrl: 'libsql://probe.turso.io',
     authToken: 't',
     sync: { onConnect: false, intervalSeconds: 0 },

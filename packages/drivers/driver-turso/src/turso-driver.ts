@@ -14,9 +14,14 @@
  *
  * The transport mode is auto-detected from the URL:
  * - `file:` or `:memory:` → local
- * - `file:` or `:memory:` + `syncUrl` → replica
+ * - `file:` + `syncUrl` → replica (an embedded replica is a local FILE)
  * - `libsql://`, `https://`, `http://`, `wss://` or `ws://` (no syncUrl) → remote
  *   (`http://` / `ws://` = plaintext, for self-hosted / local-dev endpoints)
+ *
+ * Refused at construction (`VALIDATION_ERROR` / 400), because the local engine
+ * would have run on a private `:memory:` database: a remote url beside
+ * `syncUrl` or under `mode: 'local'` / `'replica'`, and a replica whose url is
+ * not a `file:` path (`:memory:` included).
  */
 
 import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
@@ -57,8 +62,9 @@ export type TursoTransportMode = 'local' | 'replica' | 'remote';
  * Supports the following connection modes:
  * 1. **Local (Embedded):** `url: 'file:./data/local.db'`
  * 2. **In-memory (Ephemeral):** `url: ':memory:'`
- * 3. **Embedded Replica (Hybrid):** `url` (local file or `:memory:`) +
- *    `syncUrl` (remote `libsql://` / `https://` Turso endpoint)
+ * 3. **Embedded Replica (Hybrid):** `url` (a local `file:`, never `:memory:`
+ *    or a remote url, both refused at construction) + `syncUrl` (remote
+ *    `libsql://` / `https://` Turso endpoint)
  * 4. **Remote (Cloud):** `url: 'libsql://...'` — pure remote queries
  *    via @libsql/client, no local SQLite needed
  *
@@ -95,7 +101,15 @@ export interface TursoDriverConfig {
    */
   concurrency?: number;
 
-  /** Remote sync URL for embedded replica mode (`libsql://` or `https://`) */
+  /**
+   * Remote sync URL for embedded replica mode (`libsql://` or `https://`).
+   *
+   * Turns a local `file:` `url` into an embedded replica. Beside a remote
+   * `url` or `:memory:` the constructor refuses it (`VALIDATION_ERROR` / 400):
+   * there is no local file for the replica to live in, so the local engine
+   * would run on a private in-memory database. For a remote database, drop
+   * `syncUrl` and keep the remote `url`.
+   */
   syncUrl?: string;
 
   /** Sync configuration for embedded replica mode (requires `syncUrl`) */
@@ -143,8 +157,13 @@ export interface TursoDriverConfig {
    * from the URL:
    *
    * - `file:` or `:memory:` without syncUrl → `'local'`
-   * - `file:` or `:memory:` with syncUrl → `'replica'`
+   * - `file:` with syncUrl → `'replica'`
    * - `libsql://` / `https://` / `http://` / `wss://` / `ws://` without syncUrl → `'remote'`
+   *
+   * A forced `'local'` or `'replica'` still runs on the local engine, so it
+   * is refused beside a remote url (`VALIDATION_ERROR` / 400), and
+   * `'replica'` is refused on any url that is not a local `file:` path. The
+   * engine would otherwise run on a private in-memory database.
    */
   mode?: TursoTransportMode;
 
@@ -619,8 +638,10 @@ function ridesWebSocketTransport(url: string): boolean {
  * a boot that would have run unbounded fails at the one constructor every
  * loader calls (`buildTursoDriverConfig` → `new TursoDriver`).
  *
- * Scoped to REMOTE mode: on the replica arm a `wss://` url beside `syncUrl`
- * still has `sync()` bounded, so the key is not inert there. `timeout: 0` is
+ * Scoped to REMOTE mode: on the replica arm `sync()` is bounded, so the key is
+ * not inert there. (A `wss://` url never reaches that arm: a remote url beside
+ * `syncUrl` is refused on its own grounds by `localEngineDefect`, whatever
+ * `timeout` says, and a replica's url is always a local `file:`.) `timeout: 0` is
  * the documented "no bound", asks for nothing, and is not refused. A
  * caller-supplied `client` is not consulted — its transport is not the driver's
  * to know; the scheme of the `url` beside it is what decides here.
@@ -700,6 +721,171 @@ function refuseSuppliedClientTimeout(timeoutMs: number): never {
       `\`createClient({ fetch })\`. Replica mode is unaffected: there \`sync()\` is bounded whatever ` +
       `client is in use.`,
   ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
+// ── The local engine: a file, or a declared `:memory:` — never a silent one ───
+
+/**
+ * The url prefixes {@link TursoDriver.detectMode} classifies as remote — one
+ * list for the classifier and for {@link localEngineDefect}, so the refusal can
+ * never disagree with it about which urls are remote. Matched lowercase and
+ * case-sensitively, as `detectMode` always has (see
+ * {@link ridesWebSocketTransport} for why that reader does not fold case).
+ */
+const REMOTE_URL_PREFIXES = ['libsql://', 'https://', 'http://', 'wss://', 'ws://'] as const;
+
+function hasRemotePrefix(url: string): boolean {
+  return REMOTE_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+}
+
+/**
+ * Does this url name an in-memory database, by `@libsql/client`'s own reading?
+ *
+ * `@libsql/core@0.17.4` `lib-esm/config.js` expands a bare `:memory:` to
+ * `file::memory:`, and `isInMemoryConfig` then answers true for a `file` scheme
+ * whose path is `:memory:` or starts with `:memory:?`. Mirrored here so the
+ * replica refusal below covers exactly the urls the client's own embedded
+ * replica refuses.
+ */
+function namesInMemoryDatabase(url: string): boolean {
+  if (url === ':memory:') return true;
+  if (!url.startsWith('file:')) return false;
+  const path = url.slice('file:'.length);
+  return path === ':memory:' || path.startsWith(':memory:?');
+}
+
+type LocalEngineDefect = 'remote-url' | 'replica-without-file';
+
+/**
+ * Which way, if any, a LOCAL or REPLICA configuration would leave the local
+ * engine with nothing durable behind it.
+ *
+ * Both non-remote arms run every read and write through the inherited Knex +
+ * better-sqlite3 engine, which can open exactly two things:
+ * {@link TursoDriver.toKnexConfig} hands it the path of a `file:` url, or
+ * `:memory:`. Anything else reached that method's last arm, which handed it
+ * `:memory:`: a private in-memory database. The writes succeed and read back,
+ * so from outside the datasource looks healthy, and all of it is gone on
+ * restart. Measured on `main` @ `2c1011b01b`, a `create` then a `find` then a
+ * fresh driver on the same config:
+ *
+ * ```
+ * libsql:// + syncUrl (sync.onConnect: false) -> replica, knex :memory:, 1 row, 0 after restart
+ * https:// / wss:// + syncUrl (same)          -> same
+ * libsql:// + mode: 'replica' (no syncUrl)    -> replica, knex :memory:, 1 row, 0 after restart
+ * libsql:// + mode: 'local'                   -> local,   knex :memory:, 1 row, 0 after restart
+ * :memory: + syncUrl + a supplied client      -> replica, knex :memory:, 1 row, 0 after restart
+ * file: + syncUrl (control)                   -> replica, knex <the file>, 1 row, 1 after restart
+ * ```
+ *
+ * With the driver building its own client and the default `sync.onConnect`,
+ * the first two rows failed at `connect()` rather than silently, but on
+ * libsql's error, not this driver's: an http/ws client's `sync()` throws
+ * `SYNC_NOT_SUPPORTED`, and a `:memory:` url beside `syncUrl` throws
+ * `URL_INVALID` ("Embedded replica must use file for local db"). So:
+ *
+ * - `'remote-url'`: a url {@link TursoDriver.detectMode} would call remote, in
+ *   a local or replica mode. `@libsql/client@0.17.4` builds no embedded replica
+ *   for it: `lib-esm/node.js` routes `http`/`https` to its HTTP client and
+ *   `ws`/`wss` to its WebSocket client, and `syncUrl` is read by
+ *   `lib-esm/sqlite3.js` alone (a `syncUrl` grep over `http.js` and `ws.js`
+ *   returns zero, while `authToken` returns six in each: the control that
+ *   makes the zero a reading).
+ * - `'replica-without-file'`: a replica whose url is not a local file. A
+ *   replica IS a local file kept in sync with the remote; on anything else
+ *   nothing the sync brings down can reach the engine the reads go through.
+ *   The same rule as `@libsql/client`'s own `URL_INVALID` above, applied to
+ *   every url that is not a `file:` path and not only to `:memory:`.
+ *
+ * ⛔ Deliberately NOT a defect here: a LOCAL mode whose url is some other
+ * string, such as an uppercase scheme or a bare path with no `file:`. That is
+ * the auto-detect fall-through {@link ridesWebSocketTransport} records as
+ * deliberately left alone, with a published control pinning that it constructs.
+ * It reaches the same `:memory:` arm, but turning it into a refusal changes a
+ * decision this refusal does not own, so it has to be argued separately. This
+ * predicate covers a url that is remote by the classifier's own list, and a
+ * replica.
+ */
+function localEngineDefect(url: string, mode: 'local' | 'replica'): LocalEngineDefect | undefined {
+  if (hasRemotePrefix(url)) return 'remote-url';
+  if (mode === 'replica' && (!url.startsWith('file:') || namesInMemoryDatabase(url))) {
+    return 'replica-without-file';
+  }
+  return undefined;
+}
+
+/**
+ * A local or replica configuration with nothing durable behind its engine,
+ * refused at construction. See {@link localEngineDefect} for the measurement.
+ *
+ * Raised BEFORE `super()`, beside `detectMode`, like the two `timeout`
+ * refusals above: ahead of the Knex base and of any `@libsql/client`, at the
+ * one constructor every loader calls (`buildTursoDriverConfig` →
+ * `new TursoDriver`). Neither loader parses a config schema on the way in, so
+ * this is the runtime's only gate for a datasource that bypassed authoring
+ * validation.
+ *
+ * ADR-0049 enforce-or-remove, and AGENTS.md's durability rule (prefer failing
+ * to falling back): the configuration asked for a replica, or a local
+ * database, and the driver quietly delivered a scratch in-memory one. The
+ * refusal changes no wire behaviour. Re-classifying the pair as `remote`
+ * instead was rejected: that would accept a declared `syncUrl` and then ignore
+ * it, which is the same declared-but-not-enforced shape.
+ *
+ * ⛔ The url is not echoed, only its scheme: a url may carry a live
+ * `?authToken=` (see `turso-authtoken-url-channel.test.ts`), and this message
+ * reaches an operator's boot log and Studio's datasource form. ⛔ No internal
+ * issue id in the message either, for the same reason. The ids live in the
+ * comments beside it.
+ */
+function refuseNonDurableLocalEngine(
+  config: TursoDriverConfig,
+  mode: 'local' | 'replica',
+  defect: LocalEngineDefect,
+): never {
+  const arm = mode === 'replica' ? 'an embedded replica' : 'a local database';
+  const cause = config.mode ? `\`mode: '${config.mode}'\`` : '`syncUrl`';
+  let message: string;
+  if (defect === 'remote-url') {
+    const scheme = config.url.slice(0, config.url.indexOf('://') + '://'.length);
+    const toRemote = config.mode
+      ? `drop \`mode\` (a \`${scheme}\` url is detected as remote) or set \`mode: 'remote'\`` +
+        (config.syncUrl ? ', and drop `syncUrl`' : '')
+      : 'drop `syncUrl` (and `sync`): the url alone sends every read and write to it';
+    const toLocal =
+      mode === 'replica'
+        ? 'For an embedded replica, point `url` at a local file and keep the remote in `syncUrl`: ' +
+          "`url: 'file:./data/replica.db'`."
+        : "For a local database, point `url` at a file: `url: 'file:./data/app.db'`."
+    message =
+      `\`TursoDriverConfig.url\` is a remote \`${scheme}\` url, but ${cause} makes this datasource ` +
+      `${arm}, which runs every read and write through a local SQLite engine. That engine cannot open ` +
+      `a remote url, so it would run on a private in-memory database instead: writes would succeed and ` +
+      `read back, then be lost on restart, and none of them would reach the remote. ` +
+      (mode === 'replica'
+        ? '(@libsql/client builds a plain remote client for a remote url and ignores `syncUrl` beside ' +
+          'it, measured against @libsql/client 0.17.4, so there is no embedded replica to sync.) '
+        : '') +
+      `To use the remote database, ${toRemote}. ${toLocal}`;
+  } else {
+    const what = namesInMemoryDatabase(config.url)
+      ? 'names an in-memory database'
+      : 'is not a `file:` url';
+    const drop = config.mode
+      ? "`mode: 'replica'`" + (config.syncUrl ? ' and `syncUrl`' : '')
+      : '`syncUrl` (and `sync`)';
+    message =
+      `\`TursoDriverConfig.url\` ${what}, so it cannot hold an embedded replica, which ${cause} asks ` +
+      'for. A replica is a local FILE kept in sync with the remote named in `syncUrl`. Here the local ' +
+      'engine would run on a private in-memory database that no sync ever reaches: writes would ' +
+      'succeed and read back, then be lost on restart. @libsql/client refuses an in-memory embedded ' +
+      "replica itself. Point `url` at a local file (`url: 'file:./data/replica.db'` beside " +
+      `\`syncUrl\`), or drop ${drop} for a plain local database.`;
+  }
+  const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
   throw err;
@@ -868,6 +1054,14 @@ export class TursoDriver extends SqlDriver {
 
   constructor(config: TursoDriverConfig) {
     const mode = TursoDriver.detectMode(config);
+    // A local or replica engine with nothing durable behind it (a remote url,
+    // or a replica that is not a local file) is refused here, before the Knex
+    // base could open a private `:memory:` database in its place. See
+    // `localEngineDefect` for the measurement.
+    if (mode !== 'remote') {
+      const defect = localEngineDefect(config.url, mode);
+      if (defect) refuseNonDurableLocalEngine(config, mode, defect);
+    }
     // A window the WebSocket arm cannot deliver is refused here, ahead of the
     // Knex base and of any client — see `refuseWebSocketTimeout` for the
     // reading and the ruling behind it.
@@ -987,16 +1181,15 @@ export class TursoDriver extends SqlDriver {
     // queries go over the wire — otherwise the URL falls through to the
     // local-SQLite fallback below and silently writes to an ephemeral
     // in-memory DB (data never reaches the remote, lost on every restart).
-    if (
-      url.startsWith('libsql://') ||
-      url.startsWith('https://') ||
-      url.startsWith('http://') ||
-      url.startsWith('wss://') ||
-      url.startsWith('ws://')
-    ) {
-      // When both url and syncUrl are remote, @libsql/client operates in
-      // embedded replica mode with an in-memory local cache. The remote URL
-      // serves as the primary database and syncUrl configures the sync target.
+    if (hasRemotePrefix(url)) {
+      // A remote url beside `syncUrl` is still classified `replica`, because
+      // that is what the declaration asks for, and the constructor REFUSES it
+      // (`localEngineDefect`). It is not a working configuration:
+      // `@libsql/client` builds no embedded replica for a remote url. It
+      // routes the url to its HTTP or WebSocket client, which never reads
+      // `syncUrl` and throws `SYNC_NOT_SUPPORTED` from `sync()`, and the local
+      // engine could only have opened `:memory:`. An embedded replica is a
+      // `file:` url beside `syncUrl`.
       if (config.syncUrl) return 'replica';
       return 'remote';
     }
@@ -1039,7 +1232,14 @@ export class TursoDriver extends SqlDriver {
       };
     }
 
-    // Remote URL with syncUrl (replica mode) — use :memory: as local backend
+    // Reached only by a LOCAL mode whose url is neither `file:` nor `:memory:`:
+    // an uppercase or otherwise unrecognised scheme, or a bare path. A remote
+    // url in a local or replica mode, and a replica on anything but a local
+    // file, used to land here too and are now refused in the constructor
+    // (`localEngineDefect`). What still arrives gets a private in-memory
+    // database. That is the auto-detect fall-through recorded at
+    // `ridesWebSocketTransport` as deliberately left alone, and it needs its
+    // own decision; the refusal does not own it.
     return {
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },

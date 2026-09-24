@@ -56,8 +56,13 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Client } from '@libsql/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { replicaFiles } from './replica-file.testkit.js';
 import { TursoDriver } from './turso-driver';
+
+// A replica is a local FILE: the constructor refuses one on `:memory:`.
+const files = replicaFiles();
+afterAll(() => files.removeAll());
 
 /** The window the positive cases configure, and the slack the box is allowed. */
 const WINDOW_MS = 100;
@@ -212,7 +217,7 @@ describe('TursoDriverConfig.timeout — replica mode (sync)', () => {
 
   function replicaDriver(timeout: number | undefined): TursoDriver {
     return new TursoDriver({
-      url: ':memory:',
+      url: files.next(),
       syncUrl: 'libsql://primary.example.turso.io',
       authToken: 'token',
       client: stalledSyncClient(),
