@@ -136,8 +136,8 @@ async function runCommand(argv: string[]) {
   const err = await MigrateFilesToReferences.run(argv, { root: CLI_ROOT }).then(() => null, (e: unknown) => e);
   if (err !== null && !isExitSignal(err)) throw err;
   const exit = err === null ? 0 : (err as { oclif?: { exit?: number } }).oclif?.exit;
-  const json = stdout.mock.calls.map((c: unknown[]) => String(c[0])).join('');
-  const lines = log.mock.calls.map((c: unknown[]) => c.map(String).join(' '));
+  const json: string = stdout.mock.calls.map((c: unknown[]) => String(c[0])).join('');
+  const lines: string[] = log.mock.calls.map((c: unknown[]) => c.map(String).join(' '));
   return { exit, json, lines };
 }
 
