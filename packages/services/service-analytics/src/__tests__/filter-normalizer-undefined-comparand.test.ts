@@ -167,18 +167,19 @@ const MEASURED: Array<{ name: string; where: unknown; path: string; wasReadAs: s
 /**
  * Comparand positions beyond the issue's seven, measured in the same round.
  *
- * Two of them are where this gate deliberately diverges from `read-scope-sql`'s
- * twin, and in both cases because THIS module accepts the enclosing shape that
- * one refuses outright — so a "comparand is undefined" answer is the truest
- * thing to say here and would have been a mislabel there.
+ * One of them (the nested relation) is where this gate deliberately diverges
+ * from `read-scope-sql`'s twin, because THIS module accepts the enclosing shape
+ * that one refuses outright — so a "comparand is undefined" answer is the
+ * truest thing to say here and would have been a mislabel there.
+ *
+ * [#19888] There used to be a second: a member of the BARE-ARRAY implicit `$in`,
+ * `{d: [1, undefined]}` → `"d"[1]`. Ruling 乙 (#19757) refuses a list in the
+ * equality slot, so that enclosing shape is no longer accepted: the list is
+ * refused as a whole before this gate runs, as the twin always did, and the row
+ * moved to `where-equality-slot-list-refusal.test.ts` ("a list is diagnosed as
+ * the list, not by one of its members").
  */
 const BEYOND_THE_TABLE: Array<{ name: string; where: unknown; path: string; wasReadAs: string }> = [
-  {
-    name: 'a member of the BARE-ARRAY implicit $in (twin refuses the array itself)',
-    where: { d: [1, undefined] },
-    path: '"d"[1]',
-    wasReadAs: 'd in [1, null]',
-  },
   {
     name: "a $between bound — lowered to the leaf's comparand",
     where: { d: { $between: [undefined, 5] } },
@@ -294,11 +295,12 @@ const NULL_CONTROL: Array<{ name: string; where: unknown; tree: unknown }> = [
     where: { $not: { d: { $ne: null } } },
     tree: { kind: 'not', child: { kind: 'leaf', member: 'd', operator: 'set', values: [] } },
   },
-  {
-    name: '{d: [1, null]} → a bare-array $in carrying null',
-    where: { d: [1, null] },
-    tree: { kind: 'leaf', member: 'd', operator: 'in', values: [1, null] },
-  },
+  // [#19888] RE-JUDGED. A row `{d: [1, null]} → d in [1, null]` stood here: a
+  // bare-array implicit `$in` carrying null. Ruling 乙 (#19757) refuses a list in
+  // the equality slot, so that shape is refused whole (INVALID_FILTER / 400,
+  // `where-equality-slot-list-refusal.test.ts`) and is no longer an accepted
+  // position for this group to hold still. A null member of a list keeps its
+  // accepted spelling, `{$in: [null]}`, two rows above.
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
