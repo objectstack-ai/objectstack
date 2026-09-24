@@ -23,6 +23,7 @@ import { retiredKey } from '../shared/retired-key';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
+import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
 import { EndConfigSchema } from './builtin-node-config.zod';
 import { APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE } from './approval.zod';
 export const FlowNodeAction = z.enum([
@@ -157,7 +158,10 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  * `end` node has no executor and no descriptor, so the flow parse is the ONLY
  * door its config passes through — {@link parseEndNodeConfig} applies
  * {@link EndConfigSchema} to it. Every other type's `config` stays the
- * executor's to close.
+ * executor's to close. One VALUE rule reaches into an open `config` at the
+ * flow level without closing its key set (#17493): a blank string in a slot
+ * the expression ledger declares with the `predicate` role is refused by the
+ * `FlowSchema` superRefine — see the block there for its scope.
  */
 
 /**
@@ -1288,6 +1292,52 @@ export const FlowSchema = lazySchema(() => strictObject(
     });
   }
 
+  // A blank string in a ledger `predicate` slot (#17493, ruling A) —
+  // `decision`'s `config.conditions[].expression` and `screen`'s
+  // `config.fields[].visibleWhen`, the slots `FLOW_NODE_EXPRESSION_PATHS`
+  // declares with the `predicate` role. The flow parse is the first of the
+  // three doors that refuse it; `AutomationEngine.registerFlow` (which parses
+  // first) and `objectstack validate` are the other two, and all three answer
+  // with `predicateSlotRefusal` — the spec's one notion of an unauthorable
+  // predicate — so the doors cannot grow two sentences or two notions of
+  // "blank". A blank predicate is an author who meant to write a rule: the
+  // resolver used to skip it and `evaluateCondition` answered it `false`, so a
+  // `decision` branch carrying it was never taken, and the two sides agreeing
+  // was ruled no defence.
+  //
+  // Scoped on purpose, three ways:
+  //  - STRINGS only. A non-string there (the `{ dialect, source }` envelope
+  //    above all) is refused at the other two doors by the same function
+  //    (#15572) and was never ruled at this one; refusing it here would narrow
+  //    the flow parse's accept set past the ruling.
+  //  - The ledger's `predicate` role only. A `flow-template` slot's blank is
+  //    untouched (no validator implements that dialect), and so is the
+  //    structural `config.condition`, which the ledger does not list — its
+  //    blank is refused at `registerFlow` and `objectstack validate` (#17322,
+  //    #17495), and a node's open `config` still carries no parse door for it.
+  //  - A VALUE rule, never a key-set closure: the node `config` stays the open
+  //    record the header of this module describes.
+  //
+  // Walked with `collectFlowGraphs`, like the two refusals above, so a
+  // `decision` inside an ADR-0031 region body is refused here too, anchored at
+  // the path the author wrote (`nodes.1.config.body.nodes.0.config…`).
+  for (const graph of collectFlowGraphs(flow)) {
+    graph.nodes.forEach((node, index) => {
+      const type: unknown = (node as { type?: unknown } | null)?.type;
+      if (typeof type !== 'string') return;
+      for (const found of resolveFlowNodeExpressions(type, (node as { config?: unknown }).config)) {
+        if (found.entry.role !== 'predicate' || typeof found.value !== 'string') continue;
+        const refusal = predicateSlotRefusal(found.value);
+        if (!refusal) continue;
+        ctx.addIssue({
+          code: 'custom',
+          path: [...graph.path, 'nodes', index, 'config', ...ledgerPathSegments(found.path)],
+          message: refusal.message,
+        });
+      }
+    });
+  }
+
   // Edges (#14964): every reader of `edges[].id` assumes the ids are unique —
   // a designer, a BPMN export, a flow diff, any traversal that dedupes by id —
   // while nothing enforced it: two edges carrying one id parsed, shipped
@@ -1312,6 +1362,25 @@ export const FlowSchema = lazySchema(() => strictObject(
     });
   });
 }));
+
+/**
+ * A ledger path as the resolver fills it in (`conditions[0].expression`,
+ * `fields[2].visibleWhen`) → the Zod issue path segments it names
+ * (`['conditions', 0, 'expression']`), so a flow-parse refusal of a ledger
+ * slot (#17493) is anchored where the author wrote the value, the address
+ * `formatZodError` prints for any other node key. A hoisted `function` for the
+ * same reason {@link flowNodeObject} is one.
+ */
+function ledgerPathSegments(path: string): (string | number)[] {
+  const segments: (string | number)[] = [];
+  for (const part of path.split('.')) {
+    const bracket = part.indexOf('[');
+    segments.push(bracket === -1 ? part : part.slice(0, bracket));
+    if (bracket === -1) continue;
+    for (const index of part.slice(bracket).matchAll(/\[(\d+)\]/g)) segments.push(Number(index[1]));
+  }
+  return segments;
+}
 
 /**
  * Type-safe factory for creating flow definitions.
