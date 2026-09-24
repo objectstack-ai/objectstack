@@ -17,9 +17,9 @@
  * ```
  * LIBSQL://… (no mode)            -> local, 1 row, 0 after restart
  * FILE:<tmp>/upper.db (no mode)   -> local, 1 row, 0 after restart, file never created
- * ./data/app.db (no mode)         -> local, 1 row, 0 after restart, file never created
+ * ./<dir>/app.db (no mode)        -> local, 1 row, 0 after restart, file never created
  * <tmp>/bare.db (no mode)         -> local, 1 row, 0 after restart, file never created
- * ./data/app.db + mode: 'local'   -> local, 1 row, 0 after restart, file never created
+ * ./<dir>/app.db + mode: 'local'  -> local, 1 row, 0 after restart, file never created
  * file:<tmp>/ctl.db (CONTROL)     -> local, 1 row, 1 after restart, file created
  * ```
  *

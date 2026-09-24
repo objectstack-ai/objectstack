@@ -11,8 +11,9 @@ Clause-②: no (narrowing)
 ```
 LIBSQL://… (no mode)                -> local, 1 row back, 0 rows after restart
 FILE:<path> (no mode)               -> local, 1 row back, 0 rows after restart, file never created
-./data/app.db (no mode)             -> local, 1 row back, 0 rows after restart, file never created
-./data/app.db + mode: 'local'       -> local, 1 row back, 0 rows after restart, file never created
+./<dir>/app.db (no mode)            -> local, 1 row back, 0 rows after restart, file never created
+<tmp>/app.db (no mode)              -> local, 1 row back, 0 rows after restart, file never created
+./<dir>/app.db + mode: 'local'      -> local, 1 row back, 0 rows after restart, file never created
 file:<path> (unchanged)             -> local, 1 row back, 1 row after restart
 ```
 

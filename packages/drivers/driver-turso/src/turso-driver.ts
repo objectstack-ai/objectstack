@@ -828,13 +828,16 @@ type LocalEngineDefect = 'remote-url' | 'unrecognised-url' | 'in-memory-replica'
  *   scheme. With no `mode`, {@link TursoDriver.detectMode} used to answer
  *   `'local'` for it, matching remote schemes case-sensitively too, so an
  *   uppercase `LIBSQL://` landed here as well; a forced `mode: 'local'` sent it
- *   the same way. Measured on `main` @ `a7581b326`, same probe:
+ *   the same way (an uppercase `FILE:` too). Measured on `main` @ `a7581b326`,
+ *   same probe:
  *
  *   ```
- *   LIBSQL://… (no mode)            -> local, knex :memory:, 1 row, 0 after restart
- *   ./data/app.db (no mode)         -> local, knex :memory:, 1 row, 0 after restart, no file
- *   ./data/app.db + mode: 'local'   -> local, knex :memory:, 1 row, 0 after restart, no file
- *   file:./data/app.db (control)    -> local, knex <the file>, 1 row, 1 after restart
+ *   LIBSQL://… (no mode)             -> local, 1 row, 0 after restart
+ *   FILE:<tmp>/x.db (no mode)        -> local, 1 row, 0 after restart, file never created
+ *   ./<dir>/app.db (no mode)         -> local, 1 row, 0 after restart, file never created
+ *   <tmp>/app.db (no mode)           -> local, 1 row, 0 after restart, file never created
+ *   ./<dir>/app.db + mode: 'local'   -> local, 1 row, 0 after restart, file never created
+ *   file:<tmp>/x.db (control)        -> local, 1 row, 1 after restart, file created
  *   ```
  *
  *   The scheme is now matched in any letter case (see {@link startsWithScheme}),
