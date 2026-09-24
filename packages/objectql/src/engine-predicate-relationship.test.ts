@@ -589,6 +589,22 @@ describe('#20006 — a cascade reference clear refused by a traversing rule says
     expect(d.storeFor('crm_deal').has('deal_1')).toBe(false);
   });
 
+  it("REFUSES the delete up front when the reference's deleteBehavior is 'restrict' — as the refusal says", async () => {
+    const { engine, d } = await boot([readsCleared]);
+    const deal = engine.registry.getObject('crm_deal') as any;
+    engine.registry.registerObject({
+      ...deal,
+      fields: { ...deal.fields, account: { ...deal.fields.account, deleteBehavior: 'restrict' } },
+    }, 'test-package');
+    const err: any = await engine
+      .delete('crm_account', { where: { id: 'acc_1' }, context: { isSystem: true } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err?.code).toBe('DELETE_RESTRICTED');
+    expect(err?.status).toBe(409);
+    expect(d.storeFor('crm_account').has('acc_1')).toBe(true);
+    expect(d.storeFor('crm_deal').get('deal_1')?.account).toBe('acc_1');
+  });
+
   it('CONTROL: a rule that traverses nothing keeps its text byte for byte on the same clear', async () => {
     const { err } = await deleteAccount([{
       name: 'broken', type: 'script', severity: 'error', message: 'never shown',

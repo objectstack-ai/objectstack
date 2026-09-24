@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   collectPredicateRelationships,
   evaluateValidationRules,
+  referentialClearBinding,
 } from './rule-validator.js';
 import { ValidationError } from './record-validator.js';
 
@@ -335,5 +336,74 @@ describe('#18682 — a binding is used only for the record its foreign key names
       const detail = JSON.stringify((e as unknown as { errors?: unknown }).errors ?? (e as Error).message);
       expect(detail).toContain('the related record was not found');
     }
+  });
+});
+
+// [#20006] The evaluator half of a delete's reference cleanup. The engine hands
+// the cleanup an EMPTY binding that remembers the delete and the reference it
+// clears (end to end in `engine-predicate-relationship.test.ts`); these pin what
+// the evaluator does with it, arm by arm.
+describe('#20006 — the reference-cleanup binding changes a text, never a verdict', () => {
+  const deal = {
+    fields: {
+      amount: { type: 'number' },
+      account: { type: 'lookup', reference: 'crm_account' },
+      accounts: { type: 'lookup', reference: 'crm_account', multiple: true },
+      region: { type: 'lookup', reference: 'crm_region' },
+    },
+  };
+  const cleanupOf = (field: string) => referentialClearBinding({
+    object: 'crm_account', id: 'acc_1', referencingObject: 'crm_deal', field,
+  });
+  /** The refusal message, or `null` when the write is accepted. */
+  const refusal = (condition: string, data: Record<string, unknown>, field: string): string | null => {
+    try {
+      evaluateValidationRules(
+        { ...deal, validations: [{ name: 'r', type: 'script', severity: 'error', message: 'fired', condition }] } as any,
+        data, 'update', { previous: { id: 'deal_1', ...data }, related: cleanupOf(field) },
+      );
+      return null;
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      return (e as Error).message;
+    }
+  };
+
+  it('offers the guard only where it skips the rule: a single reference the cleanup EMPTIES', () => {
+    const message = refusal("record.region.kind == 'secret'", { account: null, region: 'reg_1' }, 'account');
+    expect(message).toContain('Cannot delete crm_account (acc_1): the delete clears `account`');
+    expect(message).toContain('`when` is `record.account != null`');
+  });
+
+  it('offers only deleteBehavior on a multi-value reference, where the guard would still run the rule', () => {
+    const message = refusal("record.region.kind == 'secret'", { accounts: ['acc_2'], region: 'reg_1' }, 'accounts');
+    expect(message).toContain('the delete removes it from `accounts`');
+    expect(message).toContain('`deleteBehavior` on crm_deal.accounts');
+    expect(message).not.toContain('conditional');
+  });
+
+  it("keeps the generic text for a fault in the rule's OWN columns — broken on every write, not by the cleanup", () => {
+    // The ternary's condition is evaluated first, so the fault is `nope`, not the traversal.
+    const message = refusal("record.nope == 1 ? record.region.kind == 'secret' : false", { account: null, region: 'reg_1' }, 'account');
+    expect(message).toMatch(/^Validation rule 'r' could not be evaluated \(runtime: No such key: nope\)/);
+    expect(message).not.toContain('Cannot delete');
+  });
+
+  it('decides nothing: a rule with a verdict that reads through no resolved record keeps it', () => {
+    expect(refusal("record.amount > 100 && record.region.kind == 'secret'", { amount: 5, account: null, region: 'reg_1' }, 'account'))
+      .toBe(null);
+    expect(refusal("record.amount > 100 && record.region.kind == 'secret'", { amount: 500, account: null, region: 'reg_1' }, 'account'))
+      .toContain('Cannot delete crm_account (acc_1)');
+  });
+
+  it('CONTROL: a plain empty binding carries no cleanup — the generic text', () => {
+    let message = '';
+    try {
+      evaluateValidationRules(
+        { ...deal, validations: [{ name: 'r', type: 'script', severity: 'error', message: 'fired', condition: "record.region.kind == 'secret'" }] } as any,
+        { account: null, region: 'reg_1' }, 'update', { previous: { id: 'deal_1' }, related: {} },
+      );
+    } catch (e) { message = (e as Error).message; }
+    expect(message).toMatch(/^Validation rule 'r' could not be evaluated \(runtime: No such key: kind\)/);
   });
 });
