@@ -769,8 +769,8 @@ function withoutKeys(
 /**
  * [#19911] Which judged keys the conditional strip drops — so that a value
  * another lock in the same strip takes back out can never unlock a lock, and,
- * where one release step can settle it, no key is dropped that is unlocked on
- * the row the write stores.
+ * [#19927] wherever the locks' reads of one another form no cycle, no key is
+ * dropped that is unlocked on the row the write stores.
  *
  * ## Why one pass was not enough
  *
@@ -786,12 +786,13 @@ function withoutKeys(
  * against a `'closed'` the row never took. `stored` (#19887) closed the static
  * strip's twin of both; this is the conditional strip's own.
  *
- * ## The rule: never open a lock, then agree with the stored row where one step can
+ * ## The rule: never open a lock, then agree with the stored row
  *
  * A key is judged with its OWN incoming value (a lock that reads its own field
  * judges the write) and every OTHER dropped key reverted to the prior row's
  * value. A drop set is EXACT when every key it drops is locked, and every key
- * it keeps is unlocked, on that view. Reached in two steps:
+ * it keeps is unlocked, on that view: judging every key against an exact set
+ * gives back the set itself. Reached in two steps:
  *
  *  ① A monotone fixpoint. Judge every key; drop the ones that lock; re-judge
  *    the rest with those reverted; repeat until a pass locks nothing new.
@@ -799,23 +800,47 @@ function withoutKeys(
  *    keeps is unlocked on the row it stores: it never opens a lock. Its first
  *    pass IS the single pass it replaced, so a write whose drops move no
  *    other lock's verdict is judged exactly as before.
- *  ② An exact release. A key ① dropped but that is unlocked on ①'s row was
+ *  ② A release iteration. A key ① dropped but that is unlocked on ①'s row was
  *    locked by a value a later pass reverted. Every such key is released at
- *    once, and the result is kept only if it is exact; otherwise ①'s answer
- *    stands.
+ *    once; then every key is judged against that set, the keys that lock are
+ *    the next set, and so on until a set gives back itself. That set is exact
+ *    and is the answer. After n + 1 sets (n keys judged) the iteration stops,
+ *    and ①'s answer stands.
  *
- * ① alone is guaranteed; ② is one step, not a search. When it does not settle
- * the set, ①'s larger drop set stands, so a key whose own lock is FALSE on
- * the stored row can still be dropped — the fail-safe direction, where a lock
- * that cannot be settled is not waived (#4889's frozen lines depend on that).
- * Two shapes, measured:
- *  - a CYCLE has no exact set at all — `a` locked by `record.b == 'x'`, `b` by
- *    `record.a == 'old'`, a write setting both;
- *  - a CASCADE can have one that ② misses (#19927) — `c` locked by
- *    `previous.c == 'L'`, `x` by `record.c == 'open'`, `y` by `record.x ==
- *    'xv'`, a write setting all three on a row with `c: 'L'`. The exact set is
- *    `{c, y}`, but releasing `x` moves `y`'s verdict, so the release fails its
- *    check and `{c, x, y}` stands, as it did before this function existed.
+ * What that guarantees:
+ *  - No lock opens. The answer is ①'s set, or a set that gave back itself,
+ *    which is exact; both keep only keys unlocked on the row they store.
+ *  - Without a cycle the exact set is unique, and ② reaches it. A key's
+ *    verdict then depends only on the keys its `record` reads name, so after
+ *    t sets every key at depth below t in that read graph holds its final
+ *    verdict: the n-th set is exact and the (n + 1)-th gives it back. The
+ *    #19927 cascade — `c` locked by `previous.c == 'L'`, `x` by `record.c ==
+ *    'open'`, `y` by `record.x == 'xv'`, a write setting all three on a row
+ *    with `c: 'L'` — releases `x` and `y` to `{c}`, locks `y` again in the
+ *    second set `{c, y}`, and the third gives that back: its exact set, where
+ *    the single release step this replaced stopped at `{c}`'s failed check.
+ *  - A cycle can have no exact set, one, or several. With none, no set gives
+ *    back itself and ①'s larger drop set stands: the fail-safe direction, where
+ *    a lock that cannot be settled is not waived (#4889's frozen lines depend
+ *    on that). `a` locked by `record.b == 'x'`, `b` by `record.a == 'old'`, a
+ *    write setting both, is one. With several, the answer is the one ②
+ *    reaches, or ①'s when it reaches none: `a` locked by `record.b ==
+ *    'new_b'` and `b` by `record.a == 'new_a'`, a write setting both, has
+ *    `{a}` and `{b}`; ② alternates between `{}` and `{a, b}`, and ①'s `{a, b}`
+ *    stands.
+ *  - No order matters: each step judges every key against one set, so field
+ *    declaration order and payload key order cannot move the answer.
+ *  - The exact set need not lie inside ①'s: a key ① kept can lock once
+ *    another key is released, and the exact set drops it.
+ *  - Each claim is about the views this function is handed. The engine's
+ *    master-detail settlement judges the FK here against the header it NAMES
+ *    and, when the FK does not land, judges the rest against the header the
+ *    row KEEPS (#19853): an FK dropped that way can be unlocked on the row the
+ *    write stores, as it could before #19927.
+ *
+ * Cost, counted in key judgements (a bulk write judges each over its matched
+ * rows): at most n(n + 1) / 2 in ①, at most n + n² in ②. When ① or its first
+ * release settles the set, ② judges exactly what it did before #19927.
  *
  * Each key's warnings come from the evaluation that decided it and are handed
  * back rather than logged, so a key judged more than once still warns once.
@@ -856,17 +881,26 @@ function settleReadonlyWhenDrops<V>(
     standing = standing.filter((name) => !dropped.has(name));
   }
   // ② Every standing key is unlocked on ①'s row; a dropped key unlocked there
-  // too is over-locked.
-  const overLocked = [...dropped].filter((name) => !judge(name, dropped).locked);
-  if (overLocked.length === 0) return { dropped, warnings };
-  const released = new Set([...dropped].filter((name) => !overLocked.includes(name)));
-  const releasedWarnings = new Map<string, string[]>();
-  for (const name of judged) {
-    const verdict = judge(name, released);
-    if (verdict.locked !== released.has(name)) return { dropped, warnings };
-    releasedWarnings.set(name, verdict.said);
+  // too is over-locked. The first set releases them all at once; each later
+  // set is every key that locks when judged against the one before, until a
+  // set gives back itself — n more sets at most. The answer's warnings are
+  // those of the judgements that gave it back.
+  let current = new Set([...dropped].filter((name) => judge(name, dropped).locked));
+  if (current.size === dropped.size) return { dropped, warnings };
+  for (let step = 0; step < judged.length; step++) {
+    const next = new Set<string>();
+    const nextWarnings = new Map<string, string[]>();
+    for (const name of judged) {
+      const verdict = judge(name, current);
+      nextWarnings.set(name, verdict.said);
+      if (verdict.locked) next.add(name);
+    }
+    if (next.size === current.size && [...next].every((name) => current.has(name))) {
+      return { dropped: current, warnings: nextWarnings };
+    }
+    current = next;
   }
-  return { dropped: released, warnings: releasedWarnings };
+  return { dropped, warnings };
 }
 
 /**
