@@ -215,13 +215,25 @@ key runs no write-time check on any field type, so editing it changes nothing.
 **Retry:** `no_retry`
 
 ### `VALUE_TOO_LONG`
-**Cause:** String value exceeds the field's `maxLength` constraint.  
-**Fix:** Truncate the value to the maximum allowed length.  
+**Cause:** Reserved for a string value longer than its declared maximum. **No route emits it
+today.** A string over a field's `maxLength` is refused as a *field-level* failure inside
+`VALIDATION_FAILED` instead, with `fields[].code` `max_length`; on a record write that entry's
+`constraint` carries `maxLength` and the `actual` length. A settings value over its declared
+maximum, and a string in a request body a route parses with Zod, also answer field-level
+`max_length`.  
+**Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` + `fields[].code`
+`max_length`, and shorten the value to fit the declared maximum.  
 **Retry:** `no_retry`
 
 ### `VALUE_TOO_SHORT`
-**Cause:** String value is below the field's `minLength` constraint.  
-**Fix:** Provide a longer value that meets the minimum length requirement.  
+**Cause:** Reserved for a string value shorter than its declared minimum. **No route emits it
+today.** A string under a field's `minLength` is refused as a *field-level* failure inside
+`VALIDATION_FAILED` instead, with `fields[].code` `min_length`; on a record write that entry's
+`constraint` carries `minLength` and the `actual` length. A settings value under its declared
+minimum, and a string in a request body a route parses with Zod, also answer field-level
+`min_length`.  
+**Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` + `fields[].code`
+`min_length`, and lengthen the value to meet the declared minimum.  
 **Retry:** `no_retry`
 
 ### `VALUE_OUT_OF_RANGE`
