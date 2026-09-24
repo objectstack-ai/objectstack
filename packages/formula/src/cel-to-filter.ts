@@ -345,6 +345,13 @@ function lowerComparison(op: string, lNode: ASTNode, rNode: ASTNode, ctx: Ctx): 
     // field-to-field comparison → `{ $field: otherPath }` reference.
     return emit((L as { path: string }).path, op, { $field: (R as { path: string }).path }, true);
   }
+  // [#19886] A LIST LITERAL compared with `==` / `!=` is refused before it is
+  // emitted — see {@link arrayComparandRefusal} for the scope, and why a
+  // variable that resolves to an array is not (yet) refused here.
+  if ((op === '==' || op === '!=') && (lField || rField)) {
+    const other = lField ? R : L;
+    if (other.kind === 'literal' && Array.isArray(other.value)) throw arrayComparandRefusal(op);
+  }
   if (lField) return emit((L as { path: string }).path, op, resolveValue(R, ctx), false);
   if (rField) return emit((R as { path: string }).path, FLIP[op] ?? op, resolveValue(L, ctx), false);
 
@@ -422,9 +429,8 @@ function lowerStringMethod(args: [string, ASTNode, ASTNode[]], ctx: Ctx): Filter
  *
  * Until this refusal `record.status != ['closed', 'archived']` lowered to
  * `{ status: { $ne: [...] } }` and `record.status == [...]` to the bare-array
- * `{ status: [...] }`, and so did the same comparison against a `current_user`
- * membership ARRAY (`record.reviewer_id != current_user.org_user_ids`). The
- * backends that received them disagreed, and two of the answers widened:
+ * `{ status: [...] }`. The backends that received them disagreed, and two of
+ * the answers widened:
  *
  * | lowered shape                  | driver-sql / memory / turso | formula `matchesFilterCondition` (RLS `check`), before its own refusal | driver-mongodb (mingo proxy) |
  * |:-------------------------------|:----------------------------|:----------------------|:-----------------------------|
@@ -441,22 +447,33 @@ function lowerStringMethod(args: [string, ASTNode, ASTNode[]], ctx: Ctx): Filter
  * the rule.
  *
  * A literal list is caught by the shape check too (`isPushdownableCel`), so the
- * authoring gate sees it; a variable that RESOLVES to an array can only be
- * caught when it resolves, at request time. "One of these values" is `in`;
- * "none of these values" is `!(… in …)`.
+ * authoring gate sees it. "One of these values" is `in`; "none of these
+ * values" is `!(… in …)`.
+ *
+ * ⚠️ SCOPE — list LITERALS only. A `current_user` variable that RESOLVES to an
+ * array (`record.r != current_user.org_user_ids`) still lowers as before. The
+ * authoring lint's reference pass compiles every predicate with each
+ * kernel-resolved `current_user` key — `id` and `email` included — bound to an
+ * ARRAY probe, and relies on `==` / `!=` accepting it to reach the field and
+ * variable checks; refusing a resolved array here would silence those checks
+ * for every `field == current_user.id` policy. That half waits on a lint change
+ * this refusal does not carry. What a resolved array still lowers to meets the
+ * driver faces: `$ne: [...]` is refused by driver-sql, driver-memory and
+ * driver-mongodb; the equality spelling (`{ r: [...] }`, and its `$not`) by
+ * driver-sql and driver-memory, and on driver-mongodb it is left to the shared
+ * comparand-shape face's ruling.
  */
 function arrayComparandRefusal(op: string): CompileError {
   return new CompileError(
     'unsupported',
-    `\`${op}\` compares one value, but its comparand is a list (a list literal, or a ` +
-      '`current_user` membership set) — spell "one of these" as `record.f in [...]` and ' +
+    `\`${op}\` compares one value, but its comparand is a list literal — spell "one of these" ` +
+      'as `record.f in [...]` and ' +
       '"none of these" as `!(record.f in [...])`',
   );
 }
 
 /** Build `{ field: <op> value }`. `isRef` true → value is a `{ $field }` reference. */
 function emit(field: string, op: string, value: unknown, isRef: boolean): FilterCondition {
-  if ((op === '==' || op === '!=') && !isRef && Array.isArray(value)) throw arrayComparandRefusal(op);
   if (op === '==') {
     if (!isRef && value === null) return { [field]: { $null: true } } as FilterCondition;
     if (isRef) return { [field]: { $eq: value } } as FilterCondition;
