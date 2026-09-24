@@ -1,10 +1,10 @@
 ---
-"@objectstack/spec": patch
+"@objectstack/spec": minor
 ---
 
 fix(spec): a stored view filter rule with no value on a value-taking operator is now refused at save instead of failing every query (#19751)
 
-**BREAKING** — an accept-set narrowing on a published authoring surface, pulling `ViewFilterRuleSchema` back to what its own `value` description already declares: every operator outside `in` / `not_in` / `between` and the four unary operators takes a scalar, and only the unary operators ignore the key. The level is `patch` because nothing widens; during the launch window breaking-ness is carried by this banner and the ADR-0087 disposition below, not by the level. The hand-migration prescription is registered under protocol major 18 as `view-filter-rule-absent-value-refused`.
+**BREAKING** — an accept-set narrowing on a published authoring surface, pulling `ViewFilterRuleSchema` back to what its own `value` description already declares: every operator outside `in` / `not_in` / `between` and the four unary operators takes a scalar, and only the unary operators ignore the key. Shipped as `minor` under the repo's launch-window convention for accept-set narrowings: during the launch window a breaking change ships as `minor`, so the level alone does not signal the break — this banner and the ADR-0087 disposition below carry it. The hand-migration prescription is registered under protocol major 18 as `view-filter-rule-absent-value-refused`.
 
 ## What changes
 
@@ -13,6 +13,8 @@ A filter rule that omits `value` (or carries `value: undefined`) on `equals`, `n
 ```text
 Filter comparand for operator "icontains" on field "name" is undefined. The rule carries no value, …
 ```
+
+This reverses a carve-out the #19514 entry records: its statements that an **omitted** value still parses (`value` is optional) and that an **absent** `icontains` comparand is left unjudged on a view rule no longer hold for any operator that takes a value — such a rule is now refused once, with the message above.
 
 ## What stays accepted
 
