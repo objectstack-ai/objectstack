@@ -14,8 +14,7 @@
  *     to exclude, which is what the lowered `$ne: [...]` (and the `$nor` of a
  *     negated equality) returned on driver-mongodb before the refusal;
  *   - a `check` write is refused with the row-level CHECK envelope
- *     (`PERMISSION_DENIED` / 403) and nothing is stored — before the refusal
- *     the resolved-array spellings ADMITTED the forbidden row here.
+ *     (`PERMISSION_DENIED` / 403) and nothing is stored.
  *
  * The controls are the spellings the refusal points at, `!(record.f in …)`,
  * which keep their exact meaning. The ground truth is read past every scope.
