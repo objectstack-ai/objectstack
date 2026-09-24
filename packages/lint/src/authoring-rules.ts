@@ -907,14 +907,24 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // MEMBERS judge that snapshot. A `report` write reaches exactly
     // `validateChartBindings`. Every other member keeps its declaration.
     //
-    // ⛔ `skill` is NOT here. It was crossed in an earlier revision of this
-    // card and is held out on a measurement: `validateAiToolReferences`
-    // resolves into `stack.tools` and `stack.actions`, neither of which the
-    // per-write snapshot carries, so the shipped corpus's own AI-exposed
-    // stack-level action reads as unresolved at the door and the rule ships a
-    // false advisory into Studio. The member carries the measurement; the type
-    // takes the ruling's group B treatment of `tool`, the same universe
-    // obstacle read from the other side.
+    // ⛔ `skill` is NOT here, BY DESIGN: cross-item reference resolution
+    // belongs to the whole-stack rule (ruling `5791822697` on #19527, letter
+    // B; ADR-0109 Decision §3). `ai-skill-tool-unresolved` is a verdict of
+    // `os validate` / `os lint` / `os build`, and this door NEVER emits it.
+    // `validateAiToolReferences` resolves a skill's tools against a universe of
+    // three limbs — `stack.tools`, the platform registry and the materialised
+    // `action_<name>` family — and a per-write snapshot carries neither
+    // `stack.tools` nor `stack.actions`, while a tool a runtime plugin
+    // registers outside the registry is invisible to every static universe.
+    // So at this door the member has no truthful `unresolved` verdict to give:
+    // the shipped corpus's own AI-exposed stack-level action reads as
+    // unresolved here and resolves over the whole stack (the reason pin is the
+    // LIT case in `runtime-gate.inert-type-writes.test.ts`). ⛔ Not a hold-out
+    // awaiting a wider snapshot: the ruling rejected carrying `actions` /
+    // `tools` in `RuntimeStackContext` (a read on every gated write that still
+    // leaves the plugin limb false). The member keeps the frozen `flow` default
+    // and `skill` has no `TYPE_TO_STACK_KEY` row: with no rule to run it is not
+    // a runtime-gated type, so the wiring guard's invariant asks no row of it.
     //
     // ⛔ `action` and `hook` are deliberately NOT here, although this card
     // crosses both types on `validateStackExpressions` above. The suite carries
