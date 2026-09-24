@@ -289,6 +289,11 @@ describe('a readonlyWhen cycle no longer over-locks the rest of the update (#199
     expect(row('beside_none', 'n1')).toMatchObject({ ...CHAIN_ROW, ...NONE_ROW });
   });
 
+  it('THE CARD for an isSystem caller: the locks bind it the same way', async () => {
+    await engine.update('beside_none', { id: 'n1', ...CHAIN_WRITE, ...NONE_WRITE }, { context: { isSystem: true } } as any);
+    expect(row('beside_none', 'n1')).toMatchObject({ c: 'L', x: 'xv', y: 'old', a: 'old_a', b: 'y' });
+  });
+
   it('THE CARD beside a cycle with two agreeing sets, {a} and {b}: x lands, and the cycle holds (fail-safe)', async () => {
     const { events, options } = dropEvents();
     await engine.update('beside_two', { id: 'w1', ...CHAIN_WRITE, a: 'new_a', b: 'new_b' }, options);
