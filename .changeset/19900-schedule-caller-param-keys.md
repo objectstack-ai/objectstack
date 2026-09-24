@@ -10,3 +10,5 @@ The schedule trigger starts each run with three seeds of its own in `params` —
 The trigger now sets `AutomationContext.callerParamKeys: []` — "the caller supplied nothing" — which the verdict reads instead of inferring. A screen in a scheduled flow pauses, whatever its fields are named. The three seeds stay in `params`; flows that read them are unaffected.
 
 `@objectstack/spec`: the `callerParamKeys` TSDoc now names the schedule trigger as a producer that states the empty list, and no longer lists it among the producers that leave the key absent. No type changes.
+
+This supersedes one sentence of the `callerParamKeys` entry (#19846): the schedule trigger no longer leaves the key absent. Record-change, time-relative and webhook triggers still do.
