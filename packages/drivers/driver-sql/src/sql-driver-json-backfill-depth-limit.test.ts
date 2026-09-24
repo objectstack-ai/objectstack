@@ -34,11 +34,21 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
 import { SqlDriver } from './sql-driver.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+
+/**
+ * A second, raw connection — another process on the same file. Loaded through
+ * `createRequire` because the package carries no `@types/better-sqlite3`; the
+ * two members used are typed here.
+ */
+const Database = createRequire(import.meta.url)('better-sqlite3') as new (file: string) => {
+  prepare(sql: string): { run(...args: unknown[]): unknown };
+  close(): void;
+};
 
 const T = 'json_depth_19912';
 const FIELDS = { label: { type: 'text' }, val: { type: 'json' } };
