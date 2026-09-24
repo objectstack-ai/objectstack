@@ -32,7 +32,7 @@ After this change, every row above that goes through a platform door gets the 40
 - Every scalar equality comparand is untouched. That includes `null`: `{ field: null }` and `{ field: { $eq: null } }` are the has-no-value predicate.
 - A `{ $field }` reference on an equality spelling still lowers to `$eq` and passes.
 - A field spec with no `$` key (`{ author: { tags: ['a'] } }`) is still not descended into.
-- The schema doors are not touched. `FilterConditionSchema` still parses `{ field: [...] }`, because `FieldOperatorsSchema.$eq` is `z.any()`. A document carrying the shape therefore still publishes, and is refused when it is queried.
+- This change does not touch the schema doors. A separate change in this release does: `FilterConditionSchema` and `FieldOperatorsSchema.$eq` now refuse the same shape when a document is saved, with this refusal's sentence (the location is carried by the issue's path instead). Its changeset and the ADR-0087 entry `filter-equality-array-comparand-refused-at-save` describe it.
 - `ViewFilterRule` already refused an array on every scalar view operator at authoring time.
 
 ## FROM → TO
