@@ -58,6 +58,18 @@ const OBJECTS = [
       organization_id: { name: 'organization_id', type: 'text' },
     },
   },
+  // An object whose OWD says nothing about writes, so `member_default`'s
+  // ownership floor (`owner_only_writes`, `created_by == current_user.id`,
+  // positions `org_member`) applies to an `org_member` caller.
+  {
+    name: 'qa_deal',
+    label: 'Deal',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      stage: { name: 'stage', type: 'text' },
+      created_by: { name: 'created_by', type: 'text' },
+    },
+  },
 ];
 
 /** The repro's predicate, verbatim. */
@@ -67,10 +79,13 @@ const OWN_TENANT = 'organization_id == current_user.organization_id';
 
 type Policy = { name: string; operation: string; using?: string; check?: string };
 
-function permissionSet(policies: Policy[]): PermissionSet {
+function permissionSet(policies: Array<Policy & { object?: string }>): PermissionSet {
   return PermissionSetSchema.parse({
     name: 'qa_writer',
-    objects: { qa_ticket: { allowRead: true, allowCreate: true, allowEdit: true } },
+    objects: {
+      qa_ticket: { allowRead: true, allowCreate: true, allowEdit: true },
+      qa_deal: { allowRead: true, allowCreate: true, allowEdit: true },
+    },
     rowLevelSecurity: policies.map((p) => ({ object: 'qa_ticket', ...p })),
   });
 }
@@ -279,6 +294,41 @@ for (const [driverName, makeDriver] of DRIVERS) {
         ),
       );
       expect(await storedRow(engine, 't2')).toBeUndefined();
+    });
+  });
+
+  describe(`a USING-only update widener composes with the ownership floor — ${driverName}`, () => {
+    // "Anyone may update a deal still open" — an app-authored widener, OR-ed at
+    // the pre-image with the platform floor `created_by == current_user.id`.
+    // The defaulted check is that same OR on the new row.
+    const widener = () =>
+      permissionSet([{ name: 'open_deals', object: 'qa_deal', operation: 'update', using: "stage == 'open'" }]);
+    const MEMBER = { ...CALLER, positions: ['writer', 'org_member'] };
+    const seed = (engine: ObjectQL, id: string, stage: string, createdBy: string) =>
+      engine.insert('qa_deal', { id, stage, created_by: createdBy } as never, { context: SYS_CTX } as never);
+    const dealStage = async (engine: ObjectQL, id: string) =>
+      ((await engine.find('qa_deal', { where: { id }, context: SYS_CTX } as never)) as Array<Record<string, unknown>>)[0]
+        ?.stage;
+
+    it("⭐ the creator still updates their own deal out of 'open' — the floor stays in the check", async () => {
+      const engine = await boot(makeDriver, widener());
+      await seed(engine, 'd_mine', 'open', MEMBER.userId);
+      const outcome = await attempt(() =>
+        engine.update('qa_deal', { id: 'd_mine', stage: 'won' } as never, { context: MEMBER } as never),
+      );
+      expect(outcome.ok).toBe(true);
+      expect(await dealStage(engine, 'd_mine')).toBe('won');
+    });
+
+    it("a non-creator admitted only by the widener cannot move the deal out of 'open'", async () => {
+      const engine = await boot(makeDriver, widener());
+      await seed(engine, 'd_theirs', 'open', 'usr_other');
+      expectCheckRefusal(
+        await attempt(() =>
+          engine.update('qa_deal', { id: 'd_theirs', stage: 'won' } as never, { context: MEMBER } as never),
+        ),
+      );
+      expect(await dealStage(engine, 'd_theirs')).toBe('open');
     });
   });
 }

@@ -334,13 +334,19 @@ describe('SecurityPlugin', () => {
     const harness = makeMiddlewareCtx({ permissionSets: [tenantPolicySet] });
     await plugin.init(harness.ctx);
     await plugin.start(harness.ctx);
+    // The row carries the caller's own organization, as the org-scoping
+    // auto-stamp writes it in `beforeInsert` ahead of the post-image check. The
+    // `tenant_isolation` policy declares no `check`, so its `using` is the
+    // insert check (ADR-0058 D4 default) and a row with no organization would
+    // be refused. This double runs no hooks, so the payload stands in for them.
     const opCtx: any = {
-      object: 'task', operation: 'insert', data: { name: 'A' },
+      object: 'task', operation: 'insert', data: { name: 'A', organization_id: 'org-1' },
       context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [] },
     };
     await harness.run(opCtx);
-    // SecurityPlugin no longer touches organization_id — that's plugin-org-scoping's job.
-    expect(opCtx.data.organization_id).toBeUndefined();
+    // SecurityPlugin does not touch organization_id — that's plugin-org-scoping's
+    // job — so the value arrives exactly as sent.
+    expect(opCtx.data.organization_id).toBe('org-1');
     expect(opCtx.data.owner_id).toBe('u1');
   });
 
