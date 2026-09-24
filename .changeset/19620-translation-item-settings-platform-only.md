@@ -68,4 +68,4 @@ evidenced is untouched.
 
 Ruling batch #210 item 2 letter B (2026-09-22) — maintainer 「210 同意」.
 
-<!-- adr-0087: registered translation-per-app-settings-removed, translation-per-app-settings-platform-only -->
+<!-- adr-0087: not-required (already-registered translation-per-app-settings-removed, translation-per-app-settings-platform-only) both entries already existed for the per-app bundle door; this change EXTENDS them to the translation item door in the same unreleased major — the D2 conversion learns the bare item shape and the D3 semantic entry covers both doors -->
