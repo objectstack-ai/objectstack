@@ -89,12 +89,14 @@ async function mount(dir: string, opts: { controlPlaneUrl?: string; registry?: a
     // `kernel:ready` registers the plugin's own "Installed Apps" UI bundle and
     // rehydrates the ledger; count only what the request under test does.
     const registeredAtBoot = register.mock.calls.length;
+    const syncedAtBoot = syncSchemas.mock.calls.length;
     return {
         routes: rawApp.routes,
         register,
         syncSchemas,
         logger,
         installRegistrations: () => register.mock.calls.slice(registeredAtBoot).map((call) => call[0]),
+        installSyncs: () => syncSchemas.mock.calls.length - syncedAtBoot,
         bootRegistrations: () => register.mock.calls.slice(0, registeredAtBoot).map((call) => call[0]),
     };
 }
@@ -120,6 +122,13 @@ function expectDeclaredRefusal(res: { payload: any; status: number }, status: nu
     expect(ApiErrorSchema.safeParse(res.payload.error).success).toBe(true);
     expect(res.payload.success).toBe(false);
     expect(res.payload.error.code).toBe('PLUGIN_MANIFEST_INVALID');
+}
+
+/** A refused install leaves the runtime exactly as it found it. */
+function expectNothingWritten(h: { installRegistrations: () => unknown[]; installSyncs: () => number }) {
+    expect(h.installRegistrations()).toEqual([]);
+    expect(h.installSyncs()).toBe(0);
+    expect(readdirSync(dir)).toEqual([]);
 }
 
 let dir: string;
@@ -154,9 +163,7 @@ describe('install-local parses the inline manifest\'s `id` through its declarati
             );
             expectDeclaredRefusal(res, 400);
             expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', id));
-            expect(h.installRegistrations()).toEqual([]);
-            expect(h.syncSchemas).not.toHaveBeenCalled();
-            expect(readdirSync(dir)).toEqual([]);
+            expectNothingWritten(h);
         });
     }
 
@@ -168,8 +175,7 @@ describe('install-local parses the inline manifest\'s `id` through its declarati
         expectDeclaredRefusal(res, 400);
         expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', undefined));
         expect(res.payload.error.message).toContain('`manifest.id`');
-        expect(h.installRegistrations()).toEqual([]);
-        expect(readdirSync(dir)).toEqual([]);
+        expectNothingWritten(h);
     });
 
     it('refuses a manifest with neither `id` nor `name`, with the same sentence', async () => {
@@ -177,7 +183,7 @@ describe('install-local parses the inline manifest\'s `id` through its declarati
         const res = await h.routes.get(`POST ${ROUTE}`)!(makeC({ manifest: { version: '1.0.0' } }));
         expectDeclaredRefusal(res, 400);
         expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', undefined));
-        expect(readdirSync(dir)).toEqual([]);
+        expectNothingWritten(h);
     });
 
     it('refuses a non-string `id` rather than stringifying it into a key', async () => {
@@ -185,8 +191,7 @@ describe('install-local parses the inline manifest\'s `id` through its declarati
         const res = await h.routes.get(`POST ${ROUTE}`)!(makeC({ manifest: { id: 123, version: '1.0.0' } }));
         expectDeclaredRefusal(res, 400);
         expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', 123));
-        expect(h.installRegistrations()).toEqual([]);
-        expect(readdirSync(dir)).toEqual([]);
+        expectNothingWritten(h);
     });
 
     it('carries the declaration\'s mechanical repair, not only its rule', async () => {
@@ -204,8 +209,7 @@ describe('install-local parses the inline manifest\'s `id` through its declarati
         }));
         expectDeclaredRefusal(res, 400);
         expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', 'late-app'));
-        expect(h.installRegistrations()).toEqual([]);
-        expect(readdirSync(dir)).toEqual([]);
+        expectNothingWritten(h);
     });
 
     it('answers validity BEFORE collision: a refused id that local code also registered is a 400, not a 409', async () => {
@@ -215,6 +219,7 @@ describe('install-local parses the inline manifest\'s `id` through its declarati
         const res = await h.routes.get(`POST ${ROUTE}`)!(makeC({ manifest: { id: 'late-app', version: '1.0.0' } }));
         expectDeclaredRefusal(res, 400);
         expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', 'late-app'));
+        expectNothingWritten(h);
     });
 
     for (const id of ['com.example.crm', 'com.example.my-erp', 'org.apache.superset']) {
@@ -267,9 +272,7 @@ describe('install-local parses the cloud snapshot\'s `id` through the same decla
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expectDeclaredRefusal(res, 502);
         expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', 'late-app'));
-        expect(h.installRegistrations()).toEqual([]);
-        expect(h.syncSchemas).not.toHaveBeenCalled();
-        expect(readdirSync(dir)).toEqual([]);
+        expectNothingWritten(h);
     });
 
     it('refuses a name-only snapshot the same way', async () => {
@@ -278,7 +281,7 @@ describe('install-local parses the cloud snapshot\'s `id` through the same decla
         const res = await h.routes.get(`POST ${ROUTE}`)!(makeC({ packageId: 'pkg_crm' }));
         expectDeclaredRefusal(res, 502);
         expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', undefined));
-        expect(readdirSync(dir)).toEqual([]);
+        expectNothingWritten(h);
     });
 
     it('lit control — a snapshot with a conforming id still installs, keyed by the manifest id', async () => {
@@ -333,7 +336,11 @@ describe('an entry installed BEFORE the gate is not stranded by it', () => {
         const h = await mount(dir);
         const res = await h.routes.get(`POST ${ROUTE}`)!(makeC({ manifest: { id: 'late-app', version: '1.0.1' } }));
         expectDeclaredRefusal(res, 400);
-        // The existing entry is left exactly as it was.
+        expect(res.payload.error.message).toBe(manifestIdRefusal('manifest.id', 'late-app'));
+        // Nothing registered past boot, and the existing entry is left exactly as it was.
+        expect(h.installRegistrations()).toEqual([]);
+        expect(h.installSyncs()).toBe(0);
+        expect(readdirSync(dir)).toEqual(['late-app.json']);
         expect(new LocalManifestSource(dir).read('late-app').entry?.version).toBe('1.0.0');
     });
 });
