@@ -359,7 +359,7 @@ mode-dependent — dev hops to the next free port, production fails loudly. See
 Step 4's list is the fixed core. Every other service plugin is opt-in, and
 `requires: [...]` on the stack root is what turns it on. The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
-`packages/cli/src/commands/serve.ts` — 19 of its 20 entries (`package-registry` is always-on):
+`packages/cli/src/commands/serve.ts` — its 19 opt-in entries:
 
 | Token | Provider package |
 |:--|:--|
