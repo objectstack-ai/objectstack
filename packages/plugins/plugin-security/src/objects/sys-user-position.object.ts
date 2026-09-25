@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 import { reservedIdentityNamesCelList, reservedIdentityNameMessage } from './reserved-identity-names.js';
 
 /**
@@ -41,6 +42,15 @@ export const SysUserPosition = ObjectSchema.create({
   // a declaration only; the DelegatedAdminGate is the authz.
   managedBy: 'system-data',
   description: 'Assigns a position (sys_position.name) to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. With no pointer declared, the
+  // registry's designate-only pass stamped `nameField: 'id'` (the first
+  // title-eligible field), so a renderer honouring ADR-0079's order (an
+  // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
+  // page's H1. `titleFormat` stays for renderers that still read it first;
+  // `sys-security-assignment-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{user_id} → {position}',
   highlightFields: ['user_id', 'position', 'business_unit_id', 'organization_id'],
 
@@ -50,6 +60,19 @@ export const SysUserPosition = ObjectSchema.create({
       required: true,
       readonly: true,
       description: 'UUID of the user-position assignment.',
+    }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. It reads only this row's own columns —
+    // the user foreign key and the position name, never a field of the user
+    // record — and neither is hidden, permission-guarded or masked on this
+    // object, so the title carries nothing the declared read path withholds.
+    // Both are required, so the expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.user_id + ' → ' + record.position`,
+      description: 'Record title: the user and the position they hold (computed on read)',
     }),
 
     user_id: Field.lookup('sys_user', {

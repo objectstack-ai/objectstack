@@ -318,6 +318,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Assignment ID",
         help: "UUID of the assignment."
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the permission set assigned to them (computed on read)"
+      },
       user_id: {
         label: "User",
         help: "Foreign key to sys_user."
@@ -371,6 +375,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Binding ID",
         help: "UUID of the position-permission-set binding."
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the position and the permission set bound to it (computed on read)"
+      },
       position_id: {
         label: "Position",
         help: "Foreign key to sys_position."
@@ -395,6 +403,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Assignment ID",
         help: "UUID of the user-position assignment."
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the position they hold (computed on read)"
       },
       user_id: {
         label: "User",

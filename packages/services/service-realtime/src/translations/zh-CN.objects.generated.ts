@@ -23,6 +23,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "在线状态 ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and their presence status (computed on read)"
+      },
       created_at: {
         label: "创建时间"
       },

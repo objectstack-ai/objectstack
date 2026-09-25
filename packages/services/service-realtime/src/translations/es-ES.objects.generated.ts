@@ -23,6 +23,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de presencia"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and their presence status (computed on read)"
+      },
       created_at: {
         label: "Creado el"
       },
