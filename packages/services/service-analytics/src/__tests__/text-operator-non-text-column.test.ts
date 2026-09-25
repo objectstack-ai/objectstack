@@ -300,11 +300,12 @@ describe('[#14079] the two strategies, on a real SQLite engine over a REAL colum
       expect(echo.params, `echo of ${JSON.stringify(where)}`).toEqual([]);
     }
     // The text column beside it still compiles a real predicate on both — and
-    // since #15684 that predicate is the dialect's case-EXACT construct, `GLOB`
-    // on the SQLite engine this suite runs, with the escaped pattern its own.
+    // since #15684 that predicate is the dialect's case-EXACT construct —
+    // [#20025] `instr()` for `contains` on the SQLite engine this suite runs,
+    // binding the comparand raw.
     const native = await new NativeSQLStrategy().generateSql(query({ name: { $contains: 'acme' } }), nativeCtx);
-    expect(native.sql).toMatch(/GLOB/);
-    expect(native.params).toEqual(['*acme*']);
+    expect(native.sql).toContain('instr(name, $1) > 0');
+    expect(native.params).toEqual(['acme']);
   });
 
   it('$not over the constant composes: every row for !contains, no row for !notContains', async () => {

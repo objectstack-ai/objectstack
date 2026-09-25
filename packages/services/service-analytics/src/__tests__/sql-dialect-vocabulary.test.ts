@@ -417,6 +417,9 @@ describe('[#16206] the `unknown` arm\'s ROWS for a `sqlite3`-answering host, on 
     const viaSqlite3 = await sqlite3Host.generateSql(query({ name: { $contains: 'acme' } }));
     const viaSqlite = await sqliteHost.generateSql(query({ name: { $contains: 'acme' } }));
     expect(viaSqlite3.sql).toContain('LIKE');
-    expect(viaSqlite.sql).toContain('GLOB');
+    // [#20025] `instr()` for `contains` since the `sqlite` arm took
+    // `driver-sql`'s U+0000-safe constructs — case-exact, and never `LIKE`.
+    expect(viaSqlite.sql).toContain('instr(name, $1) > 0');
+    expect(viaSqlite.sql).not.toContain('LIKE');
   });
 });
