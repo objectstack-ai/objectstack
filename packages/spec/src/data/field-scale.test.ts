@@ -30,7 +30,10 @@ describe('resolveFieldScale', () => {
   it('prefers a DECLARED scale over the type default', () => {
     expect(resolveFieldScale({ type: 'percent', scale: 2 })).toBe(2);
     expect(resolveFieldScale({ type: 'number', scale: 3 })).toBe(3);
-    expect(resolveFieldScale({ type: 'currency', scale: 4 })).toBe(4);
+    // `slider`, not `currency`: `scale` is retired from the currency type and
+    // refused at parse (ruling 5791803339, letter B), so a currency field is no
+    // longer a type whose declared width this resolver is asked about.
+    expect(resolveFieldScale({ type: 'slider', scale: 4 })).toBe(4);
   });
 
   it('treats a declared 0 as a declaration, not as absence', () => {
@@ -45,8 +48,8 @@ describe('resolveFieldScale', () => {
     // ⛔ Not a hole to fill with a fallback: `number`'s faces disagree by
     // design (no-fixed-width on the cell, 0 in the summary footer) and the
     // grouping policy keys on absent-vs-declared-0; `currency` resolves its
-    // fraction digits from ISO 4217 minor units with a different surface's
-    // `precision` as the override, and does not read this key at all.
+    // cell's fraction digits from ISO 4217 minor units and can no longer
+    // declare this key at all (retired from the type, refused at parse).
     expect(resolveFieldScale({ type: 'number' })).toBeUndefined();
     expect(resolveFieldScale({ type: 'currency' })).toBeUndefined();
   });

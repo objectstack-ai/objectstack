@@ -282,10 +282,13 @@ describe('FieldSchema', () => {
 
   describe('Number Field Constraints', () => {
     it('should accept number field with precision and scale', () => {
+      // `type: 'number'`, as the title says: this fixture spelled `currency`
+      // until `scale` was retired from the currency type (refused at parse —
+      // pinned in field-currency-scale-refused.test.ts).
       const numberField: Field = {
         name: 'amount',
         label: 'Amount',
-        type: 'currency',
+        type: 'number',
         precision: 10,
         scale: 2,
         min: 0,

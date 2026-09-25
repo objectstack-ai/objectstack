@@ -47,7 +47,6 @@ export const OpportunityLineItem = ObjectSchema.create({
     }),
     unit_price: Field.currency({
       label: 'Unit Price',
-      scale: 2,
       min: 0,
     }),
     // Amount = Qty × Unit Price. Kept as a *stored* currency column (so the
@@ -59,7 +58,6 @@ export const OpportunityLineItem = ObjectSchema.create({
     // showcase InvoiceLine.amount pattern.)
     amount: Field.currency({
       label: 'Amount',
-      scale: 2,
       min: 0,
       expression: cel`record.quantity * record.unit_price`,
     }),

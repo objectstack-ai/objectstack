@@ -23,7 +23,7 @@ export const Product = ObjectSchema.create({
     name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 120 }),
     sku: Field.text({ label: 'SKU', searchable: true, maxLength: 40 }),
     description: Field.text({ label: 'Description', maxLength: 200 }),
-    unit_price: Field.currency({ label: 'Unit Price', scale: 2, min: 0 }),
+    unit_price: Field.currency({ label: 'Unit Price', min: 0 }),
     active: Field.boolean({ label: 'Active', defaultValue: true }),
   },
 });
@@ -308,7 +308,6 @@ export const InvoiceLine = ObjectSchema.create({
     }),
     unit_price: Field.currency({
       label: 'Unit Price',
-      scale: 2,
       min: 0,
       readonlyWhen: P`parent.status == 'paid'`,
     }),
@@ -326,7 +325,6 @@ export const InvoiceLine = ObjectSchema.create({
     // the client-sent value is stored as-is.
     amount: Field.currency({
       label: 'Amount',
-      scale: 2,
       min: 0,
       expression: cel`record.quantity * record.unit_price`,
     }),
