@@ -357,8 +357,9 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // the liveness walk stops at the union's `container` arm (its `shapeOf`
   // takes the first OBJECT member, and the `viewItem` arm is a discriminated
   // union), so a row for any of the seven is an ORPHAN — planting `config`
-  // there failed `check:liveness`. Read at framework 7e6ca1787a and at the
-  // objectui pin 62597c588:
+  // there failed `check:liveness`. Read at framework 7e6ca1787a and objectui
+  // 62597c588, then re-read at framework 980bc05e5b and objectui f8a9d0fb0596
+  // (the console pin on that main) with the same readings:
   //
   //   config     the viewItem arm's REQUIRED body. Authored (`defineViewItem`,
   //              the console's `viewEnvelope`); `getViewsByObject` serves it.
