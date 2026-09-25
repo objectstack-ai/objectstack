@@ -403,7 +403,8 @@ a PM dispatch sets the assignee (step 1) and posts the `Claim:` naming the dev's
 both on the dev's behalf. A dispatched executor inherits both records: it verifies that the
 newest `Claim:` names its branch (on a mismatch it stops and reports), posts no second claim —
 the dispatch's `Claim:` is its identity and its own record is the report comment — and it ⛔ never
-writes the assignee and ⛔ never yields a card it was dispatched to. Before writing code, re-read
+writes the card's assignee (the PR's assignee mirrors the card's, set by the executor at
+pr_create) and ⛔ never yields a card it was dispatched to. Before writing code, re-read
 the comments — the comments decide, not the field: a `Claim:` from another session or branch
 (other than the dispatch that sent you) means taken whatever the field says — pick another or
 ask, ⛔ never reassign; a bare assignee with no `Claim:` under it is a dispatch's step 1, not a

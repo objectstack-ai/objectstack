@@ -450,13 +450,16 @@ function refuseRemoteDeferredDdl(): never {
  *
  * `SqlDriver.detectManagedDrift` reads the physical schema through Knex: a
  * `hasTable` probe per table, then column and index introspection fed to the
- * shared differ. In remote mode that Knex instance is the placeholder
- * `:memory:` database {@link TursoDriver.toKnexConfig} hands the base
- * constructor. It holds none of this datasource's tables, so every table was
+ * shared differ. In remote mode that Knex instance was then the placeholder
+ * `:memory:` database {@link TursoDriver.toKnexConfig} handed the base
+ * constructor. It held none of this datasource's tables, so every table was
  * skipped as absent and the answer was `[]` whatever the remote database held.
  * The no-argument call had a second reason to answer `[]`: it iterates
  * `managedObjectFields`, which only the Knex `initObjects` fills and no remote
- * schema door reaches. Measured on the transport's SQLite-backed double
+ * schema door reaches. [#20054] Remote mode's Knex has no connection at all
+ * now, so an explicit-objects call would fail on its first `hasTable`; the
+ * no-argument call would still answer `[]` from the empty registry, which is
+ * why the refusal stays. Measured on the transport's SQLite-backed double
  * (`turso-remote-drift-detection-refusal.test.ts`): a synced table carrying an
  * extra physical column the declaration omits reads `unmapped_column` /
  * `drop_column` on the local face and `[]` on the remote one, with or without
@@ -473,7 +476,7 @@ function refuseRemoteDeferredDdl(): never {
  * the NULL-safe duplicate probe), so a remote implementation is a second copy
  * of each of those SQLite arms. It also needs a remote answer for
  * `applyMigrationEntries`, which the gate calls on whatever it finds and which
- * runs on the same placeholder. Until that exists the refusal is the honest
+ * runs through the same `this.knex`. Until that exists the refusal is the honest
  * answer, in the envelope and for the reason {@link refuseRemoteDeferredDdl}
  * records for its sibling gap on this transport: the call is spelled correctly
  * and the base class declares it, so the gap is the backend's.
@@ -494,9 +497,11 @@ function refuseRemoteDriftDetection(): never {
     'Schema drift detection is not supported by the Turso REMOTE transport (this datasource\'s ' +
     'transport mode is `remote`), so this driver cannot say whether the database\'s physical ' +
     'schema matches the declared objects. Drift detection reads the physical schema through the ' +
-    'SQL driver\'s Knex connection, and in remote mode that connection is a placeholder in-memory ' +
-    'database holding none of this datasource\'s tables. Answering from it would report "no drift" ' +
-    'for every remote database, whatever its tables hold, so the call refuses. The call is spelled ' +
+    'SQL driver\'s Knex connection, which remote mode does not have: every statement goes to the ' +
+    'remote database through the libSQL client instead. The objects it compares by default are the ' +
+    'ones the SQL driver\'s own schema sync registers, and remote mode registers none there, so ' +
+    'answering would report "no drift" for every remote database, whatever its tables hold; the ' +
+    'call refuses instead. The call is spelled ' +
     'correctly and `SqlDriver` declares it, so this is a capability gap of the remote transport ' +
     'rather than a mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a ' +
     '400. To check this database for drift, run `os migrate plan` against a local SQLite copy of it ' +
@@ -520,9 +525,12 @@ function refuseRemoteDriftDetection(): never {
  * `os migrate files-to-references --apply`. It walks `managedObjectFields`,
  * which the Knex `initObjects` fills (through `registerObjectMetadata`) and no
  * remote schema door reaches, and it probes each table with `hasTable` and
- * column introspection through `this.knex`, which in remote mode is the
- * placeholder `:memory:` database {@link TursoDriver.toKnexConfig} hands the
- * base constructor. Either reason alone empties the answer. Measured on the
+ * column introspection through `this.knex`, which in remote mode was then the
+ * placeholder `:memory:` database {@link TursoDriver.toKnexConfig} handed the
+ * base constructor. Either reason alone empties the answer. [#20054] Remote
+ * mode's Knex has no connection at all now, and the walk over the empty
+ * registry still answers an empty scan without reaching it, which is why the
+ * refusal stays. Measured on the
  * transport's SQLite-backed double
  * (`turso-remote-media-column-move-refusal.test.ts`): a table `m` with a `file`
  * and an `image` field, synced through each of the three remote schema doors,
@@ -564,8 +572,8 @@ function refuseRemoteMediaColumnMove(): never {
     'Planning the ADR-0104 media column move is not supported by the Turso REMOTE transport ' +
     '(this datasource\'s transport mode is `remote`), so this driver cannot say which single-value ' +
     'media columns the database holds or how their values are encoded. The planner reads the ' +
-    'physical columns through the SQL driver\'s Knex connection, and in remote mode that connection ' +
-    'is a placeholder in-memory database holding none of this datasource\'s tables; the objects it ' +
+    'physical columns through the SQL driver\'s Knex connection, which remote mode does not have: ' +
+    'every statement goes to the remote database through the libSQL client instead. The objects it ' +
     'walks are the ones the SQL driver\'s own schema sync registers, and remote mode registers its ' +
     'objects another way. Answering from them would report "nothing to move" for every remote ' +
     'database, whatever media columns it holds, so the call refuses: nothing was planned and nothing ' +
@@ -1357,17 +1365,43 @@ export class TursoDriver extends SqlDriver {
   /**
    * Convert TursoDriverConfig to a Knex-compatible SqlDriverConfig.
    * Extracts the file path from the URL for local/embedded modes.
-   * In remote mode, uses a dummy :memory: config (Knex is not used).
+   * In remote mode, hands the base a Knex with NO connection: the SQLite
+   * dialect's compiler and nothing else (see the remote arm below).
    */
   private static toKnexConfig(config: TursoDriverConfig, mode: TursoTransportMode): SqlDriverConfig {
-    // Remote mode: All CRUD/schema operations delegate to RemoteTransport
-    // (via @libsql/client). Knex is never used for queries, but the SqlDriver
-    // base class constructor requires a valid config. We provide a minimal
-    // :memory: config that initializes Knex without side effects.
+    // [#20054] Remote mode: every CRUD and schema door delegates to
+    // RemoteTransport (`@libsql/client`), and none of them reads `this.knex`.
+    // Measured with the Knex instance wrapped to record every access after
+    // construction, across connect, the CRUD and bulk doors, aggregate,
+    // execute, the three schema doors and disconnect: zero reads. The
+    // `SqlDriver` constructor still builds a Knex instance, so this arm only
+    // decides WHICH one.
+    //
+    // It is built WITHOUT a `connection`, and that is the whole fix. knex's
+    // `Client` constructor loads the dialect's native driver
+    // (`initializeDriver` → `require('better-sqlite3')`) and builds a pool only
+    // when the config carries a `connection`. This arm used to pass
+    // `{ filename: ':memory:' }`, but loading the native module is a side
+    // effect: with `better-sqlite3` absent — the install this package's
+    // manifest (an OPTIONAL peer) and README give remote mode, e.g. on Vercel
+    // or an Edge runtime — construction threw knex's `npm install
+    // better-sqlite3` error before any remote call was made.
+    //
+    // What stays the same: the client is still spelled `better-sqlite3`, so
+    // `isSqlite` and every dialect-keyed rule the remote arms borrow from the
+    // base (`temporalFilterColumnSql`, the canonical-time SQL) answer exactly
+    // as before, and so does anything that reads the dialect name off
+    // `config.client`.
+    //
+    // What changes for a path that still reaches `this.knex` (only `SqlDriver`
+    // methods this class does not override for remote mode): it used to RUN
+    // against a private, empty `:memory:` database and could answer from it,
+    // as `introspectSchema()` did with "no tables". Now knex refuses to run it
+    // (`Unable to acquire a connection`), because there is no connection to
+    // run it on. That failure is loud; it never adds a silent answer.
     if (mode === 'remote') {
       return {
         client: 'better-sqlite3',
-        connection: { filename: ':memory:' },
         useNullAsDefault: true,
       };
     }
@@ -2551,10 +2585,11 @@ export class TursoDriver extends SqlDriver {
   /**
    * Detect managed-schema drift — refused on the REMOTE face, see
    * {@link refuseRemoteDriftDetection}. The inherited detector reads the
-   * physical schema through the placeholder Knex connection remote mode is
-   * built with, so its remote answer was always `[]`. Refused with or without
-   * explicit `objects`, because both read the same placeholder. Local and
-   * replica modes inherit the Knex detector unchanged.
+   * physical schema through `this.knex`, which remote mode builds with no
+   * connection; with no `objects` it walks a registry no remote schema door
+   * fills and answers `[]`. Refused with or without explicit `objects`, because
+   * neither can judge the remote database. Local and replica modes inherit the
+   * Knex detector unchanged.
    *
    * The parameter repeats the base's declared shape key for key rather than
    * deriving it (`check:object-def-param-keys` arm C), so the keys a caller may
@@ -2571,9 +2606,9 @@ export class TursoDriver extends SqlDriver {
    * Plan the ADR-0104 media column move — refused on the REMOTE face, see
    * {@link refuseRemoteMediaColumnMove}. The inherited planner walks
    * `managedObjectFields`, which no remote schema door fills, and probes each
-   * table through the placeholder Knex connection remote mode is built with,
-   * so its remote answer was always an empty scan. Local and replica modes
-   * inherit the Knex planner unchanged.
+   * table through `this.knex`, which remote mode builds with no connection, so
+   * its remote answer is an empty scan. Local and replica modes inherit the
+   * Knex planner unchanged.
    */
   override async planMediaColumnMove(): ReturnType<SqlDriver['planMediaColumnMove']> {
     if (this.isRemote) refuseRemoteMediaColumnMove();
