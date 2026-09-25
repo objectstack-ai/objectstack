@@ -37,7 +37,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectQL, SchemaRegistry, SEARCH_COMPANION_FIELD, resolveRecordTitle } from '@objectstack/objectql';
+import {
+  ObjectQL,
+  SEARCH_COMPANION_FIELD,
+  provisionSearchCompanion,
+  resolveRecordTitle,
+  resolveSearchCompanionSources,
+} from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { NotificationDelivery } from './notification-delivery.object.js';
@@ -233,14 +239,13 @@ describe('[#20044] notification objects resolve a real record title under ADR-00
     });
 
     it(`${object}: provisions no search companion column, even where pinyin search is on`, () => {
-      // The companion (`__search`) is a real column fed by the title field; a
-      // registry only provisions it when pinyin search is enabled, so ask one
-      // that is.
-      const companionRegistry = new SchemaRegistry({ searchCompanion: true });
-      companionRegistry.registerObject(c.schema, 'com.objectstack.test.20044');
-      const registered = companionRegistry.getObject(object) as any;
-      expect(registered.nameField).toBe(c.pointer);
-      expect(registered.fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
+      // The companion (`__search`) is a real column fed by the title field. A
+      // registry provisions it only where pinyin search is on, by running
+      // `provisionSearchCompanion` over the body it has just designated, so
+      // run that step over the registered body.
+      const registered = engine.registry.getObject(object) as any;
+      expect(resolveSearchCompanionSources(registered)).toEqual([]);
+      expect(provisionSearchCompanion(registered).fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
     });
   }
 });

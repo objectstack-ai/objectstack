@@ -37,7 +37,13 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectQL, SchemaRegistry, SEARCH_COMPANION_FIELD, resolveRecordTitle } from '@objectstack/objectql';
+import {
+  ObjectQL,
+  SEARCH_COMPANION_FIELD,
+  provisionSearchCompanion,
+  resolveRecordTitle,
+  resolveSearchCompanionSources,
+} from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { SysPositionPermissionSet } from './sys-position-permission-set.object.js';
@@ -187,14 +193,14 @@ describe('[#20044] permission-assignment tables resolve a real record title unde
     });
 
     it(`${object}: provisions no search companion column, even where pinyin search is on`, () => {
-      // The companion (`__search`) is a real column fed by the title field; a
-      // registry only provisions it when pinyin search is enabled, so ask one
-      // that is. A formula title is never a companion source.
-      const companionRegistry = new SchemaRegistry({ searchCompanion: true });
-      companionRegistry.registerObject(schema, 'com.objectstack.test.20044');
-      const registered = companionRegistry.getObject(object) as any;
-      expect(registered.nameField).toBe('display_title');
-      expect(registered.fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
+      // The companion (`__search`) is a real column fed by the title field. A
+      // registry provisions it only where pinyin search is on, by running
+      // `provisionSearchCompanion` over the body it has just designated, so
+      // run that step over the registered body. A formula title is never a
+      // source.
+      const registered = engine.registry.getObject(object) as any;
+      expect(resolveSearchCompanionSources(registered)).toEqual([]);
+      expect(provisionSearchCompanion(registered).fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
     });
   }
 });
