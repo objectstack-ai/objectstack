@@ -763,6 +763,7 @@
     "getTursoConfigJsonSchema (const)",
     "hasDanglingLikeEscape (function)",
     "hasDynamicTokens (function)",
+    "hasNulInLikePattern (function)",
     "hookForm (const)",
     "injectedSystemColumnDefs (function)",
     "isAcceptedFilterComparand (function)",

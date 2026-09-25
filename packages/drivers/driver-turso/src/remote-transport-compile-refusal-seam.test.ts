@@ -83,6 +83,15 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, SECRET],
     klass: 'ending in a lone unpaired backslash',
   },
+  // ── #20041: born in the seam ───────────────────────────────────────────────
+  {
+    builder: 'nulLikePattern',
+    // U+0000 spelled by code point: a source file never holds the raw byte.
+    where: () => ({ [POLICY_COL]: { $like: `%${SECRET}${String.fromCharCode(0x00)}` } }),
+    secrets: [POLICY_COL, SECRET],
+    klass: 'has a pattern holding the NUL character U+0000',
+    label: '{ secret_policy_col: { $like: "%PSECRET_LITERAL" + U+0000 } }',
+  },
   {
     builder: 'undefinedComparand',
     where: () => ({ [POLICY_COL]: { $eq: undefined } }),
@@ -454,6 +463,8 @@ describe('[#20039] TursoDriver LOCAL and REMOTE withhold these classes alike', (
     ['undefined comparand', () => ({ [POLICY_COL]: { $eq: undefined } }), POLICY_COL],
     ['non-node $or element', () => ({ $or: [SECRET] }), SECRET],
     ['undeclared combinator', () => ({ [UNDECLARED_KEY]: 'x' }), UNDECLARED_KEY],
+    // [#20041] Written on both compilers as one sentence from the start.
+    ['U+0000 in a pattern', () => ({ [POLICY_COL]: { $like: `${SECRET}${String.fromCharCode(0x00)}` } }), SECRET],
   ];
 
   for (const [label, where, secret] of SHARED) {

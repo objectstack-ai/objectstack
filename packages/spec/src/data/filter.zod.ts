@@ -1057,8 +1057,9 @@ const LIKE_DESCRIPTION =
     + 'backslash escapes the character after it ("\\%", "\\_", "\\\\") so it '
     + 'matches literally. The pattern must cover the WHOLE value — a pattern '
     + 'with no wildcards is an exact comparison, NOT a substring search; write '
-    + '$contains for containment. A pattern ending in a lone unpaired backslash '
-    + 'is refused (INVALID_FILTER). Comparison is case-SENSITIVE, same contract '
+    + '$contains for containment. A pattern ending in a lone unpaired backslash, '
+    + 'or holding the NUL character U+0000, is refused (INVALID_FILTER). '
+    + 'Comparison is case-SENSITIVE, same contract '
     + 'as $contains (Q2 = A); $ilike is the case-insensitive twin. '
     + 'Answered by the SQL family (driver-sql, driver-sqlite-wasm, '
     + 'driver-turso on both transports), by driver-memory and by '
@@ -1240,6 +1241,35 @@ export function hasDanglingLikeEscape(pattern: string): boolean {
   let backslashes = 0;
   for (let i = pattern.length - 1; i >= 0 && pattern[i] === '\\'; i--) backslashes++;
   return backslashes % 2 === 1;
+}
+
+/** U+0000, spelled by code point so no source file ever holds the raw byte. */
+const LIKE_PATTERN_NUL = String.fromCharCode(0x00);
+
+/**
+ * [#20041] Does this `$like`/`$ilike` pattern hold U+0000 (NUL) anywhere?
+ *
+ * Such a pattern is REFUSED everywhere rather than answered, for the reason
+ * {@link hasDanglingLikeEscape} gives for its own shape: the backends cannot be
+ * made to agree on what it means. The SQLite faces (`driver-sql` on SQLite,
+ * `driver-sqlite-wasm`, `driver-turso` on both transports) compile `$like` to
+ * `GLOB` over {@link likePatternToGlobPattern}'s translation, and SQLite reads a
+ * pattern only up to its first U+0000 — so the pattern is CUT there, silently,
+ * and matches a different set of rows than {@link likePatternToRegexSource}
+ * gives the JS faces. Measured on every SQLite face: `'%'` followed by U+0000
+ * returned every non-NULL row, where the JS translation returns only the values
+ * that END in U+0000; `'a'` + U+0000 + `'b'` returned `'a'` as well. SQLite has
+ * no NUL-safe pattern primitive to compile to instead: `LIKE` cuts the same way,
+ * `replace()` cannot target U+0000, and `instr()` has no wildcards.
+ *
+ * So the check is shared, and every face that refuses a dangling escape refuses
+ * this too, in its own ADR-0112 `INVALID_FILTER` envelope. It judges the
+ * PATTERN only, and an escaped U+0000 (a backslash before it) holds one as
+ * well. A pattern without U+0000 matched against a STORED value holding one is
+ * a different question, and no refusal of the pattern can reach it.
+ */
+export function hasNulInLikePattern(pattern: string): boolean {
+  return pattern.includes(LIKE_PATTERN_NUL);
 }
 
 /**
