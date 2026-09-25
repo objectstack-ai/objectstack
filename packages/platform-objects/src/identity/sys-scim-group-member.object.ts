@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec/shared';
 
 /**
  * sys_scim_group_member — SCIM group membership junction
@@ -29,6 +30,18 @@ export const SysScimGroupMember = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'SCIM group membership rows pushed by the IdP (group ↔ provisioned user)',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // columns `titleFormat` names. With no pointer declared, the registry's
+  // designate-only pass stamped `nameField: 'id'` (the first title-eligible
+  // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
+  // wins over `titleFormat`) drew the raw id as the record page's H1.
+  // `titleFormat` stays for renderers that still read it first;
+  // `identity-display-title.test.ts` holds the two to the same text.
+  // `scim_user_id` and `group_id` are lookups, so the formula reads their stored
+  // ids: a formula is evaluated on the stored row, before `$expand`, and
+  // cannot reach a related record's own title.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{scim_user_id} in {group_id}',
   highlightFields: ['group_id', 'scim_user_id', 'created_at'],
 
@@ -46,6 +59,17 @@ export const SysScimGroupMember = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'ID', required: true, readonly: true, group: 'System' }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. Every source column is required, so the
+    // expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.scim_user_id + ' in ' + record.group_id`,
+      description: 'Record title: the provisioned user and the group (computed on read)',
+      group: 'Membership',
+    }),
 
     connection_id: Field.text({
       label: 'Connection ID',
