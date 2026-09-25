@@ -11,10 +11,12 @@
  * writing them twice — the same argument that put {@link
  * ./declared-fields.js#materializeDeclaredFields} in front of every server-side
  * evaluator: two when this module was written, THREE since #4953 added the
- * field `readonlyWhen` strips. That third seam is fail-open rather than
- * rejecting, so it reads only {@link unknownVariableOf} (the #4889
- * unbound-root branch) and never {@link describeCelFault}'s rejection
- * sentences.
+ * field `readonlyWhen` strips. That third seam, and the field `requiredWhen`
+ * block beside it, were fail-open until ADR-0137 D2 made a faulting field-rule
+ * predicate refuse the write; both now word that refusal through
+ * {@link describeCelFault} too, via `rule-validator.ts`'s one refusal builder.
+ * The `readonlyWhen` strip still reads {@link unknownVariableOf} first — the
+ * #4889 unbound-root branch, which LOCKS rather than refusing.
  *
  * This module has no opinion about what a caller does with a fault. It answers
  * three questions and hands back a sentence:
