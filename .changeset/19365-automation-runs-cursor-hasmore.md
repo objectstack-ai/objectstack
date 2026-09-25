@@ -29,7 +29,7 @@ FROM  ListRunsRequestSchema.parse({ name: 'f', cursor: 'n_007' })
       -> { name: 'f', limit: 20, cursor: 'n_007' }   // forwarded, then dropped
 
 TO    ListRunsRequestSchema.parse({ name: 'f', cursor: 'n_007' })
-      -> throws: '`cursor` was removed from GET /api/automation/:name/runs in
+      -> throws: '`cursor` was removed from GET /api/v1/automation/:name/runs in
                   @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) …'
 ```
 
