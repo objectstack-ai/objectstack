@@ -86,7 +86,6 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   // `@objectstack/rest` mounts itself, through a different registrar.
   'rest-family:rest-route-ledger.ts:packages',
   'rest-family:rest-route-ledger.ts:record-shares',
-  'rest-family:rest-route-ledger.ts:reports',
   'rest-family:rest-route-ledger.ts:search',
   'rest-family:rest-route-ledger.ts:security',
   'rest-family:rest-route-ledger.ts:security-explain',
@@ -123,6 +122,8 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
  * away; raising it is a reviewed decision, never a side effect of adding a
  * route family.
  *
- * 34 at 2026-08-31, the day the ledger population was adopted.
+ * 34 at 2026-08-31, the day the ledger population was adopted. 33 at
+ * 2026-09-25 (#20102): `rest-family:rest-route-ledger.ts:reports` left with the
+ * retired saved-report family — deleted, not classified.
  */
-export const LEDGER_POPULATION_BASELINE_MAX = 34;
+export const LEDGER_POPULATION_BASELINE_MAX = 33;
