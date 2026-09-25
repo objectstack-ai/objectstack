@@ -91,6 +91,10 @@ describe('[#18783] /auth/me/permissions `objects` is the one effective-map funct
         expect(body.objects.sys_member).toMatchObject({ allowEdit: false });     // clamp over the fold
         expect(body.objects.report).toMatchObject({ allowRead: true });          // seed for a super-user
         expect(Array.isArray(body.objects.report.apiOperations)).toBe(true);     // annotation
+        // [#20134] the per-set super-user fold: `modifyAllRecords` grants transfer, on a seeded
+        // entry and on one another set names narrower alike.
+        expect(body.objects.report).toMatchObject({ allowTransfer: true });
+        expect(body.objects.deal).toMatchObject({ allowTransfer: true });
     });
 
     it('[#20083] a PLAIN wildcard reaches every registered public object it covers — the same bytes', async () => {

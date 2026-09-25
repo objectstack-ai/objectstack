@@ -299,10 +299,21 @@ describe('[#18783] the engine is handed the same producer', () => {
  *    model. There the pin holds the refuse direction only — the map never grants
  *    what the evaluator refuses.
  *
- * Subjects whose sets carry a SUPER-USER wildcard are outside this table: their
- * entries are the super-user seed's and fold's, which this card leaves as they
- * were, and which the plain-wildcard pass does not touch (pinned in core's
- * `effective-object-permissions.test.ts`).
+ * [#20134] Subjects whose sets carry a SUPER-USER wildcard are held by the same
+ * table, one row per shape: the shipped platform admin and walled org admin, a
+ * bare `modifyAllRecords` wildcard, a super-read wildcard carrying plain bits, a
+ * super-user wildcard carrying `allowExport` (which the seed used to skip), and
+ * a super-user wildcard beside a set naming an object narrower. Their entries
+ * used to lack `transfer` (the write bypass grants it) and a super-read
+ * wildcard's own plain bits, and the `allowExport` shape had no entry at all for
+ * an unrestricted object; each row is now 0 under-granted.
+ *
+ * The super-user fold is also BROADER than the evaluator in two known places.
+ * Both belong to this family's over-grant card (#20136), and both are
+ * pre-registered below cell for cell in `KNOWN_OVER_GRANT` — never absorbed
+ * into the table's rule: the merged bypass folded into an entry the super-user
+ * set itself names narrower, and `allowCreate` pulled on `modifyAllRecords`
+ * alone, which the spec's `objectPermissionGrants` gives no create cell.
  */
 describe('[#20083] parity: can() over the member\'s map answers what checkObjectPermission answers', () => {
   const REGISTERED: Record<string, any> = {
@@ -344,6 +355,68 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
       authored('exporter', { '*': { allowExport: true } }),
     ],
     'a wildcard that grants nothing': [authored('none', { '*': {} })],
+    // [#20134] Super-user wildcards.
+    'platform admin': [shipped('admin_full_access'), shipped('member_default')],
+    'platform admin who is also a wall-less org admin': [
+      shipped('admin_full_access'), shipped('organization_admin_no_bypass'), shipped('member_default'),
+    ],
+    'walled org admin': [shipped('organization_admin'), shipped('member_default')],
+    'a bare modify-all wildcard': [authored('modify_all', { '*': { modifyAllRecords: true } })],
+    'a super-read wildcard carrying plain bits': [
+      authored('view_all_editor', { '*': { viewAllRecords: true, allowEdit: true, allowTransfer: true } }),
+    ],
+    'a super-user wildcard carrying the export grant': [
+      authored('exporting_admin', {
+        '*': {
+          allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
+          viewAllRecords: true, modifyAllRecords: true, allowExport: true,
+        },
+      }),
+    ],
+    'a super-read wildcard carrying the export grant': [
+      authored('exporting_viewer', { '*': { viewAllRecords: true, allowExport: true } }),
+    ],
+    'an explicit entry beside another set\'s super-user wildcard': [
+      authored('reader', { crm_account: { allowRead: true } }),
+      authored('super', { '*': { viewAllRecords: true, allowTransfer: true, allowExport: true } }),
+    ],
+    'one set: a super-user wildcard AND a narrower explicit entry': [
+      authored('same_super', {
+        '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true },
+        crm_account: { allowRead: true },
+      }),
+    ],
+  };
+
+  /**
+   * [#20134] KNOWN DIVERGENCE, pre-registered — the super-user fold's two
+   * over-grants, both owned by #20136 and both left exactly as they were:
+   *
+   *  - the merged bypass folded into an entry the super-user set ITSELF names
+   *    narrower (`resolveObjectPermission` answers that set with its explicit
+   *    entry): the walled org admin's read-only RBAC rows, and the one-set row;
+   *  - `allowCreate` pulled on `modifyAllRecords` alone.
+   *
+   * The assertion below is EXACT, both ways: a cell missing here fails the row,
+   * and a cell listed here that no longer diverges fails it too. ⛔ FLIP TRIGGER:
+   * when #20136 lands, these rows go red; delete each entry it empties — never
+   * widen one to absorb a new cell.
+   */
+  const WRITE_VERBS = ['create', 'delete', 'edit', 'import', 'remove', 'update', 'write'] as const;
+  const CREATE_VERBS = ['create', 'import'] as const;
+  const cellsOf = (objects: readonly string[], verbs: readonly string[]) =>
+    objects.flatMap((object) => verbs.map((verb) => `${object}.${verb}`));
+  const KNOWN_OVER_GRANT: Record<string, readonly string[]> = {
+    // `organization_admin` names its RBAC rows read-only; its own `'*'` is folded over them.
+    'walled org admin': cellsOf([SysPosition.name, SysPermissionSet.name], WRITE_VERBS),
+    // The same shape, authored: the set's `crm_account` entry is its whole answer there.
+    'one set: a super-user wildcard AND a narrower explicit entry': cellsOf(['crm_account'], WRITE_VERBS),
+    // `modifyAllRecords` has no create cell; the fold pulls `allowCreate` on every unguarded entry
+    // (the clamp takes it back on a guarded one).
+    'a bare modify-all wildcard': cellsOf(
+      ['crm_account', 'crm_lead', 'crm_secret', 'crm_hidden', SysAttachment.name, SysUserPreference.name, SysPosition.name, SysPermissionSet.name],
+      CREATE_VERBS,
+    ),
   };
 
   const OPERATION: Record<string, string> = {
@@ -378,6 +451,7 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
       const permissions = toEvalPermissions(await svc.getEffectiveObjectPermissions!({ userId: USER.id }));
 
       const wrong: string[] = [];
+      const overGranted: string[] = [];
       let cells = 0;
       for (const schema of Object.values(REGISTERED)) {
         const isPrivate = schema.access?.default === 'private';
@@ -390,13 +464,53 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
           if (map === server) continue;
           // The managed-write clamp may only NARROW, and only on its own verbs.
           if (clamped && CLAMPED.has(target) && server && !map) continue;
+          // [#20134] A pre-registered over-grant is collected, then held EXACTLY below.
+          if (map && (KNOWN_OVER_GRANT[label] ?? []).includes(`${schema.name}.${verb}`)) {
+            overGranted.push(`${schema.name}.${verb}`);
+            continue;
+          }
           wrong.push(`${schema.name}.${verb}: can()=${map} checkObjectPermission=${server}`);
         }
       }
       expect(cells).toBe(Object.keys(REGISTERED).length * OBJECT_PERMISSION_VERB_NAMES.length);
       expect(wrong).toEqual([]);
+      // The flip trigger: the known divergence is exactly what it was registered as.
+      expect([...overGranted].sort()).toEqual([...(KNOWN_OVER_GRANT[label] ?? [])].sort());
     });
   }
+
+  it('[#20134] every pre-registered over-grant names a row of the table', () => {
+    for (const label of Object.keys(KNOWN_OVER_GRANT)) expect(SUBJECTS, label).toHaveProperty([label]);
+  });
+
+  it('[#20134] the reported case, spelled out: the platform admin may transfer, and can() says so', async () => {
+    const sets = SUBJECTS['platform admin'];
+    const { svc, plugin } = await locate({ schemas: REGISTERED });
+    vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+    const permissions = toEvalPermissions(await svc.getEffectiveObjectPermissions!({ userId: USER.id }));
+    // `modifyAllRecords` is the write bypass, and `transfer` is in its class.
+    expect(evaluator.checkObjectPermission('transfer', 'crm_account', sets)).toBe(true);
+    expect(can(permissions, 'crm_account', 'transfer')).toBe(true);
+    // …on a private object too: a super-user wildcard covers it.
+    expect(evaluator.checkObjectPermission('transfer', 'crm_secret', sets, { isPrivate: true })).toBe(true);
+    expect(can(permissions, 'crm_secret', 'transfer')).toBe(true);
+  });
+
+  it('[#20134] a super-user wildcard carrying the export grant: an unrestricted object has an entry, and it answers', async () => {
+    const sets = SUBJECTS['a super-user wildcard carrying the export grant'];
+    const { svc, plugin } = await locate({ schemas: REGISTERED });
+    vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+    const map: any = await svc.getEffectiveObjectPermissions!({ userId: USER.id });
+    const permissions = toEvalPermissions(map);
+    for (const [verb, operation] of [['read', 'find'], ['edit', 'update'], ['export', 'export']] as const) {
+      expect(evaluator.checkObjectPermission(operation, 'crm_account', sets)).toBe(true);
+      expect(can(permissions, 'crm_account', verb), verb).toBe(true);
+    }
+    // The operation channel still says nothing about an object that keeps its whole closure…
+    expect(map.crm_account).not.toHaveProperty('apiOperations');
+    // …and still speaks for one whose `apiMethods` narrow it, `export` included.
+    expect(map.crm_lead.apiOperations).toEqual(expect.arrayContaining(['get', 'list', 'export']));
+  });
 
   it('the wall-less org admin\'s reported case, spelled out: edit on an app object reached only through `*`', async () => {
     const sets = SUBJECTS['wall-less org admin'];

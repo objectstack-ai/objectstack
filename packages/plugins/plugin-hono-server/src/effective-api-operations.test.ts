@@ -173,21 +173,24 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
     { name: 'locked', enable: { apiMethods: [] } },                // deny-all (restricting)
   ];
 
-  it('for a modify-all super-user, seeds false-init entries for restricting objects only', () => {
-    // [#18931] `allowExport: true` is what keeps this case about the `apiMethods`
-    // DERIVATION — the same reason the annotate block above grants it. Without
-    // it the export axis also withholds `export`, which is its own reason to
-    // seed `open_obj`, and this assertion would be reading that instead. The
-    // withheld-export case is pinned separately below.
+  // [#20134] INVERTED on purpose. This read "seeds false-init entries for
+  // restricting objects only" and asserted `open_obj` undefined: an unrestricted
+  // object whose export stays allowed needs no `apiOperations`, so the seed
+  // skipped it. But `current_user.can()` reads the entry, and an absent one as
+  // "no grant", so every such object answered `false` for every verb this
+  // principal holds. The #18990 ruling's own headline — every object a
+  // principal can reach gets an entry — now holds for it too; the annotation
+  // keeps its skip, pinned in the #18931 block below.
+  it('for a modify-all super-user, seeds a false-init entry for every registered object', () => {
+    // [#18931] `allowExport: true` is what keeps `open_obj` the export-allowed,
+    // unrestricted case — the one the seed used to skip.
     const objects: Record<string, any> = {
       '*': { modifyAllRecords: true, viewAllRecords: true, allowExport: true },
     };
     seedSuperUserRestrictedObjects(objects, schemas);
     expect(objects.widget).toEqual({ allowCreate: false, allowRead: false, allowEdit: false, allowDelete: false });
     expect(objects.locked).toBeDefined();
-    // an unrestricted object that keeps its FULL closure is NOT seeded — for it
-    // the client's default-allow path is already the right answer
-    expect(objects.open_obj).toBeUndefined();
+    expect(objects.open_obj).toEqual({ allowCreate: false, allowRead: false, allowEdit: false, allowDelete: false });
   });
 
   // [#18990] INVERTED on purpose. This used to read "does not seed for a
@@ -287,15 +290,20 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
       );
     });
 
-    it('stays silent for the same object once the principal really may export', () => {
+    // [#20134] INVERTED on purpose: this read "stays silent" and asserted no
+    // entry at all. The OPERATION channel still says nothing — the control
+    // below — but the entry exists, because `current_user.can()` reads it and
+    // reads an absent one as "no grant" for every verb.
+    it('once the principal really may export: an entry, and no operation set on it', () => {
       // The control: same schema, same super-user bits, `allowExport` granted.
-      // Nothing is withheld, so there is nothing to say and the client's
-      // default-allow path is correct — no entry, exactly as before #18931.
+      // Nothing is withheld, so there is no `apiOperations` to say and the
+      // client's default-allow path for the operation set is correct.
       const objects: Record<string, any> = wildcardOnlyAdmin();
       objects['*'].allowExport = true;
       seedSuperUserRestrictedObjects(objects, unrestricted);
       annotateEffectiveApiOperations(objects, (name) => unrestricted.find((s) => s.name === name));
-      expect(objects.crm_lead).toBeUndefined();
+      expect(objects.crm_lead).toBeDefined();
+      expect(objects.crm_lead).not.toHaveProperty('apiOperations');
     });
 
     // [#18990] INVERTED on purpose, under the ruling on #18990 (batch #159
@@ -326,15 +334,17 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
       );
     });
 
-    it('stays silent for a viewAll-only principal once it really may export', () => {
+    it('a viewAll-only principal once it really may export: an entry read true, and no operation set on it', () => {
       // The ruling's own carve-out — "skip only an unrestricted object whose
-      // export stays allowed" — is the SAME skip the modify-all control above
-      // pins, reached through the same predicate and not a second one.
+      // export stays allowed" — is annotate's skip, and it is the SAME skip the
+      // modify-all control above pins; [#20134] the entry itself is no longer
+      // skipped, so `can()` reads the read the server grants.
       const objects: Record<string, any> = { '*': { viewAllRecords: true, allowExport: true } };
       seedSuperUserRestrictedObjects(objects, unrestricted);
       foldWildcardSuperUser(objects);
       annotateEffectiveApiOperations(objects, (name) => unrestricted.find((s) => s.name === name));
-      expect(objects.crm_lead).toBeUndefined();
+      expect(objects.crm_lead).toMatchObject({ allowRead: true, allowEdit: false });
+      expect(objects.crm_lead).not.toHaveProperty('apiOperations');
     });
   });
 });
