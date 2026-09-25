@@ -9187,7 +9187,7 @@ const step18: MigrationStep = {
         + 'than deriving a second one; it is the same decision reaching the second slot, which is why '
         + 'it is named here instead of in an entry of its own. Reachable wherever a flow is authored '
         + 'or stored: defineStack({ flows }) sources, an exported stack passed to objectstack validate, '
-        + 'a POST /flows body, and a flow row already sitting in sys_metadata',
+        + 'a POST /api/v1/automation body, and a flow row already sitting in sys_metadata',
       replacement:
         'a non-blank `source` — `{ dialect: \'cel\', source: \'record.amount > 10\' }`, or the bare '
         + 'string `\'record.amount > 10\'` — if the edge was meant to branch; or REMOVE the '
@@ -9229,7 +9229,7 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Grep every authored structural condition — BOTH `edges[].condition` and a node\'s '
         + '`config.condition` (a `decision` node\'s predicate, and on a `start` node the trigger '
-        + 'gate) — in `defineStack({ flows })` sources, exported stacks and `POST /flows` bodies, and '
+        + 'gate) — in `defineStack({ flows })` sources, exported stacks and `POST /api/v1/automation` bodies, and '
         + 'every flow row in `sys_metadata`, for an envelope with no `source` key and for a `source` '
         + '(or bare string) that is empty after trimming. ⚠️ Sweeping only the edge key leaves the '
         + 'node key unswept, and the node key is the one with no schema in front of it. For each '

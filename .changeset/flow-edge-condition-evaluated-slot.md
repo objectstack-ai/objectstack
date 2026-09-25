@@ -61,7 +61,10 @@ edges:
   refused by `evaluateCondition` with the same sentence, instead of answering a
   silent `false`. An `ast` BESIDE a string `source` is still admitted
   everywhere. The whitespace-only STRING ruling on `config.condition` (#15662:
-  consistent `false` on both sides) is untouched.
+  consistent `false` on both sides) is untouched by this change, but it does not
+  survive the release that carries it: two sibling notes in that release refuse
+  the value, at `registerFlow` (#17322, `@objectstack/service-automation`) and
+  at `objectstack validate` (#17495, `@objectstack/lint`).
 - **Three doors agree, through the spec.** `registerFlow` refuses the flow at
   `FlowSchema.parse` (edge) or at its structural pass (`config.condition`);
   `objectstack validate` refuses it at its `ObjectStackDefinitionSchema` parse
@@ -80,7 +83,7 @@ the refusal itself carries the prescription.
 
 **A flow ALREADY STORED in `sys_metadata` stops running entirely — the whole
 flow, not just the edge.** The paragraph above is the author's remedy, at
-`objectstack validate` / `POST /flows`; a stored row has no author in front of
+`objectstack validate` / `POST /api/v1/automation`; a stored row has no author in front of
 it. Stored flows are deliberately NOT canonicalized by
 `applyConversionsToStoredItem` (`spec/src/conversions/stored.ts`, and the same
 skip in `metadata/src/loaders/database-loader.ts`'s `rowToData`) — flow-node
@@ -104,5 +107,9 @@ door, `objectstack validate`, which locates the same edge at
 judgment for a consumer replaying the chain.
 
 Not touched here: `start.config.condition` has no Zod schema to narrow (the
-start node's `config` is an open record); its producer-side gate is the
-structural refusal above, which this change tightens but does not type.
+start node's `config` is an open record). Its producer-side gate is the
+structural pass at `registerFlow` and `objectstack validate`: the shape refusal
+above, which this change tightens but does not type, and after it a blank-source
+check that runs this change's `EvaluatedExpressionInputSchema` on the
+condition's `source` (added by #17322 at `registerFlow` and by #17495 at
+`objectstack validate`).
