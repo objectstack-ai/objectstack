@@ -523,3 +523,54 @@ describe('[#20122] per-aggregation filter — what the walk leaves alone answers
     });
   }
 });
+
+describe('[#20122] per-aggregation filter — the shape gate `where` takes: a filter that is not a filter object is refused', () => {
+  // Before, measured through `engine.aggregate` on driver-memory and
+  // driver-sql: each shape was DROPPED — the aggregation counted every row of
+  // its group, on a populated table, with no error (driver-sql's native
+  // aggregate answered the non-empty string with NOT_IMPLEMENTED / 501). The
+  // REST door refuses each one already, through `AggregationNodeSchema`.
+  const SHAPE_REFUSED: ReadonlyArray<readonly [string, () => unknown, string]> = [
+    ['a string', () => "stage = 'closed_won'", `received string "stage = 'closed_won'"`],
+    ['a number', () => 42, 'received number 42'],
+    ['a Map', () => new Map([['stage', 'closed_won']]), 'received Map'],
+    ['true', () => true, 'received boolean true'],
+    ['the empty string', () => '', 'received string ""'],
+    ['a Date', () => new Date(0), 'received Date'],
+  ];
+
+  for (const [name, filter, received] of SHAPE_REFUSED) {
+    it(`${name}: refused before any read, whatever the rows`, async () => {
+      const message = await expectFilterRefusal(filter);
+      expect(message).toContain(`aggregate('crm_opportunity'): '${AT}' must be a filter object or condition array, ${received}.`);
+      expect(message).toContain('It was not applied');
+    });
+  }
+
+  it('a filter object answers as before — a literal and a null-prototype one alike', async () => {
+    for (const native of [true, false]) {
+      for (const filter of [{ stage: 'closed_won' }, Object.assign(Object.create(null), { stage: 'closed_won' })]) {
+        const { driver } = makeCountingDriver(OPPORTUNITIES, native);
+        const engine = await makeEngine(driver);
+        expect(await engine.aggregate('crm_opportunity', withFilter(filter))).toEqual([{ opp_count: 6, picked: 2 }]);
+      }
+    }
+  });
+
+  it('an array is not this gate\'s to refuse, as it is not on `where` — `[]` and a FilterArray answer as before', async () => {
+    // Held, not endorsed: the FilterArray's answer is the walker's reading of an
+    // array (its index keys read as column names, so no row matches) — the
+    // pre-existing reading, left for its own decision; `[]` is the vacuous
+    // filter. What this pins is that the shape gate moves neither.
+    for (const native of [true, false]) {
+      const { driver } = makeCountingDriver(OPPORTUNITIES, native);
+      const engine = await makeEngine(driver);
+      expect(await engine.aggregate('crm_opportunity', withFilter([['amount', '>', 100]]))).toEqual([{ opp_count: 6, picked: 0 }]);
+    }
+    // `[]` is read as no filter and so keeps the native push-down; the stand-in's
+    // native door computes nothing, so it is read on the fallback door here.
+    const { driver } = makeCountingDriver(OPPORTUNITIES, false);
+    const engine = await makeEngine(driver);
+    expect(await engine.aggregate('crm_opportunity', withFilter([]))).toEqual([{ opp_count: 6, picked: 6 }]);
+  });
+});

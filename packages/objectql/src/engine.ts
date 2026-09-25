@@ -16090,6 +16090,25 @@ export class ObjectQL implements IObjectQLEngine {
           for (const [i, agg] of aggregations.entries()) {
               const aggFilter = (agg as { filter?: unknown })?.filter;
               if (aggFilter == null) continue;
+              // [#20122] The SHAPE gate `where` takes first on its own seam
+              // (`lowerWhereFilterArray`, #20121) — first here too, with its
+              // accept set and its words. A filter that is not a filter object
+              // (a string, a number, a boolean, `''`, a `Map`, a `Date`) was
+              // stepped around by every door below, each of which walks a filter
+              // node's keys, and then dropped: the fork below reads it as "no
+              // filter", so the aggregation read every row of its group
+              // (`driver-sql`'s native aggregate answered a non-empty string
+              // with a 501 instead). The wire door already refuses these shapes
+              // through `AggregationNodeSchema`; this closes the in-process one.
+              // An array is left to the doors below, as `where` leaves one to
+              // its array branch.
+              if (!Array.isArray(aggFilter) && !isWhereFilterObject(aggFilter)) {
+                  throw invalidFilterError(
+                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object or condition ` +
+                      `array, received ${describeNonFilterWhere(aggFilter)}. It was not applied, and an ` +
+                      `unapplied filter would have aggregated every row of each group for that aggregation.`,
+                  );
+              }
               assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
               assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
               // [#15661] …and the declared-type door for the text operators: a
@@ -16112,11 +16131,6 @@ export class ObjectQL implements IObjectQLEngine {
               //     walks the filter per SOURCE row, so `{ amount: { $median: 1 } }`
               //     was a 400 on a populated table and a `200 []` on an empty one,
               //     and a `$or` whose first branch held counted every row.
-              // ⛔ Not the condition-object check `having` got: a `filter` that is
-              // not a filter node at all (a string, a number, a `Map`) is a
-              // question about the clause's SHAPE, answered by the shape door
-              // for every filter position at once — not a refusal that depends
-              // on the data, which is what this block closes.
               const typed = normalizeFilterComparandTypes(aggFilter, `aggregate('${object}')`, `aggregations[${i}].filter`);
               assertAggregationFilterIsEvaluable(typed, i);
               if (typed !== aggFilter) {
