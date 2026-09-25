@@ -155,8 +155,6 @@ export {
   clampManagedObjectWrites,
   seedSuperUserRestrictedObjects,
   annotateEffectiveApiOperations,
-  type EffectiveObjectPermissionsSchemaSource,
-  type EffectiveObjectPermissionsInputSet,
   type ManagedSchemaLike,
   type ApiExposureSchemaLike,
 } from './effective-object-permissions.js';
