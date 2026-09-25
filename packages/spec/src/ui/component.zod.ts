@@ -862,27 +862,27 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `62597c588072`), under `packages/plugin-detail/src/renderers/`
+ * (`.objectui-sha` = `f8a9d0fb0596`), under `packages/plugin-detail/src/renderers/`
  * and `packages/permissions/src/`:
  *
  * 1. CAPABILITIES, NOT OBJECT ACTIONS. Every block gates through
- *    `perms.hasCapabilities(required)` — `record-details.tsx:234`,
- *    `record-highlights.tsx:93`, `record-related-list.tsx:242`,
+ *    `perms.hasCapabilities(required)` — `record-details.tsx:235`,
+ *    `record-highlights.tsx:93`, `record-related-list.tsx:276`,
  *    `record-quick-actions.tsx:263` — and never `perms.can(objectName, …)`;
  *    each renderer's docblock states the capability "is not object-scoped"
- *    (`record-details.tsx:223`, `record-highlights.tsx:77`,
- *    `record-related-list.tsx:229`, `record-quick-actions.tsx:252`). `read`
+ *    (`record-details.tsx:224`, `record-highlights.tsx:77`,
+ *    `record-related-list.tsx:263`, `record-quick-actions.tsx:252`). `read`
  *    is looked up in the capability set like any other name.
  * 2. ALL OF THEM. `MePermissionsProvider.tsx:416` is
  *    `required.every((p) => held.has(p))`.
  * 3. THE OUTCOME. Each block returns a `role="status"` "Insufficient
  *    permissions to view …" notice instead of its content —
- *    `record-details.tsx:234-242`, `record-highlights.tsx:151-164`,
- *    `record-related-list.tsx:242-250`, `record-quick-actions.tsx:263-271`.
+ *    `record-details.tsx:235-243`, `record-highlights.tsx:151-164`,
+ *    `record-related-list.tsx:276-284`, `record-quick-actions.tsx:263-271`.
  *    Checks that already withhold the content run first on two of them (no
- *    record bound, `record-details.tsx:186`; no object,
- *    `record-related-list.tsx:184`; the related object's read gate,
- *    `record-related-list.tsx:202`), which is why the text says "wherever it
+ *    record bound, `record-details.tsx:187`; no object,
+ *    `record-related-list.tsx:218`; the related object's read gate,
+ *    `record-related-list.tsx:236`), which is why the text says "wherever it
  *    would otherwise render" rather than promising the notice unconditionally.
  * 4. PRESENTATION ONLY. The gate is renderer code: nothing in this repo's
  *    server packages reads a page component's `requiredPermissions`. The data
