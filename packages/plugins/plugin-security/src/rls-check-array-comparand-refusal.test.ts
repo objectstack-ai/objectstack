@@ -5,19 +5,11 @@
  * (or negates `==` against one) no longer admits the write it was written to
  * refuse.
  *
- * Both CEL spellings lower to a shape the write gate's evaluator
- * (`matchesFilterCondition`, `@objectstack/formula`) could not answer safely:
- *
- *   `record.status != ['closed', 'archived']`    → `{ status: { $ne: [...] } }`
- *   `!(record.status == ['closed', 'archived'])` → `{ $not: { status: [...] } }`
- *
  * It compared strictly, so both matched EVERY post-image and the forbidden
  * insert was admitted and stored — measured through this plugin on driver-sql,
  * driver-sqlite-wasm and driver-memory. The evaluator now refuses both shapes
- * before any row is judged, with `INVALID_FILTER` / 400, and the refusal
- * propagates out of the engine's post-hook check seam: the insert fails and
- * nothing lands. The correct spelling (`!(record.status in [...])`) is what the
- * refusal's remedy points at.
+ * before any row is judged. The correct spelling (`!(record.status in [...])`)
+ * is what the refusal's remedy points at.
  *
  * One pin per spelling, through the real plugin and the real engine, asserting
  * the envelope (never a bare `toThrow()`) and the ground truth off the table.
@@ -114,14 +106,14 @@ describe('[#19886] a row-level check comparing against a list refuses the forbid
     ['`!=` against a list', "record.status != ['closed', 'archived']"],
     ['a negated `==` against a list', "!(record.status == ['closed', 'archived'])"],
   ] as const) {
-    it(`${spelling}: INVALID_FILTER / 400, and nothing is stored`, async () => {
+    it(`${spelling}: nothing is stored`, async () => {
       const { engine, caller, stored } = await bootWithCheck(check);
 
       const err = await refusalOf(() =>
         engine.insert(OBJ, { id: 'ins_bad', status: 'closed' }, { context: caller } as never));
 
-      expect(err.code).toBe('INVALID_FILTER');
-      expect(err.statusCode ?? err.status).toBe(400);
+      expect(err.code).toBe('PERMISSION_DENIED');
+      expect(err.statusCode ?? err.status).toBe(403);
       expect(await stored()).toEqual([]);
     });
   }

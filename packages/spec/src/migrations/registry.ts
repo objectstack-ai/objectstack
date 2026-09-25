@@ -6247,6 +6247,54 @@ const step18: MigrationStep = {
         + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
     },
+    // The CEL-lowering face of the list-comparand refusal: the pushdown compiler
+    // every row-level policy and declared sharing rule compiles through, plus the
+    // driver-mongodb face that answered the lowered shape. Recorded as its own entry
+    // because the surface an author rewrites is a CEL predicate string, and on
+    // MongoDB a stored query filter.
+    {
+      id: 'cel-predicate-list-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
+        + 'CEL predicate comparing a field with != or == against a list, either a list literal or a '
+        + 'current_user membership set the runtime resolves to an array (org_user_ids, positions, '
+        + 'accessible_org_ids, or a key staged into rlsMembership), and the negation of such a '
+        + 'comparison. On driver-mongodb, also a query filter carrying $ne with an array comparand, at '
+        + 'any depth under $and / $or / $not',
+      replacement:
+        'the list operator the comparison was standing in for. "One of these values" is in: '
+        + 'record.status in ["open", "pending"], or record.reviewer_id in current_user.org_user_ids. '
+        + '"None of these values" is the negated in: !(record.status in ["closed", "archived"]). In a '
+        + 'query filter, $in and $nin. Scalar != and ==, null, in, and field-to-field comparisons lower '
+        + 'exactly as before',
+      reason:
+        'The @objectstack/formula pushdown compiler lowered such a comparison to a $ne carrying the '
+        + 'array, to a bare-array equality, or to a $not around one. A row-level using clause is '
+        + 'composed into the query after the engine\'s comparand-shape check, and driver-mongodb passed '
+        + 'the shape to the server: measured through mingo, the named proxy for MongoDB query '
+        + 'semantics, $ne against an array and the $nor that a negated equality becomes selected every '
+        + 'row storing a scalar, so the read returned the rows the policy was written to hide. A check '
+        + 'written != against a membership set admitted and stored every write, on driver-sql as on '
+        + 'driver-mongodb. The compiler now refuses the comparison with reason unsupported, so the RLS '
+        + 'compiler drops the policy and fails closed when no other policy applies: reads under it '
+        + 'return no rows and check writes '
+        + 'are refused 403. A declared sharing rule with such a condition is skipped at bootstrap and '
+        + 'never seeded. The authoring lint reports a list literal as rls-predicate-unenforceable; a '
+        + 'membership set holds its value only per request, so that form is refused at request time. '
+        + 'driver-mongodb refuses $ne with an array comparand with INVALID_FILTER / 400, as driver-sql '
+        + 'and driver-memory already do. Metadata AT REST is not rewritten and this entry adds no D2 '
+        + 'conversion: the platform cannot tell which list operator a list comparison was standing in '
+        + 'for, and a policy rewritten on the author\'s behalf would change which rows it admits, which '
+        + 'is the policy author\'s decision. ADR-0058 D4 / ADR-0087.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity using and check predicates of your permission sets, and the '
+        + 'condition of your sharing rules, for != or == whose other side is a list literal or a '
+        + 'current_user membership set, and for the negation of such an ==, then rewrite each with in '
+        + 'or its negation. On driver-mongodb, '
+        + 'grep stored query filters for $ne with an array value and rewrite each with $nin.',
+    },
     {
       id: 'change-management-duration-keys-retired',
       surface:
@@ -11833,10 +11881,10 @@ const step18: MigrationStep = {
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
       // span already, and a nested backtick would close it.
       surface:
-        'security.PermissionSet rowLevelSecurity[].check (and .using, where the explain engine '
-        + 'attributes a record) — a CEL predicate comparing a field with != or == against a list, '
+        'security.PermissionSet rowLevelSecurity[].check — a CEL predicate comparing a field with != '
+        + 'or == against a list, '
         + 'a list literal or a current_user membership array, and the negation of such an ==. They '
-        + 'lower to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
+        + 'lowered to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
         + 'the @objectstack/formula evaluator matchesFilterCondition now refuses, together with '
         + '{ field: { $eq: [...] } }, at any depth under $and / $or / $not, the empty array included',
       replacement:
@@ -11853,12 +11901,9 @@ const step18: MigrationStep = {
         + 'membership array, matched EVERY post-image, and a check written '
         + '!(record.status == ["closed", "archived"]) did the same: every write such a policy was '
         + 'written to refuse was admitted and stored. The positive record.status == ["open", '
-        + '"pending"] refused every write (403). All of these shapes now fail the write with '
-        + 'INVALID_FILTER / 400 before any record is judged, the envelope driver-sql and '
-        + 'driver-memory already give the same shape on the read side, and the explain engine\'s '
-        + 'record attribution refuses too. The message withholds the field, the operator and the '
-        + 'value, because the filter is usually an access policy the caller did not write and the '
-        + 'comparand may be a resolved membership set. Metadata AT REST is not rewritten and this '
+        + '"pending"] refused every write (403). The evaluator now refuses all of these shapes '
+        + 'before any record is judged. The message withholds the field, the operator and the '
+        + 'value. Metadata AT REST is not rewritten and this '
         + 'entry adds no D2 conversion: the platform cannot tell which list operator a list '
         + 'comparison was standing in for, and a policy rewritten on the author\'s behalf would '
         + 'change which writes it admits (the negated forms would start refusing writes they '
@@ -11867,9 +11912,7 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Grep the rowLevelSecurity check and using predicates of your permission sets for != or == '
         + 'whose right-hand side is a list literal or a current_user membership array, and for the '
-        + 'negation of such an ==, then rewrite each with in or !(... in ...). A check that still '
-        + 'carries the shape refuses every write it governs with INVALID_FILTER / 400, allowed '
-        + 'values included, so one allowed write under each policy finds every such check left. '
+        + 'negation of such an ==, then rewrite each with in or !(... in ...). '
         + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',

@@ -345,8 +345,11 @@ function lowerComparison(op: string, lNode: ASTNode, rNode: ASTNode, ctx: Ctx): 
     // field-to-field comparison → `{ $field: otherPath }` reference.
     return emit((L as { path: string }).path, op, { $field: (R as { path: string }).path }, true);
   }
-  if (lField) return emit((L as { path: string }).path, op, resolveValue(R, ctx), false);
-  if (rField) return emit((R as { path: string }).path, FLIP[op] ?? op, resolveValue(L, ctx), false);
+  // [#19886] `==` / `!=` against a comparand that IS a list — a list literal, or
+  // a `current_user` variable that resolves to an array — is refused before it
+  // is emitted. See {@link arrayComparandRefusal}.
+  if (lField) return emit((L as { path: string }).path, op, comparandOf(op, R, ctx), false);
+  if (rField) return emit((R as { path: string }).path, FLIP[op] ?? op, comparandOf(op, L, ctx), false);
 
   // Neither side is a field: a constant comparison. Fold the always-true case
   // (`1 == 1`, the RLS allow-all) to "no restriction"; refuse the rest (a
@@ -415,6 +418,80 @@ function lowerStringMethod(args: [string, ASTNode, ASTNode[]], ctx: Ctx): Filter
     throw new CompileError('unsupported', `"${method}()" argument must be a string literal`);
   }
   return { [(recv as { path: string }).path]: { [mapped]: arg } } as FilterCondition;
+}
+
+/**
+ * [#19886] `==` / `!=` compare ONE value, and a list is not one value.
+ *
+ * Until this refusal `record.status != ['closed', 'archived']` lowered to
+ * `{ status: { $ne: [...] } }` and `record.status == [...]` to the bare-array
+ * `{ status: [...] }`. The backends that received them disagreed, and two of
+ * the answers widened:
+ *
+ * | lowered shape                  | driver-sql / memory / turso | formula `matchesFilterCondition` (RLS `check`), before its own refusal | driver-mongodb (mingo proxy) |
+ * |:-------------------------------|:----------------------------|:----------------------|:-----------------------------|
+ * | `{ f: { $ne: [...] } }`        | 400                         | every row             | every scalar row             |
+ * | `{ $not: { f: [...] } }`       | 400                         | every row             | every row (`$nor`)           |
+ *
+ * The RLS `using` clause is AND-composed into the query AFTER the engine's
+ * comparand-shape seam, so no shared face stood between that lowering and a
+ * driver that answered it. Refusing HERE closes it at the one point every
+ * consumer compiles through — the RLS `using` / `check` compiler, the
+ * sharing-rule bootstrap, and the authoring lint — and it fails closed the way
+ * every other `unsupported` shape does: the RLS compiler drops the policy
+ * (`RLS_DENY_FILTER` when nothing else applies), and the sharing seeder skips
+ * the rule.
+ *
+ * ## Both kinds of list, one refusal
+ *
+ * A LIST LITERAL (`record.status != ['closed', 'archived']`) and a
+ * `current_user` variable that RESOLVES to an array
+ * (`record.reviewer_id != current_user.org_user_ids`) lower to the same shapes
+ * and are refused alike, with the same `unsupported` reason. They differ only
+ * in WHEN the refusal is visible:
+ *
+ *  - A literal is refused by the shape check too (`isPushdownableCel`, so
+ *    `isSupportedRlsExpression`): the authoring gate reports it before any
+ *    request, and the RLS compiler drops it as an uncompilable predicate.
+ *  - A variable's value exists only per request, so the shape check cannot see
+ *    it and passes the source. The refusal lands at request time instead, as
+ *    this compile's `unsupported` result: the RLS compiler collects the policy
+ *    as a denial and returns `RLS_DENY_FILTER` when nothing else applies —
+ *    zero rows on a read, `PermissionDeniedError` on a `check` write. The
+ *    sharing-rule bootstrap compiles with no variables at all, so a variable
+ *    never reaches this check there (it is `unresolved-variable` first).
+ *
+ * The authoring lint's reference pass compiles each predicate with every
+ * kernel-resolved `current_user` key bound to a probe of that key's RUNTIME
+ * type — a scalar for `id` / `email` / `organization_id`, an array for the
+ * membership sets — so `field == current_user.id` still lowers there and keeps
+ * its field and variable checks.
+ *
+ * "One of these values" is `in`; "none of these values" is `!(… in …)`. The
+ * refusal message names the variable PATH the author wrote and never a value:
+ * a resolved array is a membership set.
+ */
+function arrayComparandRefusal(op: string, leaf: Leaf): CompileError {
+  const list = leaf.kind === 'var' ? leaf.path.join('.') : '[...]';
+  const comparand =
+    leaf.kind === 'var' ? `its comparand \`${list}\` resolves to a list` : 'its comparand is a list literal';
+  return new CompileError(
+    'unsupported',
+    `\`${op}\` compares one value, but ${comparand} — spell "one of these" ` +
+      `as \`record.f in ${list}\` and ` +
+      `"none of these" as \`!(record.f in ${list})\``,
+  );
+}
+
+/**
+ * Resolve the non-field side of a comparison, refusing a list under `==` / `!=`
+ * ({@link arrayComparandRefusal}). In shape mode a variable resolves to the
+ * placeholder, so only a literal list is refused there.
+ */
+function comparandOf(op: string, leaf: Leaf, ctx: Ctx): unknown {
+  const value = resolveValue(leaf, ctx);
+  if ((op === '==' || op === '!=') && Array.isArray(value)) throw arrayComparandRefusal(op, leaf);
+  return value;
 }
 
 /** Build `{ field: <op> value }`. `isRef` true → value is a `{ $field }` reference. */

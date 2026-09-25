@@ -168,6 +168,7 @@ import {
 } from '@objectstack/formula';
 import type { CelBoundsOverrun } from '@objectstack/formula';
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
+import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import {
   describeFieldPathVerdict,
   indexObjectGraph,
@@ -371,14 +372,45 @@ const PRERESOLVED_USER_KEYS: ReadonlySet<string> = new Set(RESERVED_RLS_MEMBERSH
 /**
  * Probe values bound in place of the real request context.
  *
- * An ARRAY is the value that lowers in EVERY position the pushdown subset has:
- * `lowerMembership` requires `Array.isArray` on the right of `in`, and
- * `lowerComparison` accepts any value at all — so binding every known key to one
- * array lets a well-formed predicate compile without a request. The SCALAR is
+ * Each kernel-resolved key is bound to a value of the type it HOLDS at runtime
+ * (see {@link kernelKeyProbe}): a scalar for a scalar key, an array for a
+ * membership set. The compiler's verdict on a position then matches the
+ * runtime's — `==` / `!=` refuse an array (#19886) and `in` requires one — so a
+ * well-formed predicate compiles without a request, and a predicate the runtime
+ * drops for a type mismatch does not compile here either. The SCALAR is also
  * the discriminator described on {@link userVariableIsScalarPositioned}.
  */
 const PROBE_ARRAY: readonly string[] = ['__objectstack_lint_probe__'];
 const PROBE_SCALAR = '__objectstack_lint_probe__';
+
+/**
+ * The kernel keys `RLSCompiler.compileFilter` copies from an `ExecutionContext`
+ * field of a DIFFERENT name (`id: executionContext.userId`,
+ * `organization_id: executionContext.tenantId`). Every other kernel key is
+ * copied from the field of its own name.
+ */
+const KERNEL_KEY_RENAMED_FROM: Readonly<Record<string, string>> = {
+  id: 'userId',
+  organization_id: 'tenantId',
+};
+
+/**
+ * The probe for one kernel-resolved key: whatever its `ExecutionContext` field
+ * accepts. The type is asked of the declaring schema (`ExecutionContextSchema`,
+ * `@objectstack/spec/kernel`) rather than transcribed here — if that field takes
+ * an array the key is a membership set, otherwise it is a scalar.
+ *
+ * A key with no declared field keeps the array probe this pass used for every
+ * key before #19886; the test that pins the key-binding table goes red first.
+ */
+function kernelKeyProbe(key: string): unknown {
+  const field = KERNEL_KEY_RENAMED_FROM[key] ?? key;
+  const declared = (ExecutionContextSchema.shape as Record<string, { safeParse(v: unknown): { success: boolean } }>)[
+    field
+  ];
+  if (!declared) return PROBE_ARRAY;
+  return declared.safeParse(PROBE_ARRAY).success ? PROBE_ARRAY : PROBE_SCALAR;
+}
 
 /** `variable "current_user.nope" is undefined` → `current_user.nope`. */
 function unresolvedVariablePath(detail: string): string | null {
@@ -390,7 +422,7 @@ type UserProbe = Record<string, unknown>;
 
 function baseUserProbe(): UserProbe {
   const probe: UserProbe = {};
-  for (const key of PRERESOLVED_USER_KEYS) probe[key] = PROBE_ARRAY;
+  for (const key of PRERESOLVED_USER_KEYS) probe[key] = kernelKeyProbe(key);
   return probe;
 }
 
@@ -477,8 +509,10 @@ function resolveReferences(
     if (res.ok) return { filter: res.filter as Record<string, unknown>, unresolvedScalars };
     if (res.reason !== 'unresolved-variable') {
       // The predicate passed `isSupportedRlsExpression`, so a shape refusal here
-      // can only be a probe value the position cannot take (an array handed to
-      // `startsWith`). Nothing further is decidable; report what was found.
+      // can only be a value the position cannot take — a membership set under
+      // `==` / `!=` or handed to `startsWith`, a scalar key on the right of `in`.
+      // The runtime refuses the same value in the same position, so nothing
+      // further is decidable; report what was found.
       return { filter: null, unresolvedScalars };
     }
     const path = unresolvedVariablePath(res.detail);
