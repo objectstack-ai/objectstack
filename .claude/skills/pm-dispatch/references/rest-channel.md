@@ -14,7 +14,7 @@
 - ⛔ 它、赋值与 `cd … &&` 前缀都落分类器;多仓云会话首调单独裸 `cd /home/user/objectstack`。
 - 活着 = 工作流文件在 `main` 且 Actions 状态 `active`;维护者在 Actions UI 停用即整队回 `direct`。
 - dispatch 带会话令牌发往 objectstack;run 在 runner 上以逐次铸造、窄到目标仓的 App 令牌执行。
-- 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具,`dispatch.mjs` 无 allow 行。
+- 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具,直调 `dispatch.mjs` 仅落地。
 - 正文超 60,000 字节的那一笔 `post-stamped` 写走 `direct` 并印一行,身份是席位自己的用户。
 - run 失败记 5(post-stamped 4,close-cards 有步落地或读不回 4),UNCONFIRMED 6:只读,⛔ 永不重试。
 
@@ -48,12 +48,12 @@
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位、零文件写、真合并提交。
 - `expected_head_sha` 须完整 40 字符 SHA(短 SHA 回 422);base 未动回 422 = 无事可做,不是失败。
-- ✓ draft 转 ready `curl -sS -X POST .../pulls/{n}/ccr/ready_for_review -d '{}'`,反向 `.../ccr/convert_to_draft`。
+- ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
 - ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 零改;状态码不作数,`GET /pulls/{n}` 才作数。
 - 线程自己建:`POST .../pulls/{n}/comments` 带 `commit_id`·`path`·`line`,回读看 `review_threads`。
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
-- ✓ auto-merge 挂载 `curl -sS -X PUT .../pulls/{n}/ccr/auto_merge -d '{"merge_method":"SQUASH"}'`,`DELETE` 卸载。
-- ⛔ `PUT .../ccr/auto_merge` 在 draft 上 422 零存储;`DELETE` 无挂载回 422 = 本就没挂,非失败。
+- ✓ F = `[{"op":"pr_ready","pull":N},{"op":"automerge_enable","pull":N}]`;反向 `pr_draft`/`automerge_disable`。
+- ⛔ draft 上挂 auto-merge 零存储(ccr 路实测 422)⇒ `pr_ready` 排前,首败即停;反向两 op 未实调。
 - 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见配额段,MCP 恒用户。
 
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段

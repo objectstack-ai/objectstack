@@ -2,9 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PackagePathParamsSchema,
   ListInstalledPackagesRequestSchema,
-  ListInstalledPackagesResponseSchema,
   GetInstalledPackageRequestSchema,
-  GetInstalledPackageResponseSchema,
   PackageInstallRequestSchema,
   PackageInstallBodySchema,
   PackageInstallResponseSchema,
@@ -18,10 +16,16 @@ import {
   UninstallPackageApiRequestSchema,
   UninstallPackageApiResponseSchema,
   PackageApiErrorCode,
+} from './package-api.zod';
+// The declarations that embed the assembled package body live one file over
+// and ship from `@objectstack/spec/api-assembled` (#18576 ruling, letter B).
+import {
+  ListInstalledPackagesResponseSchema,
+  GetInstalledPackageResponseSchema,
   PackageApiContracts,
   AssembledInstalledPackageSchema,
   InstalledPackageAtEitherStageSchema,
-} from './package-api.zod';
+} from './package-api-assembled.zod';
 import { InstalledPackageSchema } from '../kernel/package-registry.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { AssembledPackageBodySchema } from '../stack.zod';

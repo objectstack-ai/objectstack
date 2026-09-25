@@ -385,14 +385,30 @@ describe('#4649 — unchanged neighbours', () => {
       .not.toThrow();
   });
 
-  it('a broken field-level `requiredWhen` stays fail-open (out of scope, deliberately)', () => {
+  // #4649 left the field-level `requiredWhen` out of scope, and it stayed
+  // fail-open until ADR-0137 D2 ruled the field-rule row: a field-rule predicate
+  // that cannot be evaluated refuses the write and names the field and the rule.
+  // It left this neighbour list for that reason — the dedicated pins live in
+  // `engine-field-predicate-fault.test.ts`.
+  it('a broken field-level `requiredWhen` is no longer a neighbour: it refuses (ADR-0137 D2)', () => {
     const schema = {
       fields: {
         a: { name: 'a', type: 'text', requiredWhen: { dialect: 'cel', source: 'this is (( not valid' } },
       },
       validations: [],
     };
-    expect(() => evaluateValidationRules(schema, { a: null }, 'update', { previous: { a: null } }))
-      .not.toThrow();
+    let err: unknown;
+    try {
+      evaluateValidationRules(schema, { a: null }, 'update', { previous: { a: null } });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as ValidationError).code).toBe('VALIDATION_FAILED');
+    expect((err as ValidationError).fields).toContainEqual(expect.objectContaining({
+      field: 'a',
+      code: 'rule_violation',
+      constraint: expect.objectContaining({ rule: 'requiredWhen', reason: 'unevaluable' }),
+    }));
   });
 });

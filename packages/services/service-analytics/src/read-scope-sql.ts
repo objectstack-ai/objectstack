@@ -5,6 +5,10 @@ import type { FilterCondition } from '@objectstack/spec/data';
 // at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
 // [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [#19995] The engine's own placeholder resolver (`ObjectQL.resolveWhereTokens`
+// is a call to it), run on a read scope, alone, at the ObjectQL merge sites by
+// {@link assertReadScopePlaceholdersResolvable}.
+import { filterTokenContextFrom, resolveFilterTokens, type ExecutionContextLike } from '@objectstack/core';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
@@ -461,6 +465,26 @@ import {
  * ordering, for the same door-distinguishable log), and the faces add only what
  * would otherwise have been lowered. The envelope is this module's one
  * envelope; nothing here re-argues the rulings the faces carry.
+ *
+ * ## …and a placeholder the engine cannot resolve, on the engine path (#19995)
+ *
+ * The engine resolves `{placeholder}` filter values on the COMPOSED `where`,
+ * after `withReadScope` has `$and`-ed the scope into it, so a scope carrying an
+ * unknown placeholder, or a known one the request context has no value for,
+ * came back as the engine's `FILTER_TOKEN_UNKNOWN` / `FILTER_TOKEN_UNRESOLVED`
+ * / 400: the token was relayed, and with it what the policy compares against.
+ * {@link assertReadScopePlaceholdersResolvable} runs the engine's own resolver
+ * on the scope alone, with the token context the engine builds, at the same
+ * two merge sites. A placeholder the engine resolves is resolved there too, so
+ * the scope is served as before.
+ *
+ * Still the engine's to answer on that path, with a 400 that names the policy:
+ * the doors that read the object's SCHEMA — a text operator over a field that
+ * never holds a string, a temporal comparand the field's storage rule cannot
+ * read, a filter over a virtual field or through a dotted path. Their walks
+ * live in `@objectstack/objectql`, are not exported from its package entries,
+ * and this package does not depend on the engine at runtime; judging them here
+ * would take a copy of each.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -741,7 +765,10 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
  * SCHEMA or the request's CONTEXT (text operators on non-text fields, temporal
  * comparands, filter placeholders), and `driver-sql` refuses more at compile
  * time. Judging those here would mean a second copy of rules this package
- * cannot see; their envelope is the engine's and the driver's to give.
+ * cannot see; their envelope is the engine's and the driver's to give. The
+ * CONTEXT one is the exception, because its rule IS reachable from here: the
+ * placeholder resolver lives in `@objectstack/core`, and the sibling
+ * {@link assertReadScopePlaceholdersResolvable} runs it.
  *
  * Anything the two walks throw is attributable to the scope — they read
  * nothing else — so every throw is re-raised in the one envelope, the walk's
@@ -759,6 +786,64 @@ export function assertReadScopeComparandsRunnable(scope: unknown, objectName: st
   } catch (e) {
     throw readScopeCompileError(
       `[read-scope-sql] read scope for "${objectName}" carries a comparand the engine refuses — ` +
+        `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
+    );
+  }
+}
+
+/**
+ * [#19995] Refuse, in this module's envelope, a read scope carrying a filter
+ * placeholder the ENGINE's resolver refuses — judged on the scope ALONE, at
+ * the two engine-bound merges, before it is composed with the caller's filter.
+ *
+ * The engine resolves `{placeholder}` values once per verb, on the whole
+ * `where` it is handed (`ObjectQL.resolveWhereTokens`, a call to
+ * `resolveFilterTokens`). On the ObjectQL face that `where` already carries
+ * the scope, so an unknown placeholder (`FILTER_TOKEN_UNKNOWN`) or a known one
+ * the request has no value for (`FILTER_TOKEN_UNRESOLVED`) came back as a 400
+ * whose message — the token, and a suggestion for a near miss — the HTTP doors
+ * relay. The caller's own `where` never reaches that door with a placeholder
+ * still in it: the analytics service resolves the query's own positions first,
+ * with its own 400 and message, which is why this is a judgement of the scope
+ * and ⛔ never a catch around `executeAggregate`.
+ *
+ * ## Why the refusal set is exactly the engine's
+ *
+ * Same function, same inputs. `resolveFilterTokens` classifies every string
+ * with the spec's `classifyFilterToken` and resolves what it recognises; its
+ * verdict on one string depends on nothing else in the tree, so the scope
+ * alone answers exactly as the scope inside `{ $and: [userFilter, scope] }`
+ * does. The token context is built by the engine's own bridge,
+ * `filterTokenContextFrom`, over the context the strategy forwards to
+ * `executeAggregate` — the one the engine reads when it resolves. A
+ * placeholder the engine resolves is therefore resolved here too, and the
+ * scope is served; the resolved tree is discarded, and the engine resolves the
+ * original as it always has.
+ *
+ * Whatever the resolver throws here is re-raised in the envelope. It read the
+ * scope and the request's token context and nothing else, and the engine
+ * throws the same thing for the same scope under the same request. Today that
+ * is its two refusals: an unknown placeholder, and a known one the context
+ * has no value for. (An unusable time zone is not a third: the calendar maths
+ * falls back to UTC rather than throwing.)
+ *
+ * @param scope the `StrategyContext.getReadScope` output, exactly as returned
+ * @param objectName the object the scope was requested for — for the operator's
+ *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
+ *   500 declaration, like every message in this module.
+ * @param context the request context the strategy forwards to
+ *   `executeAggregate` with this scope
+ */
+export function assertReadScopePlaceholdersResolvable(
+  scope: unknown,
+  objectName: string,
+  context: ExecutionContextLike | undefined,
+): void {
+  try {
+    resolveFilterTokens(scope, filterTokenContextFrom(context));
+  } catch (e) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" carries a filter placeholder the engine cannot resolve — ` +
         `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
     );
   }

@@ -176,7 +176,7 @@ export function parseIntegerParam(
 
 /**
  * A CLOSED-SET parameter — a filter whose declared values are an enum on the
- * wire (`?status=failed` on `GET /api/automation/:name/runs`, whose
+ * wire (`?status=failed` on `GET /api/v1/automation/:name/runs`, whose
  * `ListRunsRequestSchema` bounds it to `ExecutionStatus` itself — the enum
  * rather than a copy of its members, so the bound is whatever that vocabulary
  * declares rather than a count fixed on the day this line was written. #7359

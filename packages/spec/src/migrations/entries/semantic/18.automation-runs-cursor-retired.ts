@@ -8,7 +8,7 @@ export const entry: SemanticMigration = {
   // code span AND a table cell.
   surface:
     'api.listRuns cursor — the pagination query parameter of '
-    + 'GET /api/automation/:name/runs declared by ListRunsRequestSchema, its slot on '
+    + 'GET /api/v1/automation/:name/runs declared by ListRunsRequestSchema, its slot on '
     + 'IAutomationService.listRuns, and its option on all three @objectstack/client run-list '
     + 'surfaces (automation.runs.list, automation.listRuns, environment().automation.listRuns). '
     + 'The limit parameter of the same door is NOT part of this retirement and is unchanged, '
@@ -40,7 +40,7 @@ export const entry: SemanticMigration = {
     + "the Console's flow-runs page sends it today. Retiring it would have been a "
     + 'regression, and its `.default(20)` stays with it. '
     + 'The same card computes `hasMore`, which is the half a bare retirement would have left '
-    + 'lying. `GET /api/automation/:name/runs` shipped a literal `hasMore: false` beside a '
+    + 'lying. `GET /api/v1/automation/:name/runs` shipped a literal `hasMore: false` beside a '
     + 'list the engine had already truncated with `.slice(0, limit)`, so a caller asking for '
     + 'one row of a thousand was handed one row and told that was all of them. The engine '
     + 'now reports truncation to the door through a new optional contract member, '
@@ -69,7 +69,7 @@ export const entry: SemanticMigration = {
     + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
     + 'the removal in its docblock. ADR-0049 / ADR-0087, #19543.',
   acceptanceCriteria:
-    'No caller sends `cursor` to `GET /api/automation/:name/runs`, and that is true of every '
+    'No caller sends `cursor` to `GET /api/v1/automation/:name/runs`, and that is true of every '
     + 'channel this repo ships rather than of the schema alone. Writing it on a '
     + '`ListRunsRequest` is a `tsc` error (the input type is `never`), and any value reaching a '
     + 'parse raises the prescription rather than a generic unrecognized-key issue. The option is '

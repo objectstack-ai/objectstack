@@ -157,7 +157,11 @@ const REFUSALS: Array<{
     // envelope block below covers the tenth site the way it covers the nine.
     name: 'an undefined comparand (#6386)',
     where: { stage: undefined },
-    message: /comparand at "stage" is undefined/,
+    // [#20035] RE-JUDGED for the wording only: the shared comparand-TYPE face
+    // answers first now (#7872, 2026-08-12: 「refuses everything else loudly at
+    // the compile face」), in its sentence and at its path; the verdict and
+    // the envelope are this row's and do not move.
+    message: /^Filter comparand at where\.stage is undefined\./,
     issueBullet: false,
     addedAfter5352: '#6386',
   },

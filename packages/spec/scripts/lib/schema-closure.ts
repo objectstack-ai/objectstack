@@ -42,6 +42,8 @@
  * it still warns — pinned by `schema-closure.test.ts`, both directions.
  */
 
+import { isSplitEntry, SPLIT_ENTRIES, type SplitEntry } from './split-entries';
+
 /**
  * Category directory -> the citation in this repo that declares it ships no
  * schema closure.
@@ -98,8 +100,14 @@ export const CATEGORIES_WITHOUT_SCHEMA_CLOSURE: Readonly<Record<string, string>>
 export function schemaClosureAbsenceIsDeclared(
   category: string,
   exempt: Readonly<Record<string, string>> = CATEGORIES_WITHOUT_SCHEMA_CLOSURE,
+  splits: Readonly<Record<string, SplitEntry>> = SPLIT_ENTRIES,
 ): boolean {
-  return Object.hasOwn(exempt, category);
+  // The second declaration (#18576): a SPLIT entry has a schema closure, and
+  // its schemas publish under its HOME category's directory (`lib/split-entries.ts`),
+  // so `json-schema/<split>/` is absent by design — declared there, with its
+  // citation, and expiring by `splitEntryCoverage` there, which `build-docs.ts`
+  // runs on the same walk as the coverage check below.
+  return Object.hasOwn(exempt, category) || isSplitEntry(category, splits);
 }
 
 /** Directories whose exemption no longer describes the tree. */

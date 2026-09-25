@@ -247,7 +247,8 @@ describe('a value one readonlyWhen lock drops no longer unlocks another (#19911)
         tag: { type: 'text' },
       },
     } as any);
-    // An FK whose own lock faults (text compared with a number): fail-open.
+    // An FK whose own lock faults (text compared with a number): the write is
+    // refused (ADR-0137 D2 — it was fail-open until then).
     engine.registry.registerObject({
       name: 'line_fault',
       fields: {
@@ -520,10 +521,27 @@ describe('a value one readonlyWhen lock drops no longer unlocks another (#19911)
     expect(reads).toEqual(['inv_a']);
   });
 
-  it('a landing FK is re-judged with the rest, and its fail-open fault is said ONCE', async () => {
-    await engine.update('line_fault', { id: 'f1', invoice: 'inv_b', amount: 5 });
-    expect(row('line_fault', 'f1')).toMatchObject({ invoice: 'inv_b', amount: 5 });
-    expect(warns.filter((w) => w.includes("readonlyWhen for 'invoice' failed to evaluate"))).toHaveLength(1);
+  it('a landing FK whose own lock faults REFUSES the write (ADR-0137 D2), and the refusal is said ONCE', async () => {
+    // Until D2 the fault was fail-open: the FK landed and the fault was said
+    // once, however many times the settlement judged it. The fault now refuses
+    // the write where the settlement first meets it — the FK's own judgement,
+    // before the header it names is bound for the rest — and still says so once.
+    const before = { ...row('line_fault', 'f1') };
+    let err: any;
+    try {
+      await engine.update('line_fault', { id: 'f1', invoice: 'inv_b', amount: 5 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err?.name).toBe('ValidationError');
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toContainEqual(expect.objectContaining({
+      field: 'invoice',
+      code: 'rule_violation',
+      constraint: expect.objectContaining({ rule: 'readonlyWhen', reason: 'unevaluable' }),
+    }));
+    expect(row('line_fault', 'f1')).toEqual(before);
+    expect(warns.filter((w) => w.includes("Field 'invoice' readonlyWhen could not be evaluated"))).toHaveLength(1);
   });
 
   // ── The settlement in the other direction: stays → moves ─────────────

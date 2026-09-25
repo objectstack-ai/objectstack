@@ -69,10 +69,12 @@ import type { SearchAllResponse } from '@objectstack/spec/api';
 // [#17536] The two READ doors' declared element, and the branch of it that made
 // the client's authoring-stage declaration wrong. Both are imported as TYPES:
 // the pins below are the only thing that can observe a return-type move.
+// Published from `@objectstack/spec/api-assembled` since the #18576 split: the
+// declarations that embed the assembled package body left `/api`.
 import type {
     AssembledInstalledPackage,
     InstalledPackageAtEitherStage,
-} from '@objectstack/spec/api';
+} from '@objectstack/spec/api-assembled';
 import type {
     AnalyticsMetadataResponse,
     AnalyticsSqlResponse,

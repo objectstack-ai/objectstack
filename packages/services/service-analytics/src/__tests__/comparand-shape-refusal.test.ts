@@ -49,7 +49,12 @@
  * The analytics door answers `INVALID_FILTER` / 400 — a caller authored that
  * filter. The read scope answers `READ_SCOPE_COMPILE_FAILED` / 500 fail-closed —
  * a policy produced it, and #5367 ruled that route withholds its message. One
- * sentence, two envelopes; `comparand-shape.ts` owns the sentence.
+ * sentence, two envelopes; `comparand-shape.ts` owns the sentence. [#20035]
+ * For the shapes the shared comparand-TYPE face judges (a plain object, a
+ * `Map`, a binary), the `where` door now answers first in THAT face's sentence
+ * (see the #20035 section below), while the read scope keeps this file's
+ * sentence because its own gates run before the face (#20018); still two
+ * envelopes, and each diagnosis names the offending member.
  *
  * # [#7693] The family's fifth member
  *
@@ -62,6 +67,21 @@
  * added the entry; the loops now name all five, and the `where`-door arm of the
  * `$icontains` row is the case that only passes because of it (the read-scope
  * arm was already green and is here as the no-regression control).
+ *
+ * # [#20035] The `where` door answers a TYPE defect in the shared face's words
+ *
+ * The maintainer's ruling on #7872 (2026-08-12) defines the accepted comparand
+ * types (`string | number | bigint | boolean | null | Date`) at the shared
+ * comparand-TYPE face and 「refuses everything else loudly at the compile
+ * face」. The `where` door now runs that face on the object spelling before any
+ * leaf is built, so a plain-object `$in` member and a plain-object LIKE
+ * comparand are refused first by the face, in its sentence and at its path
+ * (`where.status.$in[1]`) — the answer the `FilterArray` spelling of this door
+ * and the engine seam already gave. Every such pin below keeps its verdict
+ * (`INVALID_FILTER` / 400) and is re-judged for the wording. The shapes the face
+ * does not judge keep #5234's sentences: an ARRAY member or comparand, and a
+ * `{ $field }` reference. And the `{ $eq: {…} }` account #5234 left open is
+ * closed by the same ruling: refused, not bound as JSON text.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -99,7 +119,11 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
       const err = refusalOf(() => tree({ status: { $in: ['a', { foo: 1 }] } }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
-      expect(err.message).toContain('index 1');
+      // [#20035] RE-JUDGED: still refused, now by the shared type face first
+      // (#7872: 「refuses everything else loudly at the compile face」), which
+      // names the member by its path (`$in[1]`) where #5234's sentence said
+      // `index 1` — the FilterArray spelling's bytes.
+      expect(err.message.startsWith('Filter comparand at where.status.$in[1] is a plain object')).toBe(true);
       expect(err.message).toContain('$in');
       expect(err.message).toContain('{"foo":1}');
     });
@@ -107,8 +131,11 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
     it('`$nin` too — the direction there is WIDER, not narrower', () => {
       const err = refusalOf(() => tree({ status: { $nin: [{ foo: 1 }] } }));
       expect(err.code).toBe('INVALID_FILTER');
-      expect(err.message).toContain('index 0');
-      expect(err.message).toContain('$nin loses the exclusion');
+      // [#20035] RE-JUDGED: refused by the shared type face first (#7872). The
+      // widening #5234's sentence spelled out as "$nin loses the exclusion" is
+      // the face's closing sentence: the unapplied filter returns everything.
+      expect(err.message.startsWith('Filter comparand at where.status.$nin[0] is a plain object')).toBe(true);
+      expect(err.message).toContain('would have returned the UNFILTERED result set');
     });
 
     it('a nested-array member is refused as well', () => {
@@ -126,7 +153,12 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
         expect(err.code, op).toBe('INVALID_FILTER');
         expect(err.status, op).toBe(400);
         expect(err.message, op).toContain(op);
-        expect(err.message, op).toContain('StringOperatorSchema');
+        // [#20035] RE-JUDGED: the shared type face answers a plain object first
+        // (#7872), so the sentence is its own and not the LIKE-family
+        // `StringOperatorSchema` one, which now answers only the shapes the face
+        // does not judge — the array and the `{ $field }` rows below.
+        expect(err.message.startsWith(`Filter comparand at where.name.${op} is a plain object`), op).toBe(true);
+        expect(err.message, op).not.toContain('StringOperatorSchema');
       });
     }
 
@@ -201,25 +233,33 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
       });
     });
 
-    it('`{$eq: {…}}` is deliberately UNTOUCHED — a separate account', () => {
-      // #5526 pinned `toSqlBindValue({a:1})` → `'{"a":1}'`. Refusing it is the
-      // analytics-side half of #5041, which this change does not open.
+    it('`{$eq: {…}}` — the account #5234 left open is closed by the #7872 ruling', () => {
+      // #5526 pinned `toSqlBindValue({a:1})` → `'{"a":1}'`, and #5234 left this
+      // account open on purpose: refusing it was the analytics-side half of
+      // #5041, which that change did not open. [#7598] made the row
+      // load-bearing: it proved the field-reference gate keys on the SHAPE
+      // `{$field: <string>}` and not on "an object comparand".
       //
-      // ⚠️ [#7598] Still true, and now load-bearing in a second way: the
-      // field-reference gate added there covers this very operator, so this case
-      // is what proves the gate keys on the SHAPE `{$field: <string>}` and not on
-      // "an object comparand". A gate that had widened to every object would turn
-      // this row red — which is why the row is worth keeping rather than being
-      // folded into the block above.
-      expect(tree({ name: { $eq: { a: 1 } } })).toEqual({
-        kind: 'leaf', member: 'name', operator: 'equals', values: [{ a: 1 }],
-      });
-      // The same distinction one step finer: `$field` present but NOT a string is
-      // the ordinary object account too, exactly as on `driver-sql`, whose
-      // `fieldReferenceOf` requires `typeof ref === 'string'`.
-      expect(tree({ name: { $eq: { $field: 5 } } })).toEqual({
-        kind: 'leaf', member: 'name', operator: 'equals', values: [{ $field: 5 }],
-      });
+      // [#20035] RE-JUDGED — FLIPPED. The account is no longer open: the
+      // maintainer's ruling on #7872 (2026-08-12) puts a plain object in a
+      // SCALAR slot outside the accepted comparand types and 「refuses
+      // everything else loudly at the compile face」, and the door now runs that
+      // face. Measured before the flip, on a real engine: the native path bound
+      // the JSON text and matched nothing, the `/analytics/sql` echo answered
+      // DATABASE_ERROR / 500, and the engine path refused it — one condition,
+      // three answers. What #7598 needed from this row still holds, one row
+      // down: a STRING `$field` is a reference, so it is kept and served
+      // (`cross-field-reference-refusal.test.ts`), while a non-string `$field`
+      // is an ordinary object and is refused with every other object.
+      for (const [where, path, preview] of [
+        [{ name: { $eq: { a: 1 } } }, 'where.name.$eq', '{"a":1}'],
+        [{ name: { $eq: { $field: 5 } } }, 'where.name.$eq', '{"$field":5}'],
+      ] as const) {
+        const err = refusalOf(() => tree(where));
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err.message.startsWith(`Filter comparand at ${path} is a plain object (${preview})`)).toBe(true);
+      }
     });
   });
 });

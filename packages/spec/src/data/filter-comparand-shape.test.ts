@@ -594,15 +594,17 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
 
   it('LIT CONTROL — every array-valued operator the vocabulary declares keeps its array', () => {
     // Read off the enforced schema rather than listed: the operators whose
-    // declared comparand ACCEPTS an array. `$eq` / `$ne` are in that set only
-    // because both are `z.any()` there — `$eq` is this arm's subject and
-    // `$ne` is not judged at this door (see the todo below) — so the loop
-    // covers exactly the list operators, and a fourth array-valued operator
-    // added to the schema lands in it without an edit here.
+    // declared comparand ACCEPTS an array. `$ne` is in that set only because
+    // it is `z.any()` there and is not judged at this door (see the todo
+    // below) — so the loop covers exactly the list operators, and a fourth
+    // array-valued operator added to the schema lands in it without an edit
+    // here. [#19889] `$eq` left the set when the schema door began refusing an
+    // array there too (ruling A, record 5805248669), in this face's words —
+    // `filter-equality-array-schema-door.test.ts` pins that door.
     const arrayValued = Object.keys(FieldOperatorsSchema.shape).filter((op) =>
       FieldOperatorsSchema.safeParse({ [op]: ['a', 'b'] }).success);
-    expect(arrayValued.sort()).toEqual(['$between', '$eq', '$in', '$ne', '$nin']);
-    for (const op of arrayValued.filter((o) => o !== '$eq' && o !== '$ne')) {
+    expect(arrayValued.sort()).toEqual(['$between', '$in', '$ne', '$nin']);
+    for (const op of arrayValued.filter((o) => o !== '$ne')) {
       expect(parseFilterAST({ tags: { [op]: ['a', 'b'] } }), op).toEqual({ tags: { [op]: ['a', 'b'] } });
     }
     // The empty lists stay the declared predicates they are.

@@ -985,10 +985,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     });
 
     // #4977 — the same gate, extended to the slot the same issue gave a server
-    // `parent` binding. `requiredWhen` stays FAIL-OPEN at runtime, so this build
-    // gate is the only thing that stops an unbindable declaration from shipping
-    // and enforcing nothing forever — which is why the message must name that
-    // consequence and not `readonlyWhen`'s opposite one.
+    // `parent` binding. `requiredWhen` REFUSES the write at runtime when the
+    // predicate cannot be evaluated (ADR-0137 D2; it was fail-OPEN until then),
+    // so this build gate is what stops an unbindable declaration from shipping
+    // and refusing writes in production — which is why the message must name
+    // that consequence and not `readonlyWhen`'s LOCKED one.
     describe('parent-scoped `requiredWhen` needs a resolvable master (#4977)', () => {
       const parentScopeIssues = (obj: Record<string, unknown>) =>
         validateStackExpressions({ objects: [obj] }).filter((i) => /reads `parent`/.test(i.message));
@@ -1006,8 +1007,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(issues[0]!.where).toMatch(/field 'description' requiredWhen/);
         expect(issues[0]!.message).toMatch(/declares no `master_detail` relationships/);
         // The CONSEQUENCE clause is what separates this from its `readonlyWhen`
-        // twin: fail-open there, fail-closed here, opposite fixes.
-        expect(issues[0]!.message).toMatch(/the requirement would never be enforced/);
+        // twin: that one LOCKS the field, this one REFUSES the write.
+        expect(issues[0]!.message).toMatch(/writes would be refused/);
+        expect(issues[0]!.message).not.toMatch(/never be enforced/);
         expect(issues[0]!.message).not.toMatch(/locked on every write/);
       });
 
@@ -1883,10 +1885,11 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         expect(m).toMatch(/editable/);
       });
 
-      it('`requiredWhen` — says the requirement is never enforced, not anything about visibility', () => {
+      it('`requiredWhen` — says the server refuses the write, not anything about visibility', () => {
         const m = messageFor('requiredWhen');
-        expect(m).toMatch(/never enforced/);
-        expect(m).toMatch(/saves with the field empty/);
+        expect(m).toMatch(/server REFUSES a write/);
+        expect(m).not.toMatch(/never enforced/);
+        expect(m).not.toMatch(/saves with the field empty/);
         expect(m).not.toMatch(/VISIBLE/);
         expect(m).not.toMatch(/showing for everyone/);
       });
@@ -2517,9 +2520,9 @@ describe('null-guard gate (#4763)', () => {
   // #4811 — the one surface the coverage review found to MEET the gate's
   // totality criterion: `evaluateValidationRules` evaluates a field's
   // `requiredWhen` against the same `materializeDeclaredFields`-merged record
-  // the object's validation rules see. It is also the quietest failure of the
-  // three covered surfaces: a faulting `requiredWhen` is fail-OPEN (logged and
-  // skipped), so the field is simply never required and the write sails through.
+  // the object's validation rules see. It WAS the quietest failure of the
+  // three covered surfaces — a faulting `requiredWhen` was fail-OPEN (logged
+  // and skipped) — until ADR-0137 D2 made it refuse the write like the rest.
   describe('field `requiredWhen` — covered since #4811', () => {
     const withField = (requiredWhen: string) =>
       validateStackExpressions({
@@ -2552,14 +2555,15 @@ describe('null-guard gate (#4763)', () => {
     });
 
     // The consequence clause is per-surface, and getting it wrong sends the
-    // author to the wrong place. `requiredWhen` is fail-OPEN — `rule-validator`
-    // logs and skips — so it must NOT borrow the validation rules' "the write
-    // is rejected fail-closed" wording.
-    it('reports the fail-OPEN consequence, not the validation rules’ fail-closed one', () => {
+    // author to the wrong place. Since ADR-0137 D2 a faulting `requiredWhen`
+    // REFUSES the write — `rule-validator` no longer logs and skips — so it
+    // takes the validation rules' "the write is rejected fail-closed" wording
+    // and must NOT keep promising that the write goes through.
+    it('reports the fail-CLOSED consequence — a faulting requiredWhen refuses the write (ADR-0137 D2)', () => {
       const [issue] = withField('has(record.budget) && record.budget > 100');
-      expect(issue.message).toContain('SKIPPED fail-open');
-      expect(issue.message).toContain('the field is never actually required');
-      expect(issue.message).not.toContain('rejected fail-closed');
+      expect(issue.message).toContain('rejected fail-closed');
+      expect(issue.message).not.toContain('SKIPPED fail-open');
+      expect(issue.message).not.toContain('the field is never actually required');
     });
 
     it('leaves the fail-closed wording on the surfaces that really fail closed', () => {

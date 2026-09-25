@@ -744,8 +744,12 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // into a statement with no `WHERE` (#5297's lesson, one call above the
       // compiler). So this asserts the refusal reaches the executing seam, not
       // merely that the normalizer throws in isolation.
+      //
+      // [#20035] RE-JUDGED for the wording only: the shared comparand-TYPE face
+      // answers first now (#7872, 2026-08-12: 「refuses everything else loudly
+      // at the compile face」), in its sentence and at its path.
       await expect(ids({ stage: undefined, owner: 'u1' })).rejects.toThrowError(
-        /comparand at "stage" is undefined/,
+        /^Filter comparand at where\.stage is undefined\./,
       );
       // `$not: undefined` is NOT the same condition and must not borrow the same
       // message: it is a combinator with a missing operand, and the branch that

@@ -68,23 +68,33 @@
  * What is shared is therefore the CONSTRUCT TABLE, not the code: arm for arm,
  * escaped character class for escaped character class, this is #6518's table
  * re-emitted through a caller-supplied {@link TextMatchBind}. What keeps the two
- * from drifting is not this comment — it is
- * `__tests__/text-operator-case-exactness.test.ts`, which runs the shared
- * `FILTER_TEXT_CASES` through BOTH this package's compilers and a real
- * `SqliteWasmDriver` (a devDependency, never a runtime one) on the same engine
- * and requires the same row sets. A third hand-copy of this table anywhere is
- * the thing to refuse — import from here, or add a consumer to that test.
+ * from drifting is not this comment — it is two suites that run BOTH this
+ * package's compilers and a real driver (a devDependency, never a runtime one)
+ * on the same engine and require the same row sets:
+ * `__tests__/text-operator-case-exactness.test.ts` over the shared
+ * `FILTER_TEXT_CASES`, and [#20025] `__tests__/text-match-sqlite-nul.test.ts`
+ * over stored values and comparands holding U+0000, on better-sqlite3 and
+ * sql.js. A third hand-copy of this table anywhere is the thing to refuse —
+ * import from here, or add a consumer to those tests.
  *
  * ## The arms, and why each cell
  *
- * Character for character #6518's, whose header carries the measurements:
+ * Character for character `driver-sql`'s (#6518, #19999, #20024), whose header
+ * carries the measurements:
  *
- *   - **`sqlite` → `GLOB`.** Case-exact by definition, and it carries its OWN
- *     escape mechanism — a single-character class — because SQLite's grammar
- *     has no `ESCAPE` clause for `GLOB`. So this arm binds ONE value where the
- *     others bind two, which is precisely the kind of divergence a second
- *     emitter drops on the floor; every arm below therefore goes through one
- *     {@link TextMatchBind} and one shared shape wrapper.
+ *   - **`sqlite` → `GLOB` for a `starts` comparand free of U+0000; `instr()`
+ *     and a BLOB byte suffix for every other comparand.** `GLOB` is
+ *     case-exact by definition, but `glob()` reads its pattern AND the stored
+ *     value as C strings, cut at their first U+0000 — so [#20025] it now serves
+ *     only the one shape neither cut can change and the one an index can
+ *     serve, and {@link sqliteLengthAwareTextMatchSql} carries every
+ *     `contains` / `ends` comparand and a `starts` comparand holding U+0000.
+ *     Where `GLOB` remains it carries its OWN escape mechanism — a
+ *     single-character class — because SQLite's grammar has no `ESCAPE` clause
+ *     for it, and it binds ONE value; the length-aware constructs escape
+ *     nothing and bind one value, or two for the suffix. That is precisely the
+ *     kind of divergence a second emitter drops on the floor; every arm below
+ *     therefore goes through one {@link TextMatchBind}.
  *   - **`postgres` → `LIKE`, unchanged.** `LIKE` is already case-exact there,
  *     so the bytes this package emitted before #15684 are the bytes it emits
  *     now — a Postgres deployment sees no change at all.
@@ -113,9 +123,10 @@
  * the dialect question, the escaping and the placeholder plumbing are identical
  * for both families, and only the fold's spelling differs per arm:
  *
- *   - **`sqlite` → `lower()` around the GLOB arm.** ASCII-only there —
- *     measured, `lower('CAFÉ')` is `cafÉ` — which is the #4706 Q1 = A boundary
- *     executed rather than argued.
+ *   - **`sqlite` → `lower()` on both sides of the arm's construct** —
+ *     `instr(lower(col), lower(?)) > 0` since #20025, the fold only ever
+ *     arriving with `contains`. ASCII-only there — measured, `lower('CAFÉ')` is
+ *     `cafÉ` — which is the #4706 Q1 = A boundary executed rather than argued.
  *   - **`postgres` → `translate()`, unchanged.** Correct there, so the bytes
  *     emitted before #15780 are the bytes emitted now.
  *   - **[#16028] `unknown` → the portable nested-`REPLACE` fold**
@@ -168,9 +179,20 @@
  *
  * Escaping (#5567) is unchanged — {@link likePattern} still builds every
  * LIKE-arm pattern, and the GLOB arm's own escaped class is a DIFFERENT one,
- * not a shared regex. The fold composes with it rather than replacing it: on
- * the SQLite arm `lower()` wraps an already-GLOB-escaped pattern, and `[`, `]`,
- * `*` and `?` are not letters, so the escape survives the fold untouched.
+ * not a shared regex. The fold composes with it rather than replacing it: where
+ * the SQLite arm still emits `GLOB`, `lower()` wraps an already-GLOB-escaped
+ * pattern, and `[`, `]`, `*` and `?` are not letters, so the escape survives the
+ * fold untouched; the `instr()` construct `$icontains` takes has nothing to
+ * escape.
+ *
+ * ⚠️ [#20025] SQLite's `LIKE` is cut at U+0000 as well, on the pattern and on
+ * the stored value (measured on better-sqlite3 and sql.js: `'a'` + U+0000 +
+ * `'b'` is not `LIKE '%b%'`). So the `unknown` arm, which SQLite reaches through
+ * the four embedder compositions above, still answers wrongly the U+0000
+ * cells the `sqlite` arm now answers like JS. It keeps `LIKE` because it is the
+ * residue for dialects nothing answered for, PostgreSQL-like ones among them,
+ * and `instr()` does not exist on PostgreSQL — choosing a construct there
+ * would be the dialect guess this file refuses to make.
  */
 
 import {
@@ -397,6 +419,81 @@ function asciiLowerReplaceSql(expr: string): string {
   return out;
 }
 
+/** U+0000, spelled by its code point so no raw control byte sits in this file. */
+const NUL_CHARACTER = String.fromCharCode(0x00);
+
+/**
+ * [#20025] The SQLite text match that reads the WHOLE comparand and the WHOLE
+ * stored value — every `contains` / `ends` comparand, and a `starts` comparand
+ * that holds U+0000. Cell for cell `driver-sql`'s `sqliteLengthAwareTextMatch`
+ * (#19999, #20024), re-emitted through the caller's {@link TextMatchBind}:
+ *
+ * | shape | predicate |
+ * |---|---|
+ * | `contains` | `instr(col, ?) > 0` |
+ * | `starts` | `instr(col, ?) = 1` — the first occurrence IS the prefix |
+ * | `ends` | `coalesce(substr(CAST(col AS BLOB), -length(CAST(? AS BLOB))), CAST(col AS BLOB)) = CAST(? AS BLOB)` |
+ *
+ * Why `GLOB` cannot serve them: SQLite's `glob()` reads its pattern AND the
+ * stored value as C strings, so each is cut at its first U+0000. Measured on
+ * better-sqlite3 (SQLite 3.53.4) and sql.js (3.49.1) through all three of this
+ * package's compilers, neither raising: a comparand that STARTS with U+0000
+ * became the pattern `*`, so `$contains` / `$endsWith` matched every row and
+ * `$notContains` none; and with a comparand free of U+0000, a stored value was
+ * seen only up to its first U+0000, so `$contains: 'b'` missed `'a'` + U+0000
+ * + `'b'`, `$endsWith: 'a'` returned it, and `$notContains` admitted it. On
+ * `read-scope-sql.ts` both are a read scope answering a different row set from
+ * the policy's own predicate (#3948), in either direction.
+ *
+ * `instr()` compares bytes over the full length of both arguments, and `lower()`
+ * folds every byte it is given. `length()` and `substr()` over TEXT do NOT —
+ * they stop at the first U+0000 — so the suffix is taken over BLOB, where both
+ * count bytes; a byte suffix equal to a valid UTF-8 comparand starts on a
+ * character boundary, because UTF-8 is self-synchronising. Over a zero-length
+ * blob `substr` answers NULL, not the empty blob, which would make `''` answer
+ * NULL where the answer is false — lost under `$not` — so `coalesce()` falls
+ * back to the value itself: the empty blob, never equal to a non-empty
+ * comparand, or NULL, which stays NULL as it does under `GLOB`.
+ *
+ * The EMPTY comparand never reaches the suffix construct: `-length('')` is
+ * `-0`, which `substr` reads as "from the start", so the construct would ask
+ * whether the whole value equals `''`. An empty string ends every value, so it
+ * takes `instr(col, '') > 0`, which is 1 for every non-NULL value and NULL for
+ * NULL, exactly as `GLOB '*'` answered it.
+ *
+ * Nothing is escaped: none of the three constructs has a pattern language, so
+ * `*`, `?` and `[` are literal by construction and the comparand binds as
+ * written. The suffix arm binds it TWICE, left to right in placeholder order,
+ * which {@link TextMatchBind} already allows (the `LIKE` arms bind two values
+ * as well), so no caller's plumbing changes. The fold is the `GLOB` arm's own
+ * `lower()` on both sides; it only ever arrives with `contains`
+ * (`$icontains`). The negation is `NOT (…)`, which is NULL for a NULL value
+ * exactly as `NOT GLOB` is, so the NULL-safe wrapper the compilers put around
+ * `$notContains` composes unchanged (#5298).
+ */
+function sqliteLengthAwareTextMatchSql(
+  column: string,
+  text: string,
+  shape: LikeShape,
+  negate: boolean,
+  lower: (expr: string) => string,
+  bind: TextMatchBind,
+): string {
+  const col = lower(column);
+  let positive: string;
+  if (shape === 'ends' && text !== '') {
+    // Bound in the order the two placeholders appear.
+    const lengthOf = lower(bind(text));
+    const suffix = lower(bind(text));
+    positive =
+      `coalesce(substr(CAST(${col} AS BLOB), -length(CAST(${lengthOf} AS BLOB))), CAST(${col} AS BLOB))`
+      + ` = CAST(${suffix} AS BLOB)`;
+  } else {
+    positive = `instr(${col}, ${lower(bind(text))}) ${shape === 'starts' ? '= 1' : '> 0'}`;
+  }
+  return negate ? `NOT (${positive})` : positive;
+}
+
 /** One text predicate, ready to splice into a WHERE clause. */
 export interface TextMatchRequest {
   /** The dialect that will execute the statement. */
@@ -433,12 +530,19 @@ export function textMatchPredicateSql(req: TextMatchRequest): string {
   const fold = req.fold === true;
 
   if (dialect === 'sqlite') {
-    // GLOB takes no ESCAPE clause, so this arm binds ONE value, not two.
     // [#15780] The fold is SQLite's own `lower()`, which is ASCII-only —
     // measured, `lower('CAFÉ')` is `cafÉ` — so it is exactly the #4706 Q1 = A
     // domain rather than an approximation of it. Applied to BOTH sides: a
     // folded needle against a raw column matches only the already-lower rows.
     const lower = (expr: string) => (fold ? `lower(${expr})` : expr);
+    // [#20025] `glob()` cuts its pattern AND the stored value at their first
+    // U+0000. Only a `starts` comparand free of U+0000 is immune to both cuts;
+    // every other comparand is compared by a length-aware construct.
+    const text = String(value);
+    if (shape !== 'starts' || text.includes(NUL_CHARACTER)) {
+      return sqliteLengthAwareTextMatchSql(column, text, shape, negate, lower, bind);
+    }
+    // GLOB takes no ESCAPE clause, so this arm binds ONE value, not two.
     return `${lower(column)} ${negate ? 'NOT GLOB' : 'GLOB'} ${lower(bind(globPattern(shape, value)))}`;
   }
 
