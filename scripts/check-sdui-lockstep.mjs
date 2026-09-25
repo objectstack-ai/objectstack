@@ -44,6 +44,28 @@
  * The `.objectui-sha` clause below is the one offline instrument that reaches
  * into the second class, and it is deliberate rather than incidental — see it.
  *
+ * ## The third comparison: the containment PREDICATE (#19969)
+ *
+ * Codes and the literal region cannot see a change in WHEN a code fires.
+ * objectui#9910 moved `not-a-container` off `comp.isContainer` onto the
+ * declared `children` input without adding or removing a code and without
+ * touching `parse.ts`, so both comparisons above stayed green across a change
+ * that made the save gate and the renderer disagree on five served
+ * components. So the record also carries objectui's containment predicate:
+ * the condition of the ONE `if` in `validate.ts` whose body stamps
+ * `not-a-container`, plus every module-level declaration of that file the
+ * condition reaches (transitively — `acceptsChildren`, then `CHILD_LIST_KEY`),
+ * reduced to its TOKENS (comments and whitespace dropped), so a comment or a
+ * re-wrap moves nothing and a changed token does. `[containment-drift]` prints
+ * both token texts.
+ *
+ * What it CANNOT see: how `comp` is looked up before the branch, and the body
+ * of a helper imported from another module (the closure stops at the file
+ * boundary; an imported name is still printed as written, so swapping it
+ * shows). A `validate.ts` with zero or two such branches REFUSES — measuring
+ * one of two is the silent-short-set failure the code extractor refuses for
+ * the same reason.
+ *
  * ## Why `--update` cannot launder a divergence
  *
  * `--update` re-reads OBJECTUI's side only. It never reads this tree's parser,
@@ -143,6 +165,12 @@ const REGION_FILE = 'packages/sdui-parser/src/parse.ts';
  * gate refuses (rather than measuring a shorter region) when it is not found.
  */
 const REGION_DELIMITER = '/* ---------------------- the JS literal subset (#6614) ---------------------- */';
+
+/** The file whose `not-a-container` branch is the containment predicate, in both copies. */
+const CONTAINMENT_FILE = 'packages/sdui-parser/src/validate.ts';
+
+/** The diagnostic code whose guarding condition IS the containment predicate. */
+const CONTAINMENT_CODE = 'not-a-container';
 
 /** The vendored record of OBJECTUI's side. One side only — see the header. */
 const RECORD_FILE = 'packages/sdui-parser/objectui-lockstep.json';
@@ -298,13 +326,119 @@ export function extractDiagnosticCodes({ files, read }) {
   return { codes: [...codes.keys()].sort(), sites: codes, unresolved };
 }
 
-/** One copy's whole parity fingerprint: the region reading plus the code set. */
+/**
+ * The containment predicate of one `validate.ts`, as canonical text plus its
+ * blob id, or `{ predicate: null, why }` when it cannot be read whole.
+ *
+ * The predicate is the condition of the ONE `if` whose then-branch stamps
+ * `code: 'not-a-container'`, closed over every module-level function or
+ * variable declaration of the same file that the condition names — and that
+ * those name in turn. A property NAME (`node.children`, `input.name`) is not a
+ * reference; a local (`comp`, `node`) resolves to no module-level declaration
+ * and is left as written. Each piece is reduced to its token sequence — the
+ * AST's leaf tokens joined by one space, JSDoc nodes skipped, trivia never
+ * reached — one line per piece, declarations in name order, so the text
+ * depends on tokens and not on comments, wrapping or declaration order. (The
+ * TypeScript printer was tried first and is not this: it keeps a source line
+ * break before a `.` in a call chain, so a re-wrap moved the reading.)
+ */
+export function extractContainmentPredicate(text, rel = CONTAINMENT_FILE) {
+  const sourceFile = parseSourceFile(rel, text);
+  const print = (root) => {
+    const tokens = [];
+    const walk = (node) => {
+      if (ts.isJSDoc(node)) return;
+      const children = node.getChildren(sourceFile);
+      if (children.length === 0) {
+        if (node.kind !== ts.SyntaxKind.EndOfFileToken) tokens.push(node.getText(sourceFile));
+        return;
+      }
+      children.forEach(walk);
+    };
+    walk(root);
+    return tokens.filter((t) => t !== '').join(' ');
+  };
+
+  const topLevel = new Map();
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) topLevel.set(statement.name.text, statement);
+    if (ts.isVariableStatement(statement)) {
+      for (const decl of statement.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name)) topLevel.set(decl.name.text, statement);
+      }
+    }
+  }
+
+  const stampsContainment = (root) => {
+    let found = false;
+    const visit = (node) => {
+      if (
+        ts.isPropertyAssignment(node)
+        && ts.isIdentifier(node.name)
+        && node.name.text === 'code'
+        && ts.isStringLiteralLike(node.initializer)
+        && node.initializer.text === CONTAINMENT_CODE
+      ) {
+        found = true;
+      }
+      if (!found) ts.forEachChild(node, visit);
+    };
+    visit(root);
+    return found;
+  };
+
+  const branches = [];
+  const findBranches = (node) => {
+    if (ts.isIfStatement(node) && stampsContainment(node.thenStatement)) branches.push(node);
+    ts.forEachChild(node, findBranches);
+  };
+  findBranches(sourceFile);
+  if (branches.length !== 1) {
+    return {
+      predicate: null,
+      why: `${rel} has ${branches.length} \`if\` branch(es) stamping \`${CONTAINMENT_CODE}\`, and exactly one is the predicate`,
+    };
+  }
+  const condition = branches[0].expression;
+
+  const referencedFrom = (root) => {
+    const names = [];
+    const visit = (node) => {
+      if (ts.isIdentifier(node)) {
+        const parent = node.parent;
+        const isPropertyName = parent
+          && ((ts.isPropertyAccessExpression(parent) && parent.name === node)
+            || (ts.isPropertyAssignment(parent) && parent.name === node));
+        if (!isPropertyName && topLevel.has(node.text)) names.push(node.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(root);
+    return names;
+  };
+  const reached = new Set();
+  const queue = referencedFrom(condition);
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (reached.has(name)) continue;
+    reached.add(name);
+    queue.push(...referencedFrom(topLevel.get(name)));
+  }
+
+  const reaches = [...reached].sort();
+  const printedDecls = [...new Set(reaches.map((name) => topLevel.get(name)))].map(print);
+  const canonical = `${[`if (${print(condition)})`, ...printedDecls].join('\n')}\n`;
+  return { predicate: { text: canonical, blob: gitBlobHash(canonical), reaches }, why: null };
+}
+
+/** One copy's whole parity fingerprint: the region reading, the code set and the containment predicate. */
 export function fingerprintOf(root) {
   const files = parserSources(root);
   const read = (rel) => readFileSync(join(root, rel), 'utf8');
   const region = readRegion(read(REGION_FILE));
   const { codes, unresolved } = extractDiagnosticCodes({ files, read });
-  return { files, region, codes, unresolved };
+  const containment = extractContainmentPredicate(read(CONTAINMENT_FILE));
+  return { files, region, codes, unresolved, containment };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,6 +463,13 @@ export function recordProblems(record) {
   }
   if (!Array.isArray(record.diagnosticCodes) || record.diagnosticCodes.length === 0) {
     problems.push('`diagnosticCodes` is not a non-empty array');
+  }
+  if (
+    typeof record.containmentPredicate?.blob !== 'string'
+    || !/^[0-9a-f]{40}$/.test(record.containmentPredicate.blob)
+    || typeof record.containmentPredicate?.text !== 'string'
+  ) {
+    problems.push('`containmentPredicate` does not carry a 40-character `blob` and its `text`');
   }
   return problems;
 }
@@ -367,6 +508,13 @@ export function judge({ record, ours, livePin }) {
       + '    extractor read nothing rather than finding nothing.',
     );
   }
+  if (ours.containment?.predicate == null) {
+    findings.push(
+      `[containment-unreachable] ${ours.containment?.why ?? `no containment reading was taken of ${CONTAINMENT_FILE}`}.\n`
+      + '    Nothing was compared. The predicate that decides `not-a-container` is part of the lockstep (#19969),\n'
+      + '    and a copy whose predicate cannot be located is not a copy that agrees.',
+    );
+  }
   if (findings.length > 0) return findings;
 
   if (record.recordedAgainstPin !== livePin) {
@@ -386,6 +534,17 @@ export function judge({ record, ours, livePin }) {
       + `      recorded ${record.grammarRegion.lines} line(s), blob ${record.grammarRegion.blob}\n`
       + '    Either this copy was edited without the port, or the port was not byte-faithful. Diff the two\n'
       + `    copies' ${REGION_FILE} from the delimiter down.`,
+    );
+  }
+
+  if (ours.containment.predicate.blob !== record.containmentPredicate.blob) {
+    const indent = (t) => t.trimEnd().split('\n').map((l) => `        ${l}`).join('\n');
+    findings.push(
+      `[containment-drift] the \`${CONTAINMENT_CODE}\` predicate in ${CONTAINMENT_FILE} is not the one objectui's copy\n`
+      + `    runs at ${record.objectui.rev.slice(0, 12)}, so the save gate and the renderer disagree about which\n`
+      + '    components accept a child list.\n'
+      + `      here     blob ${ours.containment.predicate.blob}\n${indent(ours.containment.predicate.text)}\n`
+      + `      recorded blob ${record.containmentPredicate.blob}\n${indent(record.containmentPredicate.text)}`,
     );
   }
 
@@ -544,6 +703,13 @@ function update() {
     );
     process.exit(1);
   }
+  if (theirs.containment.predicate === null) {
+    console.error(
+      `\ncheck-sdui-lockstep --update: REFUSED — objectui's containment predicate could not be read: ${theirs.containment.why}.\n`
+      + '  Nothing was recorded.\n',
+    );
+    process.exit(1);
+  }
   if (theirs.unresolved.length > 0 || theirs.codes.length === 0) {
     console.error(
       '\ncheck-sdui-lockstep --update: REFUSED — objectui\'s diagnostic-code set could not be read whole:\n'
@@ -577,12 +743,20 @@ function update() {
       blob: theirs.region.blob,
     },
     diagnosticCodes: theirs.codes,
+    containmentPredicate: {
+      file: CONTAINMENT_FILE,
+      code: CONTAINMENT_CODE,
+      reaches: theirs.containment.predicate.reaches,
+      blob: theirs.containment.predicate.blob,
+      text: theirs.containment.predicate.text,
+    },
   };
   writeFileSync(join(ROOT, RECORD_FILE), `${JSON.stringify(record, null, 2)}\n`);
   console.log(
     `check-sdui-lockstep --update: recorded objectui@${record.objectui.rev.slice(0, 12)} `
     + `(${record.objectui.revDate}) — ${record.grammarRegion.lines} region line(s), blob `
     + `${record.grammarRegion.blob.slice(0, 12)}, ${record.diagnosticCodes.length} diagnostic code(s), `
+    + `containment predicate ${record.containmentPredicate.blob.slice(0, 12)}, `
     + `against pin ${record.recordedAgainstPin.slice(0, 12)}.`,
   );
   console.log(`  Wrote ${RECORD_FILE}. Now run \`pnpm check:sdui-lockstep\` — a RED there is the port you still owe.`);
@@ -609,6 +783,33 @@ class P {
   run(): void { this.error('no-root', 'nothing'); }
 }
 export const stamp = { code: UNCONSUMED_WIDGET_OPTION, message: 'x' };
+`;
+
+// The containment fixtures: the two predicates objectui#9910 moved between,
+// shaped like `validate.ts` (a branch INSIDE the walker, the helper and its
+// constant at module level, comments on both).
+const FIXTURE_CONTAINMENT_SLOT = `
+export const CHILD_LIST_KEY = 'children';
+/** Does it accept a child list? */
+export function acceptsChildren(comp: { inputs: Array<{ name: string }> }): boolean {
+  return comp.inputs.some((input) => input.name === CHILD_LIST_KEY);
+}
+const UNRELATED = 'not-reached';
+export function validateTree(node: any, comp: any, diagnostics: any[]): void {
+  // containment
+  if (node.children?.length && !acceptsChildren(comp)) {
+    diagnostics.push({ severity: 'warning', code: 'not-a-container', message: 'x' });
+  }
+  if (node.x) diagnostics.push({ code: 'unknown-prop', message: UNRELATED });
+}
+`;
+
+const FIXTURE_CONTAINMENT_FLAG = `
+export function validateTree(node: any, comp: any, diagnostics: any[]): void {
+  if (node.children?.length && !comp.isContainer) {
+    diagnostics.push({ severity: 'warning', code: 'not-a-container', message: 'x' });
+  }
+}
 `;
 
 const FIXTURE_UNRESOLVABLE = `
@@ -645,11 +846,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Absence is loud: every degraded input REFUSES rather than passing': 8,
   'The generator will not record a tree the pin does not name': 7,
   'The wiring this gate needs to be reachable at all': 12,
+  'The containment predicate (#19969)': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -750,13 +952,21 @@ export function selfTest() {
 
   // ── The verdict ──────────────────────────────────────────────────────────
   battery('The verdict');
+  const slotReading = extractContainmentPredicate(FIXTURE_CONTAINMENT_SLOT, 'slot.ts');
+  const flagReading = extractContainmentPredicate(FIXTURE_CONTAINMENT_FLAG, 'flag.ts');
   const goodRecord = {
     objectui: { rev: 'a'.repeat(40) },
     recordedAgainstPin: 'b'.repeat(40),
     grammarRegion: { lines: 3, blob: region.blob },
     diagnosticCodes: ['no-root', 'unconsumed-widget-option'],
+    containmentPredicate: { blob: slotReading.predicate?.blob, text: slotReading.predicate?.text },
   };
-  const goodOurs = { region, codes: ['no-root', 'unconsumed-widget-option'], unresolved: [] };
+  const goodOurs = {
+    region,
+    codes: ['no-root', 'unconsumed-widget-option'],
+    unresolved: [],
+    containment: slotReading,
+  };
   const kinds = (f) => f.map((x) => x.slice(1, x.indexOf(']'))).join(',');
   check('agreement is silent', judge({ record: goodRecord, ours: goodOurs, livePin: 'b'.repeat(40) }).length === 0);
   check(
@@ -938,6 +1148,80 @@ export function selfTest() {
     /recordedAgainstPin: livePin,/.test(updateSrc) && !/recordedAgainstPin: readFileSync/.test(updateSrc),
   );
 
+  // ── The containment predicate (#19969) ───────────────────────────────────
+  //
+  // The comparison the code set and the region cannot make: WHEN a code fires.
+  // The first case is the reason the battery exists — the two predicates
+  // objectui#9910 moved between must read DIFFERENT, or the pin is blind to the
+  // very change that motivated it.
+  battery('The containment predicate (#19969)');
+  check(
+    '⭐ the flag predicate and the declared-slot predicate read DIFFERENT',
+    slotReading.predicate !== null && flagReading.predicate !== null
+      && slotReading.predicate.blob !== flagReading.predicate.blob,
+    `${slotReading.predicate?.blob} vs ${flagReading.predicate?.blob}`,
+  );
+  check(
+    'the closure reaches the helper AND the constant the helper names, and nothing unreferenced',
+    slotReading.predicate?.reaches.join(',') === 'CHILD_LIST_KEY,acceptsChildren',
+    slotReading.predicate?.reaches.join(','),
+  );
+  check(
+    'a property NAME is not a reference (`input.name`, `node.children`), a flag read reaches nothing',
+    flagReading.predicate?.reaches.length === 0,
+    flagReading.predicate?.reaches.join(','),
+  );
+  check(
+    'comments and wrapping do not move the reading',
+    extractContainmentPredicate(
+      FIXTURE_CONTAINMENT_SLOT
+        .replace('/** Does it accept a child list? */', '/** Reworded entirely. */')
+        .replace('return comp.inputs.some((input) => input.name === CHILD_LIST_KEY);',
+          'return comp.inputs\n    .some((input) =>\n      input.name === CHILD_LIST_KEY);'),
+      'slot.ts',
+    ).predicate?.blob === slotReading.predicate?.blob,
+  );
+  check(
+    'a change two hops away — the constant the helper reads — moves the reading',
+    extractContainmentPredicate(
+      FIXTURE_CONTAINMENT_SLOT.replace("export const CHILD_LIST_KEY = 'children';", "export const CHILD_LIST_KEY = 'body';"),
+      'slot.ts',
+    ).predicate?.blob !== slotReading.predicate?.blob,
+  );
+  check(
+    'a validate.ts with NO containment branch refuses, never reads as an empty predicate',
+    extractContainmentPredicate('export const x = 1;\n', 'none.ts').predicate === null,
+  );
+  check(
+    'a validate.ts with TWO containment branches refuses, never measures one of them',
+    extractContainmentPredicate(`${FIXTURE_CONTAINMENT_FLAG}\n${FIXTURE_CONTAINMENT_FLAG.replace('validateTree', 'again')}`, 'two.ts')
+      .predicate === null,
+  );
+  check(
+    'a predicate that differs from the record is a finding',
+    kinds(judge({
+      record: goodRecord,
+      ours: { ...goodOurs, containment: flagReading },
+      livePin: 'b'.repeat(40),
+    })) === 'containment-drift',
+  );
+  check(
+    'an unreadable predicate in THIS tree refuses instead of comparing',
+    kinds(judge({
+      record: goodRecord,
+      ours: { ...goodOurs, containment: { predicate: null, why: 'two branches' } },
+      livePin: 'b'.repeat(40),
+    })) === 'containment-unreachable',
+  );
+  check(
+    'a record without the predicate is unusable, not a pass',
+    kinds(judge({
+      record: { ...goodRecord, containmentPredicate: undefined },
+      ours: goodOurs,
+      livePin: 'b'.repeat(40),
+    })) === 'record-unusable',
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -991,7 +1275,8 @@ export function selfTest() {
   console.log(
     'check:sdui-lockstep --self-test passed (the constant-vs-literal decomposition and its unresolvable '
     + 'direction, the region reader in both drift directions, all four refusal classes, the generator\'s '
-    + 'HEAD-vs-pin refusal in both directions, and the CI wiring)',
+    + 'HEAD-vs-pin refusal in both directions, the CI wiring, and the containment predicate in both '
+    + 'directions)',
   );
 
   return SELF_TEST_VERDICT;
@@ -1040,7 +1325,8 @@ function main() {
     console.log(
       `check:sdui-lockstep: OK — this copy is byte-identical to objectui@${record.objectui.rev.slice(0, 12)} `
       + `(${record.objectui.revDate}) over ${ours.region.lines} grammar line(s) `
-      + `[blob ${ours.region.blob.slice(0, 12)}] and agrees on all ${ours.codes.length} diagnostic code(s), `
+      + `[blob ${ours.region.blob.slice(0, 12)}], agrees on all ${ours.codes.length} diagnostic code(s) `
+      + `and on the \`${CONTAINMENT_CODE}\` predicate [blob ${ours.containment.predicate.blob.slice(0, 12)}], `
       + `across ${ours.files.length} non-test source(s).`,
     );
     console.log(
