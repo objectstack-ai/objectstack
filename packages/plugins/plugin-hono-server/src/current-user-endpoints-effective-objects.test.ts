@@ -10,9 +10,10 @@
 // reintroduced here — the second copy that would let the console and the
 // server's own `current_user.can()` disagree — turns this red.
 //
-// The fixture makes every step of the composition fire (merge, super-user
-// seed, fold, managed-write clamp, apiOperations annotation), because an
-// equality over a map none of them touched would pin nothing.
+// The fixtures make every step of the composition fire (merge, super-user
+// seed, plain-wildcard coverage, fold, managed-write clamp, apiOperations
+// annotation), because an equality over a map none of them touched would pin
+// nothing.
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
@@ -48,7 +49,7 @@ const ql = {
     getSchema: (name: string) => SCHEMAS[name],
 };
 
-function mount() {
+function mount(resolved: unknown[] = RESOLVED) {
     const services: Record<string, unknown> = {
         auth: {
             api: {
@@ -60,7 +61,7 @@ function mount() {
         },
         objectql: ql,
         metadata: { list: async () => [] as unknown[] },
-        security: { resolvePermissionSetsForContext: async () => RESOLVED },
+        security: { resolvePermissionSetsForContext: async () => resolved },
     };
     const app = new Hono();
     registerCurrentUserEndpoints({
@@ -90,6 +91,25 @@ describe('[#18783] /auth/me/permissions `objects` is the one effective-map funct
         expect(body.objects.sys_member).toMatchObject({ allowEdit: false });     // clamp over the fold
         expect(body.objects.report).toMatchObject({ allowRead: true });          // seed for a super-user
         expect(Array.isArray(body.objects.report.apiOperations)).toBe(true);     // annotation
+    });
+
+    it('[#20083] a PLAIN wildcard reaches every registered public object it covers — the same bytes', async () => {
+        // The wall-less org admin's shape: a `'*'` with no super-user bit, and a
+        // second set naming one object explicitly. The server lets this subject
+        // write `report` and `deal` through the wildcard, so the map carries them.
+        const plain = [
+            { name: 'ops_plain', objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }, fields: {} },
+            { name: 'sales', objects: { deal: { allowRead: true, allowEdit: false } }, fields: {} },
+        ];
+        const body: any = await (await mount(plain).request(`http://localhost${ME_PERMISSIONS}`)).json();
+        const expected = buildEffectiveObjectPermissions(plain, {
+            allSchemas: () => ql.registry.getAllObjects(),
+            schemaOf: (name) => ql.getSchema(name),
+        });
+        expect(JSON.stringify(body.objects)).toBe(JSON.stringify(expected));
+        expect(body.objects.report).toMatchObject({ allowRead: true, allowEdit: true });        // named by no set
+        expect(body.objects.deal).toMatchObject({ allowRead: true, allowEdit: true });          // another set's wildcard widens it
+        expect(body.objects.sys_member).toMatchObject({ allowRead: true, allowEdit: false });   // the clamp still has the last word
     });
 
     it('keeps the rest of the envelope on its own merges', async () => {

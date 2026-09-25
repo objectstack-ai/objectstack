@@ -17,7 +17,10 @@
  *    the same resolution and the same engine, the function the endpoint builds
  *    that slot with (the endpoint's own half is pinned in plugin-hono-server's
  *    `current-user-endpoints-effective-objects.test.ts`);
- *  - the WHOLE map — seeded, folded, clamped and annotated, not a slice;
+ *  - the WHOLE map — seeded, covered (a plain `'*'`, #20083), folded, clamped
+ *    and annotated, not a slice — and, per cell, the map `current_user.can()`
+ *    answers what `PermissionEvaluator.checkObjectPermission` answers (the
+ *    parity table at the foot of this file);
  *  - it THROWS on resolution failure and ⛔ never answers `{}`;
  *  - request-scoped: resolved per ask, never cached across requests.
  *
@@ -27,9 +30,19 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { buildEffectiveObjectPermissions } from '@objectstack/core';
+import { ExpressionEngine, toEvalPermissions } from '@objectstack/formula';
+import { SysAttachment, SysMember, SysSecret, SysUser, SysUserPreference } from '@objectstack/platform-objects';
 import type { ISecurityService } from '@objectstack/spec/contracts';
-import type { PermissionSet } from '@objectstack/spec/security';
+import {
+  OBJECT_PERMISSION_VERB_NAMES,
+  PermissionSetSchema,
+  resolveObjectPermissionVerb,
+  type PermissionSet,
+} from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { PermissionEvaluator } from './permission-evaluator.js';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import { SysPermissionSet, SysPosition } from './objects/index.js';
 
 /** The metadata-declared baseline every member resolves additively. */
 const MEMBER_DEFAULT: PermissionSet = {
@@ -68,6 +81,20 @@ const SALES_ROW = {
   tab_permissions: JSON.stringify({}),
 };
 
+/**
+ * [#20083] A DB-authored PLAIN wildcard — no bypass bit — the shape of the
+ * wall-less org admin (`organization_admin_no_bypass`). It names no object, so
+ * every entry it contributes is the plain-wildcard coverage pass's.
+ */
+const OPS_PLAIN_ROW = {
+  name: 'ops_plain',
+  label: 'Ops (no bypass)',
+  object_permissions: JSON.stringify({ '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }),
+  field_permissions: JSON.stringify({}),
+  system_permissions: JSON.stringify([]),
+  tab_permissions: JSON.stringify({}),
+};
+
 /** Registered schemas: one plain, one better-auth-managed, one whose `apiMethods` tighten exposure. */
 const SCHEMAS: Record<string, any> = {
   deal: { name: 'deal', label: 'Deal', fields: { id: { name: 'id' } } },
@@ -88,14 +115,17 @@ function matches(row: Record<string, unknown>, where: Record<string, unknown> | 
   });
 }
 
-function bootPlugin(opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean } = {}) {
+function bootPlugin(
+  opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean; schemas?: Record<string, any> } = {},
+) {
   const dbRows = opts.dbRows ?? [];
+  const schemas = opts.schemas ?? SCHEMAS;
   const permissionSetReads: string[][] = [];
   const registered: Array<(context: unknown) => Promise<unknown>> = [];
   const ql: any = {
     registerMiddleware: () => {},
-    registry: { getAllObjects: () => Object.values(SCHEMAS) },
-    getSchema: (name: string) => SCHEMAS[name] ?? null,
+    registry: { getAllObjects: () => Object.values(schemas) },
+    getSchema: (name: string) => schemas[name] ?? null,
     find: async (object: string, query: any) => {
       const tables: Record<string, Array<Record<string, unknown>>> = { sys_permission_set: dbRows };
       if (object === 'sys_permission_set') permissionSetReads.push(query?.where?.name?.$in ?? []);
@@ -108,7 +138,7 @@ function bootPlugin(opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?
     ql.registerEffectiveObjectPermissionsResolver = (fn: (context: unknown) => Promise<unknown>) => registered.push(fn);
   }
   const metadata: any = {
-    get: async (_type: string, name: string) => SCHEMAS[name] ?? null,
+    get: async (_type: string, name: string) => schemas[name] ?? null,
     list: async () => [MEMBER_DEFAULT],
   };
   const services: Record<string, any> = { manifest: { register: vi.fn() }, objectql: ql, metadata };
@@ -142,6 +172,7 @@ function endpointObjects(sets: unknown, ql: any) {
 
 const ADMIN = { userId: 'u_admin', permissions: ['ops_admin'] } as any;
 const REP = { userId: 'u_rep', permissions: ['sales'] } as any;
+const PLAIN = { userId: 'u_plain', permissions: ['ops_plain'] } as any;
 
 describe('[#18783] getEffectiveObjectPermissions — reachable, and the endpoint\'s answer', () => {
   it('is exposed on the REGISTERED literal, where a cross-package consumer feature-detects it', async () => {
@@ -150,12 +181,16 @@ describe('[#18783] getEffectiveObjectPermissions — reachable, and the endpoint
   });
 
   it('is BYTE-EQUAL to the /auth/me/permissions computation over the same resolution', async () => {
-    const { svc, ql } = await locate({ dbRows: [OPS_ADMIN_ROW, SALES_ROW] });
-    for (const context of [ADMIN, REP, { userId: 'u_member' }]) {
+    const { svc, ql } = await locate({ dbRows: [OPS_ADMIN_ROW, SALES_ROW, OPS_PLAIN_ROW] });
+    for (const context of [ADMIN, REP, PLAIN, { userId: 'u_member' }]) {
       const sets = await svc.resolvePermissionSetsForContext!(context);
       const member = await svc.getEffectiveObjectPermissions!(context);
       expect(JSON.stringify(member), context.userId).toBe(JSON.stringify(endpointObjects(sets, ql)));
     }
+    // [#20083] …with the plain-wildcard coverage pass firing for the no-bypass subject, so the
+    // equality covers it too: `report` is named by no set, and reaches the map through `'*'`.
+    const plain: any = await svc.getEffectiveObjectPermissions!(PLAIN);
+    expect(plain.report).toMatchObject({ allowRead: true, allowEdit: true });
   });
 
   it('is the WHOLE map — merged, seeded, folded, clamped and annotated, not a slice', async () => {
@@ -242,5 +277,136 @@ describe('[#18783] the engine is handed the same producer', () => {
     expect(registered).toHaveLength(0);
     const lines = ctx.logger.warn.mock.calls.map((c: any[]) => String(c[0]));
     expect(lines.some((l: string) => l.includes('registerEffectiveObjectPermissionsResolver'))).toBe(true);
+  });
+});
+
+/**
+ * [#20083] PARITY — the map the member answers, read the way `current_user.can()`
+ * reads it, against the server's own verdict, `PermissionEvaluator.checkObjectPermission`,
+ * cell by cell: subjects x registered objects x every verb `can()` accepts.
+ *
+ * The map used to omit every object a subject reached only through a PLAIN `'*'`
+ * (one with no super-user bit), so the wall-less org admin's `can('crm_account',
+ * 'edit')` answered `false` where the server writes; and it kept a narrower entry
+ * wherever one set named the object and another covered it by its wildcard. Both
+ * directions are held here, over the shipped sets and the wildcard shapes an
+ * author can write:
+ *
+ *  - EXACT, cell for cell — except that
+ *  - on a guarded managed object (`better-auth` / `engine-owned` / `append-only`)
+ *    the create / edit / delete verbs may read NARROWER than the evaluator: that
+ *    is the managed-write clamp, the engine write guard the permission sets do not
+ *    model. There the pin holds the refuse direction only — the map never grants
+ *    what the evaluator refuses.
+ *
+ * Subjects whose sets carry a SUPER-USER wildcard are outside this table: their
+ * entries are the super-user seed's and fold's, which this card leaves as they
+ * were, and which the plain-wildcard pass does not touch (pinned in core's
+ * `effective-object-permissions.test.ts`).
+ */
+describe('[#20083] parity: can() over the member\'s map answers what checkObjectPermission answers', () => {
+  const REGISTERED: Record<string, any> = {
+    // App objects: public, restricted exposure, private posture, API switched off.
+    crm_account: { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' } } },
+    crm_lead: { name: 'crm_lead', label: 'Lead', fields: { name: { type: 'text' } }, enable: { apiMethods: ['get', 'list'] } },
+    crm_secret: { name: 'crm_secret', label: 'Secret', fields: { name: { type: 'text' } }, access: { default: 'private' } },
+    crm_hidden: { name: 'crm_hidden', label: 'Hidden', fields: { name: { type: 'text' } }, enable: { apiEnabled: false } },
+    // Real platform objects, one per posture the shipped sets treat differently.
+    [SysAttachment.name]: SysAttachment,         // public, named by no shipped set
+    [SysUserPreference.name]: SysUserPreference, // named by member_default, not by the org admin
+    [SysUser.name]: SysUser,                     // better-auth, opts `edit` in
+    [SysMember.name]: SysMember,                 // better-auth, write-denied blanket
+    [SysSecret.name]: SysSecret,                 // private, engine-owned, named by no shipped set
+    [SysPosition.name]: SysPosition,             // the org admin's read-only RBAC rows
+    [SysPermissionSet.name]: SysPermissionSet,
+  };
+  const shipped = (name: string): PermissionSet => {
+    const set = defaultPermissionSets.find((ps) => ps.name === name);
+    if (!set) throw new Error(`no shipped permission set '${name}'`);
+    return set;
+  };
+  const authored = (name: string, objects: Record<string, unknown>): PermissionSet =>
+    PermissionSetSchema.parse({ name, label: name, objects });
+
+  const SUBJECTS: Record<string, PermissionSet[]> = {
+    'wall-less org admin': [shipped('organization_admin_no_bypass'), shipped('member_default')],
+    'member': [shipped('member_default')],
+    'viewer': [shipped('viewer_readonly'), shipped('member_default')],
+    'an explicit entry beside another set\'s plain wildcard': [
+      authored('reader', { crm_account: { allowRead: true } }),
+      authored('wild', { '*': { allowRead: true, allowEdit: true, allowExport: true } }),
+    ],
+    'one set: a plain wildcard AND a narrower explicit entry': [
+      authored('same', { '*': { allowRead: true, allowEdit: true, allowDelete: true }, crm_account: { allowRead: true } }),
+    ],
+    'an export-only wildcard beside a reader': [
+      authored('reader', { crm_account: { allowRead: true } }),
+      authored('exporter', { '*': { allowExport: true } }),
+    ],
+    'a wildcard that grants nothing': [authored('none', { '*': {} })],
+  };
+
+  const OPERATION: Record<string, string> = {
+    allowRead: 'find', allowCreate: 'insert', allowEdit: 'update', allowDelete: 'delete',
+    allowTransfer: 'transfer', allowExport: 'export',
+  };
+  const GUARDED = new Set(['better-auth', 'engine-owned', 'append-only']);
+  const CLAMPED = new Set(['allowCreate', 'allowEdit', 'allowDelete']);
+  const USER = { id: 'u_parity', positions: [] as string[] };
+  const evaluator = new PermissionEvaluator();
+
+  /** The real `can()`: formula's CEL binding over the published map shape. */
+  function can(permissions: ReturnType<typeof toEvalPermissions>, object: string, verb: string): boolean {
+    const res = ExpressionEngine.evaluate<boolean>(
+      { dialect: 'cel', source: `current_user.can('${object}', '${verb}')` },
+      { user: USER, permissions },
+    );
+    if (!res.ok) throw new Error(`can('${object}', '${verb}') did not evaluate: ${JSON.stringify(res.error)}`);
+    return res.value === true;
+  }
+
+  it('covers every verb the vocabulary accepts', () => {
+    expect([...OBJECT_PERMISSION_VERB_NAMES].sort()).toEqual(
+      ['create', 'delete', 'edit', 'export', 'import', 'read', 'remove', 'transfer', 'update', 'write'],
+    );
+  });
+
+  for (const [label, sets] of Object.entries(SUBJECTS)) {
+    it(`${label}: no cell where the map and the evaluator disagree`, async () => {
+      const { svc, plugin } = await locate({ schemas: REGISTERED });
+      vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+      const permissions = toEvalPermissions(await svc.getEffectiveObjectPermissions!({ userId: USER.id }));
+
+      const wrong: string[] = [];
+      let cells = 0;
+      for (const schema of Object.values(REGISTERED)) {
+        const isPrivate = schema.access?.default === 'private';
+        const clamped = GUARDED.has(schema.managedBy);
+        for (const verb of OBJECT_PERMISSION_VERB_NAMES) {
+          const target = resolveObjectPermissionVerb(verb)!;
+          const map = can(permissions, schema.name, verb);
+          const server = evaluator.checkObjectPermission(OPERATION[target], schema.name, sets, { isPrivate });
+          cells += 1;
+          if (map === server) continue;
+          // The managed-write clamp may only NARROW, and only on its own verbs.
+          if (clamped && CLAMPED.has(target) && server && !map) continue;
+          wrong.push(`${schema.name}.${verb}: can()=${map} checkObjectPermission=${server}`);
+        }
+      }
+      expect(cells).toBe(Object.keys(REGISTERED).length * OBJECT_PERMISSION_VERB_NAMES.length);
+      expect(wrong).toEqual([]);
+    });
+  }
+
+  it('the wall-less org admin\'s reported case, spelled out: edit on an app object reached only through `*`', async () => {
+    const sets = SUBJECTS['wall-less org admin'];
+    const { svc, plugin } = await locate({ schemas: REGISTERED });
+    vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+    const permissions = toEvalPermissions(await svc.getEffectiveObjectPermissions!({ userId: USER.id }));
+    expect(evaluator.checkObjectPermission('update', 'crm_account', sets)).toBe(true);
+    expect(can(permissions, 'crm_account', 'edit')).toBe(true);
+    // …and the private object stays out of a plain wildcard's reach on both sides.
+    expect(evaluator.checkObjectPermission('find', 'crm_secret', sets, { isPrivate: true })).toBe(false);
+    expect(can(permissions, 'crm_secret', 'read')).toBe(false);
   });
 });
