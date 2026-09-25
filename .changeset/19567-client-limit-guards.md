@@ -17,11 +17,11 @@ to answer `200` can now answer `400`.
 guards, so one input got a different answer depending on the method. Seven methods
 already sent every value except `undefined`. Three used a truthy test, so `0` and
 `NaN` never left the client and the server answered `200` with its default window —
-rows the caller did not ask for. Four used `!= null`, so an untyped `null` was dropped
-there while the other ten sent it as the text `null`. All fourteen emitters now leave
-only an absent (`undefined`) `limit` off the wire and send everything else as written;
-the door that declares the bound decides. The SDK itself still does not validate
-`limit`.
+rows the caller did not ask for. Four used `!= null`, which dropped an untyped `null`
+as the truthy three did, while the seven others sent it as the text `null`. All
+fourteen emitters now leave only an absent (`undefined`) `limit` off the wire and send
+everything else as written; the door that declares the bound decides. The SDK itself
+still does not validate `limit`.
 
 | method | what changes on the wire |
 |:--|:--|
