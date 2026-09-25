@@ -227,6 +227,130 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'onlyWhen',
     why: "the mirror of `retention.onlyWhen` — one shape by design (`lifecycleOnlyWhenSchema`, object.zod.ts) — with the same boundary: a row-filter map with no scalar rendering among the ttl block's text inputs, and its one writer today is the code-declared sys_session object (`revoked_at: { $null: true }`). Offering it needs a structured control, a form-face addition rather than a reconciliation",
   },
+  // ── The root coordinate (#19333): top-level keys no form may offer ──
+  //
+  // Three reasons, each read off the key's own `describe()` or its liveness
+  // verdict (`packages/spec/liveness/TYPE.json`) rather than decided here:
+  // platform-written state, a deprecated or legacy alias, and a key declared
+  // but not enforced yet. A fourth reason covers far more keys and has no row
+  // at all: the ADR-0010 provenance/lock overlay, whose one reason is
+  // `FRAMEWORK_FIELDS` above — a root row naming one of its keys is refused by
+  // the resolve test below.
+  //
+  // `view` rows are here although `view` is outside the top-level direction
+  // until its per-arm forms exist: each reason holds on every arm, so none of
+  // these rows can excuse a key a future arm form ought to offer. The `view`
+  // keys whose answer depends on the arm carry no row (`liveness/view.json`'s
+  // note records what was measured for them).
+  //
+  // The not-enforced-yet rows hold only while the verdict does. Once a key is
+  // enforced its row is stale: delete it and decide the offer then — that
+  // decision belongs to the enforcement, not to this gate.
+
+  // Platform-written, never authored.
+  {
+    kind: 'omit',
+    type: 'app',
+    path: ROOT_PATH,
+    key: '_unpublished',
+    why: "platform-written, never authored — the schema's own words: `Machine-managed publish gate (ADR-0045 §3) … Written by AI materialization, cleared by publish-drafts. Never authored`. The `_` prefix is the tooling-stamped channel ADR-0010's envelope also uses, but the key is not in that envelope (`MetadataProtectionFields`), so the overlay skip does not reach it and this row does. A control would let an author publish or re-gate an app by hand",
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'system',
+    why: "platform-written, never authored — the schema calls it the `Auto-injected system/audit field` marker, kept apart from `author-declared business fields`, and every writer is platform code (the injected-column provenance table, the search companion, audit-field governance). The record validator reads it on the write path and skips its required and multi-value checks for a flagged column, so a control would let an author claim a false provenance that silently switches those checks off",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'columnState',
+    why: "platform-written, never authored — `Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'isPinned',
+    why: "platform-written, never authored — `Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'sortOrder',
+    why: "platform-written, never authored — `Studio round-trip: position within the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name and points the author at `order`, the authored default",
+  },
+
+  // Deprecated or legacy alias — deliberately not offered to new authors, the
+  // `page.interfaceConfig.sourceView` precedent at the top of this ledger.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'displayNameField',
+    why: "`[DEPRECATED → nameField]` alias, accepted on read for back-compat and deliberately not offered to new authors: this form offers the canonical `nameField` (ADR-0079), and a second control beside it would teach the retired spelling",
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'titleFormat',
+    why: "`[DEPRECATED → nameField (ADR-0079)]` render-only title template the server cannot return or query, deliberately not offered to new authors; its own describe prescribes the migration — a single-field title to `nameField`, a composite to a formula field designated as `nameField` — and both targets are authorable",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'drawerWidth',
+    why: '`[DEPRECATED → size buckets]` pixel drawer width, deliberately not offered to new authors: a pixel width cannot be chosen without knowing the client viewport, so the renderer derives it from the size bucket',
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'groups',
+    why: '`[LEGACY ALIAS → sections]` accepted for back-compat and folded onto `sections` at parse (`sections` wins when both are present), deliberately not offered to new authors',
+  },
+
+  // Declared, not enforced yet — no offer until it is enforced.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'externalSharingModel',
+    why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0090 D11: validated at authoring time only; the audience-aware evaluator branch that would honour it is scheduled, not built). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'useGrouping',
+    why: 'declared, not enforced yet — liveness verdict `planned` (the renderer read side that maps it onto `Intl.NumberFormat` is not landed). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'requires',
+    why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0080: inferred at compile time; save/load enforcement of plugin presence is deferred). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'agent',
+    path: ROOT_PATH,
+    key: 'structuredOutput',
+    why: 'declared, not enforced yet — `[EXPERIMENTAL — not enforced]` in its own describe and `experimental` in the liveness ledger: parsed, no runtime consumer. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'onSuccess',
+    why: 'declared, not enforced yet — both of its children (`navigate`, `openIn`) carry the liveness verdict `planned`: no console consumer reads the block yet. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
