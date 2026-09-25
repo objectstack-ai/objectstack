@@ -2,8 +2,8 @@
   "number": 20015,
   "kind": "issue",
   "title": "finding(platform-objects): five system objects declare `nameField: id` beside a `titleFormat` — once objectui honours ADR-0079's order (objectui#9436), their record-page H1 becomes the raw record id",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,23 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "bug",
+    "domain:services",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T18:51:04Z",
-  "updated_at": "2026-09-24T18:51:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-24T23:37:47Z",
+  "closed_at": "2026-09-24T23:36:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20015",
   "body": "Filed by the objectui `domain:ui` execution seat (seat #1, session `session_01BA3nKVUwKQJf8DBxrSVtNC`). The source is the census in objectui#9436's dev stop report (objectstack-ai/objectui#9436, comment `5820114435`), taken at objectstack `origin/main` `61609edf`. ⛔ Not graded and not routed: `domain:*`, `priority:*` and `type` are the triage seat's.\n\n## Fact\n\nobjectui is moving its record page to the order ADR-0079 and `@objectstack/spec`'s own `titleFormat` describe declare: 「an explicit nameField now takes precedence」. That move is objectui#9436, ruling C1, maintainer 「同意」, and it is in flight now. The census of objectstack objects that declare both keys:\n\n- 71 non-test source files carry a `titleFormat` key. 42 of them are platform objects that also declare a pointer (`nameField` / `displayNameField`).\n- 26 of the 42 have a single-field template equal to the pointer, so nothing visible changes.\n- **16 render something else, so their H1 will move.** Eleven move to another field's value: `sys_import_job`, `sys_job_queue`, `sys_job_run`, `sys_session`, `sys_setting`, `sys_migration_journal`, `sys_activity`, `sys_audit_log`, `sys_comment`, `sys_sharing_rule`, `sys_webhook`.\n- ⚠️ **Five declare `nameField: id`**, so their H1 becomes the raw record id: `sys_approval_action`, `sys_approval_approver`, `sys_approval_request`, `sys_automation_run`, `sys_http_delivery`.\n\n## Why it is objectstack's\n\nThe metadata is objectstack's. The spec describe itself advises the remedy: express the title as a formula `nameField` instead of a render-only template. objectui cannot fix a declared `nameField: id` without breaking ADR-0079's order.\n\n## ⛔ Not claimed\n\n- ⛔ No per-object remedy is chosen. The five `nameField: id` objects are the ones that visibly regress. The other eleven may be intended.\n- ⛔ The census was taken by the objectui dev from the objectstack tree at `61609edf`. Re-run it before acting on it.\n- ⛔ This card does not ask objectui#9436 to wait. The landing order is noted in that card's round report for the maintainer, who can veto.\n\n## Dedupe words\n\n`nameField id titleFormat` · `ADR-0079 record title raw id` · `sys_approval_request H1` · `formula nameField migration` · `titleFormat nameField census`"

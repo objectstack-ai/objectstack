@@ -2,9 +2,9 @@
   "number": 19818,
   "kind": "pull_request",
   "title": "fix(lint): walk page filterBy and lookup-field lookupFilters as authored filters",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T08:27:54Z",
-  "updated_at": "2026-09-23T15:28:23Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 5,
+  "updated_at": "2026-09-25T01:42:21Z",
+  "closed_at": "2026-09-25T01:42:19Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-25T01:42:19Z",
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19818",
   "body": "Fixes #19791\nClause-②: no\n\n<sub>Rewritten short by the `domain:spec#5` seat (2026-09-23T15:28Z), which took this PR over from seat 2. The earlier body is in the edit history; the dev reports are on #19791.</sub>\n\nA page's `interfaceConfig.filterBy` and a lookup field's `lookupFilters` hold filter rules that reach the engine's `where`, but the lint's shared filter walk did not enter them. A date-range preset in either, such as `{ field: 'close_date', operator: 'gt', value: 'last_30_days' }`, parsed, linted and published green.\n\n## What changed\n\n- **Lint** (`@objectstack/lint` patch): `FILTER_KEYS` in `packages/lint/src/filter-walk.ts` adds `filterBy` and `lookupFilters`. `filter-preset-comparand` binds a `filterBy` rule to `interfaceConfig.source` (else the page's `object`), and a `lookupFilters` rule to the field's `reference`. A `relatedListFilter` on the same field still binds to the owning object. `filter-token-unknown` reaches both keys through the same walk.\n- **Migration entry `18.filter-preset-ordering-comparand-refused`** (`@objectstack/spec` patch; rulings `5793402649` and `5794625162` on #19791): the fix makes parts of it false, and they are deleted with no replacement: `surface` group (3) and the word \"three\" before it, the by-hand clause in `acceptanceCriteria`, and the \"reached by neither\" clause in `reason`. `registry.ts` is regenerated.\n- **Pending note `.changeset/19778-preset-entry-carriers.md`** (from #19801, not yet released): its item 3 said both keys lint green and must be swept by hand. That is false after this PR, so item 3 is deleted, \"The three groups\" becomes \"The groups\", and the Reach sub-bullet counting \"nine sentences\" is deleted too.\n\n## `Check Changeset` is red on purpose\n\nThis PR edits a pending changeset it did not add (the #19778 note above). `check-empty-changeset.mjs` calls this a DELIBERATE CORRECTION: the check stays red. The correction is recorded on this PR (`5796661306`) and awaits the maintainer's written confirmation. `Check Changeset` is not a required context.\n\n## Measured (dev reports on #19791)\n\n- With the card's rule in each key: `os lint`, `os validate` and the runtime publish gate refuse it at this head; none of them refuses it at `afc3b64928`. Lit control (a component `dataSource.filter`): refused on both trees. Dark control (an ISO date): green on both trees.\n- New tests: 5 in `validate-preset-comparands.test.ts` and 1 in `validate-filter-tokens.test.ts`. Restoring the base source turns 5 red. Three ablations each turn their pin red: dropping the two keys, dropping the `lookupFilters` binding, and dropping the `interfaceConfig` reader.\n- Two at-tier reviews (`5795612549`, `5796648031`) failed sentences, not code. Rounds 4 and 5 cut them: three \"the two carriers\" exclusives (object-grid `defaultFilters` is also outside the walk), a lit-control claim, an unknown token called \"silent\" (the engine throws `FILTER_TOKEN_UNKNOWN`), and \"refused only at query time\".\n- CI at `4dda1fd0fd`: all seven required contexts pass. `Check Changeset` is red as described above; the gate comment is `5796661306`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"

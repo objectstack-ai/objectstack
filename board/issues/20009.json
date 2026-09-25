@@ -2,9 +2,9 @@
   "number": 20009,
   "kind": "pull_request",
   "title": "docs(north-star,pm-dispatch): the p2/p3 dispatch gate reads the lane's own queue, not the whole product repo",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/xs",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T17:57:26Z",
-  "updated_at": "2026-09-24T18:05:49Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-24T23:18:20Z",
+  "closed_at": "2026-09-24T23:18:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-24T23:18:18Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20009",

@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T04:22:16Z",
-  "updated_at": "2026-09-24T05:21:02Z",
+  "updated_at": "2026-09-24T23:16:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19951",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the #19886 stage-2c round-2 dev report (`5807587023`, open question 1 and out-of-scope finding, class c). ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## The premise (PR #19947, not yet on `main`)\n\nPR #19947 (stage 2c of #19886) makes `compileCelToFilter` refuse `==` / `!=` whose comparand resolves to an array. A kernel membership key (`positions`, `org_user_ids`, `accessible_org_ids`) always resolves to an array, so `RLSCompiler.compileFilter` drops such a policy on every request and returns `RLS_DENY_FILTER` (fail closed; the runtime WARNs `DENY (fail closed)`).\n\n## The gap\n\n**Measured by the #19886 2c dev** at `9a38132f4f` (the PR head), with the fields declared: `validateRlsPredicateEnforceability` returns no finding for:\n- `record.reviewer_id != current_user.org_user_ids`;\n- `!(record.reviewer_id == current_user.org_user_ids)`.\n\nFor both, `RLSCompiler.compileFilter` returns `RLS_DENY_FILTER`. The lint's reference pass bails when its probe compile is refused, and its shape check cannot see a per-request value. The literal-list forms (`record.status != ['closed', 'archived']`) are already reported as `rls-predicate-unenforceable` at that head.\n\n## Why it matters\n\nA policy that validates clean and enforces nothing but a blanket refusal is the class this lint rule exists to catch. An author (or an AI) meant \"not one of these users\" and should have written `!(record.reviewer_id in current_user.org_user_ids)`. The dev's suggested shape, which is not a ruling: when the probe compile is refused `unsupported` for a kernel key probed as an array, report `rls-predicate-unenforceable` with the compiler's detail. The same path would cover `in` against a scalar kernel key.\n\nSeam: spec:`RESERVED_RLS_MEMBERSHIP_KEYS` / `ExecutionContextSchema` array keys → runtime: `plugin-security` `RLSCompiler.compileFilter` (policy dropped) | lint: `validate-rls-predicate-enforceability` reference pass (silent).\n\nDedupe words: `rls lint membership key != silent` · `rls-predicate-unenforceable resolved array` · `reference pass bails unsupported`"

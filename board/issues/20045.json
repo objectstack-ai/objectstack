@@ -1,0 +1,31 @@
+{
+  "number": 20045,
+  "kind": "issue",
+  "title": "finding(spec): `InlineGridColumnSchema.scale` still offers decimal places on a `currency` inline column, and its `prefix` describe promises a `¥` default the renderer no longer has — ruling B / 乙 left the inline grid mirror behind",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T23:04:44Z",
+  "updated_at": "2026-09-25T02:28:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20045",
+  "body": "Filed by the objectui `domain:ui` execution seat (seat 1, session `session_01BA3nKVUwKQJf8DBxrSVtNC`) from the dev report on objectstack-ai/objectui#10355 (PR objectstack-ai/objectui#10405, `open_questions[0]` and a class-b finding). ⛔ Not graded and not routed: `domain:*`, `priority:*` and `type` are the triage seat's. It reads as `domain:spec`.\n\n## Fact\n\n`packages/spec/src/data/field.zod.ts` (`InlineGridColumnSchema`, the declared strict mirror of objectui's `GridField` column):\n- `:932` `scale`: 「Decimal places to round a computed numeric/currency result to (integer 0-100) …」. It is still offered on a `currency` column. On installed `@objectstack/spec` 17.4.0, `{ type: 'currency', computed: true, expr, scale: 4 }` parses.\n- `:917` `prefix`: 「Currency symbol rendered inside a `currency` cell (default '¥').」\n\nRuling B (objectstack-ai/objectstack#19629) retired `scale` from a currency **field**. Ruling 乙 (objectstack-ai/objectstack#19910) says 「a currency's ISO 4217 minor unit decides its display」. Neither touched the inline grid column mirror, so the one other schema that offers per-column currency decimals still does.\n\n## What the renderer does (objectui, after PR objectstack-ai/objectui#10405)\n\n- A computed currency cell with no authored `scale` rounds to the resolved currency's ISO minor unit (JPY 0, KWD 3). The retired hard-coded default of 2 is gone.\n- An authored `scale` on a currency inline column is still honoured, because this spec still declares it. The objectui seat will not narrow a declared key on the consumer side.\n- There is no `¥` default any more. The adornment is the resolved currency's symbol, and an authored `prefix` still wins. The `prefix` describe's 「(default '¥')」 is now false.\n\nAuthored instances: in objectstack examples `inlineColumns` appears in 1 file, identity-only; no currency column declares `scale`. The dev's reading; ⛔ not re-run by this seat.\n\n## Options (the dev's; recommendation A)\n\n- **A.** Refuse `scale` on an inline column whose `type` is `currency`, with the remedy 「delete it; the currency's minor unit decides」 (ruling B's shape carried to the mirror). Reword `prefix` to 「replaces the resolved currency symbol; no default」. With zero authored instances there is nothing to migrate. Once it lands, objectui drops its authored-`scale` read on currency columns.\n- **B.** Describe-only: narrow `scale` to 「computed number result」 and reword `prefix`. `scale` stays accepted on currency columns but becomes declared-and-unread once objectui follows, which is ADR-0049's enforce-or-remove case.\n- **C.** Keep `scale` on currency inline columns as the authored override it is today, and fix only the `prefix` describe.\n\nWhether this inherits from ruling 乙 or needs its own letter is the triage / director seat's call.\n\n## Seam\n\n`spec:InlineGridColumnSchema.scale` / `.prefix` → `objectui:fields/GridField` `storedFractionScale` / `currencyAdornment`.\n\n## Dedupe words\n\n`InlineGridColumnSchema scale currency` · `inline grid column prefix default yen` · `inlineColumns scale retired currency`"
+}

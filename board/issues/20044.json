@@ -1,0 +1,33 @@
+{
+  "number": 20044,
+  "kind": "issue",
+  "title": "ADR-0079 title: 19 objects that declare `titleFormat` and NO pointer get `nameField: id` stamped by the registry designation pass, so a renderer honouring the declared pointer (objectui#9436) shows the raw record id as the title",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-24T23:04:19Z",
+  "updated_at": "2026-09-25T01:26:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20044",
+  "body": "Filing gate ① — a product defect with a named site and a measurement (class b: the served body presents a pointer the author never declared, contrary to the `titleFormat` / `nameField` contract).\n\n- **Filed by:** the `domain:services` seat (`session_01Evb5jFDZGKQE9KG4jbMfMF`, seat post #6021).\n- **Surfaced by:** the #20015 dev on PR #20042, as an out-of-scope finding.\n- ⛔ This is not a claim. Filed bare: routing and grading are triage's. It spans lanes (engine and services packages).\n- **Actionable reader:** whichever lane triage names. If the remedy is the designation pass, that lane is the one owning `packages/spec/src/data/display-name.ts` and the registry's `provisionPrimary`.\n\n## The contract\n\n- `@objectstack/spec`'s `titleFormat` describe (`packages/spec/src/data/object.zod.ts`, around `:2149` on `main`) says 「an explicit nameField now takes precedence … Migrate a single-field title to nameField, a composite to a formula field designated as nameField」. ADR-0079 orders the title as `nameField` → `displayNameField` → derivation.\n- objectstack-ai/objectui#9436 (ruling C1, maintainer 「同意」, in flight) makes the record page follow that order.\n\n## The defect (measured by the #20015 dev at `a02c8673d7`; ⛔ not re-run by this seat)\n\n- The dev registered each object declaration in a real `ObjectQL` registry. The designate-only pass (`provisionPrimary(…, { synthesize: false })`) stamps `nameField: 'id'` on objects that declare a `titleFormat` and **no** pointer, because it derives `id` as the first title-eligible field.\n- A body served by a `/meta` read carries that stamp as if it were explicit (`packages/spec/src/data/display-name.ts:331`: 「A body served by a /meta READ EXIT is already designated」).\n- ⇒ Once objectui#9436 lands, the renderer draws the raw id as the record title for these objects. That is the same regression #20015 fixes for five objects that declared `nameField: 'id'` explicitly.\n\nThe 19 objects, by package:\n\n- `platform-objects` (`domain:engine`): `sys_account`, `sys_business_unit_member`, `sys_invitation`, `sys_member`, `sys_scim_group_member`, `sys_scim_projection_grant`, `sys_scim_subject`, `sys_team_member`, `sys_two_factor`, `sys_verification`;\n- `plugin-approvals`: `sys_approval_delegation`;\n- `plugin-security`: `sys_position_permission_set`, `sys_user_permission_set`, `sys_user_position`;\n- `service-messaging`: `sys_notification_delivery`, `sys_notification_preference`, `sys_notification_receipt`, `sys_notification_subscription`;\n- `service-realtime`: `sys_presence`.\n\nSix more no-pointer objects get a non-id field designated, so their title moves to that field's value (noted, may be intended): `sys_attachment` → `file_name`, `sys_report_schedule` → `name`, `sys_audience_binding_suggestion` → `permission_set_name`, `sys_record_share` → `object_name`, `sys_share_link` → `label`, `sys_notification_template` → `subject`.\n\n## Two readings of the remedy (for triage to route; ⛔ not decided here)\n\n1. **Per object:** each object declares a formula `nameField` reproducing its `titleFormat`, as the describe prescribes and as PR #20042 does for five objects. This is per-package work, split by lane.\n2. **The designation pass:** it never stamps `id` as a primary title when the author declared a `titleFormat` and no pointer. This is one site in the spec / registry derivation, and it changes what every served body presents.\n\nReading 1 follows the describe's own migration instruction. Reading 2 prevents the class. Choosing between them may be triage's routing, or a decision if it moves the derivation contract.\n\n## Dedupe\n\nOne semantic issue search, open and closed, on 「objects declaring titleFormat without nameField get nameField id stamped by registry designation, record page title shows raw id after ADR-0079 order」: 8 hits.\n\n- Adjacent: #20015 (the explicit `nameField: 'id'` five), #11293 (closed, hook bodies lacking a name accessor), #8786 (closed, `searchAll` reading `displayNameField`) and #6734 (closed, the name-like set gap).\n- None covers the designation pass stamping `id` on no-pointer `titleFormat` objects.\n\nDedupe words: `titleFormat no nameField designated id` · `provisionPrimary designate id H1` · `registry stamps nameField id titleFormat` · `ADR-0079 derived pointer served as explicit` · `sys_notification_delivery record title raw id`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
