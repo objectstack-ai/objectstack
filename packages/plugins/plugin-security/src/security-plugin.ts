@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, POSTURE_LADDER, isRowActive } from '@objectstack/core';
-import type { PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
+import { Plugin, PluginContext, POSTURE_LADDER, isRowActive, buildEffectiveObjectPermissions } from '@objectstack/core';
+import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
@@ -1330,6 +1330,31 @@ export class SecurityPlugin implements Plugin {
       );
     }
 
+    // [#18783] Hand the engine the subject's EFFECTIVE object permissions, so
+    // `current_user.can(object, verb)` in an option's `visibleWhen` is answered
+    // on the write path instead of failing open. The same method the
+    // registered `security` literal exposes as `getEffectiveObjectPermissions`
+    // (below) — one map, one producer. The engine asks it at most once per
+    // write, and only for a write that picks an option whose predicate calls
+    // `can`; a throw fails that write CLOSED there.
+    if (typeof (ql as any).registerEffectiveObjectPermissionsResolver === 'function') {
+      (ql as any).registerEffectiveObjectPermissionsResolver(
+        (context: unknown): Promise<Readonly<Record<string, EffectiveObjectPermission>>> =>
+          this.getEffectiveObjectPermissions(context),
+      );
+    } else {
+      // Absence must be loud, and it is functional, not durability: the engine
+      // is older than this plugin, so an option gated on `current_user.can(…)`
+      // stays unevaluable there (admitted, one warn per write) exactly as it
+      // was before the seam existed. The remedy is the version bump.
+      ctx.logger.warn(
+        '[security] this ObjectQL exposes no effective-permission seam '
+        + '(registerEffectiveObjectPermissionsResolver), so an option visibleWhen that calls '
+        + 'current_user.can(object, verb) cannot be answered on the write path and is admitted '
+        + 'unenforced. Upgrade @objectstack/objectql to a version that offers the seam.',
+      );
+    }
+
     // [#11968] Bind the invalidation epoch to the ENGINE's seam when the wired
     // engine exposes one. Resolved here, once, rather than probed per request:
     // the plugin DI graph is static after start, and a per-request probe would
@@ -1789,6 +1814,11 @@ export class SecurityPlugin implements Plugin {
         // same code rather than two that agree today.
         resolvePermissionSetsForContext: (context?: any): Promise<PermissionSet[]> =>
           this.resolvePermissionSetsForContext(context),
+        // [#18783] The EFFECTIVE object-permission map — the `objects` slot of
+        // `/auth/me/permissions`, from the same function that endpoint uses
+        // (`buildEffectiveObjectPermissions`). Exposed on the literal for the
+        // reason above: a cross-package consumer can only reach it here.
+        getEffectiveObjectPermissions: (context?: any) => this.getEffectiveObjectPermissions(context),
         // [ADR-0090 D6] First-class access explanation. Same code paths as
         // the middleware (resolution/evaluator/RLS compiler) — explained by
         // construction. Explaining ANOTHER user requires `manage_users`.
@@ -5862,6 +5892,46 @@ export class SecurityPlugin implements Plugin {
       context?.principalKind ?? null,
       context?.userId ? 1 : 0,
     ]);
+  }
+
+  /**
+   * [#18783] `ISecurityService.getEffectiveObjectPermissions` — the subject's
+   * EFFECTIVE object-permission map, object name -> `EffectiveObjectPermission`.
+   *
+   * It is `buildEffectiveObjectPermissions` (`@objectstack/core`) over
+   * {@link resolvePermissionSetsForContext}'s answer and this plugin's engine:
+   * the ONE function `/auth/me/permissions` builds its `objects` slot with, so
+   * the endpoint and this method are the same answer for the same sets rather
+   * than two merges that agree today. Every clause of the contract member:
+   *
+   *  - **The WHOLE map** — no object parameter; every object the resolution
+   *    mentions plus the entries the super-user seed adds.
+   *  - **Throws on resolution failure, never `{}`** — the throw is the set
+   *    resolution's own, propagated untouched, so whatever it carries (a code,
+   *    a status) reaches the caller intact. An empty map comes back only when
+   *    the subject really holds nothing.
+   *  - **Request-scoped** — computed per call and never cached here. The set
+   *    resolution under it is the plugin's existing per-context memo (keyed on
+   *    the request's context object and retired by the write epoch), so a
+   *    second ask within one request pays no second resolution, and a new
+   *    request — a new context — never sees an old grant.
+   *
+   * Frozen at the top level: the map is pinned data for its consumers
+   * (`toEvalPermissions` copies it again on the way into a predicate), and no
+   * entry aliases a permission set.
+   */
+  private async getEffectiveObjectPermissions(
+    context?: any,
+  ): Promise<Readonly<Record<string, EffectiveObjectPermission>>> {
+    const sets = await this.resolvePermissionSetsForContext(context);
+    const ql = this.ql;
+    return Object.freeze(buildEffectiveObjectPermissions(sets, {
+      // The registry view is engine-local (`unknown[]` on the contract); the
+      // seed reads only `name` / `enable` off each entry.
+      allSchemas: () => ql?.registry?.getAllObjects?.(),
+      schemaOf: (name: string) => ql?.getSchema?.(name),
+      logger: this.logger,
+    }));
   }
 
   /**

@@ -219,7 +219,7 @@
  */
 
 import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals, findTraversalConflicts } from '@objectstack/formula';
-import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
+import type { EvalPermissions, RelationshipTraversalAnalysis } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, referenceTargetOf, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { recordAdvisoryHit } from '@objectstack/core';
@@ -381,6 +381,22 @@ export interface EvaluateRulesOptions {
    * and fail-open (see {@link evaluateOptionVisibility}).
    */
   currentUser?: { id?: string; roles?: string[]; organizationId?: string | null; [k: string]: unknown } | null;
+  /**
+   * [#18783] The acting subject's EFFECTIVE object permissions — the map
+   * `current_user.can(object, verb)` in a per-option `visibleWhen` is answered
+   * from (`EvalContext.permissions`). Only the engine can resolve it (it is
+   * `ISecurityService.getEffectiveObjectPermissions`, the `objects` slot of
+   * `/auth/me/permissions`), so it resolves it ONCE per write and hands it over,
+   * the division of labour `parent` and `related` follow.
+   *
+   * ⛔ `undefined` is NOT an empty map. It means "no permission data": a `can`
+   * predicate then stays loudly unevaluable (the fail-open branch of
+   * {@link evaluateOptionVisibility}, naming the missing input). An empty map is
+   * a REAL answer — this subject holds nothing, every `can()` is `false`.
+   * The engine passes one only for a write that picks an option whose predicate
+   * calls `can` ({@link optionVisibilityReadsPermissions}).
+   */
+  permissions?: EvalPermissions;
   /**
    * [#4977] The master-detail header this write's field `requiredWhen`
    * predicates read as `parent` — the SAME binding, resolved by the SAME engine
@@ -2853,9 +2869,11 @@ function toExpression(cond: string | Expression): Expression {
  * user. `ctx` and `os` are listed at bare-root granularity because that is what
  * {@link collectCelRootIdentifiers} reports — and that is exact at THIS call
  * site rather than merely conservative: {@link evaluateOptionVisibility}
- * evaluates with `{ record, previous, user }` and nothing else, so `buildScope`
- * has no `org`/`env` to mount `os` from and no other source for `ctx`. Both
- * roots are therefore bound here if and only if a user is.
+ * evaluates with `{ record, previous, user, permissions }` and nothing else, so
+ * `buildScope` has no `org`/`env` to mount `os` from and no other source for
+ * `ctx` (`permissions` mounts no root at all — it reaches `can` through the
+ * environment, #18783). Both roots are therefore bound here if and only if a
+ * user is.
  */
 const USER_SCOPE_ROOTS: readonly string[] = ['current_user', 'user', 'ctx', 'os'];
 
@@ -2914,6 +2932,14 @@ function readsUserRoot(cond: string | Expression): boolean {
  * write. Authorization gating therefore depends on the engine binding
  * `current_user` on authenticated writes.
  *
+ * [#18783] A grant-gated option — `current_user.can('crm_account', 'edit')` —
+ * additionally needs the subject's effective object permissions, which the
+ * engine resolves once per write and passes as `permissions`. With the map the
+ * predicate evaluates and a clean FALSE refuses like any other; without it
+ * `can` refuses loudly inside the evaluator and the value takes the fail-open
+ * branch below with that refusal as its `error`. A resolution FAILURE never
+ * reaches here: the engine fails the write closed before evaluating.
+ *
  * The admission is deliberate and unchanged. What the fail-open branch does NOT
  * do any more is describe two different facts with one sentence. A system write
  * — a declarative seed, an in-process job, anything with no acting user — can
@@ -2934,13 +2960,75 @@ function evaluateOptionVisibility(
   merged: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   currentUser: EvaluateRulesOptions['currentUser'],
+  permissions: EvaluateRulesOptions['permissions'],
   errors: FieldValidationError[],
   logger: EvaluateRulesOptions['logger'],
   messages: ValidationMessageContext | undefined,
 ): void {
   if (!fields) return;
   const user = (currentUser ?? undefined) as any;
+  for (const { name, def, value, opt } of pickedGatedOptions(fields, data)) {
+    const res = ExpressionEngine.evaluate<boolean>(toExpression(opt.visibleWhen!), {
+      record: merged,
+      previous,
+      user,
+      // [#18783] What `current_user.can(object, verb)` is answered from. Passed
+      // through as the engine resolved it: `undefined` leaves `can` loudly
+      // unevaluable (the fault lands in the fail-open branch below, naming the
+      // missing input), never a quiet `false` — see `EvaluateRulesOptions`.
+      permissions,
+    });
+    if (!res.ok) {
+      // Which of the two fail-open cases is this? "No acting user to bind"
+      // needs BOTH facts — the write carries no user AND the predicate asks
+      // for one. Either alone misfiles: a system write whose predicate names
+      // no user root and faults on a typo'd field is a real broken gate, and
+      // an authenticated caller's fault is the case this log exists for.
+      const noActingUser = user === undefined;
+      if (noActingUser && readsUserRoot(opt.visibleWhen!)) {
+        logger?.warn?.(
+          `option visibleWhen for '${name}=${String(value)}' not evaluated: no acting user to bind current_user (system write) — allowed through`,
+          { field: name, value: String(value), reason: 'no-acting-user', error: res.error },
+        );
+      } else {
+        logger?.warn?.(
+          `option visibleWhen for '${name}=${String(value)}' failed to evaluate `
+            + `(${noActingUser ? 'system write' : 'authenticated caller'}) — allowed through; `
+            + `the option's gate was NOT enforced on this write. Check the predicate.`,
+          { field: name, value: String(value), reason: 'predicate-fault', error: res.error },
+        );
+      }
+      continue; // fail-open
+    }
+    if (res.value === false) {
+      errors.push(buildFieldError({
+        field: name,
+        code: 'invalid_option',
+        def,
+        value: String(value),
+        messageKey: 'option_unavailable',
+      }, messages));
+    }
+  }
+}
+
+/**
+ * The gated options a write PICKS — one `{ field, value, option }` per picked
+ * value whose matched option carries a `visibleWhen`.
+ *
+ * ONE reading of "which options does this write pick", shared by
+ * {@link evaluateOptionVisibility} (which judges them) and
+ * {@link optionVisibilityReadsPermissions} (which tells the engine whether the
+ * write needs the permission map at all), so the two can never select
+ * differently: a pick the evaluator judges without the map it needed is a `can`
+ * gate silently not enforced.
+ */
+function* pickedGatedOptions(
+  fields: Record<string, ConditionalFieldDef>,
+  data: Record<string, unknown>,
+): Generator<{ name: string; def: ConditionalFieldDef; value: unknown; opt: ConditionalFieldOption }> {
   for (const [name, def] of Object.entries(fields)) {
+    // Only WRITTEN fields — an unchanged persisted value is left alone.
     if (!fieldHasOptionVisibility(def) || !(name in data)) continue;
     const raw = data[name];
     if (raw === undefined || raw === null || raw === '') continue;
@@ -2953,44 +3041,72 @@ function evaluateOptionVisibility(
       // Unknown value (not in options) or an ungated option → nothing to enforce
       // here; an out-of-set value is the enum validator's concern, not ours.
       if (!opt || opt.visibleWhen == null) continue;
-      const res = ExpressionEngine.evaluate<boolean>(toExpression(opt.visibleWhen), {
-        record: merged,
-        previous,
-        user,
-      });
-      if (!res.ok) {
-        // Which of the two fail-open cases is this? "No acting user to bind"
-        // needs BOTH facts — the write carries no user AND the predicate asks
-        // for one. Either alone misfiles: a system write whose predicate names
-        // no user root and faults on a typo'd field is a real broken gate, and
-        // an authenticated caller's fault is the case this log exists for.
-        const noActingUser = user === undefined;
-        if (noActingUser && readsUserRoot(opt.visibleWhen)) {
-          logger?.warn?.(
-            `option visibleWhen for '${name}=${String(value)}' not evaluated: no acting user to bind current_user (system write) — allowed through`,
-            { field: name, value: String(value), reason: 'no-acting-user', error: res.error },
-          );
-        } else {
-          logger?.warn?.(
-            `option visibleWhen for '${name}=${String(value)}' failed to evaluate `
-              + `(${noActingUser ? 'system write' : 'authenticated caller'}) — allowed through; `
-              + `the option's gate was NOT enforced on this write. Check the predicate.`,
-            { field: name, value: String(value), reason: 'predicate-fault', error: res.error },
-          );
-        }
-        continue; // fail-open
-      }
-      if (res.value === false) {
-        errors.push(buildFieldError({
-          field: name,
-          code: 'invalid_option',
-          def,
-          value: String(value),
-          messageKey: 'option_unavailable',
-        }, messages));
-      }
+      yield { name, def, value, opt };
     }
   }
+}
+
+/** Parsed-call memo for {@link readsPermissionPredicate} — same fixed sources as {@link userRootCache}. */
+const permissionPredicateCache = new Map<string, boolean>();
+
+/**
+ * Does this predicate CALL the permission predicate — a receiver call named
+ * `can`, i.e. `current_user.can(object, verb)` or an ADR-0068 alias of it?
+ *
+ * Read off the canonical parse ({@link parseCelToAst}), never off the text: a
+ * string literal that happens to contain `can(` is not a call, and a regex over
+ * the source would resolve the whole permission map for it. Only the RECEIVER
+ * form counts because it is the only form formula registers; a bare
+ * `can(object, verb)` faults whatever the context carries, so the map would buy
+ * it nothing.
+ *
+ * A non-CEL dialect, or a source that does not parse, answers `false`: the
+ * evaluator runs the same parser and cannot evaluate what this cannot read, so
+ * the map could not change its outcome.
+ */
+function readsPermissionPredicate(cond: string | Expression): boolean {
+  const expr = toExpression(cond);
+  if (expr.dialect !== 'cel') return false;
+  const source = typeof expr.source === 'string' ? expr.source : '';
+  if (!source) return false;
+  const cached = permissionPredicateCache.get(source);
+  if (cached !== undefined) return cached;
+  const answer = callsReceiverMethod(parseCelToAst(source), 'can');
+  permissionPredicateCache.set(source, answer);
+  return answer;
+}
+
+/** Walk a cel-js AST for a receiver call (`op: 'rcall'`, `args[0]` = method name) named `method`. */
+function callsReceiverMethod(node: unknown, method: string): boolean {
+  if (Array.isArray(node)) return node.some((child) => callsReceiverMethod(child, method));
+  if (typeof node !== 'object' || node === null) return false;
+  const { op, args } = node as { op?: unknown; args?: unknown };
+  if (typeof op !== 'string') return false;
+  if (op === 'rcall' && Array.isArray(args) && args[0] === method) return true;
+  return callsReceiverMethod(args, method);
+}
+
+/**
+ * [#18783] Does this write need the acting subject's effective object
+ * permissions — does it PICK an option whose `visibleWhen` calls
+ * `current_user.can(…)`?
+ *
+ * The engine asks this before resolving the map, so the map is resolved only
+ * for a write it can change the verdict of: a write whose gates never mention
+ * `can` pays nothing, and — the part that matters more — cannot be refused by a
+ * resolution failure it never depended on. Selection is
+ * {@link pickedGatedOptions}, the evaluator's own, so the two agree on every
+ * pick by construction.
+ */
+export function optionVisibilityReadsPermissions(
+  fields: Record<string, ConditionalFieldDef> | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+): boolean {
+  if (!fields || !data) return false;
+  for (const { opt } of pickedGatedOptions(fields, data)) {
+    if (readsPermissionPredicate(opt.visibleWhen!)) return true;
+  }
+  return false;
 }
 
 /**
@@ -3204,7 +3320,7 @@ export function evaluateValidationRules(
   // choice value whose option `visibleWhen` resolves cleanly to FALSE against the
   // merged record + `current_user`. Complements the client-side hiding, which is
   // not a security boundary.
-  evaluateOptionVisibility(fields, data, merged, previous, opts.currentUser, errors, opts.logger, opts.messages);
+  evaluateOptionVisibility(fields, data, merged, previous, opts.currentUser, opts.permissions, errors, opts.logger, opts.messages);
 
   // [#13889] Does this write move any BUSINESS field? A system write-back that
   // touches only platform-injected columns does not, so re-running the object's

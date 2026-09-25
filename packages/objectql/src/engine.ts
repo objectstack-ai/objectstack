@@ -193,7 +193,7 @@ import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine } from '@objectstack/formula';
+import { ExpressionEngine, toEvalPermissions, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import {
   isAggregatedViewContainer,
@@ -214,7 +214,7 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, evaluateValidationRules, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -4155,6 +4155,80 @@ export class ObjectQL implements IObjectQLEngine {
   ): void {
     this._writeGateProbe = fn;
     this.logger.debug('Registered write-gate probe for validate() relationship resolution');
+  }
+
+  /**
+   * [#18783] Where the acting subject's EFFECTIVE object permissions come from —
+   * the map `current_user.can(object, verb)` in a per-option `visibleWhen` is
+   * answered from. Registered by the security plugin (the one producer,
+   * `ISecurityService.getEffectiveObjectPermissions`), the same way it
+   * registers {@link registerWriteGateProbe}; last registration wins.
+   *
+   * Unregistered is a DEFINED state, not a fault: the engine then passes NO
+   * permission data — ⛔ never an empty map and never one it merged itself — so
+   * a `can` predicate stays loudly unevaluable, exactly as the contract member
+   * prescribes for an absent method. See {@link resolveOptionPermissions} for
+   * when it is asked and what a throw does.
+   */
+  private _effectiveObjectPermissionsResolver?: (context: unknown) => Promise<unknown>;
+
+  /** Wire the effective object-permission source (#18783). Last registration wins. */
+  registerEffectiveObjectPermissionsResolver(fn: (context: unknown) => Promise<unknown>): void {
+    this._effectiveObjectPermissionsResolver = fn;
+    this.logger.debug('Registered effective object-permission resolver for option visibleWhen can()');
+  }
+
+  /**
+   * [#18783] The permission map one write's option gates are evaluated with —
+   * resolved at most ONCE for the whole write (a batch insert, a by-id update,
+   * an N-row bulk update, a `validate()` preview), never per row and never per
+   * predicate, and never kept past the call: the contract member is
+   * request-scoped, and a map held across writes would serve a grant that may
+   * since have been revoked.
+   *
+   * Asked ONLY when the write can need it — a resolver is registered, the write
+   * has an acting user (`current_user` is otherwise unbound and `can` asks
+   * about nobody), and some payload PICKS an option whose `visibleWhen` calls
+   * `can` ({@link optionVisibilityReadsPermissions}, the evaluator's own
+   * picker). Every other write pays nothing, and cannot be refused by a
+   * resolution it never depended on.
+   *
+   * The answer goes through `toEvalPermissions`, formula's one door into
+   * `EvalContext.permissions`, so a map that is not the published shape is
+   * refused here rather than answering `can()` confidently wrong.
+   *
+   * Returns a per-payload accessor, the shape {@link resolvePredicateRelated}
+   * hands back:
+   *
+   *  - a payload that picks no `can`-gated option gets `undefined`;
+   *  - one that does gets the map;
+   *  - when the resolution THREW (or the map was refused), one that does gets
+   *    the throw, re-raised untouched: the write fails CLOSED, with the
+   *    resolution's own error. ⛔ It is never read as "no grants", which would
+   *    publish a failure as a measured denial of everything.
+   */
+  private async resolveOptionPermissions(
+    schema: unknown,
+    payloads: ReadonlyArray<Record<string, unknown> | null | undefined>,
+    context: ExecutionContext | undefined,
+  ): Promise<(payload: Record<string, unknown> | null | undefined) => EvalPermissions | undefined> {
+    const none = (): undefined => undefined;
+    const resolver = this._effectiveObjectPermissionsResolver;
+    if (!resolver || !this.buildEvalUser(context)) return none;
+    const fields = (schema as { fields?: Parameters<typeof optionVisibilityReadsPermissions>[0] } | null | undefined)?.fields;
+    const needs = (payload: Record<string, unknown> | null | undefined): boolean =>
+      optionVisibilityReadsPermissions(fields, payload);
+    if (!payloads.some(needs)) return none;
+    let permissions: EvalPermissions;
+    try {
+      permissions = toEvalPermissions(await resolver(context));
+    } catch (err) {
+      return (payload) => {
+        if (needs(payload)) throw err;
+        return undefined;
+      };
+    }
+    return (payload) => (needs(payload) ? permissions : undefined);
   }
 
 
@@ -11269,6 +11343,10 @@ export class ObjectQL implements IObjectQLEngine {
     const previewRelatedForRow = mayWrite
       ? await this.resolvePredicateRelated(schemaForValidation, rows, options?.context)
       : () => undefined;
+    // [#18783] The preview answers a `can`-gated option with the SAME map the
+    // write would — resolved once for the whole set, like every posture input
+    // above. A resolution failure rejects the preview, as it fails the write.
+    const previewPermissionsFor = await this.resolveOptionPermissions(schemaForValidation, rows, options?.context);
 
     const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
       const warnings: ValidateDataIssue[] = [];
@@ -11299,6 +11377,7 @@ export class ObjectQL implements IObjectQLEngine {
         evaluateValidationRules(schemaForValidation as any, row, mode, {
           logger: this.logger, currentUser, skipStateMachine, messages,
           related: previewRelatedForRow(row),
+          permissions: previewPermissionsFor(row),
         });
       } catch (e) {
         if (e instanceof ValidationError) {
@@ -12000,12 +12079,20 @@ export class ObjectQL implements IObjectQLEngine {
         // when no rule traverses. Read under SYSTEM authority, bounded by the
         // projection — see `resolvePredicateRelated`.
         const insertRelatedForRow = await this.resolvePredicateRelated(schemaForValidation, rows, opCtx.context);
+        // [#18783] The subject's effective object permissions, for an option
+        // gated on `current_user.can(…)`: ONE resolution for the whole batch,
+        // and none at all unless a row picks such an option. A resolution
+        // failure refuses exactly the rows that needed it (per-row under
+        // partial mode, like every other row error here).
+        const insertPermissionsFor = await this.resolveOptionPermissions(
+          schemaForValidation, rows.filter((_, i) => rowErrors[i] === undefined), opCtx.context,
+        );
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]) });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
@@ -13483,7 +13570,12 @@ export class ObjectQL implements IObjectQLEngine {
                // POST-strip merged view `evaluateValidationRules` evaluates.
                const updateView = { ...(priorRecord ?? {}), ...(hookContext.input.data as Record<string, unknown>) };
                const relatedForUpdate = (await this.resolvePredicateRelated(updateSchema, [updateView], opCtx.context))(updateView);
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate });
+               // [#18783] The map an option gated on `current_user.can(…)` is
+               // answered from — resolved only when the PATCH picks one, and a
+               // resolution failure fails this write closed right here.
+               const updatePayload = hookContext.input.data as Record<string, unknown>;
+               const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], opCtx.context))(updatePayload);
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
@@ -13757,10 +13849,14 @@ export class ObjectQL implements IObjectQLEngine {
                        opCtx.context,
                      )
                    : undefined;
+               // [#18783] ONE permission-map resolution for the whole matched
+               // set — the patch is shared, so either every row picks a
+               // `can`-gated option or none does. Never per row.
+               const bulkPermissions = (await this.resolveOptionPermissions(updateSchema, [bulkPatch], opCtx.context))(bulkPatch);
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }) });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -13776,7 +13872,7 @@ export class ObjectQL implements IObjectQLEngine {
                    // every such object down the per-row branch above, where the
                    // binding is supplied. This branch only ever runs for the
                    // rule families that never read a header.
-                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+                   evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions });
                }
                // [#4441] The bulk call site too — a guard wired into single-id
                // writes only is still a hole one call site over (AGENTS.md
