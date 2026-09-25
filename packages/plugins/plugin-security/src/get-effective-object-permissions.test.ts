@@ -33,6 +33,7 @@ import { buildEffectiveObjectPermissions } from '@objectstack/core';
 import { ExpressionEngine, toEvalPermissions } from '@objectstack/formula';
 import { SysAttachment, SysMember, SysSecret, SysUser, SysUserPreference } from '@objectstack/platform-objects';
 import type { ISecurityService } from '@objectstack/spec/contracts';
+import { canServeApiOperation } from '@objectstack/spec/data';
 import {
   OBJECT_PERMISSION_VERB_NAMES,
   PermissionSetSchema,
@@ -386,6 +387,11 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
         crm_account: { allowRead: true },
       }),
     ],
+    // [#20135] The export slot's own shapes.
+    'platform admin beside a plain export-only wildcard': [shipped('admin_full_access'), authored('exporter', { '*': { allowExport: true } })],
+    'one set: an exporting wildcard AND an explicit entry without the grant': [
+      authored('same_export', { '*': { allowRead: true, allowExport: true }, crm_lead: { allowRead: true } }),
+    ],
   };
 
   /**
@@ -510,6 +516,87 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
     expect(map.crm_account).not.toHaveProperty('apiOperations');
     // …and still speaks for one whose `apiMethods` narrow it, `export` included.
     expect(map.crm_lead.apiOperations).toEqual(expect.arrayContaining(['get', 'list', 'export']));
+  });
+
+  /**
+   * [#20135] The `apiOperations` COLUMN — the map's operation set, read the way
+   * a client reads it (absent = default-allow), against what the REST door
+   * serves, for every subject above × every registered object its map carries
+   * an entry for × every operation the door gates by name. The door is asked
+   * its own two questions:
+   *
+   *  - the object half, `canServeApiOperation` — the boolean face of the spec's
+   *    `apiExposureDenialReason`, which `@objectstack/rest`'s `enforceApiAccess`
+   *    turns into `404 OBJECT_API_DISABLED` / `405 OBJECT_API_METHOD_NOT_ALLOWED`
+   *    (this package takes no dependency on the transport, so the door's decision
+   *    function is asked, not its envelope);
+   *  - the user half on `export`, the security member's own `canExport` — what
+   *    `enforceExportPermission` asks before its `403 EXPORT_NOT_PERMITTED`.
+   *
+   * `offeredRefused` is the security direction — an operation the client offers
+   * and the door refuses — and `servedHidden` its converse. Both must be empty.
+   * An object with no entry is left out: whether the map carries an entry at all
+   * is the seed's question, not this column's.
+   *
+   * It used to fail two ways: an `enable.apiEnabled: false` object was annotated
+   * with its whole closure, or not at all, while the door answers 404 for every
+   * verb; and the export slot fell back to the MERGED `'*'` export bit, which
+   * offered `export` on a private object only a plain wildcard reached, and on
+   * an object the exporting set itself names without the grant.
+   */
+  const DOOR_OPERATIONS = ['get', 'list', 'create', 'update', 'delete', 'bulk', 'import', 'export'] as const;
+
+  for (const [label, sets] of Object.entries(SUBJECTS)) {
+    it(`[#20135] ${label}: apiOperations offers exactly what the REST door serves`, async () => {
+      const { svc, plugin } = await locate({ schemas: REGISTERED });
+      vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+      const context = { userId: USER.id };
+      const map: any = await svc.getEffectiveObjectPermissions!(context);
+
+      const offeredRefused: string[] = [];
+      const servedHidden: string[] = [];
+      let cells = 0;
+      for (const schema of Object.values(REGISTERED)) {
+        const entry = map[schema.name];
+        if (!entry) continue;
+        for (const operation of DOOR_OPERATIONS) {
+          const served = canServeApiOperation(schema.enable, operation)
+            && (operation !== 'export' || (await svc.canExport!(schema.name, context)));
+          const offered = entry.apiOperations === undefined || entry.apiOperations.includes(operation);
+          cells += 1;
+          if (offered && !served) offeredRefused.push(`${schema.name}.${operation}`);
+          if (served && !offered) servedHidden.push(`${schema.name}.${operation}`);
+        }
+      }
+      // Every registered entry the map carries was scored (a subject granted nothing carries none).
+      expect(cells).toBe(Object.keys(map).filter((name) => name in REGISTERED).length * DOOR_OPERATIONS.length);
+      expect({ offeredRefused, servedHidden }).toEqual({ offeredRefused: [], servedHidden: [] });
+    });
+  }
+
+  it('[#20135] the reported cases, spelled out', async () => {
+    const context = { userId: USER.id };
+    // An API-disabled object: the platform admin's entry stays, and offers nothing.
+    const admin = SUBJECTS['platform admin'];
+    const a = await locate({ schemas: REGISTERED });
+    vi.spyOn(a.plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(admin);
+    const adminMap: any = await a.svc.getEffectiveObjectPermissions!(context);
+    for (const operation of DOOR_OPERATIONS) expect(canServeApiOperation(REGISTERED.crm_hidden.enable, operation), operation).toBe(false);
+    expect(adminMap.crm_hidden.apiOperations).toEqual([]);
+    expect(adminMap.crm_hidden).toMatchObject({ allowRead: true, allowEdit: true });
+
+    // The private export: `admin_full_access` beside a plain `'*': { allowExport: true }`.
+    const sets = SUBJECTS['platform admin beside a plain export-only wildcard'];
+    const b = await locate({ schemas: REGISTERED });
+    vi.spyOn(b.plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
+    const map: any = await b.svc.getEffectiveObjectPermissions!(context);
+    expect(evaluator.checkObjectPermission('export', SysSecret.name, sets, { isPrivate: true })).toBe(false);
+    expect(await b.svc.canExport!(SysSecret.name, context)).toBe(false);
+    expect(map[SysSecret.name].apiOperations).not.toContain('export');
+    expect(map.crm_secret.apiOperations).not.toContain('export');
+    // …and a public object the plain wildcard covers keeps it, on both sides.
+    expect(await b.svc.canExport!('crm_lead', context)).toBe(true);
+    expect(map.crm_lead.apiOperations).toContain('export');
   });
 
   it('the wall-less org admin\'s reported case, spelled out: edit on an app object reached only through `*`', async () => {

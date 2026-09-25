@@ -35,6 +35,7 @@
 import {
   resolveEffectiveApiMethods,
   effectiveOperationsArray,
+  canServeApiOperation,
   type EnableLike,
 } from '@objectstack/spec/data';
 import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
@@ -435,38 +436,63 @@ export function seedSuperUserRestrictedObjects(
  * fold + clamp so the annotation sits alongside the final CRUD affordances, and
  * {@link seedSuperUserRestrictedObjects} applies the same predicate so a
  * wildcard-only principal has an entry here to annotate ([#18931]).
+ *
+ * [#20135] The set is what the REST door SERVES this subject, read through the
+ * door's own two questions rather than a second spelling of either:
+ *
+ *  - the OBJECT half is `canServeApiOperation` — the boolean face of the
+ *    spec's `apiExposureDenialReason`, the one function
+ *    `@objectstack/rest`'s `enforceApiAccess` turns into its 404 / 405. It
+ *    judges `enable.apiEnabled === false` FIRST and for every operation, so an
+ *    API-disabled object is annotated `[]`: the door answers
+ *    `404 OBJECT_API_DISABLED` for every verb, whatever `apiMethods` says, and
+ *    an entry left without an annotation would send the client down its
+ *    default-allow path — every operation offered, every one refused. The
+ *    entry itself stays: `apiEnabled` closes the API, not data access, and the
+ *    map's CRUD bits are what `current_user.can()` reads on the server;
+ *  - the USER half is the export door's own conjunction on this entry,
+ *    `objectPermissionGrants(entry, 'allowExport')` — read ∧ an opt-in export
+ *    grant. By the time this pass runs every set's `'*'` has been put on the
+ *    entries it covers for THAT set and posture (plain coverage, then the
+ *    per-set super-user fold), so the entry already is
+ *    `PermissionEvaluator.checkObjectPermission('export', …, { isPrivate })`'s
+ *    answer. It used to fall back to the MERGED `'*'` export bit, which covers
+ *    what no single set covers: a private object reached only through a plain
+ *    `'*': { allowExport: true }` (a plain wildcard never covers a private
+ *    object), and an object the exporting set itself names without the grant.
+ *    Both were annotated `export` and answered `403 EXPORT_NOT_PERMITTED`.
+ *
+ * Which entries carry the annotation is unchanged in rule: only an
+ * unrestricted object that keeps its whole closure — every operation served,
+ * `export` included — gets none.
  */
 export function annotateEffectiveApiOperations(
   objects: Record<string, any>,
   schemaOf: (objectName: string) => ApiExposureSchemaLike | undefined,
 ): void {
-  // [#3544] The `'*'` entry's export grant is the FALLBACK for objects that do
-  // not carry one of their own. The merge keeps `'*'` and named objects as
-  // independent keys, but the server evaluator does not: its
-  // `resolveObjectPermission` falls back to the wildcard whenever a set has no
-  // explicit entry for the object, so an admin set granting export wholesale
-  // via `'*': { allowExport: true }` really does grant it per-object. Reading
-  // the wildcard here keeps the button the client shows and the request the
-  // server accepts in agreement — the same class of client/server divergence
-  // `foldWildcardSuperUser` exists to close, on the export axis.
-  const wildExport = objects?.['*']?.allowExport;
   for (const [obj, acc] of Object.entries(objects) as Array<[string, any]>) {
     if (obj === '*' || !acc) continue;
     const schema = schemaOf(obj);
     if (!schema) continue; // schema missing → no annotation (client falls back)
+    const enable = schema.enable ?? undefined;
     // [#3544] User-level export axis: `export` derives from `list ∧ this
-    // grant`. OPT-IN — only an explicit `true` (on the object entry, else
-    // inherited from `'*'`) allows export; unset and `false` both withhold
-    // it, and the super-user bits do NOT imply it.
-    const exportBit = acc.allowExport ?? wildExport;
-    const userExportAllowed = exportBit === true;
-    const eff = resolveEffectiveApiMethods(schema.enable ?? undefined, { userExportAllowed });
-    // Annotate when the object tightens via `apiMethods`, OR when the export
+    // grant`. OPT-IN — only an explicit `true` allows export; unset and
+    // `false` both withhold it, and the super-user bits do NOT imply it.
+    // [#20135] Read off THIS entry, as the export door reads it (see above).
+    const userExportAllowed = objectPermissionGrants(acc as EffectiveObjectPermission, 'allowExport');
+    const eff = resolveEffectiveApiMethods(enable, { userExportAllowed });
+    const closure = effectiveOperationsArray(eff);
+    // [#20135] Only what the door itself admits: `apiEnabled: false` empties
+    // the set; any other `enable` leaves the closure as it is.
+    const served = closure.filter((operation) => canServeApiOperation(enable, operation));
+    // Annotate when the object tightens via `apiMethods`, when the export
     // axis removes `export` from an otherwise-open object (so the client
-    // hides the Export button). An unrestricted object with export still
-    // allowed needs no annotation — the client keeps its default-allow path.
-    if (eff.mode === 'unrestricted' && userExportAllowed) continue;
-    acc.apiOperations = effectiveOperationsArray(eff);
+    // hides the Export button), OR when the door serves less than the closure
+    // (an API-disabled object). An unrestricted object with every operation
+    // still served needs no annotation — the client keeps its default-allow
+    // path.
+    if (eff.mode === 'unrestricted' && userExportAllowed && served.length === closure.length) continue;
+    acc.apiOperations = served;
   }
 }
 
