@@ -14,14 +14,14 @@ The 2026-09-23 ruling on #19757 refuses an array in the equality slot at the sha
 
 | you wrote in `having` | what it did before | write instead |
 |:--|:--|:--|
-| `{ total: [500] }` or `{ total: { $eq: [500] } }`, at any depth under `$and` / `$or` / `$not` | kept the 500 group: JS `500 == [500]` is true | `{ total: 500 }`, or `{ total: { $in: [500, 1250] } }` for "one of these" |
+| `{ total: [500] }` or `{ total: { $eq: [500] } }`, at any depth under `$and` / `$or` / `$not` | kept the 500 group, because JS `500 == [500]` is true; under `$not` it kept the complement, the 1250 and 20 groups | `{ total: 500 }`, or `{ total: { $in: [500, 1250] } }` for "one of these" |
 | `{ total: [] }` | kept no group | drop the condition, or write the value you meant |
 | `{ customer_id: { $in: 'c1' } }` / `{ customer_id: { $nin: 'c1' } }` | `$in` kept no group; `$nin` kept every group | `{ customer_id: 'c1' }` / `{ customer_id: { $ne: 'c1' } }`, or wrap the value in a list |
 | `{ customer_id: { $in: ['c1', null] } }` (or `$nin`) | the null member was compared as a value | `{ $or: [{ customer_id: { $in: ['c1'] } }, { customer_id: { $null: true } }] }` |
 | `{ total: { $gt: null } }` (or `$gte` / `$lt` / `$lte`) | `$gt` / `$gte` kept every group; `$lt` / `$lte` kept none | `{ total: { $eq: null } }` for "has no value", `{ total: { $ne: null } }` for "has a value" |
 | `{ total: { $between: 500 } }` or `{ total: { $between: [500] } }` | the scalar kept every group; the one-bound list kept the groups at or above it | `{ total: { $between: [min, max] } }` |
 | `{ total: { $between: [null, 1000] } }`, `['', 1000]` or `[undefined, 1000]` | the blank bound compared as a value | `{ total: { $lte: 1000 } }` for a one-sided range, or the bound you meant |
-| `{ total: { $between: [{ $field: 'order_count' }, 1000] } }` | the reference compared as a value | literal bounds. ⚠️ The refusal's own text suggests a two-bound `{ $field }` comparison, which `having` does not evaluate: a `{ $field }` reference in any `having` slot is compared as a value and keeps no group. That gap is not changed here |
+| `{ total: { $between: [{ $field: 'order_count' }, 1000] } }` | the reference compared as a value | literal bounds. ⚠️ The refusal's own text suggests a two-bound `{ $field }` comparison, which `having` does not evaluate. In an operator slot the reference is compared as a value: under `$eq`, `$gt`, `$gte`, `$lt` or `$lte` it keeps no group, and under `$ne` it keeps every group. In the implicit slot (`{ total: { $field: 'order_count' } }`) it is refused as an unsupported operator (`INVALID_FILTER` / 400), though only when a grouped row carries that column: an empty grouped set evaluates nothing and comes back empty. That gap is not changed here |
 
 The gate is ONE call in `engine.aggregate`, ahead of both `having` evaluations, so the two paths cannot disagree, and the verdict belongs to the filter rather than to the data: an empty grouped set refuses the same `having` a populated one does. Whatever arm the shared face gains later, `having` gains with it.
 
