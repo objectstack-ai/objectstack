@@ -29,7 +29,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { buildEffectiveObjectPermissions } from '@objectstack/core';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import type { PermissionSet } from '@objectstack/spec/security';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 
 /** The metadata-declared baseline every member resolves additively. */
@@ -84,7 +83,6 @@ function bootPlugin(opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?
     registerMiddleware: () => {},
     registry: { getAllObjects: () => Object.values(SCHEMAS) },
     getSchema: (name: string) => SCHEMAS[name] ?? null,
-    findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; },
     find: async (object: string, query: any) => {
       if (object !== 'sys_permission_set') return [];
       const wanted: string[] = query?.where?.name?.$in ?? [];
