@@ -6,7 +6,7 @@
 
 The dispatcher mounts the automation door at its `prefix` plus `/automation`, the prefix defaults to `/api/v1`, and `objectstack serve` passes none. So all nine declared paths answered `404 ENDPOINT_NOT_FOUND` on the default composition while the same requests under `/api/v1/automation` answered `200`, and the generated API reference printed the nine unserved paths as the endpoints. Every other `*ApiContracts` map in `@objectstack/spec/api` already carried `/api/v1`; this one was the only outlier. The runtime is unchanged — only the declaration moves.
 
-Clause-②: yes
+Clause-②: no
 
 **What moved on the published surface**
 
