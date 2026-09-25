@@ -1067,8 +1067,25 @@ export class AnalyticsServicePlugin implements Plugin {
       // of the two moves.
       debugSql: this.options.debugSql,
       // Source-field metadata behind the display chains on result columns:
-      // ADR-0053 currency (`currencyConfig.defaultCurrency`) and percent scale
-      // (`max`, which is what marks whole-percent storage — objectui#3136).
+      // the field's FIXED currency and percent scale (`max`, which is what
+      // marks whole-percent storage — objectui#3136).
+      //
+      // [#20091] `defaultCurrency` is relayed ONLY under
+      // `currencyConfig.currencyMode === 'fixed'`. That is the spec's own
+      // reading of the pair (`CurrencyConfigSchema`, `packages/spec/src/data/
+      // field.zod.ts`): only `fixed` pins one currency to the field, and a
+      // field without one "uses the tenant default at runtime". `dynamic` —
+      // and a config naming no mode, which IS `dynamic` by the schema default —
+      // has no field currency, so its `defaultCurrency` (possibly the schema's
+      // placeholder `CNY`, materialised by a parse the author never saw) is
+      // not relayed and the result column falls through to `ctx.currency`.
+      // Decided HERE, at the one producer, so every reader of
+      // `sourceFieldMeta().defaultCurrency` inherits one rule — the same one
+      // objectui's `resolveFieldCurrency` applies on the field faces
+      // (objectstack-ai/objectui#10461). Mode is compared rather than
+      // defaulted: the registry stores what it was handed, so a raw
+      // registration arrives with no `currencyMode` key at all, and a parsed
+      // one with `'dynamic'` — both are "not fixed".
       //
       // [#17560] A formula field's declared `returnType` was relayed here too
       // (#16236) for one reader — `measureResultType`'s `formula` branch. That
@@ -1078,11 +1095,13 @@ export class AnalyticsServicePlugin implements Plugin {
       // on regardless would relay metadata into a seam nothing reads.
       sourceFieldMeta: (object: string, field: string) => {
         const f = dataEngine()?.getObject?.(object)?.fields?.[field] as
-          | { type?: string; max?: number; currencyConfig?: { defaultCurrency?: string } }
+          | { type?: string; max?: number; currencyConfig?: { currencyMode?: string; defaultCurrency?: string } }
           | undefined;
-        return f
-          ? { type: f.type, max: f.max, defaultCurrency: f.currencyConfig?.defaultCurrency }
+        if (!f) return undefined;
+        const fixedCurrency = f.currencyConfig?.currencyMode === 'fixed'
+          ? f.currencyConfig.defaultCurrency
           : undefined;
+        return { type: f.type, max: f.max, defaultCurrency: fixedCurrency };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
       // actual cause when a dataset's SQL references a table that is not on the

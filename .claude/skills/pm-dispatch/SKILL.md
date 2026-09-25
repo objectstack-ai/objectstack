@@ -276,13 +276,13 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 ## 报告契约
 
-- 终报 JSON 的权威形状住 `.claude/agents/os-dev.md` 终报消息节,⛔ 本文不抄第二份。
+- 终报 JSON 形状住 `.claude/agents/os-dev.md`,⛔ 不抄第二份;`needs_decision` 时 `open_questions` 非空。
 - `premise_still_valid: false` + `pr: null` 是合法终报,当再分诊输入复核,永不当失败派发。
-- `status: needs_decision` 时 `open_questions` 必须非空。
-- `out_of_scope_findings` 每条 `class: a|b|c`+证据,或 `carrier:`(承接者);皆无 ⇒ Acceptance notes。
+- `out_of_scope_findings` 每条 `class: a|b|c`+`reach:`+证据,或 `carrier:`(承接者);皆无 ⇒ Acceptance notes。
+- `reach:` 无实测 ⇒ ⛔ 不立卡,例外三种与定义见立卡门 ①;同轮报告互读,同族只开一张。
 - dev 不立卡;ACCEPT 逐条一行 `filed #N`/`Acceptance notes`/`dropped — 因`;三类由席位立在修复仓。
 - 席位读 PR `## Acceptance notes`,实属三类的经立卡门补立、归挂;门外已立卡关 not planned。
-- PM 核验它们存在,并把同轮并行报告互相对读:两个 dev 同一小时审相邻代码会立出孪生卡。
+- 同族发现并入收口卡(一卡覆盖全族位置,带枚举钉子),⛔ 不开单点卡;无则第二次即开。
 
 ## 机械守卫索引
 
