@@ -1357,17 +1357,43 @@ export class TursoDriver extends SqlDriver {
   /**
    * Convert TursoDriverConfig to a Knex-compatible SqlDriverConfig.
    * Extracts the file path from the URL for local/embedded modes.
-   * In remote mode, uses a dummy :memory: config (Knex is not used).
+   * In remote mode, hands the base a Knex with NO connection: the SQLite
+   * dialect's compiler and nothing else (see the remote arm below).
    */
   private static toKnexConfig(config: TursoDriverConfig, mode: TursoTransportMode): SqlDriverConfig {
-    // Remote mode: All CRUD/schema operations delegate to RemoteTransport
-    // (via @libsql/client). Knex is never used for queries, but the SqlDriver
-    // base class constructor requires a valid config. We provide a minimal
-    // :memory: config that initializes Knex without side effects.
+    // [#20054] Remote mode: every CRUD and schema door delegates to
+    // RemoteTransport (`@libsql/client`), and none of them reads `this.knex`.
+    // Measured with the Knex instance wrapped to record every access after
+    // construction, across connect, the CRUD and bulk doors, aggregate,
+    // execute, the three schema doors and disconnect: zero reads. The
+    // `SqlDriver` constructor still builds a Knex instance, so this arm only
+    // decides WHICH one.
+    //
+    // It is built WITHOUT a `connection`, and that is the whole fix. knex's
+    // `Client` constructor loads the dialect's native driver
+    // (`initializeDriver` → `require('better-sqlite3')`) and builds a pool only
+    // when the config carries a `connection`. This arm used to pass
+    // `{ filename: ':memory:' }`, but loading the native module is a side
+    // effect: with `better-sqlite3` absent — the install this package's
+    // manifest (an OPTIONAL peer) and README give remote mode, e.g. on Vercel
+    // or an Edge runtime — construction threw knex's `npm install
+    // better-sqlite3` error before any remote call was made.
+    //
+    // What stays the same: the client is still spelled `better-sqlite3`, so
+    // `isSqlite` and every dialect-keyed rule the remote arms borrow from the
+    // base (`temporalFilterColumnSql`, the canonical-time SQL) answer exactly
+    // as before, and so does anything that reads the dialect name off
+    // `config.client`.
+    //
+    // What changes for a path that still reaches `this.knex` (only `SqlDriver`
+    // methods this class does not override for remote mode): it used to RUN
+    // against a private, empty `:memory:` database and could answer from it,
+    // as `introspectSchema()` did with "no tables". Now knex refuses to run it
+    // (`Unable to acquire a connection`), because there is no connection to
+    // run it on. That failure is loud; it never adds a silent answer.
     if (mode === 'remote') {
       return {
         client: 'better-sqlite3',
-        connection: { filename: ':memory:' },
         useNullAsDefault: true,
       };
     }
