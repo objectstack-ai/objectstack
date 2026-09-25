@@ -1634,8 +1634,8 @@ export class InMemoryDriver implements IDataDriver {
           // on the whole tree before this ran (the #5324/#5328 discipline every
           // arm here follows), so `val` is a string with no dangling escape and
           // no U+0000 (#20041). The re-check is the totality floor a translator
-          // owes itself, the same one `driver-sql`'s emitter keeps beside its
-          // own gate.
+          // owes itself; for the dangling escape it is the same one
+          // `driver-sql`'s emitter keeps beside its own gate.
           if (typeof val !== 'string') throw likePatternComparandError(field, op, val, path);
           if (hasDanglingLikeEscape(val)) throw danglingLikeEscapeError(field, op, val, path);
           if (hasNulInLikePattern(val)) throw nulLikePatternError(field, op, val, path);
