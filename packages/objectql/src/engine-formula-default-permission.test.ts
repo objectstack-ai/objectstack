@@ -54,6 +54,10 @@ function makeDriver() {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where as Record<string, unknown>).every(([k, v]) => {
       if (k === '$and') return (v as unknown[]).every((w) => matches(row, w));
+      if (k === '$or') return (v as unknown[]).some((w) => matches(row, w));
+      // Any other combinator is REFUSED, never read as a field name
+      // (`check:where-matcher`).
+      if (k.startsWith('$')) throw new Error(`test driver: unsupported combinator ${k}`);
       const cond = v as Record<string, unknown> | null;
       if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
         if ('$in' in cond) return Array.isArray(cond.$in) && cond.$in.includes(row[k]);
