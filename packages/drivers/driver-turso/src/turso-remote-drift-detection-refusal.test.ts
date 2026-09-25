@@ -5,9 +5,10 @@
  * answering "no drift".
  *
  * `SqlDriver.detectManagedDrift` reads the physical schema through Knex, and a
- * remote `TursoDriver` is built with a placeholder `:memory:` Knex connection
- * that holds none of the datasource's tables. Before the refusal, the remote
- * answer was `[]` for every database. That is the answer the artifact-pinned
+ * remote `TursoDriver` was then built with a placeholder `:memory:` Knex
+ * connection that held none of the datasource's tables (since #20054 it is
+ * built with no Knex connection at all). Before the refusal, the remote answer
+ * was `[]` for every database. That is the answer the artifact-pinned
  * boot gate of `os serve` reads as "never drifted", so a gate whose job is to
  * refuse a boot on destructive drift let every remote-Turso boot through.
  *
