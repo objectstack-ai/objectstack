@@ -150,6 +150,12 @@ import {
  * engine-level door does not admit, and it is deliberately kept: a blob column
  * really is comparable on this driver family, and the read path measured it
  * accepted in every bind position. It is `driver-sql`'s own recorded extra too.
+ *
+ * [#20018] On the analytics `where` door, that is. A READ SCOPE no longer
+ * reaches this extra: `compileScopedFilterToSql` runs the shared comparand-type
+ * face after its own gates, and that face refuses binary, the answer the
+ * ObjectQL execute face already gave the same scope. This predicate's own
+ * answer is unchanged.
  */
 export function isBindableComparand(value: unknown): boolean {
   // `undefined` — see {@link isRenderableTextComparand}'s note; it is admitted
