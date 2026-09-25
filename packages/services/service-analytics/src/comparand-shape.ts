@@ -73,11 +73,21 @@ import {
  * predicates against the driver's post-#7872 expressions over a shared value
  * table, and by `__tests__/comparand-door-single-source.test.ts`, which pins the
  * end-to-end accept/refuse matrix this reconciliation had to leave untouched.
+ * (Cells of that matrix have moved since, each named in the test with the
+ * change that moved it — #20010 and #20035 at the `where` door, #19975 and
+ * #20018 at the read scope.)
  *
  * ⛔ The ENVELOPES and the position logic below are this package's own and were
  * deliberately NOT moved: a caller-authored `where` refuses with a 400
  * `INVALID_FILTER`, a read scope fails closed with a 500 (ADR-0021 D-C), and
  * only the type membership and the shared sentence come from the door.
+ * [#20035] That last clause is now true of the predicates below, not of the
+ * `where` door as a whole: the door runs the shared comparand-TYPE face itself
+ * (`normalizeFilterComparandTypes`, through `filter-normalizer.ts`'s
+ * `normalizeWhereComparands`) before any predicate here is asked, so a TYPE
+ * defect there is refused in the face's own sentence and path, in the same
+ * `INVALID_FILTER` / 400 envelope. The read scope runs the same face after its
+ * own gates (#20018), so there the predicates below still answer first.
  *
  * ## ⚠️ [#7598] What the mirror does NOT cover: a position no gate ever reached
  *
@@ -149,13 +159,22 @@ import {
  * `ArrayBuffer.isView` (which covers `Buffer`, a `Uint8Array`) is a bindable the
  * engine-level door does not admit, and it is deliberately kept: a blob column
  * really is comparable on this driver family, and the read path measured it
- * accepted in every bind position. It is `driver-sql`'s own recorded extra too.
+ * accepted in every bind position when #8186 reconciled the set (neither door
+ * serves it now — the two notes below). It is `driver-sql`'s own recorded
+ * extra too.
  *
- * [#20018] On the analytics `where` door, that is. A READ SCOPE no longer
- * reaches this extra: `compileScopedFilterToSql` runs the shared comparand-type
- * face after its own gates, and that face refuses binary, the answer the
- * ObjectQL execute face already gave the same scope. This predicate's own
- * answer is unchanged.
+ * [#20018] A READ SCOPE no longer reaches this extra: `compileScopedFilterToSql`
+ * runs the shared comparand-type face after its own gates, and that face
+ * refuses binary, the answer the ObjectQL execute face already gave the same
+ * scope. This predicate's own answer is unchanged.
+ *
+ * [#20035] Nor does the analytics `where` door. It now runs the same face on
+ * the object spelling before any predicate is asked, and the keep-or-reconcile
+ * call #8186 asked for was made to RECONCILE: measured on a real engine, that
+ * door never compared a binary as a blob (the native path bound it as JSON
+ * text through `toSqlBindValue`), and no producer can send one over JSON. So
+ * the extra is admitted by this predicate and served at neither door; it stays
+ * a value-for-value mirror of `driver-sql`'s own recorded extra.
  */
 export function isBindableComparand(value: unknown): boolean {
   // `undefined` — see {@link isRenderableTextComparand}'s note; it is admitted
@@ -185,7 +204,15 @@ export function isBindableComparand(value: unknown): boolean {
  * | door | what refuses an `undefined` comparand first | envelope |
  * |---|---|---|
  * | read scope | `read-scope-sql.ts`, per #6050 ruling B pushed down by #6125 | `READ_SCOPE_COMPILE_FAILED` / 500 |
- * | analytics `where` | `assertDefinedComparands` (#6386, same ruling) | `INVALID_FILTER` / 400 |
+ * | analytics `where` | the shared comparand-TYPE face (`normalizeFilterComparandTypes`, #7872), run by `filter-normalizer.ts`'s `normalizeWhereComparands` before any node is built (#20035); `assertDefinedComparands` (#6386, same ruling) answers only the positions that face does not judge | `INVALID_FILTER` / 400 |
+ *
+ * [#20035] The `where` row used to name `assertDefinedComparands` alone. The
+ * type face now answers first, in its own sentence and at its own path, with
+ * the same verdict and envelope. #6386's gate stays as `fieldLeaves`'
+ * invariant and still answers the two positions the face steps around: an
+ * `undefined` inside an ARRAY comparand (`{d: {$contains: ['a', undefined]}}`)
+ * and the comparand of an operator outside the vocabulary (`{d: {$wat:
+ * undefined}}`). Either way, nothing reaches this predicate holding one.
  *
  * So `comparand()`'s normalise-to-`null` is itself a deliberately-kept dead arm
  * (its own TSDoc says so, and says reopening it is #5526's call, not a
@@ -221,9 +248,14 @@ export function isRenderableTextComparand(value: unknown): boolean {
  *     close (#5222 measured the same cell driver-side and moved its own test).
  *   - **A non-string `$field` is NOT one.** `{ $field: 5 }` falls through to the
  *     ordinary object-comparand account — `driver-sql` binds it as JSON there
- *     and so does this package (#5234 left `{$eq: {…}}` alone on purpose). That
- *     cell is untouched here; changing it would be a different ruling, not a
- *     rider on this one.
+ *     (for a direct driver caller), and this package used to as well (#5234
+ *     left `{$eq: {…}}` alone on purpose). That cell was untouched here;
+ *     changing it was a different ruling, not a rider on this one. That ruling
+ *     is #7872's accepted comparand set, and both of this package's doors now
+ *     apply it: the `where` door refuses the object as a plain object
+ *     (`INVALID_FILTER` / 400, #20035) and the read-scope lowering refuses it
+ *     after its own gates (`READ_SCOPE_COMPILE_FAILED` / 500, #20018). Neither
+ *     reads it as a reference.
  *
  * ⚠️ `@objectstack/formula` is the WIDER of the two (`'$field' in raw`, any
  * value type). The driver's spelling is mirrored because this file's contract is
@@ -281,7 +313,9 @@ export const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * sides of the routing decision — the LIKE family and `$in` / `$nin` members
  * through this file's two predicates here and through `driver-sql`'s own #5222
  * refusal arm, a `$between` endpoint through
- * `filter-normalizer.ts`'s surviving gate, a bare `{ field: { $field: … } }` as
+ * `filter-normalizer.ts`'s surviving gate (from the `where` door, the shared
+ * comparand-shape face refuses that endpoint first since #20010, and the gate
+ * is `fieldLeaves`' invariant), a bare `{ field: { $field: … } }` as
  * an unsupported operator. Declining for those would swap one refusal for
  * another refusal a package further away, trading this package's precise
  * wording for the driver's without changing a single outcome. The scalar
@@ -493,6 +527,13 @@ export function shapePreview(value: unknown): string {
  * `INVALID_FILTER` for a caller-authored filter, a fail-closed compile refusal
  * for a read scope — because the envelope is what differs between them, not the
  * diagnosis.
+ *
+ * [#20035] On the `where` door this sentence now answers only what the shared
+ * comparand-TYPE face steps around — an ARRAY comparand and a `{ $field }`
+ * reference. A plain object, a `Map`, a binary or a class instance is refused
+ * there first by that face, in its own sentence. The read-scope lowering still
+ * says this sentence for every object, because its own gates run before the
+ * face (#20018).
  */
 export function unrenderableTextComparandMessage(op: string, field: string, value: unknown): string {
   return (
@@ -588,6 +629,12 @@ export function fieldReferenceComparandMessage(
  * #5222 COMPILES — succeeding on the analytics face alone, in defiance of both
  * the driver corpus and the schema. See `filter-normalizer.ts`'s
  * `assertNoFieldReferenceComparand`.
+ *
+ * [#20010] From the `where` door this sentence is no longer reached: the door
+ * hands every field entry to the shared comparand-shape face before any leaf
+ * is built, and the face refuses a `{ $field }` endpoint first, in its own
+ * words (the 2026-08-11 ruling, #7596). `assertNoFieldReferenceComparand`
+ * stays as `fieldLeaves`' invariant, for the laundering reason above.
  */
 export function fieldReferenceBetweenBoundMessage(
   op: string,
@@ -615,17 +662,31 @@ export function fieldReferenceBetweenBoundMessage(
 /**
  * The sentence both doors say about a list member that cannot be bound. See
  * {@link unrenderableTextComparandMessage} for why the message is shared and the
- * envelope is not.
+ * envelope is not. [#20035] As there, on the `where` door it now answers only
+ * an ARRAY member and a `{ $field }` reference; a plain-object, `Map`, binary or
+ * class-instance member is refused first by the shared comparand-TYPE face.
  *
  * [#8186] The accepted-set clause is {@link ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE},
  * with binary kept as this package's own parenthetical extra — the exact shape
  * `driver-sql`'s twin took when #7872 reconciled it, so the two faces describe
- * one rule in one wording again. The hand-copy it replaces read "a string,
+ * one rule in one wording again. [#20035] The parenthetical is gone from this
+ * copy; see the note below. The hand-copy it replaces read "a string,
  * number, boolean, null, Date or binary value", which had silently gone WRONG
  * in the quieter direction: it omitted `bigint`, a type both predicates here
  * have always accepted and both doors have always compiled. Quoting the door
  * fixes the omission as a side effect of removing the copy — the accepted set
  * itself does not move (`__tests__/comparand-door-single-source.test.ts`).
+ *
+ * [#20035] FIXED: the text no longer offers "(or a binary value)" as a
+ * repair. It stopped describing either door when each began refusing a binary
+ * member with the shared comparand-type face — the read-scope lowering
+ * (#20018) and the `where` door (#20035) — so a refusal that still prescribed it
+ * sent the author to a value the same door refuses (#5240's wrong-repair
+ * class). The repair it names is now exactly the accepted set. What did NOT
+ * move: {@link isBindableComparand}'s binary arm, which stays as the
+ * value-for-value mirror of `driver-sql`, and `driver-sql`'s own copy of this
+ * sentence, which keeps the parenthetical because that driver does bind a
+ * binary. `__tests__/comparand-door-single-source.test.ts` pins both halves.
  */
 export function unbindableListMemberMessage(
   op: string,
@@ -636,7 +697,7 @@ export function unbindableListMemberMessage(
   return (
     `"${op}" on "${field}" has a value at index ${index} of its list that cannot be bound as a SQL ` +
     `parameter: ${shapePreview(value)}. Every member of an $in/$nin/$between list is a comparand ` +
-    `in its own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a binary value). ` +
+    `in its own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. ` +
     `Refusing rather than binding it: the member can equal no stored value, so the list silently ` +
     `loses that entry (and a $nin loses the exclusion the caller wrote).`
   );

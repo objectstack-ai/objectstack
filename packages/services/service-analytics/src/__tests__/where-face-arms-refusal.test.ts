@@ -201,15 +201,23 @@ describe('[#20010] what is diagnosed first', () => {
     expect(b.message).not.toContain('mixes $-operator keys');
   });
 
-  it('CONTROL: an `undefined` outside a `$between` endpoint keeps #6386\'s own sentence — the TYPE face is not run here', () => {
+  it('CONTROL: an `undefined` outside a `$between` endpoint is the TYPE face\'s, not this face\'s', () => {
+    // [#20035] RE-JUDGED. This pinned #6386's door-local sentence, because the
+    // comparand-TYPE face was not run on this door. It is now — after this
+    // face, as in `parseFilterAST` (#7872, 2026-08-12: 「refuses everything
+    // else loudly at the compile face」) — so these three answer in the type
+    // face's sentence. What the control protects is unchanged: the SHAPE face
+    // judges `undefined` only as a `$between` endpoint, so none of these reads
+    // as a blank bound.
     for (const [where, path] of [
-      [{ amt: { $gt: undefined } }, '"amt".$gt'],
-      [{ stage: { $in: [undefined] } }, '"stage".$in[0]'],
-      [{ stage: undefined }, '"stage"'],
+      [{ amt: { $gt: undefined } }, 'where.amt.$gt'],
+      [{ stage: { $in: [undefined] } }, 'where.stage.$in[0]'],
+      [{ stage: undefined }, 'where.stage'],
     ] as const) {
       const err = refusalOf(() => tree(where));
       expectEnvelope(err);
-      expect(err.message).toContain(`comparand at ${path} is undefined`);
+      expect(err.message.startsWith(`Filter comparand at ${path} is undefined.`)).toBe(true);
+      expect(err.message).not.toContain('non-blank bounds');
     }
   });
 });

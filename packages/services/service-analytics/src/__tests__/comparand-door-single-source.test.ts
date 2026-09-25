@@ -38,16 +38,23 @@
  *   - **`undefined` is REFUSED by both doors** — `assertDefinedComparands`
  *     (#6386, on #6050's ruling B) at the `where` door and #6125's upstream
  *     refusal at the read scope, both of which fire before a predicate is
- *     consulted. The `undefined` arms inside the predicates, and `comparand()`'s
+ *     consulted. [#20035] At the `where` door the shared comparand-type face
+ *     now fires first, in its own words; same verdict, same envelope. The `undefined` arms inside the predicates, and `comparand()`'s
  *     normalise-to-`null`, survive as deliberately-kept dead arms (#5526's call
  *     to reopen, not this card's). The `undefined` row below is what makes that
  *     checkable instead of asserted — it pins REFUSAL, at both doors.
  *   - **binary** binds but has no faithful text rendering, so it is accepted in
  *     a bind position and refused by the LIKE family. That asymmetry is the
  *     reason the package carries two predicates rather than one with a flag.
- *     [#20018] On the READ-SCOPE door it is now refused in every position: the
+ *     At the PREDICATE level it still is, and at neither DOOR is it reachable
+ *     as an accepted comparand any more: both now run the shared comparand-type
+ *     face, which does not admit binary.
+ *     [#20018] On the READ-SCOPE door it is refused in every position: the
  *     lowering runs the shared comparand-type face after its own gates, as the
- *     ObjectQL execute face does. The predicate's own answer is unchanged.
+ *     ObjectQL execute face does.
+ *     [#20035] On the `where` DOOR it is refused in every position too: the
+ *     door runs the same face before any predicate is asked (see the binary
+ *     row's note for the evidence the keep-or-reconcile call rests on).
  *
  * @see comparand-shape.ts — the predicates and the messages this pins
  * @see https://github.com/objectstack-ai/objectstack/issues/8186
@@ -150,31 +157,50 @@ const MATRIX: readonly Row[] = [
   // ── the two package-local predicate admissions, neither reachable ──────────
   // `undefined`: the predicates admit it; BOTH doors refuse it upstream (#6386
   // at the `where` door, #6125 at the read scope) before a predicate is asked.
+  // [#20035] At the `where` door the shared comparand-type face now answers
+  // first, in its own words; the verdict and envelope below are unchanged.
   { label: 'undefined', value: undefined,
     bindable: true, renderable: true,
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // binary: binds, does not render — accepted where it binds, refused by LIKE.
-  // [#20018] Two cells moved AFTER the #8186 measurement, on purpose: the
-  // read-scope lowering now runs the shared comparand-type face after its own
-  // gates, and that face does not admit binary (the predicate above it still
-  // does — the `where` door keeps the extra, the read scope no longer reaches
-  // it). The ObjectQL execute face already refused a binary read-scope
+  // Four cells of this row moved AFTER the #8186 measurement, each named with
+  // the change that moved it; `whereLike` / `scopeLike` were refused from the
+  // start, and the predicate columns never moved.
+  // [#20018] `scopeIn` / `scopeEq`: the read-scope lowering now runs the shared
+  // comparand-type face after its own gates, and that face does not admit
+  // binary. The ObjectQL execute face already refused a binary read-scope
   // comparand.
+  // [#20035] `whereIn` / `whereEq`: RE-JUDGED from accept to refused, on
+  // purpose and with the evidence stated, because the type face's docblock
+  // lets a door keep binary only as a DECLARED local extra and #8186 asked for
+  // an explicit keep-or-reconcile call. Reconciled: the maintainer's ruling on
+  // #7872 (2026-08-12) 「refuses everything else loudly at the compile face」,
+  // and this door never delivered the extra — measured on a real engine before
+  // the change, the native path bound the buffer as the JSON TEXT
+  // '{"0":1,"1":2}' (no row; `$ne` served every row), the engine path and the
+  // FilterArray spelling refused it, and no producer can send one over JSON.
+  // So the extra is now reachable from neither door; the predicate above still
+  // admits it.
   { label: 'binary', value: new Uint8Array([1, 2]),
     bindable: true, renderable: false,
-    whereLike: REFUSED_WHERE, whereIn: OK, whereEq: OK,
+    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
 
   // ── shapes outside the fence ──────────────────────────────────────────────
-  // `$eq` accepts them on purpose: #5234 left the `{$eq: {…}}` account alone.
-  // [#20018] …on the `where` door. On the read-scope lowering the shared
-  // comparand-type face now closes that account (#7872's set), the answer the
-  // ObjectQL execute face already gave: a plain object bound as a scalar was
-  // refused by the database at execution, not by this package.
+  // `$eq` accepted them on purpose: #5234 left the `{$eq: {…}}` account alone.
+  // Both `$eq` cells have moved since, each by the #7872 set (「refuses
+  // everything else loudly at the compile face」) reaching one more door:
+  // [#20018] `scopeEq`: the read-scope lowering now runs the shared
+  // comparand-type face, the answer the ObjectQL execute face already gave (a
+  // plain object bound as a scalar was refused by the database at execution,
+  // not by this package).
+  // [#20035] `whereEq`: RE-JUDGED to refused — the `where` door now runs the
+  // same face on the object spelling, as `parseFilterAST` and the engine seam
+  // always did.
   { label: 'plain object', value: { foo: 1 },
     bindable: false, renderable: false,
-    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: OK,
+    whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // [#19975] One cell of this row moved AFTER the #8186 measurement, on
   // purpose: ruling 乙 (#19757) refuses a list in the equality slot, and the
@@ -276,11 +302,27 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
     });
 
     it('binary stays a package-local extra the door does not admit', () => {
+      // [#20035] At the predicate level, which is what this case reads. The
+      // `where` door refuses binary before this predicate is asked (the matrix
+      // row above); the read-scope door still asks it and then refuses the
+      // value with the shared type face after its own gates (#20018), so the
+      // extra is admitted here and served at neither door.
       const buf = new Uint8Array([1, 2]);
       expect(isAcceptedFilterComparand(buf)).toBe(false);
       expect(isBindableComparand(buf)).toBe(true);
-      expect(unbindableListMemberMessage('$in', 'status', { foo: 1 }, 0))
-        .toContain('(or a binary value)');
+      // [#20035] RE-JUDGED — FLIPPED. This asserted the refusal sentence offered
+      // "(or a binary value)" as a repair, the parenthetical #8186 kept beside
+      // the door's sentence. Neither door accepts a binary any more: the
+      // read-scope lowering refuses it with the shared comparand-type face
+      // (#20018) and so does the `where` door (#20035, the #7872 ruling:
+      // 「refuses everything else loudly at the compile face」). A refusal that
+      // still prescribed it sent the author to a value the same door refuses,
+      // so the sentence now names the accepted set and nothing more. The
+      // predicate's binary arm above is unchanged — it is `driver-sql`'s
+      // mirror, and `driver-sql`, which does bind a binary, keeps its own copy.
+      const message = unbindableListMemberMessage('$in', 'status', { foo: 1 }, 0);
+      expect(message).not.toContain('binary');
+      expect(message).toContain(`use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather than binding it`);
     });
   });
 

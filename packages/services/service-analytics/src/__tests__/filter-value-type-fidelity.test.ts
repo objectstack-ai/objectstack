@@ -234,8 +234,13 @@ describe('[#5526] the SQL bind form converts only what a driver cannot bind', ()
     // The `null` half of the same position is untouched and asserted below, in
     // the SQL/engine consumer blocks — that is the pair this file exists to keep
     // apart, and they live one `===` apart in every polarity table in the module.
+    //
+    // [#20035] RE-JUDGED for the wording only: the refusal now comes from the
+    // shared comparand-TYPE face, which the door runs before any leaf is built
+    // (#7872, 2026-08-12: 「refuses everything else loudly at the compile
+    // face」), in its sentence and at its path — the FilterArray spelling's.
     const refusal = (): unknown => normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } });
-    expect(refusal).toThrowError(/comparand at "code"\.\$eq is undefined/);
+    expect(refusal).toThrowError(/^Filter comparand at where\.code\.\$eq is undefined\./);
     // Still the module's one envelope (#5352), so the REST face answers 400.
     try {
       refusal();
