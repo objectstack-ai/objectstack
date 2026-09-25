@@ -83,6 +83,7 @@
  */
 
 import ts from 'typescript';
+import { SPLIT_ENTRIES } from './lib/split-entries';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -367,6 +368,15 @@ export function buildDeclarationMap(pkgDir: string): ComposedMap {
   const originsByCategory = new Map<string, Record<string, string>>(
     originShards.map((s) => [s.name, s.doc.exports]),
   );
+  // [#18576] A SPLIT entry publishes part of its HOME category's protocol
+  // (`lib/split-entries.ts`): the schema manifest keys its defs
+  // `<home>/<Name>`, so they resolve against the home's origins joined with the
+  // split entry's. The two entries share no name (the route-ledger resolver in
+  // packages/client pins that), so the join cannot shadow either side.
+  for (const [split, { home }] of Object.entries(SPLIT_ENTRIES)) {
+    const extra = originsByCategory.get(split);
+    if (extra) originsByCategory.set(home, { ...(originsByCategory.get(home) ?? {}), ...extra });
+  }
 
   const defKeys = manifestShards.flatMap((s) => s.doc.schemas);
   // Anti-vacuity floor, same instinct as build-export-origins' entry-point

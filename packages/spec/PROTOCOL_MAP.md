@@ -166,6 +166,7 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`contract.zod.ts`](src/api/contract.zod.ts) | | **API Contracts**. Versioned API signatures. |
 | [`storage.zod.ts`](src/api/storage.zod.ts) | | **Storage API**. File upload/download endpoints. |
 | [`package-api.zod.ts`](src/api/package-api.zod.ts) | | **Package API**. Package lifecycle endpoints (`/api/v1/packages`). |
+| [`package-api-assembled.zod.ts`](src/api/package-api-assembled.zod.ts) | | **Package API — assembled stage**. The installed-package rows at the assembled stage, the two package read responses and the route map; published from `@objectstack/spec/api-assembled` so `/api` does not link the assembled package body. |
 
 ---
 

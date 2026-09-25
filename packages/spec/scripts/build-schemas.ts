@@ -132,6 +132,11 @@ import {
 import { keySetMatches } from '../src/shared/suggestions.zod';
 import * as AI from '../src/ai';
 import * as API from '../src/api';
+// [#18576] `./api-assembled` is a SPLIT entry of the API protocol
+// (`lib/split-entries.ts`): its declarations are `api` schemas published from
+// another import path, so they are walked as part of `API` below and their
+// JSON Schema ids stay `api/<Name>`.
+import * as ApiAssembled from '../src/api-assembled';
 import * as Automation from '../src/automation';
 import * as Contracts from '../src/contracts';
 import * as Data from '../src/data';
@@ -150,7 +155,7 @@ import * as UI from '../src/ui';
 // packages/spec/src/index.ts). Build subpath-by-subpath instead so every
 // category folder under json-schema/ gets populated.
 const Protocol: Record<string, Record<string, unknown>> = {
-  AI, API, Automation, Contracts, Data, Identity, Integration,
+  AI, API: { ...API, ...ApiAssembled }, Automation, Contracts, Data, Identity, Integration,
   Kernel, Marketplace, QA, Security, Shared, Studio, System, UI,
 };
 

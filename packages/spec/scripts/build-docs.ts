@@ -60,6 +60,7 @@ import {
   type ZodFileInput,
 } from './lib/schema-index';
 import { schemaNameFromExportKey } from './lib/schema-name';
+import { formatSplitEntryCoverage, splitEntryCoverage } from './lib/split-entries';
 import { renderSchemaSection } from './lib/schema-section';
 import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
@@ -367,6 +368,14 @@ function groupSchemasByPage(): Map<string, Map<string, Array<{ name: string; con
     console.error(`\n\u2717 ${formatSchemaClosureExemptionCoverage(exemptions)}`);
     process.exit(1);
   }
+  // The split entries (#18576, `lib/split-entries.ts`) are exempt from the
+  // warning above for a different declared reason — their schemas publish under
+  // their HOME category — and expire the same way, on the same walk.
+  const splitMismatch = formatSplitEntryCoverage(splitEntryCoverage(Object.keys(CATEGORIES), categoriesWithSchemaDir));
+  if (splitMismatch) {
+    console.error(`\n\u2717 ${splitMismatch}`);
+    process.exit(1);
+  }
 
   return byCategory;
 }
@@ -494,10 +503,10 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
     md += `${'#'.repeat(PAGE_SECTION_LEVEL)} TypeScript Usage\n\n`;
     md += `\`\`\`typescript\n`;
     if (imports.valueNames.length) {
-      md += `import { ${imports.valueNames.join(', ')} } from '@objectstack/spec/${category}';\n`;
+      md += `import { ${imports.valueNames.join(', ')} } from '@objectstack/spec/${imports.entry}';\n`;
     }
     if (imports.typeNames.length) {
-      md += `import type { ${imports.typeNames.join(', ')} } from '@objectstack/spec/${category}';\n`;
+      md += `import type { ${imports.typeNames.join(', ')} } from '@objectstack/spec/${imports.entry}';\n`;
     }
     md += `\n`;
     if (imports.exampleValue) {

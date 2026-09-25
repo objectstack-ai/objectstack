@@ -70,6 +70,13 @@
 export const CATEGORY_TITLES: Readonly<Record<string, string>> = {
   ai: 'AI Protocol',
   api: 'API Protocol',
+  // [#18576] A SPLIT entry of `api`, not a protocol of its own (see
+  // `lib/split-entries.ts`): the API declarations whose payload embeds the
+  // assembled package body, published from their own entry so the
+  // browser-facing `./api` does not link that tree. Titled "Entry", not
+  // "Protocol", so `check-docs-spec-enumerations.mjs` counts it as a subpath and
+  // never as a protocol namespace; its schemas are documented under `api`.
+  'api-assembled': 'API Assembled-Stage Entry',
   automation: 'Automation Protocol',
   contracts: 'Contracts Protocol',
   conversions: 'Conversions Protocol',

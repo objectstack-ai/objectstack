@@ -119,7 +119,11 @@ export interface RouteLedgerEntry {
   /** Dotted method path on `ObjectStackClient` — required when disposition is `sdk`. */
   client?: string;
   /**
-   * Name of the `@objectstack/spec/api` export declaring this route's response
+   * Name of the API-protocol export declaring this route's response PAYLOAD —
+   * an export of `@objectstack/spec/api`, or of its sibling entry
+   * `@objectstack/spec/api-assembled`, which carries the API declarations whose
+   * payload embeds the assembled package body (the two package READ responses;
+   * the #18576 ruling moved them off the browser-facing `/api`). The
    * PAYLOAD — the `data` of the shared `{ success, data }` envelope where the
    * route emits one, the whole body where it does not. The envelope itself is
    * not this field's business; `pnpm check:route-envelope` guards it
@@ -140,8 +144,8 @@ export interface RouteLedgerEntry {
    * can demand coverage for it; a name written ahead of the test it points at
    * would BE the "declared but unverified" surface the programme exists to
    * remove. `packages/client/src/route-ledger-response-schema.test.ts` resolves
-   * every name written here against the live `@objectstack/spec/api` exports,
-   * so a typo or a retired schema fails loudly rather than rotting.
+   * every name written here against the live exports of those two entries, so a
+   * typo or a retired schema fails loudly rather than rotting.
    *
    * A NAME rather than a live schema object, deliberately: this module stays
    * import-free — the client-side guards compile it as a relative SOURCE file,
@@ -382,7 +386,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // note records what its declaration does NOT carry.
   { route: 'GET /packages', domain: '/packages', disposition: 'sdk', client: 'packages.list',
     responseSchema: 'ListInstalledPackagesResponseSchema',
-    note: 'The schema names the WHOLE BODY here, envelope included (`BaseResponseSchema.extend({ data })`), not the `data` alone its lifecycle siblings above declare. This row was blank until now as a MEASURED verdict: an earlier contract review had added `hasMore`, but every row was still typed `InstalledPackageSchema`, whose `manifest` is the AUTHORING-stage `ManifestSchema` (`objects` = glob patterns), while a `defineStack()` host installs the ASSEMBLED body (`objects` = object definitions) — the stage mismatch the comment above names. It is filled by following that ruling one layer up: `@objectstack/spec/api` declares `AssembledInstalledPackageSchema` and binds both read responses to `InstalledPackageAtEitherStageSchema`, a union over the two whole CLOSED stage declarations — neither stage widened, and a row belonging to neither still refused. Fillable because `domains/packages-read-delete-response-conformance.test.ts` drives THIS handler and parses the payload it answers on BOTH authoring paths. ⚠️ The declaration is a strict SUBSET of the wire: each row also carries `writable`, this door\'s own computed verdict and not a declared record field, which a declared parse therefore strips — asserted by name in the same file rather than fixed' },
+    note: 'The schema names the WHOLE BODY here, envelope included (`BaseResponseSchema.extend({ data })`), not the `data` alone its lifecycle siblings above declare. This row was blank until now as a MEASURED verdict: an earlier contract review had added `hasMore`, but every row was still typed `InstalledPackageSchema`, whose `manifest` is the AUTHORING-stage `ManifestSchema` (`objects` = glob patterns), while a `defineStack()` host installs the ASSEMBLED body (`objects` = object definitions) — the stage mismatch the comment above names. It is filled by following that ruling one layer up: the API protocol declares `AssembledInstalledPackageSchema` and binds both read responses to `InstalledPackageAtEitherStageSchema`, a union over the two whole CLOSED stage declarations — neither stage widened, and a row belonging to neither still refused. Fillable because `domains/packages-read-delete-response-conformance.test.ts` drives THIS handler and parses the payload it answers on BOTH authoring paths. ⚠️ The declaration is a strict SUBSET of the wire: each row also carries `writable`, this door\'s own computed verdict and not a declared record field, which a declared parse therefore strips — asserted by name in the same file rather than fixed' },
   { route: 'POST /packages', domain: '/packages', disposition: 'sdk', client: 'packages.install' },
   { route: 'GET /packages/:id', domain: '/packages', disposition: 'sdk', client: 'packages.get',
     responseSchema: 'GetInstalledPackageResponseSchema',

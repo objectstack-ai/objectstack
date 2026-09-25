@@ -77,7 +77,7 @@ const query = {
 
 ---
 
-## 3. Schema Inventory by Domain (202 schemas)
+## 3. Schema Inventory by Domain (203 schemas)
 
 Counted as `*.zod.ts` modules under `packages/spec/src/<domain>/` — the sources
 that ship in this tarball (`files` includes `src/**/*.zod.ts`), so every number
@@ -88,7 +88,7 @@ here is verifiable from the installed package.
 | system | 34 | Auth, Cache, Compliance, Dev Login, Encryption, HTTP Server, License, Logging, Metrics |
 | kernel | 31 | Plugin, Manifest, Events (6 sub-modules), Feature, Context, Package Registry |
 | data | 30 | Object, Field, Query, Filter, Driver (SQL/NoSQL/Memory/Mongo/Postgres), Cube |
-| api | 30 | Endpoint, REST Server, Discovery, OData, Batch, WebSocket, Response Envelope, Package Lifecycle |
+| api | 31 | Endpoint, REST Server, Discovery, OData, Batch, WebSocket, Response Envelope, Package Lifecycle, Package API (assembled stage) |
 | ui | 18 | View, App, Action, Dashboard, Page, Chart, Component, Animation |
 | automation | 14 | Flow, Approval, BPMN Interop, Control Flow, State Machine, Webhook, Schedule Organization |
 | shared | 15 | Enums, HTTP, Identifiers, Mapping, Metadata Types, Connector Auth, Retry Policy, Value Domain, Epoch Instant (EpochMs), Duration (DurationMs / DurationSeconds) |
@@ -130,6 +130,11 @@ here is verifiable from the installed package.
 - `ApiEndpointSchema`: REST endpoints.
 - `ResponseEnvelopeConfigSchema`, `ApiErrorSchema`: Request/Response envelopes.
 - `DiscoverySchema`: Service discovery.
+- NOT here: the installed-package read responses (`ListInstalledPackagesResponseSchema`,
+  `GetInstalledPackageResponseSchema`), the rows they carry (`AssembledInstalledPackageSchema`,
+  `InstalledPackageAtEitherStageSchema`) and `PackageApiContracts` embed the assembled package
+  body, so they import from `@objectstack/spec/api-assembled` — which keeps `/api` light enough
+  for browser code.
 
 ---
 

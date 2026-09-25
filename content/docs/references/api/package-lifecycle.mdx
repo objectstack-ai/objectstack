@@ -25,11 +25,12 @@ schema declares the `data` payload, envelope-free — the same convention as
 (`MetadataManager.publishPackage`) already has an exact published schema,
 `PackagePublishResultSchema` in `@objectstack/spec/system` — re-exported
 below into this `/api` namespace (ruling 5A: re-export, never a second
-copy) because the route-ledger resolver looks names up only in
-`@objectstack/spec/api`.
+copy) because the route-ledger resolver looks names up only in the API
+protocol's entries — `@objectstack/spec/api`, and `/api-assembled` for the
+declarations that embed the assembled package body (#18576).
 
 The retired `PackageRollbackResponseSchema` and its
-`PackageApiContracts.rollbackPackage` binding (see `./package-api.zod.ts`)
+`PackageApiContracts.rollbackPackage` binding (see `./package-api-assembled.zod.ts`)
 declared a VERSION rollback against the live COMMIT-rollback path;
 `RollbackToPackageCommitResponseSchema` below is the true contract,
 authored after that retirement per the ruling's sequencing (3A).
