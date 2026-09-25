@@ -72,7 +72,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Knex } from 'knex';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import {
   DIALECT_CELLS,
@@ -165,8 +165,15 @@ function declareTextCaseSweep(cell: DialectCell): void {
     for (const testCase of FILTER_TEXT_CASES) {
       it(testCase.name, async () => {
         if (testCase.expectRejection) {
+          // [#20020] The case-set's refusals name the operator and its
+          // replacement — which this driver discloses only for a predicate the
+          // caller is known to have written (the #8220 contract). So the
+          // filter is handed over marked 'author', as a read-scope merge
+          // boundary marks a caller's own predicate, on a shallow COPY so the
+          // shared case constant itself is never marked.
+          const where = markFilterSubtreeProvenance({ ...testCase.filter }, 'author');
           const err = await driver
-            .find(TEXT_OBJECT, { where: testCase.filter }, BYPASS)
+            .find(TEXT_OBJECT, { where }, BYPASS)
             .then(() => null, (e: unknown) => e as WireBearingError);
           expect(err, 'the case-set requires this filter REFUSED, not answered').toBeInstanceOf(Error);
           // `code` AND `status`: a refusal outside the ADR-0112 envelope reaches

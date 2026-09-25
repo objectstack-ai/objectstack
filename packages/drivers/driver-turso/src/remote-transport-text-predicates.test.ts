@@ -27,6 +27,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -188,8 +189,16 @@ describe('TursoDriver remote — declared text predicates return rows', () => {
   });
 
   it('REFUSES the retired $regex, in the ADR-0112 envelope, naming $icontains', async () => {
+    // [#20020] The transport's retired-operator refusal names the operator and
+    // its replacement only for a subtree positively marked 'author' (the #8220
+    // contract). Through `TursoDriver`'s remote mode no mark reaches the
+    // transport — `toRemoteFilter` rebuilds every node into storage form, and
+    // a rebuilt node carries no mark — so even an author-marked filter gets
+    // the withheld wording here: the fail-closed direction, never a
+    // disclosure. The author-facing text is pinned on the transport directly
+    // (`remote-transport-refusal-door-provenance.test.ts`).
     const err = await driver
-      .find('widget', { where: { name: { $regex: 'lph' } } })
+      .find('widget', { where: markFilterSubtreeProvenance({ name: { $regex: 'lph' } }, 'author') })
       .then(() => null, (e: any) => e);
     expect(err).toBeInstanceOf(Error);
     // `code` and `status`, not a bare rejection: this transport's whole family
@@ -197,8 +206,8 @@ describe('TursoDriver remote — declared text predicates return rows', () => {
     // opaque 500, and `rejects.toThrow()` alone cannot tell the two apart.
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
-    expect(err.message).toContain('$regex');
-    expect(err.message).toContain('$icontains');
+    expect(err.message).toContain('is RETIRED');
+    expect(err.message).not.toContain('$regex');
   });
 
   it('REFUSES an $icontains comparand that constrains nothing', async () => {
@@ -327,16 +336,21 @@ describe('RemoteTransport — unknown operators throw instead of degrading', () 
 
   it('rejects an operator it does not implement', async () => {
     const { t, calls } = transportWithCapturingClient();
-    await expect(t.find('widget', { where: { name: { $bogus: 'x' } } })).rejects.toThrow(
-      /\$bogus.*widget\.name/s,
-    );
+    // [#20020] Marked author-written throughout this block: the operator and
+    // its target are named only for a predicate the caller is known to have
+    // written (the #8220 contract).
+    await expect(
+      t.find('widget', { where: markFilterSubtreeProvenance({ name: { $bogus: 'x' } }, 'author') }),
+    ).rejects.toThrow(/\$bogus.*widget\.name/s);
     expect(calls, 'must refuse before executing anything').toHaveLength(0);
   });
 
   it('rejects a null-comparand unknown operator too (the IS NULL accident)', async () => {
     // `{ $bogus: null }` used to land on `IS NULL` and look plausible.
     const { t } = transportWithCapturingClient();
-    await expect(t.find('widget', { where: { name: { $bogus: null } } })).rejects.toThrow(/\$bogus/);
+    await expect(
+      t.find('widget', { where: markFilterSubtreeProvenance({ name: { $bogus: null } }, 'author') }),
+    ).rejects.toThrow(/\$bogus/);
   });
 
   it('rejects $between at the transport, naming the driver that must lower it', async () => {
@@ -351,13 +365,15 @@ describe('RemoteTransport — unknown operators throw instead of degrading', () 
   it('rejects an unknown operator nested inside $and / $or', async () => {
     const { t } = transportWithCapturingClient();
     await expect(
-      t.find('widget', { where: { $or: [{ name: { $eq: 'a' } }, { name: { $bogus: 'b' } }] } }),
+      t.find('widget', {
+        where: markFilterSubtreeProvenance({ $or: [{ name: { $eq: 'a' } }, { name: { $bogus: 'b' } }] }, 'author'),
+      }),
     ).rejects.toThrow(/\$bogus/);
   });
 
   it('the throw reaches callers through count / updateMany / deleteMany too', async () => {
     const { t } = transportWithCapturingClient();
-    const where = { name: { $bogus: 'x' } };
+    const where = markFilterSubtreeProvenance({ name: { $bogus: 'x' } }, 'author');
     await expect(t.count('widget', { where })).rejects.toThrow(/\$bogus/);
     await expect(t.updateMany('widget', { where }, { name: 'y' })).rejects.toThrow(/\$bogus/);
     await expect(t.deleteMany('widget', { where })).rejects.toThrow(/\$bogus/);

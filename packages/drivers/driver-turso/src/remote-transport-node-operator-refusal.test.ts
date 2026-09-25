@@ -67,6 +67,7 @@ import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { QueryAST } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -270,7 +271,11 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
 
     for (const [label, where, key, shown] of NON_LIST) {
       it(`refuses ${label} by name, not as a column`, async () => {
-        const err = await refusalOf(where);
+        // [#20020] Marked 'author', as a read-scope merge boundary marks a
+        // caller's own predicate: the combinator, its position and the operand
+        // are named only then (the #8220 contract). The withheld wording is
+        // pinned in `remote-transport-refusal-door-provenance.test.ts`.
+        const err = await refusalOf(markFilterSubtreeProvenance(where as object, 'author'));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         expect(err.message).toContain(`"${key}" at where.${key}`);
@@ -382,7 +387,8 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
     // condition. The new gate must not swallow them into one message — that is
     // the #1051 diagnostic detour re-created, just from the other side.
     it('an unknown FIELD operator is still #1004`s message', async () => {
-      const err = await refusalOf({ stage: { $sounds_like: 'won' } });
+      // [#20020] Marked 'author' — the operator and target are named only then.
+      const err = await refusalOf(markFilterSubtreeProvenance({ stage: { $sounds_like: 'won' } }, 'author'));
       expect(err.message).toMatch(/Unsupported filter operator "\$sounds_like" on 'deal\.stage'/);
       expect(err.message).not.toMatch(/combinator/);
     });

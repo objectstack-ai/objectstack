@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { z } from 'zod';
-import { FieldType } from '../data/field.zod';
 
 import { aliasProbe } from './alias-probe';
 import {
@@ -17,10 +16,21 @@ import {
  *
  * @example
  * ```ts
- * suggestFieldType('text_area');  // ['textarea']
- * suggestFieldType('String');     // ['text']
- * suggestFieldType('int');        // ['number']
+ * findClosestMatches('hiddenon', ['hiddenOn', 'label']);  // ['hiddenOn']
+ * formatSuggestion(['textarea']);  // "Did you mean 'textarea'?"
  * ```
+ *
+ * ⛔ **This module imports no schema module — keep it that way (#19930).**
+ * `shared/strict-object.ts` imports it, and nearly every closed schema in the
+ * package imports `strict-object.ts`, so anything imported HERE is evaluated
+ * in the middle of whichever schema module reached `strict-object` first. A
+ * value import of `data/field.zod` here (it used to feed `suggestFieldType`)
+ * closed the loop `data/filter.zod → strict-object → suggestions.zod →
+ * data/field.zod`, and under `OS_EAGER_SCHEMAS=1` the published
+ * `@objectstack/spec/api` and `/data` entries threw at import. A suggester that
+ * needs a schema's vocabulary lives beside it instead —
+ * `suggestFieldType` is in `./field-type-suggestion.ts`, and
+ * `eager-entry-import.test.ts` fails on the loop.
  */
 
 /**
@@ -116,98 +126,6 @@ export function findClosestMatches(
     .sort((a, b) => a.distance - b.distance || a.cased - b.cased);
 
   return scored.slice(0, maxResults).map((s) => s.value);
-}
-
-/**
- * Well-known aliases that map common typos / alternative names to valid FieldTypes.
- */
-const FIELD_TYPE_ALIASES: Record<string, string> = {
-  // Common alternative names
-  string: 'text',
-  str: 'text',
-  varchar: 'text',
-  char: 'text',
-  int: 'number',
-  integer: 'number',
-  float: 'number',
-  double: 'number',
-  decimal: 'number',
-  numeric: 'number',
-  bool: 'boolean',
-  checkbox: 'boolean',
-  check: 'boolean',
-  date_time: 'datetime',
-  timestamp: 'datetime',
-  // Common typos
-  text_area: 'textarea',
-  textarea_: 'textarea',
-  textfield: 'text',
-  dropdown: 'select',
-  picklist: 'select',
-  enum: 'select',
-  multi_select: 'multiselect',
-  multiselect_: 'multiselect',
-  reference: 'lookup',
-  ref: 'lookup',
-  foreign_key: 'lookup',
-  fk: 'lookup',
-  relation: 'lookup',
-  master: 'master_detail',
-  richtext_: 'richtext',
-  rich_text: 'richtext',
-  upload: 'file',
-  attachment: 'file',
-  photo: 'image',
-  picture: 'image',
-  img: 'image',
-  percent_: 'percent',
-  percentage: 'percent',
-  money: 'currency',
-  price: 'currency',
-  auto_number: 'autonumber',
-  auto_increment: 'autonumber',
-  sequence: 'autonumber',
-  markdown_: 'markdown',
-  md: 'markdown',
-  barcode: 'qrcode',
-  tag: 'tags',
-  star: 'rating',
-  stars: 'rating',
-  geo: 'location',
-  gps: 'location',
-  coordinates: 'location',
-  embed: 'vector',
-  embedding: 'vector',
-  embeddings: 'vector',
-};
-
-/**
- * Suggest valid FieldType values for an invalid input.
- *
- * First checks known aliases, then falls back to fuzzy matching.
- *
- * @param input - Invalid field type string
- * @returns Array of suggested valid FieldType values
- *
- * @example
- * ```ts
- * suggestFieldType('text_area');  // ['textarea']
- * suggestFieldType('String');     // ['text']
- * suggestFieldType('int');        // ['number']
- * suggestFieldType('dropdown');   // ['select']
- * ```
- */
-export function suggestFieldType(input: string): string[] {
-  const normalized = input.toLowerCase().replace(/[-\s]/g, '_');
-
-  // Check alias map first
-  const alias = FIELD_TYPE_ALIASES[normalized];
-  if (alias) {
-    return [alias];
-  }
-
-  // Fall back to fuzzy matching
-  return findClosestMatches(normalized, FieldType.options);
 }
 
 /**

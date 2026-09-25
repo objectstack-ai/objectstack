@@ -269,7 +269,19 @@ describe('[#5234] the read-scope lowering refuses the same two shapes, fail-clos
 
   describe('the guard is narrow here too', () => {
     it('keeps binding every legitimate `$in` member', () => {
-      expect(scope({ status: { $in: ['a', null, 7, true] } }).params).toEqual(['a', null, 7, true]);
+      expect(scope({ status: { $in: ['a', 7, true] } }).params).toEqual(['a', 7, true]);
+    });
+
+    it('[#20018] a `null` member is no longer one of them — refused by the shared list-shape face', () => {
+      // This row used to bind `null` beside the three members above. The
+      // null-member ruling (2026-08-31) refuses it at the shared face, and the
+      // lowering now runs that face after its own gates, as the ObjectQL
+      // execute face does — so this door's own member gate is still narrow,
+      // and the refusal carries the face's sentence, not this door's.
+      const err = refusalOf(() => scope({ status: { $in: ['a', null, 7, true] } }));
+      expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(err.status).toBe(500);
+      expect(err.message).toContain('does not accept null as a list member');
     });
 
     it('keeps every primitive LIKE comparand', () => {

@@ -52,7 +52,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 
@@ -160,8 +160,14 @@ describe('[#6518] TursoDriver LOCAL and REMOTE answer FILTER_TEXT_CASES identica
     it(testCase.name, async () => {
       if (testCase.expectRejection) {
         for (const [face, driver] of [['local', local], ['remote', remote]] as const) {
+          // [#20020] The case-set's refusals name the operator and its
+          // replacement, which both compilers disclose only for a predicate the
+          // caller is known to have written (the #8220 contract) — so each face
+          // gets its own shallow COPY marked 'author', and the shared case
+          // constant itself is never marked.
+          const where = markFilterSubtreeProvenance({ ...testCase.filter }, 'author');
           const err = await driver
-            .find(TEXT_OBJECT.name, { where: testCase.filter } as DriverQuery)
+            .find(TEXT_OBJECT.name, { where } as DriverQuery)
             .then(() => null, (e: unknown) => e as WireBearingError);
           expect(err, `${face} compiled a filter the case-set requires refused`).not.toBeNull();
           // `code` AND `status`, never a bare rejection: this driver's whole
@@ -169,8 +175,16 @@ describe('[#6518] TursoDriver LOCAL and REMOTE answer FILTER_TEXT_CASES identica
           // 400-class error rather than an opaque 500 (ADR-0112).
           expect(err!.code, face).toBe(testCase.code);
           expect(err!.status, face).toBe(400);
+          // [#20020] On the REMOTE face `TursoDriver.toRemoteFilter` rebuilds
+          // every node before the transport sees it, so no author mark survives
+          // and a door that reads the mark answers its withheld wording — the
+          // fail-closed direction. Such an answer must then name NONE of the
+          // mentions (a half-redaction is none), and the author-facing text is
+          // pinned on the transport itself.
+          const withheld = face === 'remote' && err!.message.includes('withheld from the message');
           for (const mention of testCase.mustMention) {
-            expect(err!.message, `${face} — ${mention}`).toContain(mention);
+            if (withheld) expect(err!.message, `${face} — ${mention}`).not.toContain(mention);
+            else expect(err!.message, `${face} — ${mention}`).toContain(mention);
           }
         }
         return;
