@@ -28,6 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { ObjectQL } from './engine.js';
 import { ValidationError } from './validation/record-validator.js';
 
@@ -127,8 +128,8 @@ function countingResolver(answer: unknown | (() => unknown)) {
   return { fn, asks };
 }
 
-const ACTING = { userId: 'u1', positions: ['sales_rep'] } as any;
-const SYSTEM = { isSystem: true } as any;
+const ACTING: ExecutionContext = { userId: 'u1', positions: ['sales_rep'] };
+const SYSTEM: ExecutionContext = { isSystem: true };
 /** The `objects` slot of `/auth/me/permissions`: `edit` granted on crm_account, `delete` not. */
 const MAP = { crm_account: { allowRead: true, allowEdit: true } };
 const BOOM = Object.assign(new Error('permission store unreachable'), { code: 'AUTHZ_STORE_UNAVAILABLE', status: 503 });
@@ -260,7 +261,7 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
 
       it('formula field on find — one resolution for the whole result set', async () => {
         seed(4);
-        const rows = await engine.find('crm_case', { context: ACTING } as any) as Array<Record<string, unknown>>;
+        const rows = await engine.find('crm_case', { context: ACTING }) as Array<Record<string, unknown>>;
         expect(rows).toHaveLength(4);
         expectFormulaCells(rows, 1);
         expect(asks).toHaveLength(row.resolver ? 1 : 0);
@@ -268,20 +269,20 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
 
       it('formula field on findOne', async () => {
         seed(2);
-        const rec = await engine.findOne('crm_case', { where: { id: 'c1' }, context: ACTING } as any) as Record<string, unknown>;
+        const rec = await engine.findOne('crm_case', { where: { id: 'c1' }, context: ACTING }) as Record<string, unknown>;
         expectFormulaCells([rec], 1);
         expect(asks).toHaveLength(row.resolver ? 1 : 0);
       });
 
       it('formula field on the update echo', async () => {
         seed(1);
-        const echo = await engine.update('crm_case', { subject: 'renamed' }, { where: { id: 'c0' }, context: ACTING } as any) as Record<string, unknown>;
+        const echo = await engine.update('crm_case', { subject: 'renamed' }, { where: { id: 'c0' }, context: ACTING }) as Record<string, unknown>;
         expectFormulaCells([echo], 1);
         expect(asks).toHaveLength(row.resolver ? 1 : 0);
       });
 
       it('CEL defaultValue on insert — and the insert echo\'s formula reuses the same resolution', async () => {
-        const write = engine.insert('crm_case', { subject: 'n' }, { context: ACTING } as any);
+        const write = engine.insert('crm_case', { subject: 'n' }, { context: ACTING });
         if (row.defaulted === 'refused') {
           // Fail CLOSED with the resolution's own error, untouched: ⛔ not read
           // as "no grants" (which would STORE `false`), and nothing written.
@@ -315,7 +316,7 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
       });
 
       it('a `required` field defaulted by `can`', async () => {
-        const write = engine.insert('crm_gate', { subject: 'g' }, { context: ACTING } as any);
+        const write = engine.insert('crm_gate', { subject: 'g' }, { context: ACTING });
         if (row.defaulted === 'refused') {
           expect(await refusal(write)).toBe(BOOM);
           expect(created('crm_gate')).toHaveLength(0);
@@ -344,14 +345,14 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
       fields: { flag: { type: 'boolean', required: true, defaultValue: cel("current_user.can('crm_account', 'delete')") } },
     } as any, 'test-package');
     engine.registerEffectiveObjectPermissionsResolver(countingResolver(MAP).fn);
-    await engine.insert('crm_gate_denied', {}, { context: ACTING } as any);
+    await engine.insert('crm_gate_denied', {}, { context: ACTING });
     expect(created('crm_gate_denied')[0].data.flag).toBe(false);
   });
 
   it('ONE resolution for a write that needs the map three ways: default, option gate and response formula', async () => {
     const r = countingResolver(MAP);
     engine.registerEffectiveObjectPermissionsResolver(r.fn);
-    const echo = await engine.insert('crm_case', { subject: 'x', stage: 'escalated' }, { context: ACTING } as any) as Record<string, unknown>;
+    const echo = await engine.insert('crm_case', { subject: 'x', stage: 'escalated' }, { context: ACTING }) as Record<string, unknown>;
     expect(created('crm_case')[0].data).toMatchObject({ stage: 'escalated', edit_flag: true, delete_flag: false });
     expect(echo.may_edit_account).toBe(true);
     expect(r.asks).toHaveLength(1);
@@ -360,19 +361,19 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
   it('ONE resolution for a batch insert of N rows, and for a by-id update picking a gated option', async () => {
     const r = countingResolver(MAP);
     engine.registerEffectiveObjectPermissionsResolver(r.fn);
-    await engine.insert('crm_case', Array.from({ length: 6 }, (_, i) => ({ subject: `b${i}` })) as any, { context: ACTING } as any);
+    await engine.insert('crm_case', Array.from({ length: 6 }, (_, i) => ({ subject: `b${i}` })) as any, { context: ACTING });
     expect(created('crm_case')).toHaveLength(6);
     expect(created('crm_case').every((w) => w.data.edit_flag === true && w.data.delete_flag === false)).toBe(true);
     expect(r.asks).toHaveLength(1);
 
-    await engine.update('crm_case', { stage: 'escalated' }, { where: { id: 'r_1' }, context: ACTING } as any);
+    await engine.update('crm_case', { stage: 'escalated' }, { where: { id: 'r_1' }, context: ACTING });
     expect(r.asks).toHaveLength(2);
   });
 
   it('validate() previews the defaults and the option gate with ONE resolution', async () => {
     const r = countingResolver(MAP);
     engine.registerEffectiveObjectPermissionsResolver(r.fn);
-    const preview = await engine.validate('crm_gate', [{ subject: 'a' }, { subject: 'b' }], { mode: 'insert', context: ACTING } as any);
+    const preview = await engine.validate('crm_gate', [{ subject: 'a' }, { subject: 'b' }], { mode: 'insert', context: ACTING });
     expect(preview.valid).toBe(true);
     expect(r.asks).toHaveLength(1);
   });
@@ -380,10 +381,10 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
   it('validate() rejects the same way the write does when a row\'s `can` default needed a failed resolution', async () => {
     engine.registerEffectiveObjectPermissionsResolver(countingResolver(() => { throw BOOM; }).fn);
     await expect(
-      engine.validate('crm_gate', [{ subject: 'a' }], { mode: 'insert', context: ACTING } as any),
+      engine.validate('crm_gate', [{ subject: 'a' }], { mode: 'insert', context: ACTING }),
     ).rejects.toBe(BOOM);
     // A row that supplies the field previews without asking.
-    const supplied = await engine.validate('crm_gate', [{ subject: 'a', flag: false }], { mode: 'insert', context: ACTING } as any);
+    const supplied = await engine.validate('crm_gate', [{ subject: 'a', flag: false }], { mode: 'insert', context: ACTING });
     expect(supplied.valid).toBe(true);
   });
 
@@ -391,18 +392,18 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
     seed(3);
     const r = countingResolver(MAP);
     engine.registerEffectiveObjectPermissionsResolver(r.fn);
-    await engine.find('crm_case', { context: ACTING } as any);
-    await engine.find('crm_case', { context: ACTING } as any);
+    await engine.find('crm_case', { context: ACTING });
+    await engine.find('crm_case', { context: ACTING });
     expect(r.asks).toHaveLength(2);
   });
 
   it('control: no `can` anywhere ⇒ never asks, even a resolver that would THROW, and no warn', async () => {
     const r = countingResolver(() => { throw BOOM; });
     engine.registerEffectiveObjectPermissionsResolver(r.fn);
-    const echo = await engine.insert('crm_note', { body: 'hi' }, { context: ACTING } as any) as Record<string, unknown>;
+    const echo = await engine.insert('crm_note', { body: 'hi' }, { context: ACTING }) as Record<string, unknown>;
     expect(echo.shout).toBe('hi!');
     expect(created('crm_note')[0].data.author).toBe('u1');
-    const rows = await engine.find('crm_note', { context: ACTING } as any) as Array<Record<string, unknown>>;
+    const rows = await engine.find('crm_note', { context: ACTING }) as Array<Record<string, unknown>>;
     expect(rows[0].shout).toBe('hi!');
     expect(r.asks).toHaveLength(0);
     expect(formulaWarns()).toHaveLength(0);
@@ -414,7 +415,7 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
     // The formula leg of the echo still reads null (with its warn): only the
     // default path was spared, because only the default path did not need it.
     await expect(
-      engine.insert('crm_case', { subject: 's', edit_flag: true, delete_flag: false }, { context: ACTING } as any),
+      engine.insert('crm_case', { subject: 's', edit_flag: true, delete_flag: false }, { context: ACTING }),
     ).resolves.toBeTruthy();
     expect(created('crm_case')[0].data).toMatchObject({ edit_flag: true, delete_flag: false });
     expect(r.asks).toHaveLength(1); // the echo's formulas — the default path asked nothing
@@ -424,8 +425,8 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
     seed(2);
     const r = countingResolver(MAP);
     engine.registerEffectiveObjectPermissionsResolver(r.fn);
-    await engine.find('crm_case', { context: SYSTEM } as any);
-    await engine.find('crm_case', {} as any);
+    await engine.find('crm_case', { context: SYSTEM });
+    await engine.find('crm_case', {});
     expect(r.asks).toHaveLength(0);
     expect(formulaWarns()).toHaveLength(0);
   });
@@ -435,7 +436,7 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
     const out = await engine.insertMany('crm_case', [
       { subject: 'needs' },
       { subject: 'supplies', edit_flag: false, delete_flag: true },
-    ], { context: ACTING } as any);
+    ], { context: ACTING });
     expect(out[0].ok).toBe(false);
     expect((out[0] as { error: unknown }).error).toBe(BOOM);
     expect(out[1].ok).toBe(true);
@@ -444,13 +445,13 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
 
   it('a map that is not the published shape fails closed the same way (formula\'s door)', async () => {
     engine.registerEffectiveObjectPermissionsResolver(countingResolver({ crm_account: true }).fn);
-    const err = await refusal(engine.insert('crm_case', { subject: 'n' }, { context: ACTING } as any));
+    const err = await refusal(engine.insert('crm_case', { subject: 'n' }, { context: ACTING }));
     expect(err).toBeInstanceOf(TypeError);
     expect(String(err.message)).toContain("the entry for 'crm_account' is not an EffectiveObjectPermission");
     expect(created('crm_case')).toHaveLength(0);
 
     seed(1);
-    const rows = await engine.find('crm_case', { context: ACTING } as any) as Array<Record<string, unknown>>;
+    const rows = await engine.find('crm_case', { context: ACTING }) as Array<Record<string, unknown>>;
     expect(rows[0].may_edit_account).toBeNull();
     expect(formulaWarns().at(-1)?.meta).toMatchObject({ reason: 'permission-resolution-failed' });
   });
