@@ -28,6 +28,8 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_delegation.fields.delegate_id.label": "afd6d8733dc5bc14",
   "objects.sys_approval_delegation.fields.delegator_id.help": "c4686c5c9f24e0be",
   "objects.sys_approval_delegation.fields.delegator_id.label": "f76b1f95f2fdabff",
+  "objects.sys_approval_delegation.fields.display_title.help": "2831a1ffde72b425",
+  "objects.sys_approval_delegation.fields.display_title.label": "70f7aadecce647a5",
   "objects.sys_approval_delegation.fields.id.label": "3383564051b4b76d",
   "objects.sys_approval_delegation.fields.organization_id.help": "f02982e88229d9ca",
   "objects.sys_approval_delegation.fields.organization_id.label": "3e55836156e1c1de",

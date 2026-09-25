@@ -17,8 +17,9 @@ const manifest = manifestFromConfigs([
   { type: 'flex', namespace: 'ui', isContainer: true, inputs: [
     { name: 'direction', type: 'enum', enum: ['row', 'col'] },
     { name: 'gap', type: 'number' },
+    { name: 'children', type: 'slot' },
   ] },
-  { type: 'grid', namespace: 'ui', isContainer: true, inputs: [{ name: 'columns', type: 'number' }] },
+  { type: 'grid', namespace: 'ui', isContainer: true, inputs: [{ name: 'columns', type: 'number' }, { name: 'children', type: 'slot' }] },
   { type: 'object-chart', namespace: 'plugin-charts', isContainer: false, inputs: [
     { name: 'objectName', type: 'string', binding: 'object' },
   ] },

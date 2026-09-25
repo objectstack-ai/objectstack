@@ -23,6 +23,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "在席 ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and their presence status (computed on read)"
+      },
       created_at: {
         label: "作成日時"
       },

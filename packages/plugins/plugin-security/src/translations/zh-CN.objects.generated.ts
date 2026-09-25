@@ -318,6 +318,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "分配 ID",
         help: "该分配记录的 UUID。"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the permission set assigned to them (computed on read)"
+      },
       user_id: {
         label: "用户",
         help: "指向 sys_user 的外键。"
@@ -371,6 +375,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "绑定 ID",
         help: "岗位-权限集绑定记录的 UUID。"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the position and the permission set bound to it (computed on read)"
+      },
       position_id: {
         label: "岗位",
         help: "指向 sys_position 的外键。"
@@ -395,6 +403,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "分配 ID",
         help: "用户-岗位分配的 UUID。"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the position they hold (computed on read)"
       },
       user_id: {
         label: "用户",

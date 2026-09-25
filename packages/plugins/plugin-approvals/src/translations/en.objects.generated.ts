@@ -302,6 +302,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Delegation ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the delegator and the delegate (computed on read)"
+      },
       delegator_id: {
         label: "Delegator",
         help: "The user going out of office; their individually-routed approver slots are rerouted while active."
