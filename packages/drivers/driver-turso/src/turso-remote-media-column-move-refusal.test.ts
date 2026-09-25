@@ -7,8 +7,9 @@
  * `SqlDriver.planMediaColumnMove` walks `managedObjectFields` and probes each
  * table through Knex. A remote `TursoDriver` fills neither: no remote schema
  * door reaches the Knex `initObjects` that fills the map, and its Knex
- * connection is a placeholder `:memory:` database holding none of the
- * datasource's tables. `os migrate files-to-references` mapped the resulting
+ * connection was then a placeholder `:memory:` database holding none of the
+ * datasource's tables (since #20054 there is no Knex connection at all).
+ * `os migrate files-to-references` mapped the resulting
  * empty scan to "nothing to move — this datastore declares no single-value
  * media column".
  *
