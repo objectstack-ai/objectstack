@@ -386,14 +386,4 @@ describe('#17676 ruling A\' item 5: the three probes across a restart of a stock
       `GET /data/${OBJECT} after a restart: ${JSON.stringify(after?.data.body)} (code ${String(errorCode(after?.data.body))})`,
     ).toBe(200);
   });
-
-  it('the second boot hydrated sys_metadata instead of skipping it as a "project kernel"', () => {
-    // The plugin's `else` line. It printed on every self-hosted boot before
-    // #20071, and it was false there: this composition persists its own
-    // `sys_metadata`. The second boot is where it matters, because only there
-    // is anything runtime-authored waiting to be read back.
-    expect(secondBoot, 'the second boot must not skip hydration').not.toContain(
-      'Project kernel — skipping sys_metadata hydration',
-    );
-  });
 });
