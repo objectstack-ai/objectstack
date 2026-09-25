@@ -8,7 +8,7 @@ Clause-②: yes (narrowing)
 
 `TursoDriver` extends `SqlDriver`. Before this change, 23 public `SqlDriver` members had no remote-mode arm, so a remote driver ran their Knex implementations. Remote mode builds Knex with no connection, so those calls failed with knex's `Unable to acquire a connection`, which reads as a network fault, or they answered from state no remote schema sync fills. Each one is now answered on the remote database or refused with `NOT_IMPLEMENTED` / 501, and the driver's source lists every public `SqlDriver` member with its remote answer. A method added to `SqlDriver` later fails this package's type check until its remote answer is decided.
 
-**BREAKING.** On a remote driver, five calls that used to answer now refuse or answer differently. This narrows what a published driver accepts. It ships as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`).
+**BREAKING.** On a remote driver, six members that used to answer now refuse or answer differently. This narrows what a published driver accepts. It ships as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`).
 
 - `explain()` and `analyzeQuery()` used to resolve with the SQL the local compiler would build, plus an `error` field in place of a plan. They now reject with `NOT_IMPLEMENTED` / 501.
 - `applyMigrationEntries()` used to resolve. Every entry came back `skipped`, including a destructive entry that `allowDestructive` permitted. It now rejects with `NOT_IMPLEMENTED` / 501, with or without entries.
