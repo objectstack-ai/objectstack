@@ -36,6 +36,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ObjectQL } from '@objectstack/objectql';
 import { Runtime } from './runtime.js';
 import { createStandaloneStack } from './standalone-stack.js';
 
@@ -158,7 +159,7 @@ describe('[#20071] createStandaloneStack declares sys_metadata hydration instead
             },
         });
         await protocol.saveMetaItem({ type: 'app', name: APP, item: { name: APP, label: 'Hydration Console' } });
-        const engine1: any = first.getService('objectql');
+        const engine1 = first.getService<ObjectQL>('objectql');
         // Harness health: both rows are persisted env-wide and active — exactly
         // the population `loadMetaFromDb` selects — so their absence from the
         // next boot's registry can only be the boot's doing.
@@ -184,9 +185,12 @@ describe('[#20071] createStandaloneStack declares sys_metadata hydration instead
         // ── boot 2: same file, nothing authored — only hydration can bring them back
         const second = await boot((await createStandaloneStack(stackConfig)).plugins);
         kernels.push(second);
-        const engine2: any = second.getService('objectql');
+        const engine2 = second.getService<ObjectQL>('objectql');
         expect(engine2.registry.getObject(OBJECT)?.name, `${OBJECT} is registered after the restart`).toBe(OBJECT);
-        expect(engine2.registry.getItem('app', APP)?.name, `app ${APP} is registered after the restart`).toBe(APP);
+        expect(
+            engine2.registry.getItem<{ name?: string }>('app', APP)?.name,
+            `app ${APP} is registered after the restart`,
+        ).toBe(APP);
         const rows: Array<{ title?: unknown }> = await engine2.find(OBJECT, {});
         expect(rows.map((r) => r.title)).toEqual(['survives the restart']);
     }, BOOT_TIMEOUT);
