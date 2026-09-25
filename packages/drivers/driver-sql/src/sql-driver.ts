@@ -3878,13 +3878,14 @@ function sqliteLikePatternPlan(pattern: string): SqliteLikePatternPlan {
  * so a NUL-free pattern over a value holding one answered a different
  * question: `$like: 'a'` matched `'a'` + U+0000 + `'b'`, and `$like: ''`
  * matched U+0000 + `'z'`. Measured at base `fe677aeeed` over 108 patterns and
- * 59 stored values, identically on better-sqlite3 (SQLite 3.53.4), sql.js
- * (3.49.1), `TursoDriver` local, and `TursoDriver` remote over a real
- * `@libsql/client` engine (3.45.1): 336 of 3224 cells over a value holding
- * U+0000 differed from `@objectstack/formula`, and 0 of 3472 over a value
- * without one. SQLite has no NUL-safe pattern operator (`LIKE` cuts the same
- * way) and `replace()` cannot target U+0000 (it returns its input unchanged),
- * so the value is rewritten first and then handed to `GLOB`:
+ * 22 compositions against 59 stored values, identically on better-sqlite3
+ * (SQLite 3.53.4), sql.js (3.49.1), `TursoDriver` local, and `TursoDriver`
+ * remote over a real `@libsql/client` engine (3.45.1): 359 of 3380 cells over a
+ * value holding U+0000 differed from `@objectstack/formula`, and 0 of 3640 over
+ * a value without one inside the Basic Multilingual Plane. SQLite has no
+ * NUL-safe pattern operator (`LIKE` cuts the same way) and `replace()` cannot
+ * target U+0000 (it returns its input unchanged), so the value is rewritten
+ * first and then handed to `GLOB`:
  *
  * - **A value without U+0000** takes `col GLOB ?`, exactly as before, so its
  *   answer cannot move. `instr()` over BLOB finds a U+0000 wherever it is.

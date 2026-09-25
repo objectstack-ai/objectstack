@@ -10,7 +10,8 @@
  * `TursoDriver` remote over a real `@libsql/client` engine (3.45.1), all four
  * alike: over 108 patterns and 22 compositions against 59 stored values, 359 of
  * 3380 cells over a value holding U+0000 differed from `@objectstack/formula`,
- * and 0 over a value without one. For example `$like: 'a'` returned
+ * and 0 of 3640 over a value without one inside the Basic Multilingual Plane.
+ * For example `$like: 'a'` returned
  * `'a'` + U+0000 + `'b'`, and `$like: '_'` missed a lone U+0000.
  *
  * `likePatternPredicate` now rewrites a value holding U+0000 before `GLOB` reads
