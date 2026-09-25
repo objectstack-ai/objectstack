@@ -19,6 +19,7 @@ import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js
 import {
   assertReadScopeCannotVacate,
   assertReadScopeComparandsRunnable,
+  assertReadScopePlaceholdersResolvable,
   compileScopedFilterToSql,
 } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
@@ -662,6 +663,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Judged on the scope ALONE, for the attribution reason above; the
     // caller's own `where` keeps reaching the engine's doors and its 400.
     assertReadScopeComparandsRunnable(scope, objectName);
+    // [#19995] …and the placeholder half. The engine resolves `{…}` values on
+    // the COMPOSED `where`, so a placeholder in the scope it cannot resolve
+    // came back as its `FILTER_TOKEN_*` / 400 with the token relayed. Judged
+    // with the engine's own resolver and the context the caller forwards to
+    // `executeAggregate` alongside this filter. After the comparand faces
+    // because the engine resolves after its lowering doors, so a scope with
+    // both defects logs the sentence the engine would have given; the wire
+    // envelope is the same either way. Before the mark, like its siblings.
+    assertReadScopePlaceholdersResolvable(scope, objectName, ctx.context);
     const scopeFilter = markFilterSubtreeProvenance(scope as Record<string, unknown>, 'policy');
     if (!userFilter) return scopeFilter;
     return { $and: [userFilter, scopeFilter] };
@@ -1149,6 +1159,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // engine refuses would come back as its relayed 400, naming the referenced
     // object's policy. Before the mark, for the same reason as the line above.
     if (scope != null) assertReadScopeComparandsRunnable(scope, refObject);
+    // [#19995] …and the placeholder half, as at `withReadScope`, with the
+    // context forwarded to `executeAggregate` below.
+    if (scope != null) assertReadScopePlaceholdersResolvable(scope, refObject, ctx.context);
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {
