@@ -853,6 +853,59 @@ export const PageCardProps = strictObject({
  * ----------------------------------------------------------------------
  */
 
+/**
+ * The ONE describe of the block-level `requiredPermissions` gate, carried word
+ * for word by `record:details`, `record:highlights`, `record:related_list` and
+ * `record:quick_actions` (#18159, seat ruling A on #19186's ruling-B semantics:
+ * one word, one meaning, one text). The shape is `z.array(z.string()).optional()`
+ * on all four; `component-record-block-field-security.test.ts` holds the four
+ * declarations identical.
+ *
+ * Each clause is read off the objectui pin this repo builds against
+ * (`.objectui-sha` = `f8a9d0fb0596`), under `packages/plugin-detail/src/renderers/`
+ * and `packages/permissions/src/`:
+ *
+ * 1. CAPABILITIES, NOT OBJECT ACTIONS. Every block gates through
+ *    `perms.hasCapabilities(required)` — `record-details.tsx:235`,
+ *    `record-highlights.tsx:93`, `record-related-list.tsx:276`,
+ *    `record-quick-actions.tsx:263` — and never `perms.can(objectName, …)`;
+ *    each renderer's docblock states the capability "is not object-scoped"
+ *    (`record-details.tsx:224`, `record-highlights.tsx:77`,
+ *    `record-related-list.tsx:263`, `record-quick-actions.tsx:252`). `read`
+ *    is looked up in the capability set like any other name.
+ * 2. ALL OF THEM. `MePermissionsProvider.tsx:416` is
+ *    `required.every((p) => held.has(p))`.
+ * 3. THE OUTCOME. Each block returns a `role="status"` "Insufficient
+ *    permissions to view …" notice instead of its content —
+ *    `record-details.tsx:235-243`, `record-highlights.tsx:151-164`,
+ *    `record-related-list.tsx:276-284`, `record-quick-actions.tsx:263-271`.
+ *    Checks that already withhold the content run first on two of them (no
+ *    record bound, `record-details.tsx:187`; no object,
+ *    `record-related-list.tsx:218`; the related object's read gate,
+ *    `record-related-list.tsx:236`), which is why the text says "wherever it
+ *    would otherwise render" rather than promising the notice unconditionally.
+ * 4. PRESENTATION ONLY. The gate is renderer code: nothing in this repo's
+ *    server packages reads a page component's `requiredPermissions`. The data
+ *    stays in reach — a gated `record:highlights` registers no field names
+ *    (`record-highlights.tsx:146-149`), so `record:details` no longer
+ *    de-duplicates those fields out of its body. To keep a value from a
+ *    user, gate the object, the field or the action.
+ * 5. UNRESOLVED CAPABILITIES FAIL OPEN. `hasCapabilities` answers `true` when
+ *    `systemPermissions` was never reported (`MePermissionsProvider.tsx:414`),
+ *    under the role-based provider (`PermissionProvider.tsx:77`) and with no
+ *    provider mounted (`usePermissions.ts:45`); a REPORTED empty array reaches
+ *    the `every` at `:416` and gates.
+ *
+ * Unlike the field's own `requiredPermissions` (ADR-0066 D3, enforced by the
+ * server before the payload leaves it), this key authorises
+ * nothing.
+ */
+const RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION =
+  '[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object\'s read or edit permission. '
+  + 'When the client has resolved the user\'s capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. '
+  + 'Presentation only: it authorises nothing, and the data API still serves the same data to the same user. '
+  + 'A client that cannot resolve the user\'s capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open.';
+
 export const RecordDetailsProps = strictObject({
   surface: 'this `record:details`',
   history: PROPS_HISTORY,
@@ -1120,18 +1173,14 @@ export const RecordDetailsProps = strictObject({
    * field list they remove the same rows. Converging them is a contract
    * question this card did not open.
    *
-   * ⚠️ The THIRD key objectui reads on these three blocks —
-   * `requiredPermissions` — is deliberately NOT declared here. Its read is
-   * `perms.can(objectName, name)`, whose second parameter is the closed
-   * `PermissionActionSchema` enum (`create`/`read`/…/`admin`), not the
-   * ADR-0066 capability set every other `requiredPermissions` in this spec
-   * names. Measured: under the backend-backed provider an unmapped name falls
-   * to the object's `allowRead` bit, so a capability nobody holds passes for
-   * every reader; under the role-based provider the same name is denied for
-   * everyone whenever the object carries a permission config. Declaring it
-   * would mint the ADR-0049 fail-open access gate this repo retired on
-   * `app.areas[].requiredPermissions` in 17.0.0. The exit is the spec seat's
-   * to rule.
+   * ⚠️ The THIRD key objectui reads on these three blocks,
+   * `requiredPermissions`, is declared below them — a different mechanism
+   * from this pair and from the field's own `requiredPermissions` above. It
+   * is the block-level ADR-0066 capability gate, read through the capability
+   * set, with the one describe it shares word for word with
+   * `record:quick_actions` ({@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}
+   * carries the renderer read points). Like this pair it is presentation
+   * only: it authorises nothing.
    */
   enforceFieldSecurity: z.boolean().optional().describe(
     'Fold this block\'s field list through the caller\'s FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value.',
@@ -1139,6 +1188,12 @@ export const RecordDetailsProps = strictObject({
   redactFields: z.array(z.string()).optional().describe(
     'Field names this block never renders, whatever the permission answer (renderer default: render everything authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. Neighbours `hideFields`, which is the dedupe channel the renderer also writes to.',
   ),
+  /**
+   * Block-level ADR-0066 capability gate (#18159) — same shape and same
+   * describe as `record:quick_actions.requiredPermissions`; the read points
+   * behind every clause are on {@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}.
+   */
+  requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1255,8 +1310,8 @@ export const RecordRelatedListProps = strictObject({
   }).optional().describe('Add-existing-via-picker config (generic m2m/junction assignment).'),
   /**
    * The record-block field-security pair — see the family header on
-   * `RecordDetailsProps` for what the two keys are, what they are not, and why
-   * the third key objectui reads on this block is not declared.
+   * `RecordDetailsProps` for what the two keys are, what they are not, and how
+   * they differ from the block-level `requiredPermissions` gate declared below.
    *
    * On THIS block the pair folds `columns` rather than a field list, and
    * `redactFields` is additionally handed down to `RelatedList` itself: the
@@ -1273,6 +1328,12 @@ export const RecordRelatedListProps = strictObject({
   redactFields: z.array(z.string()).optional().describe(
     'Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set.',
   ),
+  /**
+   * Block-level ADR-0066 capability gate (#18159) — same shape and same
+   * describe as `record:quick_actions.requiredPermissions`; the read points
+   * behind every clause are on {@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}.
+   */
+  requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1356,8 +1417,8 @@ export const RecordHighlightsProps = strictObject({
   layout: z.enum(['horizontal', 'vertical']).default('horizontal').describe('Layout orientation for highlight fields'),
   /**
    * The record-block field-security pair — see the family header on
-   * `RecordDetailsProps` for what the two keys are, what they are not, and why
-   * the third key objectui reads on this block is not declared.
+   * `RecordDetailsProps` for what the two keys are, what they are not, and how
+   * they differ from the block-level `requiredPermissions` gate declared below.
    *
    * On THIS block the pair folds the normalized `fields` chips. The renderer
    * expresses the fail-closed arm by dropping unnameable entries BEFORE the
@@ -1372,6 +1433,12 @@ export const RecordHighlightsProps = strictObject({
   redactFields: z.array(z.string()).optional().describe(
     'Field names this block never renders as a chip, whatever the permission answer (renderer default: render every field authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object\'s `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set.',
   ),
+  /**
+   * Block-level ADR-0066 capability gate (#18159) — same shape and same
+   * describe as `record:quick_actions.requiredPermissions`; the read points
+   * behind every clause are on {@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}.
+   */
+  requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1785,7 +1852,7 @@ export const RecordQuickActionsProps = strictObject({
   },
 }, {
   actionNames: z.array(z.string()).optional().describe('Names of actions declared on this object (`actions[]`), in display order. The engine still location-filters named actions. Measured: when omitted (and the host supplies nothing) the bar resolves NO actions and renders its empty placeholder — it does not fall back to "every action at this location", whatever the registration\'s input list claims.'),
-  requiredPermissions: z.array(z.string()).optional().describe('Hide the whole bar unless the current user holds every named permission on this object.'),
+  requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
   location: ActionLocationSchema.optional().describe('Which declared action location this bar renders (renderer default: `record_header`).'),
   align: z.enum(['start', 'center', 'end']).optional().describe('Horizontal alignment of the button row (renderer default: `end`).'),
   inline: z.boolean().optional().describe('Render in the flow instead of pulling up into the record-header band. The page header sets this itself when it hosts the bar in its own action slot.'),
