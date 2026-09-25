@@ -302,6 +302,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "委派 ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the delegator and the delegate (computed on read)"
+      },
       delegator_id: {
         label: "委派人",
         help: "即将不在岗的用户；规则生效期间，路由到其个人的审批人槽位将被改派。"
