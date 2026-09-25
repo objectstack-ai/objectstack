@@ -550,12 +550,20 @@ describe('[#7693] `$icontains` is fenced on the `where` door, like its four sibl
     expect(tree({ name: { $icontains: 'admin' } })).toEqual({
       kind: 'leaf', member: 'name', operator: 'icontains', values: ['admin'],
     });
-    expect(tree({ name: { $icontains: 5 } })).toEqual({
-      kind: 'leaf', member: 'name', operator: 'icontains', values: [5],
-    });
-    expect(tree({ name: { $icontains: null } })).toEqual({
-      kind: 'leaf', member: 'name', operator: 'icontains', values: [null],
-    });
+    // [#20068] RE-JUDGED: `5` and `null` were in this control group as
+    // "legitimate" comparands, and they are not. `FILTER_TEXT_CASES` declares a
+    // non-string `$icontains` comparand REFUSED (`INVALID_FILTER`, naming
+    // `$icontains`), and this door now asks the published predicate, so both are
+    // refused here as they are at the spec's parse door and on `driver-sql`.
+    // Kept, flipped: the fence stays narrow for a non-empty string (above) and
+    // refuses exactly the table's rows. `icontains-text-comparand-refusal.test.ts`
+    // carries the rows on every face.
+    for (const refused of [5, null]) {
+      const err = refusalOf(() => tree({ name: { $icontains: refused } }));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$icontains');
+    }
     // …and the sibling door is unmoved, which is the no-regression half.
     expect(scope({ name: { $icontains: 'admin' } }).params).toEqual(['%admin%', '\\']);
   });
