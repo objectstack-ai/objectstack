@@ -161,8 +161,18 @@ function makeHarness(opts: {
   // merged with the payload) before the statement, and a terminal that skipped
   // it would be refused fail-closed by the middleware. Only the by-id path is
   // modelled, through the producer's own dispatch predicate.
+  //
+  // [#20013] …and the INSERT path, because the Layer 0 tenant wall now
+  // installs the same seam on a walled insert: `ObjectQL.insert` runs it on
+  // the rows the `beforeInsert` chain produced, which here (no hooks) are the
+  // rows as sent.
   const runByIdWriteImageCheck = async (opCtx: any) => {
     const seam = opCtx?.postHookWriteImageCheck;
+    if (seam && opCtx.operation === 'insert') {
+      seam.honoured = true;
+      await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
+      return;
+    }
     if (!seam || opCtx.operation !== 'update') return;
     const dispatch = assertEngineUpdateDispatch(opCtx.data, opCtx.options);
     if (dispatch.kind !== 'by-id') return;

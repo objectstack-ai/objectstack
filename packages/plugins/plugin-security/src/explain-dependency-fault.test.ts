@@ -27,7 +27,7 @@
 // controls pin that a dependency that ANSWERS — including one that answers
 // "no restriction" — is reported exactly as before.
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-sharing';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
@@ -244,6 +244,19 @@ async function makeStack(
             // A write stops at the engine's door: reaching it is the admission
             // under test, and no write verb is exercised on this double.
             if (operation === 'read') rows = await engine.find(OBJECT, { where: opCtx.ast.where });
+            // [#20013] …except the one step the engine takes at that door
+            // before its statement: it runs the installed stored-row seam
+            // (`postHookWriteImageCheck`) on the row it writes, the prior row
+            // merged with the payload. The Layer 0 tenant wall installs that
+            // seam on every walled update (this stack is walled), and a door
+            // that skipped it would be refused fail-closed after `next()`.
+            const seam = opCtx.postHookWriteImageCheck;
+            if (operation === 'update' && seam) {
+              const dispatch = assertEngineUpdateDispatch(opCtx.data, opCtx.options);
+              const prior = dispatch.kind === 'by-id' ? await engine.find(OBJECT, { where: { id: dispatch.id } }) : [];
+              seam.honoured = true;
+              await seam.evaluate(prior.map((r: Record<string, unknown>) => ({ ...r, ...opCtx.data })));
+            }
           });
         });
       } catch (error) {

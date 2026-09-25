@@ -42,10 +42,10 @@ export const entry: SemanticMigration = {
     + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
     + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
     + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-    + '`.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d`, re-read from this tree — '
+    + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
     + 'spells resourceLimits.timeout 0 times across '
-    + '8303 tracked files, against lit controls timeout 1086, RuntimeConfig 240 and resourceLimits '
-    + '2 on the same corpus; both resourceLimits hits are prose in packages/app-shell recording '
+    + '8512 tracked files, against lit controls timeout 1096, RuntimeConfig 245 and resourceLimits '
+    + '2 on the same corpus (0 across 8303, and 1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
     + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
     + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
     + '#14478, ADR-0087.',

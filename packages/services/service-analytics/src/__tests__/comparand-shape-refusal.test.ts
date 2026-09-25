@@ -49,7 +49,12 @@
  * The analytics door answers `INVALID_FILTER` / 400 — a caller authored that
  * filter. The read scope answers `READ_SCOPE_COMPILE_FAILED` / 500 fail-closed —
  * a policy produced it, and #5367 ruled that route withholds its message. One
- * sentence, two envelopes; `comparand-shape.ts` owns the sentence.
+ * sentence, two envelopes; `comparand-shape.ts` owns the sentence. [#20035]
+ * For the shapes the shared comparand-TYPE face judges (a plain object, a
+ * `Map`, a binary), the `where` door now answers first in THAT face's sentence
+ * (see the #20035 section below), while the read scope keeps this file's
+ * sentence because its own gates run before the face (#20018); still two
+ * envelopes, and each diagnosis names the offending member.
  *
  * # [#7693] The family's fifth member
  *
@@ -304,7 +309,19 @@ describe('[#5234] the read-scope lowering refuses the same two shapes, fail-clos
 
   describe('the guard is narrow here too', () => {
     it('keeps binding every legitimate `$in` member', () => {
-      expect(scope({ status: { $in: ['a', null, 7, true] } }).params).toEqual(['a', null, 7, true]);
+      expect(scope({ status: { $in: ['a', 7, true] } }).params).toEqual(['a', 7, true]);
+    });
+
+    it('[#20018] a `null` member is no longer one of them — refused by the shared list-shape face', () => {
+      // This row used to bind `null` beside the three members above. The
+      // null-member ruling (2026-08-31) refuses it at the shared face, and the
+      // lowering now runs that face after its own gates, as the ObjectQL
+      // execute face does — so this door's own member gate is still narrow,
+      // and the refusal carries the face's sentence, not this door's.
+      const err = refusalOf(() => scope({ status: { $in: ['a', null, 7, true] } }));
+      expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(err.status).toBe(500);
+      expect(err.message).toContain('does not accept null as a list member');
     });
 
     it('keeps every primitive LIKE comparand', () => {

@@ -215,7 +215,8 @@ export type { Skill } from './ai/skill.zod';
 
 // DX Validation Utilities (re-exported for convenience)
 export { objectStackErrorMap, formatZodError, formatZodIssue, safeParsePretty } from './shared/error-map.zod';
-export { suggestFieldType, findClosestMatches, formatSuggestion } from './shared/suggestions.zod';
+export { findClosestMatches, formatSuggestion } from './shared/suggestions.zod';
+export { suggestFieldType } from './shared/field-type-suggestion';
 export { normalizeMetadataCollection, normalizeStackInput, normalizePluginMetadata, MAP_SUPPORTED_FIELDS, METADATA_ALIASES } from './shared/metadata-collection.zod';
 export type { MetadataCollectionInput, MapSupportedField, NormalizeStackInputOptions } from './shared/metadata-collection.zod';
 

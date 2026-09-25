@@ -7,7 +7,7 @@ import {
   isCompatible,
   type SqlDialect,
 } from './type-compat';
-import { suggestFieldType } from '../shared/suggestions.zod';
+import { suggestFieldType } from '../shared/field-type-suggestion';
 
 describe('canonicalizeSqlType (ADR-0015 §4.6)', () => {
   it('strips length/precision parameters', () => {

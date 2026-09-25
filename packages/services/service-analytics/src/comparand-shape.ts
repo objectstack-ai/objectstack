@@ -149,7 +149,22 @@ import {
  * `ArrayBuffer.isView` (which covers `Buffer`, a `Uint8Array`) is a bindable the
  * engine-level door does not admit, and it is deliberately kept: a blob column
  * really is comparable on this driver family, and the read path measured it
- * accepted in every bind position. It is `driver-sql`'s own recorded extra too.
+ * accepted in every bind position when #8186 reconciled the set (neither door
+ * serves it now — the two notes below). It is `driver-sql`'s own recorded
+ * extra too.
+ *
+ * [#20018] A READ SCOPE no longer reaches this extra: `compileScopedFilterToSql`
+ * runs the shared comparand-type face after its own gates, and that face
+ * refuses binary, the answer the ObjectQL execute face already gave the same
+ * scope. This predicate's own answer is unchanged.
+ *
+ * [#20035] Nor does the analytics `where` door. It now runs the same face on
+ * the object spelling before any predicate is asked, and the keep-or-reconcile
+ * call #8186 asked for was made to RECONCILE: measured on a real engine, that
+ * door never compared a binary as a blob (the native path bound it as JSON
+ * text through `toSqlBindValue`), and no producer can send one over JSON. So
+ * the extra is admitted by this predicate and served at neither door; it stays
+ * a value-for-value mirror of `driver-sql`'s own recorded extra.
  */
 export function isBindableComparand(value: unknown): boolean {
   // `undefined` — see {@link isRenderableTextComparand}'s note; it is admitted

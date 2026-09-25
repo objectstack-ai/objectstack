@@ -23,6 +23,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Request ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the request source and the record it is about (computed on read)"
+      },
       organization_id: {
         label: "Organization",
         help: "Organization of the record this request is about (falls back to the acting context when the record has none)"
@@ -211,6 +215,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Action ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the action and, when recorded, its step (computed on read)"
       },
       organization_id: {
         label: "Organization",

@@ -38,18 +38,23 @@
  *   - **`undefined` is REFUSED by both doors** — `assertDefinedComparands`
  *     (#6386, on #6050's ruling B) at the `where` door and #6125's upstream
  *     refusal at the read scope, both of which fire before a predicate is
- *     consulted. The `undefined` arms inside the predicates, and `comparand()`'s
+ *     consulted. [#20035] At the `where` door the shared comparand-type face
+ *     now fires first, in its own words; same verdict, same envelope. The `undefined` arms inside the predicates, and `comparand()`'s
  *     normalise-to-`null`, survive as deliberately-kept dead arms (#5526's call
  *     to reopen, not this card's). The `undefined` row below is what makes that
  *     checkable instead of asserted — it pins REFUSAL, at both doors.
  *   - **binary** binds but has no faithful text rendering, so it is accepted in
  *     a bind position and refused by the LIKE family. That asymmetry is the
  *     reason the package carries two predicates rather than one with a flag.
- *     [#20035] At the PREDICATE level it still is. At the `where` DOOR it is
- *     now refused in every position: the door runs the shared comparand-TYPE
- *     face before any predicate is asked, and that face does not admit binary
- *     (see the binary row's note for the evidence the call rests on). The
- *     read-scope door keeps the admission.
+ *     At the PREDICATE level it still is, and at neither DOOR is it reachable
+ *     as an accepted comparand any more: both now run the shared comparand-type
+ *     face, which does not admit binary.
+ *     [#20018] On the READ-SCOPE door it is refused in every position: the
+ *     lowering runs the shared comparand-type face after its own gates, as the
+ *     ObjectQL execute face does.
+ *     [#20035] On the `where` DOOR it is refused in every position too: the
+ *     door runs the same face before any predicate is asked (see the binary
+ *     row's note for the evidence the keep-or-reconcile call rests on).
  *
  * @see comparand-shape.ts — the predicates and the messages this pins
  * @see https://github.com/objectstack-ai/objectstack/issues/8186
@@ -136,9 +141,15 @@ const MATRIX: readonly Row[] = [
   // spelling used to compile it to `status IN (NULL)`; the FilterArray
   // spelling was already refused (`where-face-arms-refusal.test.ts`). The
   // read-scope cell is that door's own and is not this card's.
+  // [#20018] …and the read-scope cell moved too, by the same ruling at the
+  // other door: the read-scope lowering now runs the shared list-shape face
+  // after its own gates, so a `null` MEMBER of `$in` is refused there as the
+  // ObjectQL execute face already refused it
+  // (`read-scope-comparand-three-faces.test.ts`). `null` as a scalar or LIKE
+  // comparand is not a list member and moves at neither door.
   { label: 'null', value: null,
     bindable: true, renderable: true,
-    whereLike: OK, whereIn: REFUSED_WHERE, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
+    whereLike: OK, whereIn: REFUSED_WHERE, whereEq: OK, scopeLike: OK, scopeIn: REFUSED_SCOPE, scopeEq: OK },
   { label: 'Date', value: new Date('2026-01-01T00:00:00.000Z'),
     bindable: true, renderable: true,
     whereLike: OK, whereIn: OK, whereEq: OK, scopeLike: OK, scopeIn: OK, scopeEq: OK },
@@ -146,37 +157,51 @@ const MATRIX: readonly Row[] = [
   // ── the two package-local predicate admissions, neither reachable ──────────
   // `undefined`: the predicates admit it; BOTH doors refuse it upstream (#6386
   // at the `where` door, #6125 at the read scope) before a predicate is asked.
+  // [#20035] At the `where` door the shared comparand-type face now answers
+  // first, in its own words; the verdict and envelope below are unchanged.
   { label: 'undefined', value: undefined,
     bindable: true, renderable: true,
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
     scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // binary: binds, does not render — accepted where it binds, refused by LIKE.
-  // [#20035] RE-JUDGED: the two `where` bind cells moved from accept to
-  // refused, on purpose and with the evidence stated, because the type face's
-  // docblock lets a door keep binary only as a DECLARED local extra and #8186
-  // asked for an explicit keep-or-reconcile call. Reconciled: the maintainer's
-  // ruling on #7872 (2026-08-12) 「refuses everything else loudly at the
-  // compile face」, and this door never delivered the extra — measured on a
-  // real engine before the change, the native path bound the buffer as the
-  // JSON TEXT '{"0":1,"1":2}' (no row; `$ne` served every row), the engine
-  // path and the FilterArray spelling refused it, and no producer can send one
-  // over JSON. The predicate columns and the read-scope cells are unchanged.
+  // Four cells of this row moved AFTER the #8186 measurement, each named with
+  // the change that moved it; `whereLike` / `scopeLike` were refused from the
+  // start, and the predicate columns never moved.
+  // [#20018] `scopeIn` / `scopeEq`: the read-scope lowering now runs the shared
+  // comparand-type face after its own gates, and that face does not admit
+  // binary. The ObjectQL execute face already refused a binary read-scope
+  // comparand.
+  // [#20035] `whereIn` / `whereEq`: RE-JUDGED from accept to refused, on
+  // purpose and with the evidence stated, because the type face's docblock
+  // lets a door keep binary only as a DECLARED local extra and #8186 asked for
+  // an explicit keep-or-reconcile call. Reconciled: the maintainer's ruling on
+  // #7872 (2026-08-12) 「refuses everything else loudly at the compile face」,
+  // and this door never delivered the extra — measured on a real engine before
+  // the change, the native path bound the buffer as the JSON TEXT
+  // '{"0":1,"1":2}' (no row; `$ne` served every row), the engine path and the
+  // FilterArray spelling refused it, and no producer can send one over JSON.
+  // So the extra is now reachable from neither door; the predicate above still
+  // admits it.
   { label: 'binary', value: new Uint8Array([1, 2]),
     bindable: true, renderable: false,
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
-    scopeLike: REFUSED_SCOPE, scopeIn: OK, scopeEq: OK },
+    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
 
   // ── shapes outside the fence ──────────────────────────────────────────────
   // `$eq` accepted them on purpose: #5234 left the `{$eq: {…}}` account alone.
-  // [#20035] RE-JUDGED: the `where` door's `$eq` cell moved to refused. The
-  // #7872 ruling (2026-08-12) closes that account at the shared comparand-TYPE
-  // face (「refuses everything else loudly at the compile face」), which the
-  // door now runs on the object spelling, as `parseFilterAST` and the engine
-  // seam always did. The read-scope cell is that door's own and is not moved.
+  // Both `$eq` cells have moved since, each by the #7872 set (「refuses
+  // everything else loudly at the compile face」) reaching one more door:
+  // [#20018] `scopeEq`: the read-scope lowering now runs the shared
+  // comparand-type face, the answer the ObjectQL execute face already gave (a
+  // plain object bound as a scalar was refused by the database at execution,
+  // not by this package).
+  // [#20035] `whereEq`: RE-JUDGED to refused — the `where` door now runs the
+  // same face on the object spelling, as `parseFilterAST` and the engine seam
+  // always did.
   { label: 'plain object', value: { foo: 1 },
     bindable: false, renderable: false,
     whereLike: REFUSED_WHERE, whereIn: REFUSED_WHERE, whereEq: REFUSED_WHERE,
-    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: OK },
+    scopeLike: REFUSED_SCOPE, scopeIn: REFUSED_SCOPE, scopeEq: REFUSED_SCOPE },
   // [#19975] One cell of this row moved AFTER the #8186 measurement, on
   // purpose: ruling 乙 (#19757) refuses a list in the equality slot, and the
   // read-scope lowering now refuses it under `$eq` instead of binding the list
@@ -279,7 +304,9 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
     it('binary stays a package-local extra the door does not admit', () => {
       // [#20035] At the predicate level, which is what this case reads. The
       // `where` door refuses binary before this predicate is asked (the matrix
-      // row above); the read-scope door still asks it.
+      // row above); the read-scope door still asks it and then refuses the
+      // value with the shared type face after its own gates (#20018), so the
+      // extra is admitted here and served at neither door.
       const buf = new Uint8Array([1, 2]);
       expect(isAcceptedFilterComparand(buf)).toBe(false);
       expect(isBindableComparand(buf)).toBe(true);
@@ -295,16 +322,22 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
     expect(doorTypes.map((r) => r.label)).toEqual([
       'string', 'number', 'bigint', 'boolean', 'null', 'Date',
     ]);
+    // The cells a SHAPE ruling moved, not a TYPE verdict: `null` is an accepted
+    // comparand type, but not as an `$in` MEMBER — the shared shape face's
+    // 2026-08-31 carve-out, now run at BOTH doors. Every cell is named with the
+    // change that moved it, so no other cell can move under this sentence.
+    const moved: Record<string, string> = {
+      'null whereIn': REFUSED_WHERE, // [#20010] the `where` door's envelope
+      'null scopeIn': REFUSED_SCOPE, // [#20018] the read-scope lowering's envelope
+    };
     for (const row of doorTypes) {
-      // [#20010] ONE exception, and it is not a TYPE verdict: `null` is an
-      // accepted comparand type, but not as an `$in` MEMBER — the SHAPE face's
-      // 2026-08-31 carve-out, which this door now runs. Every other position
-      // of every accepted type still accepts.
-      const whereIn = row.label === 'null' ? REFUSED_WHERE : OK;
-      expect(row.whereIn, `${row.label} $in`).toBe(whereIn);
-      for (const cell of [row.whereLike, row.whereEq,
-                          row.scopeLike, row.scopeIn, row.scopeEq]) {
-        expect(cell, row.label).toBe(OK);
+      const cells = {
+        whereLike: row.whereLike, whereIn: row.whereIn, whereEq: row.whereEq,
+        scopeLike: row.scopeLike, scopeIn: row.scopeIn, scopeEq: row.scopeEq,
+      };
+      for (const [position, cell] of Object.entries(cells)) {
+        const key = `${row.label} ${position}`;
+        expect(cell, key).toBe(moved[key] ?? OK);
       }
     }
   });

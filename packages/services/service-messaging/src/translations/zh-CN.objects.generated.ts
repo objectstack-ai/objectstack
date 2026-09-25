@@ -313,6 +313,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "投递 ID",
         help: "UUID——同时作为接收方的幂等键"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：投递标签（如已设置）和目标 URL（读取时计算）"
+      },
       source: {
         label: "来源",
         help: "来源域,如 'webhook' | 'flow'。UNIQUE(source, dedup_key)。"

@@ -283,7 +283,16 @@ function makeEngine() {
       const rows = await this.find(object, { ...options, limit: 1 });
       return rows[0] ?? null;
     },
-    async insert(object: string, data: any) {
+    // [#20013] The INSERT twin of the seam run below: the engine hands an
+    // installed write-image check the rows its `beforeInsert` chain produced —
+    // here (no hooks) the rows as sent. The Layer 0 tenant wall installs that
+    // seam on every walled insert, with or without a `check`.
+    async insert(object: string, data: any, opCtx?: any) {
+      const seam = opCtx?.postHookWriteImageCheck;
+      if (seam) {
+        seam.honoured = true;
+        await seam.evaluate(Array.isArray(data) ? data : [data]);
+      }
       (tables[object] ??= []).push({ ...data });
       return data;
     },
@@ -390,7 +399,7 @@ async function makeStack(opts: { orgScoping?: boolean } = {}): Promise<Stack> {
       await securityMw(opCtx, async () => {
         await sharingMw(opCtx, async () => {
           if (opCtx.operation === 'delete') await engine.delete(opCtx.object, opCtx.options);
-          else if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data);
+          else if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data, opCtx);
           else await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
           reached = true;
         });

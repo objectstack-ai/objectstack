@@ -418,23 +418,31 @@ describe('[#7598] the field-reference shape is read exactly as `driver-sql` read
     // `driver-sql`'s `fieldReferenceOf` requires `typeof ref === 'string'`, and
     // this package mirrors that spelling rather than inventing a third reading.
     // It is therefore NOT routed either: it is judged exactly as any other
-    // object comparand is.
+    // object comparand is, on BOTH doors, each in its own envelope — and on
+    // neither is it read as a reference.
     //
-    // [#20035] RE-JUDGED. On the `where` door that account used to BIND the
-    // object as JSON text — the account #5234 left open on purpose. The
-    // maintainer's ruling on #7872 (2026-08-12) closes it (a plain object is
-    // outside the accepted comparand types, and the shared type face
-    // 「refuses everything else loudly at the compile face」), and the door now
-    // runs that face: refused INVALID_FILTER / 400, as a plain object, at the
-    // face's path. The read-scope cell is that door's own and is unchanged.
-    // What this case protects — a non-string `$field` is not a reference, so
-    // it is neither routed nor served as one — is unchanged.
+    // It used to BIND on both: as JSON text on the `where` door (the account
+    // #5234 left open on purpose there) and as the object itself in the
+    // read-scope lowering. The maintainer's ruling on #7872 (2026-08-12) puts
+    // a plain object outside the accepted comparand types, and the shared type
+    // face 「refuses everything else loudly at the compile face」. Each door now
+    // runs that face:
     expect(findCrossFieldComparand({ amount: { $gt: { $field: 5 } } })).toBeNull();
-    const err = refusalOf(() => tree({ amount: { $gt: { $field: 5 } } }));
-    expect(err.code).toBe('INVALID_FILTER');
-    expect(err.status).toBe(400);
-    expect(err.message.startsWith('Filter comparand at where.amount.$gt is a plain object ({"$field":5})')).toBe(true);
-    expect(scope({ amount: { $gt: { $field: 5 } } }).params).toEqual([{ $field: 5 }]);
+    // [#20035] RE-JUDGED: the `where` door runs it on the object spelling
+    // before any node is built — refused INVALID_FILTER / 400, as a plain
+    // object, at the face's path.
+    const whereErr = refusalOf(() => tree({ amount: { $gt: { $field: 5 } } }));
+    expect(whereErr.code).toBe('INVALID_FILTER');
+    expect(whereErr.status).toBe(400);
+    expect(whereErr.message.startsWith('Filter comparand at where.amount.$gt is a plain object ({"$field":5})')).toBe(true);
+    // [#20018] The read-scope lowering runs it after its own gates (the
+    // ObjectQL execute face's answer too): READ_SCOPE_COMPILE_FAILED / 500.
+    // The refusal is the type face's, not the field-reference gate's.
+    const scopeErr = refusalOf(() => scope({ amount: { $gt: { $field: 5 } } }));
+    expect(scopeErr.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(scopeErr.status).toBe(500);
+    expect(scopeErr.message).toContain('is a plain object');
+    expect(scopeErr.message).not.toContain('compares against the field reference');
   });
 
   it('an ordinary object comparand is not a reference either — #7872 closed the account #5234 left open', () => {

@@ -62,6 +62,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, dialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -140,7 +141,15 @@ describe(`[#11541] driver-sql — aggregate() attributes an unresolvable column 
   // THE PROBE TABLE — five rows, three doors, one class of answer
   // ───────────────────────────────────────────────────────────────
 
-  const WHERE_NOSUCHCOL: NonNullable<DriverQuery['where']> = { nosuchcol: SECRET_LITERAL };
+  // [#20020] Marked 'author', as a read-scope merge boundary marks a caller's
+  // own predicate: the column NAME reaches the wire only for a predicate the
+  // caller is known to have written (the #8220 contract), and every row below
+  // pins that author-facing answer. The unmarked and policy-marked answers are
+  // pinned in `sql-driver-refusal-door-provenance.test.ts`.
+  const WHERE_NOSUCHCOL: NonNullable<DriverQuery['where']> = markFilterSubtreeProvenance(
+    { nosuchcol: SECRET_LITERAL },
+    'author',
+  );
 
   it('rows 1-2: find() and count() still answer the #8790 refusal — the baseline this door joins', async () => {
     for (const [half, run] of [
@@ -383,7 +392,8 @@ describe('[#11541] aggregateBackendFault — the three arms and their fences', (
 
   it('arm 2: a name in neither clause is the WHERE — #8790 verbatim', () => {
     const err = classify(
-      { where: { nosuchcol: 1 }, aggregations: [{ function: 'count', alias: 'n' }] },
+      // [#20020] The caller's own predicate, marked as a merge boundary marks it.
+      { where: markFilterSubtreeProvenance({ nosuchcol: 1 }, 'author'), aggregations: [{ function: 'count', alias: 'n' }] },
       'select count(*) as `n` from `t` where `nosuchcol` = 1 - no such column: nosuchcol',
     );
     expect(err.code).toBe('INVALID_FILTER');
@@ -413,7 +423,7 @@ describe('[#11541] aggregateBackendFault — the three arms and their fences', (
   // MySQL (DOTTED_STATUS_QUO, #8371 owns the dotted-path verdict).
   it('FENCE: a dotted where key is not attributed to an aggregation over its tail segment', () => {
     const err = classify(
-      { where: { 'title.x': 1 }, aggregations: [{ function: 'avg', field: 'x', alias: 'n' }] },
+      { where: markFilterSubtreeProvenance({ 'title.x': 1 }, 'author'), aggregations: [{ function: 'avg', field: 'x', alias: 'n' }] },
       'select avg(`x`) as `n` from `t` where `title`.`x` = 1 - no such column: title.x',
     );
     expect(err.code).toBe('INVALID_FILTER');

@@ -79,7 +79,7 @@
 import type { Knex } from 'knex';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { dialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -140,6 +140,16 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
     if (!err) throw new Error(`expected the driver to refuse ${JSON.stringify(where)}, but it compiled`);
     return err;
   };
+
+  /**
+   * [#20020] The caller's own predicate, marked as a read-scope merge boundary
+   * marks it — on a shallow COPY, so a shared case constant is never marked.
+   * The retired-operator refusal names the operator and its replacement only
+   * for a predicate the caller is known to have written (the #8220 contract);
+   * the withheld wording is pinned in `sql-driver-refusal-door-provenance.test.ts`.
+   */
+  const authored = (where: FilterCondition): FilterCondition =>
+    markFilterSubtreeProvenance({ ...where }, 'author');
 
   it('seeded the fixture (the premise)', async () => {
     expect(await ids({})).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
@@ -232,7 +242,7 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
     ],
   ] as const) {
     it(`REFUSES ${label}, naming the replacement`, async () => {
-      const err = await refusalOf(where);
+      const err = await refusalOf(authored(where));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('RETIRED');
@@ -295,7 +305,9 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
       // measured on this fixture, the unescaped pattern `*a*b*` returns rows
       // 7, 8 and 9 where the escaped one returns none of them. No fixture row
       // holds these characters, so the observable claim is that the pattern
-      // stays literal and selects nothing rather than expanding.
+      // stays literal and selects nothing rather than expanding. [#20024] Both
+      // operators compile to `instr()` now, literal by construction; the GLOB
+      // escape class still carries `$startsWith`.
       expect(await ids({ name: { $contains: comparand } })).toEqual([]);
       expect(await ids({ name: { $icontains: comparand } })).toEqual([]);
     });
@@ -303,20 +315,20 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
 
   it('compiles the case-exact SQLite construct, on both operators', async () => {
     // Identifier quoting is the dialect's (knex renders backticks on the sqlite
-    // clients), so the assertion is on the SHAPE. `[` / `]` are NOT stripped
-    // here the way #5702's version stripped them: under GLOB they are the
-    // escape mechanism, so erasing them would erase what is being pinned.
+    // clients), so the assertion is on the SHAPE. [#20024] Both operators
+    // compile to `instr()`, which reads the whole stored value (GLOB cut it at
+    // its first U+0000) and has no pattern language, so the comparand is bound
+    // raw — no `*` wrapper and no `[…]` escape class.
     const unquote = (sql: string) => sql.replace(/[`"]/g, '');
 
     const icontainsSql = unquote(driver.compileWhere({ name: { $icontains: 'acme' } }));
-    expect(icontainsSql).toContain('lower(name) GLOB lower(');
-    expect(icontainsSql).toContain('*acme*');
-    // GLOB has no ESCAPE clause in SQLite's grammar; emitting one is a syntax
-    // error, so its absence is part of the construct rather than a detail.
+    expect(icontainsSql).toContain("instr(lower(name), lower('acme')) > 0");
+    expect(icontainsSql).not.toContain('GLOB');
+    // `instr()` takes no ESCAPE clause, and neither did the GLOB it replaced.
     expect(icontainsSql).not.toContain('ESCAPE');
 
     const containsSql = unquote(driver.compileWhere({ name: { $contains: 'acme' } }));
-    expect(containsSql).toContain('name GLOB');
+    expect(containsSql).toContain("instr(name, 'acme') > 0");
     expect(containsSql).not.toContain('lower');
     expect(containsSql).not.toContain('LIKE');
   });
@@ -339,7 +351,7 @@ describe('[#5702] SqlDriver — $icontains, and the retired $regex/$options', ()
     for (const testCase of FILTER_TEXT_CASES) {
       it(testCase.name, async () => {
         if (testCase.expectRejection) {
-          const err = await refusalOf(testCase.filter);
+          const err = await refusalOf(authored(testCase.filter));
           expect(err.code).toBe(testCase.code);
           expect(err.status).toBe(400);
           for (const mention of testCase.mustMention) expect(err.message).toContain(mention);

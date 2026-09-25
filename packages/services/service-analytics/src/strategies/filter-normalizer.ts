@@ -1933,7 +1933,8 @@ function normalizeWhereComparandTypes<T>(node: T, path = 'where'): T {
  * spelling refused it. No producer can send one over REST (JSON has no binary
  * type), and no in-repo caller builds one into an analytics `where`. So the
  * door refuses it with the face; the read-scope door's use of that predicate
- * is a different door and is not moved here.
+ * is a different door and is not moved here (it refuses binary too, with the
+ * same face after its own gates, since #20018).
  *
  * EXPORTED for the one other face in this package that evaluates a `where`
  * without this door: the draft-data preview (`preview-evaluator.ts`), which

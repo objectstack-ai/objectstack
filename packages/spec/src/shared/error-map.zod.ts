@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { suggestFieldType, formatSuggestion, findClosestMatches } from './suggestions.zod';
+import { formatSuggestion, findClosestMatches } from './suggestions.zod';
+import { suggestFieldType } from './field-type-suggestion';
 import { FieldType } from '../data/field.zod';
 import {
   CONTAINER_ISSUE_CODES,

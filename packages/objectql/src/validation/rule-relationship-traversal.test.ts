@@ -248,6 +248,8 @@ describe('#18682 — the engine refuses the unserviceable shape, not only lint',
       const detail = JSON.stringify((e as unknown as { errors?: unknown }).errors ?? (e as Error).message);
       expect(detail).toContain('could not be evaluated');
       expect(detail).toContain('record.account.id');
+      // [#20007] …and, for a null test, the guard the engine's other refusals name.
+      expect(detail).toContain('`conditional` rule whose `when` is `record.account != null`');
       // ⛔ and never the rule's own message — the rule produced NO verdict.
       expect(detail).not.toContain('should never be reached');
     }
@@ -272,7 +274,12 @@ describe('#18682 — the refusal names the RELATED object, not the referencing o
   const cases: Array<[string, ReturnType<typeof unavailable>, string[]]> = [
     ['read failed', unavailable('unreadable'), ['could not read', "'crm_account'"]],
     ['undeclared related field', unavailable('undeclared-field', ['type']), ['declares no', "'type'"]],
-    ['no reference stored', unavailable('no-reference'), ['no single related record', 'MULTIPLE references']],
+    // [#20007] …and the two repairs measured to work for an EMPTY reference: the
+    // guard in `referenceGuardRepair`'s spelling, and `required`.
+    ['no reference stored', unavailable('no-reference'), [
+      'no single related record', 'MULTIPLE references',
+      '`conditional` rule whose `when` is `record.account != null`', 'make `account` required',
+    ]],
     ['related record not found', unavailable('unresolved'), ["'crm_account'", 'the related record was not found']],
   ];
 
