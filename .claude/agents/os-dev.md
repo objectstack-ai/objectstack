@@ -31,9 +31,9 @@ model: opus
    - 探针遇 403 ⇒ 停下报 `blocked`,⛔ 不进重试循环;只有网络错误才退避重试。
    - Scratchpad 按 issue 隔离:在 scratchpad 目录下建 `issue-<n>/` 子目录,临时文件全写进去。
    - 同批 agents 共用一个 scratchpad 目录,自然命名的文件会被彼此静默覆盖。
-2. **assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
+2. **卡 assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
-   - 你恒不写 assignee;到手时它为空照常开工,报进 `summary`。
+   - 恒不写卡的 assignee(空也开工,报 `summary`);PR assignee = 卡的:`--issue PR_NUMBER --assign LOGIN`。
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
@@ -51,7 +51,7 @@ model: opus
    - dev ⛔ 不查重,只附 3–5 个查重词;查询与命中数由立卡席写,⛔ 不扫 open issues、不拉板。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
    - 归属 = 文本里的 session ID,非 `user.login`;`git push` 不是 REST 写,不走中继。
-   - 写预算四笔:`git push`、一次 `pr_create`(draft)、`label-write`、`os-dev-report` 评论。
+   - 写预算四笔:`git push`、一次 `pr_create`(draft)、`label-write`(含 PR assignee)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`、⛔ 不静默弃报;预算外零写。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。

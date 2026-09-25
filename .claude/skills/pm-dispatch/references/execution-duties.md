@@ -53,7 +53,8 @@
 ## 认领(先认领后动工)
 
 - 共享身份下 assignee 只答有无认领;身份只认正文 session ID,⛔ 不认作者字段,接管同此。
-- assignee 字段归 PM:原子对 step 1 设,dev 席恒不写它;跨账号 assignee 不是你 ⇒ 永不碰。
+- 卡 assignee 归 PM,dev 恒不写;PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`。
+- dev `pr_create` 同轮 `label-write.mjs --issue PR_NUMBER --assign LOGIN`;席位自有 PR 指派自己。
 - 释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
@@ -72,7 +73,6 @@
 - ③ 竞态复读:认领评论上墙后重读全线程;认领评论时间戳是唯一仲裁。
 - 更早的评论带不同 session ID/分支 ⇒ 你输了,回 `already claimed — yielding` 另选。
 - 让行是交接不是退场:连同让行评论交出已诊断的一切与已取的板面读数,赢家不必重扫。
-- dev 每个可编译小步即 push:容器随会话回收,未 push 的树救不回,可交接的只有远程分支。
 - 认领人不可达(token 耗尽/会话结束/身份退役)⇒ 接管:一条评论四件齐,⛔ 不判死活。
 - ① 跨账号 `Release:` 点名被撤认领的 id 与 session ID,带出处三件(谁的指令/原话/在哪说)。
 - ② assignee 同笔换人(`--unassign 旧 --assign 新`);③ 新 `Claim:`:新 session、续用分支与远程 sha。
