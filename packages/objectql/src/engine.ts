@@ -15603,6 +15603,30 @@ export class ObjectQL implements IObjectQLEngine {
           // single verb.
           assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
       }
+      // [#19974] `having` is this verb's THIRD filter position, and it walks
+      // through the same comparand-shape face the other two take above —
+      // called once, here, with the path seeded at `having`. The 2026-09-23
+      // ruling on #19757 refuses an array in the equality slot at that face
+      // "for every driver at once", and the face refuses it for `where` on
+      // every driver. `having` never reaches a driver, though: the engine
+      // evaluates it itself (`applyHaving`, having-filter.ts), and that walker
+      // ANSWERED every shape the face refuses — `{ total: [5] }` by JS `==`
+      // coercion (`5 == [5]` is true), `{ total: { $eq: [5] } }` by `!=`, a
+      // scalar `$nin` or a malformed `$between` by keeping every group, a null
+      // `$lt` bound by keeping none. Measured on the base through this method,
+      // on driver-memory and driver-sqlite-wasm, on both doors below.
+      //
+      // ONE call covers BOTH `applyHaving` doors — the native
+      // `driver.aggregate()` path and the in-memory fallback — because it runs
+      // before either is chosen and before any driver is asked for a row. The
+      // shape of a comparand is a property of the FILTER, so it is judged once
+      // per query, never per aggregated row: an empty grouped set refuses the
+      // same `having` a populated one does. ⛔ Not a second face and not a
+      // walker-local check in having-filter.ts: the verdicts, the wording and
+      // the `INVALID_FILTER` / 400 envelope are the face's own, so a `having`
+      // refusal reads byte for byte as the `where` refusal of the same shape,
+      // path aside — and whatever arm the face gains next, `having` gains too.
+      assertListComparandShapes(object, 'aggregate', query.having, 'having');
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
 
