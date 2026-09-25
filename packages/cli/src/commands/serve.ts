@@ -4614,7 +4614,7 @@ export default class Serve extends Command {
           if (declaredRequires.has(cap) && !PLATFORM_CAPABILITY_TOKENS.includes(cap)) {
             // A RETIRED token (e.g. `reports`, #20102) is not a typo: say what
             // replaced it, in the same words `defineStack` refuses it with.
-            const retired = Object.hasOwn(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, cap)
+            const retired = Object.prototype.hasOwnProperty.call(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, cap)
               ? RETIRED_PLATFORM_CAPABILITY_GUIDANCE[cap]
               : undefined;
             console.warn(chalk.yellow(

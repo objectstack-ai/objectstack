@@ -343,6 +343,7 @@
     "PublicAuthFeatureName (type)",
     "PublicAuthFeatureSemantics (type)",
     "PublicAuthFeatureSurface (type)",
+    "RETIRED_PLATFORM_CAPABILITY_GUIDANCE (const)",
     "RealTimeNotificationConfig (type)",
     "RealTimeNotificationConfigParsed (type)",
     "RealTimeNotificationConfigSchema (const)",

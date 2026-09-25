@@ -64,7 +64,7 @@ a framework package; see the scope rule above if yours ships from another
 repo), SCREAMING_SNAKE (`^[A-Z][A-Z0-9_]*$` — lint-enforced by
 `error-code-ledger.test.ts`), with a trailing `//` comment when the name
 alone doesn't carry the meaning. Prefer a domain prefix for anything not
-self-evidently global (`ATTACHMENT_*`, `REPORT_*`, `SETTINGS_*`). If the
+self-evidently global (`ATTACHMENT_*`, `APPROVAL_*`, `SETTINGS_*`). If the
 condition is generic (not found / permission / validation / rate limit),
 use the standard catalog instead of registering a synonym.
 
@@ -458,13 +458,6 @@ const result = ErrorCode.parse(data);
 * `RECORD_LOCKED`
 * `RECORD_NOT_ELIGIBLE`
 * `REGISTRY_TYPE_NOT_CANONICAL`
-* `REPORTS_LIST_FAILED`
-* `REPORT_DELETE_FAILED`
-* `REPORT_GET_FAILED`
-* `REPORT_NOT_FOUND`
-* `REPORT_RUN_FAILED`
-* `REPORT_SAVE_FAILED`
-* `REPORT_SCHEDULE_FAILED`
 * `REQUEST_NOT_FOUND`
 * `RESEED_NO_ROWS`
 * `RESEED_SKIPPED`
@@ -481,8 +474,6 @@ const result = ErrorCode.parse(data);
 * `RULE_NOT_FOUND`
 * `RUN_NOT_FOUND`
 * `SAML_REGISTER_FAILED`
-* `SCHEDULES_LIST_FAILED`
-* `SCHEDULE_DELETE_FAILED`
 * `SELF_REGISTRATION_CLOSED`
 * `SERVICE_NOT_REGISTERED`
 * `SETTINGS_ACTION_FAILED`

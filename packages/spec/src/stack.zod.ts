@@ -3272,7 +3272,7 @@ function validateKnownCapabilities(config: ObjectStackDefinition): string[] {
     seen.add(token);
     // A RETIRED token is not a typo — the word used to be right — so it gets
     // the retirement notice and its replacement instead of the typo advice.
-    if (Object.hasOwn(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, token)) {
+    if (Object.prototype.hasOwnProperty.call(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, token)) {
       errors.push(RETIRED_PLATFORM_CAPABILITY_GUIDANCE[token]);
       continue;
     }
