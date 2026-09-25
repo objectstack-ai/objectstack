@@ -112,9 +112,10 @@ describe('renderCapabilityMessage (#3366)', () => {
     expect(m).toBe(prescription);
     expect(m).not.toContain('check for a typo');
     // Control: an ordinary misspelling still gets the typo hint, and the
-    // lookup is an own-property read (an inherited name is not a retired token).
+    // retired-map lookup is an own-property read (an inherited name such as
+    // `constructor` is not a retired token).
     expect(msgFor('reportz', () => true)).toContain('check for a typo');
-    expect(msgFor('constructor', () => true)).toContain('check for a typo');
+    expect(renderCapabilityMessage({ token: 'constructor', status: 'unknown' })).toContain('check for a typo');
   });
 });
 
