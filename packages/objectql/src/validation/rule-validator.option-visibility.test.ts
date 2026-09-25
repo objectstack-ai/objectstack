@@ -10,7 +10,8 @@
  * and role/context gating. Broken/unbound predicates fail-open.
  */
 import { describe, it, expect } from 'vitest';
-import { evaluateValidationRules, needsPriorRecord } from './rule-validator.js';
+import { toEvalPermissions } from '@objectstack/formula';
+import { evaluateValidationRules, needsPriorRecord, optionVisibilityReadsPermissions } from './rule-validator.js';
 import { ValidationError } from './record-validator.js';
 
 // country → province cascade + a role-gated tier option.
@@ -375,5 +376,161 @@ describe('needsPriorRecord accounts for option visibleWhen', () => {
     expect(needsPriorRecord({ fields: { color: { type: 'select', options: [{ value: 'r' }, { value: 'b' }] } } })).toBe(
       false,
     );
+  });
+});
+
+/**
+ * [#18783] `current_user.can(object, verb)` in an option's `visibleWhen` — the
+ * permission predicate, answered on the SERVER.
+ *
+ * `@objectstack/formula` answers `can` from `EvalContext.permissions` and
+ * refuses LOUDLY when none was passed. Until this card nothing on the write
+ * path passed one, so an author who gated an option on the subject's grants got
+ * the fail-open branch on every authenticated write: the gate was never
+ * enforced, one `warn` per write. The engine now hands the evaluator the
+ * subject's effective object-permission map as `permissions` (resolved once per
+ * write from `ISecurityService.getEffectiveObjectPermissions`, see the engine
+ * suite `engine-option-permission-predicate.test.ts`); these pin the evaluator's
+ * half of that contract.
+ */
+describe('per-option visibleWhen — the permission predicate `can` (#18783)', () => {
+  const canSchema = {
+    fields: {
+      stage: {
+        type: 'select',
+        options: [
+          { value: 'open' },
+          { value: 'escalated', visibleWhen: "current_user.can('crm_account', 'edit')" },
+          { value: 'vip', visibleWhen: "'vip_desk' in current_user.positions" },
+        ],
+      },
+    },
+  };
+  const USER = { id: 'u1', positions: ['sales_rep'] };
+  /** The `/auth/me/permissions` `objects` shape, through the one door formula publishes. */
+  const MAY_EDIT = toEvalPermissions({ crm_account: { allowRead: true, allowEdit: true } });
+  const READ_ONLY = toEvalPermissions({ crm_account: { allowRead: true } });
+
+  function capture() {
+    const warns: Array<{ msg: string; meta: any }> = [];
+    return { warns, logger: { warn: (msg: string, meta?: any) => warns.push({ msg, meta }) } };
+  }
+
+  it('REFUSES a `can`-gated option for a subject whose effective map withholds the verb', () => {
+    // Red before #18783: with no `permissions` reaching the evaluator the
+    // predicate faulted and the fail-open branch admitted the value.
+    const { warns, logger } = capture();
+    let caught: any;
+    try {
+      evaluateValidationRules(canSchema, { stage: 'escalated' }, 'insert', {
+        currentUser: USER, permissions: READ_ONLY, logger,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ValidationError);
+    expect(caught.code).toBe('VALIDATION_FAILED');
+    expect(caught.fields).toEqual([
+      expect.objectContaining({ field: 'stage', code: 'invalid_option' }),
+    ]);
+    // A clean FALSE is a decision, not a diagnostic.
+    expect(warns).toHaveLength(0);
+  });
+
+  it('ADMITS it for a subject whose effective map grants the verb', () => {
+    const { warns, logger } = capture();
+    expect(() =>
+      evaluateValidationRules(canSchema, { stage: 'escalated' }, 'insert', {
+        currentUser: USER, permissions: MAY_EDIT, logger,
+      }),
+    ).not.toThrow();
+    expect(warns).toHaveLength(0);
+  });
+
+  it('answers on the merged record on UPDATE exactly as on insert', () => {
+    expect(() =>
+      evaluateValidationRules(canSchema, { stage: 'escalated' }, 'update', {
+        previous: { stage: 'open' }, currentUser: USER, permissions: READ_ONLY,
+      }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      evaluateValidationRules(canSchema, { stage: 'escalated' }, 'update', {
+        previous: { stage: 'open' }, currentUser: USER, permissions: MAY_EDIT,
+      }),
+    ).not.toThrow();
+  });
+
+  it('control: a predicate WITHOUT `can` answers the same with or without the map', () => {
+    for (const permissions of [undefined, READ_ONLY, MAY_EDIT]) {
+      expect(() =>
+        evaluateValidationRules(canSchema, { stage: 'vip' }, 'insert', {
+          currentUser: USER, permissions,
+        }),
+        String(permissions && Object.keys(permissions)),
+      ).toThrow(ValidationError);
+      expect(() =>
+        evaluateValidationRules(canSchema, { stage: 'vip' }, 'insert', {
+          currentUser: { id: 'u2', positions: ['vip_desk'] }, permissions,
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  it('NO permission data ⇒ still loudly unevaluable (the named-input warn), NOT a silent denial', () => {
+    // The member-absent state: the engine passes no map at all, never `{}`.
+    // The evaluator's fail-open branch keeps the value and says why, naming the
+    // input the context lacked — the refusal formula writes for exactly this.
+    const { warns, logger } = capture();
+    expect(() =>
+      evaluateValidationRules(canSchema, { stage: 'escalated' }, 'insert', { currentUser: USER, logger }),
+    ).not.toThrow();
+    expect(warns).toHaveLength(1);
+    expect(warns[0].meta).toMatchObject({ field: 'stage', value: 'escalated', reason: 'predicate-fault' });
+    expect(warns[0].meta.error.message).toContain('carries no permission data');
+  });
+
+  it('an EMPTY map is a real answer — it refuses, it does not read as "no data"', () => {
+    expect(() =>
+      evaluateValidationRules(canSchema, { stage: 'escalated' }, 'insert', {
+        currentUser: USER, permissions: toEvalPermissions({}),
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  describe('optionVisibilityReadsPermissions — which writes need the map at all', () => {
+    it('is true only when a PICKED option\'s predicate calls `can`', () => {
+      expect(optionVisibilityReadsPermissions(canSchema.fields, { stage: 'escalated' })).toBe(true);
+      // Picked, gated, but no `can` in its predicate.
+      expect(optionVisibilityReadsPermissions(canSchema.fields, { stage: 'vip' })).toBe(false);
+      // Picked, ungated.
+      expect(optionVisibilityReadsPermissions(canSchema.fields, { stage: 'open' })).toBe(false);
+      // Not written at all — an unchanged persisted value is not re-judged.
+      expect(optionVisibilityReadsPermissions(canSchema.fields, { note: 'x' })).toBe(false);
+      expect(optionVisibilityReadsPermissions(undefined, { stage: 'escalated' })).toBe(false);
+    });
+
+    it('reads every element of a multi-value pick and every ADR-0068 alias of the subject', () => {
+      const multi = {
+        tags: {
+          type: 'multiselect',
+          options: [
+            { value: 'a' },
+            { value: 'b', visibleWhen: "user.can('crm_account', 'read') || record.x == 1" },
+          ],
+        },
+      };
+      expect(optionVisibilityReadsPermissions(multi, { tags: ['a'] })).toBe(false);
+      expect(optionVisibilityReadsPermissions(multi, { tags: ['a', 'b'] })).toBe(true);
+    });
+
+    it('reads the parsed AST, not the text: a quoted `can(` is not a call', () => {
+      const quoted = {
+        note_kind: {
+          type: 'select',
+          options: [{ value: 'q', visibleWhen: "record.title == 'you can(not) do this'" }],
+        },
+      };
+      expect(optionVisibilityReadsPermissions(quoted, { note_kind: 'q' })).toBe(false);
+    });
   });
 });
