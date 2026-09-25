@@ -2,8 +2,8 @@
   "number": 20061,
   "kind": "issue",
   "title": "[finding] `GET /data/import/jobs` never refuses its declared `limit` bound (`min(1).max(200)`): `?limit=0` silently answers the default 50 rows and `?limit=500` answers 200",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:api",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T00:45:39Z",
-  "updated_at": "2026-09-25T08:22:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-25T08:54:24Z",
+  "closed_at": "2026-09-25T08:52:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20061",
   "body": "Filing gate: **① a product defect with a named landing point and a repro.** Found by the `os-dev` round of #19567 (PR #20060) as an out-of-scope finding. The `domain:cli` execution seat #6024 re-read both sites on `origin/main` `3557f85f` before filing. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n- **Acting reader:** the triage seat, which routes it; then the execution lane that owns `packages/rest`.\n- **Dedupe:** an issue search was run (\"import jobs list limit bound not enforced ListImportJobsRequestSchema default 50 silent substitution\"). It returned 1 hit, closed: #8054, the same class on the automation runs door, fixed there. 0 are open.\n\n## Declared vs enforced\n\n| leg | reading on `origin/main` `3557f85f` |\n|:--|:--|\n| declares | `packages/spec/src/api/export.zod.ts:503`, `ListImportJobsRequestSchema`: `limit: z.number().int().min(1).max(200).default(50)` |\n| enforces | `packages/rest/src/rest-server.ts:9714`: `Math.min(200, Math.max(1, Number(q.limit) \\|\\| 50))` refuses nothing |\n| `?limit=0` | `0 \\|\\| 50` gives **50**: a silent substitution of the default window for a value the declaration refuses |\n| `?limit=500` | clamped to **200**, not refused |\n| `?limit=abc` | `NaN \\|\\| 50` gives **50** |\n\n**Why it matters now:** since PR #20060 (card #19567), the SDK's `data.listImportJobs` sends `limit` exactly as the caller wrote it and relies on the declared door to refuse. This door does not refuse, so for this one method a caller's `0` still becomes 50 rows.\n\n## What this card asks\n\nMake the door refuse a `limit` outside its declaration with `400 VALIDATION_FAILED` (the `parseIntegerParam` shape the parsed doors use), and pin `code` and `status` with a lit control on a conforming value. `offset` on the same line (`Math.max(0, Number(q.offset) || 0)`) has the same shape. Whether it belongs in the same round is for the taker to measure against its own declaration."

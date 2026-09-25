@@ -10,16 +10,23 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p1",
+    "security"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T06:59:15Z",
-  "updated_at": "2026-09-25T06:59:15Z",
+  "updated_at": "2026-09-25T10:01:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20129",
   "body": "Filing gate: **① a defect with a named landing site**, `packages/rest/src/rest-server.ts`: `fetchAudienceBooks` and the `/meta/doc/:name` corpus read. Finding class **(a)**: a user-visible authorization failure, measured.\n\nFound by the `os-dev` round on #19790 (PR #20128) and filed by the `domain:cli` execution seat (#6024, `session_01TnPAC1UsTGfHPXVUCL6iLn`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nOn `origin/main` `fa00ebf4`, re-read by this seat:\n- `fetchAudienceBooks` (`rest-server.ts:2721-2730`) reads the book list with `p.getMetaItems({ type: 'book' }).catch(() => [])`.\n- The `/meta/doc/:name` handler reads its doc corpus with `.catch(() => [])` (`:7127`).\n\nA thrown book read therefore looks like \"no book exists\":\n- `anyPermissionSetAudience([])` is false, so an authenticated caller takes the fast path, where every effective audience admits them.\n- A doc that only a `{ permissionSet }` book claims loses its gate. With the corpus read failing instead, the doc reads as unclaimed, which means `org`.\n\n**Probe** (the #19790 round; a one-off stub protocol whose `getMetaItems({ type: 'book' })` rejects; the caller is authenticated and does not hold `crm_admin`):\n- `GET /meta/doc/crm_admin_runbook` goes from `403` to **`200` with the body**;\n- `GET /meta/doc` lists it.\n\n**Reachable with the shipped protocol:** `metadata-protocol`'s `getMetaItems` rethrows every `sys_metadata` read failure except \"unprovisioned\" (#5532). A store fault on the book read, after the doc read succeeded, therefore serves the gated doc.\n\n## The contract it contradicts\n\n- ADR-0046 §6.7: docs content is gated server-side at the doc/book reads.\n- `resolveAudienceCaller`'s own rule: holdings it cannot resolve make permission-set audiences DENY (fail closed, ADR-0049).\n\nThe book read is the other input to the same decision, and its fault fails open.\n\n## Reach and context\n\n- **Pre-existing:** BASE and the #19790 head answer identically. #19790 kept these reads byte-identical by ruling.\n- **The app-nav arm #19790 adds does NOT inherit this.** It reads through `readAudienceBooks` / `readDocCorpus`, which report the fault and prune every `doc` entry. After PR #20128, the fix is one line per read: route the reads' fault to a deny instead of `[]`.\n\nDedupe: MCP issue search in this repository (`docs audience book read failure fail open fetchAudienceBooks permissionSet gated doc served`): 0 hits. Dedupe words: `fetchAudienceBooks fail open` · `docs audience book read failure` · `meta doc permissionSet leak` · `catch(() => []) audience gate`"

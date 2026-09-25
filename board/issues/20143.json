@@ -1,0 +1,32 @@
+{
+  "number": 20143,
+  "kind": "issue",
+  "title": "spec + SQLite drivers: `$like` `_` matches one code point on SQLite but one UTF-16 unit in formula / driver-memory — `$like: '_'` returns a stored emoji over REST; the spec never says which \"character\" is meant",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T10:55:58Z",
+  "updated_at": "2026-09-25T12:52:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20143",
+  "body": "Filing gate: **① a defect with a named landing site**: the spec's own two `$like` translations in `packages/spec/src/data/filter.zod.ts`.\n- `likePatternToRegexSource` builds `new RegExp` with no `u` flag, so `_` → `[\\s\\S]` matches one UTF-16 unit. `@objectstack/formula` and `driver-memory` answer by it.\n- `likePatternToGlobPattern` maps `_` → `?`, which matches one code point in SQLite `GLOB`. `SqlDriver`, `SqliteWasmDriver` and `TursoDriver` (local and remote) answer by it.\n\nFinding class **(a)**: a measured wrong answer at a public entry. The two faces disagree on every character outside the BMP.\n\n`reach:` measured at the REST data API (below).\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20024 dev's out-of-scope findings (`os-dev-report` on #20024, PR #20140). The seat's at-tier contract reviewer measured it again on its own grid and over HTTP (reviewer notes beside record 5831210370 on PR #20140). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\n**At a public entry**, measured at PR #20140's head `89e02a2521` (the same at base `fe677aeeed`). The stack was `@objectstack/verify` `bootStack` with its default `sqlite-wasm` datasource and an admin session, over an object with a `text` field `v`:\n- `POST /api/v1/data/<obj>` with `{\"v\":\"😀\"}`, `{\"v\":\"a😀b\"}` and `{\"v\":\"x\"}`: all 201.\n- `GET /api/v1/data/<obj>?$filter={\"v\":{\"$like\":\"_\"}}` → **200, `[\"😀\",\"x\"]`, `total: 2`**. `formula.matchesFilterCondition` and `driver-memory` answer `[\"x\"]` only.\n- `$like \"__\"` → 200, `[]`. The oracle answers `[\"😀\"]`.\n- `$like \"a_b\"` → 200, `[\"a😀b\"]`. The oracle answers `[]`.\n- `$like \"a__b\"` → 200, `[]`. The oracle answers `[\"a😀b\"]`.\n\n**On the driver faces**, the reviewer's grid over 6 NUL-free values outside the BMP × 242 queries: 46 of 1452 cells differ from `formula`. The answers are identical on better-sqlite3, sql.js, local `TursoDriver`, and remote `TursoDriver` over a real libSQL engine. Every one of those cells equals a code-point oracle (the spec regex with a `u` flag). `driver-memory` agrees with `formula`. The Postgres and MySQL `LIKE _` arms are NOT MEASURED; SQL `_` is one character there, the code-point reading.\n\n**The spec does not settle it.**\n- `LIKE_DESCRIPTION` says \"`_` matches exactly one character\".\n- The `likePatternToRegexSource` docblock says \"exactly one character, any character\", and the GLOB table says \"exactly one character\".\n- None of them defines \"character\" as a code point or as a UTF-16 unit, and the spec's own two translations disagree with each other.\n\nSo the contract is ambiguous inside the spec. The same REST filter answers differently depending on which driver backs the object.\n\n## Suggested shape (⛔ not a ruling)\n\n1. **First, decide which reading is the contract.** This is a spec decision.\n   - A code point is what SQL `LIKE`, SQLite `GLOB` and a user reading \"one character\" expect. Choosing it means giving `likePatternToRegexSource` the `u` flag and checking what that does to `\\` escapes and `[\\s\\S]`.\n   - A UTF-16 unit is what the JS oracle does today. Choosing it would move every SQL face, and none can express it cheaply.\n2. Then move the losing faces and pin the family cells: `_`, `__`, `a_b`, `a__b` over values outside the BMP, on every face, against the one oracle.\n3. The answer set of whichever face moves changes. Declare it (`Clause-②`) by the level rules.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site: the spec's translation pair and the faces behind it); finding class (a), with `reach:` measured at `GET /api/v1/data/...` over a real stack.\n- **Acting reader**: triage decides. The decision in step 1 is a spec contract question, and the face alignment that follows is this lane's (the SQLite emitters were last touched by PR #20140) or the spec lane's (the regex translation).\n- **Dedupe**, MCP issue search in this repo, `closed` included:\n  - `like underscore astral emoji surrogate code point UTF-16 likePatternToRegexSource` → 0 hits;\n  - `like emoji underscore` → 0 hits;\n  - `surrogate pair character` → 0 hits;\n  - control: `$like pattern U+0000` → 1 hit (#20041), which shows the search reaches this operator family.\n\nDedupe words: `$like underscore astral emoji code unit code point` · `likePatternToRegexSource u flag surrogate pair` · `GLOB ? one character vs JS regex [\\s\\S]` · `$ilike _ outside BMP formula SQLite differ`"
+}

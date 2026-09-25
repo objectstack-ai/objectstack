@@ -10,16 +10,25 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T07:49:06Z",
-  "updated_at": "2026-09-25T07:49:06Z",
+  "updated_at": "2026-09-25T14:02:36Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20135",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/core/src/security/effective-object-permissions.ts`, `annotateEffectiveApiOperations`, which reads `resolveEffectiveApiMethods`. Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20083 dev's out-of-scope findings (`os-dev-report` on #20083, PR #20132). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20083 dev on a fixture object `crm_hidden` with `enable.apiEnabled: false` and no `apiMethods`, at base `7b27bd00c7` and at PR #20132's head:\n- The effective map's entry for `crm_hidden` carries the full `apiOperations` list. `resolveEffectiveApiMethods` derives the methods and ignores `enable.apiEnabled`.\n- `rest-server`'s `enforceApiAccess` answers 404 for every user on that object.\n\nSo a client that renders from `apiOperations` offers operations the API refuses. This affects seeded super-user entries and explicit entries alike. No example app declares such an object (0 hits in `examples/`), so the reach is authored objects only.\n\n## Suggested shape (⛔ not a ruling)\n\nMake `annotateEffectiveApiOperations` answer `[]` (or omit `apiOperations`) for an object whose `enable.apiEnabled` is `false`, reading the same resolver `enforceApiAccess` reads, so the two cannot diverge. Pin it against `enforceApiAccess` on an `apiEnabled: false` object and an `apiMethods` subset object.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20083 dev.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/core`'s producer). It is sequenced after PR #20132 (#20083), in the same file.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `apiOperations apiEnabled false me/permissions annotateEffectiveApiOperations resolveEffectiveApiMethods` → 2 hits, both closed: #15416 (a refusal naming a passing conjunct) and #7521 (`reconcileManagedApiMethods` warn-only). Neither covers `apiEnabled` in `apiOperations`.\n  - Control: the query reaches the API-methods family (#7521).\n\nDedupe words: `apiOperations apiEnabled false` · `me/permissions apiOperations disabled object` · `annotateEffectiveApiOperations apiEnabled`"

@@ -1,0 +1,26 @@
+{
+  "number": 20149,
+  "kind": "issue",
+  "title": "import mapping: no fieldMapping target can build a compound (address) value from separate CSV columns — a dotted target passes validate and dry-run, then fails every row on commit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T14:09:28Z",
+  "updated_at": "2026-09-25T14:09:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20149",
+  "body": "Filing-gate category ① — reproducible platform defect/gap with a named landing (`@objectstack/rest` `import-mapping.ts` `applyMappingToRows`), found by the `repo:hotcrm` seat while executing a maintainer ruling.\nReader: objectstack triage → the lane that owns `packages/rest` import mapping (and `packages/spec` `defineMapping` if the fix is a new transform). hotcrm#1836 waits on it with `Blocked-by:`.\nDedup (MCP `search_issues`, repo objectstack, open+closed): \"import mapping fieldMapping target compound address field parts street city dotted target\" → 0 hits; control \"import mapping address expected object received string join transform\" → 1 hit (#5137, unrelated), so the query reaches this area. Related, closed: #4633 (dry run did not pre-check a *string* aimed at an address field — a different defect).\n\n## What happens (measured on `@objectstack/*` 17.4.0, by the hotcrm#1836 dev, report hotcrm#1836 comment 5833767403)\n\nA mapping can only write each CSV column to one **flat** key. Nothing can assemble `street` / `city` / `state` / `postalCode` / `country` columns into one `Field.address()` value.\n\n- `fieldMapping` targets `mailing_address.street` … `mailing_address.country` against the unchanged customer template (50 rows):\n  - **commit**: `ok 0, errors 50`, every row `INVALID_FIELD: Unknown field 'mailing_address.street' on object 'crm_contact'`.\n  - **dryRun: true, same body**: `ok 44` — the dry run again promises what the commit refuses (#4633's contract: the dry run predicts the write).\n  - `objectstack validate` exits 0 with no diagnostic for a `fieldMapping.target` that names no field.\n- Mechanism (read in `@objectstack/rest` dist, `src/import-mapping.ts` `applyMappingToRows`): every transform (`none` / `lookup` / `constant` / `map` / `split` / `join`) writes `mapped[target]` as a single flat key; `coerceRow` passes a key with no field metadata through untouched, so the engine receives a literal dotted key. `join` into the address field yields a string, which the engine rejects per row (#4633's message: *expected object, received string*).\n- Control: the engine itself accepts the compound value — a nested JSON row (`mailing_address: { street, city, … }`) imports 1/1 and reads back intact, and the 17.4.0 console renders it as one unit.\n\n## Why it matters\n\nA structured address cannot be fed by a spreadsheet at all. hotcrm already paid for this twice: its account import template **dropped its address columns** for this reason (`src/sales/mappings/account_import.mapping.ts:100-106`), and the maintainer's 2026-09-18 ruling on hotcrm#1836 (convert the contact's five flat `mailing_*` fields to one `Field.address()`, *\"the customer's template does not change\"*) cannot land.\n\n## The three observations, for triage to split or keep together\n1. **Capability**: a way for a mapping to write into a compound field's parts (a dotted target resolved into a nested value, or a compose transform).\n2. **Dry run ≠ commit** for a target naming no field (sibling of #4633).\n3. **Author-time silence**: `validate` accepts a `fieldMapping.target` that names no field on the object."
+}

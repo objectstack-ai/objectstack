@@ -1,0 +1,31 @@
+{
+  "number": 20146,
+  "kind": "issue",
+  "title": "liveness ledger: 12 AppSchema rows in app.json cite objectui's AppSidebar.tsx, which objectui#5817 deletes; re-point each to its live reader, and enforce or retire branding.logo, which nothing renders",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T12:08:37Z",
+  "updated_at": "2026-09-25T12:54:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20146",
+  "body": "Filed by objectui's `domain:ui#4` execution seat (`session_01BP8CMtACxTdLjqR6rhd33C`). objectui#5817's ruling relay (`5805876559`) asks that the seat taking the removal file this card in objectstack before the deletion lands. ⛔ Filed bare, not graded here. Reader: objectstack triage first (route and grade), then the `domain:spec` execution seat that owns `packages/spec/liveness/**`.\n\n## What changes in objectui\n\nPR objectui#10617 (objectui#5817, being landed as this card is filed) removes `AppSidebar` from `@object-ui/app-shell`: the file `packages/app-shell/src/layout/AppSidebar.tsx` and its barrel export. It was deprecated under objectui#5720 and never mounted; the console renders `UnifiedSidebar`. The maintainer ruled the removal can go now, provided the objectstack console's function is unaffected (「5817 可以现在启用，只要不影响 objectstack console 的功能」). The PR's contract review confirmed that condition.\n\n## What that does to the ledger\n\n`packages/spec/liveness/app.json` cites `objectui @940ba24: packages/app-shell/src/layout/AppSidebar.tsx:NNN` as read evidence on 12 rows, and names `AppSidebar` in the file `_note`. The citations stay resolvable at the pinned sha. But they point at a component that is no longer published, and was never mounted, so they are not evidence of a live reader.\n\nThe live readers below were named by the PR's dev and checked by its contract reviewer on objectui `main` after the PR (file and symbol; line numbers left out on purpose):\n\n| row | live reader(s) in objectui |\n|:--|:--|\n| `label` | `AppSwitcher.tsx` (`resolveKeyedI18nLabel(activeApp.label, t)` on the pill and each row); `ConsoleLayout.tsx` (`appLabel` into `AppHeader` and the `AppShell` branding title); `HomeAppsStrip.tsx` (launcher tiles) |\n| `description` | `apps/console` `AppManagementPage.tsx` (the system/apps list line and its search filter). The \"under the active app's title\" presentation has no successor |\n| `icon` | `AppSwitcher.tsx` (`getIcon(app.icon)` per row); `HomeAppsStrip.tsx` |\n| `branding` | `primaryColor`: `ConsoleLayout.tsx` → `AppShell` branding → `useAppShellBranding` in `packages/layout/src/AppShell.tsx`. **`logo`: no runtime reader** (see below) |\n| `active` | `AppSwitcher.tsx` and `UnifiedSidebar.tsx` (`a.active !== false`, plus the active-app lookup); `utils/appRoute.ts` `filterActiveApps` (used by `HomePage` and `app-launcher-renderer`) |\n| `hidden` | `AppSwitcher.tsx` and `UnifiedSidebar.tsx` (`a.hidden !== true`); `filterActiveApps` |\n| `navigation[].id` | `UnifiedSidebar.tsx` (`useNavOrder`, `useNavPins`); `NavigationRenderer.tsx` (sortable id, pin toggles); `nav-menu-renderer.tsx` (row keys, active row) |\n| `navigation[].visible` | `UnifiedSidebar.tsx` `evalVis` into `NavigationRenderer` / `hasVisibleNavigationItems`; `nav-menu-renderer.tsx` the same |\n| `areas[].id` | `UnifiedSidebar.tsx` (`activeAreaId`) |\n| `areas[].label` | `UnifiedSidebar.tsx` (`resolveInlineI18nLabel(area.label, language)`) |\n| `areas[].icon` | `UnifiedSidebar.tsx` (`getIcon(area.icon)`) |\n| `areas[].navigation` | `UnifiedSidebar.tsx` (`activeArea?.navigation`); `AppSchemaRenderer.tsx`, already cited on the row |\n| file `_note` | lists \"app-shell AppSidebar/ConsoleLayout/ContextSelectors\" among the consumers |\n\nAlso naming `AppSidebar` in prose: two comments in `packages/spec/src/ui/app.zod.ts`, the `recordId` template-variable note and the `AREA_ORDER_RETIRED` note.\n\n## `branding.logo`: authored, rendered by nothing\n\nThis is not caused by the removal: `AppSidebar` was never mounted, so an app's `branding.logo` has never shown in the console. The removal takes away the row's only (unmounted) evidence. What the review found:\n- **Authored:** plugin-designer's `BrandingEditor` and `AppCreationWizard` write it with a preview, and `EditAppPage` pre-fills it. The published `@object-ui/app-shell` CHANGELOG tells authors \"To show a logo, set it on the app schema's `branding.logo` instead\". Downstream, `objectstack-ai/hotcrm`'s `crm.app.ts` sets it, with a comment saying it renders via `AppSidebar.tsx`.\n- **Rendered:** by nothing that ships. `AppSchemaRenderer` reads the top-level `logo`, not `branding.logo`. One nuance: `wizardDraftToAppSchema` in objectui `packages/types/src/app.ts` copies a wizard draft's `branding.logo` into the top-level `logo`. So a wizard-authored logo can surface in an `AppSchemaRenderer` host, while the key itself has no runtime reader.\n\nUnder ADR-0049's enforce-or-remove, this is a declared key the runtime does not honour, and an author (or an AI) setting it gets silence. The two routes, for this repo's seat and, if the options genuinely diverge, the maintainer:\n- **enforce:** a mounted component (`UnifiedSidebar`'s header, or `AppShell`'s branding) renders `branding.logo`. That is an objectui change, filed there once ruled;\n- **retire:** `branding.logo` leaves the schema. The designer surfaces and the CHANGELOG advice follow, and the top-level `logo` stays the one spelling.\n\n## Unlock\n\nNone needed for re-pointing the 12 rows: the readers above already exist on objectui `main`. The `branding.logo` row waits on the enforce-or-retire ruling.\n\n## Dedupe\n\nREST page walk over the 1000 most recently updated items in each of objectstack and objectui. `branding.logo`, app logo near render / shown / display / reader, `BrandingEditor` near logo, and liveness `app.json` near `AppSidebar` ⇒ 0 hits in both.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

@@ -2,24 +2,35 @@
   "number": 20122,
   "kind": "issue",
   "title": "objectql: a per-aggregation `filter` refuses an unknown operator only when rows exist — `aggregations: [{ filter: { amount: { $median: 1 } } }]` answers 400 on a populated table and 200 on an empty one",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T06:27:51Z",
-  "updated_at": "2026-09-25T06:27:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-25T13:57:38Z",
+  "closed_at": "2026-09-25T13:56:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20122",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/objectql/src/engine.ts` `ObjectQL.aggregate`, the per-aggregation `filter` loop, and `packages/objectql/src/having-filter.ts` `matchesAggregationFilter`. Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20099 dev's out-of-scope findings (`os-dev-report` on #20099, PR #20117). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20099 dev at PR #20117's head (the aggregation-filter loop is unchanged from `origin/main` `aa04ea2964`), on `driver-memory` and `driver-sqlite-wasm`:\n- `aggregations: [{ function: 'count', alias: 'n', filter: { amount: { $median: 1 } } }]` answers `INVALID_FILTER` / 400 on a populated table;\n- the same request answers `200 []` on an empty table.\n\n`matchesAggregationFilter` walks the filter per raw row on the fallback door, so its operator refusals fire only when a row exists. The verdict belongs to the data, not to the filter.\n\nThis is row 4 of #20099 (`having`'s own refusals depended on the data) at the sibling position. PR #20117 closes it for `having` with a row-independent walk, `assertHavingIsEvaluable`, run once at the engine entry. The per-aggregation `filter` sits outside that claim's surface.\n\n## Suggested shape (⛔ not a ruling)\n\n- Run the same row-independent walk on each `aggregations[i].filter` in the engine loop, ahead of the driver and both doors, against the object's fields (the filter reads raw rows, not the aggregated row).\n- Pin every walker refusal on a populated and an empty table, on both `applyHaving` doors.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20099 dev.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/objectql`). It is sequenced after PR #20117 (#20099), which adds the walk this reuses. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `per-aggregation filter unknown operator refusal only on non-empty rows matchesAggregationFilter empty table` → 14 hits, all read. #20099 is the `having` twin (the positive control). #20010, #20035 and #20068 are analytics faces, and #11541 is `driver-sql`'s aggregate where column.\n  - None covers the per-aggregation `filter`.\n\nDedupe words: `aggregation filter unknown operator empty set` · `matchesAggregationFilter refusal data-dependent` · `per-aggregation filter $median empty table`"

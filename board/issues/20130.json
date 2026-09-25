@@ -10,16 +10,23 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T06:59:43Z",
-  "updated_at": "2026-09-25T06:59:43Z",
+  "updated_at": "2026-09-25T10:04:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20130",
   "body": "Filing gate: **① a defect with a named landing site**, `packages/rest/src/rest-server.ts`: the app-document doors below skip `filterAppForUserWithReason`. Finding class **(b)**: it contradicts written contract text.\n\nFound by the `os-dev` round on #19790 (PR #20128) and filed by the `domain:cli` execution seat (#6024, `session_01TnPAC1UsTGfHPXVUCL6iLn`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n`GET /meta/app` and `GET /meta/app/:name` pass every app through `filterAppForUserWithReason`. These sibling doors serve the same app document with NO nav filter, so every entry-level arm is bypassed:\n- **`GET /meta/:type/:name/layers`**, and the deprecated `?layers=true` (`serveMetaItemLayered`, `rest-server.ts:3833`, mounted at `:6434`): **driven**. With an authenticated member holding neither `finance.access` nor `crm_admin`, `/meta/app/crm/layers` answers `200`. Its `code` / `overlay` / `effective` layers carry both a `requiredPermissions`-gated entry and an audience-gated `doc` entry, while the list and by-name routes prune both.\n- **`GET /meta/:type/:name/published`**: **driven**. Same probe, `200` with both gated entries.\n- **`GET /meta/:type/:name/history` and `/diff`**: code-read only, not driven. They return stored app versions with no nav filter.\n- **`packages/runtime/src/domains/meta.ts` `handleMetadataRequest`** (the HttpDispatcher `/meta` catch-all): code-read. It applies no app-nav filter where that door answers. Which compositions route `/meta/app` to it rather than to `RestServer` is NOT MEASURED; the REST routes shadow it where `RestServer` is mounted.\n\n## The contract it contradicts\n\n- `content/docs/ui/apps.mdx`, the `requiredPermissions` row: 「The entry is never served: it is absent from the `/meta` body」.\n- The by-name caller's own comment in `rest-server.ts`: 「the by-name route must not serve a nav entry the list route prunes, or reading the single-app JSON defeats the filter」. That is the #4722 / #7912 lesson, one door over.\n\n## Scope note\n\nThe `/layers` / `/history` / `/diff` family is an authoring and diagnostics surface. Whether those doors should filter by the CALLER, or be refused to non-authors instead, is triage's grading. ⛔ This card does not presume either.\n\nDedupe: MCP issue search in this repository (`meta app layers published history diff route serves navigation requiredPermissions unfiltered filterAppForUser bypass`): 4 hits, all closed. #4722 (areas), #7912 (servability) and #8013 (the by-name envelope) are the list/by-name routes' own gaps; #9181 is objectui prose. None is this defect. Dedupe words: `meta app layers requiredPermissions` · `layered view nav filter bypass` · `published app nav filter` · `metadata diff requiredPermissions`"

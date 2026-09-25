@@ -1,0 +1,31 @@
+{
+  "number": 20142,
+  "kind": "issue",
+  "title": "Setup and Studio navigation: add component entries for the console's audit-log, AI-approvals and integrations pages, left without an in-app entry since the System Hub card wall retired (objectui#10520)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:engine",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T10:23:39Z",
+  "updated_at": "2026-09-25T11:16:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20142",
+  "body": "Blocked-by: objectstack-ai/objectui#10520\n\nFiled by objectui's `domain:ui#4` execution seat (`session_01BP8CMtACxTdLjqR6rhd33C`), as objectui#10520's triage execution notes (`5829805557`) ask: the claiming seat files the navigation half in objectstack. ⛔ Filed bare, not graded here. Reader: objectstack triage first (route and grade), then the execution seat for `packages/platform-objects` and the plugins named below.\n\n## Why\n\nRuling `5230004004` retired objectui's System Hub card wall so that navigation is the single source of truth (objectui#3743, PR objectui#10507). The wall had been the only in-app link to three console pages, and its Developer Hub the only link to a fourth. Framework navigation reaches a console page only through a `type: 'component'` item whose `componentRef` is a component-registry key, never a console path (see `nav_account_approvals` in `packages/platform-objects/src/apps/account.app.ts`).\n\nobjectui PR objectui#10576 (objectui#10520) measured each page against what navigation already reaches:\n- it retires the Developer Hub, whose four cards are now registry keys;\n- it keeps the other three pages and registers each under a new key, which is additive: the pages' standalone console routes stay.\n\nUntil the entries below exist, the three kept pages are reachable only by typed URL or bookmark.\n\n## What to add\n\nThese are the dev's proposals, checked by the PR's contract reviewer against objectstack `origin/main` `a08e059c6`. They are for this repo's seat to confirm.\n\n| key | page | proposed placement | gate |\n|:--|:--|:--|:--|\n| `audit:log` | the Audit Log browser, whose detail drawer pretty-prints a change's before and after JSON side by side (the `sys_audit_log` record page shows `old_value` / `new_value` as compact raw text) | Setup `group_diagnostics`, beside `nav_audit_logs` | Contributed by `plugin-audit`'s own `navigationContributions` (the owner of `nav_audit_logs`), it lives and dies with the plugin and needs no item gate. From `setup-nav.contributions.ts` instead: `requiresService: 'audit'`. The `group_diagnostics` anchor already requires `manage_platform_settings` |\n| `ai:approvals` | the AI Approvals queue: the whole AI pending-action queue (`/api/v1/ai/pending-actions`), with approve / reject | Setup `group_approvals` | `requiresService: 'ai'`, the same shape as `requiresService: 'approvals'` on `nav_account_approvals`. The anchor already requires `manage_platform_settings`. `ai` ships no implementation in the open framework, so without the gate the entry would render a dead page on a Community Edition boot |\n| `developer:integrations` | Integrations & APIs: the environment's REST base URL, per-object endpoints and an `x-api-key` cURL sample | Studio `group_developer`, beside `nav_api_console`, `nav_flow_runs` and `nav_public_forms` | none beyond Studio's `studio.access`, like its neighbours |\n\nThe keys resolve to `/apps/APP/component/audit/log`, `/apps/APP/component/ai/approvals` and `/apps/APP/component/developer/integrations` in the console.\n\n## Open for this repo's seat, not decided here\n\n- **Two audit entries in Setup.** With `audit:log` added, Setup carries both the `sys_audit_log` object view (`nav_audit_logs`) and the page. Keep both, or let the page replace the object entry? That is navigation's call.\n- `docs/qa/platform-checklist/FOLLOW-UPS.md` row K2 still names objectui's deleted `SystemHubPage.tsx` for the ungated AI Approvals card. Once `ai:approvals` is gated by `requiresService: 'ai'`, its \"ungated\" half is closed, and the row wants a re-read.\n\n## Unlock\n\nThis card waits for objectui#10520's PR to merge **and** for the three keys to be registered in the console build objectstack serves: the objectui pin and console overlay must carry that merge. An entry naming an unregistered key renders app-shell's \"Component not registered\" state. So the order is: the pin moves first, then these entries.\n\nPin: each entry resolves to its registered page (a `componentRef` that is registered), and the `ai:approvals` entry is absent when the `ai` service is not.\n\n## Dedupe\n\nREST page walk over the 1000 most recently updated objectstack items. `audit:log`, `ai:approvals`, `developer:integrations`, `AiPendingActions`, `ai-approvals`, and System Hub near nav, entry or orphan ⇒ 0 hits.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}
