@@ -38,6 +38,13 @@
  * polarity table in the module. Every row there passes both before and after,
  * SQL and binds byte for byte.
  *
+ * [#20018] Three rows left that group, for a reason that is not this ruling's:
+ * `null` as a MEMBER of `$in` / `$nin` and as a `$between` BOUND. Those are list
+ * and range positions, refused by the null-member ruling (2026-08-31) at the
+ * shared list-shape face, which the lowering now runs after its own gates.
+ * They are pinned as refused in their own block below. Every null PREDICATE
+ * spelling stays in the control group, unmoved.
+ *
  * `describe('what the sweep deliberately leaves alone')` records the boundary of
  * the ruling: the positions that are NOT comparands, and the shapes this module
  * already refuses with a truer diagnosis.
@@ -132,19 +139,6 @@ const NULL_CONTROL: Array<{ name: string; filter: FilterCondition; sql: string; 
   { name: '{ d: null } — the implicit null predicate', filter: { d: null }, sql: '"t"."d" IS NULL', params: [] },
   { name: '{ $eq: null }', filter: { d: { $eq: null } }, sql: '"t"."d" IS NULL', params: [] },
   { name: '{ $ne: null }', filter: { d: { $ne: null } }, sql: '"t"."d" IS NOT NULL', params: [] },
-  { name: '{ $in: [null] } — null is a bindable MEMBER', filter: { d: { $in: [null] } }, sql: '"t"."d" IN (?)', params: [null] },
-  {
-    name: '{ $nin: [null] } — NULL-safe negative (#5298)',
-    filter: { d: { $nin: [null] } },
-    sql: '("t"."d" IS NULL OR "t"."d" NOT IN (?))',
-    params: [null],
-  },
-  {
-    name: '{ $between: [null, 5] } — null is a bindable BOUND',
-    filter: { d: { $between: [null, 5] } },
-    sql: '"t"."d" BETWEEN ? AND ?',
-    params: [null, 5],
-  },
   { name: '{ $not: { d: null } } — already total, no guard added', filter: { $not: { d: null } }, sql: 'NOT ("t"."d" IS NULL)', params: [] },
   {
     name: '{ $not: { d: { $ne: null } } } — the #5146 rewrite still leaves it alone',
@@ -228,6 +222,32 @@ describe('[#6125] the null control group is UNTOUCHED — SQL and binds, byte fo
     expect(compileScopedFilterToSql({ d: null }, ALIAS).sql).toBe('"t"."d" IS NULL');
     expect(refusalFor({ d: undefined })?.code).toBe('READ_SCOPE_COMPILE_FAILED');
   });
+});
+
+describe('[#20018] null as a LIST MEMBER or RANGE BOUND left the control group — refused by the shared face', () => {
+  /**
+   * These three rows were in the control group above, compiling to a bound
+   * NULL (`IN (?)`, `NOT IN (?)`, `BETWEEN ? AND ?`). The lowering now runs the
+   * shared list-shape face after its own gates, and the null-member ruling
+   * (2026-08-31) refuses all three positions there — the answer the ObjectQL
+   * execute face already gave. Not #6125's refusal: the sentence is the face's,
+   * and nothing here moves `null` as a comparand or as the null predicate.
+   */
+  const MOVED: Array<{ name: string; filter: FilterCondition; says: string }> = [
+    { name: '{ $in: [null] }', filter: { d: { $in: [null] } }, says: 'does not accept null as a list member' },
+    { name: '{ $nin: [null] }', filter: { d: { $nin: [null] } }, says: 'does not accept null as a list member' },
+    { name: '{ $between: [null, 5] }', filter: { d: { $between: [null, 5] } }, says: 'requires two non-null bounds' },
+  ];
+
+  for (const c of MOVED) {
+    it(`refused: ${c.name}`, () => {
+      const err = refusalFor(c.filter);
+      expect(err?.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(err?.status).toBe(500);
+      expect(String(err?.message)).toContain(c.says);
+      expect(String(err?.message)).not.toContain('is undefined');
+    });
+  }
 });
 
 describe('[#6125] what the sweep deliberately leaves alone', () => {

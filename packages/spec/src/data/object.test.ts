@@ -801,7 +801,6 @@ describe('ObjectSchema', () => {
             label: 'Annual Revenue',
             type: 'currency',
             precision: 18,
-            scale: 2,
           },
           owner_id: {
             label: 'Account Owner',

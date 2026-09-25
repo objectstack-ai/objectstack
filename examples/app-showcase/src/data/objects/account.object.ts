@@ -66,7 +66,6 @@ export const Account = ObjectSchema.create({
     // strip and grids show "$25,000,000" instead of "25,000,000".
     annual_revenue: Field.currency({
       label: 'Annual Revenue',
-      scale: 2,
       min: 0,
       currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
     }),

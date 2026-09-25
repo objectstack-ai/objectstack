@@ -417,13 +417,22 @@ describe('[#7598] the field-reference shape is read exactly as `driver-sql` read
   it('a NON-STRING `$field` is not a reference — it stays the object account', () => {
     // `driver-sql`'s `fieldReferenceOf` requires `typeof ref === 'string'`, and
     // this package mirrors that spelling rather than inventing a third reading.
-    // It is therefore NOT routed either: it binds as JSON, exactly as any other
-    // object comparand does, which is the account #5234 left open on purpose.
+    // It is therefore NOT routed either: on the `where` door it binds as JSON,
+    // exactly as any other object comparand does, which is the account #5234
+    // left open on purpose there.
     expect(findCrossFieldComparand({ amount: { $gt: { $field: 5 } } })).toBeNull();
     expect(tree({ amount: { $gt: { $field: 5 } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'gt', values: [{ $field: 5 }],
     });
-    expect(scope({ amount: { $gt: { $field: 5 } } }).params).toEqual([{ $field: 5 }]);
+    // [#20018] The read-scope lowering no longer BINDS it: it now runs the
+    // shared comparand-type face after its own gates, which refuses a plain
+    // object in a scalar position (the ObjectQL execute face's answer too). It
+    // is still read as the object it is, not as a reference: the refusal is the
+    // type face's, not the field-reference gate's.
+    const err = refusalOf(() => scope({ amount: { $gt: { $field: 5 } } }));
+    expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(err.message).toContain('is a plain object');
+    expect(err.message).not.toContain('compares against the field reference');
   });
 
   it('an ordinary object comparand is untouched — #5234 left that account open', () => {

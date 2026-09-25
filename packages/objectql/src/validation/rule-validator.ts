@@ -3647,14 +3647,23 @@ function traversalRefusal(
       // reference names no single related record, so one hop is not defined on
       // it at all; and a slot already holding an expanded object is not a
       // foreign key this can resolve from.
+      //
+      // [#20007] The empty case names the two spellings measured to work for
+      // an optional reference, and names the one that does not: an author sent
+      // here with `record.<field>.id != null` — which the mixed-shape refusal
+      // used to prescribe — reads through `<field>` all the same, and lands
+      // back on this refusal. The guard spelling is `referenceGuardRepair`'s.
       return {
         summary: `cannot read ${columns} through ${on}: no single related record`,
         detail:
           ` The rule reads ${columns} through ${on}, but this record holds no single`
           + ' reference there to read — the field is empty, holds MULTIPLE references, or'
           + ' already holds an expanded record rather than an id. A predicate resolves ONE'
-          + ' hop through a single reference. Guard the rule on the reference being set, make'
-          + ' it required, or — for a multi-value reference — test it with a macro'
+          + ` hop through a single reference. To skip the rule while \`${field}\` is empty,`
+          + ` guard it on \`${field}\` being set: ${referenceGuardRepair(field)} —`
+          + ` \`record.${field}.id != null\` inside the rule is no guard, as it reads through`
+          + ` \`${field}\` too. To refuse an empty \`${field}\`, make \`${field}\` required`
+          + ' (`required: true`). For a multi-value reference, test it with a macro'
           + ' (`exists`, `size`) instead of reading through it.',
       };
     case 'undeclared-field': {
@@ -3688,6 +3697,12 @@ function traversalRefusal(
  * spelling, so every prescription that names it gives the author the same
  * words. Measured end to end: the wrapped rule is skipped while the reference is
  * empty, and judged exactly as before while it is set.
+ *
+ * [#20007] `@objectstack/formula`'s mixed-shape refusal names the same repair,
+ * and formula may not import this package, so it keeps a copy of these words
+ * (`relationship-traversal.ts`, same name). ⛔ Change both or neither:
+ * `engine-predicate-relationship.test.ts` asserts one literal in the engine's
+ * refusals from each source.
  */
 function referenceGuardRepair(field: string): string {
   return `make it the \`then\` of a \`conditional\` rule whose \`when\` is \`record.${field} != null\``;

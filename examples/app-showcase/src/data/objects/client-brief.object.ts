@@ -77,7 +77,7 @@ export const ClientBrief = ObjectSchema.create({
     // API access by an entitled member is unaffected — redaction applies only
     // when the request principal is `kind:'share-link'`.
     internal_notes: Field.text({ label: 'Internal Notes', maxLength: 2000 }),
-    deal_value: Field.currency({ label: 'Deal Value', scale: 2, min: 0 }),
+    deal_value: Field.currency({ label: 'Deal Value', min: 0 }),
     // Owner anchor — auto-stamped on insert; the `public_read` OWD reads it to
     // decide who may WRITE the row.
     owner_id: Field.lookup('sys_user', { label: 'Owner' }),
