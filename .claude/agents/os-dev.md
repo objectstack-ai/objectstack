@@ -42,22 +42,22 @@ model: opus
    - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
-   - (a) 须今天可达,分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
+   - 三类同欠 `reach:`:公开入口(HTTP/界面/`os validate`/保存)一次实测错误,或具名真实生产者。
+   - 例外三种照报,`reach:` 写明哪种:可能泄露数据;发版即固化的错误文字;维护者直派。
    - (c) 元数据 = 他人存储并再作者化的键,须具名生产者:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
-   - 其余 ⛔ 不立卡:观察、休眠、零拉动、死代码、未演练漂移、抛光、风格、nit、命名。
-   - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条带 `class: a|b|c`+证据或 `carrier:`。
+   - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
+   - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
    - `carrier:` = 将碰该文件的 PR 或人,答不出写「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
-   - dev ⛔ 不查重,只附 3–5 个查重词;查询与命中数由立卡席写,⛔ 不扫 open issues、不拉板。
+   - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
+   - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
    - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
    - 归属 = 文本里的 session ID,非 `user.login`;`git push` 不是 REST 写,不走中继。
    - 写预算四笔:`git push`、一次 `pr_create`(draft)、`label-write`(含 PR assignee)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
-   - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`、⛔ 不静默弃报;预算外零写。
+   - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
-   - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
    - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`;越界真写了的照列注明缘由,⛔ 不漏记。
-   - PM 的去重读数随派发词下发,当既有事实用,只复核其后增量,⛔ 不重跑。
    - 归挂不散落:落在已排队 issue 范围内的发现,报告点名为它的 sub-issue(自动进派发池)。
    - 只是依赖它的,报告点名独立单带 `Blocked-by:` 行;立在修复落地的仓,带回链;席位代立。
    - 有界就地修豁免,四条全立才就地修:① 与本卡同一缺陷类;② 机械修且形态已被钉死。
@@ -373,7 +373,7 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["class: a|b|c · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
+  "out_of_scope_findings": ["class: a|b|c · reach: <public door + wrong answer | named producer | exception: security|release-text|maintainer> · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
 }
 ```
 
