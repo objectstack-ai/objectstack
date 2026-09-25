@@ -331,11 +331,14 @@ describe('[#19995] ObjectQL execute face — a read scope carrying a placeholder
     /**
      * The four `driver-sql` refusal doors that read the provenance mark: a
      * scope refused there keeps `INVALID_FILTER` / 400 with no policy content
-     * in the message. This card does not move them.
+     * in the message. This card does not move them. Each row's secrets are
+     * what that door's full text names, so a scope that reached the driver
+     * vouched as the caller's own would turn the row red.
      */
     const DRIVER_WITHHELD: Array<{ name: string; scope: unknown; secrets: string[] }> = [
       { name: 'a column the object does not have', scope: { restricted_col: 'x' }, secrets: ['restricted_col'] },
-      { name: 'a retired operator', scope: { stage: { $regex: 'RESTRICTED_RX' } }, secrets: ['RESTRICTED_RX'] },
+      // The retired-operator text names the operator and the field, not the comparand.
+      { name: 'a retired operator', scope: { stage: { $regex: 'RESTRICTED_RX' } }, secrets: ['$regex', '"stage"'] },
       { name: 'a combinator with a non-array operand', scope: { $or: { stage: 'RESTRICTED_CB' } }, secrets: ['RESTRICTED_CB'] },
       { name: 'a non-boolean $null', scope: { stage: { $null: 'RESTRICTED_NL' } }, secrets: ['RESTRICTED_NL'] },
     ];
