@@ -340,6 +340,46 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     expect(caught?.message).toContain('packages[0]');
   });
 
+  // A `packages` that is present but is not an array is MALFORMED, not absent
+  // (the rule beside `AssembledPackageBodySchema`). This reader's private guard
+  // may decide only the absent branch, so these three reach the resolver.
+  const refusalOf = (stack: unknown): (Error & { code?: string; status?: number }) | undefined => {
+    try {
+      devI18nPluginOptions(stack);
+      return undefined;
+    } catch (err) {
+      return err as Error & { code?: string; status?: number };
+    }
+  };
+
+  it.each([
+    ['{}', {}],
+    ['0', 0],
+    ["'x'", 'x'],
+  ])('`packages: %s` is REFUSED with INVALID_ARTIFACT_PACKAGES, never read as absent', (_label, packages) => {
+    // No `i18n` config and no top-level `translations`, so the question
+    // reaches the package pass. See the next case for a stack that never does.
+    const caught = refusalOf({ manifest: { id: CORE_ID, name: 'x', version: '1.0.0', type: 'app' }, packages });
+    expect(caught?.code).toBe('INVALID_ARTIFACT_PACKAGES');
+    expect(caught?.status).toBe(422);
+  });
+
+  it('lit controls for the rows above: a well-formed `packages[]` resolves, and an absent key takes the single-package branch', () => {
+    // Without these, an instrument that always threw would pin the three rows
+    // above just as green.
+    expect(refusalOf(optionBProject())).toBeUndefined();
+    expect(devI18nPluginOptions(optionBProject())).toEqual({ defaultLocale: undefined, fallbackLocale: 'en' });
+
+    // Absent, explicitly `undefined`, and `null`: the guard's one decision.
+    const manifest = { id: CORE_ID, name: 'x', version: '1.0.0', type: 'app' };
+    for (const absent of [{}, { packages: undefined }, { packages: null }]) {
+      expect(refusalOf({ manifest, ...absent })).toBeUndefined();
+      expect(devI18nPluginOptions({ manifest, ...absent })).toBeUndefined();
+      expect(devI18nPluginOptions({ manifest, ...absent, translations: [{ en: {} }] }))
+        .toEqual({ defaultLocale: undefined, fallbackLocale: 'en' });
+    }
+  });
+
   // ── What the developer actually gets: the SERVICE ─────────────────────────
 
   const bootWith = async (stack: Record<string, unknown> | undefined) => {

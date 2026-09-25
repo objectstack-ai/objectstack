@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 import {
   APPROVAL_STATUSES,
   APPROVAL_STATUS_LABELS,
@@ -44,8 +45,14 @@ export const SysApprovalRequest = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
-  displayNameField: 'id',
-  nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. The pointer used to be `id`: once a
+  // renderer honours ADR-0079's order (an explicit `nameField` wins over
+  // `titleFormat`), that made the record page's H1 the raw id. `titleFormat`
+  // stays for renderers that still read it first;
+  // `sys-approval-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{process_name} · {record_id}',
   highlightFields: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'submitter_id', 'updated_at'],
 
@@ -102,6 +109,17 @@ export const SysApprovalRequest = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'Request ID', required: true, readonly: true, group: 'System' }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. Both source columns are required, so the
+    // expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.process_name + ' · ' + record.record_id`,
+      description: 'Record title: the request source and the record it is about (computed on read)',
+      group: 'Target',
+    }),
 
     // [#10101, the cloud#1395 Option A ruling] The SUBJECT record's
     // organization, with the acting context as fallback — resolved by the

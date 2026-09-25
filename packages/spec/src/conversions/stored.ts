@@ -38,6 +38,31 @@ import { applyConversions, type ApplyConversionsOptions } from './apply.js';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '../shared/metadata-collection.zod.js';
 
 /**
+ * Stored row types whose conversions walk a stack collection the
+ * MANIFEST-COLLECTION maps deliberately do not carry (#19620).
+ *
+ * `translation` is the one: `PLURAL_TO_SINGULAR` has no `translations`
+ * spelling because a stack's `translations` entries are locale-keyed BUNDLES,
+ * not named metadata items (`manifest-collection-spelling.ts` says why, and
+ * `check:stack-collection-maps` holds that map to the stack schema). But the
+ * translation conversions walk exactly that collection and are written for
+ * BOTH shapes in it — a bundle entry and a bare `translation` item, the shape a
+ * stored row is. Without this entry the stored pass had no collection to wrap
+ * a `translation` row in and returned it untouched, so no rehydration seam
+ * ever replayed a translation conversion over a stored row — which is how an
+ * item's `settings`, taken off the item door by #19620, would have gone on
+ * reaching the runtime from rows stored before. Kept HERE rather than added to
+ * the shared maps, which would advertise `translations` as a named-item stack
+ * collection to every other reader of them.
+ */
+const STORED_ONLY_COLLECTIONS: Readonly<Record<string, string>> = {
+  translation: 'translations',
+  // The legacy plural row spelling, as the protocol's singular/plural read
+  // fallback still finds it.
+  translations: 'translations',
+};
+
+/**
  * Options for {@link applyConversionsToStoredItem} — everything
  * {@link ApplyConversionsOptions} offers except `includeRetired`, which this
  * seam pins to `true` (the whole point of the stored pass; see module doc).
@@ -68,7 +93,7 @@ export function applyConversionsToStoredItem<T>(
 ): T {
   if (item == null || typeof item !== 'object' || Array.isArray(item)) return item;
   const singular = PLURAL_TO_SINGULAR[type] ?? type;
-  const collection = SINGULAR_TO_PLURAL[singular];
+  const collection = SINGULAR_TO_PLURAL[singular] ?? STORED_ONLY_COLLECTIONS[singular];
   if (!collection) return item;
   const converted = applyConversions(
     { [collection]: [item as Record<string, unknown>] },

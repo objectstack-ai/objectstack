@@ -262,10 +262,11 @@ describe('[#6050] RemoteTransport refuses an undefined comparand', () => {
     expect((await compile({ stage: 'won' })).args).toEqual(['won']);
     expect((await compile({ stage: { $in: ['won', 'lost'] } })).args).toEqual(['won', 'lost']);
     expect((await compile({ score: { $gt: 5 } })).args).toEqual([5]);
-    // [#6518] `*w*`, not `%w%`: the text family compiles to `GLOB` now, whose
-    // wildcard is `*`. The claim is unchanged — a defined comparand still
-    // compiles instead of tripping this file's undefined-comparand refusal.
-    expect((await compile({ stage: { $contains: 'w' } })).args).toEqual(['*w*']);
+    // [#20024] `w`, not `*w*` (nor #6518's `%w%`): `$contains` compiles to
+    // `instr()` now, which reads the whole stored value and takes the text as
+    // written. The claim is unchanged — a defined comparand still compiles
+    // instead of tripping this file's undefined-comparand refusal.
+    expect((await compile({ stage: { $contains: 'w' } })).args).toEqual(['w']);
     expect((await compile({})).sql).toBe(BARE_SCAN);
   });
 });

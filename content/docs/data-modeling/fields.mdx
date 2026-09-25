@@ -62,7 +62,7 @@ notes: Field.markdown({ label: 'Notes' }),
 
 ```typescript
 quantity: Field.number({ label: 'Quantity', min: 0, max: 10000, step: 1 }),
-price: Field.currency({ label: 'Price', scale: 2, min: 0 }),
+price: Field.currency({ label: 'Price', min: 0 }),
 // percent stores a fraction: 0.15 = 15% (the UI renders it as a percentage)
 discount: Field.percent({ label: 'Discount', scale: 2, min: 0, max: 1 }),
 ```

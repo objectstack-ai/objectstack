@@ -1780,7 +1780,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1813,9 +1813,9 @@
           "evidence": "the baseline trace"
         },
         {
-          "clause": "the matrix edit saves and takes effect: flipping the verb in the console answers 2xx on PUT /api/v1/meta/permission/S and the published set carries the new verb. The publish CALL is 2xx only when the save was staged as a draft (?mode=draft); a plain PUT — which is what the console editor issues — lands state:'active' directly, and POST .../publish then answers 404 [no_draft] because nothing is pending. Record WHICH path the console took",
+          "clause": "the matrix edit saves and takes effect: flipping the verb in the console answers 2xx on PUT /api/v1/meta/permission/S and the published set carries the new verb. The publish CALL is 2xx only when the save was staged as a draft (?mode=draft); a plain PUT — which is what the console editor issues — lands state:'active' directly, and POST .../publish then answers 404 with code NO_DRAFT because nothing is pending — judge that refusal on the status and the code field, never on the message text, which is human language and free to change. Record WHICH path the console took",
           "oracle": "api",
-          "verify": "PUT 2xx and GET /api/v1/meta/permission/S (published) shows delete:true on showcase_task. The publish call is 2xx after a ?mode=draft save, or 404 [no_draft] after a plain active-state PUT (rest-server.ts mounts POST /meta/:type/:name/publish for every type and answers 404 [no_draft] when there is nothing to promote) — either is a pass provided the published set carries the verb",
+          "verify": "PUT 2xx and GET /api/v1/meta/permission/S (published) shows delete:true on showcase_task. The publish call is 2xx after a ?mode=draft save, or HTTP 404 whose body carries code: 'NO_DRAFT' after a plain active-state PUT (rest-server.ts mounts POST /meta/:type/:name/publish for every type; SysMetadataRepository.promoteDraft throws status 404 / code NO_DRAFT when there is nothing to promote) — either is a pass provided the published set carries the verb. Read the code field, not the error message: the message is prose, and a quoted message spelling goes stale without the refusal changing",
           "evidence": "PUT + publish + GET"
         },
         {
@@ -1862,6 +1862,7 @@
         "objectui packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx (type=permission editor; client.save → PUT /api/v1/meta/permission/<name>; object CRUD+VAMA+lifecycle + field R/W)",
         "packages/spec/src/security/permission.zod.ts#PermissionSetSchema (PermissionSetSchema)",
         "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (PUT /api/v1/meta/:type/:name saveItem; POST .../publish publishItem — re-pointed #18104: saveItem is a CLIENT METHOD name, carried in this file only inside a string value)",
+        "packages/metadata-protocol/src/sys-metadata-repository.ts#promoteDraft (the publish-with-nothing-pending refusal: status 404, code NO_DRAFT)",
         "examples/app-showcase/src/security/permission-sets.ts",
         "cross-ref access-security.crud-permission-matrix + access-security.readonly-package-locks-studio, ADR-0090 D1/D5, ADR-0033"
       ],
@@ -1872,7 +1873,8 @@
           "change": "new — permission-matrix WRITE/edit loop: flip a verb in the console matrix → publish → affected persona's live API access flips, revoke flips back, assign/unassign moves access (enforcement + lock covered by sibling items)",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected clause 1, which demanded a 2xx from POST /api/v1/meta/permission/S/publish. That route is mounted type-generically, but it answers 404 [no_draft] when no pending draft exists — and the console's permission save is a plain PUT that lands state:'active' directly, so there is nothing to promote. As written the clause was unsatisfiable on the path the item's own fixture block describes (#9453 CF-5). The clause now keys on the published set carrying the verb and records which save path was taken", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "corrected clause 1, which demanded a 2xx from POST /api/v1/meta/permission/S/publish. That route is mounted type-generically, but it answers 404 [no_draft] when no pending draft exists — and the console's permission save is a plain PUT that lands state:'active' directly, so there is nothing to promote. As written the clause was unsatisfiable on the path the item's own fixture block describes (#9453 CF-5). The clause now keys on the published set carrying the verb and records which save path was taken", "ref": "#9386" },
+        { "revision": 3, "date": "2026-09-23", "change": "re-keyed clause 2 and its verify on the refusal's code axis: the nothing-to-publish answer is now stated as HTTP 404 with code NO_DRAFT instead of quoting a bracketed lowercase opener inside the message. That opener was retired from every metadata-protocol refusal in 7a25a3ee9c (error is human language, code is the machine token), so a checker matching the old quoted spelling against a live answer recorded a false failure. Pass/fail semantics are unchanged; the producer is now cited in source", "ref": "#19705" }
       ]
     },
     {
@@ -2403,11 +2405,11 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
-        "admin (seeded dev admin — grant-anchored via the unscoped admin_full_access row, the ADR-0068 D2 contrast; its address is seed-stamped verified per #11343)",
+        "admin (seeded dev admin — its address is seed-stamped verified per #11343. Under single, the posture this item boots, it is grant-anchored via the unscoped admin_full_access row that first-registrant promotion writes, the ADR-0068 D2 contrast; under a walled posture no such row is written and an existing one confers no platform-admin standing (#11663 L5), so it would stand only if OS_PLATFORM_OWNER_EMAIL named its address)",
         "fresh member M (the config-anchor subject; a fresh sign-up's sys_user row is UNVERIFIED, which is exactly the unverified-match fixture)"
       ],
       "fixtures": {
@@ -2417,20 +2419,20 @@
           "a manage_platform_settings-floor probe route: GET /api/v1/datasources answers 401/403 BEFORE any service resolution (packages/services/service-datasource/src/admin-routes.ts; DATASOURCE_ADMIN_CAPABILITY), and admin_full_access carries that capability (packages/spec/src/identity/eval-user.zod.ts) — so the probe discriminates platform-admin standing cleanly"
         ],
         "knownGaps": [
-          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant, so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin"
+          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant under single (the posture this item boots), so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin"
         ]
       },
       "steps": [
-        "boot showcase isolated with the variable UNSET; admin session; sign up fresh member M and record M's email; as M: GET /api/v1/datasources and GET /api/v1/auth/me/permissions (read systemPermissions) — the baseline refusals",
+        "boot showcase single (OS_TENANCY_POSTURE=single — also what a deployment with no tenancy configuration resolves to) with the variable UNSET — a walled posture (group / isolated) refuses to boot with it unset (plugin-auth init; out of scope here, see negative) — and keep that posture for every restart below; admin session; sign up fresh member M and record M's email; as M: GET /api/v1/datasources and GET /api/v1/auth/me/permissions (read systemPermissions) — the baseline refusals",
         "restart with OS_PLATFORM_OWNER_EMAIL=<M's email> (M's row is unverified); as M repeat both probes",
         "restart with OS_PLATFORM_OWNER_EMAIL=<an address matching no sys_user row>; repeat M's probes",
         "restart with a malformed list, e.g. OS_PLATFORM_OWNER_EMAIL='<M's email>, not an address'; capture the [authz] refusal from the process log (it prints once, on the first derivation after the value is seen); as M repeat the probes — the WHOLE variable is refused, so even the well-formed entry confers nothing",
         "entitled side (see knownGaps for the verified-member fixture): with M's row verified and the variable naming M, as M repeat the probes and read /api/v1/auth/me/permissions — expect the declared admin envelope; where the fixture is unavailable, run the unit pin and cite its output instead",
-        "with the variable unset again, drive one admin-standing derivation as the seeded admin (any authenticated request) and grep the process log for the once-per-process legacy-grant re-anchor pointer"
+        "the walled half of the legacy grant anchor: run the #11663 L5 posture-split unit pins named in clause 6 and cite their output. There is no live log line to grep — the once-per-process legacy-grant re-anchor pointer was retired with the walled anchor (#19136), and nothing replaces it on the request path; the only operator-facing line left is plugin-security's boot-time fail-closed error, which fires when a walled rig has no usable configured administrator"
       ],
       "acceptance": [
         {
-          "clause": "unset = ZERO config-derived administrators, and the ADR-0068 D2 unscoped-grant anchor stays the only door: M's datasource probe is refused server-side (401/403 per identity, never 200) and M's systemPermissions lacks manage_platform_settings, while the seeded admin's identical probe answers 200 (both sides of the gate)",
+          "clause": "unset = ZERO config-derived administrators, and under single the ADR-0068 D2 unscoped-grant anchor stays the only door: M's datasource probe is refused server-side (401/403 per identity, never 200) and M's systemPermissions lacks manage_platform_settings, while the seeded admin's identical probe answers 200 (both sides of the gate)",
           "oracle": "api",
           "verify": "M's GET /api/v1/datasources >=400 with the declared code; M's /auth/me/permissions systemPermissions array excludes manage_platform_settings; admin's same GET is 200",
           "evidence": "both personas' traces"
@@ -2460,10 +2462,10 @@
           "evidence": "test output (and, when the fixture exists, M's entitled traces)"
         },
         {
-          "clause": "additive, never subtractive — the legacy anchor is honoured and loudly re-pointed: with the variable unset, standing resting on the unscoped admin_full_access grant alone still resolves PLATFORM_ADMIN, and the once-per-process [authz] pointer names the OS_PLATFORM_OWNER_EMAIL config line that re-anchors it (reportLegacyPlatformAdminGrant, platform-admin.ts)",
-          "oracle": "log",
-          "verify": "seeded admin's request succeeds AND the process log carries the legacy-grant pointer naming the variable; it appears once — grep the whole log, not the tail",
-          "evidence": "the log excerpt + the admin trace"
+          "clause": "the legacy grant is an anchor under single ONLY, and silently so (#11663 L5): under single, standing resting on the unscoped admin_full_access grant alone still resolves PLATFORM_ADMIN (clauses 1 and 3 observe it live); under a walled posture — postureEnforcesWall, i.e. every posture except single, read from the REQUESTED posture — the same row confers no PLATFORM_ADMIN standing (the held set still grants its own capabilities; only the rung and the built-in platform_admin position go), while the config anchor keeps conferring on that same walled rig; and the request path logs nothing about the row on any posture",
+          "oracle": "test",
+          "verify": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts — the '[#11663 L5] the legacy grant row is an anchor under `single`, and NOWHERE else', '[#11663 L5] the legacy anchor confers only on the rigs Choice 4A keeps it for' and '[#11663 L5] standing across postures' describes; packages/core/src/security/platform-admin.test.ts — '[#11663 L5] the legacy-grant deprecation pointer is retired' (both pointer symbols absent from the module and from the @objectstack/core security entry, with positive controls). The single half's own fate is #11979's (Choice 4B): if that lands, this clause is re-authored, not read as a regression",
+          "evidence": "test output"
         }
       ],
       "negative": [
@@ -2478,7 +2480,8 @@
         "unverified match (nothing)",
         "non-match (nothing)",
         "comma-separated list — duplicates collapsed, trim+lowercase normalization (platform-admin.ts)",
-        "malformed entry (whole-variable refusal, loud once)"
+        "malformed entry (whole-variable refusal, loud once)",
+        "walled posture — the unscoped admin_full_access grant alone confers no PLATFORM_ADMIN standing (unit pin, clause 6)"
       ],
       "traps": [
         "wrong-persona",
@@ -2486,11 +2489,13 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the legacy-grant pointer loudness) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4 and 6) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server"
+        "ref": "packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. STILL MANUAL: the live-HTTP arms over a real boot (clauses 1-4; clause 6 is test-only) — the pins run the derivation in-process; this item's live legs prove the same verdicts through the mounted server"
       },
       "source": [
         "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
-        "packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails (parsePlatformAdminEmails whole-variable refusal, loud-once resolve, matchesConfiguredPlatformAdmin verified-only, reportLegacyPlatformAdminGrant)",
+        "packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails (parsePlatformAdminEmails whole-variable refusal, resolvePlatformAdminEmails loud-once resolve, matchesConfiguredPlatformAdmin verified-only)",
+        "packages/core/src/security/resolve-authz-context.ts#legacyGrantAnchorRetired (#11663 L5 — the unscoped admin_full_access row derives PLATFORM_ADMIN only when the requested posture enforces no wall)",
+        "packages/spec/src/security/tenancy-posture.ts#postureEnforcesWall (walled = every posture except single)",
         "packages/core/src/security/admin-standing-surface.ts (the env declared a non-table derivation input — no break-glass write can reach it)",
         "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV,200 (PLATFORM_OWNER_EMAIL_ENV / resolvePlatformOwnerEmail)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (#11343 — the dev seed stamps its admin's address verified)",
@@ -2503,6 +2508,12 @@
           "date": "2026-08-30",
           "change": "new — the #11663 L2 deployment-config platform-admin anchor landed (#13146, 2026-08-29) with no checklist coverage. Env-conferred standing is a security gate and needs both sides asserted live: confer on a VERIFIED stored-row match only; nothing on unset / unverified / non-match / malformed (whole-variable fail-closed, loud once); plus the legacy-grant re-anchor pointer. Written as guard assertion per the shipped-guard posture; the entitled live leg is fixture-gapped (verified second account) and rests on the unit pin meanwhile",
           "ref": "#13146"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-23",
+          "change": "re-anchored on the walled retirement of the legacy grant anchor (#19136, issue #19145): step 6 and clause 6 told the runner to grep the process log for the once-per-process re-anchor pointer and cited reportLegacyPlatformAdminGrant, both removed — clause 6 now states the posture split (an anchor under single only, silent everywhere) with the #11663 L5 unit pins as its oracle, and the source parenthetical names live symbols. The item's live legs move from isolated to single: an isolated boot with the variable unset refuses to start (plugin-auth init), and under a walled posture the seeded admin holds no grant-anchored standing, so clauses 1 and 3 and the seeded-admin both-sides control only hold under single. Persona and knownGap state the posture. The single half is described as it ships; its fate is #11979's",
+          "ref": "#19145"
         }
       ]
     },

@@ -447,6 +447,15 @@ describe('[#19808] the lookup existence probe is scoped to the caller\'s organiz
  * that exists nowhere gets — so every pair below answers the same, and the
  * controls prove the predicates still evaluate wherever the header is the
  * caller's to read.
+ *
+ * [ADR-0137 D2] What "absent" answers moved, and it moved ALIKE for every pair:
+ * a `requiredWhen` whose `parent` is unbound used to be skipped (fail-open), so
+ * a write under an unreadable header either committed or fell through to the
+ * reference guard's `header: reference_not_found`. It now refuses the write as
+ * `note: rule_violation` (`reason: 'unevaluable'`) — the rule has no verdict —
+ * and, because `evaluateValidationRules` runs before `assertReferencesResolve`,
+ * that refusal is the one the caller meets. The invariant these pins exist for
+ * is unchanged: a locked, an open and a missing header give one answer.
  */
 describe('[#19837] the master-detail parent binding is scoped to the caller\'s organization', () => {
   let engine: ObjectQL;
@@ -527,7 +536,9 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     const open = await refusalOf(() => insertLine('hy_open'));
     const nowhere = await refusalOf(() => insertLine('h_nowhere'));
 
-    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] };
+    // ADR-0137 D2: the unbound header leaves `note`'s requirement without a
+    // verdict, and that refusal precedes the reference guard's.
+    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] };
     expect(locked).toBeInstanceOf(ValidationError);
     expect(envelopeOf(locked)).toEqual(expected);
     expect(envelopeOf(open)).toEqual(expected);
@@ -545,7 +556,8 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     const locked = await refusalOf(() => repoint('hy_locked'));
     const open = await refusalOf(() => repoint('hy_open'));
 
-    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] };
+    // ADR-0137 D2: see the describe's docblock — alike, and the rule's refusal.
+    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] };
     expect(envelopeOf(locked)).toEqual(expected);
     expect(envelopeOf(open)).toEqual(expected);
     expect(storeFor('pb_line').get('ln_x')?.header).toBe('hx_open');
@@ -594,16 +606,22 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     // Clearing `note` would violate `requiredWhen` against the locked header
     // (ADR-0113: the pre-state complied). It used to be refused for `hy_locked`
     // and committed for `hy_open`; the header is not the caller's to read, so
-    // both are now judged with `parent` unbound (#4977: fail-open) — alike.
-    await engine.update('pb_line', { note: '' }, { where: { id: 'ln_yl' }, context: MEMBER_X } as any);
-    await engine.update('pb_line', { note: '' }, { where: { id: 'ln_yo' }, context: MEMBER_X } as any);
-    // An OPERATOR on `id` is a predicate, so these take the bulk branch and its
-    // batch header read; a scalar `where.id` would route to the by-id branch
-    // even under `multi: true` (`resolveEngineUpdateDispatch`).
-    await engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bl'] } }, multi: true, context: MEMBER_X } as any);
-    await engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bo'] } }, multi: true, context: MEMBER_X } as any);
+    // both are judged with `parent` unbound — alike. Unbound was fail-open
+    // (#4977: both committed) until ADR-0137 D2; it now REFUSES both, the same
+    // envelope on every door, and nothing is written.
+    const refusals = [
+      await refusalOf(() => engine.update('pb_line', { note: '' }, { where: { id: 'ln_yl' }, context: MEMBER_X } as any)),
+      await refusalOf(() => engine.update('pb_line', { note: '' }, { where: { id: 'ln_yo' }, context: MEMBER_X } as any)),
+      // An OPERATOR on `id` is a predicate, so these take the bulk branch and its
+      // batch header read; a scalar `where.id` would route to the by-id branch
+      // even under `multi: true` (`resolveEngineUpdateDispatch`).
+      await refusalOf(() => engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bl'] } }, multi: true, context: MEMBER_X } as any)),
+      await refusalOf(() => engine.update('pb_line', { note: '' }, { where: { id: { $in: ['ln_bo'] } }, multi: true, context: MEMBER_X } as any)),
+    ];
 
-    expect(['ln_yl', 'ln_yo', 'ln_bl', 'ln_bo'].map((id) => lines.get(id)?.note)).toEqual(['', '', '', '']);
+    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] };
+    for (const err of refusals) expect(envelopeOf(err)).toEqual(expected);
+    expect(['ln_yl', 'ln_yo', 'ln_bl', 'ln_bo'].map((id) => lines.get(id)?.note)).toEqual(['n', 'n', 'n', 'n']);
   });
 
   it('lit controls: a same-organization `locked` header still requires `note`; an `open` one commits', async () => {
@@ -656,12 +674,13 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     expect([...(read[0].options?.tenantIds ?? [])].sort()).toEqual([ORG_X, ORG_Y].sort());
 
     // Lit control: a member whose set is org X alone cannot see the org-Y
-    // header, so it binds absent and the write answers `reference_not_found`.
+    // header, so it binds absent and the write answers as an absent header does
+    // (ADR-0137 D2: `note`'s requirement has no verdict, and is refused).
     const ONLY_X = { ...MEMBER_X, accessible_org_ids: [ORG_X] } as unknown as ExecutionContext;
     const outside = await refusalOf(() =>
       engine.insert('pb_line', { id: 'ln_x_only', header: 'hy_locked' }, { context: ONLY_X } as any));
 
-    expect(envelopeOf(outside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] });
+    expect(envelopeOf(outside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] });
   });
 
   it('the header read runs ELEVATED and TENANT-SCOPED — the two halves of `{ ...context, isSystem: true }`', async () => {

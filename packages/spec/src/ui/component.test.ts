@@ -286,12 +286,14 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:1116` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `62597c588`. Re-derived at that pin
-// 2026-09-23: `containers.tsx` changed again across the hop from `87af769e9`
-// (74 insertions, 16 deletions, objectui `4c6f549ef`, the `page:header`
-// title), so both anchors were re-READ rather than carried — and NEITHER
-// moved: the icon block is still `1069-1075` and the input still `1116`, each
-// byte-identical to its `87af769e9` text. (The hop before, off `53ded82bf`,
+// builds against — `.objectui-sha` = `f8a9d0fb0`. Re-derived at that pin
+// 2026-09-24: `containers.tsx` changed again across the hop from `62597c588`
+// (36 insertions, 7 deletions, objectui `ba0b61a60`: an import line and the
+// `page:header` title), so both anchors were re-READ rather than carried —
+// and NEITHER moved: the icon block is still `1069-1075` and the input still
+// `1116`, each byte-identical to its `62597c588` and `87af769e9` text. The
+// hop onto `62597c588` (74 insertions, 16 deletions, objectui `4c6f549ef`)
+// read the same. (The hop before, off `53ded82bf`,
 // moved them from `919-925` and `966` and rewrote the input LINE — it now
 // declares `of: 'object'`, carries a longer description and no `label` —
 // while the member list this pin cites stayed unchanged.) Identity preserves a
@@ -379,12 +381,13 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:912` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `62597c588`. Re-derived
-// at that pin 2026-09-23: `containers.tsx` changed again across the hop from
-// `87af769e9` (74 insertions, 16 deletions, objectui `4c6f549ef`), so both
+// the pin this repo builds against — `.objectui-sha` = `f8a9d0fb0`. Re-derived
+// at that pin 2026-09-24: `containers.tsx` changed again across the hop from
+// `62597c588` (36 insertions, 7 deletions, objectui `ba0b61a60`), so both
 // anchors were re-READ rather than carried — and NEITHER moved: the icon block
 // is still `853-859` and the input still `912`, each byte-identical to its
-// `87af769e9` text. (The hop before, off `53ded82bf`, moved them from
+// `62597c588` and `87af769e9` text; the hop onto `62597c588` (74 insertions,
+// 16 deletions, objectui `4c6f549ef`) read the same. (The hop before, off `53ded82bf`, moved them from
 // `730-736` and `789` and rewrote the input LINE — `of: 'object'`, a longer
 // description, no `label` — while the member list this pin cites stayed
 // unchanged.) Never inferred (#10274).
@@ -3385,19 +3388,24 @@ describe('#7751 — object-* block props schemas', () => {
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `62597c588`; re-measured there 2026-09-23 — all
-// five objectui files this block cites are byte-identical to `87af769e9`
-// (`git diff --quiet`), so the four anchors hold unmoved; they were last
-// re-READ at `87af769e9` 2026-09-20, the hop that moved every one of them and
-// renamed one face outright): `plugin-kanban/src/ObjectKanban.tsx:676`
+// against (`.objectui-sha` = `f8a9d0fb0`; re-measured there 2026-09-24 —
+// `plugin-kanban/src/types.ts` and `plugin-kanban.mdx` are byte-identical to
+// `62597c588`; `ObjectKanban.tsx`, `index.tsx` and `objectql.ts` changed, so
+// their anchors were re-READ: `676` -> `687` and `:84` -> `:85` moved with
+// their text byte-identical, the mapping gained `sort: true` beside the
+// `limit` it cites (objectui#10068, `447-450` -> `507-511`), and the
+// `limit?: number` member moved `3735` -> `3832`. All five files were
+// byte-identical across the hop onto `62597c588`, and were last re-READ at
+// `87af769e9` 2026-09-20, the hop that moved every anchor and renamed one
+// face outright): `plugin-kanban/src/ObjectKanban.tsx:687`
 // queries `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT)` (100,
-// `:84`; the bare `??` became `resolveRowLimit` in objectui#9925, which drops
+// `:85`; the bare `??` became `resolveRowLimit` in objectui#9925, which drops
 // and reports a cap the contract refuses),
-// `plugin-kanban/src/index.tsx:447-450` maps `limit: 'limit'` in
+// `plugin-kanban/src/index.tsx:507-511` maps `limit: 'limit'` in
 // `OBJECT_KANBAN_DATA_SOURCE`, ⚠️ `KanbanSchema` is RETIRED at this pin and
 // `plugin-kanban/src/types.ts` declares the member no more — the published
 // twin is `ObjectKanbanSchema`, declaring `limit?: number` at
-// `packages/types/src/objectql.ts:3735` — and `content/docs/plugins/plugin-kanban.mdx`
+// `packages/types/src/objectql.ts:3832` — and `content/docs/plugins/plugin-kanban.mdx`
 // teaches `limit: 250` with a Properties row. The strict map refused the key by
 // name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
 // author following the published docs wrote a node the save gate rejected.
@@ -3458,10 +3466,12 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // on the React-host `kanban-ui` block). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `62597c588`; re-measured there 2026-09-23 —
-// `ObjectKanban.tsx` and `KanbanImpl.tsx` are byte-identical to `87af769e9`,
-// where every anchor was re-READ 2026-09-20 and MOVED with its cited text
-// byte-identical, so none moved on this hop) `ObjectKanban.tsx:1563`
+// against (`.objectui-sha` = `f8a9d0fb0`; re-measured there 2026-09-24 —
+// `KanbanImpl.tsx` is byte-identical to `62597c588`, and `ObjectKanban.tsx`
+// changed above the spread only (objectui#10068's `$orderby`), which MOVED
+// `1563` -> `1578` with its text byte-identical; both files were
+// byte-identical across the hop onto `62597c588`, and every anchor was
+// re-READ at `87af769e9` 2026-09-20) `ObjectKanban.tsx:1578`
 // spreads the
 // authored bag into `KanbanRenderer` and `KanbanImpl` gates the affordance on
 // `quickAdd && onQuickAdd` (`KanbanImpl.tsx:621`, `:634` — the file is spelled
@@ -3526,9 +3536,12 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `62597c588`, re-derived there 2026-09-23: `resolve-icon.ts`,
-// `button.tsx` and `lazy-icon.tsx` are all byte-identical to `87af769e9`
-// (`git diff --quiet`), so no anchor moved on this hop. The hop before it,
+// `.objectui-sha` = `f8a9d0fb0`, re-derived there 2026-09-24: `resolve-icon.ts`
+// and `lazy-icon.tsx` are byte-identical to `62597c588` and `87af769e9`
+// (`git diff --quiet`), and `button.tsx` changed only inside its
+// registration's input list (objectui#9910 added a `children` slot input, no
+// `icon` one), so the `:43` / `:72` / `:74` anchors below did not move; all
+// three files were byte-identical across the hop onto `62597c588`. The hop before that,
 // onto `87af769e9` (re-derived 2026-09-20), moved both files in this chain —
 // `resolve-icon.ts` +203/-7 and `button.tsx` +6/-11 against `53ded82bf` — so
 // no anchor below was carried there and every one was re-READ (#10274). ⚠️ `resolveIcon` itself was rewritten: its tail no
@@ -3648,10 +3661,15 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
 // renderer's read points support at the pin this repo builds against
-// (`.objectui-sha` = `62597c588`; re-measured there 2026-09-23 — the gantt and
-// tree renderers are byte-identical to `87af769e9`, and the map's
-// `ObjectMap.tsx` changed only in a docblock and a dev-warning string
-// (objectui `2252653d0`), so its anchors MOVED with their cited text
+// (`.objectui-sha` = `f8a9d0fb0`; re-measured there 2026-09-24 — the map's
+// `ObjectMap.tsx` is byte-identical to `62597c588`, and the gantt and tree
+// renderers changed on this hop, so their anchors were re-READ: no declared
+// key set moved (the gantt's new host-generated `search` / `searchableFields`
+// reads, objectui#10250, stay undeclared and are recorded in its header; the
+// tree's `filter.tree` stash read was deleted, objectui#9549). At `62597c588`
+// the gantt and tree renderers were byte-identical to `87af769e9`, and the
+// map's `ObjectMap.tsx` had changed only in a docblock and a dev-warning
+// string (objectui `2252653d0`), so its anchors MOVED with their cited text
 // byte-identical and no key set moved. They were re-READ at `87af769e9`
 // 2026-09-22 — all three renderers moved hard on the hop from `53ded82bf`,
 // so NO anchor in this block was carried and every one was re-derived. Four

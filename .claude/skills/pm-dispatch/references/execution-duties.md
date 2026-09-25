@@ -42,7 +42,7 @@
 - 自在飞派发升级出的卡首行一句:本卡承哪一半、父卡留哪一半;缺此行不入队不入箱。
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
 - 阻塞项在飞 ⇒ 等:`pm:blocking` 在其车道排最前、等待者写该卡;p0/p1 优先级沿链传递。
-- 取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:产品仓开放 P0/P1 每次取卡现读。
+- 取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:本车道队列开放 P0/P1 每次取卡现读。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 标签序:`priority:p0` > `pm:blocking` > 功能点位次 > `target:` 板上项 > p1 > p2 > p3 > 无级。
 - `pm:blocking` 级内先按解锁扇出(从 `Blocked-by:` 反向索引现算,⛔ 扇出数不落标签)。
@@ -144,9 +144,9 @@
 
 ## 收集
 
-- 报告通道统一:GitHub 是两种模式共用的真相源;dev 终报先落 issue 评论、再作返回消息。
-- 收集先扫 GitHub,标记评论在 = 报告完整;两处皆无才进探活/判死。
+- 收集先扫 GitHub(两种模式),标记评论在 = 报告完整;评论与返回消息皆无才进探活/判死。
 - 标记两种拼写等效(HTML 注释形、首行 `os-dev-report`);⛔ 永不把没收到失败通知读作还在跑。
+- 报告点名 PR ⇒ 会话席当即 `subscribe_pr_activity` 并记座位贴;中继开的 PR 永不自动挂会话。
 - 探活是每轮巡检的固定动作;完成通知不可靠,缺席什么都不证明。
 - ① 巡检首动作 `list_triggers` 确认 Routine 启用,在飞重挂加速器;唤醒归 Routine,漏挂不断链。
 - ② 在飞期间主巡检间隔 ≤45 分钟,待命期 60–70;节奏维护者明示可改。
@@ -172,7 +172,7 @@
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
 - PR 形态与范围:draft、目标 `main`、`Fixes`/`Part of` 首行判据,翻 ready 前亲核。
 - `Part of` 卡 MERGED 时点收口;changed files 范围与 changeset/`skip-changeset` 分流;测试证据。
-- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取维护者原话或出处三件转述。
+- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。

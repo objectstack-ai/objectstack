@@ -416,6 +416,9 @@ describe('flow delegates to IAutomationService.execute with the trigger route’
         // from, plus the `<object>Id` alias — none of it re-implemented here.
         expect(automationContext).toEqual({
             params: { reason: 'spam', recordId: 'rec-1', showcaseInquiryId: 'rec-1' },
+            // [#19846] Which of those the CALLER supplied — the seeded row id
+            // and its alias are not among them.
+            callerParamKeys: ['reason'],
             object: 'showcase_inquiry',
             event: 'manual',
             // The FULLY-RESOLVED identity envelope: without it a `runAs:'user'`

@@ -5,6 +5,7 @@ import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { QueryAST } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /**
  * Regression: `$null` takes a BOOLEAN, and a non-boolean is refused (#1116).
@@ -86,11 +87,22 @@ function transportWithCapturingClient() {
   return { t, calls };
 }
 
-/** The refusal a filter produces, or a failure saying it did not refuse. */
+/**
+ * The refusal a filter produces, or a failure saying it did not refuse.
+ *
+ * [#20020] The filter is handed over marked 'author' — on a shallow copy — as a
+ * read-scope merge boundary marks a caller's own predicate: every assertion in
+ * this file reads the author-facing text (the field, the value, the location),
+ * which the transport discloses only for a predicate the caller is known to
+ * have written (the #8220 contract). The withheld wording is pinned in
+ * `remote-transport-refusal-door-provenance.test.ts`.
+ */
 async function refusalOf(where: unknown): Promise<WireBearingError> {
   const { t, calls } = transportWithCapturingClient();
   try {
-    await t.find('deal', { where } as unknown as QueryAST);
+    await t.find('deal', {
+      where: markFilterSubtreeProvenance({ ...(where as object) }, 'author'),
+    } as unknown as QueryAST);
   } catch (e) {
     // A refused filter must not have run a statement on the way to throwing.
     expect(calls).toEqual([]);
@@ -339,10 +351,12 @@ describe('RemoteTransport $null comparand refusal (#1116)', () => {
       // #5041 comment excludes the family from its guard by name.
       // [#6518] The wildcard is `*`, not `%` — this transport emits `GLOB` now,
       // because the family is case-SENSITIVE by contract and SQLite's `LIKE`
-      // is not. The claim under test is still that a NUMBER and a BOOLEAN keep
-      // rendering to text rather than being refused.
+      // is not. [#20024] `$contains` binds the text itself now: it compiles to
+      // `instr()`, which reads the whole stored value and has no wildcard. The
+      // claim under test is still that a NUMBER and a BOOLEAN keep rendering to
+      // text rather than being refused.
       expect((await compile({ name: { $startsWith: 42 } })).args).toEqual(['42*']);
-      expect((await compile({ name: { $contains: true } })).args).toEqual(['*true*']);
+      expect((await compile({ name: { $contains: true } })).args).toEqual(['true']);
     });
   });
 

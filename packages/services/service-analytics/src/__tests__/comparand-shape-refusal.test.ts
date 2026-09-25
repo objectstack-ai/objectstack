@@ -169,9 +169,21 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
       expect(tree({ status: { $in: ['a', 'b'] } })).toEqual({
         kind: 'leaf', member: 'status', operator: 'in', values: ['a', 'b'],
       });
-      expect(tree({ status: { $in: ['a', null, 5, true] } })).toEqual({
-        kind: 'leaf', member: 'status', operator: 'in', values: ['a', null, 5, true],
+      expect(tree({ status: { $in: ['a', 5, true] } })).toEqual({
+        kind: 'leaf', member: 'status', operator: 'in', values: ['a', 5, true],
       });
+      // [#20010] RE-JUDGED. This list carried a `null` member, pinned as a
+      // legitimate `$in` member TYPE for this guard. It still is one for this
+      // guard, which asks only "can it bind". But the shared comparand-shape
+      // face refuses a null list member by its 2026-08-31 ruling (#13357: "A
+      // `null` member of `$in` / `$nin` … refused at this door"), and this door
+      // now runs that face first. So the list is refused whole, in the face's
+      // words and not this guard's.
+      const err = refusalOf(() => tree({ status: { $in: ['a', null, 5, true] } }));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message.startsWith('Operator "$in" on field "status" does not accept null as a list member')).toBe(true);
+      expect(err.message).not.toContain('cannot be bound as a SQL parameter');
     });
 
     it('keeps every primitive LIKE comparand, including the two #5526 pinned', () => {
@@ -257,7 +269,19 @@ describe('[#5234] the read-scope lowering refuses the same two shapes, fail-clos
 
   describe('the guard is narrow here too', () => {
     it('keeps binding every legitimate `$in` member', () => {
-      expect(scope({ status: { $in: ['a', null, 7, true] } }).params).toEqual(['a', null, 7, true]);
+      expect(scope({ status: { $in: ['a', 7, true] } }).params).toEqual(['a', 7, true]);
+    });
+
+    it('[#20018] a `null` member is no longer one of them — refused by the shared list-shape face', () => {
+      // This row used to bind `null` beside the three members above. The
+      // null-member ruling (2026-08-31) refuses it at the shared face, and the
+      // lowering now runs that face after its own gates, as the ObjectQL
+      // execute face does — so this door's own member gate is still narrow,
+      // and the refusal carries the face's sentence, not this door's.
+      const err = refusalOf(() => scope({ status: { $in: ['a', null, 7, true] } }));
+      expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
+      expect(err.status).toBe(500);
+      expect(err.message).toContain('does not accept null as a list member');
     });
 
     it('keeps every primitive LIKE comparand', () => {

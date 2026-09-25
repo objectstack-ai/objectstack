@@ -58,6 +58,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from './index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -185,7 +186,11 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
 
     for (const [label, value] of NON_BOOLEAN) {
       it(`refuses ${label} with INVALID_FILTER / 400`, async () => {
-        const err = await refusalOf({ stage: { $null: value } });
+        // [#20020] Marked 'author', as a read-scope merge boundary marks a
+        // caller's own predicate: the field, the value and the path are named
+        // only then (the #8220 contract). The withheld wording is pinned in
+        // `sql-driver-refusal-door-provenance.test.ts`.
+        const err = await refusalOf(markFilterSubtreeProvenance({ stage: { $null: value } }, 'author'));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         expect(err.message).toContain('Operator "$null" on field "stage" requires a boolean comparand');
@@ -253,7 +258,11 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
 
     for (const [label, value] of NON_BOOLEAN) {
       it(`refuses ${label} with INVALID_FILTER / 400`, async () => {
-        const err = await refusalOf({ stage: { $exists: value } });
+        // [#20020] Marked 'author', as a read-scope merge boundary marks a
+        // caller's own predicate: the field, the value and the path are named
+        // only then (the #8220 contract). The withheld wording is pinned in
+        // `sql-driver-refusal-door-provenance.test.ts`.
+        const err = await refusalOf(markFilterSubtreeProvenance({ stage: { $exists: value } }, 'author'));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         expect(err.message).toContain('Operator "$exists" on field "stage" requires a boolean comparand');

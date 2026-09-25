@@ -5228,10 +5228,15 @@ const step18: MigrationStep = {
     + '(Phase 2) and the platform’s at `kernel:ready` (Phase 3), and `deepMerge` gives the later '
     + 'source the leaf, so what an application had was a GAP FILLER on a namespace it does not own '
     + '— rendering only where the platform bundle carried no string for that key and locale. The '
-    + 'D2 conversion strips the group from per-app bundle entries only (never from a `translation` '
-    + 'ITEM, which still declares it), and the paired semantic entry says what the strip means, '
-    + 'because a notice reading "(removed)" does not say that those gaps fall back to the '
-    + "manifest's own English literal. "
+    + 'registered `translation` ITEM follows the file door (#19620, ruling batch #210 item 2 letter '
+    + 'B: one app metadata type, two authoring doors, one accepted shape) and no longer declares '
+    + '`settings` either; there the group had been STRONGER, because the runtime-authored layer is '
+    + 'read over the shipped bundles, so a stored item overrode the platform’s own copy. The D2 '
+    + 'conversion strips the group from per-app bundle entries and from bare items alike — the '
+    + 'runtime translation sync replays it over every stored row before merging — and the paired '
+    + 'semantic entry says what the strip means at each door, because a notice reading "(removed)" '
+    + 'says neither that an item’s overrides give way to the platform’s string nor that a gap falls '
+    + "back to the manifest's own English literal. "
     + 'Finally it retires object `tenancy.organizationField` (#19054, ADR-0049 '
     + 'enforce-or-remove). The key named the column a PLATFORM ROW is stamped from, as '
     + 'opposed to the column the object is WALLED by (`tenantField`); on an ordinary object '
@@ -5488,6 +5493,70 @@ const step18: MigrationStep = {
         + 'worth one pass too — an object your app declares exportable by nobody is now genuinely '
         + 'exportable by nobody, which is the point of the change; confirm that is what you want '
         + 'before granting it back.',
+    },
+    // The delegated-admin scope's one required key, required NON-BLANK. Stored
+    // scopes are deliberately not rewritten: the root of a subtree cannot be
+    // inferred from a blank, so the stored row is refused on its next write and
+    // named by the boot reconciliation's existing durability error instead.
+    {
+      id: 'admin-scope-business-unit-blank-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'security.permission.adminScope.businessUnit (AdminScopeSchema, ADR-0090 D12) authored or stored '
+        + 'BLANK: the empty string, or a value that is nothing but whitespace (spaces, a tab, a newline). '
+        + 'The key is the scope\'s only required one and names the root business unit of the delegated '
+        + 'subtree; a blank value satisfied the requirement while naming no unit',
+      replacement:
+        'the sys_business_unit.name (machine name) of the business unit at the root of the subtree the '
+        + 'delegate administers, written out: `businessUnit: \'north_america\'`. If the permission set '
+        + 'should not delegate administration at all, remove `adminScope` from it. ⛔ There is no '
+        + 'replacement that can be DERIVED from what was written: a blank names no unit, so the root the '
+        + 'author meant is not recoverable, and the platform must not pick one.',
+      reason:
+        'Maintainer ruling A on #19461 (decision batch #217 item 1, 2026-09-23 「217 同意」). '
+        + '`AdminScopeSchema` declared `businessUnit` as a bare string with no minimum, so '
+        + '`{ businessUnit: \'\' }` and `{ businessUnit: \'   \' }` parsed green — measured against the '
+        + 'published spec 17.4.0 and re-measured on `main` before the change. This narrows a published '
+        + 'face: every other key of the scope is scoped TO this one, and ADR-0090 D12 declares the scope\'s '
+        + 'WHERE as a business-unit subtree, which a blank does not name. The delegated-admin gate '
+        + 'resolves the anchor by exact name, so a blank anchor resolves to an empty subtree and approves '
+        + 'nothing on the subtree axes — no escalation was measured; the defect is a declaration that '
+        + 'does not enforce what it declares, satisfied most readily by an author (an AI author above '
+        + 'all) that knew the key was required and did not yet know the unit. The refusal is a '
+        + 'NON-TRANSFORMING refinement at the key\'s own path, deliberately not a trim: the metadata save '
+        + 'path persists the submitted body verbatim rather than the parsed value, so a trimming schema '
+        + 'would validate one string and store another that the gate\'s exact lookup cannot resolve. A '
+        + 'real name therefore parses byte-identical. Scope is blankness only: a real name with '
+        + 'surrounding whitespace is not judged by this entry. ⚠️ STORED ROWS ARE NOT REWRITTEN and there '
+        + 'is no D2 conversion (no lossless rewrite exists — the root cannot be inferred, and dropping '
+        + 'the scope would silently change who is a delegate). The read path does not re-validate stored '
+        + 'rows, so no stored permission set becomes unreadable. A stored blank-anchored scope is refused '
+        + 'on its NEXT WRITE instead: a Setup or data-door edit of that permission set answers 422 '
+        + 'INVALID_METADATA naming adminScope.businessUnit, and the boot reconciliation backfill of a '
+        + 'legacy record with no metadata definition reports it through its existing durability ERROR '
+        + '(ADR-0094 D4), whose own prescription is to make the record body spec-valid; restoring a '
+        + 'trashed blank-anchored set brings the record back and reports the missing definition at ERROR '
+        + 'the same way. ⛔ No path skips the row. Ships at once, no grace window and no dual spelling '
+        + '(2026-08-27 maintainer ruling 「短期不考虑渐进」). ADR-0049 / ADR-0087 / ADR-0090.',
+      acceptanceCriteria:
+        'Search every authored and stored permission set for an `adminScope` whose `businessUnit` is '
+        + 'empty or whitespace-only — metadata files, `sys_metadata` permission rows, and the '
+        + '`admin_scope` column of `sys_permission_set` — and write the root unit\'s machine name, or '
+        + 'remove `adminScope` where the set should not delegate. The sweep is mechanical for authored '
+        + 'metadata: `AdminScopeSchema.safeParse` and `PermissionSetSchema.safeParse` answer exactly one '
+        + '`custom` issue at `businessUnit` (or `adminScope.businessUnit` when the set is parsed whole) '
+        + 'naming `sys_business_unit.name` as the valid anchor. For STORED rows the search above is the '
+        + 'catch-all, because reads never refuse: a definition already stored in `sys_metadata` with a '
+        + 'blank anchor loads and resolves exactly as before and says nothing until it is written again. '
+        + 'Two write paths then name it: a re-save of the set (refused 422 at adminScope.businessUnit), '
+        + 'and — for a legacy `sys_permission_set` record with no metadata definition only — the boot '
+        + 'log, where the ADR-0094 D4 backfill\'s first-failure ERROR names the record and carries the '
+        + 'offending key and its summary ERROR counts and names the failed records. ⛔ A clean boot is '
+        + 'therefore NOT a completed sweep. An absent `businessUnit` is refused exactly as before, with its own invalid_type issue. Nothing is '
+        + 'normalised on the way through: an accepted anchor arrives byte-identical to what was written. '
+        + 'The repo and example apps carried zero blank anchors at the time of the change, so no fixture '
+        + 'had to be rewritten.',
     },
     {
       id: 'advanced-plugin-lifecycle-config-retired',
@@ -8262,6 +8331,49 @@ const step18: MigrationStep = {
         + 'writes `branch`.',
     },
     {
+      id: 'field-currency-scale-refused',
+      surface: 'object.fields.<name>.scale on a field whose `type` is `currency` — any declared value, '
+        + '`scale: 0` included; the `Field.currency` helper passes it through unchanged. `scale` on '
+        + '`number`, `percent`, `rating`, `slider` and `formula` is untouched',
+      replacement: 'no `scale` on a currency field. DELETE the key — that is the whole migration: a '
+        + 'currency amount\'s decimal places are its currency\'s, not a field setting. The currency\'s '
+        + 'ISO 4217 minor unit decides how the amount displays, and the field\'s write allowance stays '
+        + 'unconstrained — a currency write is accepted with the decimals it carries, as it always was '
+        + 'on a currency field that declared no `scale`. ⛔ Nothing replaces the key: do not re-declare '
+        + 'its value under any other key.',
+      reason:
+        'Maintainer ruling 5791803339 (batch #215 item 1, letter B) retires `scale` from the '
+        + '`currency` field type, and ruling 5805782503 (batch #218 item 2, letter 乙 — a currency\'s '
+        + 'decimal places are the currency\'s, not a setting) words the remedy. On a currency field the '
+        + 'key was three-faced: the metadata-admin field designer offered it as stored metadata, the '
+        + 'amount\'s cell never read it (fraction digits come from the currency\'s ISO 4217 minor '
+        + 'unit), and the record validator\'s `max_scale` branch still refused writes carrying more '
+        + 'decimals — so an author who set it bought a narrower write contract and no visible change. '
+        + '`FieldSchema` now refuses the key on `currency` at parse, and the validator stops reading it '
+        + 'for the type in the same release, so a stored declaration narrows nothing either. ⛔ No '
+        + 'alias and no grace window, per the ruling. NOT mechanically converted, deliberately: a '
+        + 'conversion that dropped the key would accept it on every load, which is the grace window '
+        + 'the ruling refused; the refusal names the key and its one-line fix instead. Two behaviour '
+        + 'changes ride along and are part of what an upgrade means: (1) a currency write with more '
+        + 'decimals than a former `scale` is now ACCEPTED — the write allowance stays unconstrained, '
+        + 'the contract every currency field without `scale` already had; (2) at the console pin '
+        + 'measured when this was written, the grid summary footer and the dashboard metric widget '
+        + 'read a currency column\'s `scale ?? 0`, and the ruling lands this change only after the '
+        + 'console derives both faces from the currency, the way the cell does, and the pin has moved '
+        + 'past that change. Population measured at the change, on origin/main 1f89ba0d70 by AST '
+        + 'sweep: 15 `Field.currency` declarations in `examples/` (app-crm 4, app-showcase 11) and 13 '
+        + 'documentation examples carried `scale`, every one of them `scale: 2`; all were deleted in '
+        + 'the same change.',
+      acceptanceCriteria:
+        'Every field in the stack parses: `ObjectSchema.parse()` / `objectstack validate` report no '
+        + 'issue on a `scale` path of a `currency` field. A currency field that carried `scale` no '
+        + 'longer declares it, and a diff of the field shows that one line deleted and no key added. '
+        + 'Its amount\'s cell renders the currency\'s ISO 4217 minor-unit digits, as before, and a '
+        + 'write with more decimals than the old `scale` is accepted where it was refused with '
+        + '`max_scale`; `number` / `percent` / `rating` / `slider` fields keep their `scale` and '
+        + 'still refuse over-scale writes.',
+    },
+    {
       id: 'field-master-detail-set-null-refused',
       surface: "object field `deleteBehavior: 'set_null'` authored on a `master_detail` field",
       replacement: "an explicit `deleteBehavior: 'restrict'` or `'cascade'` (or no declaration, "
@@ -8699,6 +8811,75 @@ const step18: MigrationStep = {
         + 'authoring schema door (SET_MEMBER_DESCRIPTION); they are outside THIS entry\'s transition '
         + 'and are worth sweeping in the same pass.',
     },
+    // The RUNTIME door's half of the question the sibling entry
+    // view-filter-rule-scalar-operator-array-refused answered at the view-rule
+    // schema door: that entry refuses an array on a scalar view operator when the
+    // rule is authored; this one refuses the lowered shape itself, at the shared
+    // comparand-shape face every query crosses, whichever vocabulary produced it.
+    // Recorded as its own entry because the surface is different (the $ dialect
+    // and the FilterArray sugar, not ViewFilterRule) and because its scope stops at
+    // the EQUALITY slot, where the view entry covers every scalar operator.
+    {
+      id: 'filter-equality-array-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.FilterCondition — an ARRAY as an EQUALITY comparand, at the runtime filter doors (the '
+        + 'shared comparand-shape face that parseFilterAST and the engine lowering seam both run): the '
+        + 'implicit form { field: [...] } — which the FilterArray sugar ["field", "equals", [...]] '
+        + 'lowers to, and likewise "=", "==" and "eq" — and the explicit form { field: { $eq: [...] } }, '
+        + 'at any depth under $and / $or / $not, the empty array included',
+      replacement:
+        'the operator the list was standing in for. "One of these values" is $in: '
+        + '{ field: { $in: ["a", "b"] } } (authoring spelling "in"). "The stored multi-value field '
+        + 'holds this value" is $contains with ONE member: { field: { $contains: "a" } } (authoring '
+        + 'spelling "contains"), and an $or of those for any-of. A filter that meant a single value '
+        + 'writes that value: { field: "a" }. The list operators ($in / $nin / $between) keep their '
+        + 'arrays, empty lists included; every scalar equality comparand, null above all (the '
+        + 'has-no-value predicate), is untouched; and $ne is NOT judged by this entry',
+      reason:
+        'Maintainer ruling on #19757 (record 5793368540, batch 217 item 3, letter 乙, 「217 同意」): '
+        + 'an array in the implicit-equality slot is refused at the shared face, for every driver at '
+        + 'once — no alias, no grace window. The comparand-shape face declared that moving a rule '
+        + 'to it 「closes that door for every driver at once」, and before this change it judged '
+        + 'only the list-operator slot; the equality slot passed both shared doors and each backend '
+        + 'answered it alone. Measured on the lowered node { tags: ["a"] } at this release, beside a '
+        + 'scalar and an $in control. driver-sql on SQLite REFUSED it with INVALID_FILTER / 400 at '
+        + 'the top level, and nested under $and / $or / $not answered 500 DATABASE_ERROR instead '
+        + '(driver-turso and driver-sqlite-wasm are built on driver-sql and were not run separately). '
+        + 'driver-memory REFUSED it with INVALID_FILTER / 400 at every depth. The formula matcher '
+        + 'returned no row, including a row storing exactly ["a"]. driver-mongodb ANSWERED it: its '
+        + 'translateFilter emits the array unchanged, and MongoDB equality on an array operand '
+        + 'selects a stored array equal to ["a"] or holding ["a"] as an element — mingo 7.2.4, the '
+        + 'named proxy, over ["a"], "a", ["a","b"], ["b","a"], [["a"],"x"], [["a"]], "b" and [] '
+        + 'selected ["a"], [["a"],"x"] and [["a"]]. The service-analytics filter normalizer read the '
+        + 'FilterArray form as MEMBERSHIP: ["stage", "=", ["won", "lost"]] charted as stage IN '
+        + '(won, lost); that form now gets the refusal too, while its OBJECT form, which that '
+        + 'normalizer does not route through the shared face, still reads as membership. A live mongod, MySQL, PostgreSQL and a live '
+        + 'Turso server were NOT measured. So one stored filter was a 400 on most backends and a '
+        + 'silent, differently-shaped row set on one. The shared face now refuses it with '
+        + 'INVALID_FILTER / 400 before any driver runs, naming the field, the path and both remedies. '
+        + 'The ruling records the hosted product as running on the SQL family, where the top-level '
+        + 'shape was already a 400, so the population that can observe a change is self-hosted '
+        + 'driver-mongodb, plus any filter nested under a combinator on the SQL family (a 500 '
+        + 'becomes a 400). $ne carrying an '
+        + 'array measured the same split and is deliberately left to its own ruling. Metadata AT '
+        + 'REST is not rewritten and this entry adds no D2 conversion: an array on equality has no '
+        + 'single honest value, and choosing between $in and $contains is the author\'s call, not '
+        + 'the platform\'s. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep stored filters, dataset and widget filters, flow node filters and code that builds '
+        + 'a where for a field whose value is an array — { field: [...] }, { field: { $eq: [...] } }, '
+        + 'or a FilterArray triple on =, ==, eq or equals carrying an array — then decide per filter '
+        + 'what it meant: one of these values ($in), the stored list holds a value ($contains, an '
+        + '$or of them for several), or one value. Each is refused at query time with INVALID_FILTER '
+        + '/ 400 naming the field and the path, so a test suite that exercises the query finds '
+        + 'every one. A dashboard or dataset filter written as the FilterArray sugar with an array on '
+        + 'equality charted as membership through the analytics normalizer; $in is the spelling that '
+        + 'charts the same rows. On driver-mongodb re-check what the query is supposed to return rather than '
+        + 'assuming the old rows were right: the old answer was MongoDB array equality, which '
+        + 'neither $in nor $contains reproduces.',
+    },
     // One entry for two doors on purpose: the two vocabularies spell one operator
     // and the rows being answered are one pair. Splitting it would put half the
     // prescription in front of an author who wrote the other spelling.
@@ -8774,7 +8955,7 @@ const step18: MigrationStep = {
         + '$gt / $gte / $lt / $lte value or a $between endpoint, a greater_than / less_than / '
         + 'before / after / between view filter rule value, or an ordering [field, op, value] '
         + 'filter triple. WHICH DOOR refuses it at publish is decided by the carrier\'s declared '
-        + 'type and by its key. The carriers measured fall in three groups, and the groups are a '
+        + 'type and by its key. The carriers measured fall in groups, and the groups are a '
         + 'list of what was measured, not a closed partition: the grep in the acceptance criteria '
         + 'is the catch-all. (1) A slot typed FilterConditionSchema — a '
         + 'dashboard widget filter, a dashboard global-filter options-source filter '
@@ -8787,11 +8968,7 @@ const step18: MigrationStep = {
         + 'filter, a page element\'s dataSource.filter, a page component\'s filter prop), and a '
         + 'Mongo-shape filter record typed as a loose record rather than FilterConditionSchema (a '
         + 'flow CRUD node\'s config.filter). The lint is likewise what refuses a preset in an '
-        + 'ordering filter triple wherever its walk meets one. (3) A filter under a key the lint '
-        + 'does NOT walk parses GREEN and lints GREEN, so neither door refuses it at publish and '
-        + 'only a search of the authored and stored metadata finds it: a page\'s '
-        + 'interfaceConfig.filterBy rule array, and a lookup field\'s lookupFilters, whose ordering '
-        + 'operators are spelled gt / gte / lt / lte',
+        + 'ordering filter triple wherever its walk meets one',
       replacement:
         'the date-macro window the preset already means — { $gte: "{30_days_ago}" } for '
         + 'last_30_days, { $between: ["{week_start}", "{week_end}"] } for this_week, and so on '
@@ -8816,8 +8993,7 @@ const step18: MigrationStep = {
         + 'shape on the slots typed that way, and the @objectstack/lint filter-preset-comparand '
         + 'rule refuses it on every filter its walk reaches, which makes it the only door for a '
         + 'walked filter whose declared type carries no preset check. Both answer at publish, where '
-        + 'the author — an AI author in particular — can still act on the message; a page\'s '
-        + 'interfaceConfig.filterBy and a lookup field\'s lookupFilters are reached by neither, and '
+        + 'the author — an AI author in particular — can still act on the message; '
         + 'the surface\'s groups say which measured carrier sits under which door. Ordering '
         + 'positions only at the schema door, deliberately: it judges no equality or membership, '
         + 'because a select/picklist column legitimately stores values that collide with preset '
@@ -8842,14 +9018,7 @@ const step18: MigrationStep = {
         + 'grep is the catch-all; the surface\'s groups are the carriers measured. The sweep is '
         + 'mechanical for groups (1) and (2): `os validate` / `os lint` report each one by path, and '
         + 'a group (1) slot is also refused by a `safeParse` of the schema that declares it, at the '
-        + 'comparand\'s own path. Group (3) is BY HAND, because nothing reports it. Search every '
-        + 'page for an `interfaceConfig.filterBy` rule whose operator is an ordering one '
-        + '(greater_than, greater_than_or_equal, less_than, less_than_or_equal, before, after, '
-        + 'between, or an alias of one) and whose value — or either `between` endpoint — is one of '
-        + 'the thirteen names. Search every lookup field for a `lookupFilters` entry whose operator '
-        + 'is `gt`, `gte`, `lt` or `lte` — the only ordering spellings that key accepts; it has no '
-        + '`between` — and whose value is one of the thirteen names. Take each window from '
-        + '`DATE_RANGE_PRESET_MACRO_WINDOWS`, since no rejection names it. Leave presets in dashboard '
+        + 'comparand\'s own path. Leave presets in dashboard '
         + 'date-filter positions (dateRange.defaultRange, date global filter defaultValue) '
         + 'untouched — they remain the declared vocabulary there. A filter that carried one of '
         + 'these shapes was never returning the window it named (silent zero before the engine '
@@ -8993,6 +9162,80 @@ const step18: MigrationStep = {
         + '`issues[].path` names `edges[N].condition`, and for a node the refusal carries that same '
         + "slot phrase. A flow that boots without that warn is unaffected; every structural "
         + 'condition carrying a non-blank `source` parses byte-identically to before.',
+    },
+    // The ledger `predicate` slots' half of the blank-predicate rule. A SEPARATE
+    // entry from `flow-edge-condition-evaluated-slot-source-required` on purpose:
+    // that one carries the structural slots (`edges[].condition`,
+    // `config.condition`), refused by the evaluated-slot rule under
+    // EVALUATED_EXPRESSION_SOURCE_REQUIRED, where removing a blank condition
+    // INVERTS the edge. These slots are declared `z.string()`, are refused under
+    // PREDICATE_SLOT_STRING_REFUSAL, and keep their run with `'false'` or no
+    // `visibleWhen` — a different prescription, which one entry cannot carry for both.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-predicate-slot-blank-string-refused',
+      surface:
+        'the two ledger predicate slots on a flow node — config.conditions[].expression on a decision '
+        + 'node (a branch predicate) and config.fields[].visibleWhen on a screen node (a field visibility '
+        + 'predicate) — authored as a string that is blank after trimming (\'\', \'   \', a tab or a '
+        + 'newline), at any depth including an ADR-0031 region body. Reachable wherever a flow is '
+        + 'authored or stored: defineStack({ flows }) sources, defineFlow(), an exported stack passed to '
+        + 'objectstack validate, and a flow row already sitting in sys_metadata',
+      replacement:
+        'the predicate the branch or field was meant to test, as non-blank bare CEL text '
+        + '(`expression: \'record.amount > 10\'`, `visibleWhen: \'amount > 0\'`); or KEEP what the blank did. '
+        + 'On a screen field, drop the `visibleWhen` key: an absent `visibleWhen` shows the field '
+        + 'unconditionally, which is what a blank one already did at run time (the resume contract '
+        + 'treated it as absent, and the renderer fell back to showing the field). On a decision '
+        + 'branch, write `expression: \'false\'`: the evaluator answered the blank `false`, so the branch '
+        + 'keeps its label and is still never taken. ⚠️ Not by dropping a decision\'s only branch: with '
+        + 'no `conditions` the node routes by its out-edges alone, so the out-edge that branch labelled '
+        + 'is no longer held back. On a structural condition removal differs again: dropping a blank '
+        + '`condition` turns a never-firing edge into an always-firing one '
+        + '(`flow-edge-condition-evaluated-slot-source-required`)',
+      reason:
+        'Card #17493, ruling A (5651023407). Both slots are declared bare CEL text (`z.string()`) '
+        + 'and both admitted a blank string at every door: the expression ledger resolver skipped it '
+        + 'as "not authored", and `AutomationEngine.evaluateCondition` answered it `false` — so a '
+        + 'decision branch carrying it was never taken, with nothing said at any layer, and a screen '
+        + 'field carrying it was shown with its predicate ignored. #15572 had pinned that '
+        + 'admission as correct because the two sides agreed. The ruling is that self-consistency '
+        + 'between parser and evaluator is not a defence when the author\'s intent is silently '
+        + 'dropped — the third instance of one rule, after #17322 (the structural `config.condition`) '
+        + 'and #15811 (a blank evaluated `source`). The blank is now refused at `FlowSchema.parse`, '
+        + 'at `AutomationEngine.registerFlow` (which parses first) and at `objectstack validate`, all '
+        + 'three through `predicateSlotRefusal`, leading with `PREDICATE_SLOT_STRING_REFUSAL`. '
+        + '⚠️ No D2 conversion, and the reason is the judgment this entry delegates: the blank is '
+        + 'where an author meant to write a rule, and the platform cannot tell a predicate somebody '
+        + 'forgot from one they meant to delete. Keeping what ran is mechanical; writing the predicate '
+        + 'is what the author intended; only the author knows which. '
+        + '⚠️ Where such a blank already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0032.',
+      acceptanceCriteria:
+        'Grep every flow node in `defineStack({ flows })` sources, exported stacks and every flow '
+        + 'row in `sys_metadata` — including nodes inside a `loop` / '
+        + '`parallel` / `try_catch` region body — for a `decision` node whose '
+        + '`config.conditions[i].expression`, or a `screen` node whose `config.fields[i].visibleWhen`, '
+        + 'is a string that is empty after trimming. Each refusal names the node and the branch or '
+        + 'field, which is the TODO\'s locator: `FlowSchema.parse` anchors a `custom` issue at '
+        + '`nodes.N.config.conditions.I.expression` (or `…config.fields.I.visibleWhen`, or the region '
+        + 'path `nodes.N.config.body.nodes.M.config…`), and `objectstack validate` prints the same '
+        + 'path; `validateStackExpressions` phrases it as '
+        + '`node \'check\' (decision) decision branch expression at config.conditions[0].expression`. '
+        + 'For each hit decide, per the `replacement` note, whether to write the predicate or to '
+        + 'keep what the blank did. Two proofs. (1) For a stack authored in config files, '
+        + '`objectstack validate` is clean. (2) Boot the stack and '
+        + 'confirm each flow REGISTERS: no `failed to register flow` warn for it (the three boot '
+        + 'paths spell it `[Automation] failed to register flow`, `[Automation] flow re-sync: failed '
+        + 'to register flow` and `[Automation] cold-boot flow bind: failed to register flow`) — that '
+        + 'warn line is the locator for a row that exists only in `sys_metadata`. A non-blank '
+        + 'predicate parses and registers byte-identically to before, and a non-string in these '
+        + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
     },
     {
       id: 'hook-register-undispatched-lifecycle-event-refused',
@@ -9552,12 +9795,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d` — names '
+        + 'against, `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 8303 tracked files, against lit '
+        + 'the string debounceDelay each occur 0 times across its 8512 tracked files (0 across the '
+        + '8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
-        + 'which re-count at this pin to 13125 and 5043 respectively (git grep -o -F, the method '
-        + 'that reproduces every earlier count).',
+        + 'which re-count to 13125 and 5043 respectively at 62597c588 and to 13347 and 5123 at '
+        + 'this pin (git grep -o -F, the method that reproduces every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
         + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
@@ -9743,10 +9987,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d`, re-read from this tree — '
+        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '8303 tracked files, against lit controls timeout 1086, RuntimeConfig 240 and resourceLimits '
-        + '2 on the same corpus; both resourceLimits hits are prose in packages/app-shell recording '
+        + '8512 tracked files, against lit controls timeout 1096, RuntimeConfig 245 and resourceLimits '
+        + '2 on the same corpus (0 across 8303, and 1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
         + '#14478, ADR-0087.',
@@ -9887,10 +10131,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d` — spells '
+        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 8303 tracked files, against lit controls `useState` 2389 and `timeout` 1086 on '
-        + 'the same corpus.',
+        + 'across its 8512 tracked files, against lit controls `useState` 2391 and `timeout` 1096 on '
+        + 'the same corpus (all four 0 across 8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
         'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
         + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '
@@ -10549,6 +10793,54 @@ const step18: MigrationStep = {
         + '`successCriteria` is a structured rule and whose sampling `condition` objects carry no '
         + '`dialect` key parses byte-identically to before — the retirement removes accepted shapes '
         + 'and adds none.',
+    },
+    {
+      id: 'package-api-contracts-unmounted-entries-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span.
+      surface:
+        'api.PackageApiContracts.upgradePackage / api.PackageApiContracts.resolveDependencies / '
+        + 'api.PackageApiContracts.uploadArtifact — the three contract-map entries that bound '
+        + 'POST /api/v1/packages/upgrade, POST /api/v1/packages/resolve-dependencies and '
+        + 'POST /api/v1/packages/upload',
+      replacement:
+        'nothing — no route serves any of the three paths, so there is no entry to read instead. '
+        + 'Delete every read of `PackageApiContracts.upgradePackage`, '
+        + '`PackageApiContracts.resolveDependencies` and `PackageApiContracts.uploadArtifact`, and every '
+        + 'URL built from them or from the three hard-coded paths: a request to any of them was never '
+        + 'answered. The per-route request/response schemas (`PackageUpgradeRequestSchema`, '
+        + '`PackageUpgradeResponseSchema`, `ResolveDependenciesRequestSchema`, '
+        + '`ResolveDependenciesResponseSchema`, `UploadArtifactRequestSchema`, '
+        + '`UploadArtifactResponseSchema`) stay published, bound to no route. The four surviving entries '
+        + '(`listPackages`, `getPackage`, `installPackage`, `uninstallPackage`) are unchanged. If the '
+        + 'platform later serves a package upgrade, dependency-resolution or upload route, its entry '
+        + 'arrives in the same change that mounts it.',
+      reason:
+        'Maintainer ruling 2026-09-23 on #19116 (director seat, decision batch #217 item 4, letter A, '
+        + '「217 同意」). The contract map is the declaration SDKs, codegen and AI clients are entitled to '
+        + 'trust, and three of its seven entries named paths the composed runtime mounts nowhere: the '
+        + 'package dispatcher has no branch for a single-segment POST under /packages and '
+        + '`@objectstack/rest` mounts only /packages/publish there, so all three answered handled=false '
+        + 'while the four surviving entries answer 200/201 (measured on one HttpDispatcher over a real '
+        + 'SchemaRegistry, #18604) — and the generated reference page printed '
+        + 'all three as live endpoints. Unlike `installPackage` (#18058, rebound onto the serving '
+        + 'POST /api/v1/packages), no serving door existed to rebind them onto, and mounting three '
+        + 'capabilities with zero measured pull was ruled out (ADR-0049 enforce-or-remove). Zero '
+        + 'consumers measured at the retiring PR\'s base: across this repository the three paths occur '
+        + 'only in the declaring file, its unit test and the generated page, and the pinned objectui '
+        + 'checkout names none of the three keys, none of the paths and not `PackageApiContracts` '
+        + 'itself. A contract-map entry is not metadata — nothing authors, stores or parses it — so '
+        + 'there is no source a D2 conversion could rewrite, and the removal is recorded here.',
+      acceptanceCriteria:
+        'No code reads `PackageApiContracts.upgradePackage`, `.resolveDependencies` or '
+        + '`.uploadArtifact` from `@objectstack/spec` or `@objectstack/spec/api` — each is a TS2339 '
+        + 'property error after upgrade, and at runtime the key is absent (pinned in '
+        + 'api/package-api.test.ts together with the rule that no surviving entry is bound to any of the '
+        + 'three paths). No client, route table or generated artefact of yours still names '
+        + 'POST /api/v1/packages/upgrade, /resolve-dependencies or /upload. No metadata document needs '
+        + 'editing. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing ever mounted the three paths '
+        + 'or built a route from the entries, so every request answers exactly as before — the removal '
+        + 'retracts a false claim, not a capability.',
     },
     {
       id: 'package-rollback-response-retired',
@@ -11403,6 +11695,56 @@ const step18: MigrationStep = {
         + 'their defaults and their mounts. The mounted REST surface is byte-identical before and after — none '
         + 'of the ten keys ever reached it. No code imports `CrudEndpointPattern(Schema)` from '
         + '`@objectstack/spec/api` (TS2305 after upgrade).',
+    },
+    // The row-level-security face of ruling A on #19886 (stage 2a): the formula
+    // evaluator plugin-security runs a policy's check against. Recorded as its own
+    // entry because the surface an author rewrites is the RLS predicate, a CEL
+    // string, not a filter object they wrote by hand.
+    {
+      id: 'rls-predicate-array-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].check (and .using, where the explain engine '
+        + 'attributes a record) — a CEL predicate comparing a field with != or == against a list, '
+        + 'a list literal or a current_user membership array, and the negation of such an ==. They '
+        + 'lower to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
+        + 'the @objectstack/formula evaluator matchesFilterCondition now refuses, together with '
+        + '{ field: { $eq: [...] } }, at any depth under $and / $or / $not, the empty array included',
+      replacement:
+        'the list operator the comparison was standing in for. "One of these values" is in: '
+        + 'record.status in ["open", "pending"]. "None of these values" is the negated in: '
+        + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands and '
+        + '{ $field } references evaluate exactly as before',
+      reason:
+        'Ruling A on #19886 refuses an array comparand under $ne, and the equality slot is ruling '
+        + '乙 on #19757; stage 2a of #19886 lands both on the formula face, the evaluator '
+        + 'plugin-security runs against the post-image of an insert or update to enforce a '
+        + 'row-level check. It compared strictly, and no stored value ever equals an array, so a '
+        + 'check written record.status != ["closed", "archived"], or != against a current_user '
+        + 'membership array, matched EVERY post-image, and a check written '
+        + '!(record.status == ["closed", "archived"]) did the same: every write such a policy was '
+        + 'written to refuse was admitted and stored. The positive record.status == ["open", '
+        + '"pending"] refused every write (403). All of these shapes now fail the write with '
+        + 'INVALID_FILTER / 400 before any record is judged, the envelope driver-sql and '
+        + 'driver-memory already give the same shape on the read side, and the explain engine\'s '
+        + 'record attribution refuses too. The message withholds the field, the operator and the '
+        + 'value, because the filter is usually an access policy the caller did not write and the '
+        + 'comparand may be a resolved membership set. Metadata AT REST is not rewritten and this '
+        + 'entry adds no D2 conversion: the platform cannot tell which list operator a list '
+        + 'comparison was standing in for, and a policy rewritten on the author\'s behalf would '
+        + 'change which writes it admits (the negated forms would start refusing writes they '
+        + 'admitted, the positive form would start admitting writes it refused), which is the '
+        + 'policy author\'s decision. ADR-0058 D4 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity check and using predicates of your permission sets for != or == '
+        + 'whose right-hand side is a list literal or a current_user membership array, and for the '
+        + 'negation of such an ==, then rewrite each with in or !(... in ...). A check that still '
+        + 'carries the shape refuses every write it governs with INVALID_FILTER / 400, allowed '
+        + 'values included, so one allowed write under each policy finds every such check left. '
+        + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
+        + 'admitted before were right: before this change a != or a negated == against a list '
+        + 'admitted every write.',
     },
     {
       id: 'schedule-flow-acting-organization-required',
@@ -12283,10 +12625,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 8303 tracked '
-        + 'files at that sha, against lit controls window 3526, timeout 1086, period 170, '
-        + 'interval 179 and metrics 324 on that same corpus and sha, so no pin bump is owed. '
+        + '`.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 8512 tracked '
+        + 'files at that sha, against lit controls window 3581, timeout 1096, period 171, '
+        + 'interval 179 and metrics 326 on that same corpus and sha (0 across 8303, against 3526 / '
+        + '1086 / 170 / 179 / 324, at 62597c588), so no pin bump is owed. '
         + '#15939, #15679, #14478, ADR-0087.',
       acceptanceCriteria:
         'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
@@ -12478,12 +12821,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8303 files '
-        + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
-        + 'text-span component, TextSpanSchema, an unrelated name), against two lit controls on '
-        + 'that same corpus and sha: 13125 hits for the bare token objectstack, and 5043 for the '
-        + 'package specifier @objectstack/spec.',
+        + 'pinned objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 8512 files '
+        + 'tracked at that sha (the 488 Span and 53 SpanSchema hits are objectui\'s own HTML '
+        + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
+        + 'two lit controls on that same corpus and sha: 13347 hits for the bare token objectstack, '
+        + 'and 5123 for the package specifier @objectstack/spec (at 62597c588: 0 across 8303, '
+        + 'Span 486, 13125 and 5043).',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
         + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
@@ -12578,9 +12922,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d` — spells it 0 '
-        + 'times across 8303 tracked files, against lit controls `TTL` 156 and `tenant` 987 on the '
-        + 'same corpus.',
+        + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells it 0 '
+        + 'times across 8512 tracked files, against lit controls `TTL` 156 and `tenant` 1034 on the '
+        + 'same corpus (0 across 8303, against 156 and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
         + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '
@@ -12737,12 +13081,20 @@ const step18: MigrationStep = {
     },
     // The judgment half of `translation-per-app-settings-removed`. The D2
     // conversion deletes the group mechanically; what it cannot say in a
-    // `to: '(removed)'` notice is WHERE those strings were rendering — only in the
-    // gaps the platform's own bundle left — and that deleting them sends those
-    // gaps back to the manifest's English literal.
+    // `to: '(removed)'` notice is WHERE those strings were rendering and what
+    // renders once they are gone — and the answer differs by door. From a per-app
+    // bundle they only ever filled gaps the platform's own bundle left, and those
+    // gaps go back to the manifest's English literal. From a `translation` item
+    // they OVERRODE the platform's copy (the runtime-authored layer is read over
+    // the shipped bundles), and those keys go back to the platform's string.
+    // Extended from the bundle door to the item door by #19620 (ruling batch #210
+    // item 2 letter B) rather than duplicated: one group, one ownership rule, one
+    // entry.
     {
       id: 'translation-per-app-settings-platform-only',
-      surface: 'stack.translations[].<locale>.settings — the per-app bundle’s settings group',
+      surface:
+        'stack.translations[].<locale>.settings and translation.settings — the settings group on the '
+        + 'per-app bundle and on the registered `translation` item',
       // The group names are DERIVED from `TranslationDataSchema.shape`, never typed
       // out beside it. A hand-maintained copy of a schema's key set is the construct
       // that drifted to nine-of-ten in this very message, so the copy is deleted
@@ -12750,68 +13102,84 @@ const step18: MigrationStep = {
       // the per-app face reaches this sentence the day it is declared.
       // `Object.keys` on a zod object shape yields the declaration order of the
       // literal it was built from — the order this sentence promises the operator.
+      // The `translation` item declares the same groups (plus `locale` and its
+      // identity/envelope keys), so the one derived list answers both doors.
       // A getter, not an eager template: importing the registry must not force the
       // lazy translation schema at module load.
       get replacement(): string {
         const groups = Object.keys(TranslationDataSchema.shape);
-        return 'Delete the group from the per-app bundle. There is no per-app replacement key: settings copy '
-          + 'is not application-authorable at all. `settings` is keyed by `SettingsManifest.namespace`, '
-          + 'and only platform code declares a manifest '
-          + '(`packages/services/service-settings/src/manifests/*.manifest.ts`), so the only namespaces a '
-          + 'per-app entry could ever address were the platform’s own. Platform settings copy is '
+        return 'Delete the group from the per-app bundle and from every `translation` item. There is no '
+          + 'application-side replacement key: settings copy is not application-authorable at either door. '
+          + '`settings` is keyed by `SettingsManifest.namespace`, and only platform code declares a manifest '
+          + '(`packages/services/service-settings/src/manifests/*.manifest.ts`), so the only namespaces an '
+          + 'application could ever address were the platform’s own. Platform settings copy is '
           + 'translated in the PLATFORM bundle — `@objectstack/service-settings`’s '
           + '`settingsBuiltinTranslations`, typed `PlatformTranslationData` — which is where a correction '
           + 'to a platform string belongs. An application’s own copy goes in the '
-          + `${groups.length} groups the per-app bundle still declares, in the order it declares them: `
+          + `${groups.length} groups the per-app bundle and the \`translation\` item still declare, in the `
+          + 'order they declare them: '
           + groups.map((g) => `\`${g}\``).join(', ')
-          + '. Note `settingsCommon` among them: it IS on this face, so the Settings UI shell strings an '
+          + '. Note `settingsCommon` among them: it IS on both faces, so the Settings UI shell strings an '
           + 'application may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT '
           + 'what is being removed here — only the per-namespace manifest copy under `settings` is.';
       },
       reason:
-        'Not losslessly convertible, and NOT because the content was inert — but not because it '
-        + 'overrode anything either. Measured on this tree before the split: '
-        + '`AppPlugin.loadTranslations` hands each `stack.translations` bundle entry WHOLE to '
+        'Not losslessly convertible, and NOT because the content was inert: what it did differs by door, '
+        + 'and both effects are visible on screen. THE PER-APP BUNDLE — measured on this tree before the '
+        + 'split: `AppPlugin.loadTranslations` hands each `stack.translations` bundle entry WHOLE to '
         + '`II18nService.loadTranslations`, the adapter deep-merges it into the one per-locale tree, and '
         + 'every platform plugin contributes into that same tree — so `settings` from an app bundle and '
         + '`settings` from `@objectstack/service-settings` land in one place. `resolveSettingsTitle` and '
         + 'the rest of the `resolveSettings*` family read it (`pickSettingsEntry` → '
         + "`pickData(bundle, locale)?.settings`), and so does the console's `useSettingsLabel`, which "
-        + 'scans every namespace carrying a `settings` branch; the liveness ledger '
-        + '`packages/spec/liveness/translation.json` records that reader with its evidence pointer. '
-        + 'ORDER decides the rest, and it runs against the application: `AppPlugin` loads the app’s '
-        + 'bundles in its own `start()` (kernel Phase 2), `SettingsServicePlugin` contributes the '
-        + 'platform’s settings translations from a `kernel:ready` hook (Phase 3), and `deepMerge` gives '
-        + 'the LATER source the leaf — `AppPlugin`’s own comment says as much (“the platform bundles have '
-        + 'not arrived yet at this point in the lifecycle”). So the platform won every key both bundles '
-        + 'defined, and what an application actually had was a GAP FILLER on a namespace it does not own: '
-        + 'the entry rendered only where the platform bundle carried no string for that key and locale '
-        + '(the platform ships en / zh-CN / ja-JP / es-ES), silently, with no way for the author to tell '
-        + 'a filled gap from an ignored override. Dropping the group therefore takes those gaps back to '
-        + 'the manifest’s own literal — the `?? fallback` every `resolveSettings*` helper ends in, which '
-        + 'is English — and that is a VISIBLE change to what a Settings screen renders, not a no-op, '
-        + 'which a mechanical notice reading "(removed)" does not convey. The two bundles are separate '
-        + 'namespaces from this major on (ruling batch #132 item 2 letter ②, 2026-09-13; ADR-0049 '
-        + 'enforce-or-remove supplied the question, not the answer — the maintainer struck the card’s own '
-        + 'removal disposition, because `settings` is a LIVE platform key). No deprecation window: the '
-        + 'per-app door refuses the key by name from this major, with the prescription on the rejection.',
+        + 'scans every namespace carrying a `settings` branch. ORDER decides the rest, and it runs against '
+        + 'the application: `AppPlugin` loads the app’s bundles in its own `start()` (kernel Phase 2), '
+        + '`SettingsServicePlugin` contributes the platform’s settings translations from a `kernel:ready` '
+        + 'hook (Phase 3), and `deepMerge` gives the LATER source the leaf — `AppPlugin`’s own comment '
+        + 'says as much (“the platform bundles have not arrived yet at this point in the lifecycle”). So '
+        + 'the platform won every key both bundles defined, and what a per-app bundle actually had was a '
+        + 'GAP FILLER on a namespace it does not own: the entry rendered only where the platform bundle '
+        + 'carried no string for that key and locale (the platform ships en / zh-CN / ja-JP / es-ES), '
+        + 'silently, with no way for the author to tell a filled gap from an ignored override. Dropping '
+        + 'it takes those gaps back to the manifest’s own literal — the `?? fallback` every '
+        + '`resolveSettings*` helper ends in, which is English. THE `translation` ITEM went further: a '
+        + 'stored item is not loaded into the static tree at all but into the runtime-authored layer '
+        + '(`authored-translation-sync` → `replaceAuthoredTranslations`), and both i18n adapters read '
+        + 'that layer OVER the shipped bundles (`deepMerge(static, authored)`), whatever order they loaded '
+        + 'in. So an item’s `settings` OVERRODE the platform’s own copy for its locale — a published item '
+        + 'could rewrite a platform Settings screen — which is exactly what the ownership ruling says an '
+        + 'application must not do. Dropping it takes each overridden key back to the platform bundle’s '
+        + 'string, and each key it had filled back to the manifest literal. A mechanical notice reading '
+        + '"(removed)" conveys neither. The two bundles are separate namespaces from this major on '
+        + '(ruling batch #132 item 2 letter ②, 2026-09-13), and the item door follows the file door '
+        + '(ruling batch #210 item 2 letter B, 2026-09-22: the file door and the item door are two '
+        + 'authoring surfaces for ONE app metadata type, so they accept one shape; an admin override of '
+        + 'platform copy, if ever wanted, is a platform-level feature, not app metadata). ADR-0049 '
+        + 'enforce-or-remove supplied the question, not the answer — `settings` stays a LIVE platform '
+        + 'key. No deprecation window: both doors refuse the key by name from this major, with the '
+        + 'prescription on the rejection.',
       acceptanceCriteria:
-        'No per-app bundle carries `settings`: `defineTranslationBundle({ <locale>: { settings: … } })` '
-        + 'and a `defineStack({ translations: [...] })` entry carrying it are both refused as an '
-        + 'unrecognized key, and the refusal names the group as platform-only rather than suggesting a '
-        + 'rename (pinned in `packages/spec/src/system/translation.test.ts`). The platform face still '
-        + 'accepts it: `PlatformTranslationDataSchema.parse({ settings: … })` succeeds, '
-        + '`settingsBuiltinTranslations` still type-checks, and `GET /api/v1/i18n/translations/:locale` '
-        + 'still declares `settings` on its response (`GetTranslationsResponseSchema`), because the '
-        + 'served document is the merged tree. The registered `translation` metadata type is unchanged '
-        + 'and still declares `settings`. For a deployment that WAS authoring per-app settings copy: the '
-        + 'screens to re-read after the upgrade are the ones where it was FILLING A GAP — a namespace, '
-        + 'key or locale the platform bundle does not translate — because those now render the '
-        + 'manifest’s own literal, which is English. Everywhere the platform already carried the string, '
-        + 'nothing changes on screen: the platform value was already the one being served. If a platform '
-        + 'string is wrong or missing for your locale, correct it in the platform bundle '
-        + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add the '
-        + 'app-side copy, which the platform overwrites on every boot wherever it has its own value.',
+        'No application-authored face carries `settings`. `defineTranslationBundle({ <locale>: { '
+        + 'settings: … } })`, a `defineStack({ translations: [...] })` entry carrying it, '
+        + '`defineTranslation({ locale, settings: … })` and a `translation` item saved through the '
+        + 'metadata API carrying it are all refused as an unrecognized key, and each refusal names the '
+        + 'group as platform-only rather than suggesting a rename (pinned in '
+        + '`packages/spec/src/system/translation.test.ts`; the metadata door answers `422 '
+        + 'INVALID_METADATA`, pinned in `packages/metadata-protocol`). The platform face still accepts it: '
+        + '`PlatformTranslationDataSchema.parse({ settings: … })` succeeds, `settingsBuiltinTranslations` '
+        + 'still type-checks, and `GET /api/v1/i18n/translations/:locale` still declares `settings` on '
+        + 'its response (`GetTranslationsResponseSchema`), because the served document is the merged '
+        + 'tree. A `translation` row ALREADY STORED with `settings` is not refused — a stored row has no '
+        + 'author to teach — it is converted: the runtime sync replays this conversion before merging the '
+        + 'row, logs the conversion notice once, and loads the rest of the item, so its `settings` stops '
+        + 'overriding at the next sync; `os migrate meta --stored --apply` persists the canonical row. '
+        + 'For a deployment that WAS authoring settings copy, re-read the Settings screens in each locale '
+        + 'it covered: where a `translation` item overrode a platform string, the platform’s string '
+        + 'renders again; where either door filled a GAP — a namespace, key or locale the platform bundle '
+        + 'does not translate — the manifest’s own literal renders, which is English. If a platform string '
+        + 'is wrong or missing for your locale, correct it in the platform bundle '
+        + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
+        + 'app-side copy at either door, which is refused.',
     },
     {
       id: 'ui-action-undoable-unfulfillable-refused',
@@ -13333,6 +13701,61 @@ const step18: MigrationStep = {
         + '`displayField`. Declared keys parse byte-identically to before; `objectstack validate` '
         + 'reports no `component-props-unknown-key` / `component-props-invalid` finding for the '
         + 'rail.',
+    },
+    // The absent-value half of the coupling #6227 declared, recorded beside its
+    // array half (`view-filter-rule-scalar-operator-array-refused`) rather than
+    // amended onto it: that entry's own replacement prose told an upgrading author
+    // "an omitted value is still an omitted value", and an upgrade guide that
+    // quietly rewrites a shipped prescription leaves the reader who followed it with
+    // no trace of why their metadata now fails.
+    {
+      id: 'view-filter-rule-absent-value-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'ui.ViewFilterRule with NO value on an operator that takes one — the value key omitted, '
+        + 'or present and undefined, on equals, not_equals, contains, not_contains, icontains, '
+        + 'starts_with, ends_with, greater_than, less_than, greater_than_or_equal, '
+        + 'less_than_or_equal, before or after (an alias spelling of any of them included), on '
+        + 'every carrier of ViewFilterRuleSchema',
+      replacement:
+        'the value the rule compares against — value: "open" on equals, value: "2026-01-01" on '
+        + 'after. A rule that meant "the field has no value" becomes one of the four operators that '
+        + 'take none — is_empty / is_not_empty / is_null / is_not_null — which read their direction '
+        + 'from their name and still parse with or without a value. A rule that was an unfinished '
+        + 'row is deleted. The list operators (in / not_in) and the range operator (between) '
+        + 'refused an absent value before this change and still do, in their own words',
+      reason:
+        '#19751. The value key\'s own published description has declared since #6227 that every '
+        + 'operator outside the list, range and unary sets takes a scalar, and that only the unary '
+        + 'operators ignore the key; the refinement implementing the coupling returned early on an '
+        + 'absent value for every operator, so a rule with no value parsed green on all thirteen '
+        + 'scalar operators. The query path refuses the same rule: both lowerings of a stored rule — '
+        + 'the console\'s and the REST lookup-picker route\'s — emit it as the two-element '
+        + '[field, operator] node, which the filter-AST lowering reads as an undefined comparand '
+        + 'and refuses with INVALID_FILTER / 400, measured for all thirteen operators. Nothing '
+        + 'between storage and the query drops the rule, so one such rule failed every query that '
+        + 'read its view, the view\'s other rules included. The first-party producer does not write '
+        + 'the shape: the console filter builder drops a row whose operator takes a value and whose '
+        + 'value is missing before it saves, and the drill-down save-as-view path checks each rule '
+        + 'against this schema before persisting it (read at the pinned objectui commit). '
+        + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion: '
+        + 'there is no value to infer, and writing a value, switching to a unary operator and '
+        + 'deleting the rule are three different predicates only the author can choose between. '
+        + 'The read path does not re-validate stored rows (the reading the sibling entry '
+        + 'view-filter-rule-scalar-operator-array-refused records), so a stored view keeps loading '
+        + '— and keeps failing its queries, as it did before this change; what changes is that '
+        + 'RE-SAVING it is refused at the value path, naming the operator and the field. '
+        + 'ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep your authored views, pages and object-* blocks for a filter rule that has no value '
+        + 'key and whose operator is none of the four unary operators, then decide per rule which '
+        + 'of three things it meant: a comparison (write the value), a test for emptiness (switch '
+        + 'to is_empty / is_not_empty / is_null / is_not_null), or an unfinished row (delete it). '
+        + 'os validate reports each one by path with the operator and the field, so the sweep is '
+        + 'mechanical rather than by eye. A view carrying one of these rules was refusing every '
+        + 'query before this change, so re-check what it is supposed to show rather than assuming '
+        + 'any earlier result set.',
     },
     // The scalar half of the coupling #6227 declared and did not judge. Recorded
     // here rather than amended onto `view-filter-rule-value-shaped-by-operator`

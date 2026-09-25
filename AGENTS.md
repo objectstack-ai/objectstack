@@ -155,11 +155,11 @@ pull its build into `packages/console/`.
 Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⛔ Never hand-edit
 `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
-**Moving the pin has a second half: regenerate the committed manifest** — `node scripts/gen-sdui-manifest-node.mjs
---objectui-version {the @object-ui version the new pin ships}`; `scripts/check-sdui-manifest.mjs` reds until you do.
-ADR-0082 D4's spec↔registry declaration-parity ratchet reads that tracked artefact, so it gates **every PR**, not a
-pin bump alone. `pnpm sdui:manifest` is the separate browser dump of objectui's own registry (needs Playwright
-chromium); `objectui:bump` and `objectui:refresh` print it. Full procedure: `docs/releases-maintenance.md`.
+**Moving the pin has a second half: regenerate the committed manifest** — `pnpm objectui:build`, then
+`node scripts/gen-sdui-manifest-node.mjs`, which reads objectui's BUILT tree at the pin (never an npm install, whose
+version string names an older commit) and takes no arguments; `scripts/check-sdui-manifest.mjs` reds until you do.
+`objectui:bump` and `objectui:refresh` print the step, and the console build ships that same tracked file in
+`packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
 
 **Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server —
 `cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
@@ -755,18 +755,6 @@ Principles the wrapper encodes (its own output is the authority on detail):
   a name, with accepted cases in the shrink-only, hand-edited
   `dual-source-exports.baseline.json`.
 
-**`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against an
-implementation** — the props the spec zod schema declares vs the inputs the objectui
-registry config declares. Its `spec-only` / `registry-only` / `missing` signals are real;
-just don't read it as proof anything renders. Its right-hand side is the **tracked
-repo-root `sdui.manifest.json`** and its record `scripts/sdui-manifest.record.json`, which
-the required lint job's `scripts/check-sdui-manifest.mjs` checks OFFLINE only — existence,
-shape, sha256 vs the record, record pin vs `.objectui-sha`; its version-vs-pin leg runs
-only where an objectui checkout is in hand, so lint prints `NOT CHECKED` by design.
-`lint.yml` runs THIS gate `--strict` against it on every PR; it still **exits 1** with no
-usable manifest and `check:generated` files it `EXTERNAL_INPUT_REQUIRED` because that
-aggregate hands it none. ⛔ Do not "fix" a red by re-adding a skip.
-
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.
 
@@ -1100,7 +1088,7 @@ Both non-handshake shapes, and how to classify and probe your own:
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
    merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a
    removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the
-   bump's `sdui:manifest` second half included — see the Frontend section). Pre-merge check for any removal or rename
+   bump's manifest regeneration included — see the Frontend section). Pre-merge check for any removal or rename
    of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the
    pinned SHA before merging.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*

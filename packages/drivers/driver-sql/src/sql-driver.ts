@@ -123,6 +123,7 @@ import {
   formatAttribute,
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
+import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
@@ -652,6 +653,13 @@ const SQLITE_TIME_EXPR_REFS = 8;
  * (1 `typeof` + 2 `instr` + 1 `julianday`.)
  */
 const SQLITE_NON_TEMPORAL_TEXT_REFS = 4;
+
+/**
+ * How many candidate cells {@link SqlDriver.backfillCanonicalJsonEncoding}
+ * reads per page. It bounds the memory one column's pass holds, never how much
+ * of the column one pass converges: the pass walks every page.
+ */
+const SQLITE_JSON_BACKFILL_PAGE_SIZE = 500;
 
 /**
  * [#4436] A filter this driver cannot COMPILE — the caller sent an operator (or
@@ -1384,6 +1392,61 @@ export function withheldFilterDiagnosticOf(err: unknown): string | null {
  */
 function refusalSubtree(comparand: unknown, enclosing: unknown): unknown {
   return comparand !== null && typeof comparand === 'object' ? comparand : enclosing;
+}
+
+/**
+ * [#20020] The provenance of the predicate that named a column the BACKEND could
+ * not resolve — the one refusal on the WHERE path that is raised from a dialect
+ * error after the statement ran, not from a node the compiler held.
+ *
+ * The dialect names a column and nothing else, so the node has to be found by
+ * that name: every plain-object node of `rootFilter` carrying a field key that
+ * resolves to `column` (as written, through {@link SqlDriver.mapSortField}'s
+ * spelling, or through an external object's column map), plus every
+ * `{ $field }` reference naming it. The answer is `'author'` only when there is
+ * at least one such node AND every one of them resolves `'author'` under
+ * `resolveFilterSubtreeProvenance`; anything else is `null`, which withholds.
+ *
+ * The match is deliberately generous — the qualified spelling a dialect may
+ * report (`task.nosuchcol`) matches the key `nosuchcol` too — because a false
+ * match can only ADD a node to the set, and one more node can only turn an
+ * `'author'` verdict into `null`. A column no node names (the tenant-scope wall
+ * the driver adds itself, a mapping this walk does not replicate) finds no
+ * node and is withheld. The walk visits plain objects and arrays only, the
+ * shapes `resolveFilterSubtreeProvenance` itself descends, and stops on a cycle.
+ */
+function unresolvableColumnProvenance(
+  rootFilter: unknown,
+  column: string,
+  namesOf: (key: string) => readonly string[],
+): 'author' | null {
+  const names = (key: string) => namesOf(key).some((n) => n === column || column.endsWith(`.${n}`));
+  const holders: object[] = [];
+  const onPath = new Set<object>();
+  const visit = (node: unknown): void => {
+    if (node === null || typeof node !== 'object' || onPath.has(node)) return;
+    const isArray = Array.isArray(node);
+    if (!isArray && !isFilterNode(node)) return;
+    onPath.add(node);
+    if (isArray) {
+      for (const element of node as unknown[]) visit(element);
+    } else {
+      const record = node as Record<string, unknown>;
+      const ref = record.$field;
+      const namesColumn =
+        (typeof ref === 'string' && names(ref)) ||
+        Object.keys(record).some((key) => !key.startsWith('$') && names(key));
+      if (namesColumn) holders.push(record);
+      for (const value of Object.values(record)) visit(value);
+    }
+    onPath.delete(node);
+  };
+  visit(rootFilter);
+  if (holders.length === 0) return null;
+  for (const holder of holders) {
+    if (resolveFilterSubtreeProvenance(rootFilter, holder) !== 'author') return null;
+  }
+  return 'author';
 }
 
 /**
@@ -2218,8 +2281,20 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
  *
  * Returns `null` when `op` is not retired, so the caller can fall through to
  * the ordinary unknown-operator refusal with one expression.
+ *
+ * [#20020, the #8220 contract] The operator, the field, the replacement and
+ * the retirement note all derive from the predicate, so a refusal raised from
+ * a read-scope subtree the caller never wrote keeps them in the server log;
+ * `subtree` is the field's operator map, and only a positively
+ * `'author'`-marked one gets the full text back. What stays on the wire is the
+ * class — a RETIRED operator, not an unknown one.
  */
-function retiredFilterOperatorError(op: string, field: string, siblings: readonly string[] = []): Error | null {
+function retiredFilterOperatorError(
+  op: string,
+  field: string,
+  siblings: readonly string[] = [],
+  subtree?: unknown,
+): Error | null {
   const guidance = RETIRED_FILTER_OPERATORS[op];
   if (!guidance) return null;
   const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
@@ -2229,9 +2304,42 @@ function retiredFilterOperatorError(op: string, field: string, siblings: readonl
       `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
       `shape, so this is ONE mistake with ONE fix, not one per key.`
     : '';
-  return unsupportedFilterError(
+  const full =
     `Filter operator "${op}" on field "${field}" is RETIRED and is no longer evaluated by this ` +
-      `driver.${replacement} ${guidance.why}${also}`,
+    `driver.${replacement} ${guidance.why}${also}`;
+  return withheldFilterError(
+    'A filter operator in this filter is RETIRED and is no longer evaluated by this driver. The ' +
+      'operator, the field it was aimed at and the operator that replaces it are withheld from ' +
+      'the message; the full diagnostic is in the server log.',
+    full,
+    subtree,
+  );
+}
+
+/**
+ * The operator vocabulary {@link SqlDriver.applyFilterCondition}'s emitter
+ * compiles, as the refusal below states it. A capability statement, not a
+ * detail of the refused predicate, so it survives the redaction.
+ */
+const SUPPORTED_FILTER_OPERATORS_SENTENCE =
+  'Supported operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, ' +
+  '$notContains, $startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists.';
+
+/**
+ * An operator outside the emitter's vocabulary and outside the retired table.
+ *
+ * [#20020, the #8220 contract] The operator name and the field are the
+ * predicate's, so they go to the server log unless `subtree` — the field's
+ * operator map — is positively marked `'author'`. The supported vocabulary is
+ * the capability statement and stays on the wire either way.
+ */
+function unsupportedFilterOperatorError(op: string, field: string, subtree?: unknown): Error {
+  return withheldFilterError(
+    `A filter operator in this filter is not one this driver evaluates. ` +
+      `${SUPPORTED_FILTER_OPERATORS_SENTENCE} The operator and the field it was aimed at are ` +
+      `withheld from the message; the full diagnostic is in the server log.`,
+    `Unsupported filter operator "${op}" on field "${field}". ${SUPPORTED_FILTER_OPERATORS_SENTENCE}`,
+    subtree,
   );
 }
 
@@ -3111,6 +3219,95 @@ function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: st
   return `${wildcard}${escaped}${wildcard}`;
 }
 
+/** U+0000, spelled by its code point so no raw control byte sits in this file. */
+const NUL_CHARACTER = String.fromCharCode(0x00);
+
+/**
+ * [#19999, #20024] The SQLite text match that reads the WHOLE comparand and the
+ * WHOLE stored value — every `contains` / `ends` comparand, and a `starts`
+ * comparand that holds U+0000.
+ *
+ * SQLite's `glob()` reads its pattern AND the stored value as C strings, so each
+ * is cut at its first U+0000. Measured on better-sqlite3 (SQLite 3.53.4),
+ * sql.js (3.49.1) and a local libSQL engine (3.45.1), all alike and none
+ * raising:
+ *
+ * - **The comparand's cut (#19999).** `$contains` / `$endsWith` of a comparand
+ *   that STARTS with U+0000 matched every row (the pattern was cut to `*`), and
+ *   `$startsWith` of one matched the rows that are empty before their first
+ *   U+0000, `''` among them.
+ * - **The stored value's cut (#20024).** With a comparand WITHOUT U+0000, `GLOB`
+ *   still saw a stored value only up to its first U+0000: `$contains: 'b'`
+ *   missed `'a'` + U+0000 + `'b'`, `$endsWith: 'a'` returned it, and
+ *   `$icontains: 'B'` missed `'A'` + U+0000 + `'B'`.
+ *
+ * So the comparand is compared whole, against the whole value, by constructs
+ * each measured NUL-safe on those three engines first:
+ *
+ * | shape | predicate |
+ * |---|---|
+ * | `contains` | `instr(col, ?) > 0` |
+ * | `starts` | `instr(col, ?) = 1` — the first occurrence IS the prefix |
+ * | `ends` | `coalesce(substr(CAST(col AS BLOB), -length(CAST(? AS BLOB))), CAST(col AS BLOB)) = CAST(? AS BLOB)` |
+ *
+ * `instr()` compares bytes over the full length of both arguments, and `lower()`
+ * folds every byte it is given. `length()` and `substr()` over TEXT do NOT —
+ * they stop at the first U+0000 (`length('a' || char(0) || 'b')` is 1) — so the
+ * suffix is taken over BLOB, where both count bytes. Comparing UTF-8 bytes is
+ * comparing characters: UTF-8 is self-synchronising, so a byte suffix equal to
+ * a valid UTF-8 comparand starts on a character boundary. A comparand longer
+ * than a non-empty value yields the whole, shorter value, which is never equal
+ * to it. Over a ZERO-LENGTH blob `substr` yields NULL, not the empty blob
+ * (measured on all three engines: `typeof(substr(CAST('' AS BLOB), -1))` is
+ * `null`), which would answer NULL for `''` where the answer is false: invisible
+ * to a bare `$endsWith`, but a `$not` over it dropped the `''` row. So
+ * `coalesce()` falls back to the value itself — `substr` answers NULL exactly
+ * when the value is NULL or zero-length, and the value is then the right
+ * stand-in: the empty blob, never equal to a comparand of one byte or more, or
+ * NULL, which stays NULL as it does under `GLOB`.
+ *
+ * The EMPTY comparand never reaches the suffix construct: `-length('')` is
+ * `-0`, which `substr` reads as "from the start", so the construct would ask
+ * whether the whole value equals `''` and answer false for `'abc'`. An empty
+ * string is a suffix — and a prefix, and a substring — of every value, so it
+ * takes `instr(col, '') > 0` instead, which is 1 for every non-NULL value
+ * (`instr('abc', '')` and `instr('', '')` are both 1 on all three engines) and
+ * NULL for NULL, exactly as `GLOB '*'` answered it.
+ *
+ * Nothing is escaped: none of the three has a pattern language, so `*`, `?` and
+ * `[` are literal by construction and the comparand is bound as written. The
+ * fold is the GLOB arm's own `lower()` on both sides, ASCII-only; it only ever
+ * arrives with `contains` (`$icontains`), and the other two shapes honour it
+ * anyway, as the GLOB arm does. The negation
+ * is `NOT (…)`, which is NULL for a NULL value exactly as `NOT GLOB` is, so the
+ * NULL-safe wrapper `$notContains` puts around it composes unchanged (#5298).
+ *
+ * `starts` with a comparand WITHOUT U+0000 stays on `GLOB` in
+ * {@link textMatchPredicate}, byte for byte: cutting the stored value at its
+ * first U+0000 cannot change that answer (a prefix free of U+0000 lies wholly
+ * before the value's first one, or the value does not start with it), and a
+ * `GLOB` prefix pattern is the one text construct here an index can serve.
+ */
+function sqliteLengthAwareTextMatch(
+  field: string,
+  text: string,
+  shape: TextMatchShape,
+  negate: boolean,
+  fold: boolean,
+): { sql: string; bindings: unknown[] } {
+  const column = fold ? 'lower(??)' : '??';
+  const comparand = fold ? 'lower(?)' : '?';
+  const suffix = shape === 'ends' && text !== '';
+  const positive = suffix
+    ? `coalesce(substr(CAST(${column} AS BLOB), -length(CAST(${comparand} AS BLOB))), CAST(${column} AS BLOB))`
+      + ` = CAST(${comparand} AS BLOB)`
+    : `instr(${column}, ${comparand}) ${shape === 'starts' ? '= 1' : '> 0'}`;
+  return {
+    sql: negate ? `NOT (${positive})` : positive,
+    bindings: suffix ? [field, text, field, text] : [field, text],
+  };
+}
+
 /**
  * [#6518] MySQL's ASCII-only case fold: 26 `REPLACE`s over the BINARY rendering
  * of an expression.
@@ -3191,6 +3388,15 @@ function mysqlAsciiLowerBinary(expr: string): string {
  *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
  *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
  *   answers row 3 — the Q1 = A boundary, executed rather than argued.
+ *   `glob()` cuts its pattern AND the stored value at their first U+0000, so
+ *   `GLOB` now serves only `starts` with a comparand free of U+0000 — the one
+ *   shape the value's cut cannot change, and the one an index can serve.
+ *   Every `contains` / `ends` comparand (#20024), and a `starts` comparand
+ *   holding U+0000 (#19999), goes to {@link sqliteLengthAwareTextMatch}, whose
+ *   `instr()` / BLOB-suffix constructs read both whole. Measured over an
+ *   indexed TEXT column on all three SQLite engines, `EXPLAIN QUERY PLAN` was
+ *   already `SCAN` for every `contains` / `ends` shape under `GLOB` (a leading
+ *   `*` is never index-usable) and stays `SCAN`; `starts` keeps its `SEARCH`.
  * - **Postgres → `LIKE`, unchanged**, because `LIKE` there is already exact.
  *   Only the fold moves, from `LOWER()` to {@link ASCII_UPPER_LETTERS}-driven
  *   `translate()`. Measured live (PG 16, ICU database): `LOWER(name) LIKE
@@ -3227,6 +3433,13 @@ function textMatchPredicate(
   fold: boolean,
 ): { sql: string; bindings: unknown[] } {
   if (dialect === 'sqlite') {
+    // [#19999, #20024] `glob()` cuts its pattern AND the stored value at their
+    // first U+0000. Only a `starts` comparand free of U+0000 is immune to both
+    // cuts; every other comparand is compared by a length-aware construct.
+    const text = String(value);
+    if (shape !== 'starts' || text.includes(NUL_CHARACTER)) {
+      return sqliteLengthAwareTextMatch(field, text, shape, negate, fold);
+    }
     // GLOB takes no ESCAPE clause, so this arm binds two values, not three.
     const pattern = wrapTextMatchShape(escapeGlobComparand(value), shape, '*');
     const column = fold ? 'lower(??)' : '??';
@@ -3735,8 +3948,14 @@ function unknownLogicalOperatorError(key: string, path: string): Error {
  * lenient-vs-strict question #5347 had to answer for `$null` does not arise
  * here, because both spellings agree on the two surviving values.
  */
-function nonBooleanExistsComparandError(field: string, value: unknown, path: string): Error {
-  return unsupportedFilterError(
+function nonBooleanExistsComparandError(
+  field: string,
+  value: unknown,
+  path: string,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    nonBooleanFlagWithheldMessage('$exists'),
     `Operator "$exists" on field "${field}" requires a boolean comparand (true or false). ` +
       `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
       `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
@@ -3745,11 +3964,18 @@ function nonBooleanExistsComparandError(field: string, value: unknown, path: str
       `OPPOSITE directions — this driver's \`=== false\` test compiles IS NOT NULL for anything ` +
       `but false, a \`=== true\` test compiles IS NULL for anything but true. Note "false" the ` +
       `STRING is truthy, so it lands on the side opposite the false it was written to mean (#5369).`,
+    subtree,
   );
 }
 
-function nonBooleanNullComparandError(field: string, value: unknown, path: string): Error {
-  return unsupportedFilterError(
+function nonBooleanNullComparandError(
+  field: string,
+  value: unknown,
+  path: string,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    nonBooleanFlagWithheldMessage('$null'),
     `Operator "$null" on field "${field}" requires a boolean comparand (true or false). ` +
       `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
       `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather ` +
@@ -3758,6 +3984,24 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
       `the false it was written to mean (#5347).`,
+    subtree,
+  );
+}
+
+/**
+ * [#20020, the #8220 contract] What the two flag refusals above say when the
+ * field's operator map is not positively marked `'author'`. The operator names
+ * the refusal's CLASS (the `$between` precedent in {@link betweenArityError}),
+ * and the declaration is the capability statement; the field, the value and
+ * the filter path are the predicate's, and go to the server log.
+ */
+function nonBooleanFlagWithheldMessage(op: '$null' | '$exists'): string {
+  return (
+    `Operator "${op}" in this filter requires a boolean comparand (true or false). ` +
+    `@objectstack/spec FieldOperatorsSchema declares ${op} as a boolean, and a non-boolean is ` +
+    'refused rather than coerced because the backends read one in OPPOSITE directions. The ' +
+    'field it was aimed at and the value it received are withheld from the message; the full ' +
+    'diagnostic is in the server log.'
   );
 }
 
@@ -3872,13 +4116,32 @@ function assertDefinedComparands(field: string, spec: unknown, path: string): vo
   }
 }
 
-/** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
-function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
+/**
+ * [#5134] `$and`/`$or` take a list; anything else is refused, never coerced.
+ *
+ * [#20020, the #8220 contract] The operand's preview and the combinator's
+ * position are the predicate's, so they go to the server log unless the
+ * refusal's node is positively marked `'author'`. That node is the operand
+ * itself when it is an object (the deepest markable node), and otherwise
+ * `enclosing` — the filter node that carries the combinator key, which a
+ * primitive operand inherits its provenance from.
+ */
+function assertFilterNodeList(
+  value: unknown,
+  key: string,
+  path: string,
+  enclosing?: unknown,
+): asserts value is unknown[] {
   if (Array.isArray(value)) return;
-  throw unsupportedFilterError(
+  throw withheldFilterError(
+    'A filter combinator ("$and" / "$or") in this filter requires an array of filter conditions. ' +
+      '@objectstack/spec FilterConditionSchema declares both as FilterCondition[]. Which one it ' +
+      'was, where it sits and the value it received are withheld from the message; the full ' +
+      'diagnostic is in the server log.',
     `Filter combinator "${key}" at ${path} requires an array of filter conditions, but received a ` +
       `${describeFilterOperand(value)} (${safeShapePreview(value)}). @objectstack/spec FilterConditionSchema ` +
       `declares "${key}" as FilterCondition[].`,
+    refusalSubtree(value, enclosing),
   );
 }
 
@@ -3917,12 +4180,15 @@ function assertFilterNodeList(value: unknown, key: string, path: string): assert
  * conformance case-set is green on both sides of the change.
  */
 function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
-  return reduceFilterVerdict(node, { ...SQL_FILTER_VERDICT_HOOKS, path });
+  return reduceFilterVerdict(node, { ...sqlFilterVerdictHooks(node, path), path });
 }
 
-/** [#5134] The verdict of ONE key of a filter node. */
-function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
-  return reduceFilterKeyVerdict(key, value, { ...SQL_FILTER_VERDICT_HOOKS, path });
+/**
+ * [#5134] The verdict of ONE key of a filter node. `enclosing` is the node the
+ * key belongs to — see {@link sqlFilterVerdictHooks} for what reads it.
+ */
+function reduceFilterKey(key: string, value: unknown, path: string, enclosing?: unknown): FilterVerdict {
+  return reduceFilterKeyVerdict(key, value, { ...sqlFilterVerdictHooks(enclosing, path), path });
 }
 
 /**
@@ -3933,12 +4199,37 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
  * passed by reference because they are TypeScript assertion functions, whose
  * narrowing is meaningless — and whose declaration requirements are a nuisance
  * — through a property reference. Nothing else about the call changes.
+ *
+ * [#20020] Built per reduction rather than shared, because the non-list
+ * combinator refusal needs the NODE that carries the combinator key, and the
+ * shared walk hands `assertNodeList` only the operand, the key and the path.
+ * The node is recovered from the path without widening that spec-declared hook
+ * signature: every node the walk reduces is either `root` (at `rootPath`) or
+ * an element / `$not` operand it announced through `assertNode` at the exact
+ * path it then reduces it under — so recording those announcements is a
+ * complete path-to-node index for the positions `assertNodeList` can name. The
+ * index is keyed only by paths built from combinator keys and list indices,
+ * never by a field name, so a field key containing a dot cannot collide with it.
  */
-const SQL_FILTER_VERDICT_HOOKS: FilterVerdictHooks = {
-  assertNodeList: (value, key, path) => assertFilterNodeList(value, key, path),
-  assertNode: (value, path) => assertFilterNode(value, path),
-  classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
-};
+function sqlFilterVerdictHooks(root: unknown, rootPath: string): FilterVerdictHooks {
+  const nodeAt = new Map<string, unknown>([[rootPath, root]]);
+  return {
+    // The walk names the key's position `${nodePath}.${key}` (bare `key` under
+    // an empty prefix), so stripping the key recovers the node's own path.
+    assertNodeList: (value, key, path) =>
+      assertFilterNodeList(
+        value,
+        key,
+        path,
+        nodeAt.get(path === key ? '' : path.slice(0, path.length - key.length - 1)),
+      ),
+    assertNode: (value, path) => {
+      nodeAt.set(path, value);
+      assertFilterNode(value, path);
+    },
+    classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
+  };
+}
 
 /**
  * [#5134] The verdict of ONE **non-combinator** key — and this driver's gate on
@@ -4047,7 +4338,7 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     Object.prototype.hasOwnProperty.call(value, '$null') &&
     typeof value.$null !== 'boolean'
   ) {
-    throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
+    throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`, value);
   }
 
   // [#5369] `$exists`'s comparand is a boolean by the same declaration, refused
@@ -4061,7 +4352,7 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     Object.prototype.hasOwnProperty.call(value, '$exists') &&
     typeof value.$exists !== 'boolean'
   ) {
-    throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+    throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`, value);
   }
 
   // [#5702] `$icontains`'s comparand is a NON-EMPTY string by declaration,
@@ -4223,8 +4514,17 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
 function nullGuardForFieldSpec(spec: unknown): NullGuard {
   // `{ field: null }` compiles to `IS NULL` — already total.
   if (spec === null) return 'none';
-  // A scalar / Date / array comparand is an implicit `=`; a NULL column fails it.
-  if (typeof spec !== 'object' || spec instanceof Date || Array.isArray(spec)) return 'requireValue';
+  // Every comparand that is not an operator map — a scalar, a Date, an array, a
+  // binary value — is an implicit `=`; a NULL column fails it.
+  //
+  // [#19885] "Not an operator map" is {@link isFilterNode}'s reading, the one the
+  // emitter and the validating walk use. This test used to name the exceptions
+  // one by one (`Date`, array) and read every other object as a map, so a binary
+  // comparand was guarded by accident: a non-empty one's byte indices fell to
+  // the per-operator default below, and an EMPTY one had no entries, came out
+  // `'none'`, and `{ $not: { data: <empty buffer> } }` compiled to a bare
+  // `NOT (data = ?)` that dropped every NULL row.
+  if (!isFilterNode(spec)) return 'requireValue';
   const entries = Object.entries(spec as Record<string, unknown>);
   // [#5240, was #5146] The `entries.length === 0` escape that used to sit here —
   // "`{ field: {} }` compiles to no SQL, so guarding it would turn a shape that
@@ -6518,7 +6818,7 @@ export class SqlDriver implements IDataDriver {
             lastError = retryError;
           }
         }
-        if (!recovered) throw this.unresolvableFilterColumnRefusal(object, lastError);
+        if (!recovered) throw this.unresolvableFilterColumnRefusal(object, lastError, query.where);
       } else {
         // [#8931] The terminal catch-all — see
         // {@link SqlDriver.backendStatementFault}. This is the `find` half of
@@ -8804,8 +9104,19 @@ export class SqlDriver implements IDataDriver {
    * Returns the error rather than throwing it, the same shape
    * {@link SqlDriver.resolveWithheldFilterRefusal} uses, so each call site
    * spells its own `throw` and no reader has to know whether this returns.
+   *
+   * [#20020, the #8220 contract] The column NAME is the predicate's too. A read
+   * scope naming a column the table lacks — a policy written against a field
+   * that was later renamed, removed or never synced — used to put that column
+   * in front of a caller who never wrote it. `rootFilter` is the query's own
+   * `where` — the tree the read-scope merge boundaries marked — and the name
+   * reaches the wire only when every node naming it is positively marked
+   * `'author'` ({@link unresolvableColumnProvenance}); otherwise the refusal
+   * takes the unnamed wording this method already had for a dialect message
+   * it could not parse, and the name stays in the log line above it. Same
+   * code, same status, whichever wording answers.
    */
-  protected unresolvableFilterColumnRefusal(object: string, error: unknown): Error {
+  protected unresolvableFilterColumnRefusal(object: string, error: unknown, rootFilter?: unknown): Error {
     const column = unresolvableColumnNameOf(error);
     const detail = (error as { message?: unknown } | null | undefined)?.message;
     this.logger.warn(
@@ -8814,7 +9125,13 @@ export class SqlDriver implements IDataDriver {
         '. The dialect message below is kept server-side because it inlines the statement ' +
         `bound literals (#7929, #8790): ${typeof detail === 'string' ? detail : String(error)}`,
     );
-    return unresolvableFilterColumnError(object, column);
+    const disclosed =
+      column !== null &&
+      unresolvableColumnProvenance(rootFilter, column, (key) => {
+        const local = this.mapSortField(key);
+        return [key, local, this.remoteColumn(object, key, local)];
+      }) === 'author';
+    return unresolvableFilterColumnError(object, disclosed ? column : null);
   }
 
   /**
@@ -8907,7 +9224,7 @@ export class SqlDriver implements IDataDriver {
       result = await builder.count<{ count: number }[]>('* as count');
     } catch (error) {
       if (isUnresolvableColumnError(error)) {
-        throw this.unresolvableFilterColumnRefusal(object, error);
+        throw this.unresolvableFilterColumnRefusal(object, error, query?.where);
       }
       // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
       throw this.backendStatementFault(object, error);
@@ -9532,7 +9849,7 @@ export class SqlDriver implements IDataDriver {
         if (inGroupBy || inAggregations) {
           return this.unresolvableAggregateColumnRefusal(object, column, { inGroupBy, inAggregations }, error);
         }
-        return this.unresolvableFilterColumnRefusal(object, error);
+        return this.unresolvableFilterColumnRefusal(object, error, query.where);
       }
       // Arm 3: recognised class, no parsed name — fall through to the terminal.
     }
@@ -9715,7 +10032,7 @@ export class SqlDriver implements IDataDriver {
     try {
       results = await builder;
     } catch (error) {
-      throw this.distinctBackendFault(object, field, error);
+      throw this.distinctBackendFault(object, field, error, filters);
     }
     const values = results.map((row: any) => row[field]);
 
@@ -9813,7 +10130,7 @@ export class SqlDriver implements IDataDriver {
    * Returns the error rather than throwing it, the shape every sibling on this
    * path uses, so the call site spells its own `throw`.
    */
-  protected distinctBackendFault(object: string, field: string, error: unknown): Error {
+  protected distinctBackendFault(object: string, field: string, error: unknown, filters?: unknown): Error {
     if (isUnresolvableColumnError(error)) {
       const column = unresolvableColumnNameOf(error);
       if (column !== null) {
@@ -9824,7 +10141,7 @@ export class SqlDriver implements IDataDriver {
         }
         // Arm 2: not the listed field ⇒ a predicate named it (the caller's
         // `filters`, or the tenant-scope wall this method applied above).
-        return this.unresolvableFilterColumnRefusal(object, error);
+        return this.unresolvableFilterColumnRefusal(object, error, filters);
       }
       // Arm 3: recognised class, no parsed name — fall through to the terminal.
     }
@@ -11256,16 +11573,47 @@ export class SqlDriver implements IDataDriver {
    *
    * ## What it converts, and the one class it converts
    *
-   * ONE `UPDATE` per column. `json_quote()` is SQLite's own spelling of
-   * `JSON.stringify` over a scalar, so "what the canonical form means" has a
-   * single definition per dialect and the migration cannot drift from the codec
-   * it exists to serve.
+   * The ONLY on-disk class the pre-fix encoding left unambiguous — a TEXT cell
+   * the driver's JSON codec cannot parse. Nothing but a stored plain string
+   * could have produced one: `JSON.stringify` of an object or an array always
+   * parses, and every other input either stayed a primitive storage class or
+   * already parses.
    *
-   * The `WHERE` names the ONLY on-disk class the pre-fix encoding left
-   * unambiguous — a TEXT cell that is not valid JSON. Nothing but a stored
-   * plain string could have produced one: `JSON.stringify` of an object or an
-   * array is always valid JSON, and every other input either stayed a primitive
-   * storage class or already parses.
+   * ## SQL pre-filters, the codec decides (#19912)
+   *
+   * Which cell is rewritten, and into what, is {@link recoverUnencodedJsonText}
+   * — the rule the Turso remote backfill imports too, so the two faces cannot
+   * come to disagree about a cell. It asks `JSON.parse`, the same question
+   * `formatOutput` asks of every json TEXT cell it reads, and answers the
+   * `JSON.stringify` the write path stores.
+   *
+   * The SQL only narrows the scan: `typeof(col) = 'text' and json_valid(col) =
+   * 0` selects the candidates, a page at a time in `rowid` order
+   * ({@link SQLITE_JSON_BACKFILL_PAGE_SIZE}). It must not decide, because
+   * SQLite's JSON parser and the driver's disagree in the dangerous direction:
+   * `json_valid()` answers 0 for JSON nested past SQLite's depth limit (a
+   * build-time constant; 1000 in the better-sqlite3, sql.js and libsql builds
+   * this repository bundles) while `JSON.parse` reads it. The single `UPDATE …
+   * set col = json_quote(col) where … json_valid(col) = 0` this method used to
+   * run therefore quoted a correctly stored deep array into a string on the
+   * next schema sync. Such a candidate is now left as stored and counted in
+   * `rowsWithheld`.
+   *
+   * The pre-filter is a superset of what the rule rewrites, with one exception
+   * in the safe direction: `json_valid()` stops at an embedded NUL, so a text
+   * that is valid JSON up to a NUL is never selected and stays as stored.
+   *
+   * Each rewrite is a compare-and-set, `where rowid = ? and typeof(col) =
+   * 'text' and col = <the text the decision read>`, so a value written between
+   * the page read and the write is never overwritten. A page's writes commit as
+   * one transaction. Because the new text is a function of the old text alone,
+   * the compare-and-set also withholds, in the safe direction, a cell whose
+   * stored bytes the engine does not read back verbatim (better-sqlite3 and
+   * sql.js, the engines measured, read invalid UTF-8 back as U+FFFD): its
+   * bytes are not what was read, so it is not written, and it keeps reading as
+   * it did. On better-sqlite3 every other text round-trips byte-for-byte, and
+   * `JSON.stringify` of it is byte-identical to the `json_quote()` this method
+   * used to write (measured over every non-surrogate BMP code point).
    *
    * ⛔ **It does not guess, because the rest cannot be guessed.** Two classes are
    * left exactly as they are, and both are named here rather than discovered:
@@ -11293,11 +11641,13 @@ export class SqlDriver implements IDataDriver {
    *
    * ## Idempotent by construction, not by convention
    *
-   * The `WHERE` is the exact complement of the `SET`'s output: `json_quote(X)`
-   * of a TEXT value is a quoted JSON string, for which `json_valid()` is 1, so
-   * a converted row cannot match the predicate again. Re-running costs one scan
-   * and zero writes — the same "a converged table is a no-op" property
-   * {@link backfillCanonicalDatetimes} has, and pinned the same way.
+   * The pre-filter is the exact complement of the rewrite's output:
+   * `JSON.stringify` of a string is a quoted JSON string, for which
+   * `json_valid()` is 1, so a converted row cannot be selected again. A
+   * withheld cell is selected on every run and never written. Re-running costs
+   * one scan, a read of the withheld cells, and zero writes — the same "a
+   * converged table is a no-op" property {@link backfillCanonicalDatetimes}
+   * has, and pinned the same way.
    *
    * ⚠️ An out-of-band reader of the SQLite file sees quoted JSON text where it
    * saw a bare value. That is the accepted cost of the format, recorded here so
@@ -11308,6 +11658,9 @@ export class SqlDriver implements IDataDriver {
    * reading them correctly, and correctness never becomes contingent on a
    * migration having run. That also covers a SQLite build without the JSON
    * functions and a `skipSchemaSync` deployment that never reaches this path.
+   * A failure part-way through a column leaves the committed pages converted
+   * and the rest legacy — each cell reads the same either way, so nothing is
+   * lost and `warn` is the level (AGENTS.md, degradation log levels).
    */
   protected async backfillCanonicalJsonEncoding(table: string, tableExisted: boolean): Promise<void> {
     const fields = this.jsonFields[table];
@@ -11317,18 +11670,9 @@ export class SqlDriver implements IDataDriver {
     if (!tableExisted) return;
 
     for (const field of fields) {
+      const tally = { converted: 0, withheld: 0 };
       try {
-        const res = await this.knex.raw(
-          `update ?? set ?? = json_quote(??) where typeof(??) = 'text' and json_valid(??) = 0`,
-          [table, field, field, field, field],
-        );
-        const converted = (res as any)?.changes ?? 0;
-        if (converted) {
-          this.logger.info?.(
-            `[sql-driver] canonicalised json storage (#12380) for ${table}.${field}`,
-            { rowsConverted: converted },
-          );
-        }
+        await this.convergeJsonColumn(table, field, tally);
       } catch (err) {
         // Correctness does not depend on this succeeding: `formatOutput` keeps
         // its parse fallback precisely so an un-migrated row still reads back
@@ -11336,9 +11680,75 @@ export class SqlDriver implements IDataDriver {
         this.logger.warn(
           `[sql-driver] could not canonicalise json storage for ${table}.${field}; ` +
           `reads stay correct via formatOutput's parse fallback`,
-          { error: err instanceof Error ? err.message : String(err) },
+          { error: err instanceof Error ? err.message : String(err), rowsConverted: tally.converted },
+        );
+        continue;
+      }
+      if (tally.converted) {
+        this.logger.info?.(
+          `[sql-driver] canonicalised json storage (#12380) for ${table}.${field}`,
+          { rowsConverted: tally.converted },
         );
       }
+      if (tally.withheld) {
+        this.logger.info?.(
+          `[sql-driver] left ${tally.withheld} json cell(s) of ${table}.${field} as stored: ` +
+          `SQLite's json_valid() rejects them but they parse as JSON (e.g. nested past ` +
+          `SQLite's JSON depth limit), so they already read back as the value they encode`,
+          { rowsWithheld: tally.withheld },
+        );
+      }
+    }
+  }
+
+  /**
+   * One column's pass for {@link backfillCanonicalJsonEncoding}: walk the
+   * pre-filtered candidates a page at a time in `rowid` order, let
+   * {@link recoverUnencodedJsonText} decide each, and compare-and-set the ones
+   * it rewrites. Throws on a failed statement; `tally` then holds what the
+   * committed pages did.
+   */
+  private async convergeJsonColumn(
+    table: string,
+    field: string,
+    tally: { converted: number; withheld: number },
+  ): Promise<void> {
+    let cursor: number | undefined;
+    for (;;) {
+      const page = this.knex(table)
+        .select(this.knex.raw('rowid as ??', ['rid']), this.knex.raw('?? as ??', [field, 'val']))
+        .whereRaw(`typeof(??) = 'text' and json_valid(??) = 0`, [field, field]);
+      if (cursor !== undefined) page.andWhereRaw('rowid > ?', [cursor]);
+      const rows = (await page.orderByRaw('rowid').limit(SQLITE_JSON_BACKFILL_PAGE_SIZE)) as Array<{
+        rid: number;
+        val: unknown;
+      }>;
+
+      const writes: Array<{ rid: number; stored: string; next: string }> = [];
+      for (const row of rows) {
+        const next = typeof row.val === 'string' ? recoverUnencodedJsonText(row.val) : null;
+        if (next === null) tally.withheld++;
+        else writes.push({ rid: row.rid, stored: row.val as string, next });
+      }
+      if (writes.length > 0) {
+        tally.converted += await this.knex.transaction(async (trx) => {
+          let changed = 0;
+          for (const w of writes) {
+            changed += await trx(table)
+              .whereRaw(`rowid = ? and typeof(??) = 'text' and ?? = ?`, [w.rid, field, field, w.stored])
+              .update({ [field]: w.next });
+          }
+          return changed;
+        });
+      }
+
+      if (rows.length < SQLITE_JSON_BACKFILL_PAGE_SIZE) return;
+      const last = rows[rows.length - 1].rid;
+      // The cursor must advance, or the same page would be read forever. A
+      // rowid past 2^53 comes back rounded and can stall it; the rest of the
+      // column then stays legacy, which reads the same.
+      if (cursor !== undefined && !(last > cursor)) return;
+      cursor = last;
     }
   }
 
@@ -15329,7 +15739,7 @@ export class SqlDriver implements IDataDriver {
         // #5134 — an all-TRUE `$and` (including `$and: []`) IS the AND identity;
         // emitting nothing for it is now a decision, not an accident. A FALSE
         // member cannot reach here: it would have made the node FALSE above.
-        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
         const branches = value.filter(
           (sub) => reduceFilterNode(sub as Record<string, unknown>, 'filter') === 'clause',
         );
@@ -15348,7 +15758,7 @@ export class SqlDriver implements IDataDriver {
       } else if (key === '$or' && Array.isArray(value)) {
         // #5134 — one TRUE disjunct makes the whole `$or` TRUE, so `{$or:[{a},{}]}`
         // matches every row instead of quietly compiling to just `(a = ?)`.
-        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
         // FALSE disjuncts are the OR identity — dropped. At least one `'clause'`
         // member survives, or the key would have been TRUE/FALSE above.
         const branches = value.filter(
@@ -15381,7 +15791,7 @@ export class SqlDriver implements IDataDriver {
         // #5134 — `$not` of a FALSE group is TRUE: skip it. `$not` of a TRUE
         // group is FALSE and never reaches here (the node reduced to FALSE), and
         // a non-node operand was refused by the reduction, so `value` is a node.
-        if (reduceFilterKey(key, value, 'filter') === 'true') continue;
+        if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
         // #5146 — negate a TOTAL predicate, so a row whose column is NULL gets
         // the same answer here as it does in driver-memory / formula instead of
         // vanishing into SQL's UNKNOWN. See {@link nullSafeNegationOperand} for
@@ -15399,7 +15809,25 @@ export class SqlDriver implements IDataDriver {
           // refusals (raised on the ORIGINAL nodes, eagerly) are unaffected.
           this.withWithheldFilterLog(root, () => this.applyFilterCondition(qb, negated, 'and', table, root));
         });
-      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      } else if (isFilterNode(value)) {
+        // [#19885] An OPERATOR MAP is a plain object — the walk's own reading
+        // ({@link isFilterNode}, which {@link classifyFilterKey} and the
+        // top-level `{ field: value }` loop in `compileFilters` agree with). This
+        // test used to be "any non-array object", so a `Date` or binary comparand
+        // landed here and was read as an operator map, with a different wrong
+        // answer per shape:
+        //
+        // - a `Date` has no own entries, so its leaf was DROPPED:
+        //   `{ $and: [{ d: <Date> }] }` answered every row on SQLite and Postgres
+        //   while the same `{ d: <Date> }` at top level answered the one matching row;
+        // - a NON-EMPTY binary comparand (`Buffer` / `Uint8Array`) had its byte
+        //   indices read as operator names, so it was REFUSED — `INVALID_FILTER` /
+        //   400, `Unsupported filter operator "0"` — a comparand the top level binds;
+        // - an EMPTY binary comparand has no entries either, so it was dropped
+        //   like the `Date`.
+        //
+        // Each is a comparand, and it now takes the bare-value branch below, the
+        // same compilation the top-level loop gives it.
         const localField = this.mapSortField(key);
         const field = this.remoteColumn(table, key, localField);
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
@@ -15622,13 +16050,13 @@ export class SqlDriver implements IDataDriver {
               // [#5702] A RETIRED spelling gets the prescription, not the
               // vocabulary list: the author who wrote `$regex` needs
               // `$icontains`, and a list of fifteen names does not say so.
-              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object));
+              //
+              // [#20020] `value` — this field's operator map — is the node both
+              // refusals hand the provenance seam: an object, so markable, and
+              // held by reference under the query's `where` root.
+              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object), value);
               if (retired) throw retired;
-              throw unsupportedFilterError(
-                `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
-                  `$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, $notContains, ` +
-                  `$startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists.`,
-              );
+              throw unsupportedFilterOperatorError(op, field, value);
             }
           }
         }
@@ -15642,6 +16070,19 @@ export class SqlDriver implements IDataDriver {
         // one condition must not have two verdicts depending on its siblings.
         // [#8197] A bare comparand is usually a primitive, so `condition` — this
         // node, an ARM of the merge when one happened — is what carries the mark.
+        //
+        // [#19885] The comparand gate first, in the order the top-level loop
+        // runs its two: this branch is the third of the three positions
+        // {@link SqlDriver.assertOperatorAppliesToColumn}'s docblock names, and
+        // it carried the column gate without the comparand one. So an array in
+        // the equality slot passed here unrefused whenever the leaf sat under
+        // `$and` / `$or` / `$not` — or beside a sibling key that carries an
+        // operator, which routes the whole node here too. SQLite then refused
+        // the bind (a 500 `DATABASE_ERROR` for a filter the caller can fix) and
+        // Postgres bound the array as its array-literal text (`{"a"}`) and
+        // silently answered the wrong rows. Same gate, same `INVALID_FILTER` /
+        // 400, as the same leaf gets at top level.
+        assertCompilableComparand(field, '=', value, condition);
         this.assertOperatorAppliesToColumn(
           table, localField, field, '=', true, refusalSubtree(value, condition),
         );

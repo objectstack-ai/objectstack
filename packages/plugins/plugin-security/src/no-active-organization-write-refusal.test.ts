@@ -124,8 +124,22 @@ async function boot(opts: BootOpts = {}) {
     warn,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     readFilter: (object: string, context: any) => (plugin as any).getReadFilter(object, context),
+    // [#20013] The terminal stands in for the engine, which runs the installed
+    // `postHookWriteImageCheck` on an INSERT's rows once its `beforeInsert`
+    // chain has run — here (no hooks) the rows as sent. The Layer 0 tenant wall
+    // installs that seam on every insert it walls, and a terminal that skipped
+    // it would be refused fail-closed. Only the insert path is modelled: every
+    // walled write in this file that reaches the terminal is an insert.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    run: async (opCtx: any) => { await middleware!(opCtx, async () => {}); return opCtx; },
+    run: async (opCtx: any) => {
+      await middleware!(opCtx, async () => {
+        const seam = opCtx.postHookWriteImageCheck;
+        if (!seam || opCtx.operation !== 'insert') return;
+        seam.honoured = true;
+        await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
+      });
+      return opCtx;
+    },
   };
 }
 

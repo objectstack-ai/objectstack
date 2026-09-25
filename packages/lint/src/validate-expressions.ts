@@ -527,13 +527,14 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *
  * ## Why it is an error and not a warning
  *
- * Every fault direction available here is silent, and two of the three are
- * the opposite of what the author declared (see the per-slot table below):
- * a `visibleWhen` written to HIDE leaves the field visible to everyone, a
- * `readonlyWhen` written to unlock-under-a-condition locks the field on every
- * write, and a `requiredWhen` simply never fires. None of the three produces
- * a runtime error an author can find; the only signal that exists is this one
- * (#6146).
+ * Every fault direction available here is either silent or the opposite of
+ * what the author declared (see the per-slot table below): a `visibleWhen`
+ * written to HIDE leaves the field visible to everyone, a `readonlyWhen`
+ * written to unlock-under-a-condition locks the field on every write, and a
+ * `requiredWhen` — silent until ADR-0137 D2 — now refuses every write that
+ * reaches the root, because that root is never bound there. Only the last
+ * produces a runtime error at all, and it produces it on the first write in
+ * production; build time is where the author should meet it (#6146).
  *
  * Verdict scope is the field level only. Per-option `visibleWhen` is checked
  * by the loop in the field walk and deliberately NOT passed through here:
@@ -631,14 +632,15 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *    success, and the value silently never lands. The old sentence told this
  *    author the field would be VISIBLE TO EVERYONE — the opposite failure, and
  *    the opposite troubleshooting direction.
- *  - **`requiredWhen` — fail-OPEN at both ends, and never about visibility.**
- *    Server: the `requiredWhen` block logs `unknownVariableOf`'s name and
- *    `continue`s — #4977 deliberately did not copy #4889's carve-out, so the
- *    required-check is skipped for that write. Client: `fallback: false`, so
- *    the form does not mark the field required either. Both ends agree and
- *    both do nothing: the requirement is never enforced anywhere, and a record
- *    saves with the field empty. "Falls back to VISIBLE" was not merely
- *    imprecise here, it named the wrong property of the field.
+ *  - **`requiredWhen` — the server REFUSES, and never about visibility.**
+ *    Server: a `requiredWhen` that cannot be evaluated refuses the write,
+ *    naming the field and the rule (ADR-0137 D2). It was fail-OPEN until then
+ *    — the block logged `unknownVariableOf`'s name and `continue`d, and a
+ *    record saved with the field empty. Client: `fallback: false`, so the form
+ *    does not mark the field required, and the save it submits is refused. An
+ *    unbound root faults on every write that reaches it. "Falls back to
+ *    VISIBLE" was not merely imprecise here, it named the wrong property of
+ *    the field.
  *
  * `conditionalRequired` also reaches this helper (the field walk still passes
  * it). It is a `retiredKey` in `FieldSchema` — the strict schema rejects it by
@@ -803,9 +805,10 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     'field editable (`fallback: false`). The server is the one that decides: ' +
     'the field looks writable, the save reports success, and the value silently never lands',
   requiredWhen:
-    'the predicate faults and the requirement is never enforced anywhere — the server logs it ' +
-    'and SKIPS the check (fail-open, #4977 deliberately did not take #4889\'s carve-out) and ' +
-    'the form does not mark the field required either, so a record saves with the field empty',
+    'the predicate faults on every write that reaches that root, and the server REFUSES a write ' +
+    'whose requirement it cannot evaluate (ADR-0137 D2: the refusal names the field and the ' +
+    'rule) — while the form does not mark the field required, so nothing on screen says why the ' +
+    'save failed',
   // Listed rather than left to the `??` below, so the map covers every slot
   // the field walk passes and the default stays unreachable. `FieldSchema`
   // declares this key only as a `retiredKey`, which rejects it by name, so
@@ -1115,6 +1118,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
      * all.
      */
     fieldRuleVerdictIssued?: boolean,
+    /**
+     * [#18682] Opt this ONE site in to the relationship-traversal conflict
+     * checks. True only where the traversal is actually SERVED — object
+     * validation rules, which ObjectQL's `checkPredicate` hydrates. Everywhere
+     * else the checks' prescription ("write `record.<fk>.id`") is false,
+     * because nothing hydrates there and the repaired expression would fault;
+     * on the fail-open seams that means the rule stops enforcing entirely.
+     */
+    traversalHydration?: boolean,
   ): void => {
     if (raw == null) return;
     const fields = objectName ? fieldIndex.get(objectName) : undefined;
@@ -1122,7 +1134,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `record`-scoped sites, so it is harmless to pass for flattened ones too.
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
-      objectName ? { objectName, fields, fieldTypes, scope } : { scope });
+      objectName ? { objectName, fields, fieldTypes, scope, traversalHydration } : { scope });
     for (const e of res.errors) {
       if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_NOWHERE_BOUND_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
@@ -1167,6 +1179,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // anything tries to read a source out of it. The refusal is the spec's,
     // shared with the engine's `registerFlow` pass: `error`, because that pass
     // throws, and a shape build refuses must not pass author time.
+    //
+    // [#17493] The same call refuses a BLANK string too (the resolver emits it
+    // for this role). `objectstack validate` meets that value first at its
+    // schema step — `FlowSchema.parse` refuses it — so this is the pass that
+    // answers for a stack handed to `validateStackExpressions` directly.
     const shapeRefusal = predicateSlotRefusal(raw);
     if (shapeRefusal) {
       issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
@@ -1518,8 +1535,14 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // The declared predicate key is `condition` (see `rulePredicates`).
       // Validation predicates are `record`-scoped — no field flattening — so
       // bare refs are flagged (#1928).
-      check(where, rule.condition, objectName, 'record');
+      // [#18682] The two sites where a relationship traversal is SERVED: these
+      // are the `script` / `cross_field` conditions ObjectQL's `checkPredicate`
+      // hydrates. `traversalHydration` is passed here and NOWHERE else.
+      check(where, rule.condition, objectName, 'record', undefined, true);
       // `conditional` rules carry a nested `when` predicate (record-scoped).
+      // ⚠️ `when` is evaluated by `checkConditional` WITHOUT hydration today, so
+      // it is opted OUT: a traversal there faults, and the conflict checks'
+      // prescription would not repair it.
       check(`${where} when`, (rule as AnyRec).when, objectName, 'record');
       // #4763 — null-guard gate over every predicate the rule carries, nested
       // `then`/`otherwise` branches included.
@@ -1620,13 +1643,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // What they do NOT share is the CONSEQUENCE, and the message has to name
       // the right one or it prescribes the wrong fix (the same reason #4811's
       // null-guard gate passes its outcome in explicitly instead of inferring
-      // it). The two runtimes fail in OPPOSITE directions on an unbindable
-      // `parent`: `readonlyWhen` fails CLOSED (#4889 — an unbound scope root
-      // resolves to LOCKED, so the field becomes unwritable forever), while
-      // `requiredWhen` stays fail-OPEN (#4977's ruling deliberately did not copy
-      // the carve-out), so the requirement silently enforces NOTHING. This gate
-      // is why fail-open is affordable there: the declaration that would rot
-      // unnoticed at runtime cannot ship in the first place.
+      // it). The two runtimes answer an unbindable `parent` differently:
+      // `readonlyWhen` fails CLOSED (#4889 — an unbound scope root resolves to
+      // LOCKED, so the field becomes unwritable forever), while `requiredWhen`
+      // REFUSES the write (ADR-0137 D2 — it was fail-OPEN until then, #4977)
+      // wherever the predicate reads `parent`. Either way the declaration is
+      // unusable, and this gate is where the author meets it instead of the
+      // first write in production.
       //
       // `conditionalRequired` (retired alias) and `visibleWhen` (no
       // server-enforced `parent` binding of its own) keep their verdicts
@@ -1638,7 +1661,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // indexed read here would have disarmed that scan silently.
       for (const [slot, raw, consequence] of [
         ['readonlyWhen', f.readonlyWhen, `the field would be locked on every write`],
-        ['requiredWhen', f.requiredWhen, `the requirement would never be enforced — the predicate faults, the server logs and skips it, and the field stays optional in the database`],
+        ['requiredWhen', f.requiredWhen, `writes would be refused — the predicate faults wherever it reads \`parent\`, and the server refuses a write whose requirement it cannot evaluate`],
       ] as const) {
         const source = celSourceOf(raw);
         if (masters === 1 || !source || !readsParentRoot(source)) continue;
@@ -1659,11 +1682,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // null-guard gate's totality criterion: `evaluateValidationRules`
       // evaluates it against the SAME `materializeDeclaredFields`-merged
       // record the object's validation rules see. It is also the surface
-      // where an unguarded predicate hurts most quietly — a faulting
-      // `requiredWhen` is fail-OPEN (`rule-validator.ts` logs
-      // "failed to evaluate — skipped"), so the field is simply never
-      // required and the write sails through. Validation rules at least
-      // reject fail-closed since #4761.
+      // where an unguarded predicate used to hurt most quietly — a faulting
+      // `requiredWhen` was fail-OPEN, so the field was simply never required
+      // and the write sailed through. Since ADR-0137 D2 it refuses the write
+      // (`rule-validator.ts`: "failed to evaluate … — write rejected"), the
+      // same outcome as a validation rule's since #4761, so it takes the
+      // `'fail-closed'` clause below.
       //
       // `readonlyWhen` is still NOT included even though it sits on the same
       // field — but no longer because its binding is sparse. Since #6454
@@ -1671,9 +1695,9 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // `materializeDeclaredFields`, so `!= null` IS the right prescription
       // there now; what holds the wiring back is clause 3 of the #4953 ruling
       // (both server-side seams first — the flow trigger-record half is
-      // outstanding). When it is wired it needs `'fail-open'`, like
-      // `requiredWhen` above and unlike the validation-rule surface. Same for
-      // `conditionalRequired` / `visibleWhen`, which have no record-scoped
+      // outstanding). When it is wired it needs `'fail-closed'`, like
+      // `requiredWhen` above: a faulting `readonlyWhen` refuses the write since
+      // ADR-0137 D2 too. `conditionalRequired` / `visibleWhen` have no record-scoped
       // total binding of their own. See the surface ledger in
       // `validate-null-guards.ts`.
       checkNullGuards(
@@ -1681,7 +1705,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         `field '${fname}' requiredWhen`,
         f.requiredWhen,
         objectName,
-        'fail-open',
+        'fail-closed',
       );
       if (f.expression) {
         // `expression` is the key `FieldSchema` declares for a computed field —

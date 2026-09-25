@@ -196,8 +196,11 @@ describe('analytics filters — every authorable operator reaches the query (#41
   });
 
   it('a malformed $between throws rather than binding a half-open guess', () => {
+    // [#20010] The shared comparand-shape face answers this one first now, in
+    // its own words (the words the FilterArray spelling gets); this door's
+    // "two-element" sentence is no longer reached from `normalizeAnalyticsFilterTree`.
     expect(() => normalizeAnalyticsFilterTree({ where: { score: { $between: [10] } } })).toThrow(
-      /two-element/,
+      /requires a \[min, max\] value array/,
     );
   });
 });

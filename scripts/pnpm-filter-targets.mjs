@@ -113,8 +113,8 @@ export const FOREIGN_SCOPES = [
   {
     scope: '@object-ui/',
     reason:
-      'the objectui repo (objectstack-ai/objectui); scripts/build-console.sh and '
-      + 'scripts/gen-sdui-manifest.sh run these filters inside that checkout, not this workspace',
+      'the objectui repo (objectstack-ai/objectui); scripts/build-console.sh runs these '
+      + 'filters inside that checkout, not this workspace',
   },
 ];
 

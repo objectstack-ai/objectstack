@@ -73,7 +73,7 @@ const crmApp = defineApp({
 
 ## Navigation Items
 
-The navigation tree supports nine item types, combined to create rich menu structures: `object`, `dashboard`, `page`, `url`, `report`, `action`, `component`, `group` and `separator`. Each is documented below.
+The navigation tree supports ten item types, combined to create rich menu structures: `object`, `dashboard`, `page`, `url`, `report`, `action`, `component`, `doc`, `group` and `separator`. Each is documented below.
 
 `type` is the discriminator: a value outside that list is rejected with the full
 set of valid ones, and every other key is checked against the branch you picked
@@ -200,6 +200,42 @@ a file path:
 
 `params` is handed to the component as props and is **open by design** — the
 props are the component's own contract.
+
+### Doc Navigation
+
+Puts package documentation ([docs and books](/docs/ui/doc-pages)) on the
+app menu. The item targets a `book`, a `doc`, or both — at least one is required,
+and an item with neither is refused with a message naming both keys:
+
+```typescript
+{ id: 'nav_help', type: 'doc', label: 'Help Centre', icon: 'book-open', book: 'crm_manual' }  // the book
+{ id: 'nav_lead_guide', type: 'doc', doc: 'crm_lead_guide' }                                  // one page
+{ id: 'nav_lead_in_manual', type: 'doc', book: 'crm_manual', doc: 'crm_lead_guide' }          // that page, in that book
+```
+
+- **`book`** opens the book at its first readable page, with the book sidebar.
+  Book membership is derived from the book's group rules, so a doc added later
+  that matches a rule appears under this entry with no navigation edit. The
+  package id also names a book: the package's implicit book.
+- **`doc`** opens that page. Its book context is the doc's own book, else the
+  package's implicit book. It is a doc **name** — the source filename stem in
+  lowercase snake_case (`crm_lead_guide`, not `crm_lead_guide.md`).
+- **Audience** — the entry has no gate of its own; it inherits the docs audience
+  gate. A `book` entry shows the member only the pages they may read, and is not
+  shown to a member with no readable page in it; a `doc` entry the member may not
+  read is not shown. The page content itself is gated on the server by the
+  `/meta/doc` and `/meta/book/:name/tree` reads. `visible` and
+  `requiredPermissions` still apply and can only narrow further.
+
+`os build`, `os validate` and `os lint` refuse a `doc` item whose `book` or `doc`
+names nothing in the package (rule `docs/nav-target`) — checked in the docs step,
+because that is where the `src/docs/*.md` files join the artifact.
+
+<Callout type="info">
+  The console's navigation renderer draws `doc` items from a later console
+  release on. Until then a `doc` item parses, is checked and publishes, but the
+  menu does not show it.
+</Callout>
 
 ### Separator
 

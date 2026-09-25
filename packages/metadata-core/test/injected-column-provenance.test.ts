@@ -41,7 +41,7 @@ const remoteFields = () => ({
   name: { type: 'text', label: 'Name' },
   email: { type: 'text', label: 'Email' },
   region: { type: 'text', label: 'Region' },
-  lifetime_value: { type: 'currency', label: 'Lifetime Value', scale: 2 },
+  lifetime_value: { type: 'currency', label: 'Lifetime Value' },
 });
 
 /** Showcase-shaped federated object (pre-injection, as authored). */

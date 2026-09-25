@@ -7,7 +7,7 @@ Turso/libSQL driver for ObjectStack — edge-first SQLite with embedded replicas
 `TursoDriver` implements a **dual-transport architecture**:
 
 - **Local/Replica modes:** Extends `SqlDriver` from `@objectstack/driver-sql`. All CRUD, schema, filtering, aggregation, window functions, introspection, and transactions are **inherited** via Knex + better-sqlite3.
-- **Remote mode:** Delegates all operations to `RemoteTransport` which uses `@libsql/client` SDK directly (HTTP/WebSocket). No local SQLite or Knex dependency needed.
+- **Remote mode:** Sends CRUD, bulk writes, `aggregate`, raw `execute`, schema sync and `dropTable` to `RemoteTransport`, which uses the `@libsql/client` SDK directly (HTTP/WebSocket). Transactions and the other calls listed under [What remote mode refuses](#what-remote-mode-refuses) are refused instead.
 
 ```
 TursoDriver extends SqlDriver (dual transport)
@@ -17,13 +17,14 @@ TursoDriver extends SqlDriver (dual transport)
 │   ├── Inherited: syncSchema, dropTable, introspectSchema
 │   ├── Inherited: aggregate, distinct, findWithWindowFunctions
 │   ├── Inherited: beginTransaction, commit, rollback
-│   └── Inherited: applyFilters (MongoDB-style + array-style)
+│   └── Inherited: applyFilters (MongoDB-style)
 ├── Transport: remote (via @libsql/client)
 │   ├── RemoteTransport: find, findOne, create, update, delete, count, upsert
 │   ├── RemoteTransport: bulkCreate, bulkUpdate, bulkDelete, updateMany, deleteMany
 │   ├── RemoteTransport: syncSchema, dropTable
-│   ├── RemoteTransport: beginTransaction, commit, rollback
-│   └── RemoteTransport: execute (raw SQL)
+│   ├── RemoteTransport: execute (raw SQL)
+│   └── Refused, NOT_IMPLEMENTED / 501: beginTransaction, commit, rollback,
+│       setDeferredDdl(true), detectManagedDrift, planMediaColumnMove
 ├── Override:  name, version, supports (Turso-specific capabilities)
 ├── Override:  connect / disconnect (transport-aware lifecycle)
 ├── Added:     transportMode ('local' | 'replica' | 'remote')
@@ -114,9 +115,40 @@ const driver = new TursoDriver({
 });
 await driver.connect();
 
-// All CRUD operations work the same as local mode
+// The CRUD methods are the same as in local mode; some calls are refused (below)
 const users = await driver.find('users', { where: { active: true } });
 ```
+
+#### What remote mode refuses
+
+Each call below is refused in remote mode with `code: 'NOT_IMPLEMENTED'` and
+`status: 501`: the call is valid, and the remote transport does not have the
+capability. The check runs before the call reads or writes anything.
+
+| Operation | Refused call | Use instead |
+|:---|:---|:---|
+| Transactions | `beginTransaction()`, `commit()`, `rollback()`, and `options.transaction` passed to any `RemoteTransport` method in the tree above, to `aggregate()` or to `syncSchemasBatch()` | The local or embedded-replica transport, which run Knex transactions and honour `options.transaction` |
+| Record numbers | `create()`, `bulkCreate()`, and an `upsert()` with no `id`, `_id` or `conflictKeys`, when a row leaves an `autonumber` field empty (`undefined`, `null` or `''`) | The local or embedded-replica transport, which generate record numbers, or a value you supply, which is written unchanged |
+| Deferring schema DDL | `setDeferredDdl(true)`, which `os migrate plan` calls. `setDeferredDdl(false)` is accepted | Run the command against a local SQLite copy of the database (a `file:` URL) |
+| Schema drift detection | `detectManagedDrift()` | `os migrate plan` against a local SQLite copy of the database (a `file:` URL) |
+| Planning the ADR-0104 media column move | `planMediaColumnMove()`, the column step of `os migrate files-to-references` | The local or embedded-replica transport, which plan it |
+
+- **Transactions.** Remote mode declares `supports.transactionsUnsupported: true`.
+  When the remote driver is the engine's default datasource, `engine.transaction()`
+  reads that and does not call `beginTransaction()`: it runs the callback with
+  no transaction and logs a warning once per datasource, or, called with
+  `require: true`, throws `TransactionUnsupportedError` before the callback runs.
+- **Record numbers.** Remote mode never generates one. The check uses the
+  `autonumber` fields this driver recorded when it synced the object's schema
+  (`syncSchema`, `syncSchemasBatch` or `initObjects`). An `upsert()` that
+  carries an `id`, `_id` or `conflictKeys` is not refused, because it may merge
+  into an existing row. If it inserts instead, the row is written with the field
+  empty and the driver logs a warning naming the row.
+- **Aggregation.** `aggregate()` called on the driver directly also refuses,
+  with the same code, a `groupBy` entry that has a `dateGranularity`, and an
+  `aggregations` entry with a non-empty `filter`. `engine.aggregate()` never
+  sends either one to this driver: it fetches the rows and computes both in
+  memory. The local transport also refuses a per-aggregation `filter`.
 
 ### Auto-Detection
 
@@ -129,6 +161,34 @@ Transport mode is automatically detected from the URL:
 | `file:...` + `syncUrl` | `replica` | Knex + @libsql/client sync |
 | `libsql://...` | `remote` | @libsql/client only |
 | `https://...` | `remote` | @libsql/client only |
+
+`http://`, `wss://` and `ws://` are remote too. A scheme matches in any letter
+case, as it does in `@libsql/client`: `LIBSQL://...` is remote and `FILE:...` is
+a local file. A path to a local database file needs the `file:` prefix. A bare
+path such as `./data/app.db` is not a url, and `@libsql/client` refuses it too.
+
+An embedded replica is a local **file** kept in sync with a remote. The local and
+replica modes run every read and write through the local SQLite engine, which
+can open only a `file:` url or `:memory:`, and a replica needs a file for the
+sync to land in. The constructor therefore refuses (`VALIDATION_ERROR` / 400):
+
+- in a local or replica mode (auto-detected, with or without `syncUrl`, or
+  forced), a `url` that is none of `file:`, `:memory:` or a remote url, such as
+  a bare path or an unsupported scheme. The fix for a local database file is
+  `url: 'file:./data/app.db'`;
+- a remote url (`libsql://`, `https://`, `http://`, `wss://`, `ws://`, in any
+  letter case) beside `syncUrl`, or under a forced `mode: 'local'` / `'replica'`;
+- a replica on an in-memory url (`:memory:`, `file::memory:`). That covers a
+  replica auto-detected from a `:memory:` or `file:` url beside `syncUrl`, and
+  one forced with `mode: 'replica'`.
+
+In each case the engine would otherwise run on a private in-memory database
+whose writes read back and then vanish on restart, and `@libsql/client` builds
+no embedded replica for a remote url anyway. For a remote database, drop
+`syncUrl` and any forced `mode`. For an embedded replica, use
+`url: 'file:./data/replica.db'` beside `syncUrl`. A forced `mode: 'remote'` runs
+no local engine, so its url is not judged here: `@libsql/client` refuses a
+url it cannot open when the driver connects.
 
 You can also force a specific mode:
 
@@ -197,6 +257,9 @@ interface TursoDriverConfig {
    * - :memory: → local mode (ephemeral)
    * - libsql://my-db.turso.io → remote mode
    * - https://my-db.turso.io → remote mode
+   * Schemes match in any letter case. In a local or replica mode any other
+   * url (a bare path, an unsupported scheme) is refused at construction
+   * (VALIDATION_ERROR / 400): spell a local file as file:./data/app.db.
    */
   url: string;
 
@@ -216,7 +279,7 @@ interface TursoDriverConfig {
    */
   concurrency?: number;
 
-  /** Remote sync URL for embedded replica mode (libsql:// or https://) */
+  /** Remote sync URL for embedded replica mode (libsql:// or https://); the replica is the local file: named by `url` */
   syncUrl?: string;
 
   /** Sync configuration (requires syncUrl) */

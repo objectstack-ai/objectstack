@@ -9,7 +9,7 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **110
+because the flag is not one concept: it is a single boolean read at **112
 distinct sites across 20 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
@@ -101,6 +101,7 @@ that silently does not happen.
 | 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `packages/plugins/plugin-security/src/security-plugin.ts#computeReadableFields` |
 | 5 | Export permission granted unconditionally | plugin-security | Get: `canExport` is `true` | `packages/plugins/plugin-security/src/security-plugin.ts#canExport` |
 | 6 | Object-level read admission granted unconditionally | plugin-security | Get: `canReadObject` is `true`. This is the OBJECT-level half of a read — "may this caller read this object at all" — which the doors that bypass this middleware ask before they compile a statement of their own; `getReadFilter` is its row-level half, and the two are not interchangeable | `packages/plugins/plugin-security/src/security-plugin.ts#canReadObject` |
+| 6b | WRITE admission granted unconditionally | plugin-security | Get: `canWriteObject` is `true`. The WRITE twin of the object-level read admission above, asked by the write PREVIEW (`ObjectQL.validate()`), which runs no middleware for its target object and so has no gate of its own. It exists because a validation rule that reads one hop through a reference field is evaluated against a related row fetched under system authority, and that elevation is bounded to the arms the question RUNS — named, ⛔ never a category of the write decision, and ⛔ not a promise the write would succeed. The arms: the ADR-0103 engine-owned affordance gate and the ADR-0090 D12 delegated-admin gate (both ahead of every resolution), the fail-closed postures (#3545's unresolvable posture and the D10 dangling delegator), the ADR-0066 D3 capability arm, the CRUD grant, the ADR-0090 D10 delegator arm that a bare CRUD-grant check misses, the field-level-security write gate over the caller's payload when one is supplied, and the ADR-0123 D2 no-active-organization wall | `packages/plugins/plugin-security/src/security-plugin.ts#canWriteObject` |
 | 7 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `packages/plugins/plugin-security/src/security-plugin.ts#start` |
 | 8 | Metadata-plane schema masking exempt (ADR-0106 D4) | metadata-core | Get: unmasked object schema. Note: the exemption is a **caller** property — it short-circuits before the security service is consulted | `packages/metadata-core/src/object-schema-fls.ts#isObjectSchemaMaskExempt` |
 | 9 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `packages/plugins/plugin-security/src/security-plugin.ts#explainAccessForCaller` |
@@ -129,11 +130,12 @@ that silently does not happen.
 | 27 | Search-companion column **kept** in a read's rows when it was explicitly requested | objectql | Get: the internal companion column is readable. Lose: nothing for app code — this is the engine reading its own index | `packages/objectql/src/engine.ts#stripSearchCompanionFromRead` |
 | 28 | Dependent-count disclosure on a blocked delete | objectql | Get: the count of blocking children. Nothing was elevated past the caller, so nothing is withheld | `packages/objectql/src/engine.ts#dependentCountIsDisclosable` |
 | 29 | Reference-cleanup log attributes the write to `'system'` | objectql | Get: an honest actor label instead of `anonymous` when the context carries neither `userId` nor `actor` | `packages/objectql/src/engine.ts#recordReferenceCheckElevation` |
+| 29b | A traversing validation rule's related read skips the **caller's bounds** | objectql | Get: no row bound from the caller's own read on a related object no organization wall scopes, and a related read even with no organization under a walled posture (a `tenantId` on the context still scopes it). Every caller that is not system is held to both | `packages/objectql/src/engine.ts#resolvePredicateRelated` |
 | 30 | **Bulk data event `organizationId` OMITTED** — the batch is published "not asserted" | plugin-security | Get: nothing — the `data.records.*` event still publishes. Lose: the per-organization attribution: this exit is taken before the security middleware composes any tenant wall, so it records no Layer 0 verdict on the operation (`OperationContext.tenantLayer0Verdict`, #15813), and the engine's bulk producer — which reads that recorded verdict and nothing else — omits the key rather than filling it from the caller's `tenantId`; a tenant-scoped consumer then does not deliver the event inside an organization wall (#15225) | `packages/plugins/plugin-security/src/security-plugin.ts#start` |
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 110 sites**.
+The largest single consumer — **17 of the 112 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -174,7 +176,7 @@ The largest single consumer — **17 of the 110 sites**.
 | 55 | Package REST route capability gate bypassed | rest | Get: a marketplace publish over REST (`POST /packages/publish`, the one route the REST registrar mounts since #14503) without `manage_metadata`; the package read cohort (`studio.access` / `setup.access`) is enforced by the dispatcher `/packages` domain's own read gate, where the reads are served | `packages/rest/src/package-routes.ts#refusePackageRequest` |
 | 56 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `packages/runtime/src/domains/packages.ts#requireManageMetadata`, `#requireReadCapability` |
 | 57 | Activation write / authoring refusals do not fire | runtime | Get: activation artifacts writable and authorable without the activation-authoring capability | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite`, `#refuseUngrantedActivationAuthoring` |
-| 58 | Automation run-state read, flow-authoring write, unrelated-screen read and the two operator run-lifecycle writes all pass | runtime | Get: run state, flow writes, screen reads with no grant — and cancelling or restoring a suspension without the platform-operator rung. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#refuseUnrelatedScreenRead`, `#refuseUngrantedRunLifecycleWrite` |
+| 58 | Automation run-state read, flow-authoring write, the paused-run caller gate (screen read and resume) and the two operator run-lifecycle writes all pass | runtime | Get: run state, flow writes, a paused run's screen and its resume with no grant and without being the run's starter — and cancelling or restoring a suspension without the platform-operator rung. The screen read and the resume ask one predicate, so this is one bypass for both. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#isRunStarterOrRunStateReader`, `#refuseUngrantedRunLifecycleWrite` |
 | 59 | Audience-binding suggestion recording skipped | plugin-security | Lose: install-time suggestions are not recorded for system callers | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#assertTenantAdmin` |
 | 60 | Email-template / webhook provenance stamps skipped | plugin-email, plugin-webhooks | Lose: the row is not marked as an admin customization | `packages/plugins/plugin-email/src/email-template-provenance.ts#bindEmailTemplateProvenanceStamp`, `packages/plugins/plugin-webhooks/src/webhook-provenance.ts#bindWebhookProvenanceStamp` |
 | 61 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `packages/services/service-automation/src/runtime-identity.ts#stampSystemInsertOwner`, called from `packages/services/service-automation/src/builtin/crud-nodes.ts#registerCrudNodes` |
@@ -279,7 +281,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 110 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 112 read sites
   in 20 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -353,16 +355,16 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 23 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 116 | ✅ |
+| — parsed as a property **read** | 118 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **110** | ✅ |
-| — behaviour-bearing (rows 1–63 above) | 106 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **112** | ✅ |
+| — behaviour-bearing (rows 1–63 above) | 108 | ✅ |
 | — carry the flag onward only (rows 64–67 above) | 4 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
 | Files containing at least one elevation read | 45 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 91 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 93 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 9 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were

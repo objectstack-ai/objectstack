@@ -2852,8 +2852,33 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/explain-dependency-fault.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-engine.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/explain-read-verdict-inputs.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/explain-write-verdict-inputs.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/explain-write-verdict-inputs.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/explain-write-verdict-inputs.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

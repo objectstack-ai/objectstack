@@ -94,7 +94,9 @@
  * thrown exception is an engine fault the author has no remedy for (rejecting
  * on it would brick every write with nothing to fix). Step 1 makes the
  * field-level predicates evaluate far more often anyway, since their fault mode
- * was the same missing key.
+ * was the same missing key. (ADR-0137 D2 has since moved `requiredWhen` and
+ * `readonlyWhen` off that list — see the section of that name below. Option
+ * `visibleWhen`, `format` and `json_schema` stay on it.)
  *
  * ## `readonlyWhen`: the UNBOUND-ROOT case is fail-CLOSED (#4889)
  *
@@ -104,9 +106,10 @@
  * header in hand — is not a broken predicate; it is a supported construct the
  * evaluation site could not answer, and answering "not locked" writes a field
  * the author declared frozen. That single case now resolves to LOCKED. Every
- * OTHER `readonlyWhen` fault (undeclared key, null overload, parse error) keeps
- * the fail-open policy this section describes, and `requiredWhen` / option
- * `visibleWhen` are untouched. See {@link isReadonlyWhenLocked}.
+ * OTHER `readonlyWhen` fault (undeclared key, null overload, parse error) kept
+ * the fail-open policy this section describes until ADR-0137 D2, which REFUSES
+ * the write instead; this carve-out is unchanged by D2 and still LOCKS. See
+ * {@link isReadonlyWhenLocked}.
  *
  * This is a NARROWING of ADR-0058 D5's "non-security predicate ⇒ fail soft"
  * line, recorded as an addendum on that ADR alongside the same narrowing #4649
@@ -143,7 +146,7 @@
  *    at that moment) is a louder failure than the `readonlyWhen` case, where the
  *    cost of the conservative answer is one refused field. That is option B of
  *    #4977 and it was explicitly NOT taken; it is reserved for the next review
- *    of ADR-0058 D5.
+ *    of ADR-0058 D5. **Superseded by ADR-0137 D2** — that review, below.
  *  - **Catch it at BUILD time instead.** `@objectstack/lint`'s
  *    `validate-expressions` rejects a `parent`-scoped `requiredWhen` on an object
  *    that declares no single `master_detail`, so the unbindable declaration —
@@ -162,10 +165,33 @@
  * `record.x == null`. Pinned by test so the app-side `has(...)` idiom cannot be
  * broken silently from under it.
  *
+ * ## ADR-0137 D2 — a field-rule predicate that FAULTS refuses the submit
+ *
+ * ADR-0137 writes the field-rule row of ADR-0058 D5's failure table — the
+ * review the #4977 ruling reserved option B for — and its Context measured the
+ * two server arms above as the defect it rules on. Its D2: "At submit time, a
+ * field-rule predicate that cannot be evaluated refuses the write and names the
+ * field and the rule. Nothing is persisted." So both arms now refuse:
+ *
+ *  - `requiredWhen` — every fault, an unbound `parent` included, adds a
+ *    refusal to this call's `ValidationError` instead of `continue`-ing.
+ *  - `readonlyWhen` — every fault EXCEPT the unbound-root carve-out above
+ *    (which still LOCKS) throws a `ValidationError` from the strip, before
+ *    anything is written.
+ *
+ * Both refusals are {@link unevaluableRuleError}'s envelope, the one a broken
+ * validation rule has carried since #4649, with the field as `field` and the
+ * slot as `constraint.rule`. What D2 does NOT reach: option `visibleWhen`
+ * ({@link evaluateOptionVisibility}) — D2 names a FIELD-rule predicate, an
+ * option's visibility is not one, and it stays fail-open; and the RENDER side,
+ * which D3 keeps fail-open for display. The consequence ADR-0137 names is
+ * deliberate: a stored predicate that silently did nothing now refuses writes,
+ * and that loud state is what reveals it.
+ *
  * ## `readonlyWhen` sees a TOTAL record too (#4953)
  *
  * The paragraph above ("Deliberately NOT changed here") is about the fail-open
- * POLICY, and that policy is still what the field-level predicates use. What
+ * POLICY, which the field-level predicates kept until ADR-0137 D2. What
  * changed in #4953 is the other half — what the predicate is evaluated
  * AGAINST. `materializeDeclaredFields` was wired into two seams and not the
  * third: the strip functions on the write path merged `{ ...previous, ...data }`
@@ -192,9 +218,10 @@
  * evaluator once per matched row — one payload, N priors (#3106).
  */
 
-import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
+import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals, findTraversalConflicts } from '@objectstack/formula';
+import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
-import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, referenceTargetOf, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { recordAdvisoryHit } from '@objectstack/core';
 // [#8215] The canonical spelling of the primary-key column — the sanctioned use
 // of this registry ("what is the canonical spelling of the column that plays
@@ -219,7 +246,10 @@ import {
 // that evaluate CEL against "the record" cannot drift apart on what that record
 // contains — see the module's own doc comment.
 import { materializeDeclaredFields } from '../declared-fields.js';
-import { describeCelFault, unknownVariableOf } from '../cel-fault.js';
+import { describeCelFault, missingKeyOf, unknownVariableOf } from '../cel-fault.js';
+// [#19929] Which `record` fields a `readonlyWhen` predicate reads, from the
+// AST of the canonical parse — see `recordFieldsRead`.
+import { parseCelToAst } from '@objectstack/formula';
 
 type Mode = 'insert' | 'update';
 
@@ -290,6 +320,10 @@ interface RuleContext {
   /** Locale + translation hooks: the BUILT-IN messages (#3957) and the
    *  authored `rule.message` (#14253) — one hook, two message sources. */
   messages: ValidationMessageContext | undefined;
+  /** [#18682] Related rows the engine resolved for this write, or undefined
+   *  when it resolved none. Applied per rule — see
+   *  {@link resolveTraversalScope}. */
+  related: RelatedRecordBinding | undefined;
 }
 
 /**
@@ -380,6 +414,29 @@ export interface EvaluateRulesOptions {
    */
   previousParent?: ParentBinding;
   /**
+   * [#18682] The related records this write's predicates read ONE HOP through a
+   * reference field — `record.crm_account.type` on an opportunity. Keyed by the
+   * reference FIELD name; the value is a {@link RelatedFieldBinding}, which
+   * either carries the related row or says WHY it has none. ⛔ Not `row | null`:
+   * the reason is what lets the refusal name the related object and column
+   * instead of leaving CEL to discover a missing key.
+   *
+   * Only the engine owns a driver, so it resolves these and hands them over —
+   * the same division of labour `parent` follows, and like `parent` the read is
+   * made under SYSTEM authority. A validation rule's output is a pass/fail the
+   * SYSTEM enforces, not data handed to the caller, which is why RLS predicates
+   * are excluded from this capability altogether. What bounds the elevation is
+   * the PROJECTION — only the columns the predicate names, intersected with the
+   * related object's declared fields.
+   *
+   * ⛔ NOT applied to every rule alike. A rule is hydrated only for the
+   * reference fields ITS OWN condition reads through, because hydrating a field
+   * replaces its stored id with the related record: a sibling rule that
+   * compares the bare id must keep seeing the id. See
+   * {@link resolveTraversalScope}.
+   */
+  related?: RelatedRecordBinding;
+  /**
    * When true, `state_machine` rules are skipped entirely — both the
    * `initialStates` entry-point check on insert (#3165) and the transition
    * check on update. Set by the engine for CURATED SEED writes
@@ -412,7 +469,93 @@ export function needsPriorRecord(
 ): boolean {
   const rules = objectSchema?.validations;
   const ruleNeeds = Array.isArray(rules) && rules.some((r) => ruleNeedsPrior(r));
-  return !!(ruleNeeds || fieldsNeedPrior(objectSchema?.fields));
+  // [#18682] A rule that reads ONE HOP through a reference field needs the
+  // prior row too, and for a reason the `previous`-reading rules do not share:
+  // the hop is taken from the foreign KEY, and a PATCH that does not touch that
+  // key does not carry it. Without the prior row the engine has no id to
+  // resolve, the related field arrives absent, and the rule faults and rejects
+  // a write it should have accepted. Counting it here is what keeps the bulk
+  // path's no-prior branch unreachable for such an object — the same argument
+  // #4977 makes for `parent`, which is bound only on the per-row branch.
+  const traverses = collectPredicateRelationships(objectSchema).size > 0;
+  return !!(ruleNeeds || traverses || fieldsNeedPrior(objectSchema?.fields));
+}
+
+/**
+ * [#18682] The reference fields an object's PREDICATE rules read one hop
+ * through, and the related fields they name on each — everything the engine
+ * must preload before evaluating this object's validation rules, and nothing
+ * more.
+ *
+ * Returns an empty map when no rule traverses anything, which is the common
+ * case and is what lets the engine skip the extra read entirely: the N+1 bound
+ * is "one hop, only the named fields, only when a rule asks".
+ *
+ * ## Scope: `script` / `cross_field`, including inside `conditional`
+ *
+ * These are the rules {@link checkPredicate} evaluates, and they are fail-CLOSED
+ * (#4649) — the one policy under which a rule that cannot be evaluated refuses
+ * the write instead of waving it through. The field-level `requiredWhen` /
+ * `readonlyWhen` / option `visibleWhen` predicates are deliberately NOT
+ * collected here: this capability hydrates for a rule whose refusal is the
+ * point, and the field level is not hydrated at all — a field predicate that
+ * reads through a reference faults, and since ADR-0137 D2 that fault REFUSES
+ * the write with a sentence saying so ({@link unevaluableFieldRuleError}).
+ * Hydrating them is a capability of its own, not a consequence of D2.
+ *
+ * ## Only REFERENCE-typed fields
+ *
+ * Judged with the spec's own `REFERENCE_VALUE_TYPES` through
+ * {@link referenceTargetOf}, the same arbiter the `$expand` gate and the engine
+ * already ask, so "what does this field point at" cannot answer differently
+ * here than it does one layer down. `record.address.city` on an object-valued
+ * field is left alone — it traverses today and keeps traversing.
+ */
+export function collectPredicateRelationships(
+  objectSchema: { validations?: unknown[]; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const rules = objectSchema?.validations;
+  if (!Array.isArray(rules) || rules.length === 0) return out;
+  const fields = objectSchema?.fields;
+  if (!fields) return out;
+
+  const addFrom = (cond: unknown): void => {
+    // The DIALECT is checked, not assumed: a `template` or `js` source that
+    // happens to parse as CEL would otherwise be analysed and hydrated, and the
+    // hop list would describe an expression no CEL engine ever evaluates.
+    // A bare string is CEL by the envelope's own default.
+    if (cond && typeof cond === 'object' && (cond as Expression).dialect !== undefined
+        && (cond as Expression).dialect !== 'cel') return;
+    const source = typeof cond === 'string'
+      ? cond
+      : (cond && typeof cond === 'object' ? (cond as Expression).source : undefined);
+    if (typeof source !== 'string' || !source) return;
+    const analysis = analysisFor(source);
+    if (!analysis) return;
+    for (const [field, related] of analysis.traversals) {
+      // `referenceTargetOf` answers undefined for a non-reference field AND for
+      // a reference field naming no target — both mean "nothing to preload".
+      if (!referenceTargetOf(fields[field])) continue;
+      let set = out.get(field);
+      if (!set) out.set(field, (set = new Set()));
+      for (const name of related) set.add(name);
+    }
+  };
+
+  const visit = (rule: unknown, depth: number): void => {
+    if (!rule || typeof rule !== 'object' || depth > 8) return;
+    const r = rule as { type?: unknown; condition?: unknown; then?: unknown; otherwise?: unknown };
+    if (r.type === 'script' || r.type === 'cross_field') addFrom(r.condition);
+    // A `conditional` wraps the rules it guards; its own `when` is evaluated
+    // by a different seam, so only the wrapped rules are collected here.
+    if (r.type === 'conditional') {
+      visit(r.then, depth + 1);
+      visit(r.otherwise, depth + 1);
+    }
+  };
+  for (const rule of rules) visit(rule, 0);
+  return out;
 }
 
 /**
@@ -422,6 +565,113 @@ export function needsPriorRecord(
  * resolve to opposite verdicts.
  */
 export type ParentBinding = Record<string, unknown> | null | undefined;
+
+/**
+ * [#18682] The reasons do NOT collapse: each names itself in
+ * the refusal, because "there is no parent" and "that column does not exist"
+ * send an author to different repairs.
+ */
+export type RelatedUnavailableReason =
+  /** The record stores no reference — the FK is null/empty, so there is no row. */
+  | 'no-reference'
+  /** The related read failed, or — for a related object no organization wall scopes — the caller's own read does not return the row. */
+  | 'unreadable'
+  /**
+   * The predicate names a column the RELATED object does not declare. A real
+   * authoring fault, and deliberately distinct from a column that exists and is
+   * empty: the latter evaluates as `null`, this one refuses.
+   */
+  | 'undeclared-field'
+  /** A reference is stored but the related record was not found. */
+  | 'unresolved';
+
+/**
+ * [#18682] What the engine resolved for ONE reference field a predicate reads
+ * through.
+ *
+ * ⭐ Why this is a discriminated record and not just `row | null`: the verdict
+ * must be decided by the ENGINE, BEFORE evaluation, and it must not depend on
+ * which CEL operator the author happened to write. Handing CEL an absent key
+ * delegates the verdict to key-absence semantics, and `has(...)`, `.?` and
+ * `orValue(...)` all read an absent key as an ordinary `false`/default — so a
+ * genuine fault would quietly stop the rule firing. The engine therefore says
+ * WHY a row is unusable and {@link checkPredicate} turns that into a refusal,
+ * rather than letting the expression discover it.
+ *
+ * It also separates the two absences #6457 taught us to keep apart: a column the
+ * related object DECLARES but which is empty is materialised to `null` on `row`
+ * (so the predicate evaluates), while a column it does not declare makes the
+ * binding unavailable (so the predicate refuses). Before this split both arrived
+ * as "the key is missing" and the verdict depended on which columns a driver
+ * happened to echo.
+ *
+ * ⚠️ The related row is read under SYSTEM authority — a validation rule's output
+ * is a pass/fail the system enforces, not data handed to the caller. The read is
+ * bounded by its PROJECTION (only the columns the predicate names, intersected
+ * with the related object's declared fields) and, on a related object no
+ * organization wall scopes, by the ROWS the own read of a caller that is not
+ * system returns. ⛔ This
+ * applies to validation rules alone; RLS and UI predicates are out of the
+ * capability entirely.
+ */
+export interface RelatedFieldBinding {
+  /** The object this reference field points at — named in the refusal text. */
+  readonly object: string;
+  /**
+   * The related row, materialised to `null` over the declared fields the
+   * predicate names. Present iff the row is usable.
+   */
+  readonly row?: Record<string, unknown>;
+  /** Why `row` is absent. Present iff `row` is absent. */
+  readonly unavailable?: RelatedUnavailableReason;
+  /** For `undeclared-field`: the named fields the related object does not declare. */
+  readonly undeclaredFields?: readonly string[];
+}
+
+/** Reference FIELD name → what the engine resolved for it. */
+export type RelatedRecordBinding = Readonly<Record<string, RelatedFieldBinding>>;
+
+/**
+ * [#20006] Why a write resolved no related record: it is the cleanup UPDATE a
+ * delete issues to clear a reference to the record being deleted.
+ *
+ * `ObjectQL.cascadeDeleteRelations` clears each `set_null` reference with an
+ * UPDATE of the referencing record, and that UPDATE resolves NO related record
+ * for a traversing rule (see `resolvePredicateRelated` for why). A rule that
+ * reads through a reference can therefore fault there and refuse the cleanup,
+ * which refuses the delete. That refusal stands — fail-closed. What this
+ * carries is what its TEXT must name: the delete, and the reference it clears.
+ *
+ * ⛔ Package-internal, and deliberately not a key of the public
+ * {@link RelatedRecordBinding} or {@link EvaluateRulesOptions}: it rides a
+ * binding only {@link referentialClearBinding} mints, so no caller of
+ * `evaluateValidationRules` can express it.
+ */
+export interface ReferentialClearCause {
+  /** The object whose record is being deleted. */
+  readonly object: string;
+  /** That record's id. */
+  readonly id: string;
+  /** The object whose reference the delete clears — the one carrying the rule. */
+  readonly referencingObject: string;
+  /** The reference field the delete clears. */
+  readonly field: string;
+}
+
+const referentialClearCauses = new WeakMap<object, ReferentialClearCause>();
+
+/**
+ * [#20006] The `related` binding for a delete's reference cleanup. It is EMPTY:
+ * the cleanup still resolves nothing, so every rule is evaluated against exactly
+ * the record it was evaluated against before, and the set of cleanups refused
+ * does not move. It only remembers WHY, for {@link checkPredicate} to say when a
+ * traversing rule faults.
+ */
+export function referentialClearBinding(cause: ReferentialClearCause): RelatedRecordBinding {
+  const binding: RelatedRecordBinding = Object.freeze({});
+  referentialClearCauses.set(binding, Object.freeze({ ...cause }));
+  return binding;
+}
 
 /**
  * The two CEL roots a field `readonlyWhen` predicate reads — `record` (the
@@ -439,8 +689,8 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  * predicates disagreed about what "the record" contains: ``requiredWhen:
  * P`record.b != null` `` was a working guard while ``readonlyWhen:
  * P`record.b != null` `` on the same field faulted whenever the driver did not
- * return `b` — and a faulting `readonlyWhen` is fail-OPEN, so the field the
- * author declared frozen was written. Whether it was written depended on which
+ * return `b` — and a faulting `readonlyWhen` was fail-OPEN then, so the field
+ * the author declared frozen was written. Whether it was written depended on which
  * columns a driver happened to echo back, which is not something an author can
  * see or control (#4953; maintainer ruling 2026-08-06: the SERVER seams are
  * unified, the cross-process ones are deferred).
@@ -458,8 +708,9 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  * the only place holding both the master's schema and the just-read header:
  * `ObjectQL.resolveMasterDetailParent(s)` (`engine.ts#materializeParentHeader`),
  * which serves this seam and the `requiredWhen` one below from one resolution.
- * This function's own contract is unchanged — hand it a sparse header and it
- * still fails open — and the ABSENT-parent signal above is untouched, because
+ * This function's own contract is unchanged — hand it a sparse header and its
+ * predicate still faults (which, since ADR-0137 D2, refuses the write) — and
+ * the ABSENT-parent signal above is untouched, because
  * materialisation is only ever applied to a header row that EXISTS.
  *
  * ## Consequences, both directions (measured, not asserted)
@@ -483,8 +734,9 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  *    consequence rather than a discovery.
  *
  * Ordering comparisons still fault over a total record (`null < null` is `no
- * such overload`), so the fail-open branch is not dead — the very reason
- * `@objectstack/lint`'s null-guard gate exists.
+ * such overload`), so the fault branch is not dead — the very reason
+ * `@objectstack/lint`'s null-guard gate exists. Since ADR-0137 D2 that branch
+ * refuses the write rather than letting the change through.
  *
  * ## Only materialise when the persisted state is IN HAND
  *
@@ -500,7 +752,7 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  * there is no insert case to answer here.
  */
 function readonlyWhenBindings(
-  data: Record<string, unknown>,
+  data: Readonly<Record<string, unknown>>,
   prior: Record<string, unknown> | undefined | null,
   fields: Record<string, ConditionalFieldDef>,
 ): { merged: Record<string, unknown>; previous: Record<string, unknown> | undefined } {
@@ -569,6 +821,36 @@ interface ReadonlyWhenStripOptions {
    * before the before-phase hooks. Omit to judge every key in the payload.
    */
   supplied?: Readonly<Record<string, unknown>>;
+  /**
+   * [#19887] The payload the write STORES once the static `readonly` strip,
+   * which runs after this one, has taken its keys back out. The `record`
+   * binding is built from this view over the prior row; the keys judged, the
+   * authorship test and the returned payload stay `data`'s, so only what a
+   * predicate READS moves.
+   *
+   * Built from `data` instead, the binding still held a value a caller forged
+   * for a statically `readonly` field: `amount` locked by `record.status ==
+   * 'closed'` was judged against a forged `status: 'open'`, the static strip
+   * then removed that `status`, and the closed row committed with its locked
+   * amount rewritten.
+   *
+   * ⚠️ Unlike `supplied`, omitting this is NOT fail-safe: the view is then
+   * `data`, which is right only when nothing downstream takes a key back out.
+   * Every engine call site passes it.
+   */
+  stored?: Readonly<Record<string, unknown>>;
+  /**
+   * [#19911] Take only this key, while every judged key is still judged with
+   * it, so its verdict is settled together with theirs
+   * ({@link settleReadonlyWhenDrops}). The engine's master-detail settlement
+   * judges the FK's own lock ahead of the rest; judged alone, the FK's
+   * predicate read every other key's incoming value, including one the rest's
+   * own locks then took back out. The key is spoken about (its warnings
+   * and the strip's line) only when it is taken: a key left standing is judged
+   * again, with the rest, by the strip that follows. Omit to take every key
+   * that locks.
+   */
+  only?: string;
 }
 
 /**
@@ -657,11 +939,18 @@ function isCallerSuppliedValue(
  * `undefined` when the object is not a detail or the payload's predicates never
  * name `parent`, and the binding is simply absent.
  *
- * A predicate that faults is fail-open (the change is allowed through) EXCEPT
- * when the fault is an unbound scope root — see {@link isReadonlyWhenLocked}.
+ * A predicate that faults REFUSES the write — a `ValidationError` naming the
+ * field and the rule, thrown before anything is persisted (ADR-0137 D2) —
+ * EXCEPT when the fault is an unbound scope root, which holds the lock (#4889).
+ * See {@link isReadonlyWhenLocked}.
  *
  * The `record` / `previous` bindings are TOTAL over the object's declared
- * fields (#4953) — see {@link readonlyWhenBindings}.
+ * fields (#4953) — see {@link readonlyWhenBindings}. `record` is the payload
+ * the write STORES over the prior row (`options.stored`, #19887), so a
+ * predicate never reads a value the static `readonly` strip takes back out;
+ * and since #19911 a value this strip takes back out can no longer unlock a
+ * lock ({@link settleReadonlyWhenDrops}, which says where it can still
+ * over-lock).
  */
 export function stripReadonlyWhenFields(
   objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
@@ -674,20 +963,397 @@ export function stripReadonlyWhenFields(
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const supplied = options?.supplied ?? data;
-  const view = readonlyWhenBindings(data, previous, fields);
-  let result = data;
+  const stored = options?.stored ?? data;
+  const judged = judgedReadonlyWhenKeys(fields, data, supplied);
+  if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
+  const settled = settleOrRefuse(logger, () => settleReadonlyWhenDrops(
+    readonlyWhenLockGroups(fields, judged),
+    (dropped) => readonlyWhenBindings(withoutKeys(stored, dropped), previous, fields),
+    (name, view, warn) => isReadonlyWhenLocked(fields[name]!, view.merged, view.previous, name, { warn }, parent, fields),
+  ));
+  return applyReadonlyWhenDrops(data, judged, settled, options?.only, logger, (name) =>
+    `Field '${name}' is read-only (readonlyWhen) — ignoring incoming change`,
+  );
+}
+
+/**
+ * [#19911] The keys the conditional strip JUDGES: every field in the payload
+ * that declares a `readonlyWhen` and still holds the caller's value (#9107,
+ * {@link isCallerSuppliedValue}) — in declaration order, which is the order
+ * the strips have always evaluated, warned and reported in.
+ */
+function judgedReadonlyWhenKeys(
+  fields: Record<string, ConditionalFieldDef>,
+  data: Record<string, unknown>,
+  supplied: Readonly<Record<string, unknown>>,
+): string[] {
+  const judged: string[] = [];
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
-    // [#9107] Asked BEFORE the predicate runs, not after: a hook-written value
+    // [#9107] Asked BEFORE any predicate runs, not after: a hook-written value
     // is not this strip's business at all, so there is nothing to evaluate and
     // nothing to warn about — including the unbound-root LOCKED branch, whose
     // fail-CLOSED verdict exists to protect against an unjudgeable CALLER write.
     if (!isCallerSuppliedValue(data, supplied, name)) continue;
-    if (isReadonlyWhenLocked(def, view.merged, view.previous, name, logger, parent)) {
-      if (result === data) result = { ...data };
-      delete (result as Record<string, unknown>)[name];
-      logger?.warn?.(`Field '${name}' is read-only (readonlyWhen) — ignoring incoming change`);
+    judged.push(name);
+  }
+  return judged;
+}
+
+/**
+ * [#19911] Is `only` (when given) among the keys judged? When it is not — no
+ * `readonlyWhen`, absent, or no longer the caller's — the strip has nothing to
+ * take, and returns before judging the rest just to read their verdicts.
+ */
+function judgesOnly(judged: readonly string[], only: string | undefined): boolean {
+  return only === undefined || judged.includes(only);
+}
+
+/** `data` without `keys`, as a copy; `data` itself when there is none to take. */
+function withoutKeys(
+  data: Readonly<Record<string, unknown>>,
+  keys: ReadonlySet<string>,
+): Readonly<Record<string, unknown>> {
+  if (keys.size === 0) return data;
+  const out: Record<string, unknown> = { ...data };
+  for (const key of keys) delete out[key];
+  return out;
+}
+
+/**
+ * [#19911] Which judged keys the conditional strip drops — so that a value
+ * another lock in the same strip takes back out can never unlock a lock, and,
+ * [#19927] [#19929] so that no key outside a cycle of the locks' reads of one
+ * another is dropped while it is unlocked on the row the write stores.
+ *
+ * ## Why one pass was not enough
+ *
+ * Every predicate read ONE `record` view, built before any lock was judged —
+ * so it still held every value the pass itself went on to drop. With `status`
+ * locked by `previous.status == 'closed'` and `amount` by `record.status ==
+ * 'closed'`, `update(c1, { status: 'open', amount: 999 })` on a closed row
+ * dropped `status` and judged `amount` against the dropped `'open'`: the row
+ * stayed closed and its locked amount was rewritten. The same mechanism locks
+ * instead of opening when the dropped value is the one that would lock: with
+ * `status` frozen by `previous.frozen == true`, `update(r, { status:
+ * 'closed', amount: 999 })` dropped `status` and then `amount` too, judged
+ * against a `'closed'` the row never took. `stored` (#19887) closed the static
+ * strip's twin of both; this is the conditional strip's own.
+ *
+ * ## The rule: never open a lock, then agree with the stored row
+ *
+ * A key is judged with its OWN incoming value (a lock that reads its own field
+ * judges the write) and every OTHER dropped key reverted to the prior row's
+ * value. A drop set is EXACT when every key it drops is locked, and every key
+ * it keeps is unlocked, on that view: judging every key against an exact set
+ * gives back the set itself.
+ *
+ * A key's verdict moves only with the drops of the keys its predicate reads
+ * through `record`, so the keys are settled in `groups`
+ * ({@link readonlyWhenLockGroups}): the keys that read each other in a cycle
+ * form one group, every other key is a group of its own, and each group comes
+ * after every group whose keys it reads. A group is judged against the drops
+ * of the groups before it, which by then are final:
+ *
+ *  - A group of one key is judged once.
+ *  - A cycle's group is settled in two steps.
+ *    ① A monotone fixpoint. Judge every key of the group; drop the ones that
+ *      lock; re-judge the rest with those reverted; repeat until a pass locks
+ *      nothing new. Drops only grow, so it ends (one pass per key at most),
+ *      and every key it keeps is unlocked on the row it stores: it never
+ *      opens a lock.
+ *    ② A release iteration. A key ① dropped but that is unlocked on ①'s row
+ *      was locked by a value a later pass reverted. Every such key is
+ *      released at once; then every key of the group is judged against that
+ *      set, the keys that lock are the next set, and so on until a set gives
+ *      back itself. That set is exact and is the group's answer. After m + 1
+ *      sets (m keys in the group) the iteration stops, and ①'s answer stands
+ *      for the group.
+ *
+ * [#19929] Until the groups, ① and ② ran once over EVERY judged key, so a
+ * cycle whose ② did not settle made ①'s larger set stand for the whole
+ * update: the #19927 cascade below, written in the same update as the first
+ * cycle below, lost `x`, which is in no cycle and unlocked on the row the
+ * write stores.
+ *
+ * What that guarantees:
+ *  - No lock opens. A group's answer is ①'s set or a set that gave back
+ *    itself; either keeps only keys unlocked on the view it was judged
+ *    against, and every key a group reads is decided before it, so on the
+ *    fields its keys read that view is the row the write stores.
+ *  - A key in no cycle is dropped exactly when its lock is TRUE on the row
+ *    the write stores: it is judged once, after every key it reads. The
+ *    #19927 cascade — `c` locked by `previous.c == 'L'`, `x` by `record.c ==
+ *    'open'`, `y` by `record.x == 'xv'`, a write setting all three on a row
+ *    with `c: 'L'` — judges `c` (locked), then `x` against the `c` the row
+ *    keeps (unlocked), then `y` against the `x` it takes (locked): `{c, y}`.
+ *  - A cycle can have no exact set, one, or several. With none, no set gives
+ *    back itself and ①'s larger drop set stands for the cycle's keys: the
+ *    fail-safe direction, where a lock that cannot be settled is not waived
+ *    (#4889's frozen lines depend on that). `a` locked by `record.b == 'x'`,
+ *    `b` by `record.a == 'old_a'`, a write setting both, is one. With
+ *    several, the answer is the one ② reaches, or ①'s when it reaches none:
+ *    `a` locked by `record.b == 'new_b'` and `b` by `record.a == 'new_a'`, a
+ *    write setting both, has `{a}` and `{b}`; ② alternates between `{}` and
+ *    `{a, b}`, and ①'s `{a, b}` stands. Only the cycle's own keys fall back:
+ *    a key the cycle reads was settled before it, and a key that reads the
+ *    cycle is judged after it, against the drops the row then keeps.
+ *  - No order matters: the groups and their order follow from the reads, and
+ *    each step judges every key of a group against one set, so field
+ *    declaration order and payload key order cannot move the answer.
+ *  - A cycle's exact set need not lie inside its ①'s: a key ① kept can lock
+ *    once another key is released, and the exact set drops it.
+ *  - Each claim is about the views this function is handed. The engine's
+ *    master-detail settlement judges the FK here against the header it NAMES
+ *    and, when the FK does not land, judges the rest against the header the
+ *    row KEEPS (#19853): an FK dropped that way can be unlocked on the row the
+ *    write stores, as it could before #19927.
+ *
+ * Cost, counted in key judgements (a bulk write judges each over its matched
+ * rows): one per key in no cycle; for a cycle of m keys, at most m(m + 1) / 2
+ * in ① and at most m + m² in ②.
+ *
+ * Each key's warnings come from the evaluation that decided it and are handed
+ * back rather than logged, so a key judged more than once still warns once.
+ */
+function settleReadonlyWhenDrops<V>(
+  groups: readonly (readonly string[])[],
+  viewFor: (dropped: ReadonlySet<string>) => V,
+  isLocked: (name: string, view: V, warn: (message: string) => void) => boolean,
+): { dropped: Set<string>; warnings: Map<string, string[]> } {
+  // Views are memoised per set of OTHER dropped keys: the groups, ① and ② ask
+  // for the same few again and again.
+  const order = groups.flat();
+  const views = new Map<string, V>();
+  const judge = (name: string, dropped: ReadonlySet<string>): { locked: boolean; said: string[] } => {
+    const others = order.filter((key) => key !== name && dropped.has(key));
+    const signature = others.join(',');
+    let view = views.get(signature);
+    if (view === undefined) {
+      view = viewFor(new Set(others));
+      views.set(signature, view);
     }
+    const said: string[] = [];
+    return { locked: isLocked(name, view, (message) => said.push(message)), said };
+  };
+  const dropped = new Set<string>();
+  const warnings = new Map<string, string[]>();
+  for (const group of groups) {
+    const settled = settleLockGroup(group, dropped, judge);
+    for (const name of group) {
+      warnings.set(name, settled.warnings.get(name) ?? []);
+      if (settled.dropped.has(name)) dropped.add(name);
+    }
+  }
+  return { dropped, warnings };
+}
+
+/**
+ * [#19929] Settle ONE group of {@link settleReadonlyWhenDrops}, every key
+ * judged against `settled` (the final drops of the groups before it) plus the
+ * group's own drops. Answers the group's drops and each key's warnings.
+ */
+function settleLockGroup(
+  group: readonly string[],
+  settled: ReadonlySet<string>,
+  judge: (name: string, dropped: ReadonlySet<string>) => { locked: boolean; said: string[] },
+): { dropped: Set<string>; warnings: Map<string, string[]> } {
+  const against = (own: ReadonlySet<string>): ReadonlySet<string> => new Set([...settled, ...own]);
+  if (group.length === 1) {
+    // A key in no cycle: every key it reads is already decided.
+    const name = group[0]!;
+    const verdict = judge(name, settled);
+    return { dropped: new Set(verdict.locked ? [name] : []), warnings: new Map([[name, verdict.said]]) };
+  }
+  // ① Every standing key is judged against the same drop set, and a drop
+  // found in this pass reaches the others in the next one.
+  const dropped = new Set<string>();
+  const warnings = new Map<string, string[]>();
+  let standing: readonly string[] = group;
+  for (;;) {
+    const view = against(dropped);
+    const locked: string[] = [];
+    for (const name of standing) {
+      const verdict = judge(name, view);
+      warnings.set(name, verdict.said);
+      if (verdict.locked) locked.push(name);
+    }
+    if (locked.length === 0) break;
+    for (const name of locked) dropped.add(name);
+    standing = standing.filter((name) => !dropped.has(name));
+  }
+  // ② Every standing key is unlocked on ①'s row; a dropped key unlocked there
+  // too is over-locked. The first set releases them all at once; each later
+  // set is every key that locks when judged against the one before, until a
+  // set gives back itself — m more sets at most. The answer's warnings are
+  // those of the judgements that gave it back.
+  const fixpoint = against(dropped);
+  let current = new Set([...dropped].filter((name) => judge(name, fixpoint).locked));
+  if (current.size === dropped.size) return { dropped, warnings };
+  for (let step = 0; step < group.length; step++) {
+    const view = against(current);
+    const next = new Set<string>();
+    const nextWarnings = new Map<string, string[]>();
+    for (const name of group) {
+      const verdict = judge(name, view);
+      nextWarnings.set(name, verdict.said);
+      if (verdict.locked) next.add(name);
+    }
+    if (next.size === current.size && [...next].every((name) => current.has(name))) {
+      return { dropped: current, warnings: nextWarnings };
+    }
+    current = next;
+  }
+  return { dropped, warnings };
+}
+
+/**
+ * [#19929] The judged keys in the groups {@link settleReadonlyWhenDrops}
+ * settles: the strongly connected components of "`k`'s predicate reads `j`
+ * through `record`" ({@link recordFieldsRead}), a key's read of its own field
+ * aside. Each group lists its keys in declaration order, and the groups come
+ * in an order where every group follows the groups whose keys it reads.
+ *
+ * The edges are read off the predicate's source, never its value on a row, so
+ * the grouping is the same for every row of a bulk write, and a read the
+ * source cannot place (see {@link recordFieldsRead}) counts as a read of
+ * every other judged key: that can only merge groups or order a key later,
+ * which settles no key on a view that lacks a drop it reads.
+ *
+ * `previous` and `parent` do not move with the drops, so they add no edge.
+ * The master-detail FK's pick of `parent` is the engine's to settle
+ * (`settleMasterDetailLanding`), which judges the FK before the header it
+ * picks is bound for the rest.
+ */
+function readonlyWhenLockGroups(
+  fields: Record<string, ConditionalFieldDef>,
+  judged: readonly string[],
+): string[][] {
+  const reads = new Map<string, string[]>();
+  for (const name of judged) {
+    const read = recordFieldsRead(fields[name]!.readonlyWhen!);
+    reads.set(name, judged.filter((other) => other !== name && (read === 'every' || read.has(other))));
+  }
+  // Tarjan's strongly connected components. A component is complete only
+  // once every component it reaches is, so they come out in dependency order.
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const groups: string[][] = [];
+  const visit = (name: string): void => {
+    index.set(name, index.size);
+    low.set(name, index.get(name)!);
+    stack.push(name);
+    onStack.add(name);
+    for (const next of reads.get(name)!) {
+      if (!index.has(next)) {
+        visit(next);
+        low.set(name, Math.min(low.get(name)!, low.get(next)!));
+      } else if (onStack.has(next)) {
+        low.set(name, Math.min(low.get(name)!, index.get(next)!));
+      }
+    }
+    if (low.get(name) !== index.get(name)) return;
+    const members = new Set<string>();
+    for (;;) {
+      const member = stack.pop()!;
+      onStack.delete(member);
+      members.add(member);
+      if (member === name) break;
+    }
+    groups.push(judged.filter((key) => members.has(key)));
+  };
+  for (const name of judged) if (!index.has(name)) visit(name);
+  return groups;
+}
+
+/** What a predicate reads through `record`: named fields, or `'every'`. */
+type RecordFieldsRead = ReadonlySet<string> | 'every';
+
+/** Parsed-read memo — metadata predicates are a small, fixed set of sources. */
+const recordFieldsReadCache = new Map<string, RecordFieldsRead>();
+
+/**
+ * [#19929] The fields a `readonlyWhen` predicate reads through `record`,
+ * decided from the AST of the canonical parse (`parseCelToAst`, the same
+ * front end the evaluator's rewrites leave the reads of alone).
+ *
+ * A read is a field select on the bare `record` root: `record.x`,
+ * `record.?x`, and anything built on one (`record.x.y`, `has(record.x)`,
+ * `record.x.size()`). Every other use of the root — `record['x']`, `'x' in
+ * record`, `size(record)`, `record` bound by a macro — answers `'every'`, and
+ * so does a predicate that is not CEL or does not parse. Only a missed read
+ * could open a lock (a key judged before a drop its predicate reads), and
+ * this reader misses none: it names a field only where the source spells it.
+ */
+function recordFieldsRead(cond: string | Expression): RecordFieldsRead {
+  const expr = toExpression(cond);
+  const source = expr.dialect === 'cel' && typeof expr.source === 'string' ? expr.source : '';
+  if (!source) return 'every';
+  const cached = recordFieldsReadCache.get(source);
+  if (cached !== undefined) return cached;
+  const ast = parseCelToAst(source);
+  let read: RecordFieldsRead = 'every';
+  if (ast !== null) {
+    const named = new Set<string>();
+    let every = false;
+    const isNode = (node: unknown): node is { op: string; args: unknown } =>
+      !!node && typeof node === 'object' && typeof (node as { op?: unknown }).op === 'string';
+    const isRecordRoot = (node: unknown): boolean =>
+      isNode(node) && node.op === 'id' && node.args === RECORD_ROOT;
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const child of node) walk(child);
+        return;
+      }
+      if (!isNode(node)) return;
+      if ((node.op === '.' || node.op === '.?') && Array.isArray(node.args)) {
+        const [receiver, member] = node.args;
+        if (isRecordRoot(receiver) && typeof member === 'string') {
+          named.add(member);
+          return;
+        }
+      }
+      if (isRecordRoot(node)) {
+        every = true;
+        return;
+      }
+      walk(node.args);
+    };
+    walk(ast);
+    if (!every) read = named;
+  }
+  recordFieldsReadCache.set(source, read);
+  return read;
+}
+
+/**
+ * [#19911] Apply a settled verdict: say what each judged key's deciding
+ * evaluation said, in declaration order, then the strip's own line for each
+ * key it takes, and return `data` without those keys — the same object when
+ * none is taken. `only` narrows what is TAKEN and SAID to one key, while every
+ * judged key still shaped the view that key was judged against
+ * ({@link ReadonlyWhenStripOptions.only}).
+ */
+function applyReadonlyWhenDrops(
+  data: Record<string, unknown>,
+  judged: readonly string[],
+  settled: { dropped: ReadonlySet<string>; warnings: ReadonlyMap<string, readonly string[]> },
+  only: string | undefined,
+  logger: EvaluateRulesOptions['logger'] | undefined,
+  line: (name: string) => string,
+): Record<string, unknown> {
+  let result = data;
+  for (const name of judged) {
+    // `only`, standing, says nothing either: its caller re-judges it with the
+    // rest when it lands, and that is where its verdict is spoken.
+    if (only !== undefined && (name !== only || !settled.dropped.has(name))) continue;
+    for (const message of settled.warnings.get(name) ?? []) logger?.warn?.(message);
+    if (!settled.dropped.has(name)) continue;
+    if (result === data) result = { ...data };
+    delete result[name];
+    logger?.warn?.(line(name));
   }
   return result;
 }
@@ -698,16 +1364,27 @@ export function stripReadonlyWhenFields(
  * dropped. Shared by the single-id ({@link stripReadonlyWhenFields}) and bulk
  * ({@link stripReadonlyWhenFieldsMulti}) strips.
  *
- * ## Two faults, two answers (#4889)
+ * ## Two faults, two answers (#4889, ADR-0137 D2)
  *
  * Until #4889 every fault took one exit — WARN and `false`, "not locked" — and
  * that single answer had to serve two very different situations:
  *
  *  - **The predicate is broken on this record.** A typo'd key, a `null`
- *    ordering overload, a parse error. The author has a bug; the field is not
- *    demonstrably locked; the historical (and deliberate, documented) policy is
- *    fail-OPEN. Unchanged here — an engine fault the author cannot act on must
- *    not brick every write to the object.
+ *    ordering overload, a parse error, a column read through a reference the
+ *    field level never hydrates. The author has a bug and the lock has no
+ *    verdict. This arm was fail-OPEN — WARN, `false`, the change allowed
+ *    through — which wrote a field the author declared frozen whenever the
+ *    predicate could not run. **ADR-0137 D2 closes it: the write is REFUSED**,
+ *    naming the field and the rule, before anything is persisted. It THROWS
+ *    the {@link ValidationError} rather than answering a boolean, because
+ *    neither boolean is true: `false` invents "unlocked", and `true` would
+ *    silently drop a value nobody showed to be locked. The refusal is what the
+ *    author can act on — the message says which key or which overload.
+ *
+ *    Thrown from INSIDE the settlement ({@link settleReadonlyWhenDrops}) on
+ *    purpose: a lock whose verdict is unknown on any view the settlement asks
+ *    about cannot be settled, and a partial settlement is the thing the
+ *    settlement exists to prevent.
  *
  *  - **The predicate names a ROOT this operation did not bind.** `parent.status
  *    == 'paid'` where no master-detail header was resolved. The expression is
@@ -736,13 +1413,15 @@ function isReadonlyWhenLocked(
   name: string,
   logger?: EvaluateRulesOptions['logger'],
   parent?: ParentBinding,
+  fields?: Record<string, ConditionalFieldDef>,
 ): boolean {
   const res = ExpressionEngine.evaluate<boolean>(toExpression(def.readonlyWhen!), {
     record: merged,
     previous,
     // Bound ONLY when resolved. An absent binding is what makes the unbound-root
     // fault below reachable, and that fault is the signal — binding `null` here
-    // would turn it into a `No such key` and re-open the fail-open hole.
+    // would turn it into a `No such key`, which the arm after it REFUSES
+    // (ADR-0137 D2) instead of holding the lock.
     ...(parent != null ? { extra: { parent } } : {}),
   });
   if (!res.ok) {
@@ -755,10 +1434,31 @@ function isReadonlyWhenLocked(
       );
       return true;
     }
-    logger?.warn?.(`readonlyWhen for '${name}' failed to evaluate — change allowed through`);
-    return false;
+    // [ADR-0137 D2] Every OTHER fault refuses the write — see the docblock.
+    throw new ValidationError([
+      unevaluableFieldRuleError('readonlyWhen', name, res.error, def.readonlyWhen!, fields),
+    ]);
   }
   return res.value === true;
+}
+
+/**
+ * [ADR-0137 D2] Run a `readonlyWhen` settlement, and say a refusal in the log
+ * before handing it to the caller — the operator needs the fault in the log even
+ * though the caller gets it in the response, as a broken validation rule's
+ * refusal is (#4649). Logged HERE rather than where the fault is read, because
+ * {@link settleReadonlyWhenDrops} defers every warning until a verdict is
+ * settled, and a refusal settles none.
+ */
+function settleOrRefuse<T>(logger: EvaluateRulesOptions['logger'] | undefined, settle: () => T): T {
+  try {
+    return settle();
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      for (const field of err.fields) logger?.warn?.(field.message);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -820,24 +1520,70 @@ export function hasParentScopedRequiredWhen(
 }
 
 /** Parsed-root memo — metadata predicates are a small, fixed set of sources. */
-const parentRootCache = new Map<string, boolean>();
+const celRootsCache = new Map<string, readonly string[]>();
 
 /** Does this predicate's CEL source reference the `parent` root? */
 function readsParentRoot(cond: string | Expression): boolean {
+  return readsCelRoot(cond, PARENT_ROOT);
+}
+
+/**
+ * Does this predicate's CEL source reference `root`? A predicate that does not
+ * parse reads nothing here — it faults at evaluation, where the fail-open /
+ * fail-closed judgment already lives.
+ */
+function readsCelRoot(cond: string | Expression, root: string): boolean {
   const expr = toExpression(cond);
   if (expr.dialect !== 'cel') return false;
   const source = typeof expr.source === 'string' ? expr.source : '';
   if (!source) return false;
-  const cached = parentRootCache.get(source);
-  if (cached !== undefined) return cached;
-  const roots = collectCelRootIdentifiers(source);
-  const answer = roots.ok && roots.roots.includes(PARENT_ROOT);
-  parentRootCache.set(source, answer);
-  return answer;
+  let roots = celRootsCache.get(source);
+  if (roots === undefined) {
+    const parsed = collectCelRootIdentifiers(source);
+    roots = parsed.ok ? parsed.roots : [];
+    celRootsCache.set(source, roots);
+  }
+  return roots.includes(root);
 }
 
 /** The CEL scope root a master-detail header is bound under (`cel-engine.ts`). */
 const PARENT_ROOT = 'parent';
+
+/** The CEL scope root a field rule reads the row the write stores under. */
+const RECORD_ROOT = 'record';
+
+/**
+ * [#19911] Does judging the master-detail FK's OWN `readonlyWhen` lock need the
+ * header the FK NAMES? The engine's settlement asks this before it judges that
+ * lock, and reads the named header only when the answer is yes.
+ *
+ * #4889's rule judges the FK's lock against the master it lands on, so a lock
+ * that reads `parent` needs that header — the one question asked before this.
+ * The second is new: the FK's lock is settled together with the other locks
+ * ({@link settleReadonlyWhenDrops}), so when it reads `record` it depends on
+ * which OTHER payload keys their own locks drop — and a `parent`-scoped one
+ * among those is judged, on the landing the FK's verdict is deciding, against
+ * the header the FK names. Left unbound it would read as LOCKED (#4889's
+ * fail-closed exit) and revert a value the write may yet store.
+ *
+ * A yes that turns out unneeded costs one header read and moves no verdict.
+ */
+export function readonlyWhenFkJudgementReadsParent(
+  objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+  data: Record<string, unknown> | undefined | null,
+  fk: string,
+): boolean {
+  const fields = objectSchema?.fields;
+  const own = fields?.[fk]?.readonlyWhen;
+  if (!fields || !data || !own || !(fk in data)) return false;
+  if (readsCelRoot(own, PARENT_ROOT)) return true;
+  if (!readsCelRoot(own, RECORD_ROOT)) return false;
+  for (const [name, def] of Object.entries(fields)) {
+    if (name === fk || !def?.readonlyWhen || !(name in data)) continue;
+    if (readsCelRoot(def.readonlyWhen, PARENT_ROOT)) return true;
+  }
+  return false;
+}
 
 /**
  * True when the UPDATE payload writes at least one field that declares a
@@ -868,9 +1614,12 @@ export function hasReadonlyWhenInPayload(
  * lock the field for some rows and write it for others, so a field locked in any
  * target row is fail-safe-dropped for all (narrow the `where` to reach the rows
  * where it is unlocked). A field NO matched row locks is written normally — a
- * legitimate bulk edit of an unlocked conditional field is unaffected. A broken
- * predicate is fail-open for that row. INSERT is exempt (update path only),
- * symmetric with the single-id strip.
+ * legitimate bulk edit of an unlocked conditional field is unaffected. A
+ * predicate that faults on ANY matched row refuses the whole write, naming the
+ * field, the rule and the row (ADR-0137 D2) — so every row is judged, not only
+ * the rows up to the first that locks: stopping there would let the refusal
+ * depend on the order the driver returned the rows in. INSERT is exempt (update
+ * path only), symmetric with the single-id strip.
  *
  * `parentForRow` (#4889) supplies each matched row's master-detail header, since
  * N rows can hang off N different masters — the bulk counterpart of the
@@ -882,10 +1631,12 @@ export function hasReadonlyWhenInPayload(
  * Each matched row's `record` / `previous` bindings are made TOTAL over the
  * declared fields (#4953, {@link readonlyWhenBindings}) exactly as on the
  * single-id path — a bulk write must not judge the same predicate by a
- * different record shape than a one-row write does. The views are built ONCE
- * per row (they do not depend on which field is being judged) and only when a
- * `readonlyWhen` field is actually in the payload, so a batch that touches none
- * still pays nothing.
+ * different record shape than a one-row write does, nor over a different payload
+ * (`options.stored`, #19887), nor settle its drops differently (#19911,
+ * {@link settleReadonlyWhenDrops}). The row views are built once per drop set
+ * the settlement asks about — once in all when nothing locks — and only when a
+ * caller-supplied `readonlyWhen` field is actually in the payload, so a batch
+ * that touches none still pays nothing.
  *
  * Only keys the CALLER supplied at engine entry are judged (#9107), off the SAME
  * entry snapshot the single-id strip uses — one payload, one authorship, so a
@@ -906,38 +1657,68 @@ export function stripReadonlyWhenFieldsMulti(
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const supplied = options?.supplied ?? data;
+  // [#19887] Each row's `record` is the payload the write stores, over THAT
+  // row — the same `stored` view the single-id strip reads.
+  const stored = options?.stored ?? data;
   const rows = priorRows ?? [];
-  // Built lazily: a payload writing no `readonlyWhen` field never reaches the
-  // `.some()` below, and then no row view is materialised at all.
-  let views: Array<ReturnType<typeof readonlyWhenBindings>> | null = null;
-  const rowViews = () => (views ??= rows.map((row) => readonlyWhenBindings(data, row, fields)));
-  let result = data;
-  for (const [name, def] of Object.entries(fields)) {
-    if (!def?.readonlyWhen || !(name in data)) continue;
-    // [#9107] Same authorship gate as the single-id strip, asked before any row
-    // is judged — a hook-written key is exempt for the whole batch, not per row.
-    if (!isCallerSuppliedValue(data, supplied, name)) continue;
-    const lockedInSomeRow = rowViews().some((view, i) =>
-      isReadonlyWhenLocked(
-        def,
-        view.merged,
-        view.previous,
-        name,
-        logger,
-        // Resolved per (field, row) exactly as before — the header lookup is
-        // the caller's, and its call pattern is not this change's business.
-        parentForRow?.(rows[i] ?? undefined),
-      ),
-    );
-    if (lockedInSomeRow) {
-      if (result === data) result = { ...data };
-      delete (result as Record<string, unknown>)[name];
-      logger?.warn?.(
-        `Field '${name}' is read-only (readonlyWhen) in ≥1 matched row — ignoring incoming change on bulk update`,
-      );
-    }
-  }
-  return result;
+  // [#9107] Same authorship gate as the single-id strip, asked before any row
+  // is judged — a hook-written key is exempt for the whole batch, not per row.
+  // A payload that judges no key returns here, before any row view is built.
+  const judged = judgedReadonlyWhenKeys(fields, data, supplied);
+  if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
+  // [#19911] The single-id strip's settlement, per matched row: a key is judged
+  // in every row against THAT row's view with the other drops reverted, and is
+  // locked when it locks in ≥1 row — so an exact set drops only keys locked in
+  // some row and keeps only keys unlocked in every row.
+  const settled = settleOrRefuse(logger, () => settleReadonlyWhenDrops(
+    readonlyWhenLockGroups(fields, judged),
+    (dropped) => {
+      const payload = withoutKeys(stored, dropped);
+      return rows.map((row) => readonlyWhenBindings(payload, row, fields));
+    },
+    (name, views, warn) => {
+      // [ADR-0137 D2] EVERY row, never `some`: a row that faults refuses the
+      // write wherever it sits among the matched rows. The rows' warnings are
+      // said once each — N rows under one unbound header word one line N times.
+      const said = new Set<string>();
+      const once = (message: string): void => {
+        if (said.has(message)) return;
+        said.add(message);
+        warn(message);
+      };
+      let locked = false;
+      views.forEach((view, i) => {
+        const row = rows[i] ?? undefined;
+        try {
+          if (
+            isReadonlyWhenLocked(
+              fields[name]!,
+              view.merged,
+              view.previous,
+              name,
+              { warn: once },
+              // Resolved per (field, row) exactly as before — the header lookup is
+              // the caller's, and its call pattern is not this change's business.
+              parentForRow?.(row),
+              fields,
+            )
+          ) {
+            locked = true;
+          }
+        } catch (err) {
+          // Name the row, as the bulk validation refusal does (`engine.ts`).
+          if (err instanceof ValidationError && row?.id != null) {
+            throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
+          }
+          throw err;
+        }
+      });
+      return locked;
+    },
+  ));
+  return applyReadonlyWhenDrops(data, judged, settled, options?.only, logger, (name) =>
+    `Field '${name}' is read-only (readonlyWhen) in ≥1 matched row — ignoring incoming change on bulk update`,
+  );
 }
 
 /**
@@ -2346,15 +3127,16 @@ export function evaluateValidationRules(
   // and update: what a predicate can read is the object's DECLARED shape, not
   // whatever subset of columns this driver happened to return.
   if (groundTruth) materializeDeclaredFields(merged, fields);
-  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages };
+  const ctx: RuleContext = { data, merged, previous, mode, logger: opts.logger, fields, messages: opts.messages, related: opts.related };
 
   const errors: FieldValidationError[] = [];
 
   // Field-level conditional rules (B2): a field whose `requiredWhen`
   // predicate is TRUE over the merged record must have a value — enforced
   // server-side so the rule can't be bypassed. (`readonlyWhen` is handled by
-  // stripReadonlyWhenFields on the write path, not here.) A broken predicate
-  // is fail-open (logged, skipped).
+  // stripReadonlyWhenFields on the write path, not here.) A predicate that
+  // cannot be evaluated REFUSES the write, naming the field and the rule
+  // (ADR-0137 D2) — see the fault arm below.
   //
   // ADR-0113 non-regression: reject iff the MERGED state violates AND the
   // PRE state complied. A write may not take the record from compliant to
@@ -2380,22 +3162,27 @@ export function evaluateValidationRules(
       if (!pred) continue;
       const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: merged, previous, ...parentScope });
       if (!res.ok) {
-        // Fail-OPEN, unchanged (#4977 ruling: bind the scope, keep the
-        // evaluation semantics). An unevaluable `requiredWhen` — including one
-        // whose `parent` the engine could not resolve — is logged and skipped,
-        // NOT turned into a rejection: that is option B, deliberately not taken
-        // here and left to the next review of ADR-0058 D5. All that changes is
-        // the diagnostic: an unbound ROOT is named, because "the header could
-        // not be read" and "the author typo'd a key" are different faults with
-        // different remedies and only one line of signal to tell them apart.
-        const unbound = unknownVariableOf(res.error);
+        // [ADR-0137 D2] A `requiredWhen` that cannot be evaluated REFUSES the
+        // write and names the field and the rule; nothing is persisted (the
+        // caller throws below, before any driver call). Until D2 this arm
+        // logged and `continue`d — #4977 kept it fail-OPEN and left the
+        // rejection ("option B") to the next review of ADR-0058 D5. ADR-0137 is
+        // that review: it writes the field-rule row of D5's table, and its own
+        // Context measured this arm ("A record saves with the field empty") as
+        // the defect it rules on. A rule that could not run has no verdict, and
+        // reading "no verdict" as "not required" is the whole defect.
+        //
+        // Every fault takes this arm, an unbound `parent` included — a header
+        // that could not be resolved for this write is exactly the relationship
+        // read #18682's ruling says must fail loudly, never silently true.
+        // Refused whatever the write does to the field: D2 refuses the SUBMIT,
+        // and a supplied value does not supply the missing verdict. The
+        // ADR-0113 pre-check below is not consulted either — it asks whether a
+        // legacy row may rest under a verdict, and there is none to rest under.
         opts.logger?.warn?.(
-          unbound
-            ? `requiredWhen for '${name}' reads '${unbound}', which is not bound for this operation — ` +
-              `skipped (the requirement is NOT enforced for this write). ` +
-              `A 'parent'-scoped predicate needs the object to declare exactly one master_detail relationship.`
-            : `requiredWhen for '${name}' failed to evaluate — skipped`,
+          `requiredWhen for '${name}' failed to evaluate (${res.error.kind}: ${String(res.error.message).split('\n')[0]}) — write rejected`,
         );
+        errors.push(unevaluableFieldRuleError('requiredWhen', name, res.error, pred, fields));
         continue;
       }
       if (res.value === true && isMissing(merged[name])) {
@@ -2561,7 +3348,7 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
       return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous, ctx);
     case 'script':
     case 'cross_field':
-      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages);
+      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages, ctx.related, ctx.fields);
     case 'format':
       return checkFormat(rule as FormatRule, ctx.data, ctx.logger, ctx.messages);
     case 'json_schema':
@@ -2677,22 +3464,35 @@ function checkStateMachine(
  * evaluators that reject a write for the same reason must not describe it in
  * two dialects — the same argument that made `materializeDeclaredFields`
  * shared.
+ *
+ * [ADR-0137 D2] The field-rule predicates (`requiredWhen` / `readonlyWhen`)
+ * refuse through this SAME builder — {@link unevaluableFieldRuleError} passes
+ * the `subject` that names the field and the slot instead of a rule name, and
+ * nothing else about the envelope moves: one refusal shape for every predicate
+ * the server could not run.
  */
 function unevaluableRuleError(
   ruleName: string,
   field: string,
   error: { kind: string; message: string },
   what: 'predicate' | 'when-predicate',
+  subject: { prose: string; detail?: string } = { prose: `Validation rule '${ruleName}'` },
 ): FieldValidationError {
-  const { summary, missingKey, nullOverload, detail } = describeCelFault(error, {
+  const described = describeCelFault(error, {
     what,
     undeclaredKeyFix: "fix the rule's condition, or declare the field",
   });
+  const { summary, nullOverload } = described;
+  // A subject that words its own detail has read the fault more precisely than
+  // the generic sentence can (a key read THROUGH a reference is not a key this
+  // object fails to declare), so the generic `missingKey` does not travel with it.
+  const detail = subject.detail ?? described.detail;
+  const missingKey = subject.detail === undefined ? described.missingKey : undefined;
   return {
     field,
     code: 'rule_violation',
     message:
-      `Validation rule '${ruleName}' could not be evaluated (${summary}) — write rejected.${detail}`,
+      `${subject.prose} could not be evaluated (${summary}) — write rejected.${detail}`,
     constraint: {
       rule: ruleName,
       reason: 'unevaluable',
@@ -2703,6 +3503,69 @@ function unevaluableRuleError(
   };
 }
 
+/** The two field-rule slots the server evaluates on a write (ADR-0137 D2). */
+type FieldRuleSlot = 'requiredWhen' | 'readonlyWhen';
+
+/**
+ * [ADR-0137 D2] The refusal a field-rule predicate that CANNOT BE EVALUATED at
+ * submit produces: it names the field and the rule, and the write is rejected
+ * with nothing persisted.
+ *
+ * Built by {@link unevaluableRuleError}, so the envelope is the one a broken
+ * validation rule has produced since #4649 — `code: 'rule_violation'`, and
+ * `constraint.reason: 'unevaluable'` — with `constraint.rule` naming the SLOT
+ * (`requiredWhen` / `readonlyWhen`). A slot name cannot collide with a
+ * validation rule's name: a rule name is a snake_case machine name, and both
+ * slot names are camelCase.
+ *
+ * Two faults get their own sentence, because the generic one would send the
+ * author to the wrong repair:
+ *
+ *  - **A column read THROUGH a reference field** (`record.account.tier`). The
+ *    related record is never read for a field-level predicate — only a
+ *    validation rule's condition is hydrated one hop — so the reference holds a
+ *    bare id and CEL reports `No such key: tier`. "Declare the field" would have
+ *    the author add `tier` to the wrong object.
+ *  - **An unbound `parent`**: the master-detail header could not be resolved for
+ *    this write. The generic sentence lists only `record` / `previous` as
+ *    roots, which is the wrong half of the story for a `parent`-scoped rule.
+ */
+function unevaluableFieldRuleError(
+  slot: FieldRuleSlot,
+  name: string,
+  error: { kind: string; message: string },
+  pred: string | Expression,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): FieldValidationError {
+  const expr = toExpression(pred);
+  const source = expr.dialect === 'cel' && typeof expr.source === 'string' ? expr.source : '';
+  let detail: string | undefined;
+  const missing = missingKeyOf(error);
+  if (missing && source && fields) {
+    for (const [ref, related] of analysisFor(source)?.traversals ?? []) {
+      const target = referenceTargetOf(fields[ref]);
+      if (!target || !related.has(missing)) continue;
+      detail =
+        ` The predicate reads '${missing}' through '${ref}', a reference to '${target}'. A field-level`
+        + ` \`${slot}\` is evaluated against this record alone and never reads the related record`
+        + ' (only a `validations[]` rule\'s condition reads one hop through a reference), so the'
+        + ` reference holds a bare id there. Express the check as a \`validations[]\` \`script\` rule,`
+        + ' or read a column this object declares.';
+      break;
+    }
+  }
+  if (detail === undefined && unknownVariableOf(error) === PARENT_ROOT) {
+    detail =
+      ` The predicate reads 'parent', the master-detail header, and no header could be resolved for`
+      + ' this write — the record names none, or it was not found or could not be read. The rule has'
+      + ' no verdict, so the write is rejected rather than allowed on an unchecked rule.';
+  }
+  return unevaluableRuleError(slot, name, error, 'predicate', {
+    prose: `Field '${name}' ${slot}`,
+    ...(detail !== undefined ? { detail } : {}),
+  });
+}
+
 /**
  * CEL predicate check (`script` / `cross_field`). The predicate expresses the
  * *failure* condition: if it evaluates TRUE the rule is violated. A predicate
@@ -2710,20 +3573,373 @@ function unevaluableRuleError(
  * declared field — is a broken rule, and a broken validation is **fail-closed**
  * (#4649): it rejects the write rather than waving it through.
  */
+/**
+ * [#18682] The parsed hop analysis for one authored source, memoised.
+ *
+ * Authored predicates are a small closed set per deployment, so this is bounded
+ * in practice; the cap is a guard against a caller that synthesises sources,
+ * and overflowing it costs a re-parse, never a wrong answer.
+ */
+const traversalAnalysisCache = new Map<string, RelationshipTraversalAnalysis | null>();
+const TRAVERSAL_CACHE_CAP = 512;
+
+function analysisFor(source: string): RelationshipTraversalAnalysis | null {
+  const hit = traversalAnalysisCache.get(source);
+  if (hit !== undefined) return hit;
+  const analysis = analyzeRelationshipTraversals(source);
+  if (traversalAnalysisCache.size < TRAVERSAL_CACHE_CAP) {
+    traversalAnalysisCache.set(source, analysis);
+  }
+  return analysis;
+}
+
+/** What {@link resolveTraversalScope} decided for one predicate. */
+type TraversalScope =
+  /** Evaluate against `record` (hydrated where the rule traverses). */
+  | { readonly ok: true; readonly record: Record<string, unknown> }
+  /** ⛔ Do not evaluate: refuse the write with this sentence. */
+  | { readonly ok: false; readonly summary: string; readonly detail: string };
+
+/**
+ * [#18682] Decide, BEFORE evaluation, what this one predicate may be evaluated
+ * against — or that it may not be evaluated at all.
+ *
+ * Three outcomes, and the two refusing ones are the point of the function:
+ *
+ * 1. **Refuse — unserviceable shape.** A reference field read BOTH through the
+ *    relationship and as a plain value cannot be served: hydrating it makes the
+ *    plain-value comparison compare a map against a string, which CEL answers
+ *    `false` WITHOUT faulting, so the rule silently stops firing. That is a
+ *    silent verdict flip on a fail-closed seam, so the rule is refused here —
+ *    in the ENGINE — and not only in the authoring layer. `@objectstack/lint`
+ *    refuses the same shape with the same prescription, but no runtime package
+ *    imports lint: metadata authored through Studio, written straight to
+ *    `sys_metadata`, or produced by an agent never meets it. ADR-0137 D1 —
+ *    a predicate slot accepts only what the engine can actually run — is a
+ *    statement about the ENGINE, and ADR-0124's server-enforces/client-is-
+ *    courtesy rule says an author-side direction is never the whole answer.
+ *
+ * 2. **Refuse — the related data is not readable.** The engine already decided
+ *    this (see {@link RelatedFieldBinding}); this function only turns the reason
+ *    into a sentence that names the RELATED object and field.
+ *
+ * 3. **Evaluate**, against a shallow COPY carrying the related rows for exactly
+ *    the reference fields THIS rule traverses. Per rule, because hydrating a
+ *    field replaces its stored id and a sibling rule comparing the bare id must
+ *    keep seeing the id. Onto a copy, because the record a rule is handed is the
+ *    write payload.
+ *
+ * A rule that traverses nothing is handed the record untouched — byte-identical
+ * to the pre-#18682 input, which is what keeps every existing rule unaffected.
+ */
+function resolveTraversalScope(
+  record: Record<string, unknown>,
+  source: string,
+  related: RelatedRecordBinding | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): TraversalScope {
+  const analysis = analysisFor(source);
+  if (!analysis || (analysis.traversals.size === 0 && analysis.multiHopFields.size === 0)) {
+    return { ok: true, record };
+  }
+
+  // (1) The shapes the engine cannot serve, judged against the SAME arbiter the
+  // authoring layer and the `$expand` gate ask — `referenceTargetOf` — so the
+  // two layers can never disagree about which fields are references.
+  const isReference = (field: string): boolean => !!referenceTargetOf(fields?.[field]);
+  const conflicts = findTraversalConflicts(analysis, isReference);
+  if (conflicts.length > 0) {
+    return {
+      ok: false,
+      summary: conflicts[0].kind === 'multi-hop'
+        ? 'reads more than one relationship hop'
+        : 'reads a reference field both through the relationship and as a value',
+      detail: ' ' + conflicts.map((c) => c.message).join(' '),
+    };
+  }
+
+  // (2)/(3) Hydrate what is available; refuse on the first field that is not.
+  let copy: Record<string, unknown> | undefined;
+  for (const field of analysis.traversals.keys()) {
+    if (!isReference(field)) continue;
+    const binding = related?.[field];
+    // No binding at all means the engine resolved nothing for this write (an
+    // embedding that never called `collectPredicateRelationships`, or the
+    // referential FK clear). Leave the record alone and let evaluation meet the
+    // bare id as it did before — this function invents no verdict for it.
+    if (!binding) continue;
+    // ⛔ Only the row this record's own foreign key names; any other is unresolved.
+    if (binding.row && binding.row.id != null && String(binding.row.id) === String(record[field])) {
+      if (!copy) copy = { ...record };
+      copy[field] = binding.row;
+      continue;
+    }
+    const reason = binding.row ? { object: binding.object, unavailable: 'unresolved' as const } : binding;
+    return { ok: false, ...traversalRefusal(field, reason, analysis.traversals.get(field)) };
+  }
+  return { ok: true, record: copy ?? record };
+}
+
+/**
+ * [#18682 / ADR-0137 D2] The sentence a traversal refusal carries.
+ *
+ * ⭐ It names the RELATED object and the related field. The generic
+ * undeclared-key prescription cannot be reused here: it reads "the predicate
+ * reads 'status', which this object does not declare — fix the rule's condition,
+ * or declare the field", and on a traversal every clause of that is wrong. The
+ * field IS declared, on another object, and an author who follows it adds a
+ * bogus column to the object they were editing. ADR-0137 D2 requires a faulting
+ * field-rule predicate to name the field and the rule; naming the wrong object
+ * sends the author to the wrong file.
+ */
+function traversalRefusal(
+  field: string,
+  binding: RelatedFieldBinding,
+  named: ReadonlySet<string> | undefined,
+): { summary: string; detail: string } {
+  const names = [...(named ?? [])].sort();
+  const columns = names.length === 1 ? `'${names[0]}'` : names.map((n) => `'${n}'`).join(', ');
+  const on = `\`${field}\` (object '${binding.object}')`;
+  switch (binding.unavailable) {
+    case 'no-reference':
+      // Three stored shapes reach this arm and the sentence names all three,
+      // because "empty" and "a list" and "already expanded" send an author to
+      // different repairs: a null/empty FK has nothing to read; a MULTI-valued
+      // reference names no single related record, so one hop is not defined on
+      // it at all; and a slot already holding an expanded object is not a
+      // foreign key this can resolve from.
+      //
+      // [#20007] The empty case names the two spellings measured to work for
+      // an optional reference, and names the one that does not: an author sent
+      // here with `record.<field>.id != null` — which the mixed-shape refusal
+      // used to prescribe — reads through `<field>` all the same, and lands
+      // back on this refusal. The guard spelling is `referenceGuardRepair`'s.
+      return {
+        summary: `cannot read ${columns} through ${on}: no single related record`,
+        detail:
+          ` The rule reads ${columns} through ${on}, but this record holds no single`
+          + ' reference there to read — the field is empty, holds MULTIPLE references, or'
+          + ' already holds an expanded record rather than an id. A predicate resolves ONE'
+          + ` hop through a single reference. To skip the rule while \`${field}\` is empty,`
+          + ` guard it on \`${field}\` being set: ${referenceGuardRepair(field)} —`
+          + ` \`record.${field}.id != null\` inside the rule is no guard, as it reads through`
+          + ` \`${field}\` too. To refuse an empty \`${field}\`, make \`${field}\` required`
+          + ' (`required: true`). For a multi-value reference, test it with a macro'
+          + ' (`exists`, `size`) instead of reading through it.',
+      };
+    case 'undeclared-field': {
+      const missing = (binding.undeclaredFields ?? []).map((n) => `'${n}'`).join(', ') || columns;
+      return {
+        summary: `'${binding.object}' declares no ${missing}`,
+        detail:
+          ` The rule reads ${missing} through ${on}, but '${binding.object}' declares no such`
+          + ` field. Fix the rule's condition, or declare ${missing} on '${binding.object}' —`
+          + ` ⛔ not on the object carrying this rule.`,
+      };
+    }
+    case 'unresolved':
+      return {
+        summary: `cannot read ${columns} through ${on}: the related record was not found`,
+        detail: '',
+      };
+    case 'unreadable':
+    default:
+      return {
+        summary: `could not read '${binding.object}'`,
+        detail:
+          ` The rule reads ${columns} through ${on}, and that row could not be read. The rule has no`
+          + ' verdict, so the write is rejected rather than allowed on an unchecked rule.',
+      };
+  }
+}
+
+/**
+ * [#20006] The repair that guards a rule on a reference being set, in ONE
+ * spelling, so every prescription that names it gives the author the same
+ * words. Measured end to end: the wrapped rule is skipped while the reference is
+ * empty, and judged exactly as before while it is set.
+ *
+ * [#20007] `@objectstack/formula`'s mixed-shape refusal names the same repair,
+ * and formula may not import this package, so it keeps a copy of these words
+ * (`relationship-traversal.ts`, same name). ⛔ Change both or neither:
+ * `engine-predicate-relationship.test.ts` asserts one literal in the engine's
+ * refusals from each source.
+ */
+function referenceGuardRepair(field: string): string {
+  return `make it the \`then\` of a \`conditional\` rule whose \`when\` is \`record.${field} != null\``;
+}
+
+/**
+ * [#20006] Does the predicate make an OWN read that faults on this write — a
+ * read of the rule's own record, not one through a reference? Then the rule is
+ * its author's to fix whatever the cleanup does, and the generic text stands.
+ *
+ * Answered for EVERY own read the predicate makes, never only for the key a
+ * fault reports: when both operands of `&&` / `||` fault, this CEL front end
+ * reports the RIGHT one's key (measured), so `record.kind == 'x' &&
+ * record.account.status == 'closed'` on an object declaring no `kind` reports
+ * the traversal's `status` — and a check keyed on it would blame the cleanup
+ * for a rule that faults on `kind` on every write.
+ *
+ * Each read below faults exactly when its holder lacks the key, so each counts
+ * only then:
+ *
+ *  - `record.KEY` — the record is made total over its DECLARED fields, so this
+ *    faults only on an undeclared key, and does so on every write;
+ *  - `record.FIELD.KEY` through a field that is not a reference, which nothing
+ *    hydrates;
+ *  - `previous.KEY`, and `previous.FIELD.KEY` through ANY field, a reference
+ *    included — the `previous` root is never hydrated, so a read through a
+ *    reference there meets its bare id.
+ *
+ * ⛔ Not a re-evaluation with the traversals served: measured, CEL's `&&` and
+ * `||` absorb an error when the other side decides, so `record.status == 'x'
+ * && record.account.status == 'closed'` evaluates to `false` once `account`
+ * holds a row, and a counterfactual run would pin the bare fault on the
+ * traversal.
+ */
+function readsAnOwnColumnItLacks(
+  source: string,
+  record: Record<string, unknown>,
+  previous: Record<string, unknown> | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): boolean {
+  const lacks = (holder: unknown, key: string): boolean =>
+    !(holder && typeof holder === 'object' && key in holder);
+  const faultsOn = (
+    analysis: RelationshipTraversalAnalysis | null,
+    holder: Record<string, unknown> | undefined,
+    skipReferences: boolean,
+  ): boolean => {
+    if (!analysis) return false;
+    for (const key of analysis.bareFields) if (lacks(holder, key)) return true;
+    for (const [through, columns] of analysis.traversals) {
+      if (skipReferences && referenceTargetOf(fields?.[through])) continue;
+      for (const key of columns) if (lacks(holder?.[through], key)) return true;
+    }
+    return false;
+  };
+  return faultsOn(analysisFor(source), record, true)
+    || faultsOn(analyzeRelationshipTraversals(source, 'previous'), previous, false);
+}
+
+/**
+ * [#20006] The refusal a traversing rule gives when it faults on a delete's
+ * reference cleanup — or `null` when this fault is not that one, and the
+ * generic {@link unevaluableRuleError} text stands unchanged.
+ *
+ * The generic text is about the rule's OWN object: for `record.account.status`
+ * it reads "the predicate reads 'status', which this object does not declare —
+ * fix the rule's condition, or declare the field". On the cleanup every clause
+ * of that is wrong, and it reaches someone who deleted a record and wrote none
+ * of it. So this names what happened instead: the delete that is refused, the
+ * reference it clears, the rule and the object carrying it, and the repairs
+ * measured to let such a delete through.
+ *
+ * Only the TEXT changes. The verdict was decided before this is reached — the
+ * predicate faulted — and the machine-readable half (`code`, `constraint`) is
+ * the generic one, byte for byte.
+ *
+ * The fault is attributed to the cleanup only when the missing key is a column
+ * the rule reads through a reference AND the rule makes no own read that
+ * faults — see {@link readsAnOwnColumnItLacks}. `record.status == 'x' &&
+ * record.account.status == 'closed'` on an object declaring no `status` is its
+ * author's to fix whatever the cleanup does, and so is `record.kind == 'x' &&
+ * …` beside it, though CEL reports the traversal's key there. Such a rule, and
+ * a fault on any other key, keeps the generic text.
+ */
+function referentialClearRefusal(
+  ruleName: string,
+  expr: Expression,
+  fault: FieldValidationError,
+  record: Record<string, unknown>,
+  previous: Record<string, unknown> | undefined,
+  related: RelatedRecordBinding | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): FieldValidationError | null {
+  const cause = related ? referentialClearCauses.get(related) : undefined;
+  const missingKey = fault.constraint?.missingKey;
+  const analysis = cause && typeof missingKey === 'string' && typeof expr.source === 'string'
+    ? analysisFor(expr.source)
+    : null;
+  if (!cause || !analysis) return null;
+
+  const reads: string[] = [];
+  const traversed = new Set<string>();
+  let named = false;
+  for (const [through, columns] of analysis.traversals) {
+    if (!referenceTargetOf(fields?.[through])) continue;
+    traversed.add(through);
+    if (columns.has(missingKey as string)) named = true;
+    reads.push(`${[...columns].sort().map((n) => `'${n}'`).join(', ')} through \`${through}\``);
+  }
+  if (!named || readsAnOwnColumnItLacks(expr.source as string, record, previous, fields)) {
+    return null;
+  }
+
+  const { object, id, referencingObject, field } = cause;
+  const cleared = record[field];
+  // The guard skips the rule wherever `field` is empty, so it is offered only
+  // where that costs nothing the rule still does: when the rule reads through
+  // `field` itself, it already refuses every write that leaves `field` empty
+  // ("no single related record"). A rule reading only ANOTHER reference is
+  // still judged on those records, and a guard on `field` would stop that. A
+  // multi-value reference keeps its other members, so there the guard would
+  // not even skip the rule. Both are offered the delete behaviour alone.
+  const clears = Array.isArray(cleared) ? `removes it from \`${field}\`` : `clears \`${field}\``;
+  const deleteBehavior =
+    ` \`deleteBehavior\` on ${referencingObject}.${field}: 'cascade' deletes those records with the ${object},`
+    + ` 'restrict' refuses the delete while they exist.`;
+  const repair = cleared == null && traversed.has(field)
+    ? `Guard the rule on \`${field}\` being set: ${referenceGuardRepair(field)}. Or change${deleteBehavior}`
+    : `Change${deleteBehavior}`;
+  return {
+    ...fault,
+    message:
+      `Cannot delete ${object} (${id}): the delete ${clears} on the ${referencingObject} records that`
+      + ` reference it, and validation rule '${ruleName}' on ${referencingObject} could not be evaluated on`
+      + ` that write — it reads ${reads.join(' and ')}, and a rule is given no related record while a`
+      + ` delete clears references. ${repair}`,
+  };
+}
+
 function checkPredicate(
   rule: PredicateRule,
   record: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   logger: EvaluateRulesOptions['logger'],
   messages?: ValidationMessageContext,
+  related?: RelatedRecordBinding,
+  fields?: Record<string, ConditionalFieldDef>,
 ): FieldValidationError | null {
   const expr = toExpression(rule.condition);
+  const field = rule.fields?.[0] ?? '_record';
+
+  // [#18682 / ADR-0137 D2] Decide the relationship question BEFORE evaluation.
+  // A refusal here is a rule that HAS no verdict — never a rule whose verdict is
+  // `false` — so it rejects the write exactly as an unevaluable predicate does
+  // (#4649), but says which RELATED object and field it could not read.
+  if (typeof expr.source === 'string' && expr.dialect === 'cel') {
+    const scope = resolveTraversalScope(record, expr.source, related, fields);
+    if (!scope.ok) {
+      logger?.warn?.(
+        `Validation rule '${rule.name}' predicate could not be evaluated (${scope.summary}) — write rejected`,
+      );
+      return {
+        field,
+        code: 'rule_violation',
+        message:
+          `Validation rule '${rule.name}' could not be evaluated (${scope.summary}) — write rejected.${scope.detail}`,
+        constraint: { rule: rule.name, reason: 'unevaluable', fault: scope.summary },
+      };
+    }
+    record = scope.record;
+  }
+
   const result = ExpressionEngine.evaluate<boolean>(expr, {
     record,
     previous: previous ?? undefined,
   });
-
-  const field = rule.fields?.[0] ?? '_record';
 
   if (!result.ok) {
     // Still logged — the operator needs the fault in the log even though the
@@ -2731,7 +3947,12 @@ function checkPredicate(
     logger?.warn?.(
       `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected (#4649)`,
     );
-    return unevaluableRuleError(rule.name, field, result.error, 'predicate');
+    const unevaluable = unevaluableRuleError(rule.name, field, result.error, 'predicate');
+    // [#20006] Same verdict; on a delete's reference cleanup, a text that names it.
+    const onCleanup = expr.dialect === 'cel'
+      ? referentialClearRefusal(rule.name, expr, unevaluable, record, previous, related, fields)
+      : null;
+    return onCleanup ?? unevaluable;
   }
 
   if (result.value === true) {
