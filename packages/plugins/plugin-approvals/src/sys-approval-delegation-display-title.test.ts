@@ -24,11 +24,13 @@
  *     here every title column is required);
  *  4. the formula reads exactly the columns `titleFormat` names, on this row
  *     only, each required and none withheld from a reader of the row;
- *  5. the formula adds no stored column.
+ *  5. the formula adds no stored column, and no search companion column
+ *     either — not even where pinyin search provisions one (a formula is
+ *     never a companion source).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectQL, resolveRecordTitle } from '@objectstack/objectql';
+import { ObjectQL, SchemaRegistry, SEARCH_COMPANION_FIELD, resolveRecordTitle } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
@@ -139,10 +141,20 @@ describe('[#20044] sys_approval_delegation resolves a real record title under AD
     }
   });
 
-  it('adds no stored column: the formula is computed on read, and no search companion appears', async () => {
+  it('adds no stored column: the formula is computed on read', async () => {
     const columns = Object.keys(await driver.getKnex()(OBJECT).columnInfo());
     expect(columns).toContain('delegator_id');
     expect(columns).not.toContain('display_title');
-    expect(columns).not.toContain('__search');
+  });
+
+  it('provisions no search companion column, even where pinyin search is on', () => {
+    // The companion (`__search`) is a real column fed by the title field; a
+    // registry only provisions it when pinyin search is enabled, so ask one
+    // that is. A formula title is never a companion source.
+    const companionRegistry = new SchemaRegistry({ searchCompanion: true });
+    companionRegistry.registerObject(SysApprovalDelegation as any, 'com.objectstack.test.20044');
+    const registered = companionRegistry.getObject(OBJECT) as any;
+    expect(registered.nameField).toBe('display_title');
+    expect(registered.fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
   });
 });

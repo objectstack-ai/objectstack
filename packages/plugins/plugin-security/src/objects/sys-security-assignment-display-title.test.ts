@@ -23,7 +23,9 @@
  *     server-side accessor (`resolveRecordTitle`) agrees;
  *  3. a row missing a title column is refused by the write path, so the
  *     formula never sees a NULL part;
- *  4. the formula adds no stored column.
+ *  4. the formula adds no stored column, and no search companion column
+ *     either — not even where pinyin search provisions one (a formula is
+ *     never a companion source).
  *
  * And, because these are permission-assignment tables, the property the new
  * field must not break: the formula reads exactly the columns `titleFormat`
@@ -35,7 +37,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectQL, resolveRecordTitle } from '@objectstack/objectql';
+import { ObjectQL, SchemaRegistry, SEARCH_COMPANION_FIELD, resolveRecordTitle } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { SysPositionPermissionSet } from './sys-position-permission-set.object.js';
@@ -178,11 +180,21 @@ describe('[#20044] permission-assignment tables resolve a real record title unde
       }
     });
 
-    it(`${object}: adds no stored column — the formula is computed on read, and no search companion appears`, async () => {
+    it(`${object}: adds no stored column — the formula is computed on read`, async () => {
       const columns = Object.keys(await driver.getKnex()(object).columnInfo());
       expect(columns).toContain(Object.keys(data)[0]);
       expect(columns).not.toContain('display_title');
-      expect(columns).not.toContain('__search');
+    });
+
+    it(`${object}: provisions no search companion column, even where pinyin search is on`, () => {
+      // The companion (`__search`) is a real column fed by the title field; a
+      // registry only provisions it when pinyin search is enabled, so ask one
+      // that is. A formula title is never a companion source.
+      const companionRegistry = new SchemaRegistry({ searchCompanion: true });
+      companionRegistry.registerObject(schema, 'com.objectstack.test.20044');
+      const registered = companionRegistry.getObject(object) as any;
+      expect(registered.nameField).toBe('display_title');
+      expect(registered.fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
     });
   }
 });

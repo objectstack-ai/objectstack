@@ -31,11 +31,13 @@
  *     write path refuses it, or fills the column's declared default;
  *  4. the formula reads exactly the columns `titleFormat` names, on this row
  *     only, each required and none withheld from a reader of the row;
- *  5. nothing adds a stored column — no formula column, no search companion.
+ *  5. nothing adds a stored column: no formula column, and no search
+ *     companion column even where pinyin search provisions one (a formula is
+ *     never a companion source, and a `select` is not title text).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectQL, resolveRecordTitle } from '@objectstack/objectql';
+import { ObjectQL, SchemaRegistry, SEARCH_COMPANION_FIELD, resolveRecordTitle } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { NotificationDelivery } from './notification-delivery.object.js';
@@ -224,11 +226,21 @@ describe('[#20044] notification objects resolve a real record title under ADR-00
       }
     });
 
-    it(`${object}: adds no stored column — no formula column and no search companion`, async () => {
+    it(`${object}: adds no stored column for the title`, async () => {
       const columns = Object.keys(await driver.getKnex()(object).columnInfo());
       expect(columns).toContain(titleFormatColumns(c.schema)[0]);
       expect(columns).not.toContain('display_title');
-      expect(columns).not.toContain('__search');
+    });
+
+    it(`${object}: provisions no search companion column, even where pinyin search is on`, () => {
+      // The companion (`__search`) is a real column fed by the title field; a
+      // registry only provisions it when pinyin search is enabled, so ask one
+      // that is.
+      const companionRegistry = new SchemaRegistry({ searchCompanion: true });
+      companionRegistry.registerObject(c.schema, 'com.objectstack.test.20044');
+      const registered = companionRegistry.getObject(object) as any;
+      expect(registered.nameField).toBe(c.pointer);
+      expect(registered.fields[SEARCH_COMPANION_FIELD]).toBeUndefined();
     });
   }
 });
