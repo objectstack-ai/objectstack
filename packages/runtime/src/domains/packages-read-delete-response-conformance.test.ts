@@ -2,8 +2,11 @@
 
 /**
  * #16781 deliverable 2 — the payloads `GET /packages` and
- * `DELETE /packages/:id` actually serve, parsed against the contracts
- * `@objectstack/spec/api` declares for them.
+ * `DELETE /packages/:id` actually serve, parsed against the contracts the
+ * API protocol declares for them — the delete response from
+ * `@objectstack/spec/api`, the two read responses from
+ * `@objectstack/spec/api-assembled` (they embed the assembled package body, and
+ * the #18576 ruling moved every such declaration off the browser-facing entry).
  *
  * ## What was measured, and why this file exists
  *
@@ -45,8 +48,9 @@
  * That is the mismatch #14242 identified one layer down, whose maintainer
  * ruling (2026-09-02, quoted in `stack.zod.ts` at `ArtifactPackageSchema`) was
  * to «declare the assembled stage rather than widen the authoring one». #17431
- * followed that ruling one layer up: `@objectstack/spec/api` now declares
- * `AssembledInstalledPackageSchema`, and both read responses are bound to
+ * followed that ruling one layer up: the API protocol now declares
+ * `AssembledInstalledPackageSchema` (published from
+ * `@objectstack/spec/api-assembled` since #18576), and both read responses are bound to
  * `InstalledPackageAtEitherStageSchema` — a union over the two whole, closed
  * stage declarations. ⛔ Neither stage was widened; a row belonging to NEITHER
  * is still refused, and that is asserted below rather than assumed.
@@ -75,11 +79,13 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
+import { UninstallPackageApiResponseSchema } from '@objectstack/spec/api';
+// The two READ responses embed the assembled package body, so they ship from
+// `@objectstack/spec/api-assembled` rather than `/api` (#18576 ruling, letter B).
 import {
     ListInstalledPackagesResponseSchema,
     GetInstalledPackageResponseSchema,
-    UninstallPackageApiResponseSchema,
-} from '@objectstack/spec/api';
+} from '@objectstack/spec/api-assembled';
 import { InstalledPackageSchema } from '@objectstack/spec/kernel';
 import { HttpDispatcher, type HttpDispatcherResult } from '../http-dispatcher.js';
 

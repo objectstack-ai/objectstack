@@ -283,6 +283,13 @@
  * (`arrayComparandError`), kept verbatim so one condition keeps one wording
  * across the platform (#5240's rule, applied across packages).
  *
+ * [#19889] The SCHEMA door refuses the same shape on save (ruling A, record
+ * 5805248669: "one constant, two doors"): `FilterConditionSchema`'s implicit
+ * form and `$eq`, and `FieldOperatorsSchema.$eq`. So the whole sentence — the
+ * position, the received list, the prescription — is assembled in
+ * `./filter-comparand-refusal-text.ts`, which both doors import; this door adds
+ * only its `at <path>` location and its envelope.
+ *
  * ## Refusal envelope
  *
  * Every refusal carries `code: 'INVALID_FILTER'` and `status: 400` (ADR-0112
@@ -297,6 +304,12 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/19757 (the equality-slot arm)
  */
 
+import {
+  IN_OPERATOR_SPELLINGS,
+  arrayEqualityComparandMessage,
+  shapePreview,
+} from './filter-comparand-refusal-text';
+
 /**
  * The operators whose comparand `FieldOperatorsSchema` declares as a list, with
  * the authoring spellings that lower to each.
@@ -310,8 +323,10 @@
  * cycle. `filter-comparand-shape.test.ts` reconciles the two sets, so a new
  * membership spelling cannot land with this message left behind.
  */
-const LIST_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new Map([
-  ['$in', ['in']],
+const LIST_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+  // [#19889] The `$in` row is read from the shared refusal text, so the operator
+  // the equality-slot refusal prescribes and this row cannot name two lists.
+  ['$in', IN_OPERATOR_SPELLINGS],
   ['$nin', ['nin', 'not_in', 'notin']],
   ['$between', ['between']],
 ]);
@@ -333,15 +348,6 @@ const ORDERING_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new
   ['$lt', ['<', 'lt', 'less_than', 'lessthan', 'before']],
   ['$lte', ['<=', 'lte', 'less_than_or_equal', 'lessthanorequal', 'lessorequal']],
 ]);
-
-/**
- * [#19757] The ARRAY-CONTAINMENT operator the equality-slot refusal prescribes,
- * with its authoring spelling: `$contains`, which `FieldOperatorsSchema`
- * declares as a MEMBERSHIP test on a `multiple: true` / JSON-stored column
- * ("the stored list holds this value"). The other half of the prescription is
- * `$in`, read off {@link LIST_COMPARAND_OPERATORS}. Reconciled by pin.
- */
-const ARRAY_CONTAINMENT_OPERATOR = { op: '$contains', spellings: ['contains'] } as const;
 
 /** What a caller most likely meant when they wrote a scalar. */
 const SCALAR_ALTERNATIVE: ReadonlyMap<string, string> = new Map([
@@ -396,28 +402,6 @@ function describeOperand(value: unknown): string {
   return typeof value;
 }
 
-/**
- * A short, bounded rendering of the offending value.
- *
- * Bounded because the value came off the wire and a filter comparand can be
- * arbitrarily large; the message is for a human reading a 400, not a dump.
- *
- * The whole message has a second, harder bound: `rest-server.ts` TRUNCATES a
- * declared-4xx message at `CLIENT_MESSAGE_MAX` (500) before it reaches the
- * client (#5423). Everything a caller needs in order to act — operator, field,
- * received value, position, corrected shape — is therefore front-loaded, and
- * the test file pins the assembled length under that bound so a later edit
- * cannot silently push the tail off the wire.
- */
-function shapePreview(value: unknown): string {
-  let text: string;
-  try {
-    text = JSON.stringify(value) ?? String(value);
-  } catch {
-    text = String(value);
-  }
-  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
-}
 
 /**
  * The wire envelope every filter refusal on the platform carries — ADR-0112
@@ -681,6 +665,10 @@ function nullOrderingComparandError(
  * equality spellings (`=`, `==`, `equals`, `eq`) are not listed: "the
  * implicit-equality comparand" names the slot, and a received list of 60
  * characters leaves no room for them inside the bound.
+ *
+ * [#19889] The sentence itself is `arrayEqualityComparandMessage`
+ * (`./filter-comparand-refusal-text.ts`), the one the schema door prints on
+ * save; this door passes its `path` and wraps the envelope.
  */
 function arrayEqualityComparandError(
   context: string | undefined,
@@ -689,19 +677,9 @@ function arrayEqualityComparandError(
   path: string,
   op?: '$eq',
 ): Error {
-  const position = op
-    ? `Operator "${op}" on field "${field}"`
-    : `The implicit-equality comparand on field "${field}"`;
-  const inSpellings = LIST_COMPARAND_OPERATORS.get('$in') ?? [];
   return invalidFilterComparandError(
     context,
-    `${position} requires a single comparable value, but received an array ` +
-    `(${shapePreview(value)}) at ${path}. For "one of these values" use {"$in": […]} ` +
-    `(authoring: ${inSpellings.join(', ')}); for "the stored list holds a value" on a ` +
-    `multi-value field, {"${ARRAY_CONTAINMENT_OPERATOR.op}": "…"} (authoring: ` +
-    `${ARRAY_CONTAINMENT_OPERATOR.spellings.join(', ')}), an $or of those for any-of. ` +
-    `The filter was NOT applied, and an unapplied filter would have returned the ` +
-    `UNFILTERED result set.`,
+    arrayEqualityComparandMessage(value, op ? { op, field, path } : { field, path }),
   );
 }
 

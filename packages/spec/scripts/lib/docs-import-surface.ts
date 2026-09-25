@@ -46,6 +46,8 @@
  * `build-docs.ts`.
  */
 
+import { splitEntriesHomedAt } from './split-entries';
+
 /** Kinds that guarantee `import type { N }` resolves. */
 const TYPE_KINDS: ReadonlySet<string> = new Set(['type', 'interface', 'class', 'enum']);
 
@@ -96,6 +98,13 @@ export function resolveTypeName(schemaName: string, surface: CategorySurface): s
 }
 
 export interface ResolvedImports {
+  /**
+   * The entry the page's import lines name — `@objectstack/spec/<entry>`. The
+   * category itself, unless the page documents declarations a SPLIT entry of
+   * that category publishes (`lib/split-entries.ts`, #18576): the API
+   * reference's assembled-stage page imports from `api-assembled`, not `api`.
+   */
+  entry: string;
   /** Const names for `import { … }`, in page order, dead names dropped. */
   valueNames: string[];
   /** Type names for `import type { … }`, in page order, dead names dropped. */
@@ -114,13 +123,27 @@ export function resolveImports(
   category: string,
   schemaNames: readonly string[],
   surfaces: ReadonlyMap<string, CategorySurface>,
+  splitEntries: readonly string[] = splitEntriesHomedAt(category),
 ): ResolvedImports {
-  const surface = surfaces.get(category);
+  // One page, one entry. A page is one source file's schemas, and a split entry
+  // re-exports whole files, so the page's names come from the category's own
+  // entry or from exactly one of its split entries — whichever exports the
+  // first name that resolves anywhere. Names that then do not resolve in THAT
+  // entry are gaps, reported against the category exactly as before, so a page
+  // split across two entries is loud rather than half-printed.
+  const entry =
+    [category, ...splitEntries].find((candidate) => {
+      const s = surfaces.get(candidate);
+      return s !== undefined
+        && schemaNames.some((n) => resolveValueName(n, s) !== null || resolveTypeName(n, s) !== null);
+    }) ?? category;
+  const surface = surfaces.get(entry);
   if (!surface) {
     // Pages exist for a category the package does not publish as an entry
     // point: every `from '@objectstack/spec/<category>'` on the page is dead,
     // not just a name on it. Report once, emit nothing.
     return {
+      entry,
       valueNames: [],
       typeNames: [],
       exampleValue: null,
@@ -142,7 +165,7 @@ export function resolveImports(
     else gaps.push(`${category}/${name} — no type export`);
   }
 
-  return { valueNames, typeNames, exampleValue: valueNames[0] ?? null, gaps };
+  return { entry, valueNames, typeNames, exampleValue: valueNames[0] ?? null, gaps };
 }
 
 // ── The committed baseline's BYTES ───────────────────────────────────────────

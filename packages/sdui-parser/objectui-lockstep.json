@@ -56,5 +56,15 @@
     "unterminated-brace",
     "unterminated-open-tag",
     "unterminated-string"
-  ]
+  ],
+  "containmentPredicate": {
+    "file": "packages/sdui-parser/src/validate.ts",
+    "code": "not-a-container",
+    "reaches": [
+      "CHILD_LIST_KEY",
+      "acceptsChildren"
+    ],
+    "blob": "76c18fb95d1fd04223e3d18deea77223408cc0a8",
+    "text": "if (node . children ?. length && ! acceptsChildren ( comp ))\nexport const CHILD_LIST_KEY = 'children' ;\nexport function acceptsChildren ( comp : Pick < ManifestComponent , 'inputs' > ) : boolean { return comp . inputs . some ( ( input ) => input . name === CHILD_LIST_KEY ) ; }\n"
+  }
 }

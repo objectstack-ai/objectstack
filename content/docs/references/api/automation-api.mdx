@@ -10,19 +10,25 @@ Automation API Protocol
 Defines REST CRUD endpoint schemas for managing automation flows,
 triggering executions, and querying execution history.
 
-Base path: /api/automation
+Base path: /api/v1/automation
+
+The wire paths the platform serves: the dispatcher mounts this door at its
+`prefix` (default `/api/v1`, the one `objectstack serve` uses) plus
+`/automation`. A drift pin in `@objectstack/runtime`
+(`automation-api-contract-mounts.test.ts`) holds every `path` in
+`AutomationApiContracts` to that mount table.
 
 **Endpoints**
 ```
-GET    /api/automation                         — List flows
-GET    /api/automation/:name                   — Get flow
-POST   /api/automation                         — Create flow
-PUT    /api/automation/:name                   — Update flow
-DELETE /api/automation/:name                   — Delete flow
-POST   /api/automation/:name/trigger           — Trigger flow execution
-POST   /api/automation/:name/toggle            — Enable/disable flow
-GET    /api/automation/:name/runs              — List execution runs
-GET    /api/automation/:name/runs/:runId       — Get single execution run
+GET    /api/v1/automation                      — List flows
+GET    /api/v1/automation/:name                — Get flow
+POST   /api/v1/automation                      — Create flow
+PUT    /api/v1/automation/:name                — Update flow
+DELETE /api/v1/automation/:name                — Delete flow
+POST   /api/v1/automation/:name/trigger        — Trigger flow execution
+POST   /api/v1/automation/:name/toggle         — Enable/disable flow
+GET    /api/v1/automation/:name/runs           — List execution runs
+GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
 ```
 
 <Callout type="info">
@@ -524,7 +530,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Flow machine name (snake_case) |
 | **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | optional | Filter by execution status |
 | **limit** | `integer` | optional (default: `20`) | Maximum number of runs to return |
-| **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/automation/:name/runs in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: the option reached the service and the engine never looked at it, no emit site has ever written the response half `nextCursor`, and the only ordering this door has is a required but non-unique `startedAt` timestamp that nothing ever minted a resume point from — so a caller looping "until the cursor runs out" re-read the first and only window forever, with no error. Delete the key. `limit` is the real window and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so ask for a wider window instead of a next page. Read the response `hasMore` to learn whether the window was short — it is now COMPUTED from the engine rather than the constant `false` it used to be. |
+| **cursor** | `never` | optional | [REMOVED] `cursor` was removed from GET /api/v1/automation/:name/runs in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it was VALIDATED at the boundary and then read by nothing: the option reached the service and the engine never looked at it, no emit site has ever written the response half `nextCursor`, and the only ordering this door has is a required but non-unique `startedAt` timestamp that nothing ever minted a resume point from — so a caller looping "until the cursor runs out" re-read the first and only window forever, with no error. Delete the key. `limit` is the real window and STAYS: it is read end to end (boundary to service to store) and bounded to 1..100, so ask for a wider window instead of a next page. Read the response `hasMore` to learn whether the window was short — it is now COMPUTED from the engine rather than the constant `false` it used to be. |
 
 
 ---

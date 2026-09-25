@@ -123,21 +123,26 @@ import {
   PackageExportManifest,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
-  // [#17536] The element the two `/packages` READ doors are declared to serve.
-  // `ListInstalledPackagesResponseSchema.packages` is
-  // `z.array(InstalledPackageAtEitherStageSchema)` and
-  // `GetInstalledPackageResponseSchema.data` is that same schema
-  // (`spec/src/api/package-api.zod.ts`) — a union over the two manifest stages,
-  // authoring (`InstalledPackageSchema`) and assembled
-  // (`AssembledInstalledPackageSchema`), each a closed RUNTIME declaration. The
-  // client is a CONSUMER of that contract, so the widest value those doors are
-  // declared to answer is what they are declared to return here. ⚠️ What the
-  // published TYPE admits is wider than what the runtime parse accepts — the
-  // measurement, and what a caller does about it, are on `packages.list` below
-  // (#19324). The WRITE methods on the same object keep `InstalledPackage`:
-  // PR #17517 moved the read doors alone.
-  InstalledPackageAtEitherStage,
 } from '@objectstack/spec/api';
+// [#17536] The element the two `/packages` READ doors are declared to serve.
+// `ListInstalledPackagesResponseSchema.packages` is
+// `z.array(InstalledPackageAtEitherStageSchema)` and
+// `GetInstalledPackageResponseSchema.data` is that same schema
+// (`spec/src/api/package-api-assembled.zod.ts`) — a union over the two manifest
+// stages, authoring (`InstalledPackageSchema`) and assembled
+// (`AssembledInstalledPackageSchema`), each a closed RUNTIME declaration. The
+// client is a CONSUMER of that contract, so the widest value those doors are
+// declared to answer is what they are declared to return here. ⚠️ What the
+// published TYPE admits is wider than what the runtime parse accepts — the
+// measurement, and what a caller does about it, are on `packages.list` below
+// (#19324). The WRITE methods on the same object keep `InstalledPackage`:
+// PR #17517 moved the read doors alone.
+//
+// Imported from `@objectstack/spec/api-assembled`, not `/api`: the declarations
+// that embed the assembled package body left the browser-facing `/api` entry
+// (#18576 ruling, letter B). A TYPE import — erased from this package's
+// bundle, so the client links none of that tree.
+import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assembled';
 import type {
   ApprovalRequestRow,
   ApprovalActionRow,
@@ -2494,7 +2499,7 @@ export class ObjectStackClient {
      * the row with a `packages/spec` schema and reading the parse's output:
      *
      * ```ts
-     * const parsed = AssembledInstalledPackageSchema.safeParse(pkg); // spec/api
+     * const parsed = AssembledInstalledPackageSchema.safeParse(pkg); // spec/api-assembled
      * if (parsed.success) {
      *   // parsed.data.manifest — the ASSEMBLED stage, object definitions
      * } else {

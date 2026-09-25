@@ -5802,6 +5802,43 @@ const step18: MigrationStep = {
         + 'the old result set.',
     },
     {
+      id: 'api-assembled-entry-split',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span.
+      surface:
+        'api.AssembledInstalledPackageSchema / api.InstalledPackageAtEitherStageSchema / '
+        + 'api.ListInstalledPackagesResponseSchema / api.GetInstalledPackageResponseSchema / '
+        + 'api.PackageApiContracts, with the types AssembledInstalledPackage, InstalledPackageAtEitherStage, '
+        + 'ListInstalledPackagesResponse, GetInstalledPackageResponse and their Parsed twins — imported from '
+        + '@objectstack/spec/api',
+      replacement:
+        'the same names, unchanged, imported from `@objectstack/spec/api-assembled` — change the import '
+        + 'path and nothing else. Every schema parses and refuses exactly what it did, the route map has the '
+        + 'same four entries, and the JSON Schema ids are unchanged (`json-schema/api/AssembledInstalledPackage.json` '
+        + 'and its three siblings are still published under `api/`). Every OTHER Package API declaration — '
+        + 'the request schemas of both read doors, the install / uninstall / upgrade / rollback shapes, '
+        + '`PackageApiErrorCode` — stays on `@objectstack/spec/api`.',
+      reason:
+        'Maintainer ruling on #18576 (batch #145 item 1, letter B, 「同意,其他也同意」): split the API entry '
+        + 'so its browser-facing half no longer carries the assembled-package declarations. Those five embed '
+        + 'the ASSEMBLED package body, which reaches the whole metadata vocabulary and, behind it, the '
+        + 'datasource declaration and the driver-config validators; declared inside `@objectstack/spec/api`, '
+        + 'that tree was part of every bundle of the entry, and a browser module importing two string '
+        + 'constants from it paid for all of it. Measured on the splitting PR: that module (objectui '
+        + '`@object-ui/core` column-sortability) bundles to 166,529 bytes gzipped instead of 311,124. The '
+        + 'split moves an import path, which is TypeScript source rather than metadata — nothing authors, '
+        + 'stores or parses it — so there is no source a D2 conversion could rewrite, and the move is '
+        + 'recorded here.',
+      acceptanceCriteria:
+        'No code imports any of the five names, their types or their Parsed twins from '
+        + '`@objectstack/spec/api` — each such import is a TS2305 "has no exported member" error after '
+        + 'upgrade (TS2724 with a did-you-mean when a similarly named export exists; the suggested name is '
+        + 'a different schema, not the replacement), and at runtime the binding is undefined. The same '
+        + 'names import cleanly from '
+        + '`@objectstack/spec/api-assembled`. No metadata document, stored row or JSON Schema reference '
+        + 'needs editing: the schemas and their published ids did not change.',
+    },
+    {
       id: 'api-error-retry-after-unit-in-key',
       surface: 'EnhancedApiError.retryAfter (api/errors.zod.ts) — the ADR-0112 error envelope on the wire',
       replacement: 'retryAfterSeconds — rename the key; the value (seconds) is unchanged',
@@ -5940,7 +5977,7 @@ const step18: MigrationStep = {
       // code span AND a table cell.
       surface:
         'api.listRuns cursor — the pagination query parameter of '
-        + 'GET /api/automation/:name/runs declared by ListRunsRequestSchema, its slot on '
+        + 'GET /api/v1/automation/:name/runs declared by ListRunsRequestSchema, its slot on '
         + 'IAutomationService.listRuns, and its option on all three @objectstack/client run-list '
         + 'surfaces (automation.runs.list, automation.listRuns, environment().automation.listRuns). '
         + 'The limit parameter of the same door is NOT part of this retirement and is unchanged, '
@@ -5972,7 +6009,7 @@ const step18: MigrationStep = {
         + "the Console's flow-runs page sends it today. Retiring it would have been a "
         + 'regression, and its `.default(20)` stays with it. '
         + 'The same card computes `hasMore`, which is the half a bare retirement would have left '
-        + 'lying. `GET /api/automation/:name/runs` shipped a literal `hasMore: false` beside a '
+        + 'lying. `GET /api/v1/automation/:name/runs` shipped a literal `hasMore: false` beside a '
         + 'list the engine had already truncated with `.slice(0, limit)`, so a caller asking for '
         + 'one row of a thousand was handed one row and told that was all of them. The engine '
         + 'now reports truncation to the door through a new optional contract member, '
@@ -6001,7 +6038,7 @@ const step18: MigrationStep = {
         + '#6361 retired the notifications `cursor`: the client dropped the option and recorded '
         + 'the removal in its docblock. ADR-0049 / ADR-0087, #19543.',
       acceptanceCriteria:
-        'No caller sends `cursor` to `GET /api/automation/:name/runs`, and that is true of every '
+        'No caller sends `cursor` to `GET /api/v1/automation/:name/runs`, and that is true of every '
         + 'channel this repo ships rather than of the schema alone. Writing it on a '
         + '`ListRunsRequest` is a `tsc` error (the input type is `never`), and any value reaching a '
         + 'parse raises the prescription rather than a generic unrecognized-key issue. The option is '
@@ -8854,11 +8891,21 @@ const step18: MigrationStep = {
         + 'named proxy, over ["a"], "a", ["a","b"], ["b","a"], [["a"],"x"], [["a"]], "b" and [] '
         + 'selected ["a"], [["a"],"x"] and [["a"]]. The service-analytics filter normalizer read the '
         + 'FilterArray form as MEMBERSHIP: ["stage", "=", ["won", "lost"]] charted as stage IN '
-        + '(won, lost); that form now gets the refusal too, while its OBJECT form, which that '
-        + 'normalizer does not route through the shared face, still reads as membership. A live mongod, MySQL, PostgreSQL and a live '
+        + '(won, lost), and its OBJECT form read the same list four ways: { stage: [...] } as IN, '
+        + '$eq with a list as its first member alone, $eq with an empty list as no predicate, and '
+        + 'an empty implicit list as the FALSE constant. A live mongod, MySQL, PostgreSQL and a live '
         + 'Turso server were NOT measured. So one stored filter was a 400 on most backends and a '
         + 'silent, differently-shaped row set on one. The shared face now refuses it with '
         + 'INVALID_FILTER / 400 before any driver runs, naming the field, the path and both remedies. '
+        + 'Which doors refuse it at this release, and with what: the shared face, inside '
+        + 'parseFilterAST and at the engine lowering seam, with INVALID_FILTER / 400; the analytics '
+        + 'where door in BOTH spellings, the FilterArray form through parseFilterAST and the OBJECT '
+        + 'form because that door hands each equality-slot list to the shared face before it builds '
+        + 'a node, with the same INVALID_FILTER / 400 and the same sentence (that door alone also '
+        + 'refuses a list inside a nested-relation condition, which it flattens to a dotted member); '
+        + 'and, on SAVE, the schema door (FilterConditionSchema and the $eq operator slot), with the '
+        + 'same sentence as a parse issue at the filter\'s own path, which is the sibling entry '
+        + 'filter-equality-array-comparand-refused-at-save. '
         + 'The ruling records the hosted product as running on the SQL family, where the top-level '
         + 'shape was already a 400, so the population that can observe a change is self-hosted '
         + 'driver-mongodb, plus any filter nested under a combinator on the SQL family (a 500 '
@@ -8874,11 +8921,92 @@ const step18: MigrationStep = {
         + 'what it meant: one of these values ($in), the stored list holds a value ($contains, an '
         + '$or of them for several), or one value. Each is refused at query time with INVALID_FILTER '
         + '/ 400 naming the field and the path, so a test suite that exercises the query finds '
-        + 'every one. A dashboard or dataset filter written as the FilterArray sugar with an array on '
-        + 'equality charted as membership through the analytics normalizer; $in is the spelling that '
-        + 'charts the same rows. On driver-mongodb re-check what the query is supposed to return rather than '
+        + 'every one; a stored carrier is also refused on save, which is the sibling entry '
+        + 'filter-equality-array-comparand-refused-at-save. A dashboard or dataset filter written as '
+        + 'the FilterArray sugar with an array on equality, or as the implicit object form, charted '
+        + 'as membership through the analytics normalizer; $in is the spelling that charts the same '
+        + 'rows. On driver-mongodb re-check what the query is supposed to return rather than '
         + 'assuming the old rows were right: the old answer was MongoDB array equality, which '
         + 'neither $in nor $contains reproduces.',
+    },
+    // The SCHEMA door's half of filter-equality-array-comparand-refused. That entry
+    // refuses the shape at the runtime filter doors, where a query is compiled; this
+    // one refuses the same shape where a filter is SAVED, in the same words, so a
+    // stored filter stops publishing clean and failing later for someone else.
+    // Recorded as its own entry because the surface is different (every schema that
+    // carries a FilterCondition, and the $eq operator slot) and because what an
+    // upgrading author sees changes at a different moment: on save, not on query.
+    {
+      id: 'filter-equality-array-comparand-refused-at-save',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.FilterCondition and the $eq slot of data.FieldOperators — an ARRAY as an EQUALITY '
+        + 'comparand, now refused when the document is PARSED: the implicit form { field: [...] } and '
+        + 'the explicit form { field: { $eq: [...] } }, the empty array included, on every schema '
+        + 'that carries a FilterCondition — a dataset filter and a dataset measure filter, a '
+        + 'dashboard widget filter and an options-source filter, a report and joined-report-block '
+        + 'runtimeFilter, a field relatedListFilter and a rollup summaryOperations filter, a '
+        + 'solution-blueprint summary filter, an analytics query where, a dataset selection '
+        + 'runtimeFilter, a query where and having, the data-engine aggregate call\'s having, an '
+        + 'aggregation filter and a query-filter where '
+        + '— plus FieldOperatorsSchema.$eq, its documentation copy EqualityOperatorSchema.$eq, and '
+        + 'the NormalizedFilter AST that validates against it',
+      replacement:
+        'the operator the list was standing in for, exactly as in '
+        + 'filter-equality-array-comparand-refused. "One of these values" is $in: '
+        + '{ field: { $in: ["a", "b"] } } (authoring spelling "in"). "The stored multi-value field '
+        + 'holds this value" is $contains with ONE member: { field: { $contains: "a" } } (authoring '
+        + 'spelling "contains"), and an $or of those for any-of. A filter that meant a single value '
+        + 'writes that value: { field: "a" }. The list operators ($in / $nin / $between) keep their '
+        + 'arrays, empty lists included; every scalar equality comparand, null above all, a Date and '
+        + 'a { $field } reference are untouched; and $ne is NOT judged by this entry',
+      reason:
+        'Ruling on #19889 (record 5805248669, letter A): FilterConditionSchema (implicit equality) '
+        + 'and FieldOperatorsSchema.$eq refuse an array comparand at parse, with the SAME remedy '
+        + 'text the shared compile face emits — one constant, two doors; a stored filter carrying '
+        + 'the shape is refused loudly on its next save, and never silently dropped, because a '
+        + 'dropped filter shows MORE rows than intended. Measured on origin/main a0920b42dc before '
+        + 'the change: a dataset whose filter was { stage: ["won", "lost"] }, and one whose measure '
+        + 'filter was { stage: { $eq: ["won", "lost"] } }, both parsed GREEN, as did '
+        + 'FilterConditionSchema and FieldOperatorsSchema on the bare shapes, while the shared '
+        + 'comparand-shape face refused both with INVALID_FILTER / 400. So such a document '
+        + 'published clean and then failed every query that used it, for a different person, '
+        + 'later. The schema door now prints the face\'s own sentence, from one builder both doors '
+        + 'import; the only difference is that the face appends the location (at where.stage) and '
+        + 'the schema door does not, because its issue carries the location as its path '
+        + '(filter.stage, measures.0.filter.stage.$eq). The reach is the face\'s and no wider: the '
+        + 'field entries of a condition and of every $and / $or / $not member, but NOT a field spec '
+        + 'with no $ key (a nested-relation or deep-equality condition), which the face never '
+        + 'descends either. ⚠️ Three positions therefore still refuse only at execution. (1) A list '
+        + 'inside a nested-relation condition, { account: { region: ["a"] } }: the analytics where '
+        + 'door flattens that to the dotted member account.region and refuses it when a dataset or '
+        + 'measure filter is charted. (2) The where option of the data-engine calls (find, count, '
+        + 'update, delete, aggregate, vector find): its type is a union whose first arm is an open '
+        + 'record, so it parses and the face refuses it when the call runs. (3) $ne carrying a '
+        + 'list, which no ruling has decided. Two request doors parse these carriers and now answer '
+        + 'the shape before the analytics compiler does: the REST dataset selection (its '
+        + 'runtimeFilter) and the analytics query body (its where) refuse with VALIDATION_FAILED / '
+        + '400 and this sentence at the field, one step ahead of the compiler\'s INVALID_FILTER / '
+        + '400. Metadata AT REST is not rewritten and this entry adds no D2 conversion, for the '
+        + 'reason the runtime entry gives: an array on equality has no single honest value. The '
+        + 'read path does not re-validate stored rows, so a stored document keeps loading; what '
+        + 'changes is that re-saving it through the metadata protocol (422 INVALID_METADATA), '
+        + 'defineStack or os validate is refused at the filter\'s path. Such a filter has failed '
+        + 'every query since the runtime entry, and on the SQL family before it at the top level, '
+        + 'so the refusal is a repair and not a loss. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every stored document that carries a filter: os validate '
+        + 'or defineStack, and a save through the metadata protocol, report each array in an '
+        + 'equality slot by path with the field, the received list and both remedies, so the sweep '
+        + 'is mechanical for the carriers listed in the surface. Decide per filter what it meant — '
+        + 'one of these values ($in), the stored list holds a value ($contains, an $or of them for '
+        + 'several), or one value — and re-check what the surface is supposed to show rather than '
+        + 'assuming the old rows were right: on most backends the filter had been failing every '
+        + 'query. ⛔ A clean re-save is NOT a complete sweep for the three positions the reason '
+        + 'names: grep nested-relation conditions and data-engine where options for a field whose '
+        + 'value is a list, and exercise them, where the runtime doors refuse with INVALID_FILTER '
+        + '/ 400 naming the field and the path.',
     },
     // One entry for two doors on purpose: the two vocabularies spell one operator
     // and the rows being answered are one pair. Splitting it would put half the
@@ -9096,7 +9224,7 @@ const step18: MigrationStep = {
         + 'than deriving a second one; it is the same decision reaching the second slot, which is why '
         + 'it is named here instead of in an entry of its own. Reachable wherever a flow is authored '
         + 'or stored: defineStack({ flows }) sources, an exported stack passed to objectstack validate, '
-        + 'a POST /flows body, and a flow row already sitting in sys_metadata',
+        + 'a POST /api/v1/automation body, and a flow row already sitting in sys_metadata',
       replacement:
         'a non-blank `source` — `{ dialect: \'cel\', source: \'record.amount > 10\' }`, or the bare '
         + 'string `\'record.amount > 10\'` — if the edge was meant to branch; or REMOVE the '
@@ -9138,7 +9266,7 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Grep every authored structural condition — BOTH `edges[].condition` and a node\'s '
         + '`config.condition` (a `decision` node\'s predicate, and on a `start` node the trigger '
-        + 'gate) — in `defineStack({ flows })` sources, exported stacks and `POST /flows` bodies, and '
+        + 'gate) — in `defineStack({ flows })` sources, exported stacks and `POST /api/v1/automation` bodies, and '
         + 'every flow row in `sys_metadata`, for an envelope with no `source` key and for a `source` '
         + '(or bare string) that is empty after trimming. ⚠️ Sweeping only the edge key leaves the '
         + 'node key unswept, and the node key is the one with no schema in front of it. For each '
