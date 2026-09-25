@@ -48,10 +48,10 @@
 
 - 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
-- 绿即转 ready + 挂 auto-merge,只走 `settings.json` allow 行的 ccr 两命令;未绿按阶梯重挂定点。
+- 绿即经中继 op `pr_ready` + `automerge_enable` 落地,拼写见 `rest-channel.md`;未绿按阶梯重挂定点。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
-- 落地中遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法或改走中继绕过。
+- 落地遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法、不退回 ccr 绕过。
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
