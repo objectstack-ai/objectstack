@@ -184,7 +184,18 @@ export interface ApiExposureSchemaLike {
  */
 export interface ObjectAccessPostureLike {
   name?: string;
-  access?: { default?: unknown } | null;
+  /**
+   * The registered schema's own `access` block, passed through as it is. Typed
+   * `unknown` so that any schema a caller already hands over still type-checks;
+   * the one read is `access.default === 'private'`.
+   */
+  access?: unknown;
+}
+
+/** `access.default === 'private'` off a registered schema — the evaluator's own test. */
+function isPrivatePosture(schema: ObjectAccessPostureLike | null | undefined): boolean {
+  const access = schema?.access;
+  return typeof access === 'object' && access !== null && (access as { default?: unknown }).default === 'private';
 }
 
 /** The `allow*` bits {@link objectPermissionGrants} reads, i.e. every bit a `can()` verb resolves to. */
@@ -251,7 +262,7 @@ function materializePlainWildcardCoverage(
   for (const schema of allSchemas) {
     const name = schema?.name;
     if (!name || name === '*') continue;
-    if (schema.access?.default === 'private') continue;
+    if (isPrivatePosture(schema)) continue;
     const had = Object.prototype.hasOwnProperty.call(objects, name);
     const acc: Record<string, unknown> = had ? objects[name] : {};
     let touched = false;

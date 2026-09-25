@@ -1,5 +1,5 @@
 ---
-'@objectstack/core': patch
+'@objectstack/core': minor
 ---
 
 fix(core): the effective object-permission map covers what a plain `'*'` grant covers, so `current_user.can()` agrees with the server for a wall-less org admin (#20083)
@@ -16,7 +16,7 @@ The population it hit: `organization_admin_no_bypass`, which a deployment withou
 - only `true` grant bits are copied; a wildcard's `false` or unset bit adds nothing;
 - an object the step would add, but whose entry grants no verb on its own, is left out.
 
-The step reads `name` and `access.default` off the `allSchemas` entries, so a direct caller of `buildEffectiveObjectPermissions` passes the registered schemas themselves there, as both in-repo callers do; an entry without `access` reads as public, exactly as the server reads it.
+The step reads `name` and `access.default` off the `allSchemas` entries, so the element type of `allSchemas` on `buildEffectiveObjectPermissions`' schema source gains an optional `access?: unknown` member (the package exports no new name for it). That is a type widening only: every call that compiled before still compiles, and a schema literal carrying `access` now does too. A direct caller passes the registered schemas themselves there, as both in-repo callers do; an entry without `access` reads as public, exactly as the server reads it.
 
 **What a reader of `/auth/me/permissions` sees.** For a subject holding a plain wildcard, `objects` gains an entry for every registered public object the wildcard covers that had none, annotated with `apiOperations` by the same rule as every other entry. An entry that was already there may gain `true` bits. Nothing is removed. For a subject holding no plain wildcard — `admin_full_access`, a walled `organization_admin`, `member_default` alone — the response is byte-identical to before. The response shape, its keys and the route are unchanged.
 
