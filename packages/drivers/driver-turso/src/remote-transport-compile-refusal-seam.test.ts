@@ -28,7 +28,9 @@
  *    mode `TursoDriver.toRemoteFilter` rebuilds every node, so no mark reaches
  *    this transport and even an author-marked `where` is withheld there: the
  *    contract's declared fail-closed direction, pinned so it is a decision and
- *    not an accident.
+ *    not an accident. [#20094] A `$between` that is not two bounds joins that
+ *    half in a table of its own: it reached neither seam before, because the
+ *    driver refused it while lowering it, ahead of the transport.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
@@ -165,12 +167,23 @@ const ARMS: readonly Door[] = [
     klass: 'a key that is not an operator',
   },
   {
-    // Unreachable through `TursoDriver` (it lowers `$between` first) — withheld
-    // all the same, so the class has no exception.
+    // A WELL-FORMED range is unreachable through `TursoDriver` (it lowers every
+    // two-bound `$between` first) — withheld all the same, so the class has no
+    // exception.
     builder: 'unsupportedOperator',
     where: () => ({ [POLICY_COL]: { $between: [1, 2] } }),
     secrets: [POLICY_COL],
     klass: 'must be lowered to $gte/$lte',
+  },
+  {
+    // [#20094] A range that is not two bounds: `TursoDriver` hands it over
+    // un-lowered, so this arm IS reachable through the driver for it — with
+    // `driver-sql`'s class statement for the same mistake, and the comparand
+    // in the sink beside the field.
+    builder: 'unsupportedOperator',
+    where: () => ({ [POLICY_COL]: { $between: [SECRET_NUM] } }),
+    secrets: [POLICY_COL, String(SECRET_NUM)],
+    klass: 'requires a [min, max] value array',
   },
   {
     // The misplaced-field-operator tail: which tail applied says whether the
@@ -458,6 +471,153 @@ describe('[#20039] TursoDriver LOCAL and REMOTE withhold these classes alike', (
       // rebuilt tree carries no mark, and unmarked is withheld. Fail-closed by
       // construction — a cost to the author on remote mode, never a disclosure.
       expect(await messageOf(remote, markFilterSubtreeProvenance(where(), 'author'))).not.toContain(secret);
+    });
+  }
+});
+
+// ── Half 3b: a `$between` that is not two bounds, one table over both faces ───
+
+/**
+ * [#20094] REMOTE mode refused a malformed range in
+ * `TursoDriver.toRemoteFieldSpec`, which runs before the transport and so
+ * outside its seam: a bare `Error` with no `code` and no `status` (an
+ * unclassified 500 over REST) that named `'deal.<field>'` and echoed the
+ * comparand to every caller, a `'policy'`-marked subtree included. LOCAL mode
+ * answers `INVALID_FILTER` / 400 with the field withheld. The lowering now
+ * hands such a range over as written and the transport's `$between` arm
+ * refuses it, so this is one table over both faces: every shape, every caller
+ * class, `find` and `count`. The two well-formed controls hold the lowering
+ * itself still — the date one turns on a row only the whole-day upper bound
+ * admits.
+ */
+describe('[#20094] TursoDriver LOCAL and REMOTE refuse a $between that is not two bounds alike', () => {
+  const RANGE_COL = 'secret_policy_amount';
+  const OBJECT = {
+    name: 'deal',
+    fields: { [RANGE_COL]: { type: 'number' }, closed_at: { type: 'datetime' } },
+  };
+  const ROWS = [
+    { id: 'r1', [RANGE_COL]: 5, closed_at: '2026-01-01T00:00:00.000Z' },
+    // Inside the window ONLY because a bare-day max covers its whole day.
+    { id: 'r2', [RANGE_COL]: 15, closed_at: '2026-01-31T13:45:00.000Z' },
+    { id: 'r3', [RANGE_COL]: 20, closed_at: '2026-02-01T00:00:00.000Z' },
+    { id: 'r4', [RANGE_COL]: 25, closed_at: '2025-12-31T23:59:59.000Z' },
+  ];
+  let local: TursoDriver;
+  let remote: TursoDriver;
+  let stub: LibsqlSqliteStub;
+
+  beforeAll(async () => {
+    local = new TursoDriver({ url: ':memory:' });
+    expect(local.transportMode).toBe('local');
+    await local.initObjects([OBJECT]);
+    stub = makeLibsqlSqliteStub();
+    remote = new TursoDriver({ url: 'libsql://between-arity.turso.io', client: asLibsqlClient(stub) });
+    await remote.connect();
+    expect(remote.transportMode).toBe('remote');
+    await remote.syncSchema(OBJECT.name, OBJECT);
+    for (const row of ROWS) {
+      await local.create(OBJECT.name, { ...row }, { bypassTenantAudit: true });
+      await remote.create(OBJECT.name, { ...row });
+    }
+  });
+
+  afterAll(async () => {
+    await local.disconnect();
+    await remote.disconnect();
+    stub.close();
+  });
+
+  type Mark = 'unmarked' | 'policy' | 'author';
+  type Op = 'find' | 'count';
+
+  /** `echo` is the literal the comparand put on the wire at base, where it has one. */
+  const RANGES: ReadonlyArray<[label: string, range: () => unknown, echo: string | null]> = [
+    ['one bound', () => [SECRET_NUM], String(SECRET_NUM)],
+    ['three bounds', () => [SECRET_NUM, SECRET_NUM + 1, SECRET_NUM + 2], String(SECRET_NUM)],
+    ['a number', () => SECRET_NUM, String(SECRET_NUM)],
+    ['a string', () => SECRET, SECRET],
+    ['null', () => null, null],
+    ['an object', () => ({}), null],
+    ['an empty list', () => [], null],
+  ];
+
+  const whereOf = (range: () => unknown, mark: Mark): Record<string, unknown> => {
+    const where = { [RANGE_COL]: { $between: range() } };
+    return mark === 'unmarked' ? where : markFilterSubtreeProvenance(where, mark);
+  };
+
+  const refusalOf = async (driver: TursoDriver, op: Op, where: unknown) => {
+    const logger = (driver as unknown as { logger: { warn: (...args: unknown[]) => void } }).logger;
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const execute = vi.spyOn(stub, 'execute');
+    try {
+      const query = { where } as DriverQuery;
+      const err = await (op === 'find' ? driver.find(OBJECT.name, query) : driver.count(OBJECT.name, query)).then(
+        () => null,
+        (e: unknown) => e as WireBearingError,
+      );
+      expect(err, `${driver.transportMode} ${op} answered a malformed range`).not.toBeNull();
+      expect(err!.code, driver.transportMode).toBe('INVALID_FILTER');
+      expect(err!.status, driver.transportMode).toBe(400);
+      expect(Object.keys(err!).sort(), driver.transportMode).toEqual(['code', 'status']);
+      if (driver === remote) expect(execute, 'a refused filter must not execute a statement').not.toHaveBeenCalled();
+      return { message: err!.message, log: warn.mock.calls.map((call) => String(call[0])).join('\n') };
+    } finally {
+      warn.mockRestore();
+      execute.mockRestore();
+    }
+  };
+
+  for (const [label, range, echo] of RANGES) {
+    for (const op of ['find', 'count'] as const) {
+      it(`${label}, ${op}: unmarked and policy-marked ⇒ one class statement on both faces, operands in the log`, async () => {
+        for (const mark of ['unmarked', 'policy'] as const) {
+          const faces = {
+            local: await refusalOf(local, op, whereOf(range, mark)),
+            remote: await refusalOf(remote, op, whereOf(range, mark)),
+          };
+          for (const [face, { message, log }] of Object.entries(faces)) {
+            expect(message, `${face} ${mark}`).toContain('requires a [min, max] value array');
+            expect(message, `${face} ${mark}`).not.toContain(RANGE_COL);
+            if (echo) expect(message, `${face} ${mark}`).not.toContain(echo);
+            expect(log, `${face} ${mark}: the log lost the field`).toContain(RANGE_COL);
+          }
+          // The remote sentence is the local one behind the transport's prefix,
+          // less the tracker id the local sentence carries: runtime text carries
+          // none (`pnpm check:doc-authoring`), so the copy could not.
+          expect(faces.remote.message, mark).toBe(
+            `[RemoteTransport] ${faces.local.message.replace(/ \(#\d+\)/g, '')}`,
+          );
+          // What the wire stopped echoing is in the remote sink.
+          if (echo) expect(faces.remote.log, `${mark}: the sink lost the comparand`).toContain(echo);
+        }
+      });
+
+      it(`${label}, ${op}: author-marked ⇒ LOCAL restores the field, REMOTE stays withheld`, async () => {
+        expect((await refusalOf(local, op, whereOf(range, 'author'))).message).toContain(RANGE_COL);
+        // `TursoDriver.toRemoteFilter` rebuilds every node, so no mark reaches
+        // the transport and an author reads the unmarked answer — the declared
+        // fail-closed direction, the same as every other remote refusal.
+        expect((await refusalOf(remote, op, whereOf(range, 'author'))).message).toBe(
+          (await refusalOf(remote, op, whereOf(range, 'unmarked'))).message,
+        );
+      });
+    }
+  }
+
+  const CONTROLS: ReadonlyArray<[label: string, where: Record<string, unknown>, expected: string[]]> = [
+    ['numeric', { [RANGE_COL]: { $between: [10, 20] } }, ['r2', 'r3']],
+    ['bare days on a datetime column', { closed_at: { $between: ['2026-01-01', '2026-01-31'] } }, ['r1', 'r2']],
+  ];
+
+  for (const [label, where, expected] of CONTROLS) {
+    it(`well-formed control, ${label}: both faces return the same rows, and count agrees`, async () => {
+      for (const driver of [local, remote]) {
+        const rows = await driver.find(OBJECT.name, { where } as DriverQuery);
+        expect(rows.map((row) => String(row.id)).sort(), driver.transportMode).toEqual(expected);
+        expect(await driver.count(OBJECT.name, { where } as DriverQuery), driver.transportMode).toBe(expected.length);
+      }
     });
   }
 });
