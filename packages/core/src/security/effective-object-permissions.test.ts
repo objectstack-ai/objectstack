@@ -187,8 +187,11 @@ describe('[#20083] plain wildcard coverage', () => {
       [{ objects: { '*': { ...WILD, viewAllRecords: true, modifyAllRecords: true } } }],
       source,
     );
-    // Seeded all-false, then folded: the super-user entry shape, not the wildcard's own bits.
-    expect(Object.keys(map.crm_account)).toEqual(['allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'apiOperations']);
+    // Seeded all-false, then folded: the super-user entry shape, not the wildcard's own key
+    // order — [#20134] with `allowTransfer`, which `modifyAllRecords` grants, appended by the
+    // per-set fold (the wildcard's own `allowTransfer: false` grants nothing and is not copied).
+    expect(Object.keys(map.crm_account)).toEqual(['allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowTransfer', 'apiOperations']);
+    expect(map.crm_account.allowTransfer).toBe(true);
     // …and the private object is the seed's, as before.
     expect(map.crm_secret).toMatchObject({ allowRead: true, allowEdit: true });
   });
@@ -198,5 +201,85 @@ describe('[#20083] plain wildcard coverage', () => {
       allSchemas: () => { throw new Error('registry down'); },
     });
     expect(map).toEqual({ '*': WILD });
+  });
+});
+
+/**
+ * [#20134] A SUPER-USER `'*'` — one carrying `viewAllRecords` or
+ * `modifyAllRecords` — puts on the map every bit it grants, per set, the way
+ * `PermissionEvaluator.checkObjectPermission` resolves it: the seed places an
+ * entry for every registered object the merge left absent, and the per-set
+ * fold reads each set's wildcard through the spec's `objectPermissionGrants`.
+ * The map used to hold only the four bits the merged fold pulls, so
+ * `current_user.can(object, 'transfer')` answered `false` for a platform admin
+ * the server lets transfer, a super-read wildcard lost its own plain bits, and
+ * a super-user wildcard carrying `allowExport` left every unrestricted object
+ * with no entry at all.
+ *
+ * The enforcement-side half — every verb, the shipped super-user sets, the
+ * real `can()` against the real evaluator — is pinned table-driven in
+ * plugin-security's `get-effective-object-permissions.test.ts`.
+ */
+describe('[#20134] super-user wildcard: every bit it grants, per set', () => {
+  const SCHEMAS: Record<string, any> = {
+    crm_account: { name: 'crm_account' },
+    crm_lead: { name: 'crm_lead', enable: { apiMethods: ['get', 'list'] } },
+    crm_secret: { name: 'crm_secret', access: { default: 'private' } },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (n: string) => SCHEMAS[n] };
+
+  it('the write bypass carries `transfer` onto every entry, a private object\'s included', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { allowRead: true, allowCreate: true, modifyAllRecords: true } } }],
+      source,
+    );
+    for (const name of Object.keys(SCHEMAS)) {
+      expect(map[name], name).toMatchObject({ allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true });
+    }
+  });
+
+  it('a super-read wildcard keeps its own plain bits — and nothing it does not grant', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { viewAllRecords: true, allowEdit: true } } }],
+      source,
+    );
+    for (const name of Object.keys(SCHEMAS)) {
+      expect(map[name], name).toMatchObject({ allowRead: true, allowEdit: true, allowCreate: false, allowDelete: false });
+      expect(map[name], name).not.toHaveProperty('allowTransfer');
+    }
+  });
+
+  it('a set that names the object contributes its explicit entry, never its own wildcard\'s grants', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { viewAllRecords: true, allowTransfer: true }, crm_account: { allowRead: true } } }],
+      source,
+    );
+    expect(map.crm_account).not.toHaveProperty('allowTransfer');
+    expect(map.crm_lead).toMatchObject({ allowRead: true, allowTransfer: true });
+  });
+
+  it('ANOTHER set\'s super-user wildcard widens a present entry, bit by bit', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [
+        { objects: { crm_account: { allowRead: true } } },
+        { objects: { '*': { viewAllRecords: true, allowTransfer: true, allowExport: true } } },
+      ],
+      source,
+    );
+    // Unrestricted and export-allowed, so annotate has nothing to add to it.
+    expect(map.crm_account).toEqual({ allowRead: true, allowTransfer: true, allowExport: true });
+  });
+
+  it('a super-user wildcard carrying `allowExport` seeds every registered object — annotate keeps its own skip', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { allowRead: true, allowEdit: true, modifyAllRecords: true, allowExport: true } } }],
+      source,
+    );
+    expect(Object.keys(map)).toEqual(['*', 'crm_account', 'crm_lead', 'crm_secret']);
+    expect(map.crm_account).toMatchObject({ allowRead: true, allowEdit: true, allowTransfer: true, allowExport: true });
+    // An unrestricted object whose export stays allowed: an entry, and no operation set on it.
+    expect(map.crm_account).not.toHaveProperty('apiOperations');
+    // A narrowed one is annotated exactly as before, `export` kept.
+    expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
   });
 });
