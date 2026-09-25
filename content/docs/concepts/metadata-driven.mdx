@@ -450,7 +450,6 @@ owner: Field.lookup({
 ```typescript
 annual_revenue: Field.currency({
   label: 'Annual Revenue',
-  scale: 2,
   min: 0,
 }),
 ```
@@ -515,7 +514,6 @@ export const ExampleObject = ObjectSchema.create({
     // Currency field
     price: Field.currency({
       label: 'Price',
-      scale: 2,
       min: 0,
     }),
     

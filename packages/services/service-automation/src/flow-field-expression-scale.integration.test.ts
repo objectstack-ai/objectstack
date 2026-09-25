@@ -4,7 +4,13 @@
  * #11060 end-to-end oracle — the hotcrm quote-flow shape (hotcrm#1206),
  * reproduced in-tree because that repo is out of reach from here: a flow
  * computes a discounted money value (`180000 * (1 - 30/100)` =
- * `125999.99999999999`) and writes it into a `scale: 2` currency field.
+ * `125999.99999999999`) and writes it into a `scale: 2` field.
+ *
+ * The field is a `number`, not the `currency` hotcrm#1206 declares: #19629
+ * retired `scale` from the `currency` type (refused at parse, and no longer
+ * enforced on currency writes), so a currency field can no longer be the gate
+ * this oracle needs. The subject — a flow-computed value lands within the
+ * declared `scale` of the field it is written to — is unchanged.
  *
  * Real stack end to end: ObjectKernel + ObjectQLPlugin + better-sqlite3
  * `:memory:` driver + AutomationServicePlugin — so the #7501 `scale`
@@ -39,13 +45,13 @@ function makeSqliteDriver() {
     });
 }
 
-/** The quote shape: a `scale: 2` currency field, as hotcrm#1206 declares it. */
+/** The quote shape: a `scale: 2` total (a `number` — see the header on `currency`). */
 const quote = {
     name: 'quote',
     label: 'Quote',
     fields: {
         title: { name: 'title', label: 'Title', type: 'text' },
-        total: { name: 'total', label: 'Total', type: 'currency', scale: 2 },
+        total: { name: 'total', label: 'Total', type: 'number', scale: 2 },
     },
 };
 
@@ -114,7 +120,7 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
         expect(await quoteByTitle('raw'), 'no row may persist from the refused write').toBeFalsy();
     });
 
-    it('ORACLE: round(x * 100) / 100 writes 126000 into the scale-2 currency field, end to end', async () => {
+    it('ORACLE: round(x * 100) / 100 writes 126000 into the scale-2 total field, end to end', async () => {
         await boot();
         automation.registerFlow(
             'rounded',
