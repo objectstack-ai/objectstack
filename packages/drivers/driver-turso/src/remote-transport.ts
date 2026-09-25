@@ -32,7 +32,8 @@ import {
 // the dangling-escape gate and the LIKE→GLOB translation. Shared with
 // `SqlDriver`'s local emitter so this transport and its local twin cannot fork
 // on what a pattern means (the fork `turso-local-remote-*` suites exist to catch).
-import { hasDanglingLikeEscape, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [#20041] And the U+0000 gate beside the dangling-escape one.
+import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToGlobPattern } from '@objectstack/spec/data';
 // [#8220] The read-scope provenance mark's consumer half — same resolution the
 // SqlDriver family applies, so which transport answered stays unobservable.
 import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
@@ -3095,6 +3096,10 @@ export class RemoteTransport {
               if (hasDanglingLikeEscape(opValue)) {
                 throw this.danglingLikeEscape(object, key, op, opValue, value);
               }
+              // [#20041] GLOB reads the pattern only up to its first U+0000.
+              if (hasNulInLikePattern(opValue)) {
+                throw this.nulLikePattern(object, key, op, opValue, value);
+              }
               if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
               this.pushLikePattern(clauses, args, column, opValue, op === '$ilike');
               break;
@@ -3460,6 +3465,39 @@ export class RemoteTransport {
         `unpaired backslash (${JSON.stringify(pattern)}). A backslash escapes the character after ` +
         `it, so a trailing one escapes nothing and the backends disagree about what it means. ` +
         `Write "\\\\\\\\" to match a literal backslash, or drop the trailing one.`,
+    );
+  }
+
+  /**
+   * [#20041] The error for a `$like` / `$ilike` pattern holding U+0000 (NUL).
+   * {@link pushLikePattern} sends it as a `GLOB` operand, and SQLite reads a
+   * pattern only up to its first U+0000, so the pattern was cut there and
+   * matched a different set of rows than the JS faces (measured on a real
+   * libSQL engine, identical to the local twin). `hasNulInLikePattern` is the
+   * spec's shared test, asked right after the dangling escape, so this
+   * transport refuses the same patterns as its local twin and the JS faces.
+   * The withheld sentence is `driver-sql`'s behind this file's prefix.
+   */
+  private nulLikePattern(
+    object: string,
+    field: string,
+    op: string,
+    pattern: string,
+    subtree?: unknown,
+  ): Error {
+    // [#20041, the #8220 contract] The pattern is the predicate's literal.
+    return this.withheldRefusal(
+      '[RemoteTransport] A pattern operator ("$like" / "$ilike") in this filter has a pattern ' +
+        'holding the NUL character U+0000. SQLite reads a pattern only up to its first NUL, so such ' +
+        'a pattern would match a different set of rows there than on the other backends, and no ' +
+        'escape makes the character portable. Remove it from the pattern. Which operator it was, ' +
+        'the field it was aimed at and the pattern are withheld from the message; the full ' +
+        'diagnostic is in the server log.',
+      subtree,
+      `[RemoteTransport] Operator "${op}" on '${object}.${field}' has a pattern holding the NUL ` +
+        `character U+0000 (${JSON.stringify(pattern)}). SQLite reads a pattern only up to its ` +
+        `first NUL, so such a pattern would match a different set of rows there than on the other ` +
+        `backends, and no escape makes the character portable. Remove it from the pattern.`,
     );
   }
 

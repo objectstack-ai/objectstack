@@ -63,7 +63,8 @@ import {
 // SQLite dialects need because GLOB is the only case-exact pattern operator
 // SQLite has and it does not speak `%`/`_`. `driver-turso`'s remote transport
 // compiles the same operator independently and calls the same two functions.
-import { hasDanglingLikeEscape, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [#20041] And the U+0000 gate beside the dangling-escape one, for the same reason.
+import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -2482,6 +2483,46 @@ function danglingLikeEscapeError(
 }
 
 /**
+ * [#20041] A `$like` / `$ilike` pattern holding U+0000 (NUL).
+ *
+ * Refused for the reason {@link danglingLikeEscapeError} is: no meaning survives
+ * every backend. This driver's SQLite arm compiles the pattern to `GLOB`, and
+ * SQLite reads a pattern only up to its first U+0000, so the pattern was CUT
+ * there and answered a different question than the JS faces, with nothing
+ * raised. Measured on better-sqlite3, sql.js and libSQL alike: `'%'` + U+0000
+ * returned every non-NULL row, where `@objectstack/formula` returns only the
+ * values ending in U+0000. There is no NUL-safe SQLite pattern primitive to
+ * compile to instead. `hasNulInLikePattern` is the spec's shared test, asked on
+ * the same walk as the dangling escape, so every face refuses the SAME patterns
+ * — on every dialect of this driver, not only SQLite.
+ *
+ * Asked AFTER the dangling escape, so a pattern that has both keeps the refusal
+ * it already had.
+ */
+function nulLikePatternError(
+  field: string,
+  op: string,
+  pattern: string,
+  path: string,
+  subtree?: unknown,
+): Error {
+  // [#20041, the #8220 contract] The pattern is the predicate's literal, and so
+  // are the field, the path and which of the two pattern operators it was.
+  return withheldFilterError(
+    `A pattern operator ("$like" / "$ilike") in this filter has a pattern holding the NUL character ` +
+      `U+0000. SQLite reads a pattern only up to its first NUL, so such a pattern would match a ` +
+      `different set of rows there than on the other backends, and no escape makes the character ` +
+      `portable. Remove it from the pattern. Which operator it was, the field it was aimed at and ` +
+      `the pattern are withheld from the message; the full diagnostic is in the server log.`,
+    `Operator "${op}" on field "${field}" at ${path} has a pattern holding the NUL character ` +
+      `U+0000 (${JSON.stringify(pattern)}). SQLite reads a pattern only up to its first NUL, so ` +
+      `such a pattern would match a different set of rows there than on the other backends, and ` +
+      `no escape makes the character portable. Remove it from the pattern.`,
+    subtree,
+  );
+}
+
+/**
  * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
  * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
  * `data/filter.zod.ts`), else `null`.
@@ -4572,6 +4613,11 @@ function classifyFilterKey(
       }
       if (hasDanglingLikeEscape(pattern)) {
         throw danglingLikeEscapeError(key, op, pattern, `${here}.${op}`, value);
+      }
+      // [#20041] A pattern holding U+0000 — SQLite's GLOB cuts it there. The
+      // operator map is the node, as for the dangling escape.
+      if (hasNulInLikePattern(pattern)) {
+        throw nulLikePatternError(key, op, pattern, `${here}.${op}`, value);
       }
     }
   }

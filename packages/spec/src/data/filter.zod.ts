@@ -1242,6 +1242,35 @@ export function hasDanglingLikeEscape(pattern: string): boolean {
   return backslashes % 2 === 1;
 }
 
+/** U+0000, spelled by code point so no source file ever holds the raw byte. */
+const LIKE_PATTERN_NUL = String.fromCharCode(0x00);
+
+/**
+ * [#20041] Does this `$like`/`$ilike` pattern hold U+0000 (NUL) anywhere?
+ *
+ * Such a pattern is REFUSED everywhere rather than answered, for the reason
+ * {@link hasDanglingLikeEscape} gives for its own shape: the backends cannot be
+ * made to agree on what it means. The SQLite faces (`driver-sql` on SQLite,
+ * `driver-sqlite-wasm`, `driver-turso` on both transports) compile `$like` to
+ * `GLOB` over {@link likePatternToGlobPattern}'s translation, and SQLite reads a
+ * pattern only up to its first U+0000 — so the pattern is CUT there, silently,
+ * and matches a different set of rows than {@link likePatternToRegexSource}
+ * gives the JS faces. Measured on every SQLite face: `'%'` followed by U+0000
+ * returned every non-NULL row, where the JS translation returns only the values
+ * that END in U+0000; `'a'` + U+0000 + `'b'` returned `'a'` as well. SQLite has
+ * no NUL-safe pattern primitive to compile to instead: `LIKE` cuts the same way,
+ * `replace()` cannot target U+0000, and `instr()` has no wildcards.
+ *
+ * So the check is shared, and every face that refuses a dangling escape refuses
+ * this too, in its own ADR-0112 `INVALID_FILTER` envelope. It judges the
+ * PATTERN only, and an escaped U+0000 (a backslash before it) holds one as
+ * well. A pattern without U+0000 matched against a STORED value holding one is
+ * a different question, and no refusal of the pattern can reach it.
+ */
+export function hasNulInLikePattern(pattern: string): boolean {
+  return pattern.includes(LIKE_PATTERN_NUL);
+}
+
 /**
  * [#7536] A `$like`/`$ilike` pattern as a regular-expression SOURCE with the
  * SAME meaning — the one translation every JS evaluation face must share, for
