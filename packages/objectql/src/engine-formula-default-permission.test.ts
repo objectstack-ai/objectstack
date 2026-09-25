@@ -377,6 +377,16 @@ describe('#20082 — formula fields and CEL defaults answer `can` from the secur
     expect(r.asks).toHaveLength(1);
   });
 
+  it('validate() rejects the same way the write does when a row\'s `can` default needed a failed resolution', async () => {
+    engine.registerEffectiveObjectPermissionsResolver(countingResolver(() => { throw BOOM; }).fn);
+    await expect(
+      engine.validate('crm_gate', [{ subject: 'a' }], { mode: 'insert', context: ACTING } as any),
+    ).rejects.toBe(BOOM);
+    // A row that supplies the field previews without asking.
+    const supplied = await engine.validate('crm_gate', [{ subject: 'a', flag: false }], { mode: 'insert', context: ACTING } as any);
+    expect(supplied.valid).toBe(true);
+  });
+
   it('never cached across operations: two finds ask twice', async () => {
     seed(3);
     const r = countingResolver(MAP);
