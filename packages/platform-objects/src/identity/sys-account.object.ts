@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec/shared';
 
 /**
  * sys_account — System Account Object
@@ -26,6 +27,15 @@ export const SysAccount = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'OAuth and authentication provider accounts',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // columns `titleFormat` names. With no pointer declared, the registry's
+  // designate-only pass stamped `nameField: 'id'` (the first title-eligible
+  // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
+  // wins over `titleFormat`) drew the raw id as the record page's H1.
+  // `titleFormat` stays for renderers that still read it first;
+  // `identity-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{provider_id} - {account_id}',
   highlightFields: ['provider_id', 'user_id', 'account_id'],
 
@@ -130,6 +140,16 @@ export const SysAccount = ObjectSchema.create({
       label: 'Account ID',
       required: true,
       readonly: true,
+    }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. Every source column is required, so the
+    // expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.provider_id + ' - ' + record.account_id`,
+      description: 'Record title: the provider and the account id it issued (computed on read)',
     }),
     
     created_at: Field.datetime({

@@ -407,6 +407,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "アカウント ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：プロバイダーと、そのプロバイダーが発行したアカウント ID（読み取り時に計算）"
+      },
       created_at: {
         label: "作成日時"
       },
@@ -498,6 +502,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "検証 ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：検証対象の識別子（読み取り時に計算）"
       },
       created_at: {
         label: "作成日時"
@@ -606,6 +614,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "メンバー ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：メンバーと、記録されている場合はそのロール（読み取り時に計算）"
+      },
       created_at: {
         label: "作成日時"
       },
@@ -667,6 +679,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "招待 ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：招待先のメールアドレス（読み取り時に計算）"
       },
       created_at: {
         label: "作成日時"
@@ -815,6 +831,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "チームメンバー ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：ユーザーとチーム（読み取り時に計算）"
+      },
       created_at: {
         label: "作成日時"
       },
@@ -932,6 +952,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "メンバー ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：ユーザーと、その割り当て先のビジネスユニット（読み取り時に計算）"
+      },
       business_unit_id: {
         label: "ビジネスユニット"
       },
@@ -1048,6 +1072,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "二要素認証 ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：この認証情報を所有するユーザー（読み取り時に計算）"
       },
       created_at: {
         label: "作成日時"
@@ -2091,6 +2119,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：プロビジョニングされたユーザーとグループ（読み取り時に計算）"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：投影されたロールと、その付与先のユーザー（読み取り時に計算）"
       },
       connection_id: {
         label: "Connection ID"
