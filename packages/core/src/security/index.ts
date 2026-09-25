@@ -145,6 +145,22 @@ export {
   type ResolveLocalizationInput,
 } from './resolve-authz-context.js';
 
+// [#18783] The EFFECTIVE object-permission map — ONE function behind both the
+// `/auth/me/permissions` `objects` slot and `ISecurityService.getEffectiveObjectPermissions`
+// (the map `current_user.can()` reads). The four folds moved here from
+// plugin-hono-server, which re-exports them under the same names.
+export {
+  buildEffectiveObjectPermissions,
+  foldWildcardSuperUser,
+  clampManagedObjectWrites,
+  seedSuperUserRestrictedObjects,
+  annotateEffectiveApiOperations,
+  type EffectiveObjectPermissionsSchemaSource,
+  type EffectiveObjectPermissionsInputSet,
+  type ManagedSchemaLike,
+  type ApiExposureSchemaLike,
+} from './effective-object-permissions.js';
+
 // #6216 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext
 // assembly shared by every transport entry point, with the anonymous face as
 // two NAMED entries (fail-closed default / explicit guest) instead of drift.
