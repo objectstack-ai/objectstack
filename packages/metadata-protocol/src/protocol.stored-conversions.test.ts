@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { PageSchema } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -253,5 +254,88 @@ describe('loadMetaFromDb — boot hydration converts, diagnoses, never drops (#3
         expect(res.loaded).toBe(1);
         expect(res.invalid).toBe(1);
         expect(registered.some((r) => r.kind === 'object' && r.body?.name === 'corrupt_thing')).toBe(true);
+    });
+});
+
+// ── [#20101] a declared DEFAULT is part of the canonical served shape ─────────
+//
+// `PageSchema` declares `type: PageTypeSchema.default('record')`: a page
+// authored without `type` IS a record page. Every row a save wrote before
+// #20101 is stored without the key (the save path persisted the authored body
+// verbatim), and a consumer that selects an object's record page by
+// `type === 'record'` never picked one. The rehydration seam now serves the
+// declared default — and ONLY serves it: the row at rest is not rewritten, and
+// the stored-migration pass finds nothing to do (no stored-row rewrite is part
+// of this fix).
+//
+// The expected value is READ from the schema, like the implementation reads
+// it, so a pin here cannot quietly become a second spelling of the default.
+const DECLARED_PAGE_TYPE = (PageSchema as unknown as { shape: { type: { parse(v: unknown): unknown } } })
+    .shape.type.parse(undefined);
+
+const typelessPageBody = { name: 'invoice_record', label: 'Invoice', object: 'crm_invoice' };
+const typelessPageRow = { type: 'page', name: 'invoice_record', metadata: typelessPageBody };
+const appPageRow = { type: 'page', name: 'launchpad', metadata: { name: 'launchpad', label: 'Launchpad', type: 'app' } };
+const typelessDraftRow = {
+    type: 'page', name: 'invoice_record_next', state: 'draft',
+    metadata: { name: 'invoice_record_next', label: 'Invoice (next)', object: 'crm_invoice' },
+};
+
+describe('[#20101] a stored page row without `type` is served with PageSchema\'s declared default', () => {
+    it('precondition: the declared default the pins below read is `record`', () => {
+        expect(DECLARED_PAGE_TYPE).toBe('record');
+    });
+
+    it('the list and the single read serve the declared default; an explicit non-record type is untouched', async () => {
+        const { engine } = makeStubEngine([typelessPageRow, appPageRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const listed = (await protocol.getMetaItems({ type: 'page' })).items as any[];
+        expect(listed.find((i) => i.name === 'invoice_record')?.type).toBe(DECLARED_PAGE_TYPE);
+        expect(listed.find((i) => i.name === 'launchpad')?.type).toBe('app');
+
+        const single: any = await protocol.getMetaItem({ type: 'page', name: 'invoice_record' });
+        expect(single.item.type).toBe(DECLARED_PAGE_TYPE);
+        expect(single.item._diagnostics?.valid).toBe(true);
+        const control: any = await protocol.getMetaItem({ type: 'page', name: 'launchpad' });
+        expect(control.item.type).toBe('app');
+    });
+
+    it('the draft reads serve it too — the pinned `?state=draft` read and the list preview', async () => {
+        const { engine } = makeStubEngine([typelessDraftRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const draft: any = await protocol.getMetaItem({ type: 'page', name: 'invoice_record_next', state: 'draft' });
+        expect(draft.item.type).toBe(DECLARED_PAGE_TYPE);
+        const preview = (await protocol.getMetaItems({ type: 'page', previewDrafts: true })).items as any[];
+        expect(preview.find((i) => i.name === 'invoice_record_next')?.type).toBe(DECLARED_PAGE_TYPE);
+    });
+
+    it('boot hydration registers the defaulted body', async () => {
+        const { engine, registered } = makeStubEngine([typelessPageRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.loadMetaFromDb();
+        expect(res).toEqual({ loaded: 1, errors: 0, invalid: 0, storeUnavailable: false });
+        const page = registered.find((r) => r.kind === 'item' && r.type === 'page')!;
+        expect(page.body.type).toBe(DECLARED_PAGE_TYPE);
+    });
+
+    it('the row at rest is NOT rewritten: its bytes survive the reads, and the migration pass reports it canonical', async () => {
+        const { engine, rows } = makeStubEngine([typelessPageRow, typelessDraftRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const before = rows.map((r) => r.metadata);
+
+        await protocol.getMetaItems({ type: 'page', previewDrafts: true });
+        await protocol.getMetaItem({ type: 'page', name: 'invoice_record' });
+        expect(rows.map((r) => r.metadata)).toEqual(before);
+        expect(JSON.parse(rows[0]!.metadata)).toEqual(typelessPageBody);
+
+        // The fill is a READ-side fact, not an ADR-0087 conversion: it emits no
+        // notice, so `os migrate meta --stored` has no row to rewrite.
+        const preview = await protocol.migrateStoredMetadata({ types: ['page'] });
+        expect(preview).toMatchObject({ scanned: 2, canonical: 2, pending: 0, failed: 0, rows: [] });
+        const applied = await protocol.migrateStoredMetadata({ types: ['page'], apply: true });
+        expect(applied).toMatchObject({ scanned: 2, canonical: 2, rewritten: 0, failed: 0, rows: [] });
+        expect(rows.map((r) => r.metadata)).toEqual(before);
     });
 });
