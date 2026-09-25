@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * sys_approval_delegation — self-service out-of-office (OOO) delegation (#1322 M1).
@@ -40,6 +41,15 @@ export const SysApprovalDelegation = ObjectSchema.create({
   managedBy: 'system-data',
   description:
     'Self-service out-of-office rule: route this user\'s approver slots to a delegate within a time window (#1322 M1).',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. With no pointer declared, the
+  // registry's designate-only pass stamped `nameField: 'id'` (the first
+  // title-eligible field), so a renderer honouring ADR-0079's order (an
+  // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
+  // page's H1. `titleFormat` stays for renderers that still read it first;
+  // `sys-approval-delegation-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{delegator_id} → {delegate_id}',
   highlightFields: ['delegator_id', 'delegate_id', 'valid_from', 'valid_until'],
 
@@ -61,6 +71,17 @@ export const SysApprovalDelegation = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'Delegation ID', required: true, readonly: true, group: 'System' }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. Both source columns are required, so the
+    // expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.delegator_id + ' → ' + record.delegate_id`,
+      description: 'Record title: the delegator and the delegate (computed on read)',
+      group: 'Delegation',
+    }),
 
     delegator_id: Field.lookup('sys_user', {
       label: 'Delegator',

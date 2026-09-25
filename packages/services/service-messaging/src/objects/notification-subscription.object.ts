@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * `sys_notification_subscription` — who is subscribed to a topic (ADR-0030
@@ -35,11 +36,30 @@ export const NotificationSubscription = ObjectSchema.create({
     // default is full CRUD, so no `userActions` block is needed.
     managedBy: 'system-data',
     description: 'Standing subscription of a principal (role/team/user) to a notification topic.',
+    // [ADR-0079] The record title is `display_title`, a text formula over the
+    // same two columns `titleFormat` names. With no pointer declared, the
+    // registry's designate-only pass stamped `nameField: 'id'` (the first
+    // title-eligible field), so a renderer honouring ADR-0079's order (an
+    // explicit `nameField` wins over `titleFormat`) drew the raw id as the
+    // record page's H1. `titleFormat` stays for renderers that still read it
+    // first; `notification-display-title.test.ts` holds the two to the same text.
+    displayNameField: 'display_title',
+    nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
     titleFormat: '{principal} · {topic}',
     highlightFields: ['topic', 'principal', 'enabled', 'created_at'],
 
     fields: {
         id: Field.text({ label: 'Subscription ID', required: true, readonly: true }),
+
+        // [ADR-0079] The record title (`nameField` above). A formula is computed
+        // on read and has no stored column. `principal` and `topic` are all required, so the
+        // expression needs no null guard.
+        display_title: Field.formula({
+            label: 'Title',
+            returnType: 'text',
+            expression: F`record.principal + ' · ' + record.topic`,
+            description: 'Record title: the subscribing principal and the topic (computed on read)',
+        }),
 
         topic: Field.text({
             label: 'Topic',

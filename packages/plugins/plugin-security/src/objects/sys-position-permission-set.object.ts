@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * sys_position_permission_set — Position ↔ PermissionSet binding.
@@ -30,6 +31,15 @@ export const SysPositionPermissionSet = ObjectSchema.create({
   // `userActions` block is needed — the DelegatedAdminGate is the authz.
   managedBy: 'system-data',
   description: 'Binds a permission set to a position.',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. With no pointer declared, the
+  // registry's designate-only pass stamped `nameField: 'id'` (the first
+  // title-eligible field), so a renderer honouring ADR-0079's order (an
+  // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
+  // page's H1. `titleFormat` stays for renderers that still read it first;
+  // `sys-security-assignment-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{position_id} → {permission_set_id}',
   highlightFields: ['position_id', 'permission_set_id'],
 
@@ -39,6 +49,17 @@ export const SysPositionPermissionSet = ObjectSchema.create({
       required: true,
       readonly: true,
       description: 'UUID of the position-permission-set binding.',
+    }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. It reads only this row's own columns —
+    // the two foreign keys, never a field of the looked-up records — so it shows a reader nothing the row does not already
+    // show them. Both are required, so the expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.position_id + ' → ' + record.permission_set_id`,
+      description: 'Record title: the position and the permission set bound to it (computed on read)',
     }),
 
     position_id: Field.lookup('sys_position', {

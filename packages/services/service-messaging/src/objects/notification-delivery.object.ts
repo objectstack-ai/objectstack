@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * `sys_notification_delivery` — the durable outbox (ADR-0030 Layer 4).
@@ -69,11 +70,30 @@ export const NotificationDelivery = ObjectSchema.create({
         },
     },
     description: 'Durable per-recipient × channel delivery outbox (ADR-0030 Layer 4).',
+    // [ADR-0079] The record title is `display_title`, a text formula over the
+    // same two columns `titleFormat` names. With no pointer declared, the
+    // registry's designate-only pass stamped `nameField: 'id'` (the first
+    // title-eligible field), so a renderer honouring ADR-0079's order (an
+    // explicit `nameField` wins over `titleFormat`) drew the raw id as the
+    // record page's H1. `titleFormat` stays for renderers that still read it
+    // first; `notification-display-title.test.ts` holds the two to the same text.
+    displayNameField: 'display_title',
+    nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
     titleFormat: '{channel} → {recipient_id}',
     highlightFields: ['notification_id', 'recipient_id', 'channel', 'status', 'attempts'],
 
     fields: {
         id: Field.text({ label: 'Delivery ID', required: true, readonly: true }),
+
+        // [ADR-0079] The record title (`nameField` above). A formula is computed
+        // on read and has no stored column. `channel` and `recipient_id` are all required, so the
+        // expression needs no null guard.
+        display_title: Field.formula({
+            label: 'Title',
+            returnType: 'text',
+            expression: F`record.channel + ' → ' + record.recipient_id`,
+            description: 'Record title: the delivery channel and its recipient (computed on read)',
+        }),
 
         notification_id: Field.text({
             label: 'Notification Event',

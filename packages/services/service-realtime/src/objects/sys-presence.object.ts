@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * sys_presence — System Presence Object
@@ -22,6 +23,15 @@ export const SysPresence = ObjectSchema.create({
   isSystem: true,
   managedBy: 'append-only',
   description: 'Real-time user presence and activity tracking',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // same two columns `titleFormat` names. With no pointer declared, the
+  // registry's designate-only pass stamped `nameField: 'id'` (the first
+  // title-eligible field), so a renderer honouring ADR-0079's order (an
+  // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
+  // page's H1. `titleFormat` stays for renderers that still read it first;
+  // `sys-presence-display-title.test.ts` holds the two to the same text.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{user_id} ({status})',
   highlightFields: ['user_id', 'status', 'last_seen'],
 
@@ -30,6 +40,17 @@ export const SysPresence = ObjectSchema.create({
       label: 'Presence ID',
       required: true,
       readonly: true,
+    }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. It reads only this row's own columns —
+    // the user foreign key and the status token, never a field of the user
+    // record. Both are required, so the expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.user_id + ' (' + record.status + ')'`,
+      description: 'Record title: the user and their presence status (computed on read)',
     }),
 
     created_at: Field.datetime({
