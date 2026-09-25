@@ -18,7 +18,7 @@ An aggregated row has no declared field types, so each column's class is now rea
 
 A column whose class the declaration cannot tell is not judged: an object with no field map, a field it does not declare, or a `formula` field.
 
-`having` resolved every pair through `@objectstack/formula`'s evaluator, which reads a number as epoch milliseconds, while `driver-sql` refuses the same pair on `where`. The refusal reuses `driver-sql`'s sentence for that pair, with "is stored as" read as "is", because an aggregated column is computed rather than stored. Measured on the base through `engine.aggregate` on `driver-memory` and `driver-sql`, both paths, and through `POST /data/:object/query` on both, over three groups with a `sum` alias `total`, a `max` of a number `max_cap`, `max` / `min` of two `date` fields, `max` / `min` of two `datetime` fields and a `count` `n`:
+`having` resolved every pair through `@objectstack/formula`'s evaluator, which reads a number as epoch milliseconds, while `driver-sql` refuses the same pair on `where`. The refusal reuses `driver-sql`'s sentences for the pair, naming each aggregated column's class where `driver-sql` names a stored type ("is numeric" for "is stored as numeric"), because an aggregated column is computed rather than stored. Measured on the base through `engine.aggregate` on `driver-memory` and `driver-sql`, both paths, and through `POST /data/:object/query` on both, over three groups with a `sum` alias `total`, a `max` of a number `max_cap`, `max` / `min` of two `date` fields, `max` / `min` of two `datetime` fields and a `count` `n`:
 
 | `having` | before | now |
 |:--|:--|:--|
