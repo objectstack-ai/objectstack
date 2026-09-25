@@ -2005,11 +2005,21 @@ export class TursoDriver extends SqlDriver {
           // (framework#4081): the upper-bound arm below already carries the
           // whole-day calendar rule, so a range's max inherits it by
           // construction instead of via a second implementation.
+          //
+          // [#20094] A range that is not two bounds is NOT refused here: it is
+          // handed to the transport as written, un-lowered, and the transport's
+          // `$between` arm refuses it (`RemoteTransport.unsupportedOperator`).
+          // This method runs outside the transport's refusal seam, so a throw
+          // here was a bare `Error` — no `code`, no `status`, a 500 over REST —
+          // naming the field and echoing the comparand to every caller, where
+          // local mode answers `INVALID_FILTER` / 400 with both withheld. The
+          // transport's arm is where every other remote filter refusal already
+          // lives, behind the withheld seam and its enumeration pin, so the
+          // lowering keeps no refusal of its own. The refused set does not
+          // move: every such range was refused before and is refused after.
           if (!Array.isArray(raw) || raw.length !== 2) {
-            throw new Error(
-              `[TursoDriver] $between on '${object}.${field}' needs exactly two bounds, got ` +
-                `${JSON.stringify(raw)}. Refusing rather than widening the query silently.`,
-            );
+            out[op] = raw;
+            break;
           }
           out.$gte = this.temporalFilterValue(object, field, raw[0]);
           Object.assign(out, this.toRemoteUpperBound(object, field, '$lte', raw[1]));

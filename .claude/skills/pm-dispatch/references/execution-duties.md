@@ -18,7 +18,7 @@
 - 引用读到的现状,⛔ 不引用裁决写作时的描述。
 - 工作项面:卡片与分诊评论列的每条工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - 每条工作项写进派发令时都是 dev 首先证伪的前提。
-- 并行度以 `batch` 封顶,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
+- `batch` 封顶全部子代理,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
 - 舰队至多一张 `tooling` 卡带 `pm:dispatched`,第二张等;带 `Unblocks:` 者继承产品级不计数。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
@@ -52,7 +52,7 @@
 
 ## 认领(先认领后动工)
 
-- 共享身份下 assignee 只答有无认领;身份只认正文 session ID,⛔ 不认作者字段,接管同此。
+- 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
 - 卡 assignee 归 PM,dev 恒不写;PR assignee = 卡的,接管 ② 同笔换;读者 `is:pr is:open assignee:LOGIN`。
 - dev `pr_create` 同轮 `label-write.mjs --issue PR_NUMBER --assign LOGIN`;席位自有 PR 指派自己。
 - 释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。
@@ -75,7 +75,7 @@
 - 让行是交接不是退场:连同让行评论交出已诊断的一切与已取的板面读数,赢家不必重扫。
 - 认领人不可达(token 耗尽/会话结束/身份退役)⇒ 接管:一条评论四件齐,⛔ 不判死活。
 - ① 跨账号 `Release:` 点名被撤认领的 id 与 session ID,带出处三件(谁的指令/原话/在哪说)。
-- ② assignee 同笔换人(`--unassign 旧 --assign 新`);③ 新 `Claim:`:新 session、续用分支与远程 sha。
+- ② assignee 同笔换人(`--unassign`+`--assign`);③ 新 `Claim:`:新 session 与 `Account:`,续用分支与 sha。
 - ④ 交接记录:旧分支最后已 push 的 sha + 一句状态;读者只验①③形状,缺一件即非撤销。
 - C9 只剩一种红:无任何 `Release:` 的跨账号 `Claim:`(真抢卡);线程上每条活认领都要点名。
 - 误伤活席位 ⇒ 令其追加式更正,落 PR 正文不落分支历史。

@@ -74,11 +74,17 @@ price: Field.currency({
   label: 'Price',
   currencyConfig: {
     precision: 2,
-    currencyMode: 'dynamic',    // 'dynamic' | 'fixed'
-    defaultCurrency: 'USD',
+    currencyMode: 'fixed',      // 'fixed' pins the column to defaultCurrency;
+                                // 'dynamic' (default) shows the tenant default
+    defaultCurrency: 'USD',     // the column's currency under 'fixed'
   },
 }),
 ```
+
+The stored value is a bare number in both modes — never `{ value, currency }`.
+Under `dynamic` (the default) the amount displays in the tenant's
+`localization.currency` setting and `defaultCurrency` is not the displayed
+currency; `fixed` pins the column to `defaultCurrency`.
 
 ### Date & Time Types
 

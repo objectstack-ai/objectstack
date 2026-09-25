@@ -3705,8 +3705,11 @@ export class RemoteTransport {
    * `TursoDriver.toRemoteFieldSpec` lowers it to `$gte`/`$lte` (#1003) so the
    * calendar-day upper-bound rule is applied in exactly one place. Growing a
    * `$between` arm here would be that second implementation, silently without
-   * the rule — so reaching this point means the lowering step was bypassed, and
-   * saying which step it was is the whole value of the message.
+   * the rule — so a well-formed range reaching this point means the lowering
+   * step was bypassed, and saying which step it was is the whole value of the
+   * message. [#20094] A range that is NOT two bounds is the other way to arrive:
+   * the lowering hands it over as written, and it gets the sentence `driver-sql`
+   * gives the same mistake instead — a malformed range, not a skipped step.
    */
   private unsupportedOperator(
     object: string,
@@ -3744,10 +3747,37 @@ export class RemoteTransport {
       );
     }
     if (op === '$between') {
-      // [#20039, the #8220 contract] Unreachable through `TursoDriver`, which
-      // lowers every `$between` before this transport sees it — and withheld
-      // all the same, so that EVERY refusal `buildWhereSQL` can raise goes
-      // through the seam and the enumeration pin has no exception to carry.
+      // [#20094] A range that is not two bounds — `[x]`, `[x, y, z]`, `[]`, a
+      // scalar, `null`, an object. `TursoDriver.toRemoteFieldSpec` lowers only a
+      // two-bound range and hands every other one over as written, so THIS is
+      // where the remote face refuses it: through the seam, `INVALID_FILTER` /
+      // 400 like every refusal here, with `driver-sql`'s class statement for
+      // the same mistake (`betweenArityError`) behind this file's prefix, less
+      // the tracker id that sentence carries (runtime text carries none). The
+      // field and the comparand go to the sink only. `subtree` is this field's
+      // operator map (the one call site hands over `value`), so the range is
+      // read off it; the refusal resolves against the range itself when it is
+      // an object, else against the map — `driver-sql`'s `refusalSubtree` rule.
+      const operatorMap =
+        subtree !== null && typeof subtree === 'object' && !Array.isArray(subtree)
+          ? (subtree as Record<string, unknown>)
+          : null;
+      const range = operatorMap?.[op];
+      if (operatorMap !== null && !(Array.isArray(range) && range.length === 2)) {
+        return this.withheldRefusal(
+          '[RemoteTransport] Operator "$between" in this filter requires a [min, max] value array. ' +
+            'The field it was aimed at is withheld from the message; the full diagnostic is in the ' +
+            'server log.',
+          refusalNode(range, operatorMap),
+          `[RemoteTransport] Operator "$between" on field ${target} requires a [min, max] value ` +
+            `array, got ${preview(range)}. Refusing rather than widening the query silently.`,
+        );
+      }
+      // [#20039, the #8220 contract] A WELL-FORMED range is unreachable through
+      // `TursoDriver`, which lowers every two-bound `$between` before this
+      // transport sees it — and withheld all the same, so that EVERY refusal
+      // `buildWhereSQL` can raise goes through the seam and the enumeration pin
+      // has no exception to carry.
       return this.withheldRefusal(
         '[RemoteTransport] A $between in this filter must be lowered to $gte/$lte before it reaches ' +
           'the transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound ' +

@@ -11,7 +11,8 @@ import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objec
 import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack/spec/data';
 // [#19995] The engine's own placeholder resolver (`ObjectQL.resolveWhereTokens`
 // is a call to it), run on a read scope, alone, at the ObjectQL merge sites by
-// {@link assertReadScopePlaceholdersResolvable}.
+// {@link assertReadScopePlaceholdersResolvable}, and [#20075] before the
+// lowering in {@link compileScopedFilterToSql}.
 import { filterTokenContextFrom, resolveFilterTokens, type ExecutionContextLike } from '@objectstack/core';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { type LikeShape } from './like-pattern.js';
@@ -505,6 +506,46 @@ import {
  * live in `@objectstack/objectql`, are not exported from its package entries,
  * and this package does not depend on the engine at runtime; judging them here
  * would take a copy of each.
+ *
+ * ## …and THIS compiler resolves the placeholder before it lowers (#20075)
+ *
+ * The section above covered the engine path only. This compiler never resolved
+ * a placeholder, so the NativeSQL face and the echo bound `{current_user_id}`
+ * as its literal text. Measured on real SQLite against the ObjectQL face
+ * (`read-scope-placeholder-three-faces.test.ts` carries the table): an
+ * equality or membership scope admitted no row where the ObjectQL face
+ * admitted the caller's; a `$ne` scope admitted EVERY row where the ObjectQL
+ * face admitted all but the caller's, a widening; a date macro compared as
+ * text; an unknown or unresolvable placeholder was served where the ObjectQL
+ * face refused it.
+ *
+ * {@link compileScopedFilterToSql} now resolves the scope with the same
+ * resolver, over the context the caller hands it
+ * ({@link ReadScopeCompileOptions.context}; both strategies pass
+ * `ctx.context`, the context the ObjectQL face forwards to the engine), and
+ * lowers the RESOLVED tree. The bound value, and the parameter the echo
+ * prints, is the one the engine resolves. A placeholder the resolver refuses
+ * is refused in this module's envelope. That covers every hop: the NativeSQL
+ * face compiles each object's scope, base table and joined hops, through this
+ * function.
+ *
+ * Where it stands among the other gates:
+ *
+ *   - Resolution runs BEFORE the lowering, because the lowering binds values.
+ *   - Its refusal is raised AFTER the lowering's own gates (the #20068
+ *     `$icontains` arm among them) and the #20018 comparand faces. That is the
+ *     engine's order, whose lowering doors run before its resolver. No gate's
+ *     verdict moves either way. Resolving replaces a fully-wrapped placeholder
+ *     string with a non-empty string, and copies the tree around it, where a
+ *     class-instance comparand other than a `Date` becomes a plain object;
+ *     every such comparand is refused in both forms. So a doubly-refused scope
+ *     keeps the sentence the lowering or the faces give it.
+ *   - The #13926 vacancy guard runs at the two merge sites after this compiler
+ *     returns, as before.
+ *
+ * With no context the resolution is the engine's for a context-less
+ * operation: a date macro resolves against UTC now, and a context token is
+ * refused. A placeholder is never bound as its literal text.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -585,6 +626,21 @@ export interface ReadScopeCompileOptions {
    * compiler's consumers fill this in from the driver that owns the object.
    */
   dialect?: string;
+  /**
+   * [#20075] The request context the scope's filter placeholders
+   * (`{current_user_id}`, `{today}`, …) resolve against before the scope is
+   * lowered: the context the ObjectQL engine reads when it resolves the same
+   * scope on the other face. Both of this compiler's consumers pass the
+   * strategy's `ctx.context`.
+   *
+   * Absent means the request has no context, and the scope resolves exactly
+   * as the engine resolves it for a context-less operation: a date macro
+   * resolves against UTC now, and a context token (`{current_user_id}`,
+   * `{current_org_id}`) is refused, like an unknown placeholder. A placeholder
+   * is never bound as its literal text. See the module header's #20075
+   * section.
+   */
+  context?: ExecutionContextLike;
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
@@ -605,8 +661,23 @@ export function compileScopedFilterToSql(
   options: ReadScopeCompileOptions = {},
 ): { sql: string; params: unknown[] } {
   const quotedAlias = quoteIdent(alias, 'alias');
+  // [#20075] Resolve the scope's placeholders with the engine's own resolver
+  // BEFORE the lowering, because the lowering binds values: what is bound, and
+  // what the echo prints, is the value the ObjectQL face's engine resolves. A
+  // refusal is held and raised after the gates below, the engine's order (its
+  // lowering doors run before its resolver), so a doubly-refused scope keeps
+  // the sentence those gates give it. Held rather than raised early, the tree
+  // lowered on that path is the unresolved one, and its SQL is discarded with
+  // the throw. See the module header's #20075 section.
+  let lowered = filter;
+  let unresolvable: Error | undefined;
+  try {
+    lowered = resolveReadScopePlaceholders(filter, alias, options.context);
+  } catch (e) {
+    unresolvable = e as Error;
+  }
   const params: unknown[] = [];
-  const sql = compileNode(filter, quotedAlias, params, options);
+  const sql = compileNode(lowered, quotedAlias, params, options);
   // [#20018] The shared comparand faces, on the scope ALONE: the judgement the
   // ObjectQL execute face makes at its merge sites (#19995), made here too, so
   // one read scope gets one verdict on all three analytics faces. AFTER the
@@ -614,6 +685,7 @@ export function compileScopedFilterToSql(
   // sentence, and the faces add exactly the shapes it would otherwise have
   // lowered. See the module header's #20018 section.
   assertReadScopeComparandsRunnable(filter, alias);
+  if (unresolvable) throw unresolvable;
   return { sql, params };
 }
 
@@ -875,6 +947,11 @@ export function assertReadScopeComparandsRunnable(scope: unknown, objectName: st
  * has no value for. (An unusable time zone is not a third: the calendar maths
  * falls back to UTC rather than throwing.)
  *
+ * [#20075] {@link compileScopedFilterToSql} makes the same judgement through
+ * {@link resolveReadScopePlaceholders}, and there the resolved tree is KEPT: it
+ * is what that compiler lowers, so the NativeSQL face and the echo bind the
+ * value this engine resolves.
+ *
  * @param scope the `StrategyContext.getReadScope` output, exactly as returned
  * @param objectName the object the scope was requested for — for the operator's
  *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
@@ -887,8 +964,27 @@ export function assertReadScopePlaceholdersResolvable(
   objectName: string,
   context: ExecutionContextLike | undefined,
 ): void {
+  resolveReadScopePlaceholders(scope, objectName, context);
+}
+
+/**
+ * [#19995 / #20075] The scope with every filter placeholder resolved against
+ * `context` by the engine's own resolver, or the resolver's refusal re-raised
+ * in this module's envelope. The one spelling of that judgement: the
+ * engine-bound merges ask it through
+ * {@link assertReadScopePlaceholdersResolvable} and discard the tree, and
+ * {@link compileScopedFilterToSql} lowers the tree it returns.
+ *
+ * A scope with no placeholder comes back by reference (`resolveFilterTokens`'
+ * contract), so its lowering is the one it always had.
+ */
+function resolveReadScopePlaceholders<T>(
+  scope: T,
+  objectName: string,
+  context: ExecutionContextLike | undefined,
+): T {
   try {
-    resolveFilterTokens(scope, filterTokenContextFrom(context));
+    return resolveFilterTokens(scope, filterTokenContextFrom(context));
   } catch (e) {
     throw readScopeCompileError(
       `[read-scope-sql] read scope for "${objectName}" carries a filter placeholder the engine cannot resolve — ` +
