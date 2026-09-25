@@ -718,12 +718,12 @@ const UNDECLARED_ROW_COUNT_PARAM = z.number().int().optional();
  * reaches this function is a single string or nothing.
  */
 function readDeclaredQueryNumber(
-    query: Record<string, unknown> | undefined,
+    queryParams: Record<string, unknown> | undefined,
     param: string,
     declared: z.ZodType<number | undefined>,
     opts: { readonly emptyIsAbsent: boolean },
 ): number | undefined {
-    const raw = query?.[param];
+    const raw = queryParams?.[param];
     let input: unknown = raw;
     if (raw === undefined || raw === null || (raw === '' && opts.emptyIsAbsent)) {
         input = undefined;
