@@ -259,6 +259,7 @@ import {
 import {
   applyHaving,
   aggregatedRowColumns,
+  aggregatedRowColumnClasses,
   assertAggregationFilterIsEvaluable,
   assertHavingIsEvaluable,
   assertHavingIsFilterCondition,
@@ -16080,7 +16081,19 @@ export class ObjectQL implements IObjectQLEngine {
       assertListComparandShapes(object, 'aggregate', query.having, 'having');
       {
           const having = normalizeFilterComparandTypes(query.having, `aggregate('${object}')`, 'having');
-          assertHavingIsEvaluable(having, aggregatedRowColumns(query.groupBy, query.aggregations));
+          // [#20127] …and each column's class, read off the query and the
+          // object's declaration, so a `{ $field, addDays }` pair is judged by
+          // the rule `FieldReferenceSchema.addDays` declares (two temporal
+          // columns of one class) rather than answered by epoch-ms coercion.
+          assertHavingIsEvaluable(
+              having,
+              aggregatedRowColumns(query.groupBy, query.aggregations),
+              aggregatedRowColumnClasses(
+                  query.groupBy,
+                  query.aggregations,
+                  (this._registry.getObject(object) as { fields?: Record<string, unknown> } | undefined)?.fields,
+              ),
+          );
           if (having !== query.having) query = { ...query, having };
       }
       const driver = this.getDriver(object);
