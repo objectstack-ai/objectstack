@@ -180,6 +180,43 @@ describe('validateFilterTokens', () => {
     ).toEqual([]);
   });
 
+  // [#19791] A list page's `interfaceConfig.filterBy` and a lookup field's
+  // `lookupFilters` reach the engine's `where` verbatim, where the same two
+  // placeholder vocabularies resolve.
+  it('reaches a page filterBy and a lookup field lookupFilters', () => {
+    const findings = validateFilterTokens({
+      objects: [{
+        name: 'invoice',
+        fields: {
+          account: {
+            type: 'lookup',
+            reference: 'account',
+            lookupFilters: [
+              { field: 'owner', operator: 'eq', value: '{current_user}' },
+              { field: 'owner', operator: 'ne', value: '{current_user_id}' },
+            ],
+          },
+        },
+      }],
+      pages: [{
+        name: 'deals',
+        type: 'list',
+        interfaceConfig: {
+          source: 'deal',
+          filterBy: [
+            { field: 'owner', operator: 'equals', value: '{user_id}' },
+            { field: 'created_at', operator: 'greater_than', value: '{30_days_ago}' },
+          ],
+        },
+      }],
+    });
+    expect(findings.map((f) => f.path).sort()).toEqual([
+      'objects[0].fields.account.lookupFilters[0].value',
+      'pages[0].interfaceConfig.filterBy[0].value',
+    ]);
+    for (const f of findings) expect(f.rule).toBe(FILTER_TOKEN_UNKNOWN);
+  });
+
   it('survives a cyclic metadata graph', () => {
     const dash: Record<string, unknown> = { name: 'd', widgets: [] };
     dash.self = dash;
