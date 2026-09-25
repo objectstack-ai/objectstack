@@ -16092,7 +16092,8 @@ export class ObjectQL implements IObjectQLEngine {
               if (aggFilter == null) continue;
               // [#20122] The SHAPE gate `where` takes first on its own seam
               // (`lowerWhereFilterArray`, #20121) — first here too, with its
-              // accept set and its words. A filter that is not a filter object
+              // object test (`isWhereFilterObject`) and its words, minus the
+              // array half (below). A filter that is not a filter object
               // (a string, a number, a boolean, `''`, a `Map`, a `Date`) was
               // stepped around by every door below, each of which walks a filter
               // node's keys, and then dropped: the fork below reads it as "no
@@ -16100,12 +16101,35 @@ export class ObjectQL implements IObjectQLEngine {
               // (`driver-sql`'s native aggregate answered a non-empty string
               // with a 501 instead). The wire door already refuses these shapes
               // through `AggregationNodeSchema`; this closes the in-process one.
-              // An array is left to the doors below, as `where` leaves one to
-              // its array branch.
-              if (!Array.isArray(aggFilter) && !isWhereFilterObject(aggFilter)) {
+              //
+              // An ARRAY is refused too, `[]` included — unlike `where`, which
+              // lowers the condition-array sugar in its array branch. The slot
+              // is declared `FilterConditionSchema` (an object, no array form),
+              // the wire door refuses every array here (`VALIDATION_FAILED`),
+              // and in-process a condition array counted no row (the walker
+              // read its index positions as column names) while `[]` read as
+              // no filter. Same ruling as `having`'s condition check (#20099).
+              if (Array.isArray(aggFilter)) {
+                  let shown: string;
+                  try {
+                      shown = JSON.stringify(aggFilter) ?? String(aggFilter);
+                  } catch {
+                      shown = String(aggFilter);
+                  }
+                  if (shown.length > 80) shown = `${shown.slice(0, 77)}...`;
                   throw invalidFilterError(
-                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object or condition ` +
-                      `array, received ${describeNonFilterWhere(aggFilter)}. It was not applied, and an ` +
+                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object, received ` +
+                      `an array (${shown}). The condition-array form — [field, operator, value] tuples and ` +
+                      `["and", …] groups — is input-only sugar lowered on 'where' alone; a per-aggregation ` +
+                      `filter is declared as a filter condition object and does not take it, so an array here ` +
+                      `was never applied as the filter it spells. Write the object form, ` +
+                      `{ "FIELD": { "$gt": 100 } }, or omit 'filter' for no filter.`,
+                  );
+              }
+              if (!isWhereFilterObject(aggFilter)) {
+                  throw invalidFilterError(
+                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object, ` +
+                      `received ${describeNonFilterWhere(aggFilter)}. It was not applied, and an ` +
                       `unapplied filter would have aggregated every row of each group for that aggregation.`,
                   );
               }

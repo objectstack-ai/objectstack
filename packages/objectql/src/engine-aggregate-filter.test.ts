@@ -542,7 +542,7 @@ describe('[#20122] per-aggregation filter — the shape gate `where` takes: a fi
   for (const [name, filter, received] of SHAPE_REFUSED) {
     it(`${name}: refused before any read, whatever the rows`, async () => {
       const message = await expectFilterRefusal(filter);
-      expect(message).toContain(`aggregate('crm_opportunity'): '${AT}' must be a filter object or condition array, ${received}.`);
+      expect(message).toContain(`aggregate('crm_opportunity'): '${AT}' must be a filter object, ${received}.`);
       expect(message).toContain('It was not applied');
     });
   }
@@ -557,20 +557,23 @@ describe('[#20122] per-aggregation filter — the shape gate `where` takes: a fi
     }
   });
 
-  it('an array is not this gate\'s to refuse, as it is not on `where` — `[]` and a FilterArray answer as before', async () => {
-    // Held, not endorsed: the FilterArray's answer is the walker's reading of an
-    // array (its index keys read as column names, so no row matches) — the
-    // pre-existing reading, left for its own decision; `[]` is the vacuous
-    // filter. What this pins is that the shape gate moves neither.
-    for (const native of [true, false]) {
-      const { driver } = makeCountingDriver(OPPORTUNITIES, native);
-      const engine = await makeEngine(driver);
-      expect(await engine.aggregate('crm_opportunity', withFilter([['amount', '>', 100]]))).toEqual([{ opp_count: 6, picked: 0 }]);
-    }
-    // `[]` is read as no filter and so keeps the native push-down; the stand-in's
-    // native door computes nothing, so it is read on the fallback door here.
-    const { driver } = makeCountingDriver(OPPORTUNITIES, false);
-    const engine = await makeEngine(driver);
-    expect(await engine.aggregate('crm_opportunity', withFilter([]))).toEqual([{ opp_count: 6, picked: 6 }]);
-  });
+  // [#20122, seat ruling A on the array question] An ARRAY is refused too, `[]`
+  // included: the slot is declared `FilterConditionSchema`, which admits no
+  // array form, and the REST door refuses every array there already
+  // (`VALIDATION_FAILED`). Before, in-process, a condition array counted NO row
+  // (the walker read its index positions as column names) and `[]` read as no
+  // filter — neither is what the declaration allows.
+  const ARRAY_REFUSED: ReadonlyArray<readonly [string, () => unknown, string]> = [
+    ['an empty array', () => [], 'received an array ([])'],
+    ['a condition array', () => [['amount', '>', 100]], 'received an array ([["amount",">",100]])'],
+    ['a logical-group array', () => ['and', ['stage', '=', 'closed_won'], ['amount', '>', 100]], 'received an array (["and",'],
+  ];
+
+  for (const [name, filter, received] of ARRAY_REFUSED) {
+    it(`${name}: refused before any read, whatever the rows, naming the object form`, async () => {
+      const message = await expectFilterRefusal(filter);
+      expect(message).toContain(`aggregate('crm_opportunity'): '${AT}' must be a filter object, ${received}`);
+      expect(message).toContain('input-only sugar');
+    });
+  }
 });
