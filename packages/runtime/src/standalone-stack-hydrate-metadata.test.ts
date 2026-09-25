@@ -126,17 +126,6 @@ describe('[#20071] createStandaloneStack declares sys_metadata hydration instead
             environmentId: 'env_from_the_config',
             hydrateMetadataFromDb: true,
         });
-
-        // The declaration is the caller's to make: a boot that says `false`
-        // gets `false`, and nothing about its environment id overrides that.
-        const declaredOff = await createStandaloneStack({
-            databaseUrl: 'memory://issue-20071-off',
-            hydrateMetadataFromDb: false,
-        });
-        expect(hydrationFlag(declaredOff.plugins)).toEqual({
-            environmentId: 'env_from_the_environment',
-            hydrateMetadataFromDb: false,
-        });
     }, BOOT_TIMEOUT);
 
     it('an env-wide object and an env-wide app written at runtime are registered again after a restart on the same database file', async () => {

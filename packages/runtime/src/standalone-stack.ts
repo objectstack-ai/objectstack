@@ -239,40 +239,6 @@ export const StandaloneStackConfigSchema = z.object({
      * boot an operator starts in order to RUN the install.
      */
     runPlatformMigrations: z.boolean().optional(),
-    /**
-     * [#20071] Does this boot read its own `sys_metadata` back into the
-     * registry at start (`ObjectQLPluginOptions.hydrateMetadataFromDb`)?
-     *
-     * Defaults to `true`, and that default is the fix — the same class as
-     * `runPlatformMigrations` right above. `ObjectQLPlugin.start()` deduces "a
-     * per-project kernel whose metadata comes from an artifact or a
-     * control-plane proxy" from `environmentId !== undefined`, and
-     * `createStandaloneStack` below stamps `'env_local'` on every boot. So an
-     * object created and published at runtime (Studio, `PUT /api/v1/meta/*`,
-     * `publish-drafts`) kept its `sys_metadata` row across a restart and was
-     * never registered again: the data API answered `404 OBJECT_NOT_FOUND`
-     * for it.
-     *
-     * The plugin option's own caution — set it ONLY when the kernel's registry
-     * is per-instance isolated AND `sys_metadata` lives on the kernel's own
-     * local driver — holds on this stack clause by clause:
-     *
-     *   - per-instance registry: this stack constructs a fresh `ObjectQLPlugin`
-     *     with no shared `ql`, so its `init()` builds a new `ObjectQL`, and each
-     *     `ObjectQL` owns its `SchemaRegistry`;
-     *   - the kernel's own driver: `sys_metadata` declares no datasource, so it
-     *     routes to the one `default` datasource this stack composes
-     *     (`DefaultDatasourcePlugin` below) — never a control-plane proxy.
-     *
-     * Set `false` only for a boot whose `sys_metadata` is NOT on that driver,
-     * or one that must not see runtime-authored metadata at all. No caller in
-     * this repository does: the one-shot `os migrate *` / `os meta *` funnel
-     * (`bootSchemaStack`) takes the default too, because those commands diff
-     * and scan the object set the serving boot registers, and the hydration
-     * read itself writes nothing (a boot that defers DDL still defers the
-     * tables of what it hydrated).
-     */
-    hydrateMetadataFromDb: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -789,17 +755,40 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // platform tables — say so — and let a read-only one-shot boot turn
         // it off explicitly.
         //
-        // [#20071] `hydrateMetadataFromDb` is the same declaration for the
-        // same reason: `ObjectQLPlugin.start()` gates its `sys_metadata`
-        // hydration on that same stamp, so every self-hosted restart dropped
-        // the objects authored at runtime from the registry while their rows
-        // stayed in the database. A standalone kernel owns its local
-        // `sys_metadata` — see the config field for the plugin's caution,
-        // checked clause by clause.
+        // [#20071] `hydrateMetadataFromDb` is declared here for the same
+        // reason. `ObjectQLPlugin.start()` reads `sys_metadata` back into the
+        // registry only when `environmentId === undefined` or this option is
+        // set, and read the `'env_local'` stamp above as "a per-project kernel
+        // whose metadata comes from an artifact or a control-plane proxy". So
+        // every self-hosted restart dropped the objects authored at runtime
+        // (Studio, `PUT /api/v1/meta/*`, `publish-drafts`) from the registry
+        // while their rows stayed in the database, and the data API answered
+        // `404 OBJECT_NOT_FOUND` for them.
+        //
+        // The option's own caution — set it ONLY when the kernel's registry is
+        // per-instance isolated AND `sys_metadata` lives on the kernel's own
+        // local driver — holds here, clause by clause:
+        //
+        //   - per-instance registry: this function constructs a fresh
+        //     `ObjectQLPlugin` with no shared `ql`, so its `init()` builds a new
+        //     `ObjectQL`, and each `ObjectQL` owns its `SchemaRegistry`;
+        //   - the kernel's own driver: `sys_metadata` declares no datasource,
+        //     so it routes to the one `default` datasource this function
+        //     composes (`defaultDatasourcePlugin` above), and every
+        //     `databaseDriver` kind dispatched above is a direct driver, never
+        //     a control-plane proxy.
+        //
+        // Both facts are properties of THIS function, not of its caller, so no
+        // caller can make either clause false — which is why it is a literal
+        // and not a config field. The one-shot `os migrate *` / `os meta *`
+        // funnel (`bootSchemaStack`) wants it too: those commands diff and scan
+        // the object set the serving boot registers, and the hydration read
+        // writes nothing (a boot that defers DDL still defers the tables of
+        // what it hydrated).
         new ObjectQLPlugin({
             environmentId,
             runPlatformMigrations: cfg.runPlatformMigrations ?? true,
-            hydrateMetadataFromDb: cfg.hydrateMetadataFromDb ?? true,
+            hydrateMetadataFromDb: true,
         }),
     ];
     if (artifactBundle) {

@@ -18,14 +18,17 @@ boot. It logged `Project kernel — skipping sys_metadata hydration (metadata
 sourced from artifact)`, which was false on this composition. This is the same
 deduction that `runPlatformMigrations` was declared out of.
 
-**Fix: a declaration, not a wider deduction.** `createStandaloneStack` gains an
-optional `hydrateMetadataFromDb` config field beside `runPlatformMigrations`,
-defaults it to `true`, and passes it to `ObjectQLPlugin`. The plugin option's
-own caution holds on this stack: the registry is per-instance (a fresh
-`ObjectQL` per plugin), and `sys_metadata` declares no datasource, so it lives
-on the stack's one `default` datasource, never a control-plane proxy. Set
-`hydrateMetadataFromDb: false` only for a boot whose `sys_metadata` is not on
-that driver.
+**Fix: a declaration, not a deduction.** `createStandaloneStack` now declares
+`hydrateMetadataFromDb: true` to `ObjectQLPlugin`, where it used to be deduced
+from the environment-id stamp. The plugin option's own caution holds for every
+boot this function builds, for two reasons:
+
+- the registry is per-instance: the function constructs a fresh
+  `ObjectQLPlugin`, which builds its own `ObjectQL` and `SchemaRegistry`;
+- `sys_metadata` is on the kernel's own driver: it declares no datasource, so it
+  routes to the one `default` datasource the function composes, and every
+  database driver kind the function dispatches is a direct driver, never a
+  control-plane proxy.
 
 What an upgraded install sees at boot:
 
@@ -38,8 +41,8 @@ What an upgraded install sees at boot:
   `[Protocol] [metadata_spec_invalid] …` at `warn`. The same boot also reports
   org-scoped rows of types that are not per-org overridable, on one aggregated
   line. Each line names its remedy;
-- the one-shot `os migrate *` / `os meta *` commands take the default too, so a
-  plan or a scan covers runtime-authored objects the way the serving boot
-  registers them. The read itself writes nothing, and a deferred-DDL boot
+- the one-shot `os migrate *` / `os meta *` commands hydrate too, so a plan or
+  a scan covers runtime-authored objects the way the serving boot registers
+  them. The read itself writes nothing, and a deferred-DDL boot
   (`os migrate plan`, `os migrate duplicates`) still defers the tables of what
   it read.
