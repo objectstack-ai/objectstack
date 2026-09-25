@@ -42,7 +42,7 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 // [ADR-0126 §8] The packaged-action activation ledger: its row contract, its
 // stores and the engine-held projection the dispatch doors consult.
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
-import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
+import { assertListComparandShapes, assertFilterIsMaterializable, invalidFilterError } from './filter-comparand-shape.js';
 import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
@@ -815,6 +815,66 @@ function foldEngineOptionAliases<T extends object | undefined>(
 }
 
 /**
+ * [#20121] Is this non-array `where` a filter OBJECT — the one non-array shape
+ * a driver reads as a predicate?
+ *
+ * The test is the object's built-in tag (`[object Object]`), not its
+ * prototype, and each edge shape lands where its measured answer puts it —
+ * nothing that answered correctly before this gate is refused by it:
+ *
+ * - a literal `{…}` and `{}` (match-all, a REAL query — the unscoped-write
+ *   detector reads it that way too) → accepted;
+ * - `Object.create(null)` and an instance of an author's class with the filter
+ *   on its own keys → accepted: both filtered correctly on `driver-memory` and
+ *   `SqlDriver`, because a driver reads a filter's own enumerable keys;
+ * - `Map`, `Set`, `Date`, a boxed primitive, a `Promise` (an un-awaited filter
+ *   builder) → refused: each carries its tag, has no own keys, and was
+ *   silently read as "no filter".
+ *
+ * `undefined` and `null` never reach this test — the caller skips them, and
+ * both keep meaning "no filter" (`findOne`'s no-predicate guard and the
+ * unscoped-write detector both read `null` as absent).
+ */
+function isWhereFilterObject(where: unknown): where is Record<string, unknown> {
+  return (
+    typeof where === 'object'
+    && where !== null
+    && !Array.isArray(where)
+    && Object.prototype.toString.call(where) === '[object Object]'
+  );
+}
+
+/**
+ * [#20121] How a refused non-filter `where` is named in the refusal: the
+ * primitive's `typeof` plus its value (bounded), or the object's built-in tag.
+ * The `typeof` spelling is the wire door's (`received number`); the value is
+ * added because a direct caller has no request to look at.
+ */
+function describeNonFilterWhere(where: unknown): string {
+  if (typeof where === 'object' && where !== null) {
+    return Object.prototype.toString.call(where).slice('[object '.length, -1);
+  }
+  if (typeof where === 'function') return 'function';
+  const text = typeof where === 'string' ? JSON.stringify(where) : String(where);
+  const bounded = text.length > 80 ? `${text.slice(0, 77)}...` : text;
+  return `${typeof where} ${bounded}`;
+}
+
+/**
+ * [#20121] What a dropped `where` would have done, per verb. The read wording is
+ * the wire door's verbatim; a write has no result set, and "every row in
+ * scope" is what an unapplied predicate on `multi: true` rewrote or removed.
+ */
+const UNAPPLIED_WHERE_CONSEQUENCE: Readonly<Record<string, string>> = {
+  find: 'returned the unfiltered result set',
+  findOne: 'returned the unfiltered result set',
+  count: 'returned the unfiltered result set',
+  aggregate: 'returned the unfiltered result set',
+  update: 'updated every row in scope',
+  delete: 'deleted every row in scope',
+};
+
+/**
  * **Door 2** — lower an arriving {@link FilterArray} on `where` to the
  * `FilterCondition` the AST actually declares (#5158, maintainer ruling C).
  *
@@ -858,6 +918,13 @@ function foldEngineOptionAliases<T extends object | undefined>(
  *    wording, or — for the infix dialect — silently compiled by a second
  *    implementation. Failing here names the caller's own value.
  *
+ * [#20121] A `where` that is not an array has to be a filter OBJECT, and that
+ * is checked FIRST, before any door below: a string, a number, a boolean, a
+ * `Map`, a `Date` — anything that is neither absent, a filter object nor an
+ * array — is refused with the same `INVALID_FILTER` / 400 envelope the array
+ * refusal (3) now carries. See {@link isWhereFilterObject} for the accept set
+ * and why each edge shape lands where it does.
+ *
  * Returns the SAME reference when `where` is not an array (the overwhelmingly
  * common path allocates nothing), otherwise a shallow copy: the bag belongs to
  * the caller and may be reused (view metadata, flow node config).
@@ -870,6 +937,33 @@ function lowerWhereFilterArray<T extends object | undefined>(
 ): T {
   if (!bag) return bag;
   const where = (bag as Record<string, unknown>).where;
+  // [#20121] The SHAPE gate, first on this seam and so first on all six verbs
+  // that call it (`find`, `findOne`, `count`, `aggregate`, `update`,
+  // `delete`) — each calls this before it resolves a driver, so a refusal
+  // here means no driver call is made at all.
+  //
+  // Before it, a string / number / `Map` `where` fell into the object branch
+  // below, every door there stepped around it (they walk the keys of a filter
+  // object, and it has none), and the driver ignored it: the READ answered the
+  // unfiltered set, and a `multi: true` UPDATE or DELETE rewrote or removed
+  // every row of the table (measured on `driver-memory` and `SqlDriver`
+  // without `SecurityPlugin`, and with it under a system context; with an
+  // RLS-scoped caller the RLS `$and` composition put the value where the
+  // driver's node gate refuses it). It also stepped past the unscoped-write
+  // guard (`dispatchUnscopedMultiWriteHooks`), which reads only an absent or
+  // `null` `where` as unscoped.
+  //
+  // The words are the wire door's (`metadata-protocol`'s normalizer answers
+  // `?filter=5` with "must be a filter object or condition array, received
+  // number … It was not applied"); the consequence is spelled per verb,
+  // because for a write it is not a result set.
+  if (where !== undefined && where !== null && !Array.isArray(where) && !isWhereFilterObject(where)) {
+    throw invalidFilterError(
+      `${operation}('${object}'): 'where' must be a filter object or condition array, ` +
+      `received ${describeNonFilterWhere(where)}. It was not applied, and an unapplied filter ` +
+      `would have ${UNAPPLIED_WHERE_CONSEQUENCE[operation] ?? UNAPPLIED_WHERE_CONSEQUENCE.find}.`,
+    );
+  }
   if (!Array.isArray(where)) {
     // [#5869] Door 1 lands HERE, not below: the protocol face runs its own
     // `isFilterAST` → `parseFilterAST` and hands the engine an already-lowered
@@ -930,8 +1024,12 @@ function lowerWhereFilterArray<T extends object | undefined>(
   }
 
   // (3) Not a shape `parseFilterAST` can express.
+  // [#20121] Through `invalidFilterError`, so this refusal carries the
+  // `INVALID_FILTER` / 400 envelope the wire door answers the same array with
+  // (`malformedFilterArrayError`) — it used to be a bare `Error`, `code` and
+  // `status` both `undefined`, a 400-class author error that read as a 500.
   if (!isFilterAST(where)) {
-    throw new Error(
+    throw invalidFilterError(
       `${operation}('${object}') received a 'where' array that is not a filter: ` +
       `${JSON.stringify(where)}. A filter array is a comparison [field, operator, value], ` +
       `a logical node ["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY ` +
