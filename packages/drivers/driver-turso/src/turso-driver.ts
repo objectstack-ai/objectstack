@@ -26,10 +26,16 @@
  * whose url names an in-memory database.
  */
 
-import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
+import {
+  SqlDriver,
+  type IntrospectedSchema,
+  type ManagedDriftEntry,
+  type SqlDriverConfig,
+  type SqlWindowFunctionQuery,
+} from '@objectstack/driver-sql';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import type { DriverOptions } from '@objectstack/spec/data';
+import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
 import {
@@ -587,6 +593,165 @@ function refuseRemoteMediaColumnMove(): never {
   err.status = 501;
   throw err;
 }
+
+// ── Remote inherited members: answered here or refused, never by accident ────
+
+/**
+ * [#20055] The refusal for a `SqlDriver` member the REMOTE face cannot answer,
+ * in the envelope and the shape of {@link refuseRemoteDriftDetection} and
+ * {@link refuseRemoteMediaColumnMove}: the operation, what the caller cannot
+ * have, why this face cannot give it, the 501 rationale, and where the answer
+ * does exist.
+ *
+ * # The defect this closes
+ *
+ * `TursoDriver extends SqlDriver`, so every public member the class does not
+ * redeclare runs the Knex implementation on the remote face too. Remote mode
+ * builds that Knex with no connection (#20054), so those members either
+ * failed with knex's `Unable to acquire a connection`, which reads as a
+ * connectivity fault rather than a capability gap, or answered from state no
+ * remote door fills. Measured on a remote face over a libSQL `file:` client
+ * holding the rows a local control answered from: `introspectSchema()`,
+ * `findWithWindowFunctions()` and `rotateShards()` failed that way;
+ * `explain()` / `analyzeQuery()` resolved with the LOCAL compiler's statement
+ * and an error in place of a plan; `applyMigrationEntries()` resolved with a
+ * destructive entry its caller had allowed reported `skipped`; `getKnex()`
+ * handed out an instance that cannot run a statement. Each member is now
+ * either answered on this face or refused through here, and
+ * {@link REMOTE_FACE_ANSWERS} is the complete list, pinned against
+ * `SqlDriver`'s public members.
+ *
+ * # Route or refuse
+ *
+ * A member with a real remote answer goes to the transport. A member whose
+ * remote answer would need a second copy of a Knex arm (a compiler, or the
+ * SQLite introspection readers) is refused. The reason for each is in its
+ * message and at its override. `NOT_IMPLEMENTED` / 501 is a
+ * {@link StandardErrorCode} member, so there is no new code.
+ */
+function refuseRemoteInheritedMember(
+  operation: string,
+  consequence: string,
+  detail: string,
+  alternative: string,
+): never {
+  const err = new Error(
+    `${operation} is not supported by the Turso REMOTE transport (this datasource's transport ` +
+    `mode is \`remote\`), so ${consequence} ${detail} The call is spelled correctly and ` +
+    '`SqlDriver` declares it, so this is a capability gap of the remote transport rather than a ' +
+    `mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a 400. ${alternative}`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+/** The sentence the Knex-bound refusals below share. */
+const REMOTE_HAS_NO_KNEX_CONNECTION =
+  'Remote mode builds the SQL driver\'s Knex with no connection and sends every statement to the ' +
+  'remote database through the libSQL client instead.';
+
+/** How the REMOTE face answers one public `SqlDriver` member. */
+export type RemoteFaceAnswer =
+  /** `TursoDriver` redeclares it, and its remote arm answers from the remote database or from this face's own state. */
+  | 'remote'
+  /** `TursoDriver` redeclares it, and its remote arm refuses with `NOT_IMPLEMENTED` / 501. */
+  | 'refused'
+  /** Not redeclared: the `SqlDriver` member's answer is already true on this face. Each such row says why. */
+  | 'inherited';
+
+/**
+ * [#20055] Every public member of `SqlDriver`, and how the REMOTE face answers
+ * it. The `satisfies` clause is the pin: `keyof SqlDriver` is exactly the
+ * public instance members, so a member added to `SqlDriver` fails this
+ * package's typecheck and build until its remote answer is decided here. It
+ * cannot reach remote callers by inheritance unnoticed.
+ * `turso-remote-inherited-members.test.ts` holds each row to the code: a
+ * `remote` or `refused` row is redeclared by `TursoDriver`, an `inherited` row
+ * is not, and every row that was inherited before #20055 answers as written.
+ */
+export const REMOTE_FACE_ANSWERS = {
+  // IDataDriver identity and declarations.
+  name: 'remote',
+  version: 'remote',
+  supports: 'remote',
+  // Lifecycle.
+  connect: 'remote',
+  checkHealth: 'remote',
+  disconnect: 'remote',
+  // CRUD, counting and raw execution: the remote transport.
+  find: 'remote',
+  findOne: 'remote',
+  create: 'remote',
+  update: 'remote',
+  upsert: 'remote',
+  delete: 'remote',
+  bulkCreate: 'remote',
+  bulkUpdate: 'remote',
+  bulkDelete: 'remote',
+  updateMany: 'remote',
+  deleteMany: 'remote',
+  count: 'remote',
+  aggregate: 'remote',
+  execute: 'remote',
+  // `SELECT DISTINCT`, compiled by the transport. A tenant-scoped call is
+  // refused: no remote read applies the tenant scope.
+  distinct: 'remote',
+  // Transactions: none on this face (ADR-0119 D1).
+  beginTransaction: 'refused',
+  commit: 'refused',
+  rollback: 'refused',
+  // Deprecated aliases: they call `this.commit` / `this.rollback`, which refuse.
+  commitTransaction: 'inherited',
+  rollbackTransaction: 'inherited',
+  // Knex-only reads.
+  findWithWindowFunctions: 'refused',
+  analyzeQuery: 'refused',
+  // Calls `this.analyzeQuery`, which refuses.
+  explain: 'inherited',
+  introspectSchema: 'refused',
+  getKnex: 'refused',
+  // Schema doors.
+  syncSchema: 'remote',
+  dropTable: 'remote',
+  initObjects: 'remote',
+  // The `PRAGMA incremental_vacuum` the local face issues, sent to the remote
+  // database.
+  reclaimSpace: 'remote',
+  // `false`: no remote schema door rotates, so the lifecycle service takes its
+  // age-based reap instead.
+  supportsRotation: 'remote',
+  rotateShards: 'refused',
+  // In-memory bookkeeping with no Knex; the remote schema doors call it
+  // themselves (`registerRemoteFieldMetadata`).
+  registerExternalObject: 'inherited',
+  // In-memory bookkeeping with no Knex, by its own contract (`skipSchemaSync`).
+  registerObjectMetadata: 'inherited',
+  // Deferred DDL: arming is refused, so nothing is ever deferred here, and the
+  // three inherited members answer that truthfully without reaching Knex.
+  setDeferredDdl: 'refused',
+  deferredSchemaObjectCount: 'inherited',
+  previewDeferredSchemaWork: 'inherited',
+  flushDeferredSchemaDdl: 'inherited',
+  // `{ created: 0, existing: 0 }`: the remote doors count nothing, and both
+  // counts at zero is the `IDataDriver` contract's "cannot say".
+  getSchemaSyncStats: 'inherited',
+  // Drift and migration: every read and write goes through Knex.
+  detectManagedDrift: 'refused',
+  applyMigrationEntries: 'refused',
+  planMediaColumnMove: 'refused',
+  // `false`, the method's own "not taken" answer: only the Knex `initObjects`
+  // asks the resolver, so on this face it would never be asked.
+  setFileColumnsMovedResolver: 'remote',
+  // `false`: remote mode opens no in-memory database.
+  sqliteOpenedEmptyInMemory: 'inherited',
+  // `'sqlite'`: libSQL speaks SQLite, and `execute()` sends what a caller
+  // compiles for it to the remote database.
+  dialectName: 'inherited',
+  // Pure functions of the registries the remote arms read themselves.
+  temporalFilterValue: 'inherited',
+  temporalFilterColumnSql: 'inherited',
+} as const satisfies Record<keyof SqlDriver, RemoteFaceAnswer>;
 
 // ── Remote operation timeout ─────────────────────────────────────────────────
 
@@ -2708,6 +2873,259 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'dropTable');
     if (this.isRemote) return this.remoteTransport!.dropTable(object);
     return super.dropTable(object, options);
+  }
+
+  // ===================================
+  // Inherited SqlDriver members (remote mode overrides)
+  // ===================================
+  //
+  // [#20055] The public `SqlDriver` members this class used to inherit with no
+  // remote arm. {@link REMOTE_FACE_ANSWERS} lists every public member and how
+  // this face answers it; the overrides below are the rows that changed. Each
+  // local and embedded-replica arm is the inherited Knex member, unchanged.
+
+  /**
+   * Distinct values of one field — answered on the REMOTE face by a
+   * `SELECT DISTINCT` the transport compiles ({@link RemoteTransport.compileDistinct}),
+   * with the filter put into storage form by {@link toRemoteFilter} as for
+   * `find()`. After the read it does what `SqlDriver.distinct` does, with the
+   * base's own members: the backend-fault classifier around the execution only,
+   * and the `find()` presentation of each value, deduplicated.
+   *
+   * A tenant-scoped call is refused. `SqlDriver.distinct` puts the tenant scope
+   * on its statement, and no remote read here applies it, so an answer would
+   * list every organization's values for the column. The condition is the
+   * scope's own: a non-empty `tenantId` on an object with a tenant field.
+   */
+  override async distinct(
+    object: string,
+    field: string,
+    filters?: FilterCondition,
+    options?: DriverOptions,
+  ): ReturnType<SqlDriver['distinct']> {
+    this.assertRemoteTransactionUnsupported(options, 'distinct');
+    if (!this.isRemote) return super.distinct(object, field, filters, options);
+    const tenantId = options?.tenantId;
+    if (tenantId !== undefined && tenantId !== null && tenantId !== '' && this.resolveTenantField(object)) {
+      refuseRemoteInheritedMember(
+        'A tenant-scoped `distinct()`',
+        'this driver cannot list only the values one organization may read.',
+        'The remote arm of `distinct()` sends its statement through the libSQL client and does not ' +
+          'apply the SQL driver\'s tenant scope (`options.tenantId` on an object with a tenant ' +
+          'column), so an answer would list every organization\'s values for this column.',
+        'The same call without `tenantId`, or on an object with no tenant column, is answered on ' +
+          'this face. Use the local or embedded-replica transport for a tenant-scoped one.',
+      );
+    }
+    // Compiled outside the classifier, so a filter refusal keeps its envelope.
+    const { sql, args } = this.remoteTransport!.compileDistinct(object, field, this.toRemoteFilter(object, filters));
+    let rows: unknown;
+    try {
+      rows = await this.remoteTransport!.execute(sql, args);
+    } catch (error) {
+      throw this.distinctBackendFault(object, field, error, filters);
+    }
+    const values = (rows as Array<Record<string, unknown>>).map((row) => row[field]);
+    const kind = this.readPresentationKind(object, field);
+    if (!kind) return values;
+    return [...new Set(values.map((value) => this.presentReadValue(kind, value)))];
+  }
+
+  /**
+   * Window-function reads — refused on the REMOTE face. The door compiles
+   * through the Knex query builder (`buildWindowFunction` included) and runs on
+   * the Knex connection, and the transport's compiler has no window syntax, so
+   * a remote answer would be a second window-function compiler.
+   */
+  override async findWithWindowFunctions(
+    object: string,
+    query: SqlWindowFunctionQuery,
+    options?: DriverOptions,
+  ): ReturnType<SqlDriver['findWithWindowFunctions']> {
+    if (this.isRemote) {
+      refuseRemoteInheritedMember(
+        'A window-function read (`findWithWindowFunctions()`)',
+        'this driver cannot compute windowed rows over the remote database.',
+        `The window door compiles its query with the SQL driver's Knex query builder and runs it on the ` +
+          `Knex connection. ${REMOTE_HAS_NO_KNEX_CONNECTION} The remote transport's own compiler has ` +
+          'no window-function syntax.',
+        'Use the local or embedded-replica transport for window-function reads, or read the rows ' +
+          'with `find()` and compute the window in the caller.',
+      );
+    }
+    return super.findWithWindowFunctions(object, query, options);
+  }
+
+  /**
+   * Query plans — refused on the REMOTE face, and `explain()` with it (the
+   * base `explain()` calls this). The inherited member compiles the query with
+   * the Knex builder and runs `EXPLAIN QUERY PLAN` on the Knex connection. It
+   * resolved here with that statement and an error in place of a plan, and the
+   * statement was not the one this face runs: remote reads are compiled by
+   * `RemoteTransport`. A remote plan would need the transport to hand out its
+   * compiled statement, and neither door has a caller in this repository.
+   */
+  override async analyzeQuery(
+    object: string,
+    query: DriverQuery,
+    options?: DriverOptions,
+  ): ReturnType<SqlDriver['analyzeQuery']> {
+    if (this.isRemote) {
+      refuseRemoteInheritedMember(
+        'Query plan analysis (`explain()` / `analyzeQuery()`)',
+        'this driver cannot show the plan of a statement it runs against the remote database.',
+        'The plan is read by compiling the query with the SQL driver\'s Knex query builder and running ' +
+          `\`EXPLAIN QUERY PLAN\` on the Knex connection. ${REMOTE_HAS_NO_KNEX_CONNECTION} The ` +
+          'statement that builder compiles is also not the one this face runs, because remote reads ' +
+          'are compiled by the remote transport.',
+        'To read a plan, run the query against the local or embedded-replica transport over a copy ' +
+          'of this database.',
+      );
+    }
+    return super.analyzeQuery(object, query, options);
+  }
+
+  /**
+   * Schema introspection — refused on the REMOTE face. The inherited member
+   * reads every table's columns, foreign keys, primary keys and unique
+   * constraints through Knex (`columnInfo()` and the SQLite pragmas), so a
+   * remote answer would be a second copy of those four readers, the copy
+   * {@link refuseRemoteDriftDetection} declines for drift. Its callers already
+   * treat a throw as "could not introspect": the datasource connection test
+   * answers `ok: false` with this message, and the federation validation sweep
+   * rows the datasource `unreachable`.
+   */
+  override async introspectSchema(): Promise<IntrospectedSchema> {
+    if (this.isRemote) {
+      refuseRemoteInheritedMember(
+        'Schema introspection (`introspectSchema()`)',
+        'this driver cannot list the tables and columns the remote database holds.',
+        'Introspection reads the physical schema through the SQL driver\'s Knex connection. ' +
+          `${REMOTE_HAS_NO_KNEX_CONNECTION} The call used to fail with knex's "Unable to acquire a ` +
+          'connection", which reads as a connectivity fault; the remote database was never asked.',
+        'To introspect this database, point a datasource at a local SQLite copy of it (a `file:` URL) ' +
+          'or at an embedded replica (a `file:` URL with `syncUrl`); both read the physical schema.',
+      );
+    }
+    return super.introspectSchema();
+  }
+
+  /**
+   * The Knex instance — refused on the REMOTE face, where it has no connection:
+   * a statement run on it failed with knex's `Unable to acquire a connection`.
+   * `execute()` and {@link getLibsqlClient} are this face's raw doors.
+   */
+  override getKnex(): ReturnType<SqlDriver['getKnex']> {
+    if (this.isRemote) {
+      refuseRemoteInheritedMember(
+        'Handing out the Knex instance (`getKnex()`)',
+        'there is no connected Knex instance to give.',
+        `${REMOTE_HAS_NO_KNEX_CONNECTION} A statement run on the instance this used to return failed ` +
+          'with knex\'s "Unable to acquire a connection", which reads as a connectivity fault.',
+        'Run raw statements through `execute()`, which this face sends to the remote database, or use ' +
+          'the libSQL client itself through `getLibsqlClient()`.',
+      );
+    }
+    return super.getKnex();
+  }
+
+  /**
+   * Reclaim free pages — answered on the REMOTE face with the statement the
+   * local face issues, `PRAGMA incremental_vacuum`, sent to the remote database
+   * through the raw door's envelope (`DATABASE_ERROR` / 500 if the server
+   * refuses it). As on a local file, it returns pages only on a database whose
+   * `auto_vacuum` is `INCREMENTAL`; the remote face does not set that mode at
+   * connect, the local face does.
+   */
+  override async reclaimSpace(options?: DriverOptions): Promise<void> {
+    this.assertRemoteTransactionUnsupported(options, 'reclaimSpace');
+    if (this.isRemote) {
+      const statement = 'PRAGMA incremental_vacuum';
+      try {
+        await this.remoteTransport!.execute(statement);
+      } catch (error) {
+        throw this.rawStatementFault(statement, error);
+      }
+      return;
+    }
+    return super.reclaimSpace(options);
+  }
+
+  /**
+   * `false` on the REMOTE face: the ADR-0057 Rotator creates, adopts and drops
+   * shard tables through Knex, and remote schema sync builds a plain table for
+   * an object declaring rotation. The lifecycle service reads this bit, and on
+   * `false` it enforces the same `shards × unit` window with an age-based reap,
+   * the path it keeps for a driver that cannot shard. It used to read `true`
+   * here (the base answers from the SQLite dialect), so the service called
+   * {@link rotateShards}, which failed, and the window went unenforced.
+   */
+  override get supportsRotation(): boolean {
+    return !this.isRemote && super.supportsRotation;
+  }
+
+  /**
+   * The ADR-0057 Rotator — refused on the REMOTE face, for the reason
+   * {@link supportsRotation} gives. The parameter repeats the base's declared
+   * shape key for key (`check:object-def-param-keys` arm C).
+   */
+  override async rotateShards(
+    objectDef: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any },
+    nowMs?: number,
+  ): ReturnType<SqlDriver['rotateShards']> {
+    if (this.isRemote) {
+      refuseRemoteInheritedMember(
+        'Data-lifecycle shard rotation (`rotateShards()`)',
+        'this driver cannot create, adopt or drop the time-sharded tables of an object that declares ' +
+          'a rotation storage policy.',
+        `Rotation issues its DDL through the SQL driver's Knex connection. ${REMOTE_HAS_NO_KNEX_CONNECTION} ` +
+          'Remote schema sync creates a plain table for such an object, and this face reports ' +
+          '`supportsRotation: false`, so the lifecycle service enforces the same retention window ' +
+          'with an age-based reap instead of calling this.',
+        'Use the local or embedded-replica transport where physical rotation is wanted.',
+      );
+    }
+    return super.rotateShards(objectDef, nowMs);
+  }
+
+  /**
+   * Apply drift entries — refused on the REMOTE face. Every entry is applied
+   * through Knex. The inherited member resolved here, reporting a destructive
+   * entry its caller had allowed as `skipped` (its SQLite rebuild caught the
+   * connection failure), so the answer read like a policy decision. The entries
+   * come from {@link detectManagedDrift}, which this face refuses too. The
+   * option parameter repeats the base's declared shape (`check:object-def-param-keys`).
+   */
+  override async applyMigrationEntries(
+    entries: ManagedDriftEntry[],
+    opts: { allowDestructive?: boolean } = {},
+  ): ReturnType<SqlDriver['applyMigrationEntries']> {
+    if (this.isRemote) {
+      refuseRemoteInheritedMember(
+        'Applying schema migration entries (`applyMigrationEntries()`)',
+        'this driver cannot change the physical schema of the remote database from a drift report.',
+        `The entries are applied through the SQL driver's Knex connection. ${REMOTE_HAS_NO_KNEX_CONNECTION} ` +
+          'Until this change the call answered as if it had run, with every entry reported ' +
+          '`skipped`, including a destructive entry that `allowDestructive` permitted.',
+        'An ordinary boot against this datasource (`os serve` / `os start`) performs the additive ' +
+          'schema sync directly. A change that needs a table rebuild or a dropped column has no ' +
+          'remote path in this driver.',
+      );
+    }
+    return super.applyMigrationEntries(entries, opts);
+  }
+
+  /**
+   * `false` on the REMOTE face, the member's own "not taken" answer. Only the
+   * Knex `initObjects` asks the ADR-0104 resolver, and no remote schema door
+   * reaches it, so on this face the resolver would be kept and never asked:
+   * this driver writes media columns in the JSON encoding whatever it would
+   * answer (`turso-remote-media-column-move-refusal.test.ts`). The member used
+   * to answer `true` here, telling the caller the resolver was installed.
+   */
+  override setFileColumnsMovedResolver(resolve: () => boolean | Promise<boolean>): boolean {
+    if (this.isRemote) return false;
+    return super.setFileColumnsMovedResolver(resolve);
   }
 
   // ===================================
