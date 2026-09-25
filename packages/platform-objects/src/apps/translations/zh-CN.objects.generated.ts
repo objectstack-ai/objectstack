@@ -407,6 +407,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "身份链接 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：提供方及其签发的账号 ID（读取时计算）"
+      },
       created_at: {
         label: "创建时间"
       },
@@ -498,6 +502,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "验证记录 ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：正在验证的标识符（读取时计算）"
       },
       created_at: {
         label: "创建时间"
@@ -606,6 +614,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "成员 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：成员，以及已记录时的角色（读取时计算）"
+      },
       created_at: {
         label: "创建时间"
       },
@@ -667,6 +679,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "邀请 ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：受邀的电子邮件地址（读取时计算）"
       },
       created_at: {
         label: "创建时间"
@@ -815,6 +831,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "团队成员 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：用户及其所在团队（读取时计算）"
+      },
       created_at: {
         label: "创建时间"
       },
@@ -932,6 +952,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "成员 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：用户及其被分配到的业务单元（读取时计算）"
+      },
       business_unit_id: {
         label: "业务单元"
       },
@@ -1048,6 +1072,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "双因素认证 ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：该凭据所属的用户（读取时计算）"
       },
       created_at: {
         label: "创建时间"
@@ -2091,6 +2119,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：预配的用户及其所在组（读取时计算）"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：投射的角色及被授予该角色的用户（读取时计算）"
       },
       connection_id: {
         label: "Connection ID"

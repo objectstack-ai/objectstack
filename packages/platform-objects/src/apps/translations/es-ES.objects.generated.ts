@@ -407,6 +407,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de cuenta de autenticación"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el proveedor y el ID de cuenta que emitió (calculado al leer)"
+      },
       created_at: {
         label: "Creado el"
       },
@@ -498,6 +502,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID de verificación"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el identificador que se verifica (calculado al leer)"
       },
       created_at: {
         label: "Creado el"
@@ -606,6 +614,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de miembro"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el miembro y, si consta, su rol (calculado al leer)"
+      },
       created_at: {
         label: "Creado el"
       },
@@ -667,6 +679,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID de invitación"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: la dirección de correo electrónico invitada (calculado al leer)"
       },
       created_at: {
         label: "Creado el"
@@ -815,6 +831,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de miembro del equipo"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario y el equipo (calculado al leer)"
+      },
       created_at: {
         label: "Creado el"
       },
@@ -932,6 +952,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de miembro"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario y la unidad de negocio a la que está asignado (calculado al leer)"
+      },
       business_unit_id: {
         label: "Unidad de negocio"
       },
@@ -1048,6 +1072,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID de doble factor"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario al que pertenece la credencial (calculado al leer)"
       },
       created_at: {
         label: "Creado el"
@@ -2091,6 +2119,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario aprovisionado y el grupo (calculado al leer)"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el rol proyectado y el usuario al que se concede (calculado al leer)"
       },
       connection_id: {
         label: "Connection ID"

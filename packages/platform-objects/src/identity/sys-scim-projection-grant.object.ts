@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec/shared';
 
 /**
  * sys_scim_projection_grant — Role/entitlement grants projected from SCIM
@@ -30,6 +31,18 @@ export const SysScimProjectionGrant = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Role/entitlement grants projected onto platform users by SCIM provisioning',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // columns `titleFormat` names. With no pointer declared, the registry's
+  // designate-only pass stamped `nameField: 'id'` (the first title-eligible
+  // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
+  // wins over `titleFormat`) drew the raw id as the record page's H1.
+  // `titleFormat` stays for renderers that still read it first;
+  // `identity-display-title.test.ts` holds the two to the same text.
+  // `user_id` is a lookup, so the formula reads its stored id: a formula
+  // is evaluated on the stored row, before `$expand`, and cannot reach the
+  // related record's own title.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{role} → {user_id}',
   highlightFields: ['role', 'source_kind', 'user_id', 'connection_id'],
 
@@ -47,6 +60,17 @@ export const SysScimProjectionGrant = ObjectSchema.create({
 
   fields: {
     id: Field.text({ label: 'ID', required: true, readonly: true, group: 'System' }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. Every source column is required, so the
+    // expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.role + ' → ' + record.user_id`,
+      description: 'Record title: the projected role and the user it is granted to (computed on read)',
+      group: 'Grant',
+    }),
 
     connection_id: Field.text({
       label: 'Connection ID',

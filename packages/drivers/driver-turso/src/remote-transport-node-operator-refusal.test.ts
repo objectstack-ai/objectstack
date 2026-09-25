@@ -107,6 +107,43 @@ async function refusalOf(where: unknown): Promise<WireBearingError> {
   throw new Error(`expected the transport to refuse ${JSON.stringify(where)}, but it compiled`);
 }
 
+/**
+ * [#20039] The same refusal for a `where` marked author-written — a shallow
+ * copy, so a shared case constant stays unmarked. The key, its position and
+ * which of the two tails applies are the predicate's detail, named on the wire
+ * only for a predicate the caller is known to have written (the #8220
+ * contract), as a read-scope merge boundary marks a caller's own. The withheld
+ * half is pinned in `remote-transport-compile-refusal-seam.test.ts`.
+ */
+async function ownRefusalOf(where: unknown): Promise<WireBearingError> {
+  return refusalOf(markFilterSubtreeProvenance({ ...(where as object) }, 'author'));
+}
+
+/**
+ * [#20039] The same, with the diagnostic sink read too. Inside `$not` this
+ * transport compiles the operand as a REWRITE (the NULL-safe totalisation), and
+ * the provenance resolver cannot find a rewritten node under the query's root —
+ * so a refusal raised there resolves ambiguous and is withheld even for an
+ * author-marked `where`: fail-closed by construction, the rule `driver-sql`
+ * documents for its own `$not` rewrite. The naming half is then the sink's.
+ */
+async function ownRefusalAndSinkOf(where: unknown): Promise<{ err: WireBearingError; sink: string }> {
+  const sink: string[] = [];
+  const t = new RemoteTransport();
+  const execute = vi.fn(async () => ({ rows: [], columns: [] }));
+  t.setClient({ execute, close: vi.fn() } as any);
+  t.setDiagnosticSink((m) => sink.push(m));
+  try {
+    await t.find('deal', {
+      where: markFilterSubtreeProvenance({ ...(where as object) }, 'author'),
+    } as unknown as QueryAST);
+  } catch (e) {
+    expect(execute, 'a refused filter must not execute a statement').not.toHaveBeenCalled();
+    return { err: e as WireBearingError, sink: sink.join('\n') };
+  }
+  throw new Error(`expected the transport to refuse ${JSON.stringify(where)}, but it compiled`);
+}
+
 const BARE_SCAN = 'SELECT * FROM "deal"';
 
 /**
@@ -181,12 +218,14 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
   describe('(a) undeclared combinators', () => {
     for (const [label, where, key, path] of UNDECLARED) {
       it(`refuses ${label} with INVALID_FILTER / 400`, async () => {
-        const err = await refusalOf(where);
+        const { err, sink } = await ownRefusalAndSinkOf(where);
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
-        // The caller must be able to see WHICH key, and WHERE.
-        expect(err.message).toContain(`"${key}"`);
-        expect(err.message).toContain(path);
+        // The caller must be able to see WHICH key, and WHERE — [#20039] on the
+        // wire for an author, except under `$not`, where the sink carries it.
+        const named = path.includes('.$not') ? sink : err.message;
+        expect(named).toContain(`"${key}"`);
+        expect(named).toContain(path);
         expect(err.message).toContain('$and, $or and $not');
         // Named as a combinator, never as a field of the object.
         expect(err.message).not.toContain(`'deal.${key}'`);
@@ -194,7 +233,7 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
     }
 
     it('says the protocol has no such key at any level, and names the write cost', async () => {
-      const err = await refusalOf({ $where: 'return true' });
+      const err = await ownRefusalOf({ $where: 'return true' });
       expect(err.message).toMatch(/declares no "\$where" at any level/);
       expect(err.message).toMatch(/deleteMany\/updateMany/);
     });
@@ -203,7 +242,7 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
   describe('(b) field operators one level too high', () => {
     for (const [label, where, key] of MISPLACED) {
       it(`refuses a node-position ${label} and points at the field spelling`, async () => {
-        const err = await refusalOf(where);
+        const err = await ownRefusalOf(where);
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         expect(err.message).toContain(`"${key}"`);
@@ -232,7 +271,7 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
      * at the malformed sibling. Pre-fix this compiled BOTH and answered `[]`.
      */
     it('refuses a malformed disjunct beside a satisfiable one', async () => {
-      const err = await refusalOf({ $or: [{ stage: 'won' }, { $where: 'x' }] });
+      const err = await ownRefusalOf({ $or: [{ stage: 'won' }, { $where: 'x' }] });
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('where.$or[1].$where');
     });
@@ -244,14 +283,14 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
      * WHERE at all.
      */
     it('refuses a malformed disjunct beside the TRUE identity `{}`', async () => {
-      const err = await refusalOf({ $or: [{}, { $nor: [{ stage: 'won' }] }] });
+      const err = await ownRefusalOf({ $or: [{}, { $nor: [{ stage: 'won' }] }] });
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('where.$or[1].$nor');
     });
 
     /** `$and: []` / `$and: [{}]` resolve to TRUE the same way. */
     it('refuses a malformed conjunct beside a vacuous one', async () => {
-      const err = await refusalOf({ $and: [{}, { $expr: 1 }] });
+      const err = await ownRefusalOf({ $and: [{}, { $expr: 1 }] });
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('where.$and[1].$expr');
     });
@@ -289,7 +328,7 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
       // `$not` takes ONE condition rather than a list, so it is shaped one level
       // down in `buildSubFilterSQL`. Two spellings for one condition is what
       // this file exists to prevent, so the boundary is pinned.
-      const err = await refusalOf({ $not: 'won' });
+      const err = await ownRefusalOf({ $not: 'won' });
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toMatch(/\$not on 'deal' is a string/);
       expect(err.message).not.toContain('requires an array of filter conditions');
@@ -297,31 +336,35 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
   });
 
   describe('(e) every WHERE-building entry point refuses, and executes nothing', () => {
-    const PROBE = { $where: 'return true' };
+    // [#20039] Author-written, one fresh object per call: the full text below
+    // is what every entry point's `buildWhereSQL` seam gives back ONLY for a
+    // vouched `where`, so these pins also hold that each entry point resolves
+    // the mark rather than merely refusing.
+    const probe = () => markFilterSubtreeProvenance({ $where: 'return true' }, 'author');
 
     it('find / findOne / count / aggregate', async () => {
       const { t, calls } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: PROBE } as unknown as QueryAST)).rejects.toThrow(
+      await expect(t.find('deal', { where: probe() } as unknown as QueryAST)).rejects.toThrow(
         /Unsupported filter combinator "\$where"/,
       );
-      await expect(t.findOne('deal', { where: PROBE } as unknown as QueryAST)).rejects.toThrow(
+      await expect(t.findOne('deal', { where: probe() } as unknown as QueryAST)).rejects.toThrow(
         /Unsupported filter combinator "\$where"/,
       );
-      await expect(t.count('deal', { where: PROBE } as unknown as QueryAST)).rejects.toThrow(
+      await expect(t.count('deal', { where: probe() } as unknown as QueryAST)).rejects.toThrow(
         /Unsupported filter combinator "\$where"/,
       );
       await expect(
-        t.aggregate('deal', { where: PROBE, aggregations: [{ function: 'count' }] } as unknown as QueryAST),
+        t.aggregate('deal', { where: probe(), aggregations: [{ function: 'count' }] } as unknown as QueryAST),
       ).rejects.toThrow(/Unsupported filter combinator "\$where"/);
       expect(calls).toEqual([]);
     });
 
     it('deleteMany / updateMany — the paths where the old answer WROTE', async () => {
       const { t, calls } = transportWithCapturingClient();
-      await expect(t.deleteMany('deal', { where: PROBE } as any)).rejects.toThrow(
+      await expect(t.deleteMany('deal', { where: probe() } as any)).rejects.toThrow(
         /Unsupported filter combinator "\$where"/,
       );
-      await expect(t.updateMany('deal', { where: PROBE } as any, { stage: 'lost' })).rejects.toThrow(
+      await expect(t.updateMany('deal', { where: probe() } as any, { stage: 'lost' })).rejects.toThrow(
         /Unsupported filter combinator "\$where"/,
       );
       expect(calls).toEqual([]);
@@ -399,8 +442,9 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
     });
 
     it('a non-node sub-filter is still #1073 / #1076`s message', async () => {
-      expect((await refusalOf({ $or: [null] })).message).toMatch(/\$or\[0\] on 'deal' is null/);
-      expect((await refusalOf({ $not: 'won' })).message).toMatch(/\$not on 'deal' is a string/);
+      // [#20039] Author-written: the position and the kind are named only then.
+      expect((await ownRefusalOf({ $or: [null] })).message).toMatch(/\$or\[0\] on 'deal' is null/);
+      expect((await ownRefusalOf({ $not: 'won' })).message).toMatch(/\$not on 'deal' is a string/);
     });
 
     it('a non-node top-level where is still #1075`s message', async () => {

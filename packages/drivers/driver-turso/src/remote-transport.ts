@@ -822,6 +822,17 @@ function nonBooleanFlagWithheldMessage(op: '$null' | '$exists'): string {
   );
 }
 
+/**
+ * [#20039] The node a refusal hands the entry seam: the comparand when it is an
+ * object (the deepest node the throw site holds, findable under the `where`
+ * root by identity), otherwise `enclosing` — the operator map, list or node a
+ * primitive inherits its provenance from, since a primitive cannot carry a
+ * mark. `driver-sql`'s `refusalSubtree`, one package over.
+ */
+function refusalNode(comparand: unknown, enclosing: unknown): unknown {
+  return comparand !== null && typeof comparand === 'object' ? comparand : enclosing;
+}
+
 function withheldInvalidFilterError(
   message: string,
   diagnostic: string,
@@ -2734,6 +2745,7 @@ export class RemoteTransport {
     // compiles its legacy INFIX array form; on this transport that form now
     // says so out loud instead of answering a different question.
     if (!isFilterNode(filters)) {
+      // [#20039] `filters` IS the `where` root, so its own mark is its verdict.
       throw this.uncompilableWhere(object, filters);
     }
 
@@ -2811,7 +2823,8 @@ export class RemoteTransport {
       // exactly that are in `remote-transport-node-operator-refusal.test.ts`.
       if (key.startsWith('$')) {
         if (!NODE_COMBINATORS.has(key)) {
-          throw this.undeclaredCombinator(object, key, `${path}.${key}`);
+          // [#20039] `filters` — the node CARRYING the key — decides.
+          throw this.undeclaredCombinator(object, key, `${path}.${key}`, filters);
         }
         // The three declared names still have to carry the shape they are
         // declared with. `{ $and: 'x' }` fell through the `Array.isArray` tests
@@ -2827,7 +2840,7 @@ export class RemoteTransport {
         const subClauses: string[] = [];
         const subArgs: any[] = [];
         for (const [index, sub] of value.entries()) {
-          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path);
+          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path, value);
           // A TRUE conjunct is AND's identity element: `x AND TRUE ≡ x`, so
           // dropping it loses nothing. This is the ONE direction the old
           // "skip whatever compiled to nothing" rule happened to get right.
@@ -2851,7 +2864,7 @@ export class RemoteTransport {
         // truth value — which is the asymmetry #1073 is about.
         let hasTrueDisjunct = false;
         for (const [index, sub] of value.entries()) {
-          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path);
+          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path, value);
           if (!sc) {
             hasTrueDisjunct = true;
             continue;
@@ -2915,7 +2928,7 @@ export class RemoteTransport {
         // refusal keeps naming the shape that was sent (the branch above has no
         // `isFilterNode` guard for precisely that reason).
         const operand = isFilterNode(value) ? nullSafeNegationOperand(value) : value;
-        const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, null, operand, path);
+        const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, null, operand, path, filters);
         if (sc) {
           clauses.push(`NOT (${sc})`);
           args.push(...sa);
@@ -3037,7 +3050,8 @@ export class RemoteTransport {
             // fold is applied to BOTH operands (see {@link pushLike}).
             case '$icontains': {
               if (typeof opValue !== 'string' || opValue === '') {
-                throw this.icontainsComparand(object, key, opValue);
+                // [#20039] The comparand when it is an object, else the operator map.
+                throw this.icontainsComparand(object, key, opValue, refusalNode(opValue, value));
               }
               const bind = this.serializeComparand(object, key, op, opValue);
               if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
@@ -3076,10 +3090,10 @@ export class RemoteTransport {
             case '$like':
             case '$ilike': {
               if (typeof opValue !== 'string') {
-                throw this.likePatternComparand(object, key, op, opValue);
+                throw this.likePatternComparand(object, key, op, opValue, refusalNode(opValue, value));
               }
               if (hasDanglingLikeEscape(opValue)) {
-                throw this.danglingLikeEscape(object, key, op, opValue);
+                throw this.danglingLikeEscape(object, key, op, opValue, value);
               }
               if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
               this.pushLikePattern(clauses, args, column, opValue, op === '$ilike');
@@ -3160,6 +3174,7 @@ export class RemoteTransport {
           }
         }
         if (clauses.length === clausesBefore) {
+          // [#20039] `value` — the empty operator map — is an object, markable.
           throw this.emptyFieldFilter(object, key, value);
         }
       } else if (value === null) {
@@ -3390,8 +3405,24 @@ export class RemoteTransport {
    * whose `[` OPENS a GLOB character class, so the query would run a pattern the
    * caller never wrote instead of merely comparing text they never wrote.
    */
-  private likePatternComparand(object: string, field: string, op: string, value: unknown): Error {
-    return invalidFilterError(
+  private likePatternComparand(
+    object: string,
+    field: string,
+    op: string,
+    value: unknown,
+    subtree?: unknown,
+  ): Error {
+    // [#20039, the #8220 contract] Which of the two pattern operators it was,
+    // the target and the comparand are the predicate's. `driver-sql`'s withheld
+    // sentence behind this file's prefix.
+    return this.withheldRefusal(
+      '[RemoteTransport] A pattern operator ("$like" / "$ilike") in this filter requires a string ' +
+        'comparand. It takes a PATTERN — "%" matches any sequence, "_" matches one character, and a ' +
+        'backslash escapes either — so a non-string comparand cannot be coerced without inventing ' +
+        'wildcards the caller never wrote. For a literal substring search write "$contains", whose ' +
+        'comparand IS text. Which operator it was, the field it was aimed at and the value it ' +
+        'received are withheld from the message; the full diagnostic is in the server log.',
+      subtree,
       `[RemoteTransport] Operator "${op}" on '${object}.${field}' requires a string comparand. ` +
         `Received ${typeof value} (${preview(value)}). "${op}" takes a PATTERN — "%" matches any ` +
         `sequence, "_" matches one character, a backslash escapes either — so a non-string ` +
@@ -3408,8 +3439,23 @@ export class RemoteTransport {
    * all). `hasDanglingLikeEscape` is the spec's shared test, so this transport
    * refuses the same patterns as its local twin and the JS faces.
    */
-  private danglingLikeEscape(object: string, field: string, op: string, pattern: string): Error {
-    return invalidFilterError(
+  private danglingLikeEscape(
+    object: string,
+    field: string,
+    op: string,
+    pattern: string,
+    subtree?: unknown,
+  ): Error {
+    // [#20039, the #8220 contract] The pattern is the predicate's literal.
+    return this.withheldRefusal(
+      '[RemoteTransport] A pattern operator ("$like" / "$ilike") in this filter has a pattern ' +
+        'ending in a lone unpaired backslash. A backslash escapes the character after it, so a ' +
+        'trailing one escapes nothing and the backends disagree about what it means — Postgres ' +
+        'rejects the pattern outright, SQLite\'s GLOB has no escape character to reject. Write ' +
+        '"\\\\\\\\" to match a literal backslash, or drop the trailing one. Which operator it was, the ' +
+        'field it was aimed at and the pattern are withheld from the message; the full diagnostic is ' +
+        'in the server log.',
+      subtree,
       `[RemoteTransport] Operator "${op}" on '${object}.${field}' has a pattern ending in a lone ` +
         `unpaired backslash (${JSON.stringify(pattern)}). A backslash escapes the character after ` +
         `it, so a trailing one escapes nothing and the backends disagree about what it means. ` +
@@ -3549,9 +3595,19 @@ export class RemoteTransport {
    * the four operators whose comparand rules #1058 already settled; adding a
    * fifth rule inside it would make one method answer two different questions.
    */
-  private icontainsComparand(object: string, field: string, value: unknown): Error {
+  private icontainsComparand(object: string, field: string, value: unknown, subtree?: unknown): Error {
     const shown = typeof value === 'string' ? 'the empty string' : describeValue(value);
-    return invalidFilterError(
+    // [#20039, the #8220 contract] The target and the comparand are the
+    // predicate's; the operator is the class. `driver-sql`'s withheld sentence
+    // behind this file's prefix.
+    return this.withheldRefusal(
+      '[RemoteTransport] Operator "$icontains" in this filter requires a NON-EMPTY string ' +
+        'comparand. "$icontains" is a case-insensitive LITERAL substring search, so its comparand is ' +
+        'the text to look for — an empty one matches every row (a predicate that constrains ' +
+        'nothing), and a non-string one would have to be coerced into text this query never asked ' +
+        'for. The field it was aimed at and the value it received are withheld from the message; ' +
+        'the full diagnostic is in the server log.',
+      subtree,
       `[RemoteTransport] Operator "$icontains" on '${object}.${field}' requires a NON-EMPTY string ` +
         `comparand. Received ${shown} (${preview(value)}). "$icontains" is a case-insensitive ` +
         `LITERAL substring search, so its comparand is the text to look for: an empty one matches ` +
@@ -3650,7 +3706,17 @@ export class RemoteTransport {
       );
     }
     if (op === '$between') {
-      return invalidFilterError(
+      // [#20039, the #8220 contract] Unreachable through `TursoDriver`, which
+      // lowers every `$between` before this transport sees it — and withheld
+      // all the same, so that EVERY refusal `buildWhereSQL` can raise goes
+      // through the seam and the enumeration pin has no exception to carry.
+      return this.withheldRefusal(
+        '[RemoteTransport] A $between in this filter must be lowered to $gte/$lte before it reaches ' +
+          'the transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound ' +
+          'rule is applied exactly once. Refusing rather than compiling a second, rule-free range. ' +
+          'The field it was aimed at is withheld from the message; the full diagnostic is in the ' +
+          'server log.',
+        subtree,
         `[RemoteTransport] $between on ${target} must be lowered to $gte/$lte before it reaches the ` +
           `transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound rule is ` +
           `applied exactly once (#1003). Refusing rather than compiling a second, rule-free range.`,
@@ -3710,7 +3776,7 @@ export class RemoteTransport {
    * distinction — see {@link MISPLACED_FIELD_OPERATORS} for why it must stay
    * that way.
    */
-  private undeclaredCombinator(object: string, key: string, path: string): Error {
+  private undeclaredCombinator(object: string, key: string, path: string, subtree?: unknown): Error {
     const shared =
       `[RemoteTransport] Unsupported filter combinator "${key}" at ${path} on '${object}'. A filter ` +
       `node's $-prefixed keys are the declared logical operators $and, $or and $not ` +
@@ -3719,14 +3785,29 @@ export class RemoteTransport {
       `degrades a double-quoted name that matches no column into a string literal, so the statement ` +
       `compiled, ran and matched nothing, and a caller could not tell "no rows matched" from "the ` +
       `filter never compiled"`;
+    // [#20039, the #8220 contract] The key and its position are the predicate's,
+    // and so is which of the two tails applies (it says whether the key is a
+    // field operator). ONE withheld sentence for both — `driver-sql`'s, behind
+    // this file's prefix — and the node CARRYING the key decides.
+    const withheld =
+      '[RemoteTransport] A filter node in this filter carries a $-prefixed key that is not a ' +
+      'declared combinator. A filter node\'s $-prefixed keys are the declared logical operators ' +
+      '$and, $or and $not (@objectstack/spec LOGICAL_OPERATORS); every other key is a field name. ' +
+      'It is refused rather than compiled as a COLUMN of that name, which would produce a ' +
+      'predicate that matched no row and reported nothing. The key and where it sits are withheld ' +
+      'from the message; the full diagnostic is in the server log.';
     if (MISPLACED_FIELD_OPERATORS.has(key)) {
-      return invalidFilterError(
+      return this.withheldRefusal(
+        withheld,
+        subtree,
         `${shared}. "${key}" IS a field operator, one level down: write ` +
           `{ <field>: { "${key}": <value> } } — e.g. { stage: { "${key}": … } } — rather than putting ` +
           `it at the condition level (objectstack#5769, objectstack#5348).`,
       );
     }
-    return invalidFilterError(
+    return this.withheldRefusal(
+      withheld,
+      subtree,
       `${shared}. The Filter Protocol declares no "${key}" at any level; on a read it cost an empty ` +
         `page, and on deleteMany/updateMany the predicate is constantly false or constantly true ` +
         `depending on which side of the comparison the literal lands (objectstack#5769, ` +
@@ -3864,7 +3945,9 @@ export class RemoteTransport {
       if (key.startsWith('$')) continue;
 
       const here = `${path}.${key}`;
-      if (value === undefined) throw this.undefinedComparand(object, key, here);
+      // [#20039] The nearest OBJECT holding the `undefined` decides: this node
+      // for a direct comparand, the operator map, or the list.
+      if (value === undefined) throw this.undefinedComparand(object, key, here, node);
       // `isOperatorMap` and NOT `isFilterNode`, because this must walk exactly
       // what the compile loop below ROUTES to its operator arms — a `Date` is a
       // value comparand on both tests, but a class instance is an operator map
@@ -3874,10 +3957,12 @@ export class RemoteTransport {
       for (const [op, opValue] of Object.entries(value as Record<string, unknown>)) {
         if (op === '$null' || op === '$exists') continue;
         const opPath = `${here}.${op}`;
-        if (opValue === undefined) throw this.undefinedComparand(object, key, opPath);
+        if (opValue === undefined) throw this.undefinedComparand(object, key, opPath, value);
         if (!Array.isArray(opValue)) continue;
         opValue.forEach((member, index) => {
-          if (member === undefined) throw this.undefinedComparand(object, key, `${opPath}[${index}]`);
+          if (member === undefined) {
+            throw this.undefinedComparand(object, key, `${opPath}[${index}]`, opValue);
+          }
         });
       }
     }
@@ -3894,8 +3979,19 @@ export class RemoteTransport {
    * as {@link RemoteTransport.undeclaredCombinator} adds them to its own shared
    * sentence.
    */
-  private undefinedComparand(object: string, field: string, path: string): Error {
-    return invalidFilterError(
+  private undefinedComparand(object: string, field: string, path: string, subtree?: unknown): Error {
+    // [#20039, the #8220 contract] The field and the position are the
+    // predicate's; the repair keeps a PLACEHOLDER name. `driver-sql`'s withheld
+    // sentence behind this file's prefix.
+    return this.withheldRefusal(
+      '[RemoteTransport] A comparand in this filter is undefined. @objectstack/spec ' +
+        'FieldOperatorsSchema declares no undefined comparand, and in JavaScript { "FIELD": undefined } ' +
+        'cannot be told apart from omitting the key — yet the two mean OPPOSITE things (a predicate ' +
+        'versus no constraint at all), so there is no reading of it that is not a guess. Write null ' +
+        'if you meant the null predicate ({ "FIELD": null } or { "FIELD": { "$null": true } }), or ' +
+        'omit the key when the value is genuinely absent. The field it was aimed at and where it ' +
+        'sits are withheld from the message; the full diagnostic is in the server log.',
+      subtree,
       `[RemoteTransport] Comparand at ${path} on '${object}' is undefined. @objectstack/spec ` +
         `FieldOperatorsSchema declares no undefined comparand, and in JavaScript ` +
         `{ "${field}": undefined } cannot be told apart from omitting the key — yet the two mean ` +
@@ -3916,8 +4012,13 @@ export class RemoteTransport {
     index: number | null,
     sub: unknown,
     path = 'where',
+    // [#20039] What ENCLOSES `sub`: the `$and` / `$or` list, or the node
+    // carrying `$not` — the provenance a primitive operand inherits.
+    enclosing?: unknown,
   ): { whereClauses: string; args: any[] } {
-    if (!isFilterNode(sub)) throw this.uncompilableSubFilter(object, branch, index, sub);
+    if (!isFilterNode(sub)) {
+      throw this.uncompilableSubFilter(object, branch, index, sub, refusalNode(sub, enclosing));
+    }
     return this.buildWhereSQL(object, sub, index === null ? `${path}.${branch}` : `${path}.${branch}[${index}]`);
   }
 
@@ -3942,6 +4043,7 @@ export class RemoteTransport {
     branch: '$and' | '$or' | '$not',
     index: number | null,
     sub: unknown,
+    subtree?: unknown,
   ): Error {
     const shown = sub === null ? 'null' : sub === undefined ? 'undefined' : describeValue(sub);
     const location = index === null ? branch : `${branch}[${index}]`;
@@ -3957,7 +4059,19 @@ export class RemoteTransport {
           `FilterConditionSchema). Refusing rather than skipping it — a dropped element leaves ` +
           `valid SQL that answers a DIFFERENT question: narrower in $or, wider in $and (#1004, ` +
           `#1058, #1066, #1073). An intentionally unconstrained branch is written \`{}\`.`;
-    return invalidFilterError(
+    // [#20039, the #8220 contract] The position, the kind and the preview are
+    // the predicate's (a policy's literal, measured) — and so is which of the
+    // three combinators it sat under, since the requirement sentence names it.
+    // `driver-sql`'s withheld sentence behind this file's prefix.
+    return this.withheldRefusal(
+      '[RemoteTransport] A filter node in this filter is not a filter condition object. Every ' +
+        'element of "$and"/"$or" and the operand of "$not" must be a plain object of field ' +
+        'constraints (e.g. { "status": "active" }) or nested combinators — @objectstack/spec ' +
+        'FilterConditionSchema declares this position as a FilterCondition. It is refused rather ' +
+        'than skipped because skipping it would silently change which rows match. Where it sits, ' +
+        'what it is and its value are withheld from the message; the full diagnostic is in the ' +
+        'server log.',
+      subtree,
       `[RemoteTransport] ${location} on '${object}' is ${shown}, not a filter condition: ` +
         `${preview(sub)}. ${requirement}`,
     );
@@ -3996,7 +4110,18 @@ export class RemoteTransport {
         `[["stage","=","won"]] is { stage: 'won' }.`
       : `A query's \`where\` must be a plain object of conditions (spec QueryASTSchema declares ` +
         `\`where: FilterConditionSchema\`, a record).`;
-    return invalidFilterError(
+    // [#20039, the #8220 contract] The preview is the WHOLE predicate. `filters`
+    // is the `where` root: an array can carry its own mark, and a primitive
+    // cannot, so it is withheld for every caller — the fail-closed direction.
+    return this.withheldRefusal(
+      '[RemoteTransport] The where of this query is not a filter condition. A query\'s `where` must ' +
+        'be a plain object of conditions (spec QueryASTSchema declares `where: FilterConditionSchema`, ' +
+        'a record); this transport does not compile the filter AST array form — convert it first ' +
+        '(`parseFilterAST`). Refusing rather than compiling it to NO WHERE clause — a filter that ' +
+        'vanishes WIDENS the statement to the whole table. "No filter" is written `{}`, or by ' +
+        'omitting `where`. What it is and its contents are withheld from the message; the full ' +
+        'diagnostic is in the server log.',
+      filters,
       `[RemoteTransport] where on '${object}' is ${describeValue(filters)}, not a filter condition: ` +
         `${preview(filters)}. ${requirement} Refusing rather than compiling it to NO WHERE clause — ` +
         `a filter that vanishes WIDENS the statement to the whole table, so a read returns exactly ` +
@@ -4023,7 +4148,17 @@ export class RemoteTransport {
    * is a different statement ("no filter at all") and keeps its early return.
    */
   private emptyFieldFilter(object: string, field: string, value: unknown): Error {
-    return invalidFilterError(
+    // [#20039, the #8220 contract] `driver-sql`'s twin of this refusal
+    // (`emptyFieldConstraintError`) has withheld its field since #8197; this
+    // one still named it. `value` — the operator map — is the node.
+    return this.withheldRefusal(
+      '[RemoteTransport] A field constraint in this filter is an object comparand that compiles to ' +
+        `NO predicate. An operator map must carry at least one operator ` +
+        `(${SUPPORTED_FILTER_OPERATORS.join(', ')}); to compare against a value, write the value ` +
+        'itself. Refusing rather than dropping the condition — a predicate that vanishes WIDENS the ' +
+        'statement to the whole table. The field it was aimed at and its value are withheld from ' +
+        'the message; the full diagnostic is in the server log.',
+      value,
       `[RemoteTransport] Filter on '${object}.${field}' is an object comparand that compiles to NO ` +
         `predicate: ${preview(value)}. An operator map must carry at least one operator ` +
         `(${SUPPORTED_FILTER_OPERATORS.join(', ')}); to compare against a value, write the value ` +
