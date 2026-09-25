@@ -3240,7 +3240,7 @@ export class ObjectStackClient {
      */
     listRevisions: async (id: string, opts?: { limit?: number; cursor?: string; branch?: string }) => {
       const params = new URLSearchParams();
-      if (opts?.limit) params.set('limit', String(opts.limit));
+      if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       if (opts?.cursor) params.set('cursor', opts.cursor);
       if (opts?.branch) params.set('branch', opts.branch);
       const qs = params.toString();
@@ -5547,12 +5547,13 @@ export class ObjectStackClient {
            * REFUSED with `400 VALIDATION_FAILED`, never clamped — so raise it
            * deliberately to see further back.
            *
-           * ⚠️ `0` and `NaN` are the exception, and they are dropped rather
-           * than refused: the guard below is truthy, so a falsy `limit` never
-           * leaves the client and the server answers its DEFAULT window
-           * instead. `-5`, `1.5` and `101` are truthy, are sent, and are
-           * refused. The two `listRuns` surfaces guard on `!= null` and do
-           * send `0`.
+           * There is no exception: the SDK does not judge `limit`, it sends
+           * whatever it is given and leaves only an ABSENT (`undefined`) value
+           * off the wire. `0`, `NaN`, `-5`, `1.5` and `101` all reach the door
+           * and are all refused there — none of them is swapped for the
+           * default window. An untyped `null` is outside the declared type; it
+           * is sent as the text `null` and refused as not a whole number. The
+           * two `listRuns` surfaces guard the same way.
            *
            * There is no continuation token — read `hasMore` to learn whether
            * the window was short.
@@ -5560,7 +5561,7 @@ export class ObjectStackClient {
           list: async (flowName: string, options?: { limit?: number }): Promise<{ runs: ExecutionLog[]; hasMore: boolean }> => {
               const route = this.getRoute('automation');
               const params = new URLSearchParams();
-              if (options?.limit) params.set('limit', String(options.limit));
+              if (options?.limit !== undefined) params.set('limit', String(options.limit));
               const qs = params.toString();
               const res = await this.fetch(`${this.baseUrl}${route}/${flowName}/runs${qs ? `?${qs}` : ''}`);
               return this.unwrapResponse(res);
@@ -5639,7 +5640,7 @@ export class ObjectStackClient {
       ): Promise<T> => {
           const route = this.getRoute('automation');
           const params = new URLSearchParams();
-          if (opts?.limit != null) params.set('limit', String(opts.limit));
+          if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
           // [#7359] The route's declared `status` filter, now that the boundary
           // honours it instead of dropping it. Until this card the typed client
           // could not send it at all — which is why nothing had tripped over the
@@ -6479,7 +6480,7 @@ export class ObjectStackClient {
       const params = new URLSearchParams();
       if (options?.read !== undefined) params.set('read', String(options.read));
       if (options?.type) params.set('type', options.type);
-      if (options?.limit) params.set('limit', String(options.limit));
+      if (options?.limit !== undefined) params.set('limit', String(options.limit));
       const qs = params.toString();
       const res = await this.fetch(`${this.baseUrl}${route}${qs ? `?${qs}` : ''}`);
       return this.unwrapResponse<ListNotificationsResponse>(res);
@@ -7083,7 +7084,7 @@ export class ObjectStackClient {
         const qs = new URLSearchParams();
         if (query.object) qs.set('object', query.object);
         if (query.status) qs.set('status', query.status);
-        if (query.limit != null) qs.set('limit', String(query.limit));
+        if (query.limit !== undefined) qs.set('limit', String(query.limit));
         if (query.offset != null) qs.set('offset', String(query.offset));
         const suffix = qs.toString() ? `?${qs.toString()}` : '';
         const res = await this.fetch(`${this.baseUrl}${route}/import/jobs${suffix}`);
@@ -7929,7 +7930,7 @@ export class ScopedEnvironmentClient {
       const qs = new URLSearchParams();
       if (query.object) qs.set('object', query.object);
       if (query.status) qs.set('status', query.status);
-      if (query.limit != null) qs.set('limit', String(query.limit));
+      if (query.limit !== undefined) qs.set('limit', String(query.limit));
       if (query.offset != null) qs.set('offset', String(query.offset));
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
       const res = await this.parent._fetch(this.dataUrl(`/import/jobs${suffix}`));
@@ -8123,7 +8124,7 @@ export class ScopedEnvironmentClient {
       opts?: { limit?: number; status?: ExecutionStatus },
     ): Promise<T> => {
       const params = new URLSearchParams();
-      if (opts?.limit != null) params.set('limit', String(opts.limit));
+      if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
       // [#7359] — see the sibling `listRuns` alias above.
       if (opts?.status) params.set('status', opts.status);
       const qs = params.toString();
