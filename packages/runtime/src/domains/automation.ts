@@ -17,6 +17,13 @@ import {
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the #10243 measurement behind it.
 import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT } from './activation-gate.js';
+// [#19874] What the run-lifecycle refusal names as the remedy is read off the
+// SAME inputs the platform-admin derivation reads — the requested posture, the
+// wall predicate, the declared-administrator variable and the set name — so
+// the sentence cannot name a remedy the resolver does not honour.
+import { PLATFORM_OWNER_EMAIL_ENV, resolveTenancyPosture } from '@objectstack/types';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { AutomationResult, IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
@@ -643,19 +650,80 @@ function isRunLifecycleWrite(parts: string[], method: string): boolean {
 const RUN_LIFECYCLE_DENY_STATUS = 403;
 const RUN_LIFECYCLE_DENY_CODE = 'PERMISSION_DENIED';
 
-/**
- * [#13953] The refusal sentence. It names the standing that would admit ANY
- * caller and nothing about this one (#7450), and — like every refusal in the
- * ADR-0126 §7 family — it names the sanctioned path a refused caller does
- * have, because the commonest reason to arrive here is an end user trying to
- * get their OWN paused run moving again, for which `resume` is the door.
- */
-const RUN_LIFECYCLE_DENY_MESSAGE =
+/** [#13953] The refusal's first part: what the two verbs are, and why they are an operator's. */
+const RUN_LIFECYCLE_DENY_VERB =
     'Cancelling an automation run, or restoring a consumed suspension, is a platform-operator verb: it ends or '
-    + 're-arms a run for the whole environment, and a run belongs to the environment rather than to a user. It '
-    + 'requires platform-operator standing (the unscoped `admin_full_access` grant, ADR-0068 D2). Resuming a run '
-    + 'you are the declared authority for is a different question and stays open to you at '
+    + 're-arms a run for the whole environment, and a run belongs to the environment rather than to a user.';
+
+/** [#19874] The remedy every posture honours — the derivation's config anchor, additive on each of them. */
+const RUN_LIFECYCLE_DECLARED_ADMINISTRATORS =
+    "the deployment's declared platform administrators: an account whose verified email address is listed in "
+    + `\`${PLATFORM_OWNER_EMAIL_ENV}\``;
+
+/** [#13953] The refusal's last part: the sanctioned door a refused caller does have. */
+const RUN_LIFECYCLE_RESUME_PATH =
+    'Resuming a run you are the declared authority for is a different question and stays open to you at '
     + '`POST /automation/:name/runs/:runId/resume`.';
+
+/** [#19874] The standing sentence for the posture this process's platform-admin derivation reads. */
+function runLifecycleStandingSentence(): string {
+    let posture: TenancyPosture | undefined;
+    try {
+        posture = resolveTenancyPosture();
+    } catch {
+        posture = undefined;
+    }
+    if (posture === undefined) {
+        return `It requires platform-operator standing, which comes from ${RUN_LIFECYCLE_DECLARED_ADMINISTRATORS}.`;
+    }
+    if (postureEnforcesWall(posture)) {
+        return `It requires platform-operator standing, and under this deployment's '${posture}' tenancy posture `
+            + `that standing comes only from ${RUN_LIFECYCLE_DECLARED_ADMINISTRATORS}.`;
+    }
+    return `It requires platform-operator standing, which under this deployment's '${posture}' tenancy posture `
+        + `comes from an unscoped \`${ADMIN_FULL_ACCESS}\` grant (ADR-0068 D2) or from `
+        + `${RUN_LIFECYCLE_DECLARED_ADMINISTRATORS}.`;
+}
+
+/**
+ * [#13953] The refusal sentence, in three parts. It names the standing that
+ * would admit ANY caller and nothing about this one (#7450), and — like every
+ * refusal in the ADR-0126 §7 family — it names the sanctioned path a refused
+ * caller does have, because the commonest reason to arrive here is an end user
+ * trying to get their OWN paused run moving again, for which `resume` is the
+ * door.
+ *
+ * ## Why the middle part is chosen per tenancy posture (#19874)
+ *
+ * A refusal that names a remedy is a promise that the remedy works. Which
+ * remedies work is decided in ONE place — the platform-admin derivation in
+ * `@objectstack/core`'s `resolveUserAuthzGrants` (§6b / §6b-config) — and that
+ * site answers differently per REQUESTED posture:
+ *
+ *  - the declared administrator list (`OS_PLATFORM_OWNER_EMAIL`, matched
+ *    against the caller's own VERIFIED stored email) confers the rung on EVERY
+ *    posture — the config anchor is additive;
+ *  - the unscoped `admin_full_access` grant (ADR-0068 D2) confers it under
+ *    `single` ONLY: under `group` / `isolated` its anchor is retired, so on a
+ *    walled deployment that grant confers nothing.
+ *
+ * One fixed sentence naming the grant therefore sent a walled operator to do a
+ * thing that then failed silently at the permission layer. The middle part
+ * reads the posture with the derivation's OWN expression,
+ * `postureEnforcesWall(resolveTenancyPosture())`, so the remedies it names are
+ * the ones that same process honours — never a remedy that posture does not
+ * honour. The `single` arm states what ships today and nothing more: that
+ * half's disposition belongs to a separate decision (#11979), which this text
+ * neither makes nor predicts.
+ *
+ * The posture read cannot turn this 403 into anything else: a requested
+ * posture that cannot be read (`resolveTenancyPosture` throws on an
+ * unrecognised value) names only the remedy every posture honours. The gate's
+ * answer — code, status, who is admitted — is identical on every arm.
+ */
+function runLifecycleDenyMessage(): string {
+    return `${RUN_LIFECYCLE_DENY_VERB} ${runLifecycleStandingSentence()} ${RUN_LIFECYCLE_RESUME_PATH}`;
+}
 
 /**
  * [#13953] THE RUN-LIFECYCLE GATE: the platform operator, and only the
@@ -694,8 +762,11 @@ const RUN_LIFECYCLE_DENY_MESSAGE =
  * names, and that table is `apiEnabled` with unconstrained `position` values,
  * so a tenant can mint a row spelling the built-in and
  * `resolveUserAuthzGrants` §4 pushes it onto the array. The rung is derived
- * from the unscoped `admin_full_access` evidence and nothing else, so it is
- * what the ruling MEANT, and it is byte-for-byte what
+ * from the platform-admin anchors and never from a position name: on every
+ * posture, a declared `OS_PLATFORM_OWNER_EMAIL` address on the caller's own
+ * verified stored row; under `single` only, also the unscoped
+ * `admin_full_access` grant (ADR-0068 D2), whose anchor a walled posture
+ * retires. So it is what the ruling MEANT, and it is byte-for-byte what
  * `hasPlatformAdminStanding` returns.
  *
  * ## ⛔ Why it is NOT posture-conditional the way the activation gate is
@@ -709,7 +780,8 @@ const RUN_LIFECYCLE_DENY_MESSAGE =
  * `resume`, which is fail-closed on the suspended node's declared
  * `resumeAuthority` (#3801 / #5561) on every deployment, and the card's floor
  * is that this door is at least as strict as `resume`'s. So the rung is
- * required unconditionally.
+ * required unconditionally. Only the refusal's SENTENCE reads the posture (see
+ * {@link runLifecycleDenyMessage}); who is admitted never does.
  *
  * ## The two non-denials, each of which is a decision
  *
@@ -737,7 +809,9 @@ const RUN_LIFECYCLE_DENY_MESSAGE =
  * validation errors from outside the operator cohort.
  *
  * Synchronous: the rung rides the caller's own execution context, so nothing
- * is resolved and no outage class exists here to absorb.
+ * is resolved. The refusal sentence reads only the environment, and a posture
+ * it cannot read changes its wording, never its answer — so no outage class
+ * exists here to absorb.
  */
 function refuseUngrantedRunLifecycleWrite(
     deps: DomainHandlerDeps,
@@ -749,7 +823,7 @@ function refuseUngrantedRunLifecycleWrite(
 
     return {
         handled: true,
-        response: deps.error(RUN_LIFECYCLE_DENY_MESSAGE, RUN_LIFECYCLE_DENY_STATUS, {
+        response: deps.error(runLifecycleDenyMessage(), RUN_LIFECYCLE_DENY_STATUS, {
             code: RUN_LIFECYCLE_DENY_CODE,
         }),
     };

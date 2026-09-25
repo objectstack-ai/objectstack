@@ -53,8 +53,11 @@
  * D4 `sys_user_position` names; `sys_user_position` is `apiEnabled` with
  * unconstrained `position` values, so a tenant could mint a row spelling that
  * very built-in and `resolveUserAuthzGrants` §4 would push it onto the array.
- * The rung is derived from the unscoped-grant evidence and nothing else, so it
- * is what the paragraph above always MEANT — and it is byte-for-byte what
+ * The rung is derived from the platform-admin anchors and never from a position
+ * name — on every posture, a declared `OS_PLATFORM_OWNER_EMAIL` address on the
+ * caller's own verified stored row; under `single` only, also the unscoped
+ * `admin_full_access` grant, whose anchor a walled posture retires — so it is
+ * what the paragraph above always MEANT, and it is byte-for-byte what
  * `hasPlatformAdminStanding` returns. `resolve-authz-context.ts` states the
  * rule at that predicate; this gate is one of the four sites #15981 found
  * ignoring it.
