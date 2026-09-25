@@ -407,6 +407,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Account ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the provider and the account id it issued (computed on read)"
+      },
       created_at: {
         label: "Created At"
       },
@@ -498,6 +502,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Verification ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the identifier being verified (computed on read)"
       },
       created_at: {
         label: "Created At"
@@ -606,6 +614,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Member ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the member and, when recorded, their role (computed on read)"
+      },
       created_at: {
         label: "Created At"
       },
@@ -667,6 +679,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Invitation ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the invited email address (computed on read)"
       },
       created_at: {
         label: "Created At"
@@ -815,6 +831,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Team Member ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the team (computed on read)"
+      },
       created_at: {
         label: "Created At"
       },
@@ -932,6 +952,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Member ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the business unit they are assigned to (computed on read)"
+      },
       business_unit_id: {
         label: "Business Unit"
       },
@@ -1048,6 +1072,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Two Factor ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user the credential belongs to (computed on read)"
       },
       created_at: {
         label: "Created At"
@@ -2091,6 +2119,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the provisioned user and the group (computed on read)"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the projected role and the user it is granted to (computed on read)"
       },
       connection_id: {
         label: "Connection ID"
