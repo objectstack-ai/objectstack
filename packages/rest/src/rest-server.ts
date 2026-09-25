@@ -449,6 +449,18 @@ interface DocsAudience {
         docs: ResolverDoc[],
         canRead?: (docName: unknown) => boolean,
     ): ResolvedBook;
+    /**
+     * The book's PAGES this caller may read: the docs `book` claims over
+     * `docs` (`resolveBookClaimedDocs` — the membership `resolveDocAudiences`
+     * itself uses) that pass the per-doc predicate. The tree's synthetic
+     * *Uncategorized* group is not among them: the spec defines those orphans
+     * as a rendering convenience, "not an authored membership claim".
+     */
+    readablePages(
+        book: Book & { _packageId?: string },
+        docs: ResolverDoc[],
+        canRead?: (docName: unknown) => boolean,
+    ): string[];
 }
 
 /**
@@ -2873,8 +2885,10 @@ export class RestServer {
         req: any,
         books: readonly any[],
     ): Promise<DocsAudience> {
-        const { audienceAllows, docAudienceAllows, resolveDocAudiences, resolveBookTree, deriveImplicitPackageBook } =
-            await import('@objectstack/spec/system');
+        const {
+            audienceAllows, docAudienceAllows, resolveDocAudiences, resolveBookTree, resolveBookClaimedDocs,
+            deriveImplicitPackageBook,
+        } = await import('@objectstack/spec/system');
         const gated = RestServer.anyPermissionSetAudience(books);
         const caller = await this.resolveAudienceCaller(environmentId, req, { needPermissionSets: gated });
         const allReadable = caller.authenticated && !gated;
@@ -2904,6 +2918,10 @@ export class RestServer {
                     }))
                     .filter((g) => g.entries.some((e) => e.doc || e.href));
                 return tree;
+            },
+            readablePages: (book, docs, canRead) => {
+                const read = canRead ?? docReader(docs);
+                return [...resolveBookClaimedDocs(book, docs, book._packageId)].filter((name) => read(name));
             },
         };
     }
@@ -3772,10 +3790,16 @@ export class RestServer {
      *    caller: `docAudienceAllows` over `resolveDocAudiences`, the answer
      *    `/meta/doc/:name` gives.
      *  - **`book` alone** — the book the name names (a declared book, else the
-     *    implicit per-package book, §6.4) must admit the caller by its own
-     *    audience, and the tree `/meta/book/:name/tree` would serve them must
-     *    keep at least one `doc` entry. External links are not pages, so a book
-     *    whose only surviving entries are `href`s is not served.
+     *    implicit per-package book, §6.4 — the tree read's own lookup) must
+     *    admit the caller by its own audience (the tree read's 401/403), and at
+     *    least one of its PAGES must be readable: a doc the book claims
+     *    (`resolveBookClaimedDocs`, the membership `resolveDocAudiences` uses)
+     *    whose effective audience admits the caller. Not "any entry of the
+     *    tree": `resolveBookTree` appends every doc the book does NOT claim as
+     *    a synthetic *Uncategorized* group, so over an env-wide corpus nearly
+     *    every book's tree holds some readable doc, and the rule would never
+     *    fire. The spec calls those orphans "not an authored membership
+     *    claim"; external `href` links are not pages either.
      *  - **`book` + `doc`** — served iff BOTH hold: the book's own audience
      *    admits the caller AND the doc is readable. A doc can be readable while
      *    the book is not (its effective audience is the UNION over every book
@@ -3825,9 +3849,9 @@ export class RestServer {
      *    per book over the whole corpus) shared by every entry.
      *
      * Per entry: a `doc` is one map lookup; a `book` alone is one
-     * `resolveBookTree` of that book over the corpus (every doc visited once
-     * per group rule) plus one lookup per resulting entry. ⛔ No cache —
-     * nothing outlives the request.
+     * `resolveBookClaimedDocs` of that book over the corpus (one
+     * `resolveBookTree`: every doc visited once per group rule) plus one
+     * lookup per claimed page. ⛔ No cache — nothing outlives the request.
      */
     private async resolveNavDocAudience(
         p: RestProtocol,
@@ -3873,10 +3897,7 @@ export class RestServer {
             if (bookName !== undefined) {
                 const book = audience.bookNamed(bookName);
                 if (!audience.admitsBook(book)) return false;
-                if (docName === undefined) {
-                    return audience.readableTree(book, corpus, canRead).groups
-                        .some((g) => g.entries.some((e) => Boolean(e.doc)));
-                }
+                if (docName === undefined) return audience.readablePages(book, corpus, canRead).length > 0;
             }
             return canRead(docName);
         };
