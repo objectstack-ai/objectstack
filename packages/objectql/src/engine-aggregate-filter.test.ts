@@ -24,10 +24,14 @@
 //     ADR-0112 `INVALID_FILTER`/400 envelope, naming the aggregation position
 //     — ignoring it would silently answer the unfiltered aggregate, which is
 //     the very defect this key closes.
+//   * [#20122] every such refusal is the FILTER's, not the data's: raised once,
+//     before any driver is asked for a row, identically on an empty and on a
+//     populated table (the last block of this file).
 
 import { describe, it, expect } from 'vitest';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import { normalizeFilterComparandTypes, type EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
+import { matchesAggregationFilter } from './having-filter.js';
 
 // The #10413 measurement's dataset shape: opportunities with a stage and an
 // amount. 6 rows, 2 closed_won worth 700 total.
@@ -294,4 +298,228 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
     // The path names WHICH aggregation carries the offending comparand.
     expect(thrown!.message).toContain('aggregations[0].filter');
   });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20122] The verdict belongs to the filter, not to the data
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * A driver that records every read, with or without a native `aggregate()`.
+ * A per-aggregation filter forces the in-memory fallback on both kinds (the
+ * #10576 fork), so a refusal raised AFTER a read shows up as `find: 1`.
+ */
+function makeCountingDriver(rows: ReadonlyArray<Record<string, unknown>>, native: boolean) {
+  const calls = { aggregate: 0, find: 0 };
+  const driver: any = {
+    name: native ? 'native-agg-recorder' : 'raw-recorder',
+    version: '0.0.0',
+    supports: {},
+    async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
+    async find() { calls.find += 1; return rows.map((r) => ({ ...r })); },
+    async findOne() { return rows[0] ?? null; },
+    async create(_o: string, d: any) { return d; },
+    async update(_o: string, _id: string, d: any) { return d; },
+    async delete() { return true; },
+    async count() { return rows.length; },
+    async bulkCreate(_o: string, r: any[]) { return r; },
+    async bulkUpdate() { return []; }, async bulkDelete() {},
+    async beginTransaction() { return { __trx: true, commit: async () => {}, rollback: async () => {} }; },
+    async commit() {}, async rollback() {},
+  };
+  if (native) driver.aggregate = async () => { calls.aggregate += 1; return []; };
+  return { driver, calls };
+}
+
+interface Refusal extends Error { code?: unknown; status?: unknown }
+
+async function refusalOf(run: () => Promise<unknown>): Promise<Refusal> {
+  let out: unknown;
+  try {
+    out = await run();
+  } catch (e) {
+    return e as Refusal;
+  }
+  throw new Error(`expected a refusal, but it answered ${JSON.stringify(out)}`);
+}
+
+function syncRefusalOf(run: () => unknown): Refusal | undefined {
+  try {
+    run();
+  } catch (e) {
+    return e as Refusal;
+  }
+  return undefined;
+}
+
+/**
+ * The filter sits on the SECOND aggregation, so every refusal must name
+ * `aggregations[1].filter` — which aggregation carries it, not merely that one
+ * does.
+ */
+function withFilter(filter: unknown, groupBy?: string[]): EngineAggregateOptions {
+  return {
+    ...(groupBy ? { groupBy } : {}),
+    aggregations: [
+      { function: 'count', alias: 'opp_count' },
+      { function: 'count', alias: 'picked', filter },
+    ],
+  } as unknown as EngineAggregateOptions;
+}
+
+const AT = 'aggregations[1].filter';
+
+/**
+ * Refused on both driver kinds, on an EMPTY and a populated table, grouped and
+ * ungrouped, with one message and no driver read. Returns the message.
+ *
+ * Before: every empty-table cell answered — `[]` grouped, `[{ opp_count: 0,
+ * picked: 0 }]` ungrouped — and the populated cells refused only after the
+ * driver had been read (`find: 1`), when they refused at all.
+ */
+async function expectFilterRefusal(filter: () => unknown): Promise<string> {
+  let message: string | undefined;
+  for (const native of [true, false]) {
+    for (const [population, rows] of [['empty', []], ['populated', OPPORTUNITIES]] as const) {
+      for (const groupBy of [undefined, ['region']]) {
+        const cell = `${native ? 'native-capable' : 'raw'} driver, ${population}, ${groupBy ? 'grouped' : 'ungrouped'}`;
+        const { driver, calls } = makeCountingDriver(rows, native);
+        const engine = await makeEngine(driver);
+        const err = await refusalOf(() => engine.aggregate('crm_opportunity', withFilter(filter(), groupBy)));
+        expect(err, cell).toBeInstanceOf(Error);
+        expect(err.code, cell).toBe('INVALID_FILTER');
+        expect(err.status, cell).toBe(400);
+        expect(calls, cell).toEqual({ aggregate: 0, find: 0 });
+        message ??= err.message;
+        expect(err.message, cell).toBe(message);
+      }
+    }
+  }
+  return message!;
+}
+
+describe('[#20122] per-aggregation filter — the walker\'s refusals belong to the filter, not to the data', () => {
+  // Each row: the filter, and a SOURCE row that walks the per-row evaluator
+  // INTO the refused arm — the floor whose words the engine-level refusal
+  // keeps. Before, measured through `engine.aggregate` on driver-memory and
+  // driver-sql (and through `POST /data/:object/query`): the populated table
+  // refused, the empty one answered; the column-absent row counted ZERO on a
+  // populated table too (the no-value exit sat before the operator was read);
+  // and the `$or` row counted EVERY row, its first branch having held.
+  const WALKER_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, Record<string, unknown>]> = [
+    ['an unknown condition operator (the triage shape)', () => ({ amount: { $median: 1 } }), { amount: 1 }],
+    ['an unknown logical operator', () => ({ $nand: [{ amount: 1 }] }), { amount: 1 }],
+    ['a retired operator', () => ({ stage: { $regex: 'won' } }), { stage: 'closed_won' }],
+    ['a retired operator with its retired sibling', () => ({ stage: { $regex: 'won', $options: 'i' } }), { stage: 'closed_won' }],
+    ['an operator of `where` this walker does not evaluate ($like)', () => ({ stage: { $like: 'closed%' } }), { stage: 'closed_won' }],
+    ['a $like with a dangling escape', () => ({ stage: { $like: 'closed\\' } }), { stage: 'closed_won' }],
+    ['an empty $icontains', () => ({ stage: { $icontains: '' } }), { stage: 'closed_won' }],
+    ['a non-string $icontains', () => ({ stage: { $icontains: 5 } }), { stage: 'closed_won' }],
+    ['a non-$ key beside an operator', () => ({ amount: { $gt: 1, foo: 2 } }), { amount: 5 }],
+    ['an unknown operator on a column the row does not carry', () => ({ nope: { $median: 1 } }), { nope: 1 }],
+    ['an unknown operator behind a $or branch that already held', () => ({ $or: [{ amount: { $gt: 0 } }, { amount: { $median: 1 } }] }), { amount: -1 }],
+    ['an unknown operator under $not', () => ({ $not: { amount: { $median: 1 } } }), { amount: 1 }],
+  ];
+
+  for (const [name, filter, floorRow] of WALKER_REFUSED) {
+    it(`${name}: refused on an empty and a populated table, in the walker's own words`, async () => {
+      const floor = syncRefusalOf(() => matchesAggregationFilter(floorRow, filter() as never, 1));
+      expect(floor, 'the per-row walker must refuse this row when it reaches it').toBeDefined();
+      const message = await expectFilterRefusal(filter);
+      expect(message).toBe(floor!.message);
+      expect(message).toContain(AT);
+    });
+  }
+
+  // Before: each row counted nothing in any group (`$nin` and `$exists`
+  // counted every row), or — the bare form — was refused on a populated table
+  // only, as an unsupported `$field` operator.
+  const REFERENCE_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, string]> = [
+    ['a bare reference with no operator', () => ({ amount: { $field: 'amount' } }), `${AT}.amount`],
+    ['a reference as an $in member', () => ({ amount: { $in: [{ $field: 'amount' }] } }), `${AT}.amount.$in`],
+    ['a reference as a $nin member', () => ({ amount: { $nin: [1, { $field: 'amount' }] } }), `${AT}.amount.$nin`],
+    ['a reference as a $contains pattern', () => ({ stage: { $contains: { $field: 'region' } } }), `${AT}.stage.$contains`],
+    ['a reference under $exists', () => ({ amount: { $exists: { $field: 'amount' } } }), `${AT}.amount.$exists`],
+    ['a fractional addDays', () => ({ amount: { $lte: { $field: 'amount', addDays: 1.5 } } }), `${AT}.amount.$lte`],
+    ['a string addDays', () => ({ amount: { $lte: { $field: 'amount', addDays: '7' } } }), `${AT}.amount.$lte`],
+  ];
+
+  for (const [name, filter, path] of REFERENCE_REFUSED) {
+    it(`${name}: refused at ${path}, whatever the rows`, async () => {
+      expect(await expectFilterRefusal(filter)).toContain(path);
+    });
+  }
+});
+
+describe('[#20122] per-aggregation filter — the comparand-TYPE door `where` takes', () => {
+  // Before: each row counted no row (`$ne` every row) on a populated table, and
+  // a Symbol under an ordering operator threw a raw `TypeError` with no `code`
+  // and no `status` — populated tables only; an empty one answered.
+  const TYPE_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>]> = [
+    ['a plain object under $eq', () => ({ amount: { $eq: { v: 1 } } })],
+    ['undefined in the implicit-equality slot', () => ({ amount: undefined })],
+    ['a Map under $eq', () => ({ amount: { $eq: new Map() } })],
+    ['a function under $gt', () => ({ amount: { $gt: () => 1 } })],
+    ['a Symbol under $gt', () => ({ amount: { $gt: Symbol('x') } })],
+    ['a Symbol under $ne', () => ({ amount: { $ne: Symbol('x') } })],
+    ['an undefined $in member', () => ({ amount: { $in: [undefined] } })],
+    ['a bigint beyond 2^53', () => ({ amount: { $gt: 2n ** 60n } })],
+    ['a { $field } whose $field is not a string', () => ({ amount: { $gt: { $field: 5 } } })],
+    ['a plain object nested in $or', () => ({ $or: [{ amount: 1 }, { amount: { $eq: { v: 1 } } }] })],
+  ];
+
+  for (const [name, filter] of TYPE_REFUSED) {
+    it(`${name}: refused in the type door's own words, rooted at the aggregation, whatever the rows`, async () => {
+      const door = syncRefusalOf(() => normalizeFilterComparandTypes(filter(), "aggregate('crm_opportunity')", AT));
+      expect(door, 'the type door must refuse this row directly').toBeDefined();
+      expect(await expectFilterRefusal(filter)).toBe(door!.message);
+    });
+  }
+
+  it('an exact-range bigint is NARROWED, as it is in where — and the caller\'s entry is not edited', async () => {
+    // Before: `{ $in: [500n, 200n] }` counted no row — `[500n].includes(500)`
+    // is false — while the same list in `where` is narrowed to numbers first.
+    for (const native of [true, false]) {
+      const { driver } = makeCountingDriver(OPPORTUNITIES, native);
+      const engine = await makeEngine(driver);
+      const query = withFilter({ amount: { $in: [500n, 200n] } });
+      const rows = await engine.aggregate('crm_opportunity', query);
+      expect(rows).toEqual([{ opp_count: 6, picked: 2 }]);
+      expect((query.aggregations![1] as { filter?: unknown }).filter).toEqual({ amount: { $in: [500n, 200n] } });
+    }
+  });
+});
+
+describe('[#20122] per-aggregation filter — what the walk leaves alone answers exactly as before', () => {
+  // Measured identical at base and head through `engine.aggregate` on
+  // driver-memory and driver-sql. Each answers on both driver kinds; the empty
+  // table answers the ruled empty values.
+  const PASSING: ReadonlyArray<readonly [string, () => Record<string, unknown>, number]> = [
+    ['implicit equality', () => ({ stage: 'closed_won' }), 2],
+    ['a scalar ordering bound', () => ({ amount: { $gt: 100 } }), 4],
+    ['a list under $in', () => ({ amount: { $in: [500, 20] } }), 2],
+    ['a list under $nin', () => ({ stage: { $nin: ['open'] } }), 4],
+    ['a [min, max] pair under $between', () => ({ amount: { $between: [50, 300] } }), 3],
+    ['a case-insensitive $icontains', () => ({ stage: { $icontains: 'WON' } }), 2],
+    ['$startsWith', () => ({ stage: { $startsWith: 'closed' } }), 4],
+    ['$ne: null', () => ({ region: { $ne: null } }), 6],
+    ['$exists', () => ({ region: { $exists: true } }), 6],
+    ['composed under $or / $not', () => ({ $or: [{ amount: { $gt: 800 } }, { $not: { stage: { $ne: 'closed_lost' } } }] }), 3],
+    ['a { $field } reference in a scalar comparison', () => ({ amount: { $gte: { $field: 'amount' } } }), 6],
+    ['the zero-row filter analytics lowers FALSE to', () => ({ $not: {} }), 0],
+    ['an exact bigint in the implicit slot', () => ({ amount: 500n }), 1],
+  ];
+
+  for (const [name, filter, populatedCount] of PASSING) {
+    it(`${name} counts ${populatedCount} of 6, and 0 on an empty table`, async () => {
+      for (const native of [true, false]) {
+        const { driver } = makeCountingDriver(OPPORTUNITIES, native);
+        const populated = await makeEngine(driver);
+        expect(await populated.aggregate('crm_opportunity', withFilter(filter()))).toEqual([{ opp_count: 6, picked: populatedCount }]);
+        const { driver: emptyDriver } = makeCountingDriver([], native);
+        const empty = await makeEngine(emptyDriver);
+        expect(await empty.aggregate('crm_opportunity', withFilter(filter()))).toEqual([{ opp_count: 0, picked: 0 }]);
+      }
+    });
+  }
 });

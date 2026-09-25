@@ -259,6 +259,7 @@ import {
 import {
   applyHaving,
   aggregatedRowColumns,
+  assertAggregationFilterIsEvaluable,
   assertHavingIsEvaluable,
   assertHavingIsFilterCondition,
 } from './having-filter.js';
@@ -15984,17 +15985,47 @@ export class ObjectQL implements IObjectQLEngine {
       // (#8296 — a typo'd column would otherwise select ZERO rows for that one
       // aggregation, silently, which is the same wrong-number shape #10413
       // measured). The path names which aggregation carries the offending key.
-      for (const [i, agg] of (Array.isArray(query.aggregations) ? query.aggregations : []).entries()) {
-          const aggFilter = (agg as { filter?: unknown })?.filter;
-          if (aggFilter == null) continue;
-          assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
-          assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
-          // [#15661] …and the declared-type door for the text operators: a
-          // `$contains` over a numeric column in ONE aggregation's filter is
-          // the same silent zero at a second filter position, and a door that
-          // spoke on `where` alone would answer one mistake two ways within a
-          // single verb.
-          assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+      {
+          const aggregations = Array.isArray(query.aggregations) ? query.aggregations : [];
+          let typedAggregations: typeof aggregations | undefined;
+          for (const [i, agg] of aggregations.entries()) {
+              const aggFilter = (agg as { filter?: unknown })?.filter;
+              if (aggFilter == null) continue;
+              assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
+              assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#15661] …and the declared-type door for the text operators: a
+              // `$contains` over a numeric column in ONE aggregation's filter is
+              // the same silent zero at a second filter position, and a door that
+              // spoke on `where` alone would answer one mistake two ways within a
+              // single verb.
+              assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#20122] …and the two doors `having` took at its own entry
+              // (#20099), so a refusal here is the FILTER's, never the data's:
+              //  1. the comparand-TYPE door `where` takes in
+              //     `lowerWhereFilterArray`, rooted at this position — a plain
+              //     object, a `Map` or a function comparand was compared as it
+              //     stood and counted no row (every row under `$ne`), and a
+              //     `Symbol` under an ordering operator threw an uncoded
+              //     `TypeError`, on a populated table only. An exact-range
+              //     bigint is narrowed copy-on-write, as it is there;
+              //  2. the walker's own refusals, judged once
+              //     (`assertAggregationFilterIsEvaluable`). The fallback below
+              //     walks the filter per SOURCE row, so `{ amount: { $median: 1 } }`
+              //     was a 400 on a populated table and a `200 []` on an empty one,
+              //     and a `$or` whose first branch held counted every row.
+              // ⛔ Not the condition-object check `having` got: a `filter` that is
+              // not a filter node at all (a string, a number, a `Map`) is a
+              // question about the clause's SHAPE, answered by the shape door
+              // for every filter position at once — not a refusal that depends
+              // on the data, which is what this block closes.
+              const typed = normalizeFilterComparandTypes(aggFilter, `aggregate('${object}')`, `aggregations[${i}].filter`);
+              assertAggregationFilterIsEvaluable(typed, i);
+              if (typed !== aggFilter) {
+                  typedAggregations ??= [...aggregations];
+                  typedAggregations[i] = { ...(agg as object), filter: typed } as typeof agg;
+              }
+          }
+          if (typedAggregations) query = { ...query, aggregations: typedAggregations };
       }
       // [#19974] `having` is this verb's THIRD filter position, and it walks
       // through the same comparand-shape face the other two take above —

@@ -80,6 +80,13 @@
 // comparand of the six scalar comparisons — the one position the Filter
 // Protocol declares for it (`FieldReferenceSchema`) and the one the
 // `{ $field }` `$between` refusal prescribes. See {@link compareWithReference}.
+//
+// [#20122] …and the per-aggregation `filter` takes the same row-independent
+// walk. It shares this walker (`matchesAggregationFilter`), so its refusals
+// depended on the rows exactly as `having`'s did: `{ amount: { $median: 1 } }`
+// was a 400 on a populated table and a 200 on an empty one. The engine now
+// judges each `aggregations[i].filter` once, before any driver is asked for a
+// row — see {@link assertAggregationFilterIsEvaluable}.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -495,25 +502,69 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  * {@link assertHavingIsFilterCondition}.
  */
 export function assertHavingIsEvaluable(having: unknown, columns: readonly string[]): void {
-  assertNodeIsEvaluable(having, 'having', columns);
+  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns });
+}
+
+/**
+ * [#20122] Judge one `aggregations[i].filter` ONCE, independent of the rows —
+ * the same walk {@link assertHavingIsEvaluable} takes, in the words the
+ * per-row walk ({@link matchesAggregationFilter}) uses for that position.
+ *
+ * The per-aggregation filter is evaluated by the in-memory fallback, per SOURCE
+ * row of each bucket, so every refusal the walker raises used to depend on the
+ * rows: an empty table never reached it (`200 []`, or `[{ n: 0 }]` without a
+ * `groupBy`), a `$or` whose first branch held never reached its second (the
+ * UNFILTERED count), and a column the row does not carry left the walk at the
+ * no-value exit before the operator was read (a count of zero). The same
+ * filter was a 400 on a populated table.
+ *
+ * `ObjectQL.aggregate` calls this in its per-aggregation loop, after the
+ * shared doors `where` also takes there and the comparand-TYPE door, and
+ * before `getDriver`, the middleware chain and the fallback that evaluates the
+ * filter. What it refuses is exactly {@link assertHavingIsEvaluable}'s list
+ * minus the name check: the filter reads the object's RAW columns, whose names
+ * the engine does not judge on `where` either (its registry-less tolerance —
+ * see `assertFilterIsMaterializable`), so a `{ $field }` here is judged for its
+ * position and its declaration, never for its name.
+ *
+ * Read-only.
+ */
+export function assertAggregationFilterIsEvaluable(filter: unknown, index: number): void {
+  const clause = aggregationFilterClause(index);
+  assertNodeIsEvaluable(filter, clause.root, { clause });
+}
+
+/**
+ * [#20122] What one row-independent walk judges against: the clause whose
+ * words its refusals use, and — where the position has a closed namespace —
+ * the column set a `{ $field }` reference must name.
+ */
+interface EvaluableScope {
+  clause: FilterClause;
+  /**
+   * The names a `{ $field }` reference may take. `undefined` when the position
+   * has no closed column set to judge a name against (the per-aggregation
+   * filter reads the object's raw columns).
+   */
+  columns?: readonly string[];
 }
 
 /** One node: the `$and` / `$or` / `$not` walk {@link matchesHaving} takes. */
-function assertNodeIsEvaluable(cond: unknown, path: string, columns: readonly string[]): void {
+function assertNodeIsEvaluable(cond: unknown, path: string, scope: EvaluableScope): void {
   if (!cond || typeof cond !== 'object') return;
   for (const [key, value] of Object.entries(cond)) {
     const here = `${path}.${key}`;
     if (key === '$and' || key === '$or') {
       const branches = Array.isArray(value) ? value : [value];
-      branches.forEach((c, i) => assertNodeIsEvaluable(c, `${here}[${i}]`, columns));
+      branches.forEach((c, i) => assertNodeIsEvaluable(c, `${here}[${i}]`, scope));
       continue;
     }
     if (key === '$not') {
-      assertNodeIsEvaluable(value, here, columns);
+      assertNodeIsEvaluable(value, here, scope);
       continue;
     }
-    if (key.startsWith('$')) throw unknownOperator(key, 'logical');
-    assertConditionIsEvaluable(value, key, here, columns);
+    if (key.startsWith('$')) throw unknownOperator(key, 'logical', [], scope.clause);
+    assertConditionIsEvaluable(value, key, here, scope);
   }
 }
 
@@ -522,7 +573,7 @@ function assertConditionIsEvaluable(
   condition: unknown,
   field: string,
   path: string,
-  columns: readonly string[],
+  scope: EvaluableScope,
 ): void {
   // Implicit equality with a literal: nothing to refuse here. An array in this
   // slot is the shared comparand-shape face's, and it has already run.
@@ -542,10 +593,10 @@ function assertConditionIsEvaluable(
       throw icontainsComparandError(field, target, `${path}.${op}`);
     }
     if (!(CONDITION_OPERATORS as readonly string[]).includes(op)) {
-      throw unknownOperator(op, 'condition', keys);
+      throw unknownOperator(op, 'condition', keys, scope.clause);
     }
     if (REFERENCE_COMPARISON_OPERATORS.has(op)) {
-      if (isFieldReferenceShape(target)) assertReferenceResolves(target, `${path}.${op}`, columns);
+      if (isFieldReferenceShape(target)) assertReferenceResolves(target, `${path}.${op}`, scope.columns);
       continue;
     }
     if (Array.isArray(target)) {
@@ -561,16 +612,20 @@ function assertConditionIsEvaluable(
  * [#20099] A reference in a scalar comparison: well-formed by its own
  * declaration, and naming columns the aggregated row has — the `$field`, and an
  * `addDays` offset's nested `$field` when it carries one.
+ *
+ * [#20122] `columns` is absent for a position with no closed column set (the
+ * per-aggregation filter); there only the declaration is judged.
  */
 function assertReferenceResolves(
   reference: Record<string, unknown>,
   path: string,
-  columns: readonly string[],
+  columns: readonly string[] | undefined,
 ): void {
   const parsed = FieldReferenceSchema.safeParse(reference);
   if (!parsed.success) {
     throw malformedFieldReferenceError(path, parsed.error.issues[0]?.message ?? 'it does not parse');
   }
+  if (!columns) return;
   const names = [reference.$field];
   if (isFieldReferenceShape(reference.addDays)) names.push(reference.addDays.$field);
   for (const name of names) {
