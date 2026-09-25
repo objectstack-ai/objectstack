@@ -26,7 +26,10 @@ FROM → TO, per surface:
 - `requires: ['reports']` → **refused** by `defineStack` (`STACK_CAPABILITY_UNKNOWN`,
   422) with the prescription "requires: 'reports' was removed in @objectstack/spec
   17.5.0 … Delete the token." Fix: delete the token. `os serve` on an older artifact
-  that still carries it warns with the same prescription and ignores it. The token is
+  that still carries it warns with the same prescription and ignores it; `os validate`
+  and `os build` over a plain-object config (no `defineStack` call, so no parse-time
+  vocabulary check) report it as a non-fatal capability advisory carrying the same
+  prescription, never "check for a typo". The token is
   gone from `PLATFORM_CAPABILITY_TOKENS` and `PLATFORM_CAPABILITY_PROVIDERS`; the new
   `RETIRED_PLATFORM_CAPABILITY_GUIDANCE` (`@objectstack/spec/kernel`) carries the
   prescription.

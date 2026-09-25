@@ -82,7 +82,7 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
  * answer for a word that used to be right, and it leaves the author (very often
  * a model repeating an older example) with no idea what replaced it. A row here
  * turns that refusal into the retirement notice. Keys are DISJOINT from
- * {@link PLATFORM_CAPABILITY_TOKENS} — pinned in `platform-capabilities.test.ts`
+ * {@link PLATFORM_CAPABILITY_TOKENS} — pinned in `reports-capability-retirement.test.ts`
  * — so a token can never be both declared and retired.
  *
  * Declaring a retired token is refused, never tolerated: there is no provider

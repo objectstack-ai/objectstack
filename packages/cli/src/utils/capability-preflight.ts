@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
   classifyRequiredCapability,
+  RETIRED_PLATFORM_CAPABILITY_GUIDANCE,
   type CapabilityClassification,
 } from '@objectstack/spec/kernel';
 
@@ -93,6 +94,12 @@ export function renderCapabilityMessage(c: CapabilityClassification): string {
       );
     }
     case 'unknown':
+      // A RETIRED token is not a typo — the word used to be right — so it gets
+      // its retirement prescription, the same text `defineStack` refuses it
+      // with and `os serve` warns with, never "check for a typo".
+      if (Object.prototype.hasOwnProperty.call(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, c.token)) {
+        return RETIRED_PLATFORM_CAPABILITY_GUIDANCE[c.token];
+      }
       return `requires: "${c.token}" is not a known platform capability — check for a typo.`;
     case 'ok':
     default:
@@ -110,7 +117,8 @@ export interface CapabilityPreflightResult {
   readonly errors: CapabilityClassification[];
   /**
    * Advisory findings — `installable` (absent but addable → `pnpm add` hint) and
-   * `unknown` (a typo). Never fatal.
+   * `unknown` (a typo, or a retired token, which renders its retirement
+   * prescription). Never fatal.
    */
   readonly warnings: CapabilityClassification[];
 }

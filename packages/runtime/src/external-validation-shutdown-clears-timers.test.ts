@@ -14,9 +14,10 @@
  * plugins in reverse calling `plugin.destroy()`, walked straight past it. The
  * only caller `stop()` had anywhere in the tree was this class's own
  * `scheduleDriftChecks()` re-arming itself. So on kernel shutdown the
- * intervals were NEVER cleared — the #9371 mechanism verbatim, in one of only
- * two `Plugin` implementations in this tree that own `setInterval` at all
- * (`ReportsServicePlugin` is the other, repaired under #10371).
+ * intervals were NEVER cleared — the #9371 mechanism verbatim, in the only
+ * `Plugin` implementation in this tree that calls `setInterval` itself
+ * (`ReportsServicePlugin` was the other, repaired under #10371 and since
+ * retired with the saved-report stack).
  *
  * This plugin is mounted on the real serve path
  * (`packages/cli/src/commands/serve.ts` — `kernel.use(createExternalValidationPlugin())`),

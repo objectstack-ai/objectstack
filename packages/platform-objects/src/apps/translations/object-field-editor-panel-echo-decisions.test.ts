@@ -301,7 +301,7 @@ const DECISIONS: readonly Decision[] = [
     en: 'Autonumber Format',
     verdict: ALL_TRANSLATE,
     reason:
-      'A compound of two ordinary words: Format is authored as 格式 / フォーマット / Formato at three other paths (dataset.fields.measures.format, sys_saved_report.format, sys_report_schedule.format), and this panel authors its other format-shaped label, maskingRule, rather than keeping it English.',
+      'A compound of two ordinary words: Format is authored as 格式 / フォーマット / Formato at dataset.fields.measures.format (sys_saved_report.format and sys_report_schedule.format carried it too until the saved-report stack was retired), and this panel authors its other format-shaped label, maskingRule, rather than keeping it English.',
   },
   {
     type: 'object',
