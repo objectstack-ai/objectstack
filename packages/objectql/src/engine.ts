@@ -259,6 +259,8 @@ import {
 import {
   applyHaving,
   aggregatedRowColumns,
+  aggregatedRowColumnClasses,
+  assertAggregationFilterIsEvaluable,
   assertHavingIsEvaluable,
   assertHavingIsFilterCondition,
 } from './having-filter.js';
@@ -16082,17 +16084,85 @@ export class ObjectQL implements IObjectQLEngine {
       // (#8296 — a typo'd column would otherwise select ZERO rows for that one
       // aggregation, silently, which is the same wrong-number shape #10413
       // measured). The path names which aggregation carries the offending key.
-      for (const [i, agg] of (Array.isArray(query.aggregations) ? query.aggregations : []).entries()) {
-          const aggFilter = (agg as { filter?: unknown })?.filter;
-          if (aggFilter == null) continue;
-          assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
-          assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
-          // [#15661] …and the declared-type door for the text operators: a
-          // `$contains` over a numeric column in ONE aggregation's filter is
-          // the same silent zero at a second filter position, and a door that
-          // spoke on `where` alone would answer one mistake two ways within a
-          // single verb.
-          assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+      {
+          const aggregations = Array.isArray(query.aggregations) ? query.aggregations : [];
+          let typedAggregations: typeof aggregations | undefined;
+          for (const [i, agg] of aggregations.entries()) {
+              const aggFilter = (agg as { filter?: unknown })?.filter;
+              if (aggFilter == null) continue;
+              // [#20122] The SHAPE gate `where` takes first on its own seam
+              // (`lowerWhereFilterArray`, #20121) — first here too, with its
+              // object test (`isWhereFilterObject`) and its words, minus the
+              // array half (below). A filter that is not a filter object
+              // (a string, a number, a boolean, `''`, a `Map`, a `Date`) was
+              // stepped around by every door below, each of which walks a filter
+              // node's keys, and then dropped: the fork below reads it as "no
+              // filter", so the aggregation read every row of its group
+              // (`driver-sql`'s native aggregate answered a non-empty string
+              // with a 501 instead). The wire door already refuses these shapes
+              // through `AggregationNodeSchema`; this closes the in-process one.
+              //
+              // An ARRAY is refused too, `[]` included — unlike `where`, which
+              // lowers the condition-array sugar in its array branch. The slot
+              // is declared `FilterConditionSchema` (an object, no array form),
+              // the wire door refuses every array here (`VALIDATION_FAILED`),
+              // and in-process a condition array counted no row (the walker
+              // read its index positions as column names) while `[]` read as
+              // no filter. Same ruling as `having`'s condition check (#20099).
+              if (Array.isArray(aggFilter)) {
+                  let shown: string;
+                  try {
+                      shown = JSON.stringify(aggFilter) ?? String(aggFilter);
+                  } catch {
+                      shown = String(aggFilter);
+                  }
+                  if (shown.length > 80) shown = `${shown.slice(0, 77)}...`;
+                  throw invalidFilterError(
+                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object, received ` +
+                      `an array (${shown}). The condition-array form — [field, operator, value] tuples and ` +
+                      `["and", …] groups — is input-only sugar lowered on 'where' alone; a per-aggregation ` +
+                      `filter is declared as a filter condition object and does not take it, so an array here ` +
+                      `was never applied as the filter it spells. Write the object form, ` +
+                      `{ "FIELD": { "$gt": 100 } }, or omit 'filter' for no filter.`,
+                  );
+              }
+              if (!isWhereFilterObject(aggFilter)) {
+                  throw invalidFilterError(
+                      `aggregate('${object}'): 'aggregations[${i}].filter' must be a filter object, ` +
+                      `received ${describeNonFilterWhere(aggFilter)}. It was not applied, and an ` +
+                      `unapplied filter would have aggregated every row of each group for that aggregation.`,
+                  );
+              }
+              assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
+              assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#15661] …and the declared-type door for the text operators: a
+              // `$contains` over a numeric column in ONE aggregation's filter is
+              // the same silent zero at a second filter position, and a door that
+              // spoke on `where` alone would answer one mistake two ways within a
+              // single verb.
+              assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#20122] …and the two doors `having` took at its own entry
+              // (#20099), so a refusal here is the FILTER's, never the data's:
+              //  1. the comparand-TYPE door `where` takes in
+              //     `lowerWhereFilterArray`, rooted at this position — a plain
+              //     object, a `Map` or a function comparand was compared as it
+              //     stood and counted no row (every row under `$ne`), and a
+              //     `Symbol` under an ordering operator threw an uncoded
+              //     `TypeError`, on a populated table only. An exact-range
+              //     bigint is narrowed copy-on-write, as it is there;
+              //  2. the walker's own refusals, judged once
+              //     (`assertAggregationFilterIsEvaluable`). The fallback below
+              //     walks the filter per SOURCE row, so `{ amount: { $median: 1 } }`
+              //     was a 400 on a populated table and a `200 []` on an empty one,
+              //     and a `$or` whose first branch held counted every row.
+              const typed = normalizeFilterComparandTypes(aggFilter, `aggregate('${object}')`, `aggregations[${i}].filter`);
+              assertAggregationFilterIsEvaluable(typed, i);
+              if (typed !== aggFilter) {
+                  typedAggregations ??= [...aggregations];
+                  typedAggregations[i] = { ...(agg as object), filter: typed } as typeof agg;
+              }
+          }
+          if (typedAggregations) query = { ...query, aggregations: typedAggregations };
       }
       // [#19974] `having` is this verb's THIRD filter position, and it walks
       // through the same comparand-shape face the other two take above —
@@ -16137,14 +16207,29 @@ export class ObjectQL implements IObjectQLEngine {
       //     position and name, judged against the aggregated row's column set
       //     read off THIS query (`assertHavingIsEvaluable`). The walker raised
       //     them per aggregated row, so an empty grouped set answered `200 []`
-      //     for a `having` a populated one refused.
+      //     for a `having` a populated one refused. [#20123] The same column
+      //     set judges every KEY too: a key naming no column read "no value"
+      //     in every group, so a typo for an alias kept no group (every group
+      //     under a negation) with no error.
       // A reference that passes is then RESOLVED against each aggregated row
       // (having-filter.ts `compareWithReference`) on both doors below.
       assertHavingIsFilterCondition(query.having);
       assertListComparandShapes(object, 'aggregate', query.having, 'having');
       {
           const having = normalizeFilterComparandTypes(query.having, `aggregate('${object}')`, 'having');
-          assertHavingIsEvaluable(having, aggregatedRowColumns(query.groupBy, query.aggregations));
+          // [#20127] …and each column's class, read off the query and the
+          // object's declaration, so a `{ $field, addDays }` pair is judged by
+          // the rule `FieldReferenceSchema.addDays` declares (two temporal
+          // columns of one class) rather than answered by epoch-ms coercion.
+          assertHavingIsEvaluable(
+              having,
+              aggregatedRowColumns(query.groupBy, query.aggregations),
+              aggregatedRowColumnClasses(
+                  query.groupBy,
+                  query.aggregations,
+                  (this._registry.getObject(object) as { fields?: Record<string, unknown> } | undefined)?.fields,
+              ),
+          );
           if (having !== query.having) query = { ...query, having };
       }
       const driver = this.getDriver(object);

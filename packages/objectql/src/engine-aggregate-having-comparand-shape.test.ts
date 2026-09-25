@@ -180,6 +180,10 @@ async function makeEngine(rows: ReadonlyArray<Record<string, unknown>>, native: 
       placed_on: { type: 'date' },
       due_on: { type: 'date' },
       grace: { type: 'number' },
+      // [#20127] Declared types are what an aggregated column's class is read
+      // from, so the `addDays` pairs need a datetime class beside the date one.
+      opened_at: { type: 'datetime' },
+      closed_at: { type: 'datetime' },
     },
   } as any);
   return { engine, calls };
@@ -664,6 +668,199 @@ describe('[#20099] having — a { $field } reference resolves against the aggreg
       offContract({ ...REF_QUERY, having: { total: { $gt: { $field: 'nope' } } } }), REF_ROWS);
     for (const column of ['customer_id', 'order_count', 'total', 'max_cap', 'last_placed', 'first_due', 'max_grace']) {
       expect(message).toContain(column);
+    }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20123] A `having` key names a column of the aggregated row
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('[#20123] having — a key naming no column of the aggregated row is refused, whatever the rows', () => {
+  // `AGG_QUERY` projects exactly three columns.
+  const COLUMNS = ['customer_id', 'order_count', 'total'];
+
+  // Before, measured through `engine.aggregate` on driver-memory and
+  // driver-sql, both doors, and through `POST /data/:object/query`: no row
+  // raised anything. A test for a value kept no group; a test for absence or
+  // a negation — and a `$or` whose first branch held — kept EVERY group.
+  const UNKNOWN_KEY: ReadonlyArray<readonly [string, () => Record<string, unknown>, string, string]> = [
+    ['a typo for an alias under $gt (the triage shape)', () => ({ totl: { $gt: 100 } }), 'totl', 'having.totl'],
+    ['a typo in the implicit-equality slot', () => ({ totl: 500 }), 'totl', 'having.totl'],
+    ['a typo under $ne', () => ({ totl: { $ne: 1 } }), 'totl', 'having.totl'],
+    ['a typo under $exists: false', () => ({ totl: { $exists: false } }), 'totl', 'having.totl'],
+    ['a typo nested in $and', () => ({ $and: [{ total: { $gt: 0 } }, { totl: { $gt: 100 } }] }), 'totl', 'having.$and[1].totl'],
+    ['a typo behind a $or branch that already held', () => ({ $or: [{ total: { $gt: 0 } }, { totl: { $gt: 100 } }] }), 'totl', 'having.$or[1].totl'],
+    ['a typo under $not', () => ({ $not: { totl: { $gt: 100 } } }), 'totl', 'having.$not.totl'],
+    ['a SOURCE column the aggregated row does not project', () => ({ amount: { $gt: 100 } }), 'amount', 'having.amount'],
+    ['a dotted path', () => ({ 'customer_id.name': 'c1' }), 'customer_id.name', 'having.customer_id.name'],
+    ['a key that also carries a { $field } reference', () => ({ totl: { $gt: { $field: 'total' } } }), 'totl', 'having.totl'],
+  ];
+
+  for (const [name, having, key, path] of UNKNOWN_KEY) {
+    it(`${name}: refused at ${path}, naming the columns`, async () => {
+      const message = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: having() }), ROWS);
+      expect(message).toContain(`'${key}' at ${path}`);
+      for (const column of COLUMNS) expect(message).toContain(column);
+    });
+  }
+
+  it('every unknown key is named — the first with its position, the rest after it', async () => {
+    const message = await expectRowIndependentRefusal(
+      offContract({ ...AGG_QUERY, having: { $and: [{ totl: 1 }, { cnt: { $gt: 1 } }, { totl: 2 }] } }), ROWS);
+    expect(message).toContain("'totl' at having.$and[0].totl");
+    expect(message).toContain('(also: cnt)');
+  });
+
+  it('an operator refusal on an unknown column is still the operator\'s — the key is judged last', async () => {
+    // The #20099 rule: a condition on a column the row does not carry is read
+    // for its operator. Held here so the new check cannot jump ahead of it.
+    const floor = syncRefusalOf(() => applyHaving([{ nope: 1 }], { nope: { $median: 1 } } as FilterCondition));
+    const message = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: { nope: { $median: 1 } } }), ROWS);
+    expect(message).toBe(floor!.message);
+  });
+
+  it('the source name of an ALIASED groupBy projection is not a column — its alias is', async () => {
+    // Before: `{ customer_id: 'c1' }` kept no group — the row projects `cust`.
+    const query = (having: FilterCondition): EngineAggregateOptions => ({
+      groupBy: [{ field: 'customer_id', alias: 'cust' }],
+      aggregations: [{ function: 'count', alias: 'order_count' }],
+      having,
+    });
+    const message = await expectRowIndependentRefusal(query({ customer_id: 'c1' }), ROWS);
+    expect(message).toContain("'customer_id' at having.customer_id");
+    expect(message).toContain('cust, order_count');
+    // The alias itself answers, on the door that projects it (the stand-in
+    // native driver groups by `customer_id` and ignores the alias).
+    const { engine } = await makeEngine(ROWS, false);
+    const rows = await engine.aggregate(OBJECT, query({ cust: 'c1' }));
+    expect(rows).toEqual([{ cust: 'c1', order_count: 2 }]);
+  });
+
+  // Every key names a column: answered exactly as before, both doors.
+  const PASSING: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
+    ['a groupBy column', { customer_id: 'c1' }, ['c1']],
+    ['an aggregation alias', { total: { $gt: 100 } }, ['c1', 'c2']],
+    ['a count alias', { order_count: { $gte: 2 } }, ['c1', 'c2']],
+    ['columns nested under $or / $and / $not', { $or: [{ total: { $gt: 1000 } }, { $and: [{ $not: { customer_id: 'c1' } }, { order_count: 1 }] }] }, ['c2', 'c3']],
+    ['a negation of a column', { total: { $ne: 500 } }, ['c2', 'c3']],
+  ];
+  for (const [name, having, expected] of PASSING) {
+    it(`${name} answers ${JSON.stringify(expected)} on both doors`, async () => {
+      for (const [door, native] of DOORS) {
+        const { engine } = await makeEngine(ROWS, native);
+        expect(groups(await engine.aggregate(OBJECT, { ...AGG_QUERY, having })), door).toEqual([...expected]);
+      }
+    });
+  }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20127] `addDays` between two temporal columns of one class
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('[#20127] having — a { $field, addDays } pair is judged by each aggregated column\'s class, whatever the rows', () => {
+  const OPENED = ['2026-01-01T10:00:00.000Z', '2026-01-02T10:00:00.000Z', '2026-02-01T10:00:00.000Z', '2026-02-05T10:00:00.000Z', '2026-02-06T10:00:00.000Z', '2026-03-01T10:00:00.000Z'];
+  const CLOSED = ['2026-01-03T10:00:00.000Z', '2026-01-02T12:00:00.000Z', '2026-02-10T10:00:00.000Z', '2026-02-05T11:00:00.000Z', '2026-02-06T10:00:00.000Z', '2026-03-01T10:00:00.000Z'];
+  const DT_ROWS = [
+    { customer_id: 'c1', amount: 100, cap: 50, placed_on: '2026-01-10', due_on: '2026-01-05', grace: 3 },
+    { customer_id: 'c1', amount: 400, cap: 10, placed_on: '2026-01-02', due_on: '2026-01-20', grace: 10 },
+    { customer_id: 'c2', amount: 900, cap: 5000, placed_on: '2026-03-01', due_on: '2026-01-01', grace: 1 },
+    { customer_id: 'c2', amount: 300, cap: 1, placed_on: '2026-02-01', due_on: '2026-02-01', grace: 1 },
+    { customer_id: 'c2', amount: 50, cap: 2, placed_on: '2026-01-15', due_on: '2026-03-01', grace: 1 },
+    { customer_id: 'c3', amount: 20, cap: 20, placed_on: '2026-02-01', due_on: '2026-01-31', grace: 0 },
+  ].map((row, i) => ({ ...row, opened_at: OPENED[i], closed_at: CLOSED[i] }));
+  // Grouped:   total  max_cap  last_placed  first_due   max_grace  first_opened       last_closed
+  //   c1        500       50   2026-01-10   2026-01-05         10  2026-01-01T10:00Z  2026-01-03T10:00Z
+  //   c2       1250     5000   2026-03-01   2026-01-01          1  2026-02-01T10:00Z  2026-02-10T10:00Z
+  //   c3         20       20   2026-02-01   2026-01-31          0  2026-03-01T10:00Z  2026-03-01T10:00Z
+  const DT_QUERY: EngineAggregateOptions = {
+    groupBy: ['customer_id'],
+    aggregations: [
+      { function: 'count', alias: 'order_count' },
+      { function: 'sum', field: 'amount', alias: 'total' },
+      { function: 'max', field: 'cap', alias: 'max_cap' },
+      { function: 'max', field: 'placed_on', alias: 'last_placed' },
+      { function: 'min', field: 'due_on', alias: 'first_due' },
+      { function: 'max', field: 'grace', alias: 'max_grace' },
+      { function: 'min', field: 'opened_at', alias: 'first_opened' },
+      { function: 'max', field: 'closed_at', alias: 'last_closed' },
+    ],
+  };
+
+  // Before, measured through `engine.aggregate` on driver-memory and
+  // driver-sql, both doors, and through `POST /data/:object/query`: every row
+  // ANSWERED, by `@objectstack/formula`'s reading of the pair (a number read
+  // as epoch milliseconds, a day added to it), where `driver-sql` refuses the
+  // same pair on `where`. Each fragment is `driver-sql`'s own sentence.
+  const REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, string]> = [
+    ['two numeric columns (the triage shape)', () => ({ total: { $gt: { $field: 'max_cap', addDays: 1 } } }), 'addDays adds whole days to a date or datetime column, and "max_cap" is numeric'],
+    ['a count against itself', () => ({ order_count: { $gte: { $field: 'order_count', addDays: 0 } } }), '"order_count" is numeric — an offset has no meaning on it'],
+    ['a date target against a numeric referent', () => ({ last_placed: { $lte: { $field: 'max_cap', addDays: 1 } } }), '"last_placed" is date but "max_cap" is numeric'],
+    ['a numeric target against a date referent', () => ({ total: { $gt: { $field: 'first_due', addDays: 1 } } }), '"total" is numeric but "first_due" is date'],
+    ['a date against a datetime', () => ({ last_placed: { $lte: { $field: 'last_closed', addDays: 1 } } }), '"last_placed" is date but "last_closed" is datetime'],
+    ['a datetime against a date', () => ({ last_closed: { $gte: { $field: 'first_due', addDays: 1 } } }), '"last_closed" is datetime but "first_due" is date'],
+    ['a groupBy text column against a date', () => ({ customer_id: { $lte: { $field: 'first_due', addDays: 1 } } }), '"customer_id" is text but "first_due" is date'],
+    ['a text offset column', () => ({ last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'customer_id' } } } }), 'the addDays offset "customer_id" (text) is not a numeric column'],
+    ['a date offset column', () => ({ last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'last_placed' } } } }), 'the addDays offset "last_placed" (date) is not a numeric column'],
+    ['a numeric pair nested under $not in a $or', () => ({ $or: [{ total: { $gt: 0 } }, { $not: { total: { $gt: { $field: 'max_cap', addDays: 1 } } } }] }), '"max_cap" is numeric'],
+  ];
+
+  for (const [name, having, fragment] of REFUSED) {
+    it(`${name}: refused in driver-sql's words`, async () => {
+      const message = await expectRowIndependentRefusal(offContract({ ...DT_QUERY, having: having() }), DT_ROWS);
+      expect(message).toContain(fragment);
+    });
+  }
+
+  // Answered exactly as before, on both doors: the pairs the declaration admits.
+  const ANSWERED: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
+    ['date / date with a positive literal', { last_placed: { $lte: { $field: 'first_due', addDays: 7 } } }, ['c1', 'c3']],
+    ['date / date with a negative literal', { last_placed: { $gte: { $field: 'first_due', addDays: -3 } } }, ['c1', 'c2', 'c3']],
+    ['date / date with a numeric offset column (a max)', { last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'max_grace' } } } }, ['c1']],
+    ['date / date with a numeric offset column (a count)', { last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'order_count' } } } }, ['c3']],
+    ['datetime / datetime', { last_closed: { $gte: { $field: 'first_opened', addDays: 1 } } }, ['c1', 'c2']],
+    ['a numeric pair with NO addDays (the rule is the offset\'s)', { total: { $gt: { $field: 'max_cap' } } }, ['c1']],
+  ];
+
+  for (const [name, having, expected] of ANSWERED) {
+    it(`${name} answers ${JSON.stringify(expected)} on both doors`, async () => {
+      for (const [door, native] of DOORS) {
+        const { engine } = await makeEngine(DT_ROWS, native);
+        expect(groups(await engine.aggregate(OBJECT, { ...DT_QUERY, having })), door).toEqual([...expected]);
+      }
+    });
+  }
+
+  it('a "day" date bucket is a date column; a coarser bucket is a text label', async () => {
+    const bucketed = (granularity: 'day' | 'month', having: FilterCondition): EngineAggregateOptions => ({
+      groupBy: [{ field: 'placed_on', dateGranularity: granularity, alias: 'placed' }],
+      aggregations: [{ function: 'min', field: 'due_on', alias: 'first_due' }],
+      having,
+    });
+    const shifted = { placed: { $lte: { $field: 'first_due', addDays: 1 } } };
+    for (const [door, native] of DOORS) {
+      const { engine } = await makeEngine(DT_ROWS, native);
+      const rows = await engine.aggregate(OBJECT, bucketed('day', shifted));
+      expect(rows.map((r: any) => r.placed).sort(), door).toEqual(['2026-01-02', '2026-01-15', '2026-02-01']);
+    }
+    const message = await expectRowIndependentRefusal(bucketed('month', shifted), DT_ROWS);
+    expect(message).toContain('"placed" is text but "first_due" is date');
+  });
+
+  it('a column whose class the declaration cannot tell is not judged — the pair is answered as before', async () => {
+    // `ghost` is declared nowhere, so `min(ghost)` has no class to judge. The
+    // engine keeps the fail-open direction its other declared-type doors take
+    // for what the declaration cannot see; the reference reads no value, so
+    // the ordering is false in every group.
+    const query = offContract({
+      ...DT_QUERY,
+      aggregations: [...DT_QUERY.aggregations!, { function: 'min', field: 'ghost', alias: 'ghost_min' }],
+      having: { first_due: { $gte: { $field: 'ghost_min', addDays: 1 } } },
+    });
+    for (const [door, native] of DOORS) {
+      const { engine } = await makeEngine(DT_ROWS, native);
+      expect(groups(await engine.aggregate(OBJECT, query)), door).toEqual([]);
     }
   });
 });
