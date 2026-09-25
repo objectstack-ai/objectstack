@@ -223,8 +223,8 @@ export const StandaloneStackConfigSchema = z.object({
      * Defaults to `true`, and that default is the fix: a standalone kernel
      * OWNS its local platform tables, which is what the gate in
      * `assembleMetadataProtocol` always meant to say. It used to deduce that
-     * from `environmentId === undefined`, and line ~567 below stamps
-     * `'env_local'` on every boot — so the block never ran and #8686's
+     * from `environmentId === undefined`, and `createStandaloneStack` below
+     * stamps `'env_local'` on every boot — so the block never ran and #8686's
      * "covers every existing deployment" half covered no self-hosted install
      * at all.
      *
@@ -239,6 +239,40 @@ export const StandaloneStackConfigSchema = z.object({
      * boot an operator starts in order to RUN the install.
      */
     runPlatformMigrations: z.boolean().optional(),
+    /**
+     * [#20071] Does this boot read its own `sys_metadata` back into the
+     * registry at start (`ObjectQLPluginOptions.hydrateMetadataFromDb`)?
+     *
+     * Defaults to `true`, and that default is the fix — the same class as
+     * `runPlatformMigrations` right above. `ObjectQLPlugin.start()` deduces "a
+     * per-project kernel whose metadata comes from an artifact or a
+     * control-plane proxy" from `environmentId !== undefined`, and
+     * `createStandaloneStack` below stamps `'env_local'` on every boot. So an
+     * object created and published at runtime (Studio, `PUT /api/v1/meta/*`,
+     * `publish-drafts`) kept its `sys_metadata` row across a restart and was
+     * never registered again: the data API answered `404 OBJECT_NOT_FOUND`
+     * for it.
+     *
+     * The plugin option's own caution — set it ONLY when the kernel's registry
+     * is per-instance isolated AND `sys_metadata` lives on the kernel's own
+     * local driver — holds on this stack clause by clause:
+     *
+     *   - per-instance registry: this stack constructs a fresh `ObjectQLPlugin`
+     *     with no shared `ql`, so its `init()` builds a new `ObjectQL`, and each
+     *     `ObjectQL` owns its `SchemaRegistry`;
+     *   - the kernel's own driver: `sys_metadata` declares no datasource, so it
+     *     routes to the one `default` datasource this stack composes
+     *     (`DefaultDatasourcePlugin` below) — never a control-plane proxy.
+     *
+     * Set `false` only for a boot whose `sys_metadata` is NOT on that driver,
+     * or one that must not see runtime-authored metadata at all. No caller in
+     * this repository does: the one-shot `os migrate *` / `os meta *` funnel
+     * (`bootSchemaStack`) takes the default too, because those commands diff
+     * and scan the object set the serving boot registers, and the hydration
+     * read itself writes nothing (a boot that defers DDL still defers the
+     * tables of what it hydrated).
+     */
+    hydrateMetadataFromDb: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -754,7 +788,19 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // every self-hosted install. A standalone kernel owns its local
         // platform tables — say so — and let a read-only one-shot boot turn
         // it off explicitly.
-        new ObjectQLPlugin({ environmentId, runPlatformMigrations: cfg.runPlatformMigrations ?? true }),
+        //
+        // [#20071] `hydrateMetadataFromDb` is the same declaration for the
+        // same reason: `ObjectQLPlugin.start()` gates its `sys_metadata`
+        // hydration on that same stamp, so every self-hosted restart dropped
+        // the objects authored at runtime from the registry while their rows
+        // stayed in the database. A standalone kernel owns its local
+        // `sys_metadata` — see the config field for the plugin's caution,
+        // checked clause by clause.
+        new ObjectQLPlugin({
+            environmentId,
+            runPlatformMigrations: cfg.runPlatformMigrations ?? true,
+            hydrateMetadataFromDb: cfg.hydrateMetadataFromDb ?? true,
+        }),
     ];
     if (artifactBundle) {
         plugins.push(new AppPlugin(artifactBundle, undefined, {

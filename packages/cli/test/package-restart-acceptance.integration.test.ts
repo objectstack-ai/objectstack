@@ -29,22 +29,22 @@
  *   2. `GET /api/v1/data/<ns>_<obj>` — the object must be REGISTERED to serve.
  *   3. `GET /api/v1/meta/object/<ns>_<obj>/published` — the stored row.
  *
- * ## What this file finds at the head it landed on
+ * ## What this file pins
  *
- * Probes 1 and 3 cross the restart: the package comes back from `sys_packages`
- * (the `package-registry` mount) and the published row is still served. Probe
- * 2 does NOT: after the restart the data route answers `404 OBJECT_NOT_FOUND`
- * for an object that was published and serving before it. The stock
- * composition is `createStandaloneStack` (`packages/runtime`), which builds
- * `ObjectQLPlugin({ environmentId: 'env_local', … })` without
- * `hydrateMetadataFromDb`, so `ObjectQLPlugin.start()` logs `Project kernel —
- * skipping sys_metadata hydration` and never re-registers a runtime-authored
- * object. The agreement is therefore pinned as `it.fails` (the precedent is
- * `commands.test.ts`): it goes red on the change that makes the three probes
- * agree, and that change promotes it to a plain `it`. Every other assertion
- * below is harness health for it — `it.fails` is green on ANY failure, so the
- * chain, the pre-restart agreement and the two probes that do survive are
- * asserted on their own.
+ * All three probes cross the restart. Probe 1: the package comes back from
+ * `sys_packages` (the `package-registry` mount). Probe 3: the published row is
+ * still served. Probe 2: the data route serves the object again, because the
+ * stock composition, `createStandaloneStack` (`packages/runtime`), DECLARES
+ * `hydrateMetadataFromDb` on its `ObjectQLPlugin` (#20071), so
+ * `ObjectQLPlugin.start()` reads the runtime-authored object back from
+ * `sys_metadata`. Before that declaration the stack stamped `environmentId:
+ * 'env_local'`, the plugin read the stamp as "a per-project kernel" and skipped
+ * the read, and the data route answered `404 OBJECT_NOT_FOUND` after the
+ * restart for an object that was published and serving before it. This file
+ * landed with probe 2 as `it.fails` and went red on that fix, which promoted it
+ * to a plain `it`. The other assertions below are harness health for probe 2:
+ * the chain, the pre-restart agreement and the other two probes are asserted on
+ * their own.
  *
  * Tier: the name carries no nightly tier (`scripts/nightly-tiers.mjs`), so it
  * runs in the per-PR and merge-queue Test Core run; it spawns the CLI, so
@@ -377,20 +377,23 @@ describe('#17676 ruling A\' item 5: the three probes across a restart of a stock
     expect((after?.published.body as { name?: unknown } | null)?.name).toBe(OBJECT);
   });
 
-  // Known-broken at the head this landed on: the data route answers
-  // `404 OBJECT_NOT_FOUND` after the restart, because the stock standalone
-  // composition skips `sys_metadata` hydration (see the header). Promote to a
-  // plain `it` in the change that makes the composition re-register
-  // runtime-authored objects — that is the change that meets #17676's
-  // acceptance, and it is the one that turns this red.
-  it.fails(
-    'probe 2 after the restart — the data route serves the published object, so the three probes agree '
-      + '(known-broken: the stock composition skips sys_metadata hydration; promote to a plain assertion once fixed)',
-    () => {
-      expect(
-        after?.data.status,
-        `GET /data/${OBJECT} after a restart: ${JSON.stringify(after?.data.body)} (code ${String(errorCode(after?.data.body))})`,
-      ).toBe(200);
-    },
-  );
+  // #17676's acceptance. Landed as `it.fails` while the stock standalone
+  // composition skipped `sys_metadata` hydration; promoted on #20071, the change
+  // that declares it (see the header).
+  it('probe 2 after the restart — the data route serves the published object, so the three probes agree', () => {
+    expect(
+      after?.data.status,
+      `GET /data/${OBJECT} after a restart: ${JSON.stringify(after?.data.body)} (code ${String(errorCode(after?.data.body))})`,
+    ).toBe(200);
+  });
+
+  it('the second boot hydrated sys_metadata instead of skipping it as a "project kernel"', () => {
+    // The plugin's `else` line. It printed on every self-hosted boot before
+    // #20071, and it was false there: this composition persists its own
+    // `sys_metadata`. The second boot is where it matters, because only there
+    // is anything runtime-authored waiting to be read back.
+    expect(secondBoot, 'the second boot must not skip hydration').not.toContain(
+      'Project kernel — skipping sys_metadata hydration',
+    );
+  });
 });
