@@ -94,8 +94,9 @@ export * from './package-api.zod';
 export * from './package-lifecycle.zod';
 // Ruling 5A (#12038): the book-tree response contract is declared beside its
 // resolver in `../system/book.zod` — re-exported here (never a second copy)
-// so the route-ledger resolver, which searches only `@objectstack/spec/api`,
-// can name it.
+// so the route-ledger resolver, which searches only the API protocol's two
+// entries (`@objectstack/spec/api` and, since #18576, `/api-assembled`), can
+// name it.
 export { ResolvedEntrySchema, ResolvedGroupSchema, ResolvedBookSchema } from '../system/book.zod';
 // …with their existing types (the interfaces `resolveBookTree` is typed by,
 // pinned type-identical to the schemas in `system/book.test.ts`) — the same

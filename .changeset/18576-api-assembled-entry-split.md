@@ -35,6 +35,6 @@ The compiler finds every site: `TS2305` ("Module '"@objectstack/spec/api"' has n
 
 The ADR-0087 D3 semantic entry `api-assembled-entry-split` carries the judgement: an import path is TypeScript source, not metadata, so there is no source a D2 conversion could rewrite.
 
-Clause-②: yes
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered api-assembled-entry-split -->

@@ -71,7 +71,7 @@ export const InstalledPackageSchema = lazySchema(() => z.object({
    *    `PermissionSet[]` collection.
    *
    * The assembled stage has its own declaration rather than a widening of this
-   * one: `AssembledInstalledPackageSchema` (`../api/package-api.zod.ts`) over
+   * one: `AssembledInstalledPackageSchema` (`../api/package-api-assembled.zod.ts`) over
    * `AssembledPackageBodySchema` (`../stack.zod.ts`), the maintainer's road B
    * of 2026-09-02 — «declare the assembled stage rather than widen the
    * authoring one». The read doors (`GET /packages`, `GET /packages/:id`)

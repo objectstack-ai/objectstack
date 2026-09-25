@@ -209,9 +209,10 @@ export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageReque
  * read. That is the only stage this HTTP door is reached at: the ASSEMBLED
  * stage reaches the same table through `ObjectQL.registerApp`, never over this
  * wire. The read doors serve rows from BOTH and say so by name
- * ({@link InstalledPackageAtEitherStageSchema}); the write door serves one and
- * says so here. ⛔ Naming one stage on a surface reached at two, or two on a
- * surface reached at one, is the same defect in opposite directions.
+ * (`InstalledPackageAtEitherStageSchema`, in `./package-api-assembled.zod.ts`);
+ * the write door serves one and says so here. ⛔ Naming one stage on a surface
+ * reached at two, or two on a surface reached at one, is the same defect in
+ * opposite directions.
  *
  * @example POST /api/v1/packages
  * { manifest: {...}, platformVersion: '3.2.0', enableOnInstall: true, overwrite: true }
@@ -359,7 +360,8 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  * ## The two branches are disjoint — but only ONE of them is closed
  *
  * Every parse is a FULL parse of ONE coherent form, the discipline
- * {@link InstalledPackageAtEitherStageSchema} records on the read side. The
+ * `InstalledPackageAtEitherStageSchema` (`./package-api-assembled.zod.ts`)
+ * records on the read side. The
  * two are disjoint by construction — `ManifestSchema` is a `strictObject`
  * with no `manifest` key, so a wrapped body can never fall through to the bare
  * branch, and a bare manifest has no `manifest` key, so it can never satisfy
