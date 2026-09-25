@@ -227,6 +227,19 @@ describe('an engine `where` that is not a filter is refused at the seam, before 
     }
   }
 
+  // ── a door that forwards to the seam: the scoped repository ───────────────
+
+  it('createContext().object(): find and delete(multi) forward to the seam and are refused the same way', async () => {
+    const repo = engine.createContext({ isSystem: true }).object('deal');
+
+    const read = await refusalOf(() => repo.find({ where: 'amount > 15' }));
+    const write = await refusalOf(() => repo.delete({ where: 42, multi: true }));
+
+    expect([read.code, read.status, write.code, write.status]).toEqual(['INVALID_FILTER', 400, 'INVALID_FILTER', 400]);
+    expect(calls).toEqual([]);
+    expect(rows.size).toBe(3);
+  });
+
   // ── the accept set's edges: nothing that answered correctly is refused ────
 
   it.each<[string, () => unknown, number]>([
