@@ -750,6 +750,7 @@
     "getTursoConfigJsonSchema": "src/data/driver/turso.zod.ts#getTursoConfigJsonSchema (const)",
     "hasDanglingLikeEscape": "src/data/filter.zod.ts#hasDanglingLikeEscape (function)",
     "hasDynamicTokens": "src/data/autonumber-format.ts#hasDynamicTokens (function)",
+    "hasNulInLikePattern": "src/data/filter.zod.ts#hasNulInLikePattern (function)",
     "hookForm": "src/data/hook.form.ts#hookForm (const)",
     "injectedSystemColumnDefs": "src/data/injected-system-column-provenance.ts#injectedSystemColumnDefs (function)",
     "isAcceptedFilterComparand": "src/data/filter-comparand-type.ts#isAcceptedFilterComparand (function)",
