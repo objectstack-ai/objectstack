@@ -60,6 +60,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
 import type { QueryAST } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -115,6 +116,16 @@ const FRAMEWORK_LEADING_SENTENCE =
 
 const BARE_SCAN = 'SELECT * FROM "deal"';
 
+/**
+ * [#20039] The field and the position are the predicate's detail, named on the
+ * wire only for a `where` the caller is known to have written (the #8220
+ * contract) — so the pins that read them mark theirs author-written, as a
+ * read-scope merge boundary marks a caller's own predicate (a shallow copy, so
+ * a shared case constant stays unmarked). The withheld half is pinned in
+ * `remote-transport-compile-refusal-seam.test.ts`.
+ */
+const own = (where: unknown) => markFilterSubtreeProvenance({ ...(where as object) }, 'author');
+
 describe('[#6050] RemoteTransport refuses an undefined comparand', () => {
   /** Every position a comparand can occupy, with the path the refusal names. */
   const UNDEFINED_POSITIONS: Array<[label: string, where: unknown, path: string]> = [
@@ -140,7 +151,7 @@ describe('[#6050] RemoteTransport refuses an undefined comparand', () => {
 
   for (const [label, where, path] of UNDEFINED_POSITIONS) {
     it(`refuses ${label} with INVALID_FILTER / 400`, async () => {
-      const err = await refusalOf(where);
+      const err = await refusalOf(own(where));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('is undefined');
@@ -164,7 +175,7 @@ describe('[#6050] RemoteTransport refuses an undefined comparand', () => {
    * walk runs over the whole subtree first, so the guard never sees it.
    */
   it('refuses inside $not before the NULL-safe rewrite reads the operand', async () => {
-    const err = await refusalOf({ $not: { stage: { $ne: undefined } } });
+    const err = await refusalOf(own({ $not: { stage: { $ne: undefined } } }));
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.message).toContain('where.$not.stage.$ne');
   });
@@ -172,9 +183,9 @@ describe('[#6050] RemoteTransport refuses an undefined comparand', () => {
   it('refuses beside a satisfiable disjunct, and beside the TRUE identity', async () => {
     // An emitter-side gate would resolve the `$or` from the good branch and
     // never look at the offending one — a refusal conditional on siblings.
-    const withSibling = await refusalOf({ $or: [{ stage: 'won' }, { stage: undefined }] });
+    const withSibling = await refusalOf(own({ $or: [{ stage: 'won' }, { stage: undefined }] }));
     expect(withSibling.message).toContain('where.$or[1].stage');
-    const withIdentity = await refusalOf({ $or: [{}, { stage: { $eq: undefined } }] });
+    const withIdentity = await refusalOf(own({ $or: [{}, { stage: { $eq: undefined } }] }));
     expect(withIdentity.message).toContain('where.$or[1].stage.$eq');
   });
 
@@ -234,7 +245,8 @@ describe('[#6050] RemoteTransport refuses an undefined comparand', () => {
    * position that does not exist there.
    */
   it('leaves the node-position refusals alone', async () => {
-    const notOperand = await refusalOf({ $not: undefined });
+    // [#20039] Author-written: the operand's kind is named only then.
+    const notOperand = await refusalOf(own({ $not: undefined }));
     expect(notOperand.code).toBe('INVALID_FILTER');
     expect(notOperand.message).toContain('$not');
     expect(notOperand.message).toContain('undefined');
