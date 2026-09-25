@@ -315,7 +315,10 @@ const MODULES = {
     dialectOnly:
       'the repo\'s hottest response file (208 write sites, edited several times a day) — a `responses` ratchet would go red for edits that are not envelope drift',
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
-    stringError: 44,
+    // 44 → 43 (#20102): the saved-report `/reports` family was retired whole,
+    // and one of its arms spelled a literal string `error`. Deleted, not
+    // converted — banked per the ratchet's own rule.
+    stringError: 43,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -345,7 +348,12 @@ const MODULES = {
     // (`msg.replace(…)`, `String(…).slice(0, 500)`), which that counter cannot
     // see — and `respond501`, converted alongside them, was never counted by
     // either dialect, having no `error` key at all.
-    siblingCode: 69,
+    //
+    // 69 → 58 (#20102): the saved-report `/reports` family was retired whole
+    // with the saved-report stack — its eleven `{ code, error }` sites (the
+    // `*_FAILED` 500s and `SCHEDULE_DELETE_FAILED`) left with the eight routes.
+    // Deleted rather than converted, so no wire answer that still exists moved.
+    siblingCode: 58,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
