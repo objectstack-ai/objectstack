@@ -13,4 +13,4 @@ Against the served `sdui.manifest.json`, five of its 59 components change:
 
 Clause-②: no
 
-`not-a-container` stays a `warning`, so the default save gate refuses no page it accepted before and accepts no page it refused. Only `os validate --strict`, which treats warnings as errors, sees the five-component change. The package's public entry adds no export.
+`not-a-container` stays a `warning`, so the default save gate refuses no page it accepted before and accepts no page it refused. Only the two modes that treat warnings as errors see the five-component change: `os validate --strict` and `os lint --strict`. Both run `validateJsxPages`. The package's public entry adds no export.
