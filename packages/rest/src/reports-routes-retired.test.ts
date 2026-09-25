@@ -18,9 +18,9 @@
  *    `404`, byte-identical to a control path nobody ever mounted. Not `405`:
  *    a 405 would mean some other verb still lives at that path;
  *  - the server under test is really serving: a mounted sibling capability
- *    family (`/approvals`, which answers `501` with no provider wired) does NOT
- *    fall into the 404 — otherwise every assertion above passes against a
- *    server that mounted nothing.
+ *    family (`/approvals`, which refuses this anonymous caller at its auth
+ *    floor with `401`) does NOT fall into the 404 — otherwise every assertion
+ *    above passes against a server that mounted nothing.
  *
  * Driven through the real `HonoHttpServer` with its `notFound` seam installed,
  * the adapter `os serve` mounts, so the 404 is the platform's own answer and
@@ -108,10 +108,14 @@ describe('[#20102] the saved-report /api/v1/reports family is retired', () => {
 
   it('a mounted sibling capability family still answers — the 404 above is not a dead server', async () => {
     const { app } = boot();
-    // `/approvals` is served by the same registrar pass and answers 501 when
-    // no approvals provider is wired, which is the case here.
+    // `/approvals` is served by the same registrar pass. The anonymous caller
+    // is refused at that route's auth floor — a mounted route's answer, which
+    // an unmatched path can never give.
     const sibling = await answer(app, 'GET', '/api/v1/approvals/requests');
     expect(sibling.status).not.toBe(404);
-    expect(sibling.status).toBe(501);
+    expect(sibling.status).toBe(401);
+    // …and its body is not the unmatched-route answer either.
+    const unmatched = await answer(app, 'GET', '/api/v1/zz-never-mounted');
+    expect(sibling.body).not.toBe(unmatched.body);
   });
 });
