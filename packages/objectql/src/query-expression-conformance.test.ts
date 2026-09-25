@@ -411,7 +411,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
      * but a different set of rows — the "latest N" footgun below, reached
      * through a spelling rather than a typo.
      *
-     * `direction` is `IReportService.orderBy`'s live vocabulary, which
+     * `direction` is the better-auth adapter's `sortBy` vocabulary, which
      * `plugin-auth/objectql-adapter.ts` already translates by hand; the schema
      * half of this door (`SortNodeSchema`'s `aliases: { direction: 'order' }`)
      * landed in the same change.
@@ -992,11 +992,11 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         ['delete', (e: ObjectQL) => e.delete('showcase_task', { where: { is_open: true }, multi: true })],
     ])('`engine.%s` REFUSES it too — the door the REST ingress cannot reach', async (_verb, call) => {
         // The half an ingress-only fix leaves open, and it is AUTHOR-reachable
-        // rather than merely internal: `plugin-reports`' `executeReport`
-        // forwards a saved report's `query.filter` verbatim into
-        // `engine.find(object, { where: q.filter, … })`, exactly as #7095
-        // measured for `query.orderBy`. Flows and dashboards travel the same
-        // path. Every verb that accepts a caller `where` passes through the one
+        // rather than merely internal: a flow node's `config.filter` reaches the
+        // engine's `find` verbatim as its `where` (so did a saved report's
+        // `query.filter`, until the saved-report stack was retired in #20102),
+        // exactly as #7095 measured for `query.orderBy`. Dashboards travel the
+        // same path. Every verb that accepts a caller `where` passes through the one
         // lowering seam this gate lives in, which is why all six answer alike.
         await expect(call(engine)).rejects.toMatchObject({
             status: 400,
@@ -1342,9 +1342,9 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         ['update', (e: ObjectQL) => e.update('showcase_task', { status: 'done' }, { where: { 'project_id.name': 'Apollo' }, multi: true })],
         ['delete', (e: ObjectQL) => e.delete('showcase_task', { where: { 'project_id.name': 'Apollo' }, multi: true })],
     ])('`engine.%s` refuses the dotted spelling too — the door a saved report reaches', async (_verb, call) => {
-        // Same author-reachable surfaces as the #8296 verdict one block up:
-        // `plugin-reports` forwards a saved report's `query.filter` verbatim
-        // into `engine.find`, never passing the ingress.
+        // Same author-reachable surfaces as the #8296 verdict one block up: a
+        // flow node's `config.filter` reaches `engine.find` verbatim, never
+        // passing the ingress.
         await expect(call(engine)).rejects.toMatchObject({
             status: 400,
             code: 'INVALID_FIELD',

@@ -331,14 +331,14 @@ describe('the `__` operation-private-key convention has one owner (#7284)', () =
     'the scan reaches the packages that used to hold the copies',
     () => {
       // The second half of the same anti-vacuity guard: prove the scan actually
-      // descends into the three consumer packages, so a future refactor of the
-      // scan surface cannot silently narrow it to `packages/core`.
+      // descends into the consumer packages, so a future refactor of the scan
+      // surface cannot silently narrow it to `packages/core`. (A third consumer,
+      // the saved-report service, was retired whole in #20102.)
       const scanned = scannedFiles();
 
       for (const consumer of [
         'packages/plugins/plugin-audit/src/comment-access-hooks.ts',
         'packages/services/service-storage/src/attachment-access-hooks.ts',
-        'packages/plugins/plugin-reports/src/report-service.ts',
       ]) {
         expect(scanned).toContain(consumer);
       }
