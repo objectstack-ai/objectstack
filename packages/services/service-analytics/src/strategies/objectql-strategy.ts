@@ -561,9 +561,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#15684] …and the same dialect, so the echoed scope prints the
       // construct the executed one runs — `GLOB` on SQLite, where a plain
       // `LIKE` folds ASCII case and admits rows the policy excludes.
+      // [#20075] …and the request context `execute()` forwards to the engine,
+      // so the echo prints the value the engine resolves a scope placeholder
+      // to, and refuses one it cannot resolve, as `execute()` does.
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
         nonTextColumn: nonTextColumnResolver(ctx, tableName),
         dialect: sqlDialectFor(ctx, tableName),
+        context: ctx.context,
       });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
