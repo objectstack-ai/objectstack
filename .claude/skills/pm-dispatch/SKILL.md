@@ -73,7 +73,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 队列空 + 无在飞 + 无待复核 + 决策箱无新答复 ⇒ 自退。
 - 分诊席跑普通直连会话、默认判断档;裁决不在本席,归维护者召唤的总监席。
 - 子代理裁决逐份过转录核验采信。
-- 开轮互斥的四读数、开轮标记与章程触碰核对见 `references/seat-lifecycle.md` 〈开轮互斥〉。
 
 ## 阶段细则索引
 
@@ -307,6 +306,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 ```text
 Claim: PM loop round N
 Session: `session_<id>`
+Account: `<github-login>` (the seat's linked user as `GET /user` answers it; always the card's assignee)
 Branch: `claude/issue-<n>-<slug>`
 Worktree: `<repo>-issue-<n>`
 Domain: `domain:<x>`
