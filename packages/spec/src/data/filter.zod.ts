@@ -3,6 +3,10 @@
 import { z } from 'zod';
 import { closedObject } from '../shared/strict-object';
 import { assertListComparandShapes } from './filter-comparand-shape';
+// [#19889] The equality-slot refusal's words, shared with the comparand-shape
+// face so the save door and the query door print one sentence (ruling A,
+// record 5805248669: "one constant, two doors").
+import { arrayEqualityComparandMessage } from './filter-comparand-refusal-text';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
 // [#19514] The text-comparand door this package publishes for the
@@ -258,12 +262,39 @@ const NE_DESCRIPTION =
   + 'asks: it matches rows whose field holds a value, never rows that merely carry the key.';
 
 /**
+ * [#19889] The `$eq` slot, shared by the documentation copy
+ * ({@link EqualityOperatorSchema}) and the enforced copy
+ * (`FieldOperatorsSchema`) — the two share the CODE, the pairing
+ * `orderingComparandSchema` gives the ordering slots, so the published
+ * reference cannot describe a slot the enforced copy narrows.
+ *
+ * Open (`z.any()`) EXCEPT for an ARRAY, refused by ruling (#19889, letter A,
+ * record 5805248669): an array is not an equality comparand. The comparand-shape
+ * face has refused it on every query since ruling 乙 (#19757); this is the same
+ * refusal at the schema door, in the same words
+ * (`arrayEqualityComparandMessage`, one text for both doors). The field is not
+ * named here because this slot cannot see it — the key belongs to the record
+ * enclosing the operator map — and the issue's own `path` says where it is.
+ * `null`, every scalar, a `Date` and a `{ $field }` reference are not arrays and
+ * pass exactly as before; `$ne` is not judged (the ruling names equality).
+ *
+ * ⚠️ `z.toJSONSchema()` has no arm for a custom check, so the published JSON
+ * Schema still reads `{}` here. The site is declared in
+ * `dropped-refinements.baseline.json`.
+ */
+const equalityComparandSchema = () =>
+  z.any().superRefine((value, ctx) => {
+    if (!Array.isArray(value)) return;
+    ctx.addIssue({ code: 'custom', message: arrayEqualityComparandMessage(value, { op: '$eq' }) });
+  }).optional().describe(EQ_DESCRIPTION);
+
+/**
  * Comparison operators for equality and inequality checks.
  * Supported data types: Any
  */
 export const EqualityOperatorSchema = lazySchema(() => z.object({
   /** Equal to (default) - SQL: = | MongoDB: $eq */
-  $eq: z.any().optional().describe(EQ_DESCRIPTION),
+  $eq: equalityComparandSchema(),
 
   /** Not equal to - SQL: <> or != | MongoDB: $ne */
   $ne: z.any().optional().describe(NE_DESCRIPTION),
@@ -1415,8 +1446,10 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // Equality. Both slots read the SAME description constants the documentation
   // copy ({@link EqualityOperatorSchema}) reads — the pairing the ordering and
   // set slots below already use, extended to every remaining family so no
-  // operator can be described in one copy and blank in the other.
-  $eq: z.any().optional().describe(EQ_DESCRIPTION),
+  // operator can be described in one copy and blank in the other. [#19889]
+  // `$eq` is built from the same `equalityComparandSchema` factory the
+  // documentation copy uses: it refuses an ARRAY comparand, in the face's words.
+  $eq: equalityComparandSchema(),
   $ne: z.any().optional().describe(NE_DESCRIPTION),
 
   // Ordering. `string` is in the union for the reason {@link ComparisonOperatorSchema}
@@ -1553,8 +1586,36 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
 /**
  * Walk one condition node and report every comparand this authoring door
  * refuses — the bare date-range PRESET names in an ordering position (#8793),
- * and the `$icontains` comparands the platform's own conformance table declares
- * refused (#19514).
+ * the `$icontains` comparands the platform's own conformance table declares
+ * refused (#19514), and an ARRAY in the EQUALITY slot (#19889).
+ *
+ * ## The equality-slot arm answers the FACE, in the face's words (#19889)
+ *
+ * Ruled 2026-09-24 (letter A, record 5805248669): `FilterConditionSchema`
+ * (implicit equality) and `FieldOperatorsSchema.$eq` refuse an array comparand
+ * at parse, "with the SAME remedy text the shared compile face emits — one
+ * constant, two doors". The compile face (`assertListComparandShapes`) has
+ * refused `{ field: [...] }` and `{ field: { $eq: [...] } }` on every query since
+ * ruling 乙 (#19757), so before this arm a stored dataset, widget or report
+ * filter carrying either shape published clean and failed every query that
+ * used it, for a different person, later.
+ *
+ * - **The words** are `arrayEqualityComparandMessage`
+ *   (`./filter-comparand-refusal-text.ts`), which the face prints too. The one
+ *   difference is the location: the face appends `at where.<field>`, this door
+ *   does not, because a refinement cannot see where it sits in the document and
+ *   the issue's own `path` carries that (`filter.stage`,
+ *   `measures.0.filter.stage.$eq`).
+ * - **The reach** is the face's, not wider. This node's own field entries are
+ *   judged, and `$and` / `$or` / `$not` members by their own pass, as the face
+ *   walks them. A field spec with NO `$` key is a nested-relation or
+ *   deep-equality condition the face never descends, so the arm does not fire
+ *   inside one (`depth` > 0): refusing there would refuse a document the query
+ *   door accepts, which is the split this arm exists to close.
+ * - **Not dropped.** The refusal fails the parse; nothing is stripped from the
+ *   document. A dropped filter would show MORE rows than the author asked for.
+ * - ⛔ `$ne` is not judged (the ruling names equality), and the list operators
+ *   keep their lists, `$in: []` / `$nin: []` included.
  *
  * Descends non-`$` keys only (operator specs and nested relations): the
  * `$and` / `$or` / `$not` members are re-parsed by {@link FilterConditionSchema}
@@ -1606,7 +1667,22 @@ function checkFilterConditionComparands(
 
   for (const [key, value] of Object.entries(node)) {
     if (key.startsWith('$')) continue; // $and/$or/$not re-parse; other $ keys stay unjudged
-    if (!isPlainFilterNode(value)) continue; // implicit equality / arrays — not judged
+    // [#19889] The EQUALITY slot, implicit form `{ field: [...] }` — the empty
+    // list included. Judged on this node's OWN field entries only (`depth` 0),
+    // the face's exact reach: its walk never descends a field spec that has no
+    // `$` key, so an array inside a nested-relation condition is not refused
+    // there and is not refused here. See the docblock's third arm.
+    if (Array.isArray(value)) {
+      if (depth === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...path, key],
+          message: arrayEqualityComparandMessage(value, { field: key }),
+        });
+      }
+      continue;
+    }
+    if (!isPlainFilterNode(value)) continue; // a scalar implicit-equality comparand — not judged
     const hasOperatorKeys = Object.keys(value).some((k) => k.startsWith('$'));
     if (!hasOperatorKeys) {
       // Nested relation / deep equality — the schema does not re-parse these,
@@ -1615,6 +1691,19 @@ function checkFilterConditionComparands(
       continue;
     }
     for (const [op, comparand] of Object.entries(value)) {
+      // [#19889] The EQUALITY slot, explicit form `{ field: { $eq: [...] } }`,
+      // on the same reach as the implicit form above. `null`, every scalar and a
+      // `{ $field }` reference are not arrays and pass.
+      if (op === '$eq') {
+        if (depth === 0 && Array.isArray(comparand)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [...path, key, op],
+            message: arrayEqualityComparandMessage(comparand, { op: '$eq', field: key }),
+          });
+        }
+        continue;
+      }
       if (op === FILTER_TEXT_COMPARAND_OPERATOR && isRefusedTextComparand(comparand)) {
         ctx.addIssue({
           code: 'custom',
@@ -1765,15 +1854,17 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
       $or: z.array(FilterConditionSchema).optional(),
       $not: FilterConditionSchema.optional(),
     })
-  // Two comparand refusals ride one walk — see its docblock for why. [#8793]
+  // Three comparand refusals ride one walk — see its docblock for why. [#8793]
   // Bare date-range preset names are refused from ordering comparands (the
   // § 3.35 block above carries the ruling, the measured defect and the
   // ordering-only boundary); [#19514] `$icontains` comparands are refused on
   // the two shapes `FILTER_TEXT_CASES` already declares refused, so the door
-  // stops admitting the document its own conformance table says will 400. The
-  // refinement judges this node's own field entries; `$and` / `$or` / `$not`
-  // members re-enter the schema and are judged by their own pass with nested
-  // issue paths.
+  // stops admitting the document its own conformance table says will 400;
+  // [#19889] an ARRAY in the equality slot, implicit or `$eq`, is refused in
+  // the comparand-shape face's own words, so a stored filter the query door
+  // refuses is refused on save. The refinement judges this node's own field
+  // entries; `$and` / `$or` / `$not` members re-enter the schema and are
+  // judged by their own pass with nested issue paths.
   ).superRefine((node, ctx) => checkFilterConditionComparands(node, ctx))
 );
 
