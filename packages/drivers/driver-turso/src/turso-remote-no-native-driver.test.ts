@@ -42,9 +42,14 @@
  *    What this card owes is that removing the private `:memory:` database adds
  *    no silent answer. `introspectSchema()` used to answer "no tables" from it.
  *
- * Measured at this card's base with the placeholder config restored: cases 2,
- * 3 and 4 go red (the first two on knex's install error, the third on
- * `introspectSchema()` answering `[]`), and case 1 stays green.
+ * Reverse verification, with the old `connection: { filename: ':memory:' }`
+ * restored in the remote arm: 6 of 10 go red. Cases 2 and 3 fail on knex's
+ * install error, as does every case-4 test with the module absent, because
+ * construction fails first. With the module installed, `introspectSchema()`
+ * goes red on `expected [] to include 'probe_t'`, the silent answer this card
+ * removes. The two controls stay green, and so do `distinct()` and
+ * `findWithWindowFunctions()` with the module installed, which failed loudly
+ * against the private database too.
  */
 
 import Module from 'node:module';
