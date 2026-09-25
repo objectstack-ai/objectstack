@@ -52,7 +52,10 @@ export * from './security-service.js';
 export * from './sharing-service.js';
 export * from './rls-membership-resolver.js';
 export * from './share-link-service.js';
-export * from './report-service.js';
+// './report-service.js' (the saved-report contract and its six DTOs) removed
+// (#20102): the saved-report stack it described had zero callers in any repo.
+// Reports are `report` metadata (`ReportSchema`); an ad-hoc object query is a
+// ListView.
 export * from './approval-service.js';
 export * from './package-service.js';
 export * from './knowledge-service.js';

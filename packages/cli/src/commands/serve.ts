@@ -23,7 +23,7 @@ import {
 // the legacy boolean in as its unset-fallback. serve's last direct reader of the
 // boolean was the banner, and that was exactly the drift #4801 fixed.
 import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError } from '@objectstack/types';
-import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // The posture vocabulary, read from the package that DEFINES it (#5359) — the
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
@@ -2001,11 +2001,6 @@ export default class Serve extends Command {
       export: 'PinyinSearchPlugin',
       identities: ['com.objectstack.plugin.pinyin-search', 'PinyinSearchPlugin'],
     },
-    reports: {
-      pkg: '@objectstack/plugin-reports',
-      export: 'ReportsServicePlugin',
-      identities: ['com.objectstack.service.reports', 'ReportsServicePlugin'],
-    },
     approvals: {
       pkg: '@objectstack/plugin-approvals',
       export: 'ApprovalsServicePlugin',
@@ -2818,13 +2813,13 @@ export default class Serve extends Command {
           if (!requires.includes(cap)) requires.push(cap);
         }
       }
-      // The email + approvals + reports services schedule background work
-      // (durable retries, SLA escalation, scheduled digests). Auto-pull
+      // The email + approvals services schedule background work
+      // (durable retries, SLA escalation). Auto-pull
       // 'job' and 'queue' so plugins can opt into durable scheduling.
       // IMPORTANT: prepend, so their plugins load (and their kernel:ready
       // hooks fire) BEFORE consumers like email/approvals that subscribe
       // to queues during their own kernel:ready phase.
-      const NEEDS_JOB_OR_QUEUE = ['email', 'approvals', 'reports', 'auth'];
+      const NEEDS_JOB_OR_QUEUE = ['email', 'approvals', 'auth'];
       if (NEEDS_JOB_OR_QUEUE.some((c) => requires.includes(c))) {
         if (!requires.includes('queue')) requires.unshift('queue');
         if (!requires.includes('job')) requires.unshift('job');
@@ -4617,8 +4612,15 @@ export default class Serve extends Command {
           // (`serve-capability-vocabulary.test.ts`), and `@objectstack/spec` and
           // this package release in one fixed version group.
           if (declaredRequires.has(cap) && !PLATFORM_CAPABILITY_TOKENS.includes(cap)) {
+            // A RETIRED token (e.g. `reports`, #20102) is not a typo: say what
+            // replaced it, in the same words `defineStack` refuses it with.
+            const retired = Object.hasOwn(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, cap)
+              ? RETIRED_PLATFORM_CAPABILITY_GUIDANCE[cap]
+              : undefined;
             console.warn(chalk.yellow(
-              `  ⚠ requires: "${cap}" is not a known platform capability — check for a typo. It was ignored.`,
+              retired
+                ? `  ⚠ ${retired} It was ignored.`
+                : `  ⚠ requires: "${cap}" is not a known platform capability — check for a typo. It was ignored.`,
             ));
           }
           continue;

@@ -17,9 +17,9 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * The cron zone's authoring door — `iana_time_zone` membership, judged by the
  * package's own shared predicate (#16292).
  *
- * The same concept is judged by the same predicate at four columns already
+ * The same concept is judged by the same predicate at three columns already
  * (`sys_business_unit.timezone`, `sys_organization.timezone`, `sys_job.timezone`,
- * `sys_report_schedule.timezone`, all via `valueDomain: 'iana_time_zone'`), and
+ * all via `valueDomain: 'iana_time_zone'`), and
  * `sys_job.timezone` is a WRITE-ONLY mirror — `DbJobAdapter.upsertJobRow` writes
  * it and nothing reads it back — so that column never judges the value the
  * scheduler actually honours. This is the separate, earlier door: the value an

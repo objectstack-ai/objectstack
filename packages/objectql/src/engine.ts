@@ -1245,9 +1245,9 @@ function assertOrderByIsMaterializable(
  * SQL renders `"account"."name"` against a table that was never joined, the DB
  * answers `no such column`, and the #3821 recovery ladder retries `select('*')`.
  * The caller asked to narrow and silently received EVERY field, byte-identical
- * to no projection at all. A saved report's `query.fields` reaches this the
- * same way (`plugin-reports` forwards it verbatim), as does every hook and
- * internal caller.
+ * to no projection at all. Every hook and internal caller reaches this the
+ * same way (a saved report's `query.fields` did too, until the saved-report
+ * stack was retired in #20102).
  *
  * WHY A REFUSAL: ruled 2026-08-12 on #7589 (adopting the drivers seat's
  * Option B) — a dotted entry the engine cannot resolve is refused loudly at

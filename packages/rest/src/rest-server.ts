@@ -1634,7 +1634,6 @@ export class RestServer {
     private tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private emailServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private sharingServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
-    private reportsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private approvalsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private sharingRulesServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private i18nServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
@@ -1681,7 +1680,16 @@ export class RestServer {
         objectQLProvider?: (environmentId?: string) => Promise<any | undefined>,
         emailServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         sharingServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
-        reportsServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        /**
+         * RETIRED slot (#20102) — this position carried the saved-report
+         * service provider, whose `/reports` routes were retired with the
+         * saved-report stack. The slot is kept, typed `undefined`, because
+         * every later parameter is positional: removing it would silently
+         * re-bind each argument after it (the #15256 hazard) at every call
+         * site that passes one. Pass `undefined`; passing a provider is a
+         * compile error.
+         */
+        _retiredReportsServiceProvider?: undefined,
         approvalsServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         sharingRulesServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         i18nServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
@@ -1708,7 +1716,6 @@ export class RestServer {
         this.objectQLProvider = objectQLProvider;
         this.emailServiceProvider = emailServiceProvider;
         this.sharingServiceProvider = sharingServiceProvider;
-        this.reportsServiceProvider = reportsServiceProvider;
         this.approvalsServiceProvider = approvalsServiceProvider;
         this.sharingRulesServiceProvider = sharingRulesServiceProvider;
         this.i18nServiceProvider = i18nServiceProvider;
@@ -4420,14 +4427,16 @@ export class RestServer {
             // `/forms/:slug` and `/forms/:slug/submit` paths can't be
             // shadowed by a literal object named "forms".
             this.registerFormEndpoints(bp);
-            // Capability routes (sharing rules, reports, approvals) live at
+            // Capability routes (sharing rules, approvals) live at
             // the top of the API surface (`/api/v1/{capability}/...`) rather
             // than under `/data/`, so they don't collide with the greedy
             // CRUD `/:object` matcher and don't pretend to be records on a
             // single object.
             this.registerSharingEndpoints(bp);
             this.registerSharingRuleEndpoints(bp);
-            this.registerReportsEndpoints(bp);
+            // The saved-report `/reports` family was retired (#20102): no
+            // route answers there, so every path under it is the standard
+            // unmounted-route 404.
             this.registerApprovalsEndpoints(bp);
             this.registerAnalyticsEndpoints(bp);
             this.registerSecurityEndpoints(bp);
@@ -12639,346 +12648,6 @@ export class RestServer {
                 } catch (err: any) { handleError(err, res, 'INTERNAL'); }
             },
             metadata: { summary: 'Discard a stale environment overlay shadowing a package-declared permission set (ADR-0094)', tags: ['security'] },
-        });
-    }
-
-    /**
-     * Register saved-report + scheduled-digest endpoints (M11.C16).
-     *
-     * Surfaces `IReportService` over HTTP so the UI can build,
-     * run, and schedule reports without dropping to ObjectQL. Routes
-     * live at the top of the API surface (alongside `/approvals` and
-     * `/sharing`) — reports are a tenant-wide capability, not a record
-     * on a specific CRUD object:
-     *
-     *   GET    {basePath}/reports?object=&ownerId=
-     *   POST   {basePath}/reports
-     *   GET    {basePath}/reports/:id
-     *   DELETE {basePath}/reports/:id
-     *   POST   {basePath}/reports/:id/run
-     *   POST   {basePath}/reports/:id/schedule
-     *   GET    {basePath}/reports/:id/schedules
-     *   DELETE {basePath}/reports/schedules/:scheduleId
-     *
-     * All routes return 501 when `reportsServiceProvider` is unset so
-     * a deployment without `@objectstack/plugin-reports` fails cleanly.
-     */
-    private registerReportsEndpoints(basePath: string): void {
-        // Reports live at the top of the API surface (e.g. `/api/v1/reports`)
-        // rather than under `/data/`, because a report is a first-class
-        // capability whose definition is tenant-wide (not a record on a
-        // particular object).
-        const dataPath = basePath;
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        const resolveService = async (environmentId?: string) => {
-            if (!this.reportsServiceProvider) return undefined;
-            try { return await this.reportsServiceProvider(environmentId); }
-            catch { return undefined; }
-        };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Reports service is not configured on this deployment',
-        });
-        // [#11926] The door states the contract for `POST /reports` below.
-        // `IReportService.saveReport` takes a `SaveReportInput`
-        // (`packages/spec/src/contracts/report-service.ts`), on which `name`,
-        // `object` and `query` are all REQUIRED — but an HTTP body is untyped,
-        // so forwarding it unchecked handed the service a value merely CLAIMED
-        // to be a `SaveReportInput`. That left the requirement for every
-        // implementation to re-derive privately: the bundled
-        // `@objectstack/plugin-reports` does re-derive it, a third-party one
-        // need not, and a caller could not tell which one it was talking to.
-        // Refusing here makes the contract true for every implementation, in
-        // the same envelope `handleValidation` already produces (400 /
-        // VALIDATION_FAILED, ADR-0112).
-        // It THROWS rather than writing a response, and that is the design, not
-        // a detour: `handleValidation` below is this surface's single place for
-        // building a VALIDATION_FAILED body. Writing a second one here would
-        // make one route answer the same refusal in two different envelopes —
-        // and would add a non-conforming body to the `check:route-envelope`
-        // ratchet, which only ticks down. Raised before `saveReport` is called,
-        // so the door refuses rather than the service.
-        const assertSaveReportInput = (body: any): void => {
-            const missing = (['name', 'object', 'query'] as const)
-                .filter((field) => body?.[field] === undefined || body?.[field] === null);
-            if (missing.length > 0) {
-                throw new Error(
-                    `VALIDATION_FAILED: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`,
-                );
-            }
-            // `query` is a `ReportQuery` envelope — never a scalar and never a
-            // list. A string here is the shape an authoring mistake actually
-            // takes, and it reaches storage as a stringified scalar otherwise.
-            if (typeof body.query !== 'object' || Array.isArray(body.query)) {
-                throw new Error('VALIDATION_FAILED: query must be a ReportQuery object');
-            }
-        };
-        const handleValidation = (res: any, err: any): boolean => {
-            const msg = String(err?.message ?? err ?? '');
-            if (msg.startsWith('VALIDATION_FAILED')) {
-                res.status(400).json({
-                    code: 'VALIDATION_FAILED',
-                    error: msg.replace(/^VALIDATION_FAILED:\s*/, ''),
-                });
-                return true;
-            }
-            if (msg.startsWith('REPORT_NOT_FOUND')) {
-                res.status(404).json({ code: 'REPORT_NOT_FOUND', error: msg });
-                return true;
-            }
-            return false;
-        };
-
-        // GET — list reports.
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/reports`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    // [#6877] Straight passthrough — both reached `listReports`
-                    // as arrays.
-                    if (refuseRepeatedQueryParams(req, res, ['object', 'ownerId'])) return;
-                    const q = req.query ?? {};
-                    const rows = await svc.listReports({ object: q.object, ownerId: q.ownerId }, context ?? {});
-                    res.json({ data: rows });
-                } catch (error: any) {
-                    logError('[REST] List reports error:', error);
-                    res.status(500).json({ code: 'REPORTS_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'List saved reports', tags: ['reports'] },
-        });
-
-        // POST — save (upsert) a report.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/reports`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    try {
-                        // AFTER the 501 on purpose: "no reports service is
-                        // mounted" is a deployment fact and outranks anything
-                        // about the body. Inside the try so the refusal reaches
-                        // `handleValidation` like any other VALIDATION_FAILED.
-                        assertSaveReportInput(req.body ?? {});
-                        const row = await svc.saveReport(req.body ?? {}, context ?? {});
-                        res.status(201).json(row);
-                    } catch (err: any) {
-                        if (handleValidation(res, err)) return;
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Save report error:', error);
-                    res.status(500).json({ code: 'REPORT_SAVE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Create or update a saved report', tags: ['reports'] },
-        });
-
-        // GET — single report.
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/reports/:id`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const row = await svc.getReport(req.params.id, context ?? {});
-                    if (!row) {
-                        res.status(404).json({ code: 'REPORT_NOT_FOUND', error: `Report ${req.params.id} not found` });
-                        return;
-                    }
-                    res.json(row);
-                } catch (error: any) {
-                    logError('[REST] Get report error:', error);
-                    res.status(500).json({ code: 'REPORT_GET_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Get a saved report by id', tags: ['reports'] },
-        });
-
-        // DELETE — drop report + cascade schedules.
-        this.routeManager.register({
-            method: 'DELETE',
-            path: `${dataPath}/reports/:id`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    // [#7523] Deny-as-404, with the two deny arms collapsed onto ONE
-                    // response. `deleteReport()` is silently idempotent for an id that
-                    // does not exist but throws REPORT_NOT_FOUND for a report the
-                    // caller does not own — two shapes that used to reach the caller
-                    // as 204-vs-500 and let an authenticated prober read another
-                    // owner's report ids straight off the status code. Splitting them
-                    // 204-vs-404 would only re-dress the same oracle, so both arms are
-                    // answered here, before the delete fires, by the one call the
-                    // surface already keeps blind to the difference: `getReport()`
-                    // returns null for an unknown id AND for another owner's id
-                    // alike (#2980). The response is emitted by `handleValidation`
-                    // from a synthesised REPORT_NOT_FOUND, i.e. the exact code path
-                    // the thrown arm takes below — one emitter, so status and body
-                    // cannot drift apart.
-                    const visible = await svc.getReport(req.params.id, context ?? {});
-                    if (!visible) {
-                        handleValidation(res, new Error(`REPORT_NOT_FOUND: ${req.params.id}`));
-                        return;
-                    }
-                    await svc.deleteReport(req.params.id, context ?? {});
-                    res.status(204).end();
-                } catch (error: any) {
-                    // REPORT_NOT_FOUND → 404, VALIDATION_FAILED → 400. Reached only
-                    // when an IReportService gates in `deleteReport()` without also
-                    // blinding `getReport()`; routing it through the same helper keeps
-                    // that implementation's arms indistinguishable too.
-                    if (handleValidation(res, error)) return;
-                    logError('[REST] Delete report error:', error);
-                    res.status(500).json({ code: 'REPORT_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Delete a saved report (cascades schedules)', tags: ['reports'] },
-        });
-
-        // POST — execute a report by id.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/reports/:id/run`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    try {
-                        const result = await svc.run(req.params.id, context ?? {});
-                        res.json(result);
-                    } catch (err: any) {
-                        if (handleValidation(res, err)) return;
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Run report error:', error);
-                    res.status(500).json({ code: 'REPORT_RUN_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Execute a saved report and return rendered output', tags: ['reports'] },
-        });
-
-        // POST — schedule a report.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/reports/:id/schedule`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const body = req.body ?? {};
-                    try {
-                        const row = await svc.scheduleReport({
-                            reportId: req.params.id,
-                            recipients: body.recipients ?? [],
-                            name: body.name,
-                            intervalMinutes: body.intervalMinutes ?? body.interval_minutes,
-                            cronExpression: body.cronExpression ?? body.cron_expression,
-                            timezone: body.timezone,
-                            format: body.format,
-                            subjectTemplate: body.subjectTemplate ?? body.subject_template,
-                            ownerId: body.ownerId ?? body.owner_id,
-                            active: body.active,
-                        }, context ?? {});
-                        res.status(201).json(row);
-                    } catch (err: any) {
-                        if (handleValidation(res, err)) return;
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Schedule report error:', error);
-                    res.status(500).json({ code: 'REPORT_SCHEDULE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Create a recurring email schedule for a report', tags: ['reports'] },
-        });
-
-        // GET — list schedules for a report.
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/reports/:id/schedules`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const rows = await svc.listSchedules({ reportId: req.params.id }, context ?? {});
-                    res.json({ data: rows });
-                } catch (error: any) {
-                    logError('[REST] List schedules error:', error);
-                    res.status(500).json({ code: 'SCHEDULES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'List schedules for a report', tags: ['reports'] },
-        });
-
-        // DELETE — drop a schedule.
-        this.routeManager.register({
-            method: 'DELETE',
-            path: `${dataPath}/reports/schedules/:scheduleId`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    // [#7603] Both deny arms — an unknown scheduleId and another
-                    // owner's — reach the caller as the one 404 emitted by the
-                    // single `handleValidation` call below, because
-                    // `unscheduleReport` is contracted to throw the SAME
-                    // `REPORT_NOT_FOUND: <scheduleId>` for both, before the delete
-                    // fires. It used to resolve silently for the unknown id, which
-                    // landed here as a 204 and let a prober read another owner's
-                    // schedule ids off the status code (#7523's oracle, in the
-                    // 404-vs-204 costume its card warned about).
-                    //
-                    // Unlike the sibling `DELETE /reports/:id`, this route cannot
-                    // pre-empt the two arms itself: that one collapses them with
-                    // `getReport()`, already blind to the difference (#2980),
-                    // whereas the caller here presents a scheduleId and
-                    // `IReportService` exposes no by-id schedule read to be blind
-                    // with — `listSchedules` is keyed by reportId. So the blinding
-                    // is the service's obligation (stated on the contract), and the
-                    // route's job is to keep ONE emitter for whatever it throws.
-                    await svc.unscheduleReport(req.params.scheduleId, context ?? {});
-                    res.status(204).end();
-                } catch (error: any) {
-                    if (handleValidation(res, error)) return; // REPORT_NOT_FOUND → 404 (deny-as-404, anti-enumeration)
-                    logError('[REST] Unschedule report error:', error);
-                    res.status(500).json({ code: 'SCHEDULE_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Delete a report schedule by id', tags: ['reports'] },
         });
     }
 

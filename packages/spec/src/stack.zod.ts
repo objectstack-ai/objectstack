@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import { ManifestSchema } from './kernel/manifest.zod';
 import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
-import { PLATFORM_CAPABILITY_TOKENS } from './kernel/platform-capabilities';
+import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
 import { StackServerConfigSchema } from './system/stack-server.zod';
@@ -3257,7 +3257,9 @@ function validateTriggerCapability(data: unknown): string[] {
  * Directive #12): the vocabulary is the union of every token the framework CLI
  * and cloud's objectos-runtime resolve, plus the enterprise plugin-provided ones
  * (`hierarchy-security` / `ai-seat` / `governance`). The legacy `aiStudio` /
- * `aiSeat` aliases were removed in #3308, so those now reject too. Returns one
+ * `aiSeat` aliases were removed in #3308, so those now reject too. A RETIRED
+ * capability (`RETIRED_PLATFORM_CAPABILITY_GUIDANCE`, e.g. `reports`) rejects
+ * with its retirement prescription instead of the typo advice. Returns one
  * error per distinct unknown token.
  */
 function validateKnownCapabilities(config: ObjectStackDefinition): string[] {
@@ -3268,6 +3270,12 @@ function validateKnownCapabilities(config: ObjectStackDefinition): string[] {
   for (const token of raw) {
     if (PLATFORM_CAPABILITY_TOKENS.includes(token) || seen.has(token)) continue;
     seen.add(token);
+    // A RETIRED token is not a typo — the word used to be right — so it gets
+    // the retirement notice and its replacement instead of the typo advice.
+    if (Object.hasOwn(RETIRED_PLATFORM_CAPABILITY_GUIDANCE, token)) {
+      errors.push(RETIRED_PLATFORM_CAPABILITY_GUIDANCE[token]);
+      continue;
+    }
     errors.push(
       `requires: '${token}' is not a known platform capability — check for a typo ` +
         `(known tokens are kebab-case, e.g. 'ai-studio', 'pinyin-search', 'automation'). ` +

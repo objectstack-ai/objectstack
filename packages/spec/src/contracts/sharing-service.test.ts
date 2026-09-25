@@ -10,7 +10,6 @@ import type {
   SharingWriteVerdict,
 } from './sharing-service';
 import type { IApprovalService } from './approval-service';
-import type { IReportService } from './report-service';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import { ShareRecipientType } from '../security/sharing.zod';
 
@@ -590,7 +589,7 @@ type RetiredSharingContextSpecimen = {
   isSystem?: boolean;
 };
 
-describe('[#6523] sharing / approval / report enforcement takes the full ExecutionContext', () => {
+describe('[#6523] sharing / approval enforcement takes the full ExecutionContext', () => {
   it('declares the full envelope on every adjudicating signature, by type identity', () => {
     // Type-level assertions are the substance of this case; the runtime
     // expectation below only keeps vitest from reporting an empty test. tsc
@@ -600,7 +599,8 @@ describe('[#6523] sharing / approval / report enforcement takes the full Executi
     type GrantCtx = Parameters<ISharingService['grant']>[1];
     type RuleCtx = Parameters<ISharingRuleService['evaluateRule']>[1];
     type ApprovalCtx = Parameters<IApprovalService['decide']>[2];
-    type ReportCtx = Parameters<IReportService['run']>[1];
+    // The third contract of the original sweep, the saved-report service, was
+    // retired whole (#20102) — its signatures went with it, so it has no row.
 
     type _Pins = [
       Assert<Eq<SharingCtx, ExecutionContext>>,
@@ -608,17 +608,15 @@ describe('[#6523] sharing / approval / report enforcement takes the full Executi
       Assert<Eq<GrantCtx, ExecutionContext>>,
       Assert<Eq<RuleCtx, ExecutionContext>>,
       Assert<Eq<ApprovalCtx, ExecutionContext>>,
-      Assert<Eq<ReportCtx, ExecutionContext>>,
       // …and none of them is the six-field twin any more — measured against
       // the retired shape itself (the specimen above), so re-declaring that
       // subset under a fresh name is caught, not just re-importing the name
       // #7218 deleted.
       Refute<Eq<SharingCtx, RetiredSharingContextSpecimen>>,
       Refute<Eq<ApprovalCtx, RetiredSharingContextSpecimen>>,
-      Refute<Eq<ReportCtx, RetiredSharingContextSpecimen>>,
     ];
-    const pinned: _Pins = [true, true, true, true, true, true, false, false, false];
-    expect(pinned).toHaveLength(9);
+    const pinned: _Pins = [true, true, true, true, true, false, false];
+    expect(pinned).toHaveLength(7);
   });
 
   it('lets an implementation READ the envelope it is handed — no `as any` (shape witness)', async () => {

@@ -609,10 +609,6 @@
  "packages/plugins/plugin-hono-server/src/hono-plugin.ts": {
   "#4073": 1
  },
- "packages/plugins/plugin-reports/src/report-service.ts": {
-  "#2849": 2,
-  "#2980": 2
- },
  "packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts": {
   "#5876": 1,
   "#8552": 2
