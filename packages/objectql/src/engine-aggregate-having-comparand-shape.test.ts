@@ -50,6 +50,8 @@ import {
   normalizeFilterComparandTypes,
   FILTER_COMPARAND_TYPE_CASES,
   type ComparandTypeRefusalCase,
+  type EngineAggregateOptions,
+  type FilterCondition,
 } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
@@ -64,13 +66,23 @@ const ROWS = [
   { customer_id: 'c3', amount: 20 },
 ];
 
-const AGG_QUERY = {
+const AGG_QUERY: EngineAggregateOptions = {
   groupBy: ['customer_id'],
   aggregations: [
     { function: 'count', alias: 'order_count' },
     { function: 'sum', field: 'amount', alias: 'total' },
   ],
 };
+
+/**
+ * The refused shapes are OFF-CONTRACT by design — a scalar `$in`, a null
+ * `$between` bound — so the bag carrying one is cast through `unknown` to the
+ * contract it bypasses, never erased to `any`: the rest of the call stays
+ * checked, and the cast names what is being bypassed.
+ */
+function offContract(bag: Record<string, unknown>): EngineAggregateOptions {
+  return bag as unknown as EngineAggregateOptions;
+}
 
 interface Calls { aggregate: number; find: number }
 
@@ -201,7 +213,7 @@ describe('[#19974] having — the where/having parity table over the comparand-s
     it(`${name}: refused as a where AND as a having, one envelope, one wording, both doors`, async () => {
       const { engine: whereEngine, calls: whereCalls } = await makeEngine(ROWS, true);
       const whereErr = await refusalOf(() =>
-        whereEngine.aggregate(OBJECT, { ...AGG_QUERY, where: filter() } as any));
+        whereEngine.aggregate(OBJECT, offContract({ ...AGG_QUERY, where: filter() })));
       expectEnvelope(whereErr);
       expect(whereCalls).toEqual({ aggregate: 0, find: 0 });
       // The row is a real member of the face's refused set, and the where
@@ -216,7 +228,7 @@ describe('[#19974] having — the where/having parity table over the comparand-s
       for (const [door, native] of DOORS) {
         const { engine, calls } = await makeEngine(ROWS, native);
         const havingErr = await refusalOf(() =>
-          engine.aggregate(OBJECT, { ...AGG_QUERY, having: filter() } as any));
+          engine.aggregate(OBJECT, offContract({ ...AGG_QUERY, having: filter() })));
         expectEnvelope(havingErr);
         // Byte for byte the `where` refusal of the same shape, path aside.
         expect(havingErr.message, door).toBe(whereErr.message.replaceAll('where.', 'having.'));
@@ -236,7 +248,7 @@ describe('[#19974] having — the where/having parity table over the comparand-s
     const face = syncRefusalOf(() => assertListComparandShapes(filter(), `aggregate('${OBJECT}')`, 'having'));
     for (const [door, native] of DOORS) {
       const { engine } = await makeEngine(ROWS, native);
-      const run = () => engine.aggregate(OBJECT, { ...AGG_QUERY, having: filter() } as any);
+      const run = () => engine.aggregate(OBJECT, offContract({ ...AGG_QUERY, having: filter() }));
       if (face) {
         const err = await refusalOf(run);
         expectEnvelope(err);
@@ -277,7 +289,7 @@ describe('[#19974] having — driven from the shared FILTER_COMPARAND_TYPE_CASES
       for (const [door, native] of DOORS) {
         const { engine, calls } = await makeEngine(ROWS, native);
         const err = await refusalOf(() =>
-          engine.aggregate(OBJECT, { ...AGG_QUERY, having: c.filter() } as any));
+          engine.aggregate(OBJECT, { ...AGG_QUERY, having: c.filter() }));
         expect(err.code, door).toBe(c.code);
         expect(err.status, door).toBe(400);
         for (const needle of c.mustMention) {
@@ -290,7 +302,7 @@ describe('[#19974] having — driven from the shared FILTER_COMPARAND_TYPE_CASES
 });
 
 describe('[#19974] having — what the face leaves alone answers exactly as before', () => {
-  const PASSING: ReadonlyArray<readonly [string, Record<string, unknown>, readonly string[]]> = [
+  const PASSING: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
     ['a scalar in the implicit-equality slot', { total: 500 }, ['c1']],
     ['a scalar under $eq', { total: { $eq: 500 } }, ['c1']],
     ['a string in the implicit-equality slot', { customer_id: 'c2' }, ['c2']],
@@ -307,7 +319,7 @@ describe('[#19974] having — what the face leaves alone answers exactly as befo
     it(`${name} answers ${JSON.stringify(expected)} on both doors`, async () => {
       for (const [door, native] of DOORS) {
         const { engine } = await makeEngine(ROWS, native);
-        const rows = await engine.aggregate(OBJECT, { ...AGG_QUERY, having } as any);
+        const rows = await engine.aggregate(OBJECT, { ...AGG_QUERY, having });
         expect(groups(rows), door).toEqual([...expected]);
       }
     });
@@ -324,8 +336,8 @@ describe('[#19974] having — the verdict belongs to the filter, not to the data
       for (const [door, native] of DOORS) {
         const { engine: empty } = await makeEngine([], native);
         const { engine: populated } = await makeEngine(ROWS, native);
-        const emptyErr = await refusalOf(() => empty.aggregate(OBJECT, { ...AGG_QUERY, having } as any));
-        const populatedErr = await refusalOf(() => populated.aggregate(OBJECT, { ...AGG_QUERY, having } as any));
+        const emptyErr = await refusalOf(() => empty.aggregate(OBJECT, offContract({ ...AGG_QUERY, having })));
+        const populatedErr = await refusalOf(() => populated.aggregate(OBJECT, offContract({ ...AGG_QUERY, having })));
         expectEnvelope(emptyErr);
         expect(emptyErr.message, door).toBe(populatedErr.message);
       }
