@@ -1,0 +1,36 @@
+{
+  "number": 20120,
+  "kind": "pull_request",
+  "title": "docs(data-modeling): currency is a bare number in both modes; defaultCurrency is the column currency only under fixed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T06:26:57Z",
+  "updated_at": "2026-09-25T06:54:33Z",
+  "closed_at": "2026-09-25T06:54:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-25T06:54:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20120",
+  "body": "Part of #20090\n\nClause-②: no\n\nDocs half of the card: the two `content/docs/data-modeling` pages triage named as the declared cross-domain surface (the card's item 1 and the addendum). The `skills/**` half lands separately on `claude/issue-20090-currency-mode-teaching` (Tier H, awaits human approval); #20090 stays open until both have landed and the seat closes it. Not a governed surface; no `meta.json` change (both pages already exist).\n\n## What changed\n\nText only, re-derived from the spec (`packages/spec/src/data/field-value.zod.ts`: `currency` is in `NUMERIC_VALUE_TYPES`, \"`currency` IS a bare number\"; `field.zod.ts`: `currencyMode` `'dynamic' | 'fixed'` default `'dynamic'`, `defaultCurrency` default `'CNY'`, and the guidance \"a fixed currency is declared as `currencyConfig: { currencyMode: 'fixed', defaultCurrency: … }` … A field without one uses the tenant default at runtime\"; the tenant default's producer is the `localization.currency` setting in `packages/services/service-settings/src/manifests/localization.manifest.ts`).\n\n### `content/docs/data-modeling/field-types.mdx` (676 → 677 lines)\n\n- The `currency` section's lead sentence now says the stored value is a bare number in both modes and the currency code lives in `currencyConfig`, never in the value.\n- `currencyConfig.currencyMode` row: \"Whether currency is per-record or fixed\" → \"Whether the column is pinned to `defaultCurrency` (`fixed`) or displays in the tenant default currency, the `localization.currency` setting (`dynamic`); the value is a bare number either way\".\n- `currencyConfig.defaultCurrency` row: \"Default currency code\" → \"The column's currency code under `fixed`; not the displayed currency under `dynamic`\" (the row's own default is `'CNY'`, so the old description read as \"every dynamic column shows CNY\").\n\n### `content/docs/data-modeling/fields.mdx` (459 → 465 lines)\n\n- The \"Currency Configuration\" example authored `currencyMode: 'dynamic', defaultCurrency: 'USD'` and never said USD is not the displayed currency under `dynamic`. It now authors `'fixed'`, so the `defaultCurrency` it shows is the currency it displays, with the two modes explained in the comments.\n- One short paragraph under the example states the rule: bare number in both modes, never `{ value, currency }`; under `dynamic` (the default) the amount displays in the tenant's `localization.currency` setting and `defaultCurrency` is not the displayed currency; `fixed` pins the column to `defaultCurrency`.\n\nThe generated reference `content/docs/references/data/field.mdx` is untouched (auto-gen; its \"dynamic (user selectable)\" wording is the spec describe's and is reported to the seat, not edited here).\n\n## Changeset\n\n`skip-changeset`: `content/docs/**` only — docs-only, nothing published moves.\n\n## Verification (head `c982ebfa`)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` in this worktree, no paths, derives 40 families; every one run in the foreground with the exit captured before any pipe, then reconciled: `--ran` verdict \"40 derived, 40 run, 0 NOT-MEASURED, 0 UNRUN\", exit 0. All 40 exit 0:\n\n`check-ci-filter-parity` · `check-closing-keyword-parity` (+ `--self-test`) · `check-comment-mask-corpus` · `check-doc-frontmatter` (+ `--self-test`) · `check-doc-route-spelling --advisory` (+ `--self-test`) · `check-docs-section-name` (+ `--self-test`) · `check-section-landing-index` (+ `--self-test`) · `@objectstack/lint check:doc-formula-expressions` · `check:doc-security-posture` · `@objectstack/spec check:docs` (spec built first under the verify lock) · `check:empty-state` · `check:liveness` · `check:skill-examples` (\"259 prose examples type-check across 3 surface(s)\") · `check:strictness-ledger` · `check:variant-docs` · `check:yaml-examples` · `check:corpus-claim-drift` · `check:cross-package-test-inputs` · `check:doc-anchors` · `check:doc-authoring` · `check:docs-audit-scope` · `check:docs-redirects` · `check:docs-single-h1` · `check:docs-spec-enumerations` · `check:docs-transcript-drift` · `check:driver-memory-census` · `check:gitlink-declared` · `check:nul-bytes` · `check:published-readme-links` · `check:react-page-adapter-contract` · `check:refd-timer-probe` · `check:role-word` · `check:skill-identifier-liveness` · `check:vendor-version-stamps` · `check:watch-hint-literal`.\n\nPrerequisite builds (`@objectstack/spec`, `@objectstack/formula` + `@objectstack/lint`, `@objectstack/client-react` closure) ran under `scripts/pm/os-verify-lock.sh`, each with `VERDICT command-exit 0`. No reverse verification or ablation applies: prose with no consumer that parses it.\n\n## Acceptance notes\n\n- `content/docs/api/data-api.mdx` calls the server-side resolution \"the ADR-0053 currency chain\"; ADR-0053 is the date/datetime record and never names currency. That page is outside this card's surface; #20091 (the runtime half of the mode rule) remains open and is the carrier for the chain and its comments. carrier: #20091.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0148fenvVvyQV9HYxgVDQ33q)_\n"
+}

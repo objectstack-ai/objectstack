@@ -2,8 +2,8 @@
   "number": 20048,
   "kind": "issue",
   "title": "pm-dispatch: the allow-listed ccr ready flip was denied `[Auto-Mode Bypass]` in a session whose checkout carried the allow rows from its first HEAD — and since #19997 a denied ccr call leaves a session seat no landing route",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,20 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T23:18:19Z",
-  "updated_at": "2026-09-25T01:56:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-25T02:31:15Z",
+  "closed_at": "2026-09-25T02:30:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

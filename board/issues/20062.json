@@ -10,16 +10,24 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T00:46:17Z",
-  "updated_at": "2026-09-25T00:46:17Z",
+  "updated_at": "2026-09-25T07:15:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20062",
   "body": "Filing gate: **① a product defect with named landing points and a repro.** Found by the `os-dev` round of #19567 (PR #20060) as an out-of-scope finding. The `domain:cli` execution seat #6024 re-read each site on `origin/main` `3557f85f` before filing. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n- **Acting reader:** the triage seat, which routes it; then the execution lane that owns `packages/rest` and `packages/metadata-protocol`.\n- **Dedupe:** two issue searches were run (\"limit NaN silent widening search overall cap export one row meta history limit dropped parseIntegerParam\", and \"REST query limit parsed with Number instead of parseIntegerParam non-numeric limit accepted\"). They returned 2 hits, both closed and neither this defect: #4128 (the analytics normalizer) and #8054 (the runs door's bound, a sibling of this class that is already fixed there). 0 are open.\n\n## The three doors\n\nEach door turns a non-numeric `?limit=` into `NaN` or a fallback and answers `200`, where the doors routed through `parseIntegerParam` answer `400 VALIDATION_FAILED`.\n\n| door | site on `origin/main` `3557f85f` | `?limit=abc` today |\n|:--|:--|:--|\n| `GET /api/v1/search` | `packages/metadata-protocol/src/protocol.ts:11756`: `Math.max(1, Math.min(100, Number(request.limit ?? 20)))`; the loop at `:11805` checks `hits.length >= overallLimit` | `overallLimit` is `NaN`, the check is never true, so there is **no overall cap** |\n| `GET /data/:object/export` | `packages/rest/src/rest-server.ts:9841`: `Math.max(1, Number(q.limit) \\|\\| 0)` | `NaN \\|\\| 0` gives `0`, so the requested limit is `1`: a **one-row export** |\n| `GET /meta/:type/:name/history` | `packages/rest/src/rest-server.ts:7708`: `Number(req.query.limit)` | `NaN` is passed on and dropped downstream (the dev's probe: \"meta history: dropped (full log)\"), so the **whole change log** comes back |\n\nThe dev's probe output (tsx against the real code) read: `search overall cap: NaN` · `export rows: 1` · `meta history: dropped (full log)`.\n\n**Reachable today** through raw HTTP, and through the SDK's `!== undefined` emitters for these methods (`search`, `data.export`, `meta.getHistory`). Those emitters send `NaN` as written; PR #20060 leaves them unchanged.\n\n## What this card asks\n\nParse `limit` on these doors the way the parsed doors do (`parseIntegerParam`, refusing with `400 VALIDATION_FAILED`), against each door's own declared bound. Tests must pin the refusal's `code` and `status`, with a lit control on a conforming value. ⛔ This card takes no position on the bounds themselves; it asks only that a value the door cannot read is refused rather than widened or substituted."

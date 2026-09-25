@@ -1,0 +1,26 @@
+{
+  "number": 20127,
+  "kind": "issue",
+  "title": "objectql `having`: a `{ $field }` reference with `addDays` against a non-temporal aggregated column answers by epoch-ms coercion, where SQL push-down refuses the same pair on `where` — the aggregated row declares no temporal class to judge it by",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T06:49:32Z",
+  "updated_at": "2026-09-25T06:49:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20127",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/objectql/src/having-filter.ts` (`compareWithReference`), and the `having` entry of `ObjectQL.aggregate` in `packages/objectql/src/engine.ts` (`assertHavingIsEvaluable`, `aggregatedRowColumns`). Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20099 dev's open question 2 (`os-dev-report` on #20099) and PR #20117's contract review (5828166480, ③ Q2). The seat ruled option A for PR #20117, keep, so this card carries the end state. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured at PR #20117's head `98abdf4ee3`:\n- `having: { total: { $gt: { $field: 'max_cap', addDays: 1 } } }`, with `total` and `max_cap` both numeric aggregation aliases, keeps no group. `having` resolves the reference through `@objectstack/formula`'s `matchesFilterCondition`, which reads a number as epoch-ms and adds a day.\n- The same pair on `where` answers three ways, by face: `driver-sql` / `driver-sqlite-wasm` refuse it with 400 (an uncompilable pair: `addDays` compiles only between two temporal columns of one class), `driver-memory` answers `[]` (it never resolves `$field`, #15104), and formula answers by coercion.\n\n`FieldReferenceSchema.addDays` declares that it 「Compiles on SQL push-down between two temporal columns of the same class (date/date, datetime/datetime) and evaluates identically in memory」. `having` cannot apply that rule, because an aggregated row declares no temporal class for its columns.\n\n## Suggested shape (⛔ not a ruling)\n\n- Derive each aggregated column's class statically: a `groupBy` field takes its declared type, and an aggregation alias takes its function applied to its source field's declared type (`min` / `max` of a `datetime` is a `datetime`; `count` and `sum` are numbers). Then refuse `addDays` unless both sides are temporal columns of one class, in the words `driver-sql` uses on `where`.\n- Pin the date/date and datetime/datetime pairs (answered), and a number and a mixed-class pair (refused), on both `applyHaving` doors and on an empty grouped set.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20099 dev and the PR #20117 reviewer.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/objectql`). It is sequenced after PR #20117 (#20099), which adds the entry, the column set and the resolution this extends. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `having addDays field reference non-temporal aggregated column temporal class derivation` → 0 hits.\n  - `addDays field reference offset cross-field comparison temporal columns same class` → 0 hits.\n  - Control: `$field cross-field comparison field reference` → 3 hits: #15104, #5222 and #5041, the `$field` family. None covers `having`'s `addDays`.\n\nDedupe words: `having addDays non-temporal` · `aggregated column temporal class` · `field reference addDays having`"
+}

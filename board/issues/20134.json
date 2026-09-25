@@ -1,0 +1,26 @@
+{
+  "number": 20134,
+  "kind": "issue",
+  "title": "core: effective-map super-user entries never carry `transfer` (or a super-read wildcard's plain bits) — `current_user.can(obj, 'transfer')` is false for `admin_full_access` where enforcement answers true via `modifyAllRecords`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T07:48:35Z",
+  "updated_at": "2026-09-25T07:48:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20134",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/core/src/security/effective-object-permissions.ts`, `seedSuperUserRestrictedObjects` and `foldWildcardSuperUser`. Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20083 dev's out-of-scope findings (`os-dev-report` on #20083, PR #20132). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20083 dev, identically at base `7b27bd00c7` and at PR #20132's head:\n- The super-user seed initialises each entry all-false, and the fold lifts only read / create / edit / delete.\n- So `current_user.can(X, 'transfer')` is `false` for `admin_full_access` and for a walled `organization_admin` on every object, where `checkObjectPermission('transfer', X, sets)` is `true` through `modifyAllRecords`: 63 fixture cells, 78 on a booted showcase.\n- A super-read wildcard that also carries plain bits (for example `viewAllRecords` + `allowEdit`) loses those plain bits the same way.\n\nThis fails closed: a `can()`-gated `transfer` control is hidden or refused for a subject the server lets transfer.\n\n## Suggested shape (⛔ not a ruling)\n\n- Seed and fold every bit `checkObjectPermission` reads: `allowTransfer || modifyAllRecords` for transfer, and the wildcard's own plain bits beside its bypass bits.\n- Pin it with PR #20132's parity table (all 10 verbs) on the super-user subjects, with 0 under-granted cells.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20083 dev.\n- **Acting reader**: this lane's seat (`domain:engine`). It is sequenced after PR #20132 (#20083), in the same producer, beside the over-grant card filed with it. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `can transfer false admin_full_access modifyAllRecords effective permission map missing transfer bit` → 2 hits. #19515 (closed) is `grantsObjectAccess` omitting `allowTransfer`, a different function, and #4376 is row-level sharing.\n  - Control: #20083 and #18931 are reached by the sibling query in the over-grant card.\n\nDedupe words: `can transfer admin_full_access false` · `effective map modifyAllRecords missing` · `super-user seed all-false transfer`"
+}

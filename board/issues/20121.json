@@ -1,0 +1,26 @@
+{
+  "number": 20121,
+  "kind": "issue",
+  "title": "objectql: an engine `where` that is a string, number or Map is dropped — `engine.find({ where: 'amount > 100' })` returns every row, and a non-filter array is refused with no code or status; the same seam serves `update` and `delete`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T06:27:23Z",
+  "updated_at": "2026-09-25T06:27:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20121",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/objectql/src/engine.ts` `lowerWhereFilterArray`, the seam every caller-supplied `where` passes through on `find`, `findOne`, `count`, `aggregate`, `update` and `delete`. Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20099 dev's out-of-scope findings (`os-dev-report` on #20099, PR #20117). The seat re-read the seam on `origin/main`. The runtime readings are the dev's. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20099 dev on `driver-memory` and `driver-sqlite-wasm`, with 2 rows:\n- `engine.find('order', { where: 'amount > 100' })` returns both rows. A number or a `Map` as `where` does the same. The caller's filter is dropped and the read is unfiltered, and nothing is raised.\n- `engine.find('order', { where: [1, 2, 3] })` is refused, but with `code` and `status` undefined. The wire door answers `INVALID_FILTER` / 400 for the same input.\n\n`lowerWhereFilterArray` lowers an array that is a FilterArray and runs the object-form doors on everything else. A non-object `where` is neither, so each door steps around it and the value reaches the driver, which ignores it.\n\n**Unmeasured, and the reason for the card's urgency:** `update` and `delete` call the same seam before they decide between the by-id and the multi-row path (`engine.ts`, the `[#5158]` comments). Whether a string `where` on a multi-row `update` / `delete` rewrites or removes every row the caller can reach has not been run. #4346 (closed) was that shape for the `filter` alias. The taker measures the write verbs first.\n\n## Suggested shape (⛔ not a ruling)\n\n- At the top of `lowerWhereFilterArray`, refuse a `where` that is neither `undefined`, a plain filter object, nor a FilterArray. Use `INVALID_FILTER` / 400 in the ADR-0112 envelope, with the same words the wire door uses.\n- Give the non-filter-array branch the same envelope.\n- Pin every verb that calls the seam (`find`, `findOne`, `count`, `aggregate`, `update`, `delete`) with a string, a number, a `Map` and a non-filter array, and assert code, status and that no driver call is made.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20099 dev on reads.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/objectql`).\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `engine where string number scalar dropped returns every row unfiltered lowerWhereFilterArray non-object where` → 9 hits, all read. #4346 (closed) is the `filter` alias matching every row on `findOne` / `count` / `update` / `delete`, the nearest shape, but not a non-object `where`. #7534, #8296, #6386 and #4128 are other silent-widening doors.\n  - None covers a string, number or `Map` `where`.\n\nDedupe words: `engine where string unfiltered` · `where non-object scalar dropped` · `lowerWhereFilterArray non-node` · `where array not a filter envelope`"
+}

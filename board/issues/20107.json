@@ -1,0 +1,32 @@
+{
+  "number": 20107,
+  "kind": "issue",
+  "title": "driver-turso remote: a federated object's `external.remoteName` is ignored — remote `find` queries a table named after the object and throws a bare `LibsqlError` (no code, no status), while the local face reads the mapped table",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T05:06:28Z",
+  "updated_at": "2026-09-25T08:00:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20107",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/drivers/driver-turso/src/turso-driver.ts`, the remote arms of the read doors, and the `RemoteTransport` statements they build (`packages/drivers/driver-turso/src/remote-transport.ts`). Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20055 dev's out-of-scope findings (`os-dev-report` on #20055, PR #20104). The runtime reading is the dev's. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20055 dev at `origin/main` `d4c897e0e7` and at PR #20104's head:\n- **Local face (the control).** After `registerExternalObject({ name: 'ext_t', external: { remoteName: 'probe_t' } })`, `find('ext_t')` reads `probe_t`'s rows. The external-object mapping resolves the table.\n- **Remote face.** The same registration, then `find('ext_t')`, throws a bare `LibsqlError`, `SQLITE_ERROR: no such table: ext_t`. It has no `code` / `status` envelope, so REST serves an unclassified 500.\n\nSo on a remote Turso database a federated object cannot be read under its own name. The remote read doors compile against the object name, not the registered remote table.\n\n## Suggested shape (⛔ not a ruling)\n\n- Resolve the table name on the remote face the way the local face does, through the same external-object mapping, for every remote read and write door. Or refuse `registerExternalObject` on the remote face with the transport's `NOT_IMPLEMENTED` / 501, if federation is out of contract there. Measure which answer the local face's docs and callers expect first.\n- Whichever it is, a backend \"no such table\" must not reach a caller as a bare `LibsqlError`.\n- Pin local against remote with one table: find, findOne, count and aggregate on an external object.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20055 dev.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `driver-turso`). It is sequenced after PR #20104 (#20055), which edits the remote arms of the same file. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `turso remote external remoteName ignored registerExternalObject federation no such table LibsqlError` → 7 hits, all read: #20055 (the source card, the positive control), #19844, #19894, #7737, #7738, #5769 and #5903.\n    - #7737 (closed) is the federated mapping's boot ordering.\n    - #7738 (closed) is the org-scoping predicate on a federated table.\n    - None covers the remote face ignoring `remoteName`.\n\nDedupe words: `turso remote external remoteName ignored` · `turso remote federation registerExternalObject` · `turso remote find raw LibsqlError`"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 20112,
+  "kind": "issue",
+  "title": "[Decision] may a kind:'html' page author intrinsic HTML tags (div, a)? The console manifest says no, 3 of 3 shipped html pages say yes, and #19922's fallback cannot go live until one side changes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "needs-user-decision",
+    "pm:blocking",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T05:47:14Z",
+  "updated_at": "2026-09-25T08:02:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20112",
+  "body": "Filing gate: **② a decision only the maintainer can make.** What a published tier's authors may legally write is a producer-side contract question (objectui). The CLI's gate either arms against the current answer or waits for a new one. Reader: the director seat's decision batch. After the ruling, the `domain:cli` seat lands #19922, which is held behind this card.\n\nFiled by the `domain:cli` execution seat (#6024, `session_01TnPAC1UsTGfHPXVUCL6iLn`) from its round on #19922. ⛔ Not a claim. Routing and grading belong to triage.\n\n## The question\n\nShould a `kind: 'html'` page be allowed to author intrinsic HTML tags (`div`, `a`, …)?\n- Today the **manifest** the CLI would validate such pages against says **no**.\n- The **pages** this repository ships say **yes**.\n\n## What was measured\n\nAll measurements are on `origin/main` `aa04ea29`, by the #19922 round, and re-read by this seat.\n\n- **The manifest.** `packages/lint/src/sdui-jsx-baseline.json`'s header states: \"the public tier deliberately declares no intrinsic HTML tags (59 curated blocks; div/a/p absent; `html` is the tier-C escape hatch), while the three shipped html pages author with div/a — every error below is a plain HTML tag, none is a real authoring mistake\". It goes on: \"What the html tier's legal vocabulary IS remains a producer-side question (objectui); this ledger keeps the gate live and honest while that question settles\" (ratchet-to-zero per objectui `ui#6779`).\n- **Where the manifest goes.** `scripts/build-console.sh` ships the repo-root `sdui.manifest.json` inside `@objectstack/console`'s `dist` (PR #19921, #17735).\n- **The fallback.** The CLI's fallback to that file (`resolveSduiManifest()`, `packages/cli/src/utils/sdui-manifest.ts`) is dead today: #19922, which resolves a subpath the console's `exports` does not publish. The fix is measured and ready: resolve `@objectstack/console/package.json` from the CLI's own location and join `dist/sdui.manifest.json`.\n- **With the file reachable,** `examples/app-showcase` flips from exit 0 to exit 1:\n  - on `os validate`, `os compile` (the step `os dev` and `os start` spawn) and `os lint`;\n  - with 200 errors each: 100 `jsx-forbidden-tag` and 100 `jsx-unknown-component`;\n  - over 3 of 3 in-tree `kind: 'html'` pages.\n\n  These are the same 200 rows the ledger carries.\n\nSo landing #19922's fix before this is settled would:\n- stop the repo's default dev app from compiling for anyone with a built console (CI does not compile the showcase with a console dist present, so CI stays green over it);\n- at the next release, newly fail `validate` / `build` / `dev` / `start` for every manifest-less customer project whose html pages use intrinsic tags. That narrows what the published CLI accepts, which is BREAKING.\n\n## Options (four axes)\n\n- **A. The producer declares the html tier's intrinsic vocabulary.** objectui adds the intrinsic tags its html-tier renderer accepts to what the manifest declares for html pages. The manifest is regenerated at the pin, the ledger's 200 rows go stale and are deleted, and #19922 lands unchanged.\n  - *Business need:* real. html is the escape-hatch tier, and intrinsic HTML is what its authors write.\n  - *Long-term:* contract-first. The producer states what its renderer accepts, and the consumer checks against it.\n  - *Anti-AI-error:* once armed, the gate rejects only real mistakes (unknown components, bad props) and is trusted.\n  - *Startup focus:* one producer-side change, with no new surface in this repository.\n- **B. Intrinsic tags are illegal on the html tier.**\n  - The showcase's 3 pages are rewritten to public-tier blocks: 200 sites, and the ledger ratchets to zero.\n  - #19922 then lands as BREAKING (`Clause-②: no (narrowing)`, `minor`, with a migration line), because customers' intrinsic-tag html pages newly fail at that release.\n  - *Anti-AI-error:* strict. The cost is breaking authors on the one tier whose purpose is raw HTML.\n- **C. Retire the console fallback** (ADR-0049 remove arm) and keep only a project's own manifest.\n  - This is honest about today, but it discards what #19921 shipped the file for: manifest-less projects never get component/prop checking.\n  - It is the weakest on the anti-AI-error axis.\n\nThe `domain:cli` seat's reading, ⛔ not a ruling: **A**. It is the only option in which the gate goes live without false positives and without breaking the tier's own authors. Its cost is a producer-side change in objectui. Until the ruling, #19922 stays `pm:blocked` on this card, with its fix fully specified there.\n\n## Related, not this decision\n\nThe same round measured that with no manifest reachable, the JSX gate degrades to parse-level validation and says nothing. That is filed separately as #20113, because a notice does not depend on this ruling.\n\nDedupe: MCP issue search in this repository (`html tier intrinsic tags div a legal vocabulary sdui manifest jsx-forbidden-tag showcase html pages ratchet baseline`, closed included): 6 hits, none this question. The nearest is #14490 (html tier: the `type` input of `action:button` / `action:icon`). Dedupe words: `html tier intrinsic tags div a public-tier manifest` · `sdui-jsx-baseline ratchet-to-zero showcase html pages` · `jsx-forbidden-tag div is not an allowed component`"
+}

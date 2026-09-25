@@ -1,0 +1,26 @@
+{
+  "number": 20123,
+  "kind": "issue",
+  "title": "objectql: a `having` key that names no column of the aggregated row keeps no group silently — `having: { totl: { $gt: 100 } }` answers 200 [], where an unknown `where` field is refused 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T06:28:20Z",
+  "updated_at": "2026-09-25T06:28:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20123",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/objectql/src/having-filter.ts` (`checkCondition`'s no-value exit), and the `having` entry of `ObjectQL.aggregate` in `packages/objectql/src/engine.ts`. Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20099 dev's out-of-scope findings (`os-dev-report` on #20099, PR #20117). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20099 dev at PR #20117's head, on `driver-memory` and `driver-sqlite-wasm`, with a populated grouped set:\n- `having: { totl: { $gt: 100 } }` (a typo for the alias `total`) answers `200 []`. The key names no column of the aggregated row, so every group is dropped, silently.\n- An unknown field in `where` is refused `INVALID_FIELD` / 400 (#7534).\n\n`checkCondition` exits with \"no value\" for a key the row does not carry, before any operator is judged.\n\nPR #20117 gives the engine the aggregated row's column set (`aggregatedRowColumns`: the `groupBy` fields plus every aggregation alias) and refuses a `{ $field }` reference that names no column of it. A `having` KEY is not checked against the same set.\n\n## Suggested shape (⛔ not a ruling)\n\n- In the row-independent walk PR #20117 adds (`assertHavingIsEvaluable`), refuse a `having` key that names no column of `aggregatedRowColumns`. Use the unknown-field refusal's envelope, rooted at `having`.\n- Pin a populated and an empty grouped set, on both `applyHaving` doors.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20099 dev.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/objectql`). It is sequenced after PR #20117 (#20099), which adds the column set and the walk. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `having unknown column alias typo keeps no group silently refused` → 4 hits, all read: #8108, #8020, #7889 (alias gates in tooling) and #6850 (`driver-mongodb` `GroupByNode`). None covers an unknown `having` key.\n  - The `having` searches run for #20099 read #7158, #5905, #17320 and #15661. None covers it either.\n  - #7534 (closed) is the `where` twin: the positive control for the refusal this asks for.\n\nDedupe words: `having unknown column silent` · `having alias typo no group` · `having key not in aggregated row`"
+}

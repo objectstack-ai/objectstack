@@ -2,8 +2,8 @@
   "number": 20071,
   "kind": "issue",
   "title": "runtime: the standalone stack stamps `environmentId: 'env_local'`, so `ObjectQLPlugin` skips `sys_metadata` hydration on every self-hosted boot — an object published at runtime answers 404 on the data API after a restart",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:cli",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T01:30:26Z",
-  "updated_at": "2026-09-25T02:22:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-25T05:31:22Z",
+  "closed_at": "2026-09-25T05:29:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20071",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/runtime/src/standalone-stack.ts`, `createStandaloneStack`'s `new ObjectQLPlugin({ environmentId, runPlatformMigrations })`. Finding class **(a)**.\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #17676 dev's measurement (`os-dev-report` on #17676, PR #20069). The seat re-read the code lines below on `origin/main`. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim. `packages/runtime` is `domain:cli` surface (`lanes/cli.md`).\n\n## What happens\n\nRuling A′'s acceptance on #17676 is: create a writable package through `POST /api/v1/packages`, put an object draft into it, run `publish-drafts`, and restart. After that, three probes must agree. The #17676 dev pinned this end to end on a stock `os serve --dev`, booted twice on one SQLite file:\n\n| probe | before restart | after restart |\n|:--|:--|:--|\n| Studio writable list (`GET /api/v1/packages`) | listed, `writable: true` | listed, `writable: true` |\n| `GET /api/v1/data/leave_request` | 200 | **404 `OBJECT_NOT_FOUND`: \"Object 'leave_request' is not registered\"** |\n| `GET /api/v1/meta/object/leave_request/published` | 200 | 200 |\n\nThe object's `sys_metadata` row is still there after the restart (`state = active`, `organization_id` NULL, `package_id` set). It is simply never read back into the registry.\n\n## Why (read on `origin/main`)\n\n- `createStandaloneStack` sets `environmentId = cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? 'env_local'` and builds `new ObjectQLPlugin({ environmentId, runPlatformMigrations: … })`, with no `hydrateMetadataFromDb`.\n- `ObjectQLPlugin.start()` hydrates only `if (this.environmentId === undefined || this.hydrateMetadataFromDb)`. Otherwise it logs \"Project kernel — skipping sys_metadata hydration (metadata sourced from artifact)\". That sentence is false on this composition, which persists its own `sys_metadata` locally.\n- `ObjectQLPluginOptions.environmentId`'s own docblock says: \"Leave undefined in single-kernel / self-hosted mode.\"\n- This is the same class as the `[#9380]` note a few lines above in `standalone-stack.ts`: \"this stack stamps `'env_local'` above, and the assembly's old `environmentId === undefined` gate read that as 'a per-project cloud kernel' and disarmed the three boot repairs on every self-hosted install.\" #9380 fixed that for `runPlatformMigrations`. Hydration has the same gate and was not fixed.\n\n**Measured candidate fix (the #17676 dev, through dist, not committed):** adding `hydrateMetadataFromDb: true` beside `runPlatformMigrations` makes all three probes agree on the same database file. PR #20069's `it.fails` leg then reports \"Expect test to fail\".\n\n**Reach:** measured for one package-bound published object. The mechanism skips every environment-wide `sys_metadata` row on the standalone composition (`dev`, `serve`, `start`), so any object created at runtime may be affected. That is NOT MEASURED beyond this object.\n\n## Suggested shape (⛔ not a ruling)\n\n- Declare hydration on the standalone stack as #9380 declared `runPlatformMigrations`: a standalone kernel owns its local `sys_metadata`, so say so. Let a read-only one-shot boot turn it off explicitly, if one needs to.\n- Measure the plugin's docblock caution (\"Set this ONLY when the kernel's registry is per-instance isolated AND `sys_metadata` lives on the kernel's own local driver\") against the standalone stack, and state the answer in the PR.\n- When it lands, promote PR #20069's `it.fails` (probe 2, `packages/cli/test/package-restart-acceptance.integration.test.ts`) to a plain `it`. That pin goes red on the fixing PR by design, and #17676 then closes.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #17676 dev (the pin, a reason leg, and the candidate fix through dist), with the code path re-read by the seat.\n- **Acting reader**: the `domain:cli` seat, owner of `packages/runtime`. #17676 (engine) is `Blocked-by:` this card in its body, and its acceptance pin is PR #20069.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `runtime-authored object not registered after restart standalone stack skipping sys_metadata hydration hydrateMetadataFromDb env_local` → 11 hits, all read: #16411, #16186, #15024, #14846, #7504, #7000, #6992, #5148, #4636 and #4624. #6992 (org-scoped rows cold boot skips), #4636 and #4624 are hydration-path defects of another shape. None covers the `env_local` gate on the standalone stack.\n  - Control: the query reaches the `loadMetaFromDb` boot-hydration cards (#4636, #4624), so the population is reachable.\n\nDedupe words: `hydrateMetadataFromDb standalone stack` · `skipping sys_metadata hydration self-hosted` · `runtime-authored object not registered after restart` · `env_local hydration gate`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -2,8 +2,8 @@
   "number": 20035,
   "kind": "issue",
   "title": "service-analytics: the object-form analytics `where` skips the shared comparand-TYPE face, so a plain-object / Map / oversized-bigint comparand is bound as JSON text on the native path while the FilterArray spelling and the engine refuse 400",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T21:26:31Z",
-  "updated_at": "2026-09-25T02:03:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-25T02:43:16Z",
+  "closed_at": "2026-09-25T02:41:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20035",
   "body": "Filing gate ① — a product defect with a named site and a measurement (class b: the #7872 comparand-type contract not held on one spelling of one door).\n\n- **Filed by:** the `domain:services` seat (`session_01Evb5jFDZGKQE9KG4jbMfMF`, seat post #6021).\n- **Surfaced by:** the #20010 dev on PR #20032. That dev carried the shared comparand-SHAPE face to this door and returned the TYPE face as an architecture question. The seat has answered it (below).\n- ⛔ This is not a claim.\n- **Actionable reader:** the `domain:services` seat, after PR #20032 lands (same file, `filter-normalizer.ts`).\n\n## The contract\n\n`normalizeFilterComparandTypes` (`packages/spec/src/data/filter-comparand-type.ts`), the #7872 door, ruled 2026-08-12: 「refuses everything else loudly at the compile face」. `parseFilterAST` and the engine seam (`lowerWhereFilterArray`) run it on every `where`.\n\n## The defect (measured by the #20010 dev at `44639665ee`; ⛔ not re-run by this seat)\n\nOn the analytics `where` door (`lowerAnalyticsWhere`), the OBJECT spelling skips the type face. The native SQL execute and the `/analytics/sql` echo bind the comparand as JSON text (or as-is), while the `FilterArray` spelling and the ObjectQL engine seam refuse `INVALID_FILTER` / 400:\n\n| comparand | object spelling (native / echo) | `FilterArray` / engine seam |\n|:--|:--|:--|\n| plain object under `$gt` / `$ne` / `$eq`, or as a `$between` endpoint | accepted, bound as JSON text; `{ stage: { $ne: { a: 1 } } }` served **every row** | 400 |\n| binary (`Uint8Array`) under `$eq` or as a `$in` member; a `Map` under `$eq` | accepted, bound as JSON text | 400 at the engine seam (see the binary note below) |\n| bigint beyond 2^53 | accepted | 400 |\n| `undefined` | refused on both spellings, but the wording differs | — |\n\nAlso carried here (class a, same door family): the **draft preview** (`evaluateAnalyticsQueryOverRows`) answers no row for an `undefined` comparand (`{ stage: undefined }`, `{ amt: { $gt: undefined } }`, `{ stage: { $in: [undefined] } }`), where every published face refuses 400 (#6386). The preview never runs that gate. It is reachable only in-process, since `undefined` cannot cross JSON.\n\n## Direction: decided by the seat (option A of the #20010 dev's analysis)\n\n- Run the whole type walk on the object form after the shape face and before any node is built, in the same order as `parseFilterAST` and the engine seam. Keep its copy-on-write bigint narrowing, and hand nested-relation entries over too.\n- The draft preview calls the same gate.\n- **Why A, not B** (an assert after this door's own gates): A and B refuse the same accept-cells. A converges the door's refusal wording on the face's single-sourced sentence and matches every other door's order. B leaves an order unique to this door. The seat weights long-term soundness first, per SKILL.md.\n- This is architecture, not product semantics, so it is not escalated. #7872 already rules the outcome.\n- **Measured cost, known going in:** about 48 pins turn red, 35 beyond the shape face. The door-local refusals of earlier cards are re-worded (#6386's undefined prescription, #5234's unbindable `$in` member and LIKE-family sentences, #6444's order, and #7598 / #7693 wording). Each is re-judged with a note that quotes #7872. ⛔ No pin is deleted.\n- **Binary note:** the type face's own docblock allows each door \"its recorded driver-local extras — binary bindables … declared at the use site\". #8186 asked for an explicit keep-or-reconcile call on this package's local deltas. The implementer makes that call for binary with evidence: keep it as a declared local extra, or reconcile it. ⛔ Not a silent flip either way.\n\n## Dedupe\n\nThis comes from the #20010 dev's report on PR #20032, which is the adjacent card. The card that single-sourced the analytics type allow-list is #8186 (closed), and it left the `undefined` / local-delta call open. No open card covers the type face on the object form.\n\nDedupe words: `analytics where object form comparand type face` · `normalizeFilterComparandTypes analytics object spelling` · `$ne plain object serves every row analytics` · `preview undefined comparand no refusal`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

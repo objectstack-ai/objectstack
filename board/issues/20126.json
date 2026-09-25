@@ -1,0 +1,28 @@
+{
+  "number": 20126,
+  "kind": "issue",
+  "title": "class-closure(currency-mode): every site that reads or teaches defaultCurrency without the currencyMode 'fixed' condition, or cites ADR-0053 for currency — spec describe, dashboards skill, data-api docs, analytics comments",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T06:39:54Z",
+  "updated_at": "2026-09-25T06:39:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20126",
+  "body": "Filing-gate category: ① — class b (a declared contract contradicted at several sites), filed as the family's **class-closure card** under the reachability / closure rule (maintainer 「同意」 on #20088, landing as PR #20110): one card covers every site of the family with one enumerating pin; ⛔ no further single-site cards for this family — a new site is appended here. Filed by the `domain:skills#1` seat (`session_0148fenvVvyQV9HYxgVDQ33q`, os-tesla) from the `os-dev-report` 5827983271 on #20090 (PRs #20118 / #20120). ⛔ Not graded, not routed: `domain:*`, `priority:*` and `type` are triage's; the sites span the spec, skills, devx and services lanes, so triage may split them into lane sub-issues under this card.\n\nReach: exception — release-frozen wrong text on published surfaces (the spec `describe` ships in the published `@objectstack/spec` typings and in the auto-generated `content/docs/references/data/field.mdx`; `skills/objectstack-ui/rules/dashboards.md` ships by `npx skills add`). The runtime member #20091 was measured by its filer: analytics faces show a `dynamic` field's `defaultCurrency` while field faces show the tenant currency since objectui#10461 merged.\n\n## The contract (read on `origin/main` `7a13e05`)\n\n- `packages/spec/src/data/field-value.zod.ts` :23 / :63 — a `currency` value is a bare number; the currency code lives in field config.\n- `packages/spec/src/data/field.zod.ts` :439–:440 — `currencyMode: 'dynamic' | 'fixed'` (default `dynamic`), `defaultCurrency` default `'CNY'`; the FieldSchema guidance: a fixed currency is `{ currencyMode: 'fixed', defaultCurrency }`, a field without one uses the tenant default at runtime.\n- `docs/adr/0104-field-runtime-value-shape-contract.md` :60 — all treat currency as a bare number. `docs/adr/0053-*` is the date / datetime semantics record and never names currency.\n\n## Sites — each reads or teaches `defaultCurrency` without the `fixed` condition, or cites ADR-0053 for currency\n\n1. `packages/spec/src/data/field.zod.ts` :439 — the `currencyMode` describe says 「dynamic (user selectable)」: no key, ADR or runtime seam provides a per-record selection (ADR-0104 D1: the code lives in field config, not per value). Surfaces verbatim in `content/docs/references/data/field.mdx` (2 rows, `gen:docs`). Fix = one describe phrase + `gen:docs`. Lane: spec.\n2. `skills/objectstack-ui/rules/dashboards.md` :304–:308 — teaches 「resolves measure `currency` → the aggregated field's `currencyConfig.defaultCurrency` → the tenant `localization.currency` default (ADR-0053)」: no mode, wrong ADR. Lane: skills (published catalog, Tier H).\n3. `content/docs/api/data-api.mdx` :467 — the same unconditioned chain with the 「ADR-0053」 citation. Lane: devx.\n4. `packages/services/service-analytics/src/plugin.ts` :1070 and `src/analytics-service.ts` :1792 — comments cite ADR-0053 for the currency chain, and the chain reads `mc.currency ?? meta?.defaultCurrency ?? context?.currency` with no mode condition — this is #20091's runtime half (services lane, `pm:dispatched`).\n\nMembers already fixed or in flight: #20090 (`skills/objectstack-data/rules/field-types.md` + `content/docs/data-modeling/{field-types,fields}.mdx` — PRs #20118 / #20120, the seat's ACCEPT); #20091 (the analytics runtime, in flight).\n\n## Enumerating pin (the closure test; ⛔ no new `check-*` gate — a test in the owning package or an existing self-test case, added by whichever PR closes the last site)\n\n- Text sites: every `defaultCurrency` line under `skills/**/*.md` and `content/docs/**/*.mdx` must also carry `fixed` or say it is not the displayed currency under `dynamic`; the phrase `ADR-0053` within five lines of `currenc` under `skills/**`, `content/docs/**` and `packages/services/service-analytics/src/**` must count 0.\n- Runtime site: the measure-currency resolver reads `defaultCurrency` only under `currencyMode === 'fixed'` (#20091's own pin).\n\n## Dedupe\n\n`search_issues` (open + closed) on 「currencyMode defaultCurrency read unconditionally without fixed mode tenant default currency ADR-0053 citation dashboards skill analytics measure chain user selectable describe」 → 6 hits: #20091 (open, the runtime member), #20090 (open, the docs / skill member, this card's origin), #19992 (open, `currencyConfig.precision` liveness — a different key), #8163 / #19910 / #15387 (closed, other currency questions). No closure card exists for this family. Dedupe words: `currency-mode class closure` · `defaultCurrency fixed condition sites` · `ADR-0053 currency citation` · `dynamic user selectable describe` · `dashboards.md currency chain`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

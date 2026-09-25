@@ -2,7 +2,7 @@
   "number": 19809,
   "kind": "pull_request",
   "title": "fix(spec): one row bound per view — retire the unpublished per-kind view `limit`",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-23T07:24:43Z",
-  "updated_at": "2026-09-25T02:17:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-25T02:57:56Z",
+  "closed_at": "2026-09-25T02:57:55Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-25T02:57:55Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/19809",

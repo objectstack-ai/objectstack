@@ -1,0 +1,26 @@
+{
+  "number": 20136,
+  "kind": "issue",
+  "title": "security: the effective permission map folds a super-user `'*'` over the same set's narrower explicit entries — a walled org admin gets `can('sys_position','edit')` true where enforcement refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T07:49:51Z",
+  "updated_at": "2026-09-25T07:49:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20136",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/core/src/security/effective-object-permissions.ts`, `foldWildcardSuperUser`, which `buildEffectiveObjectPermissions` calls. Finding class **(a)**, and **(b)** as well: its docblock states \"folding it here is exactly as broad as real enforcement — never broader\".\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20083 dev's out-of-scope findings (`os-dev-report` on #20083, PR #20132). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured by the #20083 dev, identically at `origin/main` `7b27bd00c7` and at PR #20132's head, on a unit fixture and on a booted showcase:\n- For a walled `organization_admin` (+ `member_default`), the map grants create / edit / delete / import on `sys_position`, `sys_permission_set`, `sys_position_permission_set`, `sys_user_permission_set` and `sys_user_position`, and edit on `sys_organization`.\n- `PermissionEvaluator.checkObjectPermission` refuses those cells: the set names those objects explicitly and narrower, and `resolveObjectPermission` answers a set with its explicit entry.\n- 38 over-granted cells in total.\n- `foldWildcardSuperUser` folds the merged `'*'` bypass bits into entries the super-user set itself names narrower.\n\n**Reach (measured):** on the write path PR #20079 (#18783) wired, an option gated on `current_user.can('sys_position', 'edit')` is ADMITTED for that subject. That fails OPEN. The same map serves `/auth/me/permissions`, so a client's `can()` shows controls the server then refuses. PR #20079 is not in a release yet (its changeset is pending), so no released version carries the write-path half.\n\n## Suggested shape (⛔ not a ruling)\n\n- Fold a super-user wildcard into an entry only where `resolveObjectPermission` would. A set's own explicit entry is its whole answer for that set. Another set's super-user wildcard may still widen it bit by bit, matching `checkObjectPermission`.\n- Extend PR #20132's table-driven parity pin (map against `checkObjectPermission`, all 10 verbs) to the walled `organization_admin` and `admin_full_access` subjects, with 0 over-granted cells as the assertion.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a) and (b), measured by the #20083 dev.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/core`'s producer). It is sequenced after PR #20132 (#20083), which edits the same producer. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `effective object permissions super-user wildcard fold over-grants explicit entry same set organization_admin sys_position edit` → 20 hits, top 8 read. #20083 is the under-grant twin (the positive control). #18931 (closed) is the super-user seeding for Export. #19515 (closed) is `grantsObjectAccess` omitting transfer and export, a different function.\n  - None covers the fold over-granting inside one set.\n\nDedupe words: `foldWildcardSuperUser explicit deny same set` · `organization_admin can sys_position edit` · `effective map super-user fold over-grant`"
+}

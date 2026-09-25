@@ -2,7 +2,7 @@
   "number": 20056,
   "kind": "pull_request",
   "title": "fix(spec): AutomationApiContracts names the served /api/v1/automation paths",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T00:08:52Z",
-  "updated_at": "2026-09-25T02:00:13Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-25T02:41:57Z",
+  "closed_at": "2026-09-25T02:41:56Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-25T02:41:56Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20056",

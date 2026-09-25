@@ -2,7 +2,7 @@
   "number": 20077,
   "kind": "pull_request",
   "title": "docs(agents): narrow the executor never-writes-assignee clause to the card's assignee",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T01:58:16Z",
-  "updated_at": "2026-09-25T02:04:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-25T02:56:01Z",
+  "closed_at": "2026-09-25T02:55:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-25T02:55:59Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20077",

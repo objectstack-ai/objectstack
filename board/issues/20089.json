@@ -1,0 +1,33 @@
+{
+  "number": 20089,
+  "kind": "issue",
+  "title": "Queue-flake anchor: scripts/liveness/check-liveness.test.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T03:22:47Z",
+  "updated_at": "2026-09-25T04:36:33Z",
+  "closed_at": "2026-09-25T04:36:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20089",
+  "body": "`scripts/liveness/check-liveness.test.ts` has ejected **3 pull requests** from the merge\nqueue within a rolling 24 hours — **1 independent hit** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #20079 | S1 · root | [36088336600](https://github.com/objectstack-ai/objectstack/actions/runs/36088336600) |\n| #20086 | S1 · inherited | [36089109896](https://github.com/objectstack-ai/objectstack/actions/runs/36089109896) |\n| #20087 | S1 · inherited | [36089293345](https://github.com/objectstack-ai/objectstack/actions/runs/36089293345) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE commit IS another victim's queue HEAD contains that victim's\ntree by construction. A single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the root above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [36089293345](https://github.com/objectstack-ai/objectstack/actions/runs/36089293345) (PR #20087).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:scripts/liveness/check-liveness.test.ts -->"
+}
