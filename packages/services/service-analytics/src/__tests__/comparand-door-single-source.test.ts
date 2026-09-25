@@ -310,8 +310,19 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
       const buf = new Uint8Array([1, 2]);
       expect(isAcceptedFilterComparand(buf)).toBe(false);
       expect(isBindableComparand(buf)).toBe(true);
-      expect(unbindableListMemberMessage('$in', 'status', { foo: 1 }, 0))
-        .toContain('(or a binary value)');
+      // [#20035] RE-JUDGED — FLIPPED. This asserted the refusal sentence offered
+      // "(or a binary value)" as a repair, the parenthetical #8186 kept beside
+      // the door's sentence. Neither door accepts a binary any more: the
+      // read-scope lowering refuses it with the shared comparand-type face
+      // (#20018) and so does the `where` door (#20035, the #7872 ruling:
+      // 「refuses everything else loudly at the compile face」). A refusal that
+      // still prescribed it sent the author to a value the same door refuses,
+      // so the sentence now names the accepted set and nothing more. The
+      // predicate's binary arm above is unchanged — it is `driver-sql`'s
+      // mirror, and `driver-sql`, which does bind a binary, keeps its own copy.
+      const message = unbindableListMemberMessage('$in', 'status', { foo: 1 }, 0);
+      expect(message).not.toContain('binary');
+      expect(message).toContain(`use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather than binding it`);
     });
   });
 

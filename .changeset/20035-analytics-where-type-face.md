@@ -30,4 +30,6 @@ Refusals this door already gave in its own words now read in the face's words, t
 
 Who is affected: nothing in this repository's examples, seeds, docs or package sources authors any of the refused comparands. A text scan over 4013 non-test files found none, and it did find the shape in a code comment written for this change. Stored datasets, dashboard widget filters and report runtime filters in a deployment were NOT measured. Of the refused values, only the plain object can be stored as JSON.
 
+The refusal both analytics doors give for an unbindable `$in` / `$nin` / `$between` member no longer offers "(or a binary value)" as a repair, because neither door accepts a binary any more. It now names only the accepted set; its code, status and verdict are unchanged.
+
 Not changed: every string, number, boolean, `null` and `Date` comparand; a `{ $field }` reference in an ordering slot (served on the engine path); nested relations and dotted members; `$ne` with a list, which the shared face does not judge yet.

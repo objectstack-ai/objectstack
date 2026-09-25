@@ -669,19 +669,24 @@ export function fieldReferenceBetweenBoundMessage(
  * [#8186] The accepted-set clause is {@link ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE},
  * with binary kept as this package's own parenthetical extra — the exact shape
  * `driver-sql`'s twin took when #7872 reconciled it, so the two faces describe
- * one rule in one wording again. The hand-copy it replaces read "a string,
+ * one rule in one wording again. [#20035] The parenthetical is gone from this
+ * copy; see the note below. The hand-copy it replaces read "a string,
  * number, boolean, null, Date or binary value", which had silently gone WRONG
  * in the quieter direction: it omitted `bigint`, a type both predicates here
  * have always accepted and both doors have always compiled. Quoting the door
  * fixes the omission as a side effect of removing the copy — the accepted set
  * itself does not move (`__tests__/comparand-door-single-source.test.ts`).
  *
- * ⚠️ [#20035] The binary parenthetical in the text below — "(or a binary
- * value)" — no longer describes either door: the read-scope lowering refuses a
- * binary member with the shared comparand-type face (#20018), and so does the
- * `where` door (#20035). It is left unchanged here because this change is
- * docblock-only; the string and the test that pins it
- * (`__tests__/comparand-door-single-source.test.ts`) are for a follow-up.
+ * [#20035] FIXED: the text no longer offers "(or a binary value)" as a
+ * repair. It stopped describing either door when each began refusing a binary
+ * member with the shared comparand-type face — the read-scope lowering
+ * (#20018) and the `where` door (#20035) — so a refusal that still prescribed it
+ * sent the author to a value the same door refuses (#5240's wrong-repair
+ * class). The repair it names is now exactly the accepted set. What did NOT
+ * move: {@link isBindableComparand}'s binary arm, which stays as the
+ * value-for-value mirror of `driver-sql`, and `driver-sql`'s own copy of this
+ * sentence, which keeps the parenthetical because that driver does bind a
+ * binary. `__tests__/comparand-door-single-source.test.ts` pins both halves.
  */
 export function unbindableListMemberMessage(
   op: string,
@@ -692,7 +697,7 @@ export function unbindableListMemberMessage(
   return (
     `"${op}" on "${field}" has a value at index ${index} of its list that cannot be bound as a SQL ` +
     `parameter: ${shapePreview(value)}. Every member of an $in/$nin/$between list is a comparand ` +
-    `in its own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a binary value). ` +
+    `in its own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. ` +
     `Refusing rather than binding it: the member can equal no stored value, so the list silently ` +
     `loses that entry (and a $nin loses the exclusion the caller wrote).`
   );
