@@ -8,13 +8,7 @@ import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objec
 // [#19995] The engine's own placeholder resolver (`ObjectQL.resolveWhereTokens`
 // is a call to it), run on a read scope, alone, at the ObjectQL merge sites by
 // {@link assertReadScopePlaceholdersResolvable}.
-import {
-  filterTokenContextFrom,
-  resolveFilterTokens,
-  UnknownFilterTokenError,
-  UnresolvedFilterTokenError,
-  type ExecutionContextLike,
-} from '@objectstack/core';
+import { filterTokenContextFrom, resolveFilterTokens, type ExecutionContextLike } from '@objectstack/core';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
@@ -826,9 +820,12 @@ export function assertReadScopeComparandsRunnable(scope: unknown, objectName: st
  * scope is served; the resolved tree is discarded, and the engine resolves the
  * original as it always has.
  *
- * Only the resolver's two refusals are re-raised in the envelope, by type.
- * Anything else it throws is not about the scope — an unusable time zone on
- * the request, say — and propagates unchanged, as the engine would throw it.
+ * Whatever the resolver throws here is re-raised in the envelope. It read the
+ * scope and the request's token context and nothing else, and the engine
+ * throws the same thing for the same scope under the same request. Today that
+ * is its two refusals: an unknown placeholder, and a known one the context
+ * has no value for. (An unusable time zone is not a third: the calendar maths
+ * falls back to UTC rather than throwing.)
  *
  * @param scope the `StrategyContext.getReadScope` output, exactly as returned
  * @param objectName the object the scope was requested for — for the operator's
@@ -845,10 +842,9 @@ export function assertReadScopePlaceholdersResolvable(
   try {
     resolveFilterTokens(scope, filterTokenContextFrom(context));
   } catch (e) {
-    if (!(e instanceof UnknownFilterTokenError) && !(e instanceof UnresolvedFilterTokenError)) throw e;
     throw readScopeCompileError(
       `[read-scope-sql] read scope for "${objectName}" carries a filter placeholder the engine cannot resolve — ` +
-        `${e.message} (fail-closed).`,
+        `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
     );
   }
 }
