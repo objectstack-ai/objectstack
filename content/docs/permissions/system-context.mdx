@@ -9,8 +9,8 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **112
-distinct sites across 20 packages**, and knowing three of those behaviours gives
+because the flag is not one concept: it is a single boolean read at **105
+distinct sites across 19 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
 and the gap was observable only by querying the resulting rows.
@@ -135,7 +135,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 112 sites**.
+The largest single consumer — **17 of the 105 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -150,51 +150,48 @@ The largest single consumer — **17 of the 112 sites**.
 | 39 | Sharing-rule provenance stamp skipped | Lose: the row is not marked as an admin customization — seeder / `defineRule` / boot reconcilers are "the package door" | `packages/plugins/plugin-sharing/src/sharing-rule-provenance.ts#bindRuleProvenanceStamp` |
 | 40 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface, and the platform-global-rule delete guard | `packages/plugins/plugin-sharing/src/sharing-rule-service.ts#assertCanManageRules`, `#assertCanDeletePlatformGlobalRule` |
 
-### 4. Approvals, reports, attachments, comments, knowledge
+### 4. Approvals, attachments, comments, knowledge
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
 | 41 | **Approval record lock released** — a locked record is writable | plugin-approvals | Get: engine self-writes (the status mirror) pass. Lose: the lock that stops edits while an approval is live. Note there is deliberately **no admin exemption** here — only `isSystem` | `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindApprovalLockHook` |
 | 42 | Delegation write guard bypassed | plugin-approvals | Get: service / seed / import may write delegation rows naming another delegator | `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindDelegationWriteGuard` |
 | 43 | Approval actor / submitter / pending-approver checks bypassed (8 sites) | plugin-approvals | Get: approve, reject, recall, reassign without being a pending approver or the submitter | `packages/plugins/plugin-approvals/src/approval-service.ts#isOverrideActor`, `#resolveActor`, `#sendBack`, `#resubmit`, `#reassign`, `#remind`, `#requestInfo`, `#comment` |
-| 44 | Saved-report ownership is **assignable**, and an update may reassign it | plugin-reports | Get: `ownerId` from input is honoured. A non-system caller always owns what it creates and can never reassign | `packages/plugins/plugin-reports/src/report-service.ts#saveReport` |
-| 45 | Saved-report access / export / mutation gates bypassed | plugin-reports | Get: read, bulk-export and overwrite any report | `packages/plugins/plugin-reports/src/report-service.ts#assertExportAllowed`, `#canAccessReport`, `#listReports`, `#listSchedules` |
-| 46 | Attachment access hooks return early (insert + update + delete, and the read AST) | service-storage | Lose: attachment visibility scoping | `packages/services/service-storage/src/attachment-access-hooks.ts#installAttachmentAccessHooks`, `#installAttachmentReadVisibility` |
-| 47 | Comment access hooks return early (insert + update + delete, and the read AST) | plugin-audit | Lose: comment visibility scoping | `packages/plugins/plugin-audit/src/comment-access-hooks.ts#installCommentAccessHooks`, `#installCommentReadVisibility` |
-| 48 | Knowledge search returns hits unfiltered | service-knowledge | Lose: the permission filter over search results | `packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter` |
+| 44 | Attachment access hooks return early (insert + update + delete, and the read AST) | service-storage | Lose: attachment visibility scoping | `packages/services/service-storage/src/attachment-access-hooks.ts#installAttachmentAccessHooks`, `#installAttachmentReadVisibility` |
+| 45 | Comment access hooks return early (insert + update + delete, and the read AST) | plugin-audit | Lose: comment visibility scoping | `packages/plugins/plugin-audit/src/comment-access-hooks.ts#installCommentAccessHooks`, `#installCommentReadVisibility` |
+| 46 | Knowledge search returns hits unfiltered | service-knowledge | Lose: the permission filter over search results | `packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter` |
 
 ### 5. Actions, metadata plane, provenance, the organization wall
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
-| 49 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `packages/runtime/src/action-execution.ts#callData` |
-| 50 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `packages/runtime/src/action-execution.ts#actionPermissionError` |
-| 51 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner` |
-| 52 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 51's doors consult answers yes before any capability is examined | `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict` |
-| 53 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `packages/runtime/src/domains/actions.ts#handleActionsRequest`, `packages/runtime/src/domains/ai.ts#handleAIRequest`, `packages/runtime/src/domains/automation.ts#handleAutomationRequest`, `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/runtime/src/domains/security.ts#handleSecurityRequest`, `packages/runtime/src/domains/packages.ts#handlePackagesRequest`, `packages/rest/src/external-datasource-routes.ts#registerExternalDatasourceRoutes`, `packages/rest/src/package-routes.ts#refusePackageRequest` |
-| 54 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `packages/runtime/src/domains/mcp.ts#handleMcpRequest` |
-| 55 | Package REST route capability gate bypassed | rest | Get: a marketplace publish over REST (`POST /packages/publish`, the one route the REST registrar mounts since #14503) without `manage_metadata`; the package read cohort (`studio.access` / `setup.access`) is enforced by the dispatcher `/packages` domain's own read gate, where the reads are served | `packages/rest/src/package-routes.ts#refusePackageRequest` |
-| 56 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `packages/runtime/src/domains/packages.ts#requireManageMetadata`, `#requireReadCapability` |
-| 57 | Activation write / authoring refusals do not fire | runtime | Get: activation artifacts writable and authorable without the activation-authoring capability | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite`, `#refuseUngrantedActivationAuthoring` |
-| 58 | Automation run-state read, flow-authoring write, the paused-run caller gate (screen read and resume) and the two operator run-lifecycle writes all pass | runtime | Get: run state, flow writes, a paused run's screen and its resume with no grant and without being the run's starter — and cancelling or restoring a suspension without the platform-operator rung. The screen read and the resume ask one predicate, so this is one bypass for both. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#isRunStarterOrRunStateReader`, `#refuseUngrantedRunLifecycleWrite` |
-| 59 | Audience-binding suggestion recording skipped | plugin-security | Lose: install-time suggestions are not recorded for system callers | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#assertTenantAdmin` |
-| 60 | Email-template / webhook provenance stamps skipped | plugin-email, plugin-webhooks | Lose: the row is not marked as an admin customization | `packages/plugins/plugin-email/src/email-template-provenance.ts#bindEmailTemplateProvenanceStamp`, `packages/plugins/plugin-webhooks/src/webhook-provenance.ts#bindWebhookProvenanceStamp` |
-| 61 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `packages/services/service-automation/src/runtime-identity.ts#stampSystemInsertOwner`, called from `packages/services/service-automation/src/builtin/crud-nodes.ts#registerCrudNodes` |
-| 62 | Inbox caller refusal names `isSystem` as what was carried | service-messaging | Get: nothing — the refusal still fires. The flag only shapes the diagnostic, because privilege is not an authorization subject | `packages/services/service-messaging/src/inbox-caller.ts#resolveInboxRecipient` |
-| 63 | **`organization_id` is not auto-stamped on INSERT** — the organization-axis twin of the `owner_id` gap above | organizations | Get: an elevated write may name another organization deliberately, which is what the per-organization seed replay, the orphan-row claim, imports and migrations all rely on. Lose: the authoritative stamp, so an elevated insert that names no organization lands `organization_id = NULL` and the wall hides it. ⛔ This is why a forged `organization_id` is overwritten on the non-elevated path and not here: elevation is the seam the legitimate cross-organization writers use | `packages/plugins/organizations/src/organizations-plugin.ts#start` |
+| 47 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `packages/runtime/src/action-execution.ts#callData` |
+| 48 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `packages/runtime/src/action-execution.ts#actionPermissionError` |
+| 49 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner` |
+| 50 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 49's doors consult answers yes before any capability is examined | `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict` |
+| 51 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `packages/runtime/src/domains/actions.ts#handleActionsRequest`, `packages/runtime/src/domains/ai.ts#handleAIRequest`, `packages/runtime/src/domains/automation.ts#handleAutomationRequest`, `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/runtime/src/domains/security.ts#handleSecurityRequest`, `packages/runtime/src/domains/packages.ts#handlePackagesRequest`, `packages/rest/src/external-datasource-routes.ts#registerExternalDatasourceRoutes`, `packages/rest/src/package-routes.ts#refusePackageRequest` |
+| 52 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `packages/runtime/src/domains/mcp.ts#handleMcpRequest` |
+| 53 | Package REST route capability gate bypassed | rest | Get: a marketplace publish over REST (`POST /packages/publish`, the one route the REST registrar mounts since #14503) without `manage_metadata`; the package read cohort (`studio.access` / `setup.access`) is enforced by the dispatcher `/packages` domain's own read gate, where the reads are served | `packages/rest/src/package-routes.ts#refusePackageRequest` |
+| 54 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `packages/runtime/src/domains/packages.ts#requireManageMetadata`, `#requireReadCapability` |
+| 55 | Activation write / authoring refusals do not fire | runtime | Get: activation artifacts writable and authorable without the activation-authoring capability | `packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite`, `#refuseUngrantedActivationAuthoring` |
+| 56 | Automation run-state read, flow-authoring write, the paused-run caller gate (screen read and resume) and the two operator run-lifecycle writes all pass | runtime | Get: run state, flow writes, a paused run's screen and its resume with no grant and without being the run's starter — and cancelling or restoring a suspension without the platform-operator rung. The screen read and the resume ask one predicate, so this is one bypass for both. The lifecycle bypass is the in-process owner's door: plugin-approvals' revise-window recall (ADR-0044) cancels on behalf of a decision it already authorized and recorded | `packages/runtime/src/domains/automation.ts#mayReadRunState`, `#refuseUngrantedFlowWrite`, `#isRunStarterOrRunStateReader`, `#refuseUngrantedRunLifecycleWrite` |
+| 57 | Audience-binding suggestion recording skipped | plugin-security | Lose: install-time suggestions are not recorded for system callers | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#assertTenantAdmin` |
+| 58 | Email-template / webhook provenance stamps skipped | plugin-email, plugin-webhooks | Lose: the row is not marked as an admin customization | `packages/plugins/plugin-email/src/email-template-provenance.ts#bindEmailTemplateProvenanceStamp`, `packages/plugins/plugin-webhooks/src/webhook-provenance.ts#bindWebhookProvenanceStamp` |
+| 59 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `packages/services/service-automation/src/runtime-identity.ts#stampSystemInsertOwner`, called from `packages/services/service-automation/src/builtin/crud-nodes.ts#registerCrudNodes` |
+| 60 | Inbox caller refusal names `isSystem` as what was carried | service-messaging | Get: nothing — the refusal still fires. The flag only shapes the diagnostic, because privilege is not an authorization subject | `packages/services/service-messaging/src/inbox-caller.ts#resolveInboxRecipient` |
+| 61 | **`organization_id` is not auto-stamped on INSERT** — the organization-axis twin of the `owner_id` gap above | organizations | Get: an elevated write may name another organization deliberately, which is what the per-organization seed replay, the orphan-row claim, imports and migrations all rely on. Lose: the authoritative stamp, so an elevated insert that names no organization lands `organization_id = NULL` and the wall hides it. ⛔ This is why a forged `organization_id` is overwritten on the non-elevated path and not here: elevation is the seam the legitimate cross-organization writers use | `packages/plugins/organizations/src/organizations-plugin.ts#start` |
 
 ### 6. Reads that only carry the flag onward
 
-Not behaviours: these four sites read the flag solely to copy it into another
+Not behaviours: these three sites read the flag solely to copy it into another
 context or envelope. They are listed because the census counts them, and because
 a reader tracing where elevation travels needs them.
 
 | # | Site | Package | What it does |
 |:--|:---|:---|:---|
-| 64 | `packages/objectql/src/engine.ts#buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
-| 65 | `packages/objectql/src/engine.ts#isSystem` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
-| 66 | `packages/plugins/plugin-reports/src/report-service.ts#executeReport` | plugin-reports | Threads the flag into the engine call that runs a report |
-| 67 | `packages/runtime/src/sandbox/body-runner.ts#executionContextFromHook` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
+| 62 | `packages/objectql/src/engine.ts#buildSession` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
+| 63 | `packages/objectql/src/engine.ts#isSystem` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
+| 64 | `packages/runtime/src/sandbox/body-runner.ts#executionContextFromHook` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
 
 ---
 
@@ -281,8 +278,8 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 112 read sites
-  in 20 packages. Splitting it is a breaking contract change across all of them.
+- **Shipped semantics.** `isSystem` is a published contract with 105 read sites
+  in 19 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
 - **No business pull.** No app has asked for the combinations a split would
@@ -335,7 +332,7 @@ one ends: it returns prose inside comments and strings, the three unrelated
 metadata fields, and the `isSystemObject` / `isSystemObjectName` /
 `isSystemLedgerObject` name helpers. Worse, it loses real sites — a regex pass
 over this same corpus silently dropped **6** reads in
-`packages/plugins/plugin-reports/src/report-service.ts` to a quoting desync and **11** more to
+the saved-report service (retired since, #20102) to a quoting desync and **11** more to
 `(ctx?.session as any)?.isSystem` casts. So the census walks the TypeScript AST
 and classifies each appearance of the identifier by where the parser puts it:
 a **read** (a table row here), a **declaration**, an object-literal or type
@@ -353,19 +350,19 @@ still holds equal to the census on every pull request:
 | — in tests | 1013 | — |
 | — in non-test sources | 798 | — |
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
-| — parsed as a declaration | 23 | ✅ |
+| — parsed as a declaration | 22 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 118 | ✅ |
+| — parsed as a property **read** | 111 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **112** | ✅ |
-| — behaviour-bearing (rows 1–63 above) | 108 | ✅ |
-| — carry the flag onward only (rows 64–67 above) | 4 | ✅ |
-| Packages containing at least one elevation read | **20** | ✅ |
-| Files containing at least one elevation read | 45 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 93 | ✅ |
-| — of those files, the ones holding more than one read in one symbol | 9 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **105** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 102 | ✅ |
+| — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
+| Packages containing at least one elevation read | **19** | ✅ |
+| Files containing at least one elevation read | 44 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 87 | ✅ |
+| — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
 measured on 2026-08-29 at `ca1965f2b5` and CI does not re-derive them. They count
@@ -428,7 +425,7 @@ same resolver, and the same registration shape, that holds `docs/adr/**`.
 Renaming a symbol is now a loud red instead of a silent misdirection.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
-cannot say WHICH read inside a function it means, and **9** of the **45**
+cannot say WHICH read inside a function it means, and **8** of the **44**
 anchored files hold more than one read inside a single symbol. So the population
 check runs per file at symbol granularity: every file the census finds a read in
 must be anchored, and the set of symbols this page cites into that file must

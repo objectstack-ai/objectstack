@@ -13,7 +13,7 @@ ObjectStack is organized into **72 package manifests** across multiple categorie
 | **Client / DX** | 4 | `client`, `client-react`, `cli`, `create-objectstack` |
 | **Framework adapters** | 1 | `hono` (other frameworks: build a thin adapter on `HttpDispatcher` — see below) |
 | **Drivers** | 5 | `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-mongodb`, `driver-turso` |
-| **Plugins** | 18 | `plugin-auth`, `plugin-security`, `plugin-audit`, `plugin-approvals`, `plugin-sharing`, `plugin-email`, `plugin-webhooks`, `plugin-reports`, `plugin-hono-server`, `plugin-dev`, `plugin-pinyin-search`, `mcp`, trigger plugins (`trigger-api`, `trigger-record-change`, `trigger-schedule`), and knowledge/embedder plugins (`knowledge-memory`, `knowledge-ragflow`, `embedder-openai`) |
+| **Plugins** | 17 | `plugin-auth`, `plugin-security`, `plugin-audit`, `plugin-approvals`, `plugin-sharing`, `plugin-email`, `plugin-webhooks`, `plugin-hono-server`, `plugin-dev`, `plugin-pinyin-search`, `mcp`, trigger plugins (`trigger-api`, `trigger-record-change`, `trigger-schedule`), and knowledge/embedder plugins (`knowledge-memory`, `knowledge-ragflow`, `embedder-openai`) |
 | **Platform services** | 16 | `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-queue`, `service-realtime`, `service-settings`, `service-sms`, `service-storage` |
 
 
@@ -439,13 +439,6 @@ metadata it names.
 
 - **Features**: Subscriptions, retries, signed payloads, delivery logs
 - **When to use**: Integrating ObjectStack events with external systems
-
-### @objectstack/plugin-reports
-
-**Reports Plugin** — Metadata-driven report rendering and scheduling.
-
-- **Features**: Tabular/aggregate reports, scheduled delivery, exports
-- **When to use**: Operational reporting on top of business objects
 
 ---
 

@@ -252,8 +252,6 @@
       "items": [
         "dashboards.dataset-report-authoring",
         "dashboards.drill-through-range",
-        "dashboards.saved-report-ownership",
-        "dashboards.report-schedule-dispatch-delivery",
         "search.command-palette-navigation"
       ]
     },
