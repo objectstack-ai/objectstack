@@ -62,9 +62,13 @@
  * ## One cell deliberately outside the grid
  *
  * `$icontains: ''`. `driver-sql` refuses it (`INVALID_FILTER`, #5702) and the
- * spec's parse door refuses it too; these compilers answer every non-NULL row,
- * as they did under `GLOB '**'`. That is not a U+0000 cell and this change does
- * not move it, so it is recorded in the PR rather than pinned here.
+ * spec's parse door refuses it too. It is not a U+0000 cell, so this change did
+ * not move it, and it stays out of the grid. [#20068] RE-JUDGED: these
+ * compilers no longer answer it with every non-NULL row. Both doors now refuse
+ * it before any construct is chosen, the `where` door as `INVALID_FILTER` / 400
+ * and the read scope as `READ_SCOPE_COMPILE_FAILED` / 500, so the grid has no
+ * rows for it to hold. `icontains-text-comparand-refusal.test.ts` pins the
+ * refusal on every face.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

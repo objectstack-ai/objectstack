@@ -386,6 +386,22 @@
  * than kept as a declared local extra — the evidence is on
  * {@link normalizeWhereComparands}.
  *
+ * # The `$icontains` comparand the conformance table refuses (#20068)
+ *
+ * `FILTER_TEXT_CASES` (`@objectstack/spec/data`) declares two REJECTION rows
+ * for `$icontains`, an EMPTY comparand and a NON-STRING one, each
+ * `INVALID_FILTER` naming `$icontains`, and the spec publishes the
+ * discrimination as `isRefusedTextComparand` with its reason half as
+ * `textComparandRefusalReason`. The spec's parse door and `driver-sql` refuse
+ * both rows. This door never asked, so `{ name: { $icontains: '' } }` compiled
+ * to a predicate true for every non-NULL row, and a number, boolean or `null`
+ * was bound as its text. {@link assertCompilableComparand} now asks the
+ * published predicate inside the #7693 text fence, after the renderability
+ * check, and refuses in this door's envelope with the published reason. Only
+ * the two declared rows: `$contains` / `$startsWith` / `$endsWith` /
+ * `$notContains` keep their answer, because widening by analogy is the
+ * table's decision.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -403,14 +419,18 @@
  * on every analytics face and its neighbouring shapes (#19888), and
  * `where-face-arms-refusal.test.ts` for the face's other arms, both spellings,
  * every face (#20010), and `where-type-face-refusal.test.ts` for the
- * comparand-TYPE face, both spellings, every face, and its narrowing (#20035).
+ * comparand-TYPE face, both spellings, every face, and its narrowing (#20035),
+ * and `icontains-text-comparand-refusal.test.ts` for the two `$icontains`
+ * REJECTION rows, both doors, every face (#20068).
  */
 
 import {
   assertListComparandShapes,
   isFilterAST,
+  isRefusedTextComparand,
   normalizeFilterComparandTypes,
   parseFilterAST,
+  textComparandRefusalReason,
   VALID_AST_OPERATORS,
 } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
@@ -498,6 +518,13 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
   // and one name would make the renderers guess which was meant.
   $icontains: 'icontains',
 };
+
+/**
+ * [#20068] The one operator `FILTER_TEXT_CASES` writes comparand REJECTION rows
+ * for, in the `$` spelling this door judges. {@link assertCompilableComparand}
+ * asks `isRefusedTextComparand` for this operator and no other.
+ */
+const TABLE_REFUSED_TEXT_OPERATOR = '$icontains';
 
 /**
  * The comparand a leaf carries: the author's value, at the author's type.
@@ -662,6 +689,23 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  *
  * What did NOT move is the `$between` arm — see
  * {@link assertNoFieldReferenceComparand}, which is now that arm alone.
+ *
+ * [#20068] The text fence gained a second question, asked of `$icontains`
+ * alone: is the comparand one of the two shapes `FILTER_TEXT_CASES` declares
+ * REFUSED for that operator (an empty string, a non-string)? The spec publishes
+ * the answer as `isRefusedTextComparand` and this door CALLS it, never a local
+ * `typeof` check that could drift from the table. The reason is the spec's
+ * `textComparandRefusalReason`, seated in this door's sentence and envelope,
+ * with the operator as it ARRIVED here: `$icontains`, which is also what a
+ * `FilterArray` `icontains` has been lowered to by the time any comparand gate
+ * runs. Asked after the renderability check, so an array or a `{ $field }`
+ * keeps its #5234 / #7598 sentence, and before any emitter, so a refused
+ * comparand is refused ahead of the non-text-column constant (the 2026-09-05
+ * ruling answers only a comparand the contract accepts). The predicate answers
+ * `true` for `undefined`; that carve-out is this door's to own, and it is owned
+ * upstream: the shared comparand-TYPE face and {@link assertDefinedComparands}
+ * refuse an `undefined` before this function can see one. ⛔ The four
+ * case-exact siblings are not asked: the table has no such row for them.
  */
 function assertCompilableComparand(opKey: string, field: string, value: unknown): void {
   if (TEXT_PATTERN_OPERATORS.has(opKey)) {
@@ -671,6 +715,11 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
     // merely stringified consistently.
     if (!isRenderableTextComparand(value)) {
       throw invalidFilterError(`[analytics] ${unrenderableTextComparandMessage(opKey, field, value)}`);
+    }
+    // [#20068] The two `$icontains` REJECTION rows, through the published
+    // predicate and reason — see this function's docblock.
+    if (opKey === TABLE_REFUSED_TEXT_OPERATOR && isRefusedTextComparand(value)) {
+      throw invalidFilterError(`[analytics] The ${textComparandRefusalReason(field, opKey, value)}.`);
     }
     return;
   }

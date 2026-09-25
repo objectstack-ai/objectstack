@@ -5,6 +5,10 @@ import type { FilterCondition } from '@objectstack/spec/data';
 // at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
 // [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [#20068] The `$icontains` text-comparand door: the table's discrimination and
+// its reason half, asked at {@link compileOperator}'s `$icontains` arm and at
+// the engine-bound merges through {@link assertReadScopeComparandsRunnable}.
+import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack/spec/data';
 // [#19995] The engine's own placeholder resolver (`ObjectQL.resolveWhereTokens`
 // is a call to it), run on a read scope, alone, at the ObjectQL merge sites by
 // {@link assertReadScopePlaceholdersResolvable}.
@@ -466,6 +470,22 @@ import {
  * would otherwise have been lowered. The envelope is this module's one
  * envelope; nothing here re-argues the rulings the faces carry.
  *
+ * ## An `$icontains` comparand the table refuses is refused, on every face (#20068)
+ *
+ * `FILTER_TEXT_CASES` declares two REJECTION rows for `$icontains`, an EMPTY
+ * comparand and a NON-STRING one, and `@objectstack/spec/data` publishes the
+ * discrimination (`isRefusedTextComparand`) and its reason half
+ * (`textComparandRefusalReason`). This module never asked. An empty comparand
+ * lowered to a predicate true for every non-NULL value, so the NativeSQL face
+ * and the echo admitted every row that has one, and a non-string was bound as
+ * its text; the ObjectQL face handed the scope to the engine, where
+ * `driver-sql` refused it as a 4xx carrying the policy's field and comparand.
+ * Now {@link compileOperator}'s `$icontains` arm asks the predicate after its
+ * renderability gate and before the non-text constant, and
+ * {@link assertReadScopeComparandsRunnable} asks it at the engine-bound merges,
+ * so all three faces refuse the scope in this module's one envelope. The
+ * case-exact operators are not asked: the table has no such row for them.
+ *
  * ## …and a placeholder the engine cannot resolve, on the engine path (#19995)
  *
  * The engine resolves `{placeholder}` filter values on the COMPOSED `where`,
@@ -774,6 +794,22 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
  * nothing else — so every throw is re-raised in the one envelope, the walk's
  * own sentence kept for the operator's log.
  *
+ * ## …and the `$icontains` comparand the table refuses (#20068)
+ *
+ * One of `driver-sql`'s compile-time refusals is reachable from here after
+ * all: an empty or non-string `$icontains` comparand (#5702). Its rule is not
+ * the driver's own. `FILTER_TEXT_CASES` declares both rows and
+ * `@objectstack/spec/data` publishes the discrimination, `isRefusedTextComparand`,
+ * so asking it here is a call, not a second copy. Measured before this
+ * question was asked: a scope carrying `$icontains: ''` reached
+ * `engine.aggregate`, and the driver answered `INVALID_FILTER` / 400 with the
+ * policy's field name, path and comparand in the relayed message, while the
+ * NativeSQL face and the echo served every row that has a value. One scope,
+ * three answers. {@link findRefusedIcontainsComparand} now finds it on the
+ * scope alone, after the two faces, and it is refused in this envelope. On
+ * {@link compileScopedFilterToSql} the `$icontains` arm of
+ * {@link compileOperator} refuses the same scope first, in its own sentence.
+ *
  * @param scope the `StrategyContext.getReadScope` output, exactly as returned
  * @param objectName the object the scope was requested for — for the operator's
  *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
@@ -787,6 +823,18 @@ export function assertReadScopeComparandsRunnable(scope: unknown, objectName: st
     throw readScopeCompileError(
       `[read-scope-sql] read scope for "${objectName}" carries a comparand the engine refuses — ` +
         `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
+    );
+  }
+  // [#20068] After the two faces, so a doubly-refused scope carries the face's
+  // sentence, as it would on the engine; and after them for a second reason: the
+  // type face refuses an `undefined` comparand, which is the predicate's
+  // carve-out to own before it is asked.
+  const refused = findRefusedIcontainsComparand(scope, '');
+  if (refused) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" carries a comparand the engine refuses at ` +
+        `readScope.${refused.path} — the ${textComparandRefusalReason(refused.field, TABLE_REFUSED_TEXT_OPERATOR, refused.value)} ` +
+        `(fail-closed).`,
     );
   }
 }
@@ -1100,6 +1148,77 @@ function assertCompilableMembers(op: string, field: string, members: unknown[]):
 function assertRenderableText(op: string, field: string, val: unknown): void {
   if (isRenderableTextComparand(val)) return;
   throw readScopeCompileError(`[read-scope-sql] ${unrenderableTextComparandMessage(op, field, val)}`);
+}
+
+/**
+ * [#20068] The operator `FILTER_TEXT_CASES` writes comparand REJECTION rows
+ * for, in the `$` spelling a read scope carries.
+ */
+const TABLE_REFUSED_TEXT_OPERATOR = '$icontains';
+
+/**
+ * [#20068] Refuse an `$icontains` comparand `FILTER_TEXT_CASES` declares
+ * REFUSED: the empty string, or a non-string.
+ *
+ * The discrimination is the spec's `isRefusedTextComparand` and the reason its
+ * `textComparandRefusalReason`, seated in this module's sentence and envelope,
+ * `READ_SCOPE_COMPILE_FAILED` / 500 with the message withheld (#5367). Asked in
+ * {@link compileOperator}'s `$icontains` arm AFTER {@link assertRenderableText},
+ * so an object or an array keeps its #5234 sentence, and BEFORE
+ * {@link textOverNonTextColumn} and any bind, so a comparand the contract
+ * refuses is refused over a non-text column too: the 2026-09-05 constant
+ * answers only a comparand the contract accepts. The predicate's `undefined`
+ * carve-out is owned upstream: {@link assertDefinedComparands} refuses an
+ * `undefined` comparand in {@link compileField} before any operator arm runs.
+ *
+ * Before this gate an empty comparand lowered to a predicate true for every
+ * non-NULL value, so the scope admitted every row that has one. A non-string
+ * was bound as its text. ⛔ Only the two declared rows: the case-exact
+ * operators keep their answer, since widening by analogy is the table's call.
+ */
+function assertIcontainsComparandNotRefused(op: string, field: string, val: unknown): void {
+  if (!isRefusedTextComparand(val)) return;
+  throw readScopeCompileError(`[read-scope-sql] The ${textComparandRefusalReason(field, op, val)} (fail-closed).`);
+}
+
+/** [#20068] Where a read scope carries a refused `$icontains` comparand. */
+type RefusedTextComparandFinding = { field: string; path: string; value: unknown };
+
+/**
+ * [#20068] Walk a read scope and return the first `$icontains` comparand
+ * {@link isRefusedTextComparand} refuses, or `null`.
+ *
+ * The traversal is the shared comparand faces' own: `$and` / `$or` arrays,
+ * `$not`, and field entries, whose operator object is read for its own
+ * `$icontains` key. A nested-relation object is not descended, which is how the
+ * faces and {@link compileField} (which refuses one outright) treat it. A walk,
+ * never a reduction, so a refused comparand beside a constant-TRUE sibling is
+ * still found: `driver-sql` refuses that shape on its validating walk for the
+ * same reason (#5702).
+ */
+function findRefusedIcontainsComparand(node: unknown, path: string): RefusedTextComparandFinding | null {
+  if (!isFilterNode(node)) return null;
+  for (const [key, value] of Object.entries(node)) {
+    const here = path.length > 0 ? `${path}.${key}` : key;
+    if (key === '$not') {
+      const found = findRefusedIcontainsComparand(value, here);
+      if (found) return found;
+    } else if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) continue;
+      for (let i = 0; i < value.length; i++) {
+        const found = findRefusedIcontainsComparand(value[i], `${here}[${i}]`);
+        if (found) return found;
+      }
+    } else if (
+      !key.startsWith('$')
+      && isFilterNode(value)
+      && Object.prototype.hasOwnProperty.call(value, TABLE_REFUSED_TEXT_OPERATOR)
+      && isRefusedTextComparand(value[TABLE_REFUSED_TEXT_OPERATOR])
+    ) {
+      return { field: key, path: `${here}.${TABLE_REFUSED_TEXT_OPERATOR}`, value: value[TABLE_REFUSED_TEXT_OPERATOR] };
+    }
+  }
+  return null;
 }
 
 /**
@@ -1627,6 +1746,10 @@ function compileOperator(
      */
     case '$icontains':
       assertRenderableText(op, field, val);
+      // [#20068] …then the two REJECTION rows `FILTER_TEXT_CASES` declares for
+      // this operator, before the non-text constant and before any bind. See
+      // {@link assertIcontainsComparandNotRefused}.
+      assertIcontainsComparandNotRefused(op, field, val);
       return textOverNonTextColumn(op, field, opts)
         ?? textMatch(col, 'contains', val, false, params, opts, true);
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
