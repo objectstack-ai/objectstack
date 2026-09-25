@@ -75,6 +75,19 @@ const SCHEMAS: Record<string, any> = {
   report: { name: 'report', label: 'Report', enable: { apiMethods: ['get', 'list'] }, fields: { id: { name: 'id' } } },
 };
 
+/** `where` matcher: scalar equality plus the `$in` form the resolver sends; any other operator REFUSES. */
+function matches(row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean {
+  return Object.entries(where ?? {}).every(([key, cond]) => {
+    if (key.startsWith('$')) throw new Error(`fake engine: unsupported operator ${key}`);
+    const value = row[key] ?? null;
+    if (cond && typeof cond === 'object' && Array.isArray((cond as { $in?: unknown }).$in)) {
+      return ((cond as { $in: unknown[] }).$in).includes(value);
+    }
+    if (cond && typeof cond === 'object') throw new Error(`fake engine: unsupported condition on ${key}`);
+    return value === (cond ?? null);
+  });
+}
+
 function bootPlugin(opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?: boolean } = {}) {
   const dbRows = opts.dbRows ?? [];
   const permissionSetReads: string[][] = [];
@@ -84,10 +97,11 @@ function bootPlugin(opts: { dbRows?: Array<Record<string, unknown>>; engineSeam?
     registry: { getAllObjects: () => Object.values(SCHEMAS) },
     getSchema: (name: string) => SCHEMAS[name] ?? null,
     find: async (object: string, query: any) => {
-      if (object !== 'sys_permission_set') return [];
-      const wanted: string[] = query?.where?.name?.$in ?? [];
-      permissionSetReads.push(wanted);
-      return dbRows.filter((r) => wanted.includes(String(r.name)));
+      const tables: Record<string, Array<Record<string, unknown>>> = { sys_permission_set: dbRows };
+      if (object === 'sys_permission_set') permissionSetReads.push(query?.where?.name?.$in ?? []);
+      const rows = (tables[object] ?? []).filter((r) => matches(r, query?.where));
+      // Hold the caller's bound (`check:objectql-double-limit`).
+      return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
     },
   };
   if (opts.engineSeam !== false) {
