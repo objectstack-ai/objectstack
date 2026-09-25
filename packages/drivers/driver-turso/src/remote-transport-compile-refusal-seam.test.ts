@@ -57,6 +57,8 @@ type Door = {
   readonly secrets: readonly string[];
   readonly klass: string;
   readonly rootOnly?: true;
+  /** Names the row where `JSON.stringify` would drop its `undefined`. */
+  readonly label?: string;
 };
 
 const DOORS: readonly Door[] = [
@@ -84,6 +86,7 @@ const DOORS: readonly Door[] = [
     where: () => ({ [POLICY_COL]: { $eq: undefined } }),
     secrets: [POLICY_COL],
     klass: 'A comparand in this filter is undefined',
+    label: '{ secret_policy_col: { $eq: undefined } }',
   },
   {
     builder: 'uncompilableSubFilter',
@@ -189,12 +192,14 @@ const ARMS: readonly Door[] = [
     where: () => ({ [POLICY_COL]: undefined, stage: 'won' }),
     secrets: [POLICY_COL],
     klass: 'A comparand in this filter is undefined',
+    label: "{ secret_policy_col: undefined, stage: 'won' }",
   },
   {
     builder: 'undefinedComparand',
     where: () => ({ [POLICY_COL]: { $in: ['a', undefined] } }),
     secrets: [POLICY_COL, '$in[1]'],
     klass: 'A comparand in this filter is undefined',
+    label: "{ secret_policy_col: { $in: ['a', undefined] } }",
   },
 ];
 
@@ -325,7 +330,7 @@ const expectWithheld = ({ err, sink }: { err: WireBearingError; sink: string }, 
 
 describe('[#20039] RemoteTransport: every filter-compile refusal × filter-subtree provenance', () => {
   for (const door of [...DOORS, ...ARMS]) {
-    describe(`${door.builder}: ${JSON.stringify(door.where())}`, () => {
+    describe(`${door.builder}: ${door.label ?? JSON.stringify(door.where())}`, () => {
       it('policy-marked ⇒ same code and status, operands WITHHELD, and in the sink', async () => {
         expectWithheld(await refusalOf(markFilterSubtreeProvenance(door.where(), 'policy')), door);
       });
