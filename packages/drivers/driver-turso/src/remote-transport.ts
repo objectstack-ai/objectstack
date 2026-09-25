@@ -3388,6 +3388,27 @@ export class RemoteTransport {
    * pattern would compare a folded needle against a raw column and match just
    * the rows that were already lower-case. `lower()` on SQLite folds ASCII only,
    * which IS the contract (#4706 Q1 = A) rather than a limitation.
+   *
+   * # [#20024] A stored value holding U+0000 is read whole
+   *
+   * `glob()` reads the stored value only up to its first U+0000, so a NUL-free
+   * pattern answered a different question over such a value (`$like: 'a'`
+   * matched `'a'` + U+0000 + `'b'`), measured on this transport over a real
+   * `@libsql/client` engine (SQLite 3.45.1) exactly as on the local one. This
+   * method restates `SqlDriver`'s `sqliteLikePatternMatch`, whose docblock
+   * carries the argument, and `turso-20024-like-stored-nul.test.ts` holds the
+   * two to the same statement text and the same rows:
+   *
+   * - a value without U+0000 takes `col GLOB ?`, as before;
+   * - a value holding U+0000 has each U+0000 replaced, by a recursive CTE over
+   *   BLOB, with one character that is not a literal of the pattern, not an
+   *   ASCII letter and not U+0000, and is then handed to the same `GLOB`. A
+   *   U+0000 can only be matched by a `%` or a `_`, and so can that character,
+   *   so the answer cannot move;
+   * - a pattern that is its literal prefix plus trailing `%`s keeps the bare
+   *   `col GLOB ?`, because the cut cannot change a prefix answer;
+   * - any other case-exact pattern with a literal prefix leads with `col GLOB
+   *   '<prefix>*'`, which every match satisfies and which keeps the index range.
    */
   private pushLikePattern(
     clauses: string[],
@@ -3398,8 +3419,49 @@ export class RemoteTransport {
   ): void {
     const lhs = fold ? `lower(${column})` : column;
     const rhs = fold ? 'lower(?)' : '?';
-    clauses.push(`${lhs} GLOB ${rhs}`);
-    args.push(likePatternToGlobPattern(pattern));
+    const glob = likePatternToGlobPattern(pattern);
+    // Read the pattern: its literal prefix, whether only `%` follows it, and
+    // the literal characters the U+0000 stand-in must avoid.
+    const literals = new Set<number>();
+    let prefixEnd = pattern.length;
+    let sawWildcard = false;
+    let onlyPercentAfterPrefix = true;
+    for (let i = 0; i < pattern.length; i++) {
+      const escaped = pattern[i] === '\\';
+      if (escaped) i++;
+      if (!escaped && (pattern[i] === '%' || pattern[i] === '_')) {
+        if (!sawWildcard) prefixEnd = i;
+        sawWildcard = true;
+        if (pattern[i] === '_') onlyPercentAfterPrefix = false;
+        continue;
+      }
+      if (sawWildcard) onlyPercentAfterPrefix = false;
+      literals.add(pattern.charCodeAt(i));
+    }
+    if (sawWildcard && onlyPercentAfterPrefix) {
+      clauses.push(`${lhs} GLOB ${rhs}`);
+      args.push(glob);
+      return;
+    }
+    const isAsciiLetter = (c: number) => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+    let sentinel = 0x01;
+    while (literals.has(sentinel) || isAsciiLetter(sentinel) || (sentinel >= 0xd800 && sentinel <= 0xdfff)) {
+      sentinel++;
+    }
+    const wholeValue =
+      `(WITH RECURSIVE os_like_nul(os_rest, os_head) AS (SELECT CAST(${lhs} AS BLOB), X'' UNION ALL `
+      + `SELECT substr(os_rest, instr(os_rest, X'00') + 1), `
+      + `os_head || substr(os_rest, 1, instr(os_rest, X'00') - 1) || char(${sentinel}) `
+      + `FROM os_like_nul WHERE instr(os_rest, X'00') > 0) `
+      + `SELECT (os_head || os_rest) GLOB ${rhs} FROM os_like_nul WHERE instr(os_rest, X'00') = 0)`;
+    const predicate = `CASE WHEN instr(CAST(${column} AS BLOB), X'00') > 0 THEN ${wholeValue} ELSE ${lhs} GLOB ${rhs} END`;
+    if (fold || prefixEnd === 0) {
+      clauses.push(predicate);
+      args.push(glob, glob);
+      return;
+    }
+    clauses.push(`(${lhs} GLOB ${rhs} AND ${predicate})`);
+    args.push(`${likePatternToGlobPattern(pattern.slice(0, prefixEnd))}*`, glob, glob);
   }
 
   /**
