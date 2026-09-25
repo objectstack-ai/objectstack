@@ -143,7 +143,8 @@ Numeric value with optional precision.
 ```
 
 ### `currency`
-Monetary value with currency configuration.
+Monetary value. The stored value is a bare number in both modes; the currency
+code lives in `currencyConfig`, never in the value.
 
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
@@ -152,8 +153,8 @@ Monetary value with currency configuration.
 | `min` | `number` | — | Minimum value |
 | `max` | `number` | — | Maximum value |
 | `currencyConfig.precision` | `number` | `2` | Decimal precision for currency |
-| `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether currency is per-record or fixed |
-| `currencyConfig.defaultCurrency` | `string` | `'CNY'` | Default currency code |
+| `currencyConfig.currencyMode` | `'dynamic' \| 'fixed'` | `'dynamic'` | Whether the column is pinned to `defaultCurrency` (`fixed`) or displays in the tenant default currency, the `localization.currency` setting (`dynamic`); the value is a bare number either way |
+| `currencyConfig.defaultCurrency` | `string` | `'CNY'` | The column's currency code under `fixed`; not the displayed currency under `dynamic` |
 
 ```typescript
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' } }
