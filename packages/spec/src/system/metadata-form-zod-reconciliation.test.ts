@@ -239,9 +239,9 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   //
   // `view` rows are here although `view` is outside the top-level direction
   // until its per-arm forms exist: each reason holds on every arm, so none of
-  // these rows can excuse a key a future arm form ought to offer. The `view`
-  // keys whose answer depends on the arm carry no row (`liveness/view.json`'s
-  // note records what was measured for them).
+  // these rows can excuse a key a future arm form ought to offer. Seven other
+  // `view` keys carry no row; the block at the end of this ledger records
+  // what was measured for each of them, and why none gets a row.
   //
   // The not-enforced-yet rows hold only while the verdict does. Once a key is
   // enforced its row is stale: delete it and decide the offer then — that
@@ -351,6 +351,35 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'onSuccess',
     why: 'declared, not enforced yet — both of its children (`navigate`, `openIn`) carry the liveness verdict `planned`: no console consumer reads the block yet. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
   },
+
+  // Measured, and deliberately NOT recorded: seven `view` keys with no
+  // liveness verdict at any coordinate. `liveness/view.json` cannot hold them:
+  // the liveness walk stops at the union's `container` arm (its `shapeOf`
+  // takes the first OBJECT member, and the `viewItem` arm is a discriminated
+  // union), so a row for any of the seven is an ORPHAN — planting `config`
+  // there failed `check:liveness`. Read at framework 7e6ca1787a and at the
+  // objectui pin 62597c588:
+  //
+  //   config     the viewItem arm's REQUIRED body. Authored (`defineViewItem`,
+  //              the console's `viewEnvelope`); `getViewsByObject` serves it.
+  //   viewKind   that arm's discriminator. Authored, and also stamped by
+  //              `expandViewContainer`, `viewIdentityPatch` and the console's
+  //              `buildPersistedViewBody`; `getViewsByObject` filters on it.
+  //   order      authored: the authoring door's own guidance names it the
+  //              authored default beside the per-user `sortOrder`.
+  //              `getViewsByObject` sorts on it.
+  //   isDefault  declared on the strict authoring door, AND written by the
+  //              console's set-default (`setDefaultViewPatches`); the
+  //              console's switcher reads it.
+  //   scope      stamped `package` by `expandViewContainer`; nothing writes
+  //              `shared` or `personal`.
+  //   owner      no writer and no reader of the view key in either repo.
+  //   hidden     no writer and no reader of the view key in either repo.
+  //
+  // None of them gets a row. The first four are authored, so a row would
+  // excuse a key a per-arm form may owe an offer, and that is a question for
+  // the first arm form rather than for this ledger. The last three have no
+  // live writer, so there is no platform-written state to give as the reason.
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
