@@ -2,14 +2,18 @@
  * ObjectUI — SDUI tree validation against the registry manifest (ADR-0080 §3/§6)
  *
  * Shallow, author-time validation: unknown component, unknown/missing prop,
- * wrong coarse type, illegal enum value. Collects `requires` (plugin provenance)
- * and binding sites the SERVER must resolve against object schema (we cannot
- * resolve objects/fields here — that check is framework-side by design).
+ * wrong coarse type, illegal enum value, and containment — a child list under
+ * a component whose registration declares no `children` input draws
+ * `not-a-container` (objectui#9910; see `acceptsChildren`). Collects
+ * `requires` (plugin provenance) and binding sites the SERVER must resolve
+ * against object schema (we cannot resolve objects/fields here — that check is
+ * framework-side by design).
  */
 
 import type {
   Diagnostic,
   Manifest,
+  ManifestComponent,
   ManifestInput,
   ManifestInputType,
   SchemaElement,
@@ -20,7 +24,49 @@ import { inputTypeArms } from './input-type.js';
 import { checkDashboardWidgetOptions } from './dashboard-widget-options.js';
 import { checkKanbanQuickAdd } from './kanban-quick-add.js';
 
-/** Base props every node may carry (mirrors BaseSchema) — never "unknown prop". */
+/**
+ * The protocol's ONE child-list key — `BaseSchema.children` — and therefore the
+ * name of the `inputs` entry a registration declares when its renderer puts
+ * that list on the page: `{ name: 'children', type: 'slot' }` (objectui#9910).
+ */
+export const CHILD_LIST_KEY = 'children';
+
+/**
+ * Does this component ACCEPT an authored child list? (objectui#9910)
+ *
+ * Read from exactly ONE declaration: an input named {@link CHILD_LIST_KEY} in
+ * the component's `inputs`, whatever its coarse type — the page kinds publish
+ * it typed `array`, the rest typed `slot`, and the NAME is the declaration.
+ * objectui's registry census holds that declaration true in both directions
+ * (a renderer that puts `schema.children` on the page declares it; a
+ * declaration whose renderer never renders the list is red).
+ *
+ * ⛔ `isContainer` is NOT consulted and is NOT a fallback. The flag now means
+ * LAYOUT containment only (objectui#9910 Q2-A) and it disagrees with the
+ * declared input both ways in the served manifest: `badge` / `alert` /
+ * `button` declare the slot with the flag off, `page:tabs` /
+ * `page:accordion` carry the flag with no slot.
+ *
+ * LOCKSTEP: this function, {@link CHILD_LIST_KEY} and the containment branch
+ * in `validateTree` are the byte-equal port of objectui's copy (objectui
+ * `packages/sdui-parser/src/validate.ts`, objectui#9910 re-cut `5ea623ea`),
+ * so the save gate and the renderer reach the same `not-a-container` verdict
+ * on every page (#12719). `pnpm check:sdui-lockstep` compares this predicate
+ * against the vendored record of objectui's and goes red when they diverge
+ * (#19969) — change it only together with objectui.
+ */
+export function acceptsChildren(comp: Pick<ManifestComponent, 'inputs'>): boolean {
+  return comp.inputs.some((input) => input.name === CHILD_LIST_KEY);
+}
+
+/**
+ * Base props every node may carry (mirrors BaseSchema) — never "unknown prop".
+ *
+ * `children` IS here: the key is legal on every node, so it never draws
+ * `unknown-prop` and its declared `slot` input is never type-checked. Whether
+ * a given component RENDERS it is the containment question below, answered by
+ * {@link acceptsChildren} from the declared input.
+ */
 const BASE_PROPS = new Set([
   'type',
   'id',
@@ -30,7 +76,7 @@ const BASE_PROPS = new Set([
   'visibleOn',
   'disabled',
   'disabledOn',
-  'children',
+  CHILD_LIST_KEY,
 ]);
 
 const isExpr = (v: unknown): boolean =>
@@ -164,8 +210,10 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
         }
       }
 
-      // containment
-      if (node.children?.length && !comp.isContainer) {
+      // containment — decided by the declared `children` input and by NOTHING
+      // else (objectui#9910 Q1-A). ⛔ No `isContainer` fallback: see
+      // `acceptsChildren` for why the flag stopped deciding this.
+      if (node.children?.length && !acceptsChildren(comp)) {
         diagnostics.push({
           severity: 'warning',
           code: 'not-a-container',
