@@ -64,9 +64,15 @@ function makeCountingDriver() {
       throw new Error(`counting driver: received a non-object 'where' (${String(where)})`);
     }
     for (const [k, v] of Object.entries(where)) {
+      // A combinator or an operator this double does not implement is REFUSED,
+      // never read as a field name or skipped (`check:where-matcher`).
+      if (k.startsWith('$')) throw new Error(`counting driver: unsupported combinator ${k}`);
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         const ops = v as Record<string, unknown>;
-        if ('$gt' in ops && !((row[k] as number) > (ops.$gt as number))) return false;
+        for (const op of Object.keys(ops)) {
+          if (op !== '$gt') throw new Error(`counting driver: unsupported operator ${op}`);
+        }
+        if (!((row[k] as number) > (ops.$gt as number))) return false;
         continue;
       }
       if (row[k] !== v) return false;
@@ -77,7 +83,13 @@ function makeCountingDriver() {
   const driver: IDataDriver = {
     name: 'counting', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(_o: string, ast: DriverQuery) { calls.push('find'); return run(ast); },
+    async find(_o: string, ast: DriverQuery) {
+      calls.push('find');
+      const hit = run(ast);
+      // The caller's bound, applied AFTER the filter and by presence
+      // (`check:objectql-double-limit`).
+      return typeof ast?.limit === 'number' ? hit.slice(0, ast.limit) : hit;
+    },
     async findOne(_o: string, ast: DriverQuery) { calls.push('findOne'); return run(ast)[0] ?? null; },
     async count(_o: string, ast: DriverQuery) { calls.push('count'); return run(ast).length; },
     async aggregate(_o: string, ast: DriverQuery) { calls.push('aggregate'); return [{ n: run(ast).length }]; },
