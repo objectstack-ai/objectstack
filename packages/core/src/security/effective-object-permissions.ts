@@ -37,7 +37,7 @@ import {
   effectiveOperationsArray,
   type EnableLike,
 } from '@objectstack/spec/data';
-import type { EffectiveObjectPermission } from '@objectstack/spec/security';
+import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
 
 /**
  * Does the `'*'` entry carry the super-user READ bypass?
@@ -176,6 +176,114 @@ export interface ApiExposureSchemaLike {
 }
 
 /**
+ * The posture slice of a registered object schema: whether a plain `'*'` grant
+ * covers it at all. `access.default === 'private'` keeps a wildcard carrying no
+ * super-user bypass bit off the object — ADR-0066 D2, read exactly as
+ * `PermissionEvaluator` reads it (`access?.default === 'private'`; anything else
+ * is public).
+ */
+export interface ObjectAccessPostureLike {
+  name?: string;
+  /**
+   * The registered schema's own `access` block, passed through as it is. Typed
+   * `unknown` so that any schema a caller already hands over still type-checks;
+   * the one read is `access.default === 'private'`.
+   */
+  access?: unknown;
+}
+
+/** `access.default === 'private'` off a registered schema — the evaluator's own test. */
+function isPrivatePosture(schema: ObjectAccessPostureLike | null | undefined): boolean {
+  const access = schema?.access;
+  return typeof access === 'object' && access !== null && (access as { default?: unknown }).default === 'private';
+}
+
+/** The `allow*` bits {@link objectPermissionGrants} reads, i.e. every bit a `can()` verb resolves to. */
+const GRANT_BITS = ['allowRead', 'allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer', 'allowExport'] as const;
+const GRANT_BIT_SET: ReadonlySet<string> = new Set(GRANT_BITS);
+
+/** Does the entry grant any verb on its own? (`objectPermissionGrants` over every verb target.) */
+function grantsAnyVerb(entry: Record<string, unknown>): boolean {
+  return GRANT_BITS.some((bit) => objectPermissionGrants(entry as EffectiveObjectPermission, bit));
+}
+
+/**
+ * [#20083] Materialise every PLAIN `'*'` grant — a wildcard carrying neither
+ * super-user bypass bit — onto the registered objects it covers, mutating the
+ * map in place. Runs after the merge and the super-user seed (an entry the
+ * seed placed only gains grants here, and keeps its place), BEFORE the fold.
+ *
+ * The merge above folds each set's EXPLICIT entries and keeps `'*'` as a key of
+ * its own, but the server does not stop there: `PermissionEvaluator`'s
+ * `resolveObjectPermission` answers, PER SET, with that set's explicit entry
+ * for the object when it has one, and otherwise with its `'*'` — for a public
+ * object always, for a private one only when the wildcard is a super-user
+ * grant. So a set whose plain wildcard covers an object contributes that
+ * wildcard to the object, and `checkObjectPermission` allows as soon as ANY
+ * set's contribution grants. Without this pass the map held no entry for an
+ * object reached only that way, and `current_user.can()` — which reads an absent
+ * entry as "no grant" — answered `false` for a wall-less org admin
+ * (`organization_admin_no_bypass`) on every app object the server lets them
+ * write; and it held a narrower entry wherever one set named the object and
+ * another covered it by its wildcard.
+ *
+ * Exactly as broad as that resolution, never broader:
+ *  - only REGISTERED objects are covered — the server refuses an object whose
+ *    posture it cannot resolve, whatever the wildcard says;
+ *  - a set that names the object explicitly contributes nothing here: for
+ *    that set the explicit entry is the whole answer, and the merge already
+ *    carries it;
+ *  - a `private` object takes nothing from a plain wildcard;
+ *  - only `true` bits are merged — the grants every `can()` verb reads. A
+ *    wildcard's `false` or unset bit grants nothing, and depth keys
+ *    (`readScope`/`writeScope`) are not grants;
+ *  - an object the pass would ADD but whose entry grants no verb on its own is
+ *    left out: an absent entry and an all-`false` one read the same.
+ *
+ * A super-user wildcard is NOT materialised here: {@link seedSuperUserRestrictedObjects}
+ * and {@link foldWildcardSuperUser} carry it, and this pass leaves their answer
+ * byte-for-byte as it was for every subject holding no plain wildcard.
+ */
+function materializePlainWildcardCoverage(
+  objects: Record<string, any>,
+  sets: ReadonlyArray<EffectiveObjectPermissionsInputSet | null | undefined>,
+  allSchemas: readonly (ApiExposureSchemaLike & ObjectAccessPostureLike)[],
+): void {
+  const plainWildcards: Array<{ named: Record<string, unknown>; wild: Record<string, unknown> }> = [];
+  for (const ps of sets) {
+    const named = ps?.objects as Record<string, unknown> | null | undefined;
+    const wild = named?.['*'] as Record<string, unknown> | null | undefined;
+    if (!named || !wild || typeof wild !== 'object') continue;
+    if (wild.viewAllRecords === true || wild.modifyAllRecords === true) continue;
+    if (!GRANT_BITS.some((bit) => wild[bit] === true)) continue;
+    plainWildcards.push({ named, wild });
+  }
+  if (plainWildcards.length === 0) return;
+  for (const schema of allSchemas) {
+    const name = schema?.name;
+    if (!name || name === '*') continue;
+    if (isPrivatePosture(schema)) continue;
+    const had = Object.prototype.hasOwnProperty.call(objects, name);
+    const acc: Record<string, unknown> = had ? objects[name] : {};
+    let touched = false;
+    for (const { named, wild } of plainWildcards) {
+      // `resolveObjectPermission`'s own test: a set's explicit entry, when it
+      // has one, is that set's whole answer for the object.
+      if (named[name]) continue;
+      // The wildcard's own key order, so an entry this pass adds reads like
+      // every other entry the map carries.
+      for (const [bit, value] of Object.entries(wild)) {
+        if (value === true && GRANT_BIT_SET.has(bit) && acc[bit] !== true) {
+          acc[bit] = true;
+          touched = true;
+        }
+      }
+    }
+    if (!had && touched && grantsAnyVerb(acc)) objects[name] = acc;
+  }
+}
+
+/**
  * [#3391] Seed false-initialized per-object entries for a wildcard SUPER-USER,
  * for every registered object whose `apiMethods` whitelist tightens exposure.
  *
@@ -188,7 +296,9 @@ export interface ApiExposureSchemaLike {
  *
  * [#18990] Admitted by {@link wildcardGrantsSuperRead} — the READ bypass, so
  * BOTH super-user classes are seeded, and a plain wildcard grant carrying
- * neither bypass bit still is not. This pass used to be guarded to
+ * neither bypass bit still is not — [#20083] its coverage is
+ * {@link materializePlainWildcardCoverage}'s, which puts the wildcard's own
+ * grants on the objects it covers. This pass used to be guarded to
  * `modifyAllRecords` alone, on the reading that materializing a `false` entry
  * for a viewAll-only caller would flip the client's `check('edit')` from
  * "undefined → default-allow" to "explicit false → deny". It does flip it, and
@@ -289,8 +399,13 @@ export function annotateEffectiveApiOperations(
  * (no seed, no clamp, no `apiOperations`) — it never drops the map.
  */
 export interface EffectiveObjectPermissionsSchemaSource {
-  /** Every registered object schema — read by the super-user seed. */
-  allSchemas?: () => readonly ApiExposureSchemaLike[] | null | undefined;
+  /**
+   * Every registered object schema — read by the plain-wildcard coverage
+   * (`name` and `access.default`, [#20083]) and by the super-user seed (`name`
+   * and `enable`). Hand over the registered schemas themselves: an entry whose
+   * `access` is missing reads as public, exactly as it does to the server.
+   */
+  allSchemas?: () => readonly (ApiExposureSchemaLike & ObjectAccessPostureLike)[] | null | undefined;
   /** One object's schema — read by the managed-write clamp and the `apiOperations` annotation. */
   schemaOf?: (objectName: string) => (ManagedSchemaLike & ApiExposureSchemaLike) | null | undefined;
   /** Where a failed seed / annotation pass is reported. */
@@ -307,16 +422,19 @@ export interface EffectiveObjectPermissionsInputSet {
  * sets are `sets` — the `objects` slot of `/auth/me/permissions` and the answer
  * of `ISecurityService.getEffectiveObjectPermissions`, from this ONE function.
  *
- * In order, exactly as the endpoint has always composed it:
+ * In order:
  *
  *  1. the most-permissive merge of every set's explicit `objects` entries —
  *     same semantics as `PermissionEvaluator.getFieldPermissions`, for ALL
  *     objects in one pass (`'*'` is merged as an ordinary key);
  *  2. {@link seedSuperUserRestrictedObjects} — guarded: a failure is reported
  *     and the map is kept;
- *  3. {@link foldWildcardSuperUser};
- *  4. {@link clampManagedObjectWrites};
- *  5. {@link annotateEffectiveApiOperations} — guarded like (2).
+ *  3. {@link materializePlainWildcardCoverage} — [#20083] each set's plain
+ *     `'*'` onto the registered objects it covers for that set, so the map is
+ *     as broad as `checkObjectPermission` there; guarded like (2);
+ *  4. {@link foldWildcardSuperUser};
+ *  5. {@link clampManagedObjectWrites};
+ *  6. {@link annotateEffectiveApiOperations} — guarded like (2).
  *
  * Every entry is a FRESH object: nothing in the returned map aliases a
  * permission set, so a caller may freeze or serialise it freely.
@@ -344,17 +462,26 @@ export function buildEffectiveObjectPermissions(
   const schemaOf = (name: string): (ManagedSchemaLike & ApiExposureSchemaLike) | undefined => {
     try { return source.schemaOf?.(name) ?? undefined; } catch { return undefined; }
   };
+  const allSchemas = (() => {
+    try { return source.allSchemas?.() ?? []; } catch { return [] as ApiExposureSchemaLike[]; }
+  })();
   // [#3391] For a wildcard super-user — [#18990] either bypass bit, not
   // modify-all alone — seed restricting objects absent from the merged map so
   // fold pulls what it pulls and annotate can attach their effective
   // apiOperations. Guarded — a failure here must never drop the whole map.
   try {
-    const allSchemas = (() => {
-      try { return source.allSchemas?.() ?? []; } catch { return [] as ApiExposureSchemaLike[]; }
-    })();
     seedSuperUserRestrictedObjects(objects, allSchemas);
   } catch (e: any) {
     source.logger?.warn?.('[effective-permissions] apiOperations seed failed', { err: e?.message });
+  }
+  // [#20083] A plain `'*'` covers every registered public object its set does
+  // not name — per set, as the server resolves it. After the seed, so an entry
+  // the seed already placed keeps its place in the map and only gains grants.
+  // Guarded like the seed.
+  try {
+    materializePlainWildcardCoverage(objects, sets, allSchemas);
+  } catch (e: any) {
+    source.logger?.warn?.('[effective-permissions] plain-wildcard coverage failed', { err: e?.message });
   }
   // Make the per-object map reflect the server's ACTUAL effective enforcement
   // = permission-set grant ∩ identity write guard (ADR-0057 D10, cited as an

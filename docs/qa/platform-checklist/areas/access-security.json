@@ -2522,13 +2522,14 @@
       "title": "The /auth/me/permissions aggregation (and its /auth/me/localization + /me/apps siblings) mirrors server-side enforcement in both directions — and the trio's anonymous 200 is the deliberate exception to the 401 floor",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "contributor member C (showcase_contributor — carries the FLS grant on showcase_project budget figures, the field-parity fixture)",
         "plain member P (member_default only — the withheld-verb contrast)",
         "admin (the entitled /me/apps contrast)",
+        "wall-less org admin W (organization_admin_no_bypass + member_default, NO admin_full_access — the plain-wildcard population: its only '*' carries no viewAllRecords/modifyAllRecords bit)",
         "anonymous (the designed-200 exception)"
       ],
       "fixtures": {
@@ -2536,10 +2537,12 @@
         "requires": [
           "showcase_contributor: allowEdit on showcase_project plus FLS budget/spent/budget_remaining readable:true/editable:false (permission-sets.ts) — the same fixture access-security.fls-mask-and-strip drives; this item asserts the AGGREGATION agrees with that enforcement, not the enforcement itself",
           "member_default WITHOUT allowEdit on showcase_project — compute the ADR-0090 D5 baseline union per access-security.crud-permission-matrix's knownGaps before picking the withheld verb, or a baseline-granted verb will read as an aggregation violation",
-          "an app whose requiredPermissions a plain member lacks (the setup built-in requires setup capabilities admin_full_access carries) — the /me/apps contrast pair"
+          "an app whose requiredPermissions a plain member lacks (the setup built-in requires setup capabilities admin_full_access carries) — the /me/apps contrast pair",
+          "W: a fresh user who owns or administers an organization under the stock wall-less posture, where auto-org-admin-grant assigns organization_admin_no_bypass (not organization_admin); confirm permissionSets in W's own map before scoring — a W that also resolves admin_full_access is the super-user population, not this one"
         ],
         "knownGaps": [
-          "the SecurityPlugin-absent fail-open branch (current-user-endpoints.ts empty-but-authenticated body; /me/apps failOpen returning every app) has no showcase fixture — a stack without SecurityPlugin is a different boot. Declared boundary; do not score it here"
+          "the SecurityPlugin-absent fail-open branch (current-user-endpoints.ts empty-but-authenticated body; /me/apps failOpen returning every app) has no showcase fixture — a stack without SecurityPlugin is a different boot. Declared boundary; do not score it here",
+          "showcase declares no access.default:'private' app object, so W's private-object contrast runs on the platform's sys_secret (private, named by no shipped set) — it proves the plain wildcard's posture boundary, not an app-authored one"
         ]
       },
       "steps": [
@@ -2547,6 +2550,7 @@
         "as C: GET /api/v1/auth/me/permissions — record objects.showcase_project, fields['showcase_project.budget'], permissionSets, systemPermissions",
         "verb parity, both directions: as C PATCH a showcase_project name (the map says allowEdit) — 2xx; as P read P's own map (allowEdit absent/false on showcase_project) then issue the identical PATCH — 403 PERMISSION_DENIED",
         "field parity: C's map says budget editable:false — C's budget PATCH is refused/stripped with the stored value unchanged (the fls-mask-and-strip oracle; cross-check only, do not re-score that item here)",
+        "plain-wildcard parity: as W, GET /api/v1/auth/me/permissions — objects.showcase_semantic_zoo is PRESENT with allowEdit:true although no set W holds names it (the organization_admin_no_bypass '*' covers it), and objects.showcase_project reads allowEdit:true although showcase_member_default names it read-only (another set's plain '*' widens a named entry, because the server resolves each set on its own); create a showcase_project as W, then PATCH its name — 2xx (W's own row, so row-level scope, which this item does not score, cannot decide it); then objects.sys_secret is ABSENT (private: a plain '*' does not reach it) and W's GET /api/v1/data/sys_secret answers 403 PERMISSION_DENIED (its apiMethods offer list, so the refusal is the permission layer's, not the exposure layer's)",
         "as P then admin: GET /api/v1/me/apps — P's list excludes the capability-gated app and includes showcase_app; admin's includes it; for every returned app verify requiredPermissions ⊆ the caller's merged systemPermissions",
         "as any member: GET /api/v1/auth/me/localization — the resolved currency/locale/timezone",
         "anonymous (no Authorization header, fresh client): GET all three endpoints and capture status + body",
@@ -2588,6 +2592,12 @@
           "oracle": "api",
           "verify": "member trace carries authenticated:true plus the three keys, with timezone and locale non-null; configure localization.currency and localization.timezone and re-trace — both must move to the configured values (an unmoved trace is the #15387 defect, not a pass)",
           "evidence": "the trace"
+        },
+        {
+          "clause": "the plain-wildcard population holds the same parity: for W, whose only '*' carries no super-user bit, the map carries an entry for every registered PUBLIC object that '*' covers and no set of W's names (showcase_semantic_zoo), widens an entry another set names narrower (showcase_project reads allowEdit:true and W's PATCH of its own row is 2xx), and carries NONE for a private object the plain '*' does not reach (sys_secret absent, W's read 403) — an absent entry reads as 'no grant' to current_user.can(), so a missing covered object is an under-claim FAIL against the endpoint, and an entry for the private one an over-claim FAIL",
+          "oracle": "api",
+          "verify": "W's /auth/me/permissions objects.showcase_semantic_zoo, objects.showcase_project and objects.sys_secret against W's live PATCH and GET outcomes; permissionSets in the same body must list organization_admin_no_bypass and must NOT list admin_full_access, or the persona is wrong and the clause is not scored",
+          "evidence": "W's map + the PATCH and GET traces"
         }
       ],
       "negative": [
@@ -2607,10 +2617,11 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (the /me/apps half: member sees showcase, requiredPermissions gates, anonymous [], tabPermissions hidden drop and more-visible grant wins) + plugin-hono-server unit suites hono-current-user-endpoints.test.ts / current-user-endpoints-additive-baseline.test.ts / current-user-endpoints-position-grants.test.ts / current-user-endpoints-delegated-resolution.test.ts. STILL MANUAL: the live parity cross-check of the returned maps against actual enforcement responses (clauses 1-2) and the self-scoping probe"
+        "ref": "packages/qa/dogfood/test/me-apps-and-everyone-baseline.dogfood.test.ts (the /me/apps half: member sees showcase, requiredPermissions gates, anonymous [], tabPermissions hidden drop and more-visible grant wins) + plugin-hono-server unit suites hono-current-user-endpoints.test.ts / current-user-endpoints-additive-baseline.test.ts / current-user-endpoints-position-grants.test.ts / current-user-endpoints-delegated-resolution.test.ts + plugin-security get-effective-object-permissions.test.ts (the plain-wildcard parity table behind the plain-wildcard clause: shipped and authored plain-'*' subjects x registered objects x every can() verb, the map read through the real can() against PermissionEvaluator.checkObjectPermission — a unit oracle over fixture schemas, not the live stack). STILL MANUAL: the live parity cross-check of the returned maps against actual enforcement responses (clauses 1-2 and the plain-wildcard clause) and the self-scoping probe"
       },
       "source": [
         "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#tabPermissions (/auth/me/permissions aggregation + most-permissive merge), (/auth/me/localization), (/me/apps requiredPermissions/tabPermissions filter), (the /api/v1 prefix)",
+        "packages/core/src/security/effective-object-permissions.ts#buildEffectiveObjectPermissions (the objects slot: explicit merge, super-user seed, plain-wildcard coverage, fold, managed-write clamp, apiOperations annotation — the one function the route and ISecurityService.getEffectiveObjectPermissions share)",
         "packages/core/src/security/auth-gate.ts#ALLOW_ROUTES (ALLOW_ROUTES — /me/apps + /me/localization reachable to gated users. Was ALLOW_SUFFIXES, an endsWith test that also exempted any path merely ENDING in those two — /data/xyz/me/apps among them; the allow-list is anchored to a mount base now, so these are EXACT routes at a mount and a record id can no longer spell its way into the exemption)",
         "#7616 (delegated permission-set resolution — the enforcement path's own answer), #2752 (/me/apps registry sourcing), #3391 (effective apiOperations annotation), #4093 (guarded degraded branch), ADR-0090 D5 (additive baseline)",
         "cross-ref access-security.anonymous-deny-surfaces — the 401 floor this trio is the declared exception to",
@@ -2622,6 +2633,12 @@
           "date": "2026-08-30",
           "change": "new — the raw-mounted current-user trio (/auth/me/permissions, /auth/me/localization, /me/apps) is the console's whole permission layer and appeared in no ledger and no checklist item: aggregation-vs-enforcement parity was untested in either direction, and the deliberate anonymous-200 design (distinct bodies per endpoint: authenticated:false for two, apps:[] for the third — corrected from the sweep register, which implied one shape for all three) was unpinned and at risk of being 'fixed' into a 401",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-25",
+          "change": "the parity steps never reached the population the map got wrong: a wall-less org admin (organization_admin_no_bypass, a plain '*' with no super-user bit) had NO entry for an app object covered only by that wildcard, so current_user.can() answered false where checkObjectPermission allowed. Added persona W, its step and acceptance clause (an object no set names present and writable, a narrower named entry widened, the private sys_secret absent and refused — the shape measured on a booted showcase), the source anchor for the producer, and the unit parity table to automated.ref",
+          "ref": "#20083"
         }
       ]
     },
