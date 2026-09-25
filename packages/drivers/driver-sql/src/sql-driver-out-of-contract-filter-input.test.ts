@@ -124,7 +124,13 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
 
     for (const [label, where, key, path] of UNDECLARED) {
       it(`refuses ${label} with INVALID_FILTER / 400`, async () => {
-        const err = await refusalOf(where);
+        // [#20039] Marked 'author' (a shallow copy, so the shared case stays
+        // unmarked), as a read-scope merge boundary marks a caller's own
+        // predicate: the key and its position are the predicate's detail,
+        // named only for a predicate the caller is known to have written (the
+        // #8220 contract). The withheld half is pinned in
+        // `sql-driver-compile-refusal-seam.test.ts`.
+        const err = await refusalOf(markFilterSubtreeProvenance({ ...(where as object) }, 'author'));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         // The caller must be able to see WHICH key, and WHERE.
@@ -141,7 +147,8 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
     // never look at the malformed sibling. Before the fix this whole filter
     // RESOLVED — and to `[]`, not even to the row the good disjunct matches.
     it('refuses a malformed disjunct even when a sibling disjunct is satisfiable', async () => {
-      const err = await refusalOf({ $or: [{ stage: 'won' }, { $where: 'x' }] });
+      // [#20039] 'author'-marked for the position, as above.
+      const err = await refusalOf(markFilterSubtreeProvenance({ $or: [{ stage: 'won' }, { $where: 'x' }] }, 'author'));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('filter.$or[1].$where');
     });
@@ -149,7 +156,8 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
     // The other half of the same argument: an identity that resolves the whole
     // node TRUE before the malformed sibling is reached.
     it('refuses a malformed disjunct beside the TRUE identity `{}`', async () => {
-      const err = await refusalOf({ $or: [{}, { $nor: [{ stage: 'won' }] }] });
+      // [#20039] 'author'-marked for the position, as above.
+      const err = await refusalOf(markFilterSubtreeProvenance({ $or: [{}, { $nor: [{ stage: 'won' }] }] }, 'author'));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('filter.$or[1].$nor');
     });
@@ -345,7 +353,9 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
       // The object half now refuses, in this driver's own envelope. Replaced
       // rather than re-spelled: an assertion that keeps passing because nothing
       // is produced pins nothing at all.
-      const err = await refusalOf({ stage: { $startsWith: {} } });
+      // [#20039] 'author'-marked: which of the five text operators refused is
+      // the predicate's detail under the #8220 contract.
+      const err = await refusalOf(markFilterSubtreeProvenance({ stage: { $startsWith: {} } }, 'author'));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('$startsWith');

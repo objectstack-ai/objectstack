@@ -402,6 +402,19 @@
  * `$notContains` keep their answer, because widening by analogy is the
  * table's decision.
  *
+ * # A non-boolean `$null` / `$exists` flag is refused (#20040)
+ *
+ * `FieldOperatorsSchema` declares both flags `z.boolean()`, and the #5347 /
+ * #5369 rulings refuse a non-boolean one in every position and on every
+ * backend, because the backends read it in OPPOSITE directions. `driver-sql`
+ * refuses it, and so does this package's read-scope compiler (#6387). This
+ * door read the flag by identity, so a string, a number, `null`, an array, a
+ * `Date` or a `{ $field }` reference lowered to IS NOT NULL on every face, and
+ * both HTTP routes served it. {@link assertBooleanNullFlags} now refuses it in
+ * {@link normalizeWhereComparands}, after the two shared faces and before any
+ * node is built, in this door's envelope and with the message kept. `true` and
+ * `false` lower exactly as before.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
@@ -421,7 +434,9 @@
  * every face (#20010), and `where-type-face-refusal.test.ts` for the
  * comparand-TYPE face, both spellings, every face, and its narrowing (#20035),
  * and `icontains-text-comparand-refusal.test.ts` for the two `$icontains`
- * REJECTION rows, both doors, every face (#20068).
+ * REJECTION rows, both doors, every face (#20068), and
+ * `where-boolean-flag-refusal.test.ts` for the non-boolean flag refusal, every
+ * face, its order and its byte-for-byte boolean controls (#20040).
  */
 
 import {
@@ -440,6 +455,7 @@ import {
   isBindableComparand,
   isFieldReference,
   isRenderableTextComparand,
+  shapePreview,
   TEXT_PATTERN_OPERATORS,
   unbindableListMemberMessage,
   unrenderableTextComparandMessage,
@@ -891,7 +907,10 @@ function undefinedComparandError(field: string, path: string): Error {
  * judges the `$null` / `$exists` comparand as a literal (its operator split),
  * so from the `where` door `{$null: undefined}` is refused before any leaf
  * exists. An ACCEPTED non-boolean flag (`{$null: 'false'}`) still reaches the
- * identity read unchanged.
+ * identity read unchanged. [#20040] It no longer does: {@link assertBooleanNullFlags}
+ * refuses every non-boolean flag in {@link normalizeWhereComparands}, before
+ * any node is built, so from the `where` door only `true` and `false` reach
+ * the identity read.
  *
  * ## Why the gate sits HERE, and what that decides for `{$not: {d: undefined}}`
  *
@@ -1127,6 +1146,12 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // console emits for an "is empty" / "is not empty" filter
         // (`is_null`/`is_not_null` normalise to it in `filter.zod.ts`), so
         // dropping it silently meant such a widget showed every row.
+        //
+        // [#20040] From the `where` door the flag is a boolean by the time it
+        // gets here: `assertBooleanNullFlags` refuses anything else before any
+        // node is built (#5347 / #5369). So the identity read below is an
+        // exhaustive two-way choice, as `driver-sql`'s emitter's is once its
+        // own gate holds. It used to lower every other value to `set`.
         if (opKey === '$null' || opKey === '$exists') {
           const isNull = opKey === '$null' ? wrapper[opKey] === true : wrapper[opKey] === false;
           leaf(isNull ? 'notSet' : 'set', []);
@@ -1379,7 +1404,9 @@ type NullGuard = 'none' | 'requireValue' | 'allowNull';
  *     because {@link fieldLeaves} reads them that way, where `read-scope-sql`
  *     uses truthiness because its emitter does. Immaterial in practice: both
  *     compile to a null predicate, so they are total either way and never
- *     reach the polarity question.
+ *     reach the polarity question. [#20040] And from the `where` door the
+ *     flag is always a boolean here: {@link assertBooleanNullFlags} refuses
+ *     any other value before the `$not` rewrite that consults this table runs.
  *   - `$between` exists in this vocabulary; it lowers to `gte` + `lte`, two
  *     positive comparisons, so it takes the same default they do.
  *
@@ -1910,12 +1937,137 @@ function normalizeWhereComparandTypes<T>(node: T, path = 'where'): T {
   ) as T;
 }
 
+// ── [#20040] The null flags' boolean DOMAIN, on every spelling that carries one ──
+
+/** The two flags `FieldOperatorsSchema` declares `z.boolean()`. */
+const NULL_FLAG_OPERATORS: ReadonlySet<string> = new Set(['$null', '$exists']);
+
+/** What arrived where a flag's boolean belongs, for the refusal below. */
+function describeFlagComparand(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'bigint') return `a bigint (${value}n)`;
+  if (Array.isArray(value)) return `an array (${shapePreview(value)})`;
+  if (value instanceof Date) return `a Date (${shapePreview(value)})`;
+  if (isFieldReference(value)) return `a field reference (${shapePreview(value)})`;
+  return `a ${typeof value} (${shapePreview(value)})`;
+}
+
+/**
+ * [#20040, applying #5347 / #5369] A `$null` / `$exists` flag whose comparand
+ * is not a boolean — refused in this door's envelope, `INVALID_FILTER` / 400,
+ * with the message kept, because the caller wrote it.
+ *
+ * ## The rulings, and the faces that already hold them
+ *
+ * `FieldOperatorsSchema` (`@objectstack/spec/data`) declares both flags
+ * `z.boolean()`, and nothing between an authored `where` and this door
+ * validates against it: `FilterConditionSchema` types a field entry as
+ * `z.unknown()`, and the shared comparand-TYPE face judges a flag as a literal
+ * comparand, so a string, a number, `null`, a `Date`, an array or a
+ * `{ $field }` reference all pass it. #5347 (`$null`) and #5369 (`$exists`)
+ * ruled such a flag REFUSED, in every position and on every backend, because
+ * the backends read one in OPPOSITE directions: `driver-sql` compiled IS NULL
+ * for anything but `false`, the JS drivers IS NOT NULL for anything but
+ * `true`. The faces that hold it: `driver-sql`'s
+ * `nonBooleanNullComparandError` / `nonBooleanExistsComparandError`,
+ * `driver-memory` and `driver-mongodb`'s `$null` twins, and this package's
+ * read-scope compiler (`read-scope-sql.ts`'s `assertBooleanFlagComparands`,
+ * #6387) in its own fail-closed envelope.
+ *
+ * ## What this door did — measured on `8d76c2d38c` (#20040)
+ *
+ * {@link fieldLeaves} read the flag by IDENTITY (`=== true` for `$null`,
+ * `=== false` for `$exists`), so every other value lowered to `set`, IS NOT
+ * NULL, on every face: native execute, the `/analytics/sql` echo, the ObjectQL
+ * engine path (which received `{ f: { $ne: null } }`) and both HTTP routes
+ * (200). `{ $null: 'true' }` therefore asked for the rows it excludes, and
+ * `{ $exists: 'false' }` for the rows it keeps. The whole table is in
+ * `where-boolean-flag-refusal.test.ts`.
+ *
+ * ## Why a local check, and not an import
+ *
+ * No package this one depends on at runtime publishes a predicate or a
+ * sentence for this refusal (`@objectstack/spec`, `core` and `types` carry
+ * none), and a driver is not a dependency to take for one `typeof`. The main
+ * clause is `driver-sql`'s, word for word through "(true or false)", so one
+ * condition reads one way wherever it is refused; the rest names what THIS
+ * door used to do. The message carries no tracker number (a runtime string).
+ */
+function nonBooleanFlagError(op: string, field: string, path: string, value: unknown): Error {
+  const [whenTrue, whenFalse] = op === '$null' ? ['has no value', 'has a value'] : ['has a value', 'has no value'];
+  return invalidFilterError(
+    `[analytics] Operator "${op}" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFlagComparand(value)} at ${path}. @objectstack/spec FieldOperatorsSchema ` +
+      `declares ${op} as a boolean, and a non-boolean is refused rather than coerced because the ` +
+      `backends read one in OPPOSITE directions — one as IS NULL, another as IS NOT NULL. This ` +
+      `analytics filter used to read every non-boolean as IS NOT NULL, so the string "true" and the ` +
+      `string "false" asked for the same rows. Write the boolean itself: "${op}": true matches rows ` +
+      `whose "${field}" ${whenTrue}, "${op}": false rows whose "${field}" ${whenFalse}. The filter was ` +
+      `NOT applied.`,
+  );
+}
+
+/**
+ * [#20040] Refuse every non-boolean `$null` / `$exists` flag of an object-form
+ * `where`, at any depth, before any node is built.
+ *
+ * Over {@link forEachWhereFieldEntry}'s one traversal, so the flags are found in
+ * exactly the positions the shared faces judge — `$and` / `$or` members,
+ * `$not`, field entries, and a nested relation's entries — and reported at the
+ * path those faces give them (`where.acct.stage.$null`). The field named is the
+ * entry's own key.
+ *
+ * ## Why before any lowering, and not at the identity read in `fieldLeaves`
+ *
+ * Two readers see the flag before that read does. {@link nullSafeNegationOperand}
+ * classifies every field spec under a `$not` through
+ * {@link nullValueSatisfiesOperator} and {@link operatorIsNullTotal}, both of
+ * which read the flag, and the draft preview evaluates the condition
+ * {@link normalizeWhereComparands} returns without ever reaching `fieldLeaves`.
+ * A gate here answers all of them, and the preview then refuses this cell in
+ * the published door's words. `read-scope-sql.ts` placed its twin at its one
+ * compile road for the same reason.
+ *
+ * ## Order, measured against the neighbouring gates
+ *
+ * - AFTER the shape and type faces. A flag the type face refuses (`undefined`,
+ *   a plain object, a `Map`, a bigint beyond 2^53) keeps the face's sentence,
+ *   the one the `FilterArray` spelling and the engine seam give, and a shape or
+ *   type defect elsewhere in the same `where` is answered first.
+ * - BEFORE everything {@link buildNode} reaches: the #6386 `undefined` gate
+ *   (which skips both flags by name, so the two never judge one value), the
+ *   #5240 zero-operator and #6444 mixed-wrapper refusals, and the unsupported
+ *   operator. A `where` carrying a non-boolean flag and one of those defects is
+ *   answered with the flag, in the same envelope; the type face took the same
+ *   precedence over #6444 in #20035.
+ *
+ * It judges the author's condition, not the type face's narrowed copy, so a
+ * bigint flag is reported as the bigint that was written. The verdict is the
+ * same either way: a narrowed bigint is a number, and a number is not a boolean.
+ *
+ * The `FilterArray` spelling needs no pass of its own: `parseFilterAST` lowers
+ * `is_null` / `is_not_null` to a hard-coded boolean by operator NAME, refuses
+ * `$null` / `exists` as array operators, and `isFilterAST` refuses an embedded
+ * object, so no flag value arrives through it.
+ */
+function assertBooleanNullFlags(node: unknown, path = 'where'): void {
+  forEachWhereFieldEntry(node, path, (key, spec, at) => {
+    if (!isFilterObject(spec)) return;
+    for (const [op, value] of Object.entries(spec)) {
+      if (!NULL_FLAG_OPERATORS.has(op) || typeof value === 'boolean') continue;
+      throw nonBooleanFlagError(op, key, `${at}.${key}.${op}`, value);
+    }
+  });
+}
+
 /**
  * [#20035] The analytics `where` door's comparand gate: the shared
  * comparand-SHAPE face, then the shared comparand-TYPE face, on an object-form
  * condition, before any node is built. Returns the condition to lower — the
  * type face's copy-on-write narrowing applied — and throws on the first
- * refused comparand.
+ * refused comparand. [#20040] A third pass follows the two faces:
+ * {@link assertBooleanNullFlags}, the `$null` / `$exists` boolean domain
+ * (#5347 / #5369), which neither face judges.
  *
  * ## Why
  *
@@ -1992,7 +2144,11 @@ function normalizeWhereComparandTypes<T>(node: T, path = 'where'): T {
  */
 export function normalizeWhereComparands<T>(node: T, path = 'where'): T {
   assertWhereComparandShapes(node, path);
-  return normalizeWhereComparandTypes(node, path);
+  const narrowed = normalizeWhereComparandTypes(node, path);
+  // [#20040] Then the null flags' boolean domain, before any node is built —
+  // see {@link assertBooleanNullFlags} for the order and why it is here.
+  assertBooleanNullFlags(node, path);
+  return narrowed;
 }
 
 /**

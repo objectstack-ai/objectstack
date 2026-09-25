@@ -683,9 +683,15 @@ export interface AnalyticsServiceConfig {
    * live on the field reach the result columns. `undefined` for an unknown
    * field. Feeds three chains:
    *
-   * - ADR-0053 currency: a monetary measure that omits an explicit `currency`
-   *   falls back to the field's declared currency, then the tenant default
+   * - Currency: a monetary measure that omits an explicit `currency` falls
+   *   back to the field's FIXED currency, then the tenant default
    *   (`ctx.currency`). Non-`currency` fields never get a code.
+   *   [#20091] `defaultCurrency` here means the field's fixed currency: answer
+   *   `currencyConfig.defaultCurrency` ONLY when `currencyConfig.currencyMode`
+   *   is `'fixed'`, and `undefined` otherwise. A `dynamic` field — and a config
+   *   naming no mode, `dynamic` by the spec's default — has no field-level
+   *   currency; the tenant default applies. `AnalyticsServicePlugin`'s relay
+   *   is the reference answer.
    * - Percent scale (objectui#3136): a measure over a `percent` field inherits
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
@@ -1789,10 +1795,11 @@ export class AnalyticsService implements IAnalyticsService {
         // and break the moment the default is spelled in another language.
         if (f.builtinAggregate == null && m.label == null && m.aggregate) f.builtinAggregate = m.aggregate;
         if (f.format == null && m.format) f.format = m.format;
-        // ADR-0053 currency chain. A MONETARY measure resolves its display
-        // currency from: explicit measure `currency` → source-field
-        // `currencyConfig.defaultCurrency` → tenant default (`ctx.currency`). A
-        // measure is monetary if it declares a currency OR aggregates a
+        // Currency chain. A MONETARY measure resolves its display currency
+        // from: explicit measure `currency` → the source field's FIXED
+        // currency (`sourceFieldMeta().defaultCurrency`, relayed only under
+        // `currencyMode: 'fixed'` — #20091) → tenant default (`ctx.currency`).
+        // A measure is monetary if it declares a currency OR aggregates a
         // `currency`-type field; non-monetary measures (count, avg of a plain
         // number) never receive a currency code.
         const fc = f as { currency?: string };

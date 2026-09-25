@@ -724,6 +724,21 @@ const SQLITE_JSON_BACKFILL_PAGE_SIZE = 500;
  * as its referent, so the five refusals named in {@link refusalSubtree} join the
  * same seam. The paragraph above still describes every refusal in this file that
  * neither family covers.
+ *
+ * [#20039, the #8220 contract] On the FILTER-COMPILE path — everything
+ * {@link SqlDriver.applyFilters} runs — there is no such refusal any more: the
+ * class is closed. Every builder that path can throw from goes through
+ * {@link withheldFilterError} with the node it was raised from, so the provenance
+ * mark decides what the wire may name, and a builder added later that calls this
+ * function directly instead discloses by omission. That is what
+ * `sql-driver-compile-refusal-seam.test.ts` pins: it enumerates this file's
+ * direct callers of this function and of {@link withheldFilterError} and holds
+ * the first set to three named exceptions — the seam itself, the `'author'`
+ * re-issue in {@link SqlDriver.resolveWithheldFilterRefusal}, and
+ * {@link unresolvableFilterColumnError}, which is raised from a dialect error
+ * AFTER the statement ran and resolves its own provenance by name
+ * ({@link unresolvableColumnProvenance}) — and the second to the set its
+ * behavioural table drives under all three marks.
  */
 function unsupportedFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
@@ -2251,14 +2266,27 @@ function refuseCrossRowIdentityMerge(
  * always at the caller: lower the value (or go through the engine, which does).
  */
 function filterArrayReachedDriverError(filters: unknown[]): Error {
-  return unsupportedFilterError(
+  // [#20039, the #8220 contract] The serialized array is the WHOLE predicate —
+  // every field, operator and literal in it. A read scope handed to this
+  // driver as the `where` root in array form would be relayed entire, so the
+  // array itself is the node the seam resolves (it is the root, so its own
+  // mark is its verdict), and only an `'author'`-marked one gets it back.
+  return withheldFilterError(
+    `A filter ARRAY reached the driver. 'where' is a FilterCondition object; the array form ` +
+      `('FilterArray') is input-only authoring sugar and is lowered by @objectstack/spec ` +
+      `parseFilterAST() at the engine and protocol doors before any driver sees it. This driver ` +
+      `no longer carries a second compiler for it — call through ObjectQL, or lower the value ` +
+      `yourself with parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no ` +
+      `lowering at all: write the prefix form ["or", condA, condB]. The array's contents are ` +
+      `withheld from the message; the full diagnostic is in the server log.`,
     `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
-    `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
-    `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
-    `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
-    `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
-    `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
-    `all: write the prefix form ["or", condA, condB].`,
+      `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
+      `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
+      `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+      `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
+      `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
+      `all: write the prefix form ["or", condA, condB].`,
+    filters,
   );
 }
 
@@ -2357,14 +2385,24 @@ function unsupportedFilterOperatorError(op: string, field: string, subtree?: unk
  *   read scope that is a permission bypass rather than a degraded filter
  *   (#3948) — the same reason #5240 refused `{ field: {} }` one level up.
  */
-function icontainsComparandError(field: string, value: unknown, path: string): Error {
+function icontainsComparandError(field: string, value: unknown, path: string, subtree?: unknown): Error {
   const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
-  return unsupportedFilterError(
+  // [#20039, the #8220 contract] The field, the path and the comparand are the
+  // predicate's; the operator names the refusal's CLASS (one builder, one
+  // operator), so it stays on the wire with the capability statement.
+  return withheldFilterError(
+    `Operator "$icontains" in this filter requires a NON-EMPTY string comparand. "$icontains" is a ` +
+      `case-insensitive LITERAL substring search, so its comparand is the text to look for — an ` +
+      `empty one matches every row (a predicate that constrains nothing), and a non-string one ` +
+      `would have to be coerced into text this query never asked for. The field it was aimed at ` +
+      `and the value it received are withheld from the message; the full diagnostic is in the ` +
+      `server log.`,
     `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
       `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
       `comparand is the text to look for — an empty one matches every row (a predicate that ` +
       `constrains nothing), and a non-string one would have to be coerced into text this query ` +
       `never asked for.`,
+    subtree,
   );
 }
 
@@ -2379,13 +2417,30 @@ function icontainsComparandError(field: string, value: unknown, path: string): E
  * gate's own note): `LIKE ''` matches only the empty string, which constrains
  * plenty.
  */
-function likePatternComparandError(field: string, op: string, value: unknown, path: string): Error {
-  return unsupportedFilterError(
+function likePatternComparandError(
+  field: string,
+  op: string,
+  value: unknown,
+  path: string,
+  subtree?: unknown,
+): Error {
+  // [#20039, the #8220 contract] `$like` and `$ilike` share this builder, so
+  // WHICH of the two fired is the predicate's, not the class's — withheld with
+  // the field, the path and the comparand, as the combinator door withholds
+  // which of `$and` / `$or` it was.
+  return withheldFilterError(
+    `A pattern operator ("$like" / "$ilike") in this filter requires a string comparand. It takes ` +
+      `a PATTERN — "%" matches any sequence, "_" matches one character, and a backslash escapes ` +
+      `either — so a non-string comparand cannot be coerced without inventing wildcards the caller ` +
+      `never wrote. For a literal substring search write "$contains", whose comparand IS text. ` +
+      `Which operator it was, the field it was aimed at and the value it received are withheld ` +
+      `from the message; the full diagnostic is in the server log.`,
     `Operator "${op}" on field "${field}" at ${path} requires a string comparand, received ` +
       `${describeFilterOperand(value)} (${safeShapePreview(value)}). "${op}" takes a PATTERN — ` +
       `"%" matches any sequence, "_" matches one character, and a backslash escapes either — so ` +
       `a non-string comparand cannot be coerced without inventing wildcards the caller never ` +
       `wrote. For a literal substring search write "$contains", whose comparand IS text.`,
+    subtree,
   );
 }
 
@@ -2401,13 +2456,28 @@ function likePatternComparandError(field: string, op: string, value: unknown, pa
  * cannot compile faithfully. `hasDanglingLikeEscape` is the spec's shared test,
  * so every face refuses the SAME patterns.
  */
-function danglingLikeEscapeError(field: string, op: string, pattern: string, path: string): Error {
-  return unsupportedFilterError(
+function danglingLikeEscapeError(
+  field: string,
+  op: string,
+  pattern: string,
+  path: string,
+  subtree?: unknown,
+): Error {
+  // [#20039, the #8220 contract] The pattern is the predicate's literal, and so
+  // are the field, the path and which of the two pattern operators it was.
+  return withheldFilterError(
+    `A pattern operator ("$like" / "$ilike") in this filter has a pattern ending in a lone unpaired ` +
+      `backslash. A backslash escapes the character after it, so a trailing one escapes nothing and ` +
+      `the backends disagree about what it means — Postgres rejects the pattern outright, SQLite's ` +
+      `GLOB has no escape character to reject. Write "\\\\\\\\" to match a literal backslash, or drop ` +
+      `the trailing one. Which operator it was, the field it was aimed at and the pattern are ` +
+      `withheld from the message; the full diagnostic is in the server log.`,
     `Operator "${op}" on field "${field}" at ${path} has a pattern ending in a lone unpaired ` +
       `backslash (${JSON.stringify(pattern)}). A backslash escapes the character after it, so a ` +
       `trailing one escapes nothing and the backends disagree about what it means — Postgres ` +
       `rejects the pattern outright, SQLite's GLOB has no escape character to reject. Write ` +
       `"\\\\\\\\" to match a literal backslash, or drop the trailing one.`,
+    subtree,
   );
 }
 
@@ -2900,7 +2970,9 @@ function assertCompilableComparand(
   // the member scan below would otherwise report `{$contains: ['a', {}]}` as a
   // bad LIST member — a message about a list the operator never takes.
   if (TEXT_PATTERN_OPERATORS.has(op) && !isRenderableTextComparand(value)) {
-    throw unrenderableTextComparandError(field, op, value);
+    // [#20039] `value` is an object or an array here — markable, and the
+    // deepest node the throw site holds (see {@link refusalSubtree}).
+    throw unrenderableTextComparandError(field, op, value, refusalSubtree(value, enclosing));
   }
 
   if (Array.isArray(value)) {
@@ -2911,8 +2983,9 @@ function assertCompilableComparand(
       // own right and gets the same bind test the whole comparand gets. Scoped
       // to the operators for which an array is legitimate, so a scalar operator
       // handed an array keeps answering with its own message below.
+      // [#20039] The member when it is an object, else the list that holds it.
       if (LIST_COMPARAND_OPERATORS.has(op) && !isBindableComparand(member)) {
-        throw unbindableListMemberError(field, op, member, index);
+        throw unbindableListMemberError(field, op, member, index, refusalSubtree(member, value));
       }
     }
     // An array IS the comparand for the list operators; only a scalar operator
@@ -2999,13 +3072,31 @@ function betweenArityError(field: string, subtree?: unknown): Error {
  * bad entry from its legitimate neighbours — the same reason
  * {@link crossFieldComparisonError} takes one.
  */
-function unbindableListMemberError(field: string, op: string, value: unknown, index: number): Error {
-  return unsupportedFilterError(
+function unbindableListMemberError(
+  field: string,
+  op: string,
+  value: unknown,
+  index: number,
+  subtree?: unknown,
+): Error {
+  // [#20039, the #8220 contract] The index is what tells the bad member apart
+  // from its neighbours — for the AUTHOR. On a read-scope list it, the member's
+  // preview, the field and which of the three list operators it was are all the
+  // administrator's, so they go to the server log.
+  return withheldFilterError(
+    `A list operator ("$in" / "$nin" / "$between") in this filter has a member that cannot be ` +
+      `bound as a SQL parameter. Every member of an $in/$nin/$between list is a comparand in its ` +
+      `own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a binary value). Refusing ` +
+      `rather than binding it: the member can equal no stored value, so the list silently loses ` +
+      `that entry (and a $nin loses the exclusion the caller wrote). Which operator it was, the ` +
+      `field it was aimed at, the member's position in the list and its value are withheld from ` +
+      `the message; the full diagnostic is in the server log.`,
     `Operator "${op}" on field "${field}" has a value at index ${index} of its list that cannot be ` +
       `bound as a SQL parameter: ${safeShapePreview(value)}. Every member of an $in/$nin/$between ` +
       `list is a comparand in its own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} ` +
       `(or a binary value). Refusing rather than binding it: the member can equal no stored value, ` +
       `so the list silently loses that entry (and a $nin loses the exclusion the caller wrote).`,
+    subtree,
   );
 }
 
@@ -3027,14 +3118,30 @@ function unbindableListMemberError(field: string, op: string, value: unknown, in
  * faces, and #5526 pinned `{$contains: null}` → `%null%` deliberately. Refusing
  * those would break agreement instead of creating it.
  */
-function unrenderableTextComparandError(field: string, op: string, value: unknown): Error {
-  return unsupportedFilterError(
+function unrenderableTextComparandError(
+  field: string,
+  op: string,
+  value: unknown,
+  subtree?: unknown,
+): Error {
+  // [#20039, the #8220 contract] The comparand's preview is the predicate's
+  // literal, and the field and the operator (five share this builder) name
+  // which constraint failed, not which rule refused it.
+  return withheldFilterError(
+    `A text-matching operator in this filter matches against the TEXT of a pattern, but received a ` +
+      `comparand that is an object or an array. The spec declares this comparand a string ` +
+      `(filter.zod.ts StringOperatorSchema); ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} is ` +
+      `accepted. Refusing rather than stringifying it: String({}) is "[object Object]", so the ` +
+      `pattern that ran would be one the caller never wrote. The operator, the field it was aimed ` +
+      `at and the value it received are withheld from the message; the full diagnostic is in the ` +
+      `server log.`,
     `Operator "${op}" on field "${field}" matches against the TEXT of a pattern, but received ` +
       `${Array.isArray(value) ? 'an array' : 'an object'} (${safeShapePreview(value)}). The spec ` +
       `declares this comparand a string (filter.zod.ts StringOperatorSchema); ` +
       `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} is accepted. Refusing rather than stringifying ` +
       `it: String({}) is "[object Object]", so the pattern that ran was one the caller never ` +
       `wrote — valid SQL, and a row storing that literal text would have matched it.`,
+    subtree,
   );
 }
 
@@ -3790,14 +3897,30 @@ function describeFilterOperand(value: unknown): string {
  * the reduction safe. Same discipline as cloud#1073 on Turso's
  * `RemoteTransport.buildWhereSQL`.
  */
-function assertFilterNode(value: unknown, path: string): asserts value is Record<string, unknown> {
+function assertFilterNode(
+  value: unknown,
+  path: string,
+  enclosing?: unknown,
+): asserts value is Record<string, unknown> {
   if (isFilterNode(value)) return;
-  throw unsupportedFilterError(
+  // [#20039, the #8220 contract] The position, the kind and the preview are the
+  // predicate's (a policy's literal, measured: `$or: ['<the literal>']`). The
+  // node is the refused value when it is an object — an array, a `Date` — and
+  // otherwise `enclosing`: the `$and` / `$or` list that holds it, or the node
+  // carrying `$not`, whose provenance a primitive inherits.
+  throw withheldFilterError(
+    `A filter node in this filter is not a filter condition object. Every element of "$and"/"$or" ` +
+      `and the operand of "$not" must be a plain object of field constraints (e.g. { "status": ` +
+      `"active" }) or nested combinators — @objectstack/spec FilterConditionSchema declares this ` +
+      `position as a FilterCondition. It is refused rather than skipped because skipping it would ` +
+      `silently change which rows match. Where it sits, what it is and its value are withheld from ` +
+      `the message; the full diagnostic is in the server log.`,
     `Filter node at ${path} is a ${describeFilterOperand(value)} (${safeShapePreview(value)}), not a filter ` +
       `condition object. Every element of "$and"/"$or" and the operand of "$not" must be a plain object of ` +
       `field constraints (e.g. { "status": "active" }) or nested combinators — @objectstack/spec ` +
       `FilterConditionSchema declares this position as a FilterCondition. It is refused rather than skipped ` +
       `because skipping it would silently change which rows match.`,
+    refusalSubtree(value, enclosing),
   );
 }
 
@@ -3878,14 +4001,25 @@ function isEmptyFieldConstraint(spec: unknown): boolean {
  * wording. Only the closing clause differs: it names what THIS driver used to
  * do with the key.
  */
-function unknownLogicalOperatorError(key: string, path: string): Error {
-  return unsupportedFilterError(
+function unknownLogicalOperatorError(key: string, path: string, subtree?: unknown): Error {
+  // [#20039, the #8220 contract] The key is the predicate's — `$`-prefixed or
+  // not, it is a name the filter's author wrote — and so is its position. The
+  // node is the one CARRYING the key (never its value, which may be marked on
+  // its own: the key belongs to the node above it).
+  return withheldFilterError(
+    `A filter node in this filter carries a $-prefixed key that is not a declared combinator. A ` +
+      `filter node's $-prefixed keys are the declared logical operators $and, $or and $not ` +
+      `(@objectstack/spec LOGICAL_OPERATORS); every other key is a field name. It is refused rather ` +
+      `than compiled as a COLUMN of that name, which would produce a predicate that matched no row ` +
+      `and reported nothing. The key and where it sits are withheld from the message; the full ` +
+      `diagnostic is in the server log.`,
     `Unsupported filter combinator "${key}" at ${path}. A filter node's $-prefixed keys are the ` +
       `declared logical operators $and, $or and $not (@objectstack/spec LOGICAL_OPERATORS); every ` +
       `other key is a field name. It is refused rather than compiled as a COLUMN of that name, ` +
       `which is what this driver used to do — producing a predicate that matched no row and ` +
       `reported nothing, so a caller could not tell "no rows matched" from "the filter never ` +
       `compiled" (#5348).`,
+    subtree,
   );
 }
 
@@ -4058,8 +4192,20 @@ function nonBooleanFlagWithheldMessage(op: '$null' | '$exists'): string {
  * `{}` are the same object to every reader, and they mean opposite things (a
  * predicate vs no constraint at all).
  */
-function undefinedComparandError(field: string, path: string): Error {
-  return unsupportedFilterError(
+function undefinedComparandError(field: string, path: string, subtree?: unknown): Error {
+  // [#20039, the #8220 contract] The field and the position are the
+  // predicate's; the repair survives redaction with a PLACEHOLDER name, as the
+  // zero-operator refusal's does — the shape is the repair, and it names
+  // nothing. `undefined` itself can never carry a mark, so `subtree` is the
+  // nearest object holding it (the node, the operator map, or the list).
+  return withheldFilterError(
+    `A comparand in this filter is undefined. @objectstack/spec FieldOperatorsSchema declares no ` +
+      `undefined comparand, and in JavaScript { "FIELD": undefined } cannot be told apart from ` +
+      `omitting the key — yet the two mean OPPOSITE things (a predicate versus no constraint at ` +
+      `all), so there is no reading of it that is not a guess. Write null if you meant the null ` +
+      `predicate ({ "FIELD": null } or { "FIELD": { "$null": true } }), or omit the key when the ` +
+      `value is genuinely absent. The field it was aimed at and where it sits are withheld from ` +
+      `the message; the full diagnostic is in the server log.`,
     `Comparand at ${path} is undefined. @objectstack/spec FieldOperatorsSchema declares no ` +
       `undefined comparand, and in JavaScript { "${field}": undefined } cannot be told apart from ` +
       `omitting the key — yet the two mean OPPOSITE things (a predicate versus no constraint at ` +
@@ -4070,6 +4216,7 @@ function undefinedComparandError(field: string, path: string): Error {
       `and got a bare "Undefined binding(s)" Error carrying no code, while Turso's remote transport ` +
       `compiled it to IS NULL — so \`{ owner_id: ctx.user?.id }\` with a missing id silently ` +
       `matched every env-wide row instead of failing (#6050).`,
+    subtree,
   );
 }
 
@@ -4102,16 +4249,24 @@ function undefinedComparandError(field: string, path: string): Error {
  *   reason; inspecting its members here would relabel a shape that is refused
  *   either way.
  */
-function assertDefinedComparands(field: string, spec: unknown, path: string): void {
-  if (spec === undefined) throw undefinedComparandError(field, path);
+function assertDefinedComparands(
+  field: string,
+  spec: unknown,
+  path: string,
+  // [#20039] The filter node carrying `field` — the only object that holds a
+  // DIRECT `{ field: undefined }`. The two deeper positions hand over the
+  // nearest object of their own: the operator map, and the list.
+  enclosing?: unknown,
+): void {
+  if (spec === undefined) throw undefinedComparandError(field, path, enclosing);
   if (!isFilterNode(spec)) return;
   for (const [op, opValue] of Object.entries(spec)) {
     if (op === '$null' || op === '$exists') continue;
     const opPath = `${path}.${op}`;
-    if (opValue === undefined) throw undefinedComparandError(field, opPath);
+    if (opValue === undefined) throw undefinedComparandError(field, opPath, spec);
     if (!Array.isArray(opValue)) continue;
     opValue.forEach((member, index) => {
-      if (member === undefined) throw undefinedComparandError(field, `${opPath}[${index}]`);
+      if (member === undefined) throw undefinedComparandError(field, `${opPath}[${index}]`, opValue);
     });
   }
 }
@@ -4210,24 +4365,41 @@ function reduceFilterKey(key: string, value: unknown, path: string, enclosing?: 
  * complete path-to-node index for the positions `assertNodeList` can name. The
  * index is keyed only by paths built from combinator keys and list indices,
  * never by a field name, so a field key containing a dot cannot collide with it.
+ *
+ * [#20039] Every refusal the walk raises now asks the same index, because every
+ * one of them is withheld through the #8220 seam and needs the node it was
+ * raised FROM: `classifyKey` gets the node carrying the key (the only object
+ * holding a direct `{ field: undefined }`, and the owner of an undeclared
+ * `$`-key), and `assertNode` gets what ENCLOSES a non-node element — the
+ * `$and` / `$or` list, recorded as `assertNodeList` announces it (the walk
+ * announces a list before it visits a single element), or the node carrying
+ * `$not`. Lists are kept in their own map, keyed by the combinator key's
+ * position, so the node index above stays exactly what it was.
  */
 function sqlFilterVerdictHooks(root: unknown, rootPath: string): FilterVerdictHooks {
   const nodeAt = new Map<string, unknown>([[rootPath, root]]);
+  const listAt = new Map<string, unknown>();
+  // The walk names a key's position `${nodePath}.${key}` (bare `key` under an
+  // empty prefix), so stripping the key recovers the node's own path.
+  const nodeCarrying = (key: string, path: string): unknown =>
+    nodeAt.get(path === key ? '' : path.slice(0, path.length - key.length - 1));
   return {
-    // The walk names the key's position `${nodePath}.${key}` (bare `key` under
-    // an empty prefix), so stripping the key recovers the node's own path.
-    assertNodeList: (value, key, path) =>
-      assertFilterNodeList(
-        value,
-        key,
-        path,
-        nodeAt.get(path === key ? '' : path.slice(0, path.length - key.length - 1)),
-      ),
+    assertNodeList: (value, key, path) => {
+      listAt.set(path, value);
+      assertFilterNodeList(value, key, path, nodeCarrying(key, path));
+    },
     assertNode: (value, path) => {
       nodeAt.set(path, value);
-      assertFilterNode(value, path);
+      // An element's position is `${listPath}[${index}]`; the `$not` operand's
+      // is the key's own position, so its enclosing node is the one carrying it.
+      const element = /\[\d+\]$/.exec(path);
+      assertFilterNode(
+        value,
+        path,
+        element ? listAt.get(path.slice(0, element.index)) : nodeCarrying('$not', path),
+      );
     },
-    classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
+    classifyKey: (key, value, here) => classifyFilterKey(key, value, here, nodeCarrying(key, here)),
   };
 }
 
@@ -4240,7 +4412,15 @@ function sqlFilterVerdictHooks(root: unknown, rootPath: string): FilterVerdictHo
  * walk's now, and the refusals below are unchanged from when they sat under
  * them.
  */
-function classifyFilterKey(key: string, value: unknown, here: string): FilterVerdict {
+function classifyFilterKey(
+  key: string,
+  value: unknown,
+  here: string,
+  // [#20039] The filter node this key belongs to — see
+  // {@link sqlFilterVerdictHooks}. Absent means withheld for every refusal
+  // below that would have used it, the fail-closed direction.
+  enclosing?: unknown,
+): FilterVerdict {
   // [#5348] Everything still `$`-prefixed at this point is an UNDECLARED
   // combinator — the shared walk resolved the three declared ones before this
   // key ever reached the hook (#5659). Refused here and
@@ -4254,7 +4434,7 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   //
   // It must also come BEFORE the field arms below, because that is precisely
   // what those arms did wrong: they accepted `$where` as a field name.
-  if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
+  if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here, enclosing);
 
   // [#5240] `{ field: {} }` is refused HERE — on the validating walk, beside
   // `assertFilterNode` / `assertFilterNodeList` — rather than in the emitter
@@ -4291,7 +4471,7 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   // than repaired — and the polarity tables never have to answer a question
   // nobody ruled on. See {@link undefinedComparandError} for the measured
   // local/remote matrix and why `null` is untouched.
-  assertDefinedComparands(key, value, here);
+  assertDefinedComparands(key, value, here, enclosing);
 
   // [#7929, maintainer ruling 2026-08-12] A `{ $field }` comparand at any
   // operator OUTSIDE the six that compile one is the CROSS-FIELD refusal —
@@ -4366,7 +4546,12 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     Object.prototype.hasOwnProperty.call(value, '$icontains') &&
     (typeof value.$icontains !== 'string' || value.$icontains === '')
   ) {
-    throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
+    throw icontainsComparandError(
+      key,
+      value.$icontains,
+      `${here}.$icontains`,
+      refusalSubtree(value.$icontains, value),
+    );
   }
 
   // [#7536] `$like` / `$ilike` carry a PATTERN, gated on this same walk and for
@@ -4381,11 +4566,12 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     for (const op of LIKE_PATTERN_OPERATORS) {
       if (!Object.prototype.hasOwnProperty.call(value, op)) continue;
       const pattern = (value as Record<string, unknown>)[op];
+      // [#20039] The comparand when it is an object, else the operator map.
       if (typeof pattern !== 'string') {
-        throw likePatternComparandError(key, op, pattern, `${here}.${op}`);
+        throw likePatternComparandError(key, op, pattern, `${here}.${op}`, refusalSubtree(pattern, value));
       }
       if (hasDanglingLikeEscape(pattern)) {
-        throw danglingLikeEscapeError(key, op, pattern, `${here}.${op}`);
+        throw danglingLikeEscapeError(key, op, pattern, `${here}.${op}`, value);
       }
     }
   }
@@ -15263,6 +15449,13 @@ export class SqlDriver implements IDataDriver {
    * emitter — that walk runs at the top of `applyFilterCondition`, inside this
    * frame.
    *
+   * [#20039] Since the class was closed, EVERY refusal raised under this frame
+   * arrives here as a withheld carrier — the walk's shape refusals, the
+   * comparand gates, the operator vocabulary and the array-root refusal alike
+   * (see {@link unsupportedFilterError} for the three direct callers left, none
+   * of them under this frame). So the verdict below is the only thing that
+   * decides what a compile refusal may name; no builder decides it by omission.
+   *
    * The log is `this.logger` — the sink this driver already owns, which a host
    * injects and a test spies on. ⛔ Not `console.warn` from the module-level
    * builders: that would bypass an injected sink, which is the whole reason the
@@ -15404,6 +15597,7 @@ export class SqlDriver implements IDataDriver {
       // from every previous version of this method, and the same reading
       // `parseFilterAST([])` gives it.
       if (filters.length === 0) return;
+      // [#20039] The array IS the `where` root, so its own mark is its verdict.
       throw filterArrayReachedDriverError(filters);
     }
 
@@ -15444,7 +15638,8 @@ export class SqlDriver implements IDataDriver {
         // (`{ owner_id: ctx.user?.id }`). ONE function answers both call sites
         // so the two positions cannot drift into two verdicts, which is the
         // #5240 lesson this driver already paid for once.
-        assertDefinedComparands(key, value, `filter.${key}`);
+        // [#20039] `filters` is the node carrying `key`, as for the gate below.
+        assertDefinedComparands(key, value, `filter.${key}`, filters);
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
         // [#8197] `filters` is both this loop's node and the query's `where`

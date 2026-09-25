@@ -53,6 +53,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /**
  * Rows 3 and 4 are the point: `stage` is NULL in both, and row 3 additionally
@@ -291,9 +292,15 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
     });
 
     it('a non-node $not operand is still refused, not rewritten', async () => {
-      await expect(ids({ $not: null })).rejects.toThrow(/filter\.\$not/);
-      await expect(ids({ $not: 'x' })).rejects.toThrow(/filter\.\$not/);
-      await expect(ids({ $not: [] })).rejects.toThrow(/filter\.\$not/);
+      // [#20039] Marked 'author', as a read-scope merge boundary marks a
+      // caller's own predicate: the refused position is the predicate's detail,
+      // named only for a predicate the caller is known to have written (the
+      // #8220 contract). The withheld half is pinned in
+      // `sql-driver-compile-refusal-seam.test.ts`.
+      const own = (where: Record<string, unknown>) => markFilterSubtreeProvenance(where, 'author');
+      await expect(ids(own({ $not: null }))).rejects.toThrow(/filter\.\$not/);
+      await expect(ids(own({ $not: 'x' }))).rejects.toThrow(/filter\.\$not/);
+      await expect(ids(own({ $not: [] }))).rejects.toThrow(/filter\.\$not/);
     });
 
     it('a field constrained by zero operators is REFUSED, not rewritten (#5240)', async () => {

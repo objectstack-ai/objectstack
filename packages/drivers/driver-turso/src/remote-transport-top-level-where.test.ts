@@ -92,7 +92,22 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
     for (const [label, where, message] of MEASURED) {
       it(`refuses ${label}`, async () => {
         const { t } = transportWithCapturingClient();
-        await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow(message);
+        // [#20039] What the root IS and its contents are the predicate's detail,
+        // named on the wire only for a `where` the caller is known to have
+        // written (the #8220 contract). An ARRAY root can carry the mark, so
+        // it is marked author-written here (a shallow copy, so the shared case
+        // stays unmarked) and gets the full text back; a PRIMITIVE root cannot
+        // carry one, so it is withheld for every caller — the fail-closed
+        // direction — and states the class only.
+        if (Array.isArray(where)) {
+          await expect(
+            t.find('deal', { where: markFilterSubtreeProvenance([...where], 'author') } as unknown as QueryAST),
+          ).rejects.toThrow(message);
+        } else {
+          await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow(
+            /The where of this query is not a filter condition/,
+          );
+        }
       });
 
       it(`executes no statement for ${label}`, async () => {
@@ -106,9 +121,12 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
 
     it('names the object and echoes the filter so the caller is findable', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: [['stage', '=', 'won']] } as unknown as QueryAST)).rejects.toThrow(
-        /where on 'deal' is an array, not a filter condition: \[\["stage","=","won"\]\]/,
-      );
+      // [#20039] Author-written, as above.
+      await expect(
+        t.find('deal', {
+          where: markFilterSubtreeProvenance([['stage', '=', 'won']], 'author'),
+        } as unknown as QueryAST),
+      ).rejects.toThrow(/where on 'deal' is an array, not a filter condition: \[\["stage","=","won"\]\]/);
     });
 
     it('tells an AST-array caller what to write instead', async () => {
@@ -158,8 +176,11 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // draws for `$and`/`$or` elements (#1073). Compiling it would make the
       // node test mean two different things at two levels.
       const { t } = transportWithCapturingClient();
+      // [#20039] Author-written: an instance is an object, so it carries the mark.
       await expect(
-        t.find('deal', { where: new (class Filter { stage = 'won' })() } as unknown as QueryAST),
+        t.find('deal', {
+          where: markFilterSubtreeProvenance(new (class Filter { stage = 'won' })(), 'author'),
+        } as unknown as QueryAST),
       ).rejects.toThrow(/is an object, not a filter condition/);
     });
   });
@@ -278,18 +299,24 @@ describe('RemoteTransport top-level `where` refusal (#1075)', () => {
       // The sub-filter gate names the branch and index; the top-level gate says
       // `where`. Two levels, two messages, so a log tells you which one it was.
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { $or: [null] } } as unknown as QueryAST)).rejects.toThrow(
-        /\$or\[0\] on 'deal'/,
-      );
-      await expect(t.find('deal', { where: { $not: 'won' } } as unknown as QueryAST)).rejects.toThrow(
-        /\$not on 'deal'/,
-      );
+      // [#20039] Author-written: the branch, the index and the kind are the
+      // predicate's detail, named only for a `where` the caller is known to have
+      // written (the #8220 contract).
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ $or: [null] }, 'author') } as unknown as QueryAST),
+      ).rejects.toThrow(/\$or\[0\] on 'deal'/);
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ $not: 'won' }, 'author') } as unknown as QueryAST),
+      ).rejects.toThrow(/\$not on 'deal'/);
     });
 
     it('keeps refusing a nested AST array inside a logical branch as a BRANCH error', async () => {
       const { t } = transportWithCapturingClient();
+      // [#20039] Author-written, as above.
       await expect(
-        t.find('deal', { where: { $and: [[['stage', '=', 'won']]] } } as unknown as QueryAST),
+        t.find('deal', {
+          where: markFilterSubtreeProvenance({ $and: [[['stage', '=', 'won']]] }, 'author'),
+        } as unknown as QueryAST),
       ).rejects.toThrow(/\$and\[0\] on 'deal' is an array/);
     });
   });
