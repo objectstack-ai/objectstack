@@ -109,7 +109,15 @@ describe('[#4436] SqlDriver filter refusals carry INVALID_FILTER and leak no dri
 
   for (const [name, where, needle] of cases) {
     it(`${name} → 400 INVALID_FILTER, no prefix`, async () => {
-      const err = await refusalOf(() => find(where));
+      // [#20039] An ARRAY that reaches the driver is refused naming its
+      // contents — the caller's own value, echoed back — only when the array
+      // is marked 'author' (the #8220 contract: the array IS the `where` root,
+      // so its own mark decides). A shallow copy, so the shared case constant
+      // stays unmarked. The withheld half is pinned in
+      // `sql-driver-compile-refusal-seam.test.ts`.
+      const err = await refusalOf(() =>
+        find(Array.isArray(where) ? markFilterSubtreeProvenance([...where], 'author') : where),
+      );
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).not.toContain('[sql-driver]');

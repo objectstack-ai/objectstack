@@ -85,6 +85,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /** The shape `mapDataError` / `sendError` read off a thrown driver error. */
 interface WireBearingError extends Error {
@@ -145,11 +146,19 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
   const ids = async (where: unknown): Promise<string[]> =>
     ((await find(where)) as Array<{ id: string }>).map((r) => r.id).sort();
 
+  // [#20039] The refusals below name the operator, the field, the member's
+  // index and the comparand — every one the predicate's detail, named on the
+  // wire only for a predicate the caller is known to have written (the #8220
+  // contract). So the pins that read that text mark their `where` 'author', as
+  // a read-scope merge boundary marks a caller's own predicate. The withheld
+  // half is pinned in `sql-driver-compile-refusal-seam.test.ts`.
+  const own = (where: Record<string, unknown>) => markFilterSubtreeProvenance(where, 'author');
+
   // ── Shape 1: a non-`$field` object member of an `$in` / `$nin` list ─────────
 
   describe('shape 1 — an `$in` / `$nin` list member that cannot be bound', () => {
     it("the issue's repro — `{ status: { $in: ['a', { foo: 1 }] } }` — carries the full envelope", async () => {
-      const err = await refusalOf(() => find({ status: { $in: ['a', { foo: 1 }] } }));
+      const err = await refusalOf(() => find(own({ status: { $in: ['a', { foo: 1 }] } })));
 
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
@@ -168,7 +177,7 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
       // four rows while claiming to exclude one. On a read-scope lowering that is
       // over-reach (#5347 / #5324), which is why the issue's "fail-closed, lower
       // risk" framing does not survive this case.
-      const err = await refusalOf(() => find({ status: { $nin: [{ foo: 1 }] } }));
+      const err = await refusalOf(() => find(own({ status: { $nin: [{ foo: 1 }] } })));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('index 0');
@@ -179,7 +188,7 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
       // Pre-fix this one DID throw — but as a raw knex/SQLite `TypeError` with
       // no `code` and no `status`, i.e. exactly the #5041 defect at a different
       // spelling. Same shape, same class, one envelope.
-      const err = await refusalOf(() => find({ status: { $in: ['a', [1, 2]] } }));
+      const err = await refusalOf(() => find(own({ status: { $in: ['a', [1, 2]] } })));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('index 1');
@@ -197,6 +206,12 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
       // the operands; the sibling assertions above — over ordinary unbindable
       // objects, which disclose nothing about a policy — still pin it on the
       // wire, so this is a narrowing of the `$field` arm and not of the family.
+      //
+      // [#20039] Superseded for the family: an ordinary unbindable member of a
+      // read-scope list is the administrator's literal too (measured), so the
+      // siblings now name the index only for an 'author'-marked `where`. This
+      // case stays UNMARKED on purpose — the cross-field arm withholds for every
+      // caller that is not positively vouched, as it always did.
       const err = await refusalOf(() => find({ status: { $in: ['a', { $field: 'name' }] } }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('cross-field comparison');
@@ -208,7 +223,7 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
       // Already inside the member scan's radius since #5041 (it scans any array
       // for `$field`); before this change a non-`$field` object there produced a
       // bare bind error instead of a catalogued one.
-      const err = await refusalOf(() => find({ status: { $between: [{ a: 1 }, 'z'] } }));
+      const err = await refusalOf(() => find(own({ status: { $between: [{ a: 1 }, 'z'] } })));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('index 0');
@@ -231,7 +246,7 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
     it("the issue's repro — `{ name: { $contains: {} } }` — MATCHED a real row pre-fix", async () => {
       // The pre-fix answer was `['r_literal']`, not `[]`: the fixture stores the
       // exact text `String({})` produces. "Silently zero rows" understated it.
-      const err = await refusalOf(() => find({ name: { $contains: {} } }));
+      const err = await refusalOf(() => find(own({ name: { $contains: {} } })));
 
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
@@ -257,7 +272,7 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
     // is pinned in `sql-driver-icontains-and-retired-operators.test.ts`.
     for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$icontains'] as const) {
       it(`\`${op}\` refuses an object comparand`, async () => {
-        const err = await refusalOf(() => find({ name: { [op]: { foo: 1 } } }));
+        const err = await refusalOf(() => find(own({ name: { [op]: { foo: 1 } } })));
         expect(err.code, op).toBe('INVALID_FILTER');
         expect(err.status, op).toBe(400);
         expect(err.message, op).toContain(op);
