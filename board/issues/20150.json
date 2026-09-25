@@ -1,0 +1,32 @@
+{
+  "number": 20150,
+  "kind": "issue",
+  "title": "import mapping: a `fieldMapping.target` that names no field passes `objectstack validate` and the dry run, then fails every row on commit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-25T14:45:12Z",
+  "updated_at": "2026-09-25T14:45:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20150",
+  "body": "Filing-gate category ①: a defect with a named landing site. The triage seat split this card from #20149 (its observations 2 and 3). #20149 stays the capability question and goes to the maintainer. This card is the part that needs no ruling: it pulls the import door back to the contract the spec already declares.\n\nEvidence: measured by the hotcrm#1836 dev on `@objectstack/*` 17.4.0 (report hotcrm#1836 comment 5833767403), as relayed in #20149. ⛔ Not re-run by the triage seat. The two source sites below were read by the triage seat at objectstack `7ddf396`.\n\n## The contract\n\n`ImportFieldMappingSchema.target` (`packages/spec/src/data/mapping.zod.ts`) is declared as \"Target object field(s)\". A target that names no field of the target object is outside that contract.\n\n## What happens\n\nThe mapping's `fieldMapping` targets name no field of `crm_contact` (`mailing_address.street` … `mailing_address.country`, 50 rows):\n- **commit**: `ok 0, errors 50`. Every row fails with `INVALID_FIELD: Unknown field 'mailing_address.street' on object 'crm_contact'`.\n- **`dryRun: true`, same body**: `ok 44`. The dry run promises what the commit refuses, which breaks #4633's contract (the dry run predicts the write).\n- **`objectstack validate`** exits 0, with no diagnostic for a `fieldMapping.target` that names no field of its object.\n\n## Mechanism\n\n- `packages/rest/src/import-mapping.ts` `applyMappingToRows` writes `mapped[target]` as one flat key for every transform, and `coerceRow` passes a key with no field metadata through untouched. So the engine receives the literal key.\n- `packages/rest/src/import-runner.ts`: the dry-run branch asks `previewVerdict(data, …)` for the row's verdict (#4633). That preview does not include the unknown-field refusal the write hits.\n\n## Direction (for the claimant, not a ruling)\n\n- Judge the target once, at the import door. A mapping whose target names no field of the target object is refused before any row, naming the target, so the dry run and the commit give the same answer. Make this check the ONE place that decides what a target may name. If #20149 is ruled to allow compound-field parts, that ruling extends this check rather than adding a second one.\n- `objectstack validate` reports the same target, naming its mapping and object.\n- Pin: a target that names no field is refused on the dry run and on the commit alike; a valid mapping is the control; `validate` is red on the bad mapping and green on the control.\n\n## Triage (graded at filing)\n\nPath: business objects, records and views | records-forms.named-import-mapping | P6\n\nTriage: lands in `packages/rest` (`import-mapping.ts`, `import-runner.ts`) and the `objectstack validate` command in `packages/cli` ⇒ `domain:cli`; rationale: the dry run answers `ok` for rows the commit refuses, and the author-time check says nothing. A preview that misleads, plus a silent author gate, on a declared contract ⇒ p2. The change pulls the door back to the declared `target` contract, so it is a bug fix and needs no ruling.\n\nTriage seat (objectstack-wide, seat post #6015) · `session_01CRZSc7dU8oDStbTbSwhuZe`. ⛔ Not a claim, ⛔ not a dispatch.\n\n## Dedupe\n\n- #20149's own search (MCP `search_issues`, open and closed) found 0 hits on the compound target, with a lit control.\n- Local term count over this repo's 212 open issues and the issues closed in the last week: `previewVerdict` 0 · `applyMappingToRows` 0 · `fieldMapping.target` 0 · `mailing_address` 0.\n- The nearest closed card is #4633 (the dry run did not pre-check a structured-value shape). It is the contract this card relies on, not the same defect."
+}

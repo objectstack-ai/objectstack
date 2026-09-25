@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-09-25T14:24:53.637Z",
+  "generated_at": "2026-09-25T20:20:26.309Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-09-25T14:09:28Z",
-      "since": "2026-09-25T08:27:00Z",
+      "cursor": "2026-09-25T18:22:27Z",
+      "since": "2026-09-25T14:09:28Z",
       "slice": 300
     },
     "history": {
@@ -20,27 +20,27 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-09-25T08:27:00Z",
-  "since_reason": "incremental from the previous run's next_since (2026-09-25T08:27:00Z)",
-  "next_since": "2026-09-25T14:09:28Z",
+  "since": "2026-09-25T14:09:28Z",
+  "since_reason": "incremental from the previous run's next_since (2026-09-25T14:09:28Z)",
+  "next_since": "2026-09-25T18:22:27Z",
   "resume": null,
   "counts": {
-    "issues_open": 264,
+    "issues_open": 265,
     "issues_closed": 8434,
-    "pulls_open": 15,
+    "pulls_open": 16,
     "pulls_closed": 9334,
-    "records": 18047
+    "records": 18049
   },
   "board": {
-    "open_issues_count": 219,
-    "open_pull_requests": 7,
-    "read_at": "2026-09-25T14:24:53.183Z"
+    "open_issues_count": 221,
+    "open_pull_requests": 8,
+    "read_at": "2026-09-25T20:20:25.683Z"
   },
   "count_check": {
     "verdict": "surplus",
     "reason": null,
-    "expected": 212,
-    "archived": 264,
+    "expected": 213,
+    "archived": 265,
     "shortfall": 0,
     "surplus": 52,
     "gone_ledger": 0,
@@ -51,10 +51,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 84,
+  "requests": 21,
   "run": {
-    "numbers_read": 47,
-    "files_written": 84,
+    "numbers_read": 7,
+    "files_written": 12,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
