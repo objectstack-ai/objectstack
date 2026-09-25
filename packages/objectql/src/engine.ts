@@ -214,7 +214,7 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectPredicateRelationships, evaluateValidationRules, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -2235,8 +2235,12 @@ export interface OperationContext {
    * are the rows the COMPOSED AST selects, and that AST is complete only after
    * every middleware has run. So {@link ObjectQL.update} calls it on that path,
    * once the payload is final, with every matched row merged with the payload.
-   * A by-id `update` is never handed to the seam: the middleware judges that
-   * one row itself, by merging its pre-image with the change set.
+   *
+   * [#19989] A by-id `update` uses it too. A middleware can read that one row,
+   * but only BEFORE the `beforeUpdate` chain runs, so its image is the change
+   * set as sent and a hook that rewrites a judged field is never judged. So
+   * {@link ObjectQL.update} calls it on the by-id path as well, once the
+   * payload is final, with the prior row merged with the payload.
    *
    * ABSENT is the ordinary state — no enforcement layer is mounted, or the
    * write is one it does not gate. The engine never invents one.
@@ -2253,7 +2257,8 @@ export interface OperationContext {
  * chain left them, only the live ones (a row the declared-field door culled
  * from a partial batch is never judged: it will not be written). On a
  * predicate `update` they are the matched rows, each merged with the final
- * payload. It is called at most once per operation.
+ * payload; on a by-id `update` ([#19989]) the one prior row merged with the
+ * final payload. It is called at most once per operation.
  *
  * `honoured` is set by the engine immediately before `evaluate` runs. It exists
  * so the installer can fail CLOSED on a seam that was never called: an
@@ -7316,7 +7321,25 @@ export class ObjectQL implements IObjectQLEngine {
     // to CEL), where reading through it faults and refuses the cleanup. Pinned
     // end to end in plugin-security's
     // `delete-reference-cleanup-system-identity.test.ts`.
-    if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) return unbound;
+    if (this.buildReferentialFieldClear(context as ExecutionContext | undefined)) {
+      // [#20006] Still NOTHING is resolved: the binding handed back is empty.
+      // It carries WHY — the delete and the reference it clears, which
+      // `cascadeDeleteRelations` stamps beside the marker — so a traversing rule
+      // that faults here refuses with a text naming them, instead of one
+      // prescribing a column on the object carrying the rule. Only for the
+      // record the cleanup was issued for: a write a hook issues during the
+      // cleanup inherits the envelope, and that write is not the clear.
+      const cause = (context as { __referentialFieldClearCause?: Record<string, unknown> } | undefined)
+        ?.__referentialFieldClearCause;
+      if (!cause || schema?.name !== cause.referencingObject) return unbound;
+      const binding = referentialClearBinding({
+        object: String(cause.object),
+        id: String(cause.id),
+        referencingObject: String(cause.referencingObject),
+        field: String(cause.field),
+      });
+      return (row) => (row?.id != null && String(row.id) === String(cause.referencingId) ? binding : undefined);
+    }
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
     // ⛔ Every bound below keys on "not SYSTEM", never on `userId`: a public-form
@@ -13420,6 +13443,41 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
+               // ── [#19989] The post-image seam on the BY-ID path ─────────────
+               //
+               // The by-id twin of the predicate-path call below, placed at the
+               // same point and for the same reason: the payload is FINAL here.
+               // The `beforeUpdate` chain, the hand-back, both readonly strips
+               // and the strict-drop refusal have all run, and nothing below
+               // changes a value before the statement.
+               //
+               // An enforcement layer used to judge this row only in its own
+               // middleware, on its read of the row merged with the change set
+               // AS SENT. That image is taken before `next()` runs the hooks, so
+               // a `beforeUpdate` that rewrote a checked field (a scoping column
+               // derived from a re-pointed parent, a status derived from another
+               // field) was never judged, and the row it produced was stored
+               // unjudged. The layer keeps that earlier judgement and installs
+               // this seam as well, so the row the driver stores is judged too.
+               //
+               // The image is the prior row (read once, above, under the
+               // not-found gate, so it is present) merged with the final
+               // payload: the row `driver.update` is about to produce, and the
+               // shape the predicate path hands over per matched row. The
+               // credential channel runs above on this branch too, so a `check`
+               // naming a secret field judges the stored reference, as on the
+               // predicate path.
+               //
+               // `honoured` is set BEFORE `evaluate`: it answers "did the seam
+               // run", never "did the write pass".
+               const byIdImageCheck = opCtx.postHookWriteImageCheck;
+               if (byIdImageCheck) {
+                   byIdImageCheck.honoured = true;
+                   const payload = hookContext.input.data as Record<string, unknown>;
+                   await byIdImageCheck.evaluate([
+                     coerceBooleanFields(updateSchema as any, { ...priorRecord, ...payload } as any) as Record<string, unknown>,
+                   ]);
+               }
                // [#18682] The reference FK a predicate traverses may come from
                // the PATCH or from the stored row, so the id is read off the
                // POST-strip merged view `evaluateValidationRules` evaluates.
@@ -13629,9 +13687,11 @@ export class ObjectQL implements IObjectQLEngine {
                //
                // An enforcement layer's write `check` must hold for EVERY row a
                // write stores (ADR-0058 D4: "and on the AST-injected bulk
-               // path"). For a by-id update the enforcement middleware can judge
-               // the new row itself: it knows the one row and reads it. For a
-               // predicate update it cannot: the rows are the ones the
+               // path"). For a by-id update the enforcement middleware knows the
+               // one row, but can read it only before the hooks run, so that
+               // path hands the final row to the same seam ([#19989], the by-id
+               // branch above). For a predicate update the middleware cannot
+               // even name the rows: they are the ones the
                // middleware-COMPOSED AST selects, and that AST is complete only
                // once every middleware has run (the enforcement layer's own
                // scope, a sharing layer's editable-rows filter, the tenant
@@ -14832,7 +14892,20 @@ export class ObjectQL implements IObjectQLEngine {
             // operation-private key — on the real request path the inherited
             // caller envelope makes the cleanup otherwise indistinguishable
             // from a hand-clear of the same lookup.
-            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
+            //
+            // [#20006] `__referentialFieldClearCause` rides beside it: the
+            // delete this cleanup serves and the reference it clears, which a
+            // traversing rule's refusal of the cleanup names (see
+            // `resolvePredicateRelated`). It authorizes nothing — it is read
+            // only where the marker already holds, and only to word a refusal —
+            // and the referencing row's id in it never reaches that text.
+            const referentialCtx = {
+              ...(context ?? {}),
+              __referentialFieldClear: true,
+              __referentialFieldClearCause: {
+                object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
+              },
+            } as ExecutionContext;
             if (multiValued) {
               // The FK is a SET, so `set_null` clears the deleted MEMBER, not
               // the slot: filter the stored array and write what remains.

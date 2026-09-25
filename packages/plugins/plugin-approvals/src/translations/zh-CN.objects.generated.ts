@@ -23,6 +23,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "请求 ID"
       },
+      display_title: {
+        label: "标题",
+        help: "记录标题：请求来源及其所涉记录（读取时计算）"
+      },
       organization_id: {
         label: "组织",
         help: "该请求所涉记录所属的组织（记录无组织时回退到操作上下文）"
@@ -211,6 +215,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "动作 ID"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：操作，以及已记录时的步骤（读取时计算）"
       },
       organization_id: {
         label: "组织",

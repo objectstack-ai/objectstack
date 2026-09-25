@@ -65,15 +65,24 @@
  *   absent `scale` means "decimals unknown" and keeps its separators. Declaring
  *   `number ⇒ 0` would print every undeclared number field ungrouped: `2026`
  *   where the platform shows `2,026`.
- * - `currency` — the money faces do not read this key at all. They resolve
- *   fraction digits from the currency's own ISO 4217 minor-unit count, with
- *   `CurrencyConfigSchema.precision` (a DIFFERENT surface, with its own
- *   `scale` → `precision` alias) as the authored override. The one `2` that
- *   looks like a currency default belongs to an inline grid COLUMN's rounding
- *   of a computed result, not to a field's display width.
+ * - `currency` — ruled since, and not by a row here: `scale` is RETIRED from
+ *   the `currency` type (#19629, ruling 5791803339 letter B) and refused at
+ *   parse, so a currency field declares no `scale` for this table to default.
+ *   Ruling 5805782503 (letter 乙) words the refusal's remedy: a currency's
+ *   decimal places are the currency's, not a setting — its ISO 4217 minor
+ *   unit decides its display. The amount's cell resolves its fraction
+ *   digits from the currency's own ISO 4217 minor-unit count and never read
+ *   the key; measured at
+ *   `.objectui-sha` pin `62597c588072` (the pin when the ruling landed), the
+ *   grid summary footer and the dashboard metric widget did read it on a
+ *   currency column, as `scale ?? 0` — the ruling's consumer half is
+ *   objectui#10221, which ruling 乙 widens to that metric widget and lands
+ *   first. The one `2` that looks like a currency default belongs to an
+ *   inline grid COLUMN's rounding of a computed result, not to a field's
+ *   display width.
  *
- * ⛔ Neither reading is an argument for `0`, and neither is an argument for
- * the other face's value: they are an argument that nobody has ruled yet.
+ * ⛔ Neither reading is an argument for a `0` row: `number` still awaits its
+ * own ruling, and `currency` no longer has a declaration to resolve.
  *
  * ## Why the table is not exported
  *

@@ -2005,14 +2005,20 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `map: { style }`, which the flatten whitelist carries out as `mapStyle`),
  * while `getMapConfig` itself is byte-identical, so both read points moved 19
  * lines and neither changed what it does; the other five anchors sit in files
- * byte-identical to `87af769e9`. Each anchor quotes the line it was read at,
+ * byte-identical to `87af769e9`. RE-READ again at pin `f8a9d0fb0` on
+ * 2026-09-24: that bump redded three anchors, and each MOVED with the block it
+ * opens byte-identical — `ObjectView.tsx`'s `case 'map':` `1764` -> `1792`
+ * (17 lines), `ObjectMapConfigSchema` `1574` -> `1589` (the whole 47-line
+ * declaration) and `LIST_VIEW_LOCAL_OVERRIDES` `734` -> `741` (the whole
+ * list, still without `map`); `ObjectMap.tsx` and the `ListView.tsx` anchors
+ * did not move. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:146` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1764` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1792` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
  *   (`packages/plugin-list/src/ListView.tsx:85` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
@@ -2024,7 +2030,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:1574` first line
+ *   `packages/types/src/zod/objectql.zod.ts:1589` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. `getMapConfig` consults that `safeParse`
@@ -2040,7 +2046,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * checker at all: it dies in the whitelist without a word, and the one schema
  * that could have reported it is open and warn-only. And this parse is the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:734`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:741`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -2054,8 +2060,10 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (2026-09-23: `objectql.zod.ts` and `plugin-map.mdx` are byte-identical to
  * `87af769e9`, and the `ObjectMap.tsx` read MOVED `377` -> `396` with its line
  * byte-identical; at `87af769e9`, 2026-09-20, each of these three had moved
- * and each was re-READ):
- * `packages/types/src/zod/objectql.zod.ts:1574` declares the eight keys,
+ * and each was re-READ; at `f8a9d0fb0`, 2026-09-24, `ObjectMap.tsx` and
+ * `plugin-map.mdx` are byte-identical to `62597c588` and the declaration MOVED
+ * `1574` -> `1589` byte-identical):
+ * `packages/types/src/zod/objectql.zod.ts:1589` declares the eight keys,
  * `packages/plugin-map/src/ObjectMap.tsx:396` reads
  * `schema.mapStyle || schema.map?.style`, and objectui's own
  * `content/docs/plugins/plugin-map.mdx:143` documents `style` in the block —
@@ -3089,8 +3097,25 @@ const FormFieldBaseSchema = lazySchema(() => {
    * [#12868] `FormSelectOptionSchema`, not `SelectOptionSchema`: the form-view
    * face refuses the per-option `default` key the object-field face enforces —
    * see the narrowed schema's docblock for the ruling and the census.
+   *
+   * [#19678] Derive only where a member cannot be spelled (ruling 乙 on
+   * #19907, record 5805845085, which narrows item 1 of ruling 不动 + 声明,
+   * record 5793380467). An option `value` keeps the system-identifier bound it
+   * shares by reference with the object-field face, so an enum member carrying
+   * a hyphen or a capital (`system-data`, `new-tab`, `perRecord`) cannot be
+   * written as one at all. On a metadata form — schema-bound, built by
+   * {@link defineForm} — an enum-typed row MAY carry an inline `options` list,
+   * for human labels or a deliberate subset (the #19331 `object.ownership` /
+   * `sharingModel` rows and the master_detail `deleteBehavior` rows are the
+   * reference shapes). A row whose members cannot be spelled as option values
+   * OMITS `options`: the control derives the members from the served JSON
+   * Schema, and their meanings go in `helpText` (the `object.managedBy` /
+   * `action.openIn` / `action.execution` rows are the reference shape). The
+   * describe below states the rule where an author meets it, and
+   * `defineForm`'s module-load refusal of an unspellable value names the
+   * derive path as its remedy.
    */
-  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition)'),
+  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`.'),
   
   /** Reference object for lookup/master_detail fields */
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
@@ -3179,10 +3204,13 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `62597c588`, re-read 2026-09-23: `form.tsx` is
-   * byte-identical to `87af769e9`, so `spanLadderFor` still emits the ladder).
+   * (`.objectui-sha` = `f8a9d0fb0`, re-read 2026-09-24: `form.tsx` changed on
+   * this hop only in its registration's input list, objectui#9910's
+   * `children` slot, and `spanLadderFor` at `:204-231` is byte-identical, so it
+   * still emits the ladder; `plugin-form`'s `autoLayout.ts` is byte-identical
+   * to `62597c588`, where `form.tsx` was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `62597c588`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f8a9d0fb0596`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -6127,6 +6155,13 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  * and pulls field metadata from the resolved JSON Schema instead of from
  * ObjectQL.
  *
+ * An enum-typed row may carry an inline `options` list, for human labels or a
+ * deliberate subset. A row whose members cannot be spelled as option values
+ * omits `options` — the control derives the members from that JSON Schema,
+ * and their meanings go in `helpText`. An inline option `value` that fails
+ * the system-identifier grammar is refused here, at module load, and the
+ * refusal names that path as its remedy.
+ *
  * @example
  * ```ts
  * export const reportForm = defineForm({
@@ -6152,9 +6187,89 @@ export function defineForm(
   config: Omit<z.input<typeof FormViewSchema>, 'data'> & { schemaId: string },
 ): FormViewParsed {
   const { schemaId, ...rest } = config;
-  return FormViewSchema.parse({
+  const parsed = FormViewSchema.safeParse({
     ...rest,
     data: { provider: 'schema', schemaId },
+  });
+  if (parsed.success) return parsed.data;
+  // The refusal stays an `Error` with a stack, so an uncaught module-load throw
+  // prints its issues and the remedy, with the author's `defineForm(...)` call
+  // as the first frame. Two traps, both measured on zod 4.6.1: `new z.ZodError`
+  // builds a plain object (no `Error` parent, no `stack`), which node prints as
+  // `ZodError { name, message: [Getter/Setter] }`; and zod builds every
+  // `ZodRealError` with `Error.stackTraceLimit = 0`, capturing a trace only in
+  // `parse`, so `parsed.error` or a bare `new z.ZodRealError` carries no frame.
+  // The error is built from issues that already carry the remedy, so its
+  // lazily computed `message` holds it whenever it is first read.
+  const refusal = new z.ZodRealError(withOptionValueDeriveRemedy(parsed.error.issues));
+  z.core.util.captureStackTrace(refusal, defineForm);
+  throw refusal;
+}
+
+/**
+ * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
+ * option `value` carries — ruling 乙 (record 5805845085, narrowing ruling
+ * 不动 + 声明): the bound stays, an enum-typed row may still list spellable
+ * members inline, and the wall names the derive path for a row whose members
+ * cannot be spelled.
+ *
+ * The refusal itself is `SystemIdentifierSchema`'s grammar message
+ * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
+ * which the form face reuses BY REFERENCE (pinned in
+ * `form-select-option.test.ts`). That message cannot carry this remedy where it
+ * is declared: the same grammar bounds object-field options and three
+ * object-storage names, and "derive the members from the served JSON Schema"
+ * is true only on a schema-bound form. `defineForm` is exactly that door — it
+ * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
+ * appended here, to the issue that door raises, and nowhere else.
+ */
+const FORM_OPTION_VALUE_DERIVE_REMEDY =
+  'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
+  + '`value`, which is a lowercase system identifier. When this row edits a spec enum whose '
+  + 'members cannot be spelled as option values, omit `options`: the control derives the '
+  + 'members from the served JSON Schema, and their meanings go in `helpText`.';
+
+/**
+ * The two issue codes the system-identifier grammar raises on a string: the
+ * pattern (`invalid_format`) and the two-character floor (`too_small`).
+ */
+const OPTION_VALUE_GRAMMAR_CODES: ReadonlySet<string> = new Set(['invalid_format', 'too_small']);
+
+/** `…options.<index>.value` — an inline option's `value` on a form field row. */
+function isInlineOptionValuePath(path: readonly PropertyKey[]): boolean {
+  const n = path.length;
+  return n >= 3 && path[n - 1] === 'value' && typeof path[n - 2] === 'number' && path[n - 3] === 'options';
+}
+
+/**
+ * [#19678] Append {@link FORM_OPTION_VALUE_DERIVE_REMEDY} to every grammar
+ * refusal of an inline option `value` in a failed `FormViewSchema` parse.
+ *
+ * A field row is a union (bare field name | row object), so the option's issue
+ * usually sits inside an `invalid_union` issue's `errors`, with a path relative
+ * to the union's — the walk carries the prefix down so the full path is judged.
+ * Nothing is added, removed or re-coded: the verdict and the issue list are the
+ * parse's own, and only the matching messages grow the remedy sentence.
+ */
+function withOptionValueDeriveRemedy(
+  issues: readonly z.core.$ZodIssue[],
+  at: readonly PropertyKey[] = [],
+): z.core.$ZodIssue[] {
+  return issues.map((issue) => {
+    const path = [...at, ...issue.path];
+    // Spread copies keep every field the parse raised; the casts restore the
+    // discriminated union the spread widens (`errors` on the no-match and
+    // multiple-match variants of `invalid_union` are typed apart).
+    if (issue.code === 'invalid_union') {
+      return {
+        ...issue,
+        errors: issue.errors.map((branch) => withOptionValueDeriveRemedy(branch, path)),
+      } as z.core.$ZodIssue;
+    }
+    if (OPTION_VALUE_GRAMMAR_CODES.has(issue.code) && isInlineOptionValuePath(path)) {
+      return { ...issue, message: `${issue.message}. ${FORM_OPTION_VALUE_DERIVE_REMEDY}` } as z.core.$ZodIssue;
+    }
+    return issue;
   });
 }
 

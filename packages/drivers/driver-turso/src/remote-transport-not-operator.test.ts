@@ -5,6 +5,7 @@ import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { QueryAST } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /**
  * Regression: the remote transport must compile the spec's THIRD logical
@@ -375,8 +376,12 @@ describe('RemoteTransport $not (#1076)', () => {
       // `$sounds_like` is this repo's standing stand-in for a spelling the
       // protocol does not have and will not grow — the same name `sql-driver.ts`
       // reaches for when it needs one.
+      // [#20020] Marked author-written: the unknown-operator arm names the
+      // operator only for a predicate the caller is known to have written.
       await expect(
-        t.find('deal', { where: { $not: { stage: { $sounds_like: 'w%' } } } } as unknown as QueryAST),
+        t.find('deal', {
+          where: markFilterSubtreeProvenance({ $not: { stage: { $sounds_like: 'w%' } } }, 'author'),
+        } as unknown as QueryAST),
       ).rejects.toThrow(/Unsupported filter operator "\$sounds_like"/);
       // #1058: an unbindable comparand.
       await expect(

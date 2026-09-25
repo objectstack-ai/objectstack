@@ -388,7 +388,19 @@ async function middlewareAdmits(
     data,
   };
   try {
-    await middleware(opCtx, async () => {});
+    // [#20013] The terminal stands in for the engine, and the engine runs the
+    // installed `postHookWriteImageCheck` on an INSERT's rows once its
+    // `beforeInsert` chain has run — here (no hooks) the rows as sent. Under a
+    // walled posture the Layer 0 tenant wall installs that seam on every
+    // insert it walls, and a terminal that skipped it would be refused
+    // fail-closed. Only the insert path is modelled: every walled case in this
+    // file that reaches the terminal is an insert.
+    await middleware(opCtx, async () => {
+      const seam = opCtx.postHookWriteImageCheck;
+      if (!seam || opCtx.operation !== 'insert') return;
+      seam.honoured = true;
+      await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
+    });
     return true;
   } catch {
     return false;

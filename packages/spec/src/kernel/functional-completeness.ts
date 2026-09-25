@@ -283,16 +283,23 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `62597c588`, re-read 2026-09-23: `ListView.tsx` is
- *   byte-identical to `87af769e9`, and `ObjectCalendar.tsx` changed there only
- *   in its copy), so this describes the console this repo SHIPS and not only
+ *   (`.objectui-sha` = `f8a9d0fb0`, re-read 2026-09-24: `ObjectCalendar.tsx`
+ *   is byte-identical to `62597c588`, where it had changed only in its copy;
+ *   `ListView.tsx` changed on this hop — objectui#10275's `$select` and the
+ *   self-querying `gantt` / `tree` / `chart` filter and search of
+ *   objectui#10037 / objectui#10250 — with its `case 'calendar'` arm
+ *   untouched), so this describes the console this repo SHIPS and not only
  *   objectui's head.
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `62597c588`; `ListView.tsx`
- *   and `ObjectGantt.tsx` are byte-identical to `87af769e9`, where this was
- *   first measured, re-checked 2026-09-23). ① `ListView.tsx`'s
+ *   this repo builds against (`.objectui-sha` = `f8a9d0fb0`, re-read
+ *   2026-09-24; first measured at `87af769e9`, and both files were
+ *   byte-identical to it at `62597c588`). On this hop `ListView.tsx`'s
+ *   `case 'gantt'` gained the EFFECTIVE `filter` and the toolbar `search` /
+ *   `searchableFields` (objectui#10037, objectui#10250) and `ObjectGantt.tsx`
+ *   sends them as `$search` / `$searchFields`; neither touches the date
+ *   bindings or the config gate read below. ① `ListView.tsx`'s
  *   `case 'gantt'` spreads `startDateField` / `endDateField` / `titleField`
  *   only when the view DECLARED them — the `'start_date'` / `'end_date'`
  *   floors were deleted by objectui#7070, and the `'progress'` /
@@ -305,7 +312,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `62597c588`; `ObjectTimeline.tsx` is byte-identical to `87af769e9` too).
+ *   `f8a9d0fb0`; `ObjectTimeline.tsx` is byte-identical to `87af769e9` and
+ *   `62597c588` too, and `ListView.tsx`'s `case 'timeline'` did not move).
  *   ① `ListView.tsx`'s `case 'timeline'` resolves the axis
  *   through `resolveTimelineDateBinding` and spreads it only when one was
  *   declared — the `startDateField || 'created_at'` floor was deleted by
@@ -321,9 +329,11 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `62597c588`; `ObjectMap.tsx` changed on the hop
- *   from `87af769e9` only in a docblock and a dev-warning string, objectui
- *   `2252653d0`, and every read named below re-reads unchanged), both faces
+ *   pin (`.objectui-sha` = `f8a9d0fb0`; `ObjectMap.tsx` is byte-identical to
+ *   `62597c588`, and changed on the hop before that, from `87af769e9`, only
+ *   in a docblock and a dev-warning string, objectui `2252653d0`;
+ *   `ListView.tsx`'s `case 'map'` did not move, and every read named below
+ *   re-reads unchanged), both faces
  *   moved together in
  *   objectui#8169. ① `ListView.tsx`'s `case 'map'` forwards
  *   `resolveListMapConfig(schema)` and carries no `locationField || 'location'`

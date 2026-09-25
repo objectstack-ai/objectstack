@@ -2110,6 +2110,10 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     },
@@ -2151,6 +2155,10 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     },
@@ -2199,6 +2207,10 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     },
@@ -2218,6 +2230,10 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     },
@@ -2342,6 +2358,10 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     },
@@ -2353,6 +2373,10 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot"
         }
       ]
     },
@@ -2528,6 +2552,11 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Rich label content, rendered when `label` is not set"
         }
       ]
     },
@@ -2555,6 +2584,11 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Rich description content, rendered when `description` is not set"
         }
       ]
     },
@@ -2591,6 +2625,11 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "children",
+          "type": "slot",
+          "description": "Rich label content, rendered when `label` is not set"
         }
       ]
     },

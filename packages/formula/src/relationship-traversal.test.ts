@@ -121,6 +121,25 @@ describe('findTraversalConflicts — what the authoring layer refuses', () => {
     expect(conflicts[0].message).toContain('record.crm_account.id');
   });
 
+  // [#20007] The plain value is often a NULL TEST on an optional reference, and
+  // `.id` is no repair for that: it reads through the reference as well. The
+  // refusal must name the two spellings that do work — the guard in the ONE
+  // spelling ObjectQL's refusals use (held equal by objectql's
+  // `engine-predicate-relationship.test.ts`, which also drives both repairs end
+  // to end), and `required`.
+  it('names the guard and `required` for a null test on an optional reference', () => {
+    const a = analyzeRelationshipTraversals(
+      "record.crm_account != null && record.crm_account.type == 'partner'",
+    )!;
+    const [conflict] = findTraversalConflicts(a, isLookup);
+    expect(conflict.kind).toBe('bare-and-traversed');
+    expect(conflict.message).toContain('`record.crm_account.id` is not a null guard');
+    expect(conflict.message).toContain(
+      'make it the `then` of a `conditional` rule whose `when` is `record.crm_account != null`',
+    );
+    expect(conflict.message).toContain('make `crm_account` required (`required: true`)');
+  });
+
   // The short-circuit form is the one shape that can evaluate today for SOME
   // rows (the traversal is skipped when the left arm decides the verdict) and
   // fault for others. It is refused for that reason, not despite it.
@@ -187,6 +206,29 @@ describe('validateExpression — refuses the unserviceable traversal shapes', ()
     expect(r.ok).toBe(false);
     const message = r.errors.map((e) => e.message).join('\n');
     expect(message).toContain('record.account.id');
+  });
+
+  // [#20007] The author-side refusal carries the same repairs as the engine's.
+  it('names the guard and `required` when the plain value is a null test', () => {
+    const r = validateExpression(
+      'predicate',
+      "record.account != null && record.account.type == 'partner'",
+      schema,
+    );
+    expect(r.ok).toBe(false);
+    const message = r.errors.map((e) => e.message).join('\n');
+    expect(message).toContain(
+      'make it the `then` of a `conditional` rule whose `when` is `record.account != null`',
+    );
+    expect(message).toContain('make `account` required (`required: true`)');
+  });
+
+  // …and the repair it names is accepted where the author writes it: the
+  // guard's `when` reads the reference only as a value, the wrapped condition
+  // only through it.
+  it('accepts both halves of the guarded rule', () => {
+    expect(validateExpression('predicate', 'record.account != null', schema).ok).toBe(true);
+    expect(validateExpression('predicate', "record.account.type == 'partner'", schema).ok).toBe(true);
   });
 
   it('refuses a read deeper than one hop', () => {

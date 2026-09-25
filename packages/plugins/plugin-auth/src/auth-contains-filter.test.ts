@@ -48,12 +48,17 @@
  *     that are green because nothing distinguishes them — coverage that is
  *     blind to the very defect it names.
  *   - **Now (#5702, PR #6549).** The fallthrough is deleted and `$regex` is
- *     RETIRED: driver-sql refuses it by name in the ADR-0112 envelope
- *     (`code: 'INVALID_FILTER'`, `status: 400`), prescribing `$icontains`. The
- *     defect is therefore witnessed on the SQL arm again — not as a different
- *     row set, but as a REFUSAL, which is a strictly better reason: a bare
- *     `$regex` from this adapter no longer answers a subtly wrong question, it
- *     answers nothing and says why.
+ *     RETIRED: driver-sql refuses it in the ADR-0112 envelope
+ *     (`code: 'INVALID_FILTER'`, `status: 400`). The defect is therefore
+ *     witnessed on the SQL arm again — not as a different row set, but as a
+ *     REFUSAL, which is a strictly better reason: a bare `$regex` from this
+ *     adapter no longer answers a subtly wrong question, it answers nothing and
+ *     says why. What the message NAMES depends on who wrote the predicate:
+ *     for a `where` a read-scope merge boundary marked as the caller's own it
+ *     names `$regex` and prescribes `$icontains`; for an unmarked one — this
+ *     facade's path, which reaches the driver with no boundary in between — it
+ *     states only that a retired operator was refused, and the operator and
+ *     its replacement go to the server log. Face 3 pins both.
  *
  * Re-measured for #5893 before this file moved (both directions, `flock`-ed
  * local run, and again with the defect restored):
@@ -87,7 +92,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { FILTER_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { QueryAST } from '@objectstack/spec/data';
 import type { IDataEngine } from '@objectstack/core';
 import { createObjectQLAdapterFactory } from './objectql-adapter';
@@ -286,11 +291,30 @@ describe('[#5710] the comparand is a literal substring on a real backend', () =>
 // ---------------------------------------------------------------------------
 
 describe('[#5893] the backend refuses the operator face 2 must never see', () => {
-  it('refuses a bare `$regex` in the ADR-0112 envelope, naming its replacement', async () => {
-    const { engine } = await seededAdapter();
+  /**
+   * The server-log half of a withheld refusal: `SqlDriver` writes the naming
+   * text to its own `logger`, the sink a host injects, so the spy goes there.
+   */
+  function captureDriverLog(driver: SqlDriver): string[] {
+    const logged: string[] = [];
+    (driver as unknown as { logger: unknown }).logger = {
+      warn: (m: unknown) => { logged.push(String(m)); },
+      error: () => {},
+      info: () => {},
+      debug: () => {},
+    };
+    return logged;
+  }
+
+  it('refuses a bare `$regex` in the ADR-0112 envelope, and withholds the operator from an unmarked caller', async () => {
+    const { driver, engine } = await seededAdapter();
+    const logged = captureDriverLog(driver);
 
     // Sent through the SAME engine facade the adapter reads on, so this is the
     // literal path a regressed `convertWhere` would take — not a parallel one.
+    // The facade reaches the driver directly, so no read-scope merge boundary
+    // marks this `where` as the caller's own: it arrives UNMARKED, as it would
+    // in production on this path.
     const err: any = await engine
       .find('sys_user', { where: { name: { $regex: 'a.b' } } })
       .then(() => null, (e: unknown) => e);
@@ -304,8 +328,33 @@ describe('[#5893] the backend refuses the operator face 2 must never see', () =>
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
-    // The message is the operating instruction: which operator was refused, and
-    // what to write instead (#5702 prescribes the replacement, not a list).
+    // The refusal still says WHICH kind of refusal fired. The operator and the
+    // replacement it prescribes are details of the predicate, and a predicate
+    // no merge boundary marked as the caller's own is answered with them
+    // withheld: it could be a read-scope policy the caller never wrote. They
+    // go to the server log instead, so this is a relocation, not a deletion.
+    expect(err.message).toContain('is RETIRED');
+    expect(err.message).not.toContain('$regex');
+    expect(err.message).not.toContain('$icontains');
+    expect(logged.join('\n')).toContain('$regex');
+    expect(logged.join('\n')).toContain('$icontains');
+  });
+
+  it('names the refused operator and its replacement for a `where` marked as the caller\'s own', async () => {
+    const { engine } = await seededAdapter();
+
+    // The same predicate, marked the way a read-scope merge boundary
+    // (plugin-security, service-analytics) marks a caller's own `where`. For
+    // that caller the message is the operating instruction: which operator was
+    // refused, and what to write instead (#5702 prescribes the replacement,
+    // not a list).
+    const err: any = await engine
+      .find('sys_user', { where: markFilterSubtreeProvenance({ name: { $regex: 'a.b' } }, 'author') })
+      .then(() => null, (e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
     expect(err.message).toContain('$regex');
     expect(err.message).toContain('$icontains');
   });

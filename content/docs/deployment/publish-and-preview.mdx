@@ -90,6 +90,14 @@ They are not exclusive, and the combination is well-defined:
   `manifest.id` is already registered by the runtime's own boot is rejected with
   `409 MANIFEST_CONFLICT` ("already defined by this runtime's local code") rather
   than overwriting it. Uninstall or unpin first; do not expect last-write-wins.
+- **A collision is the second refusal, not the first.** Before it looks for a
+  collision, the install parses `manifest.id` exactly as the package manifest
+  declares it: reverse-domain notation, lowercase dot-separated segments
+  (`com.acme.crm`). An id that is not — `late-app`, `com.acme.my_app` — is
+  rejected with `400 PLUGIN_MANIFEST_INVALID` carrying the declaration's own
+  remedy, and nothing is registered or written (`502` when the id arrived in a
+  catalog snapshot rather than in your request). A `name` is not an id: a
+  manifest without `id` is refused the same way.
 - **Artifact sources have a fixed precedence**, so a container that presets one
   variable cannot shadow a deliberate override:
 

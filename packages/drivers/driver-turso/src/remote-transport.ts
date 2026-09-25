@@ -286,6 +286,13 @@ const RANGE_SQL_OPERATOR: Record<string, string> = {
 const SQL_FALSE = '1 = 0';
 
 /**
+ * [#19999] U+0000, spelled by its code point so no raw control byte sits in this
+ * file — the one character a text comparand cannot carry through `GLOB`
+ * ({@link RemoteTransport.pushLike}).
+ */
+const NUL_CHARACTER = String.fromCharCode(0x00);
+
+/**
  * Is this comparand the spec's cross-field marker, `{ $field: 'other_column' }`?
  *
  * Recognised only to give it a message of its own — it is refused either way
@@ -798,6 +805,23 @@ const WITHHELD_FILTER_AUTHOR_TEXT = Symbol.for('objectstack.driver-sql.withheldF
  * withholds the same way. Leaving one mode disclosing would make the exposure a
  * property of the connection string.
  */
+/**
+ * [#20020, the #8220 contract] What this transport's two flag refusals say when
+ * the field's operator map is not positively marked `'author'` — `driver-sql`'s
+ * withheld sentence behind this file's `[RemoteTransport]` prefix, so one
+ * condition reads alike on both compilers of one driver. The operator names the
+ * refusal's CLASS; the field, the value and the location go to the sink.
+ */
+function nonBooleanFlagWithheldMessage(op: '$null' | '$exists'): string {
+  return (
+    `[RemoteTransport] Operator "${op}" in this filter requires a boolean comparand (true or false). ` +
+    `@objectstack/spec FieldOperatorsSchema declares ${op} as a boolean, and a non-boolean is ` +
+    'refused rather than coerced because the backends read one in OPPOSITE directions. The ' +
+    'field it was aimed at and the value it received are withheld from the message; the full ' +
+    'diagnostic is in the server log.'
+  );
+}
+
 function withheldInvalidFilterError(
   message: string,
   diagnostic: string,
@@ -2796,7 +2820,7 @@ export class RemoteTransport {
         // gate is defined by. `$not` takes a single operand rather than a list
         // and is refused by shape one level down, in `buildSubFilterSQL`.
         if ((key === '$and' || key === '$or') && !Array.isArray(value)) {
-          throw this.nonListCombinator(object, key, value, `${path}.${key}`);
+          throw this.nonListCombinator(object, key, value, `${path}.${key}`, filters);
         }
       }
       if (key === '$and' && Array.isArray(value)) {
@@ -3074,7 +3098,7 @@ export class RemoteTransport {
               // per objectstack#5347 / #5368; see
               // {@link nonBooleanNullComparand} for why.
               if (typeof opValue !== 'boolean') {
-                throw this.nonBooleanNullComparand(object, key, opValue);
+                throw this.nonBooleanNullComparand(object, key, opValue, value);
               }
               // Written as a TOTAL choice over the two booleans rather than as
               // `=== false ? … : …`. The two spell the same thing only while
@@ -3109,7 +3133,7 @@ export class RemoteTransport {
               // `undefined`, `{}` and the string `'false'` — landed on the
               // `NOT NULL` side and answered as if `true` had been written.
               if (typeof opValue !== 'boolean') {
-                throw this.nonBooleanExistsComparand(object, key, opValue);
+                throw this.nonBooleanExistsComparand(object, key, opValue, value);
               }
               // Left as the `=== false` identity test rather than rewritten to a
               // total two-way choice the way the `$null` arm above was. The two
@@ -3130,7 +3154,9 @@ export class RemoteTransport {
               // reads exactly like "no rows matched" (#1004). An operator this
               // transport cannot compile is a programming error and must say
               // so.
-              throw this.unsupportedOperator(object, key, op, Object.keys(value as object));
+              // [#20020] `value` — this field's operator map — is the node the
+              // entry seam resolves the refusal's provenance against.
+              throw this.unsupportedOperator(object, key, op, Object.keys(value as object), value);
           }
         }
         if (clauses.length === clausesBefore) {
@@ -3261,6 +3287,33 @@ export class RemoteTransport {
    * function with no reusable export), so the two must be read together; the
    * row-level suite in `remote-transport-text-predicates.test.ts` is what pins
    * them to the same answers.
+   *
+   * # [#19999, #20024] Only a `starts` comparand free of U+0000 reaches `GLOB`
+   *
+   * SQLite's `glob()` reads its pattern and the stored value as C strings, so
+   * each is cut at its first U+0000 — measured on this transport (on
+   * `makeLibsqlSqliteStub` and on a local libSQL engine, SQLite 3.45.1):
+   * `$contains` / `$endsWith` of a comparand starting with U+0000 matched every
+   * row (#19999), and with a comparand free of U+0000 `$contains: 'b'` missed
+   * the stored `'a'` + U+0000 + `'b'` while `$endsWith: 'a'` returned it
+   * (#20024). So every `contains` / `ends` comparand, and a `starts` comparand
+   * holding U+0000, is compared whole instead, by the length-aware constructs
+   * `SqlDriver`'s `sqliteLengthAwareTextMatch` emits locally, each measured
+   * NUL-safe first: `instr(col, ?) > 0` for `contains`, `instr(col, ?) = 1` for
+   * `starts`, and a byte suffix over BLOB for `ends` (`length()` and `substr()`
+   * over TEXT stop at U+0000; over BLOB they count bytes), which falls back to
+   * the value itself through `coalesce()` because `substr()` over a zero-length
+   * BLOB is NULL — so `''` answers false, not NULL, and a `$not` over it keeps
+   * the row. An EMPTY `ends` comparand takes `instr(col, '') > 0` instead: the
+   * suffix construct's `-length('')` is `-0`, which `substr()` reads as "from
+   * the start", while `instr(col, '')` is 1 for every non-NULL value — the
+   * `GLOB '*'` answer. None of these has a pattern language, so nothing is
+   * escaped and the comparand is bound as written. A `starts` comparand free of
+   * U+0000 keeps `GLOB`, byte for byte: the value's cut cannot change a prefix
+   * answer, and the prefix pattern is the one an index can serve.
+   * `turso-19999-glob-nul-comparand.test.ts` and
+   * `turso-20024-glob-stored-nul.test.ts` hold this emitter and the local one to
+   * the same rows.
    */
   private pushLike(
     clauses: string[],
@@ -3272,10 +3325,22 @@ export class RemoteTransport {
     nullSafe = false,
     fold = false,
   ): void {
-    const escaped = String(value).replace(/[*?[]/g, '[$&]');
-    const pattern = shape === 'starts' ? `${escaped}*` : shape === 'ends' ? `*${escaped}` : `*${escaped}*`;
     const lhs = fold ? `lower(${column})` : column;
     const rhs = fold ? 'lower(?)' : '?';
+    const text = String(value);
+    if (shape !== 'starts' || text.includes(NUL_CHARACTER)) {
+      const suffix = shape === 'ends' && text !== '';
+      const positive = suffix
+        ? `coalesce(substr(CAST(${lhs} AS BLOB), -length(CAST(${rhs} AS BLOB))), CAST(${lhs} AS BLOB))`
+          + ` = CAST(${rhs} AS BLOB)`
+        : `instr(${lhs}, ${rhs}) ${shape === 'starts' ? '= 1' : '> 0'}`;
+      const predicate = negate ? `NOT (${positive})` : positive;
+      clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
+      args.push(...(suffix ? [text, text] : [text]));
+      return;
+    }
+    const escaped = text.replace(/[*?[]/g, '[$&]');
+    const pattern = shape === 'starts' ? `${escaped}*` : shape === 'ends' ? `*${escaped}` : `*${escaped}*`;
     const predicate = `${lhs} ${negate ? 'NOT GLOB' : 'GLOB'} ${rhs}`;
     clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
     args.push(pattern);
@@ -3428,12 +3493,18 @@ export class RemoteTransport {
    * Postgres. Only the location is spelled in this transport's own convention —
    * it names `'object.field'` rather than threading a `filter.…` path.
    */
-  private nonBooleanNullComparand(object: string, field: string, value: unknown): Error {
+  private nonBooleanNullComparand(object: string, field: string, value: unknown, subtree?: unknown): Error {
     // `describeValue` calls `null` "an object" and `undefined` "a undefined" —
     // both are the two comparands most likely to arrive here, so they are named
     // outright, exactly as {@link uncompilableSubFilter} does one level up.
     const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
-    return invalidFilterError(
+    // [#20020, the #8220 contract] The field, the value and the location are
+    // the predicate's: they reach the wire only for a positively
+    // `'author'`-marked `subtree` (the field's operator map), resolved at the
+    // `buildWhereSQL` entry seam, and go to the diagnostic sink always.
+    return this.withheldRefusal(
+      nonBooleanFlagWithheldMessage('$null'),
+      subtree,
       `[RemoteTransport] Operator "$null" on field "${field}" requires a boolean comparand (true or ` +
         `false). Received ${shown} (${preview(value)}) at '${object}.${field}'.$null. ` +
         `@objectstack/spec FieldOperatorsSchema declares $null as a boolean. It is refused rather than ` +
@@ -3444,6 +3515,18 @@ export class RemoteTransport {
         `so it landed on the side opposite the false it was written to mean ` +
         `(objectstack#5347, objectstack#5368, #1116).`,
     );
+  }
+
+  /**
+   * [#20020] Compose a refusal whose caller-visible text is `message` and whose
+   * operand-naming text is `diagnostic`: the diagnostic goes to the diagnostic
+   * sink, and the entry seam ({@link resolveWithheldFilterRefusal}) swaps it
+   * back onto the wire only for a positively `'author'`-marked `subtree`. The
+   * same order {@link uncompilableComparand} spells inline.
+   */
+  private withheldRefusal(message: string, subtree: unknown, diagnostic: string): Error {
+    this.diagnosticSink?.(diagnostic);
+    return withheldInvalidFilterError(message, diagnostic, subtree);
   }
 
   /**
@@ -3500,12 +3583,15 @@ export class RemoteTransport {
    * `$exists: true` — while the same five filters threw `INVALID_FILTER` on
    * LOCAL mode. Five wrong answers and one right one, chosen by `url`.
    */
-  private nonBooleanExistsComparand(object: string, field: string, value: unknown): Error {
+  private nonBooleanExistsComparand(object: string, field: string, value: unknown, subtree?: unknown): Error {
     // `describeValue` calls `null` "an object" and `undefined` "a undefined" —
     // both are among the comparands most likely to arrive here, so they are
     // named outright, exactly as the `$null` twin does.
     const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
-    return invalidFilterError(
+    // [#20020] Withheld unless author-marked, as the `$null` twin above.
+    return this.withheldRefusal(
+      nonBooleanFlagWithheldMessage('$exists'),
+      subtree,
       `[RemoteTransport] Operator "$exists" on field "${field}" requires a boolean comparand (true or ` +
         `false). Received ${shown} (${preview(value)}) at '${object}.${field}'.$exists. ` +
         `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
@@ -3533,6 +3619,7 @@ export class RemoteTransport {
     field: string,
     op: string,
     siblings: readonly string[] = [],
+    subtree?: unknown,
   ): Error {
     const target = `'${object}.${field}'`;
     // [#5702] A RETIRED spelling is not an unknown name — it is one this
@@ -3551,7 +3638,13 @@ export class RemoteTransport {
           `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${retired.to}" replaces the ` +
           `whole shape, so this is ONE mistake with ONE fix, not one per key.`
         : '';
-      return invalidFilterError(
+      // [#20020, the #8220 contract] The operator, the target, the replacement
+      // and the retirement note are the predicate's; the class is not.
+      return this.withheldRefusal(
+        '[RemoteTransport] A filter operator in this filter is RETIRED and is no longer compiled ' +
+          'in remote mode. The operator, the field it was aimed at and the operator that replaces ' +
+          'it are withheld from the message; the full diagnostic is in the server log.',
+        subtree,
         `[RemoteTransport] Filter operator "${op}" on ${target} is RETIRED and is no longer ` +
           `compiled in remote mode.${replacement} ${retired.why}${also}`,
       );
@@ -3563,14 +3656,27 @@ export class RemoteTransport {
           `applied exactly once (#1003). Refusing rather than compiling a second, rule-free range.`,
       );
     }
+    // [#20020, the #8220 contract] The two arms below name the target and the
+    // key or operator the predicate wrote; the vocabulary is the capability
+    // statement and stays on the wire either way.
     if (!op.startsWith('$')) {
-      return invalidFilterError(
+      return this.withheldRefusal(
+        `[RemoteTransport] A field filter in this query has an object comparand with a key that is ` +
+          `not an operator. A field's filter must be a scalar (equality) or an object of $-operators ` +
+          `(${SUPPORTED_FILTER_OPERATORS.join(', ')}). The field and the key are withheld from the ` +
+          `message; the full diagnostic is in the server log.`,
+        subtree,
         `[RemoteTransport] Filter on ${target} has an object comparand whose key "${op}" is not an ` +
           `operator. A field's filter must be a scalar (equality) or an object of $-operators ` +
           `(${SUPPORTED_FILTER_OPERATORS.join(', ')}).`,
       );
     }
-    return invalidFilterError(
+    return this.withheldRefusal(
+      `[RemoteTransport] A filter operator in this filter is not compiled in remote mode. Supported: ` +
+        `${SUPPORTED_FILTER_OPERATORS.join(', ')}. Refusing rather than compiling it to an equality, ` +
+        `which would read exactly like "no rows matched". The operator and the field it was aimed at ` +
+        `are withheld from the message; the full diagnostic is in the server log.`,
+      subtree,
       `[RemoteTransport] Unsupported filter operator "${op}" on ${target} in remote mode. Supported: ` +
         `${SUPPORTED_FILTER_OPERATORS.join(', ')}. Refusing rather than compiling it to an equality — a ` +
         `silent degradation is indistinguishable from "no rows matched" (#1004).`,
@@ -3645,9 +3751,24 @@ export class RemoteTransport {
    *
    * The requirement sentence is `driver-sql`'s, so the two read alike.
    */
-  private nonListCombinator(object: string, key: string, value: unknown, path: string): Error {
+  private nonListCombinator(
+    object: string,
+    key: string,
+    value: unknown,
+    path: string,
+    enclosing?: unknown,
+  ): Error {
     const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
-    return invalidFilterError(
+    // [#20020, the #8220 contract] The operand's preview and the position are
+    // the predicate's. The node whose mark decides is the operand when it is an
+    // object, and otherwise `enclosing` — the node carrying the key, whose
+    // provenance a primitive operand inherits.
+    return this.withheldRefusal(
+      '[RemoteTransport] A filter combinator ("$and" / "$or") in this filter requires an array of ' +
+        'filter conditions. @objectstack/spec FilterConditionSchema declares both as ' +
+        'FilterCondition[]. Which one it was, where it sits and the value it received are withheld ' +
+        'from the message; the full diagnostic is in the server log.',
+      value !== null && typeof value === 'object' ? value : enclosing,
       `[RemoteTransport] Filter combinator "${key}" at ${path} on '${object}' requires an array of ` +
         `filter conditions, but received ${shown} (${preview(value)}). @objectstack/spec ` +
         `FilterConditionSchema declares "${key}" as FilterCondition[]. Refusing rather than falling ` +

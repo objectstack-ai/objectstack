@@ -2852,6 +2852,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/explain-dependency-fault.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-engine.test.ts",
       "verb": "findOne",
       "pinned": 1

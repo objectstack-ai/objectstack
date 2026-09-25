@@ -63,12 +63,13 @@ export const entry: SemanticMigration = {
     + 'dark control of 0; inside packages/spec the '
     + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
     + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-    + 'pinned objectui checkout — `.objectui-sha` = `62597c588072636e9c30ea35b3d89b1e46fd765d` — names none of it: all 37 exports of '
-    + 'tracing.zod.ts and each of the four key names occur 0 times across the 8303 files '
-    + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
-    + 'text-span component, TextSpanSchema, an unrelated name), against two lit controls on '
-    + 'that same corpus and sha: 13125 hits for the bare token objectstack, and 5043 for the '
-    + 'package specifier @objectstack/spec.',
+    + 'pinned objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — names none of it: all 37 exports of '
+    + 'tracing.zod.ts and each of the four key names occur 0 times across the 8512 files '
+    + 'tracked at that sha (the 488 Span and 53 SpanSchema hits are objectui\'s own HTML '
+    + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
+    + 'two lit controls on that same corpus and sha: 13347 hits for the bare token objectstack, '
+    + 'and 5123 for the package specifier @objectstack/spec (at 62597c588: 0 across 8303, '
+    + 'Span 486, 13125 and 5043).',
   acceptanceCriteria:
     'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
     + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '

@@ -167,24 +167,29 @@ const MEASURED: Array<{ name: string; where: unknown; path: string; wasReadAs: s
 /**
  * Comparand positions beyond the issue's seven, measured in the same round.
  *
- * Two of them are where this gate deliberately diverges from `read-scope-sql`'s
- * twin, and in both cases because THIS module accepts the enclosing shape that
- * one refuses outright — so a "comparand is undefined" answer is the truest
- * thing to say here and would have been a mislabel there.
+ * One of them (the nested relation) is where this gate deliberately diverges
+ * from `read-scope-sql`'s twin, because THIS module accepts the enclosing shape
+ * that one refuses outright — so a "comparand is undefined" answer is the
+ * truest thing to say here and would have been a mislabel there.
+ *
+ * [#19888] There used to be a second: a member of the BARE-ARRAY implicit `$in`,
+ * `{d: [1, undefined]}` → `"d"[1]`. Ruling 乙 (#19757) refuses a list in the
+ * equality slot, so that enclosing shape is no longer accepted: the list is
+ * refused as a whole before this gate runs, as the twin always did, and the row
+ * moved to `where-equality-slot-list-refusal.test.ts` ("a list is diagnosed as
+ * the list, not by one of its members").
+ *
+ * [#20010] And a third: a `$between` bound, `{d: {$between: [undefined, 5]}}`
+ * → `"d".$between[0]`. The door now hands every field entry to the shared
+ * comparand-shape face before this gate runs, and the face's 2026-09-20
+ * endpoint ruling (#19071) names this exact spelling: "`''` and `undefined`
+ * are refused, naming the blank side (MIN / MAX and the index)". So the bound
+ * is still refused, INVALID_FILTER / 400, but in the face's words, which are
+ * the words the FilterArray spelling already got; the row moved to
+ * `where-face-arms-refusal.test.ts`. Every other position below keeps this
+ * gate's sentence: the shape face judges `undefined` only as a range endpoint.
  */
 const BEYOND_THE_TABLE: Array<{ name: string; where: unknown; path: string; wasReadAs: string }> = [
-  {
-    name: 'a member of the BARE-ARRAY implicit $in (twin refuses the array itself)',
-    where: { d: [1, undefined] },
-    path: '"d"[1]',
-    wasReadAs: 'd in [1, null]',
-  },
-  {
-    name: "a $between bound — lowered to the leaf's comparand",
-    where: { d: { $between: [undefined, 5] } },
-    path: '"d".$between[0]',
-    wasReadAs: 'd gte [null] AND d lte [5]',
-  },
   {
     name: 'a member of a $nin list',
     where: { d: { $nin: [undefined] } },
@@ -237,38 +242,20 @@ const NULL_CONTROL: Array<{ name: string; where: unknown; tree: unknown }> = [
     where: { d: { $ne: null } },
     tree: { kind: 'leaf', member: 'd', operator: 'set', values: [] },
   },
-  {
-    name: '{$gt: null} → a real comparison binding NULL (#5526)',
-    where: { d: { $gt: null } },
-    tree: { kind: 'leaf', member: 'd', operator: 'gt', values: [null] },
-  },
-  {
-    name: '{$in: [null]} → a list member, not a predicate',
-    where: { d: { $in: [null] } },
-    tree: { kind: 'leaf', member: 'd', operator: 'in', values: [null] },
-  },
-  {
-    name: '{$nin: [null]} → null-safe guarded (#5298)',
-    where: { d: { $nin: [null] } },
-    tree: {
-      kind: 'or',
-      children: [
-        { kind: 'leaf', member: 'd', operator: 'notSet', values: [] },
-        { kind: 'leaf', member: 'd', operator: 'notIn', values: [null] },
-      ],
-    },
-  },
-  {
-    name: '{$between: [null, 5]} → lowered to two bounds',
-    where: { d: { $between: [null, 5] } },
-    tree: {
-      kind: 'and',
-      children: [
-        { kind: 'leaf', member: 'd', operator: 'gte', values: [null] },
-        { kind: 'leaf', member: 'd', operator: 'lte', values: [5] },
-      ],
-    },
-  },
+  // [#20010] RE-JUDGED. Four rows stood here: `{$gt: null}` → `gt [null]`
+  // (#5526's by-construction reading), `{$in: [null]}` → `in [null]`,
+  // `{$nin: [null]}` → the #5298-guarded `notIn [null]`, and
+  // `{$between: [null, 5]}` → `gte [null] AND lte [5]`. Each is a position the
+  // shared comparand-shape face refuses by ruling, for every driver: the null
+  // list member and the null `$between` endpoint by the 2026-08-31 ruling
+  // (#13357), the null ordering comparand by the 2026-09-01 ruling (#14080) —
+  // a position the face's docblock records #5332's landing had called one
+  // "no ruling covers", so #5526's reading of it was a consequence of deleting
+  // an encoder, never a ruling of this door's. The door now runs that
+  // face, so each shape is refused whole (INVALID_FILTER / 400, in the face's
+  // words, `where-face-arms-refusal.test.ts`) and is no longer an accepted
+  // position for this group to hold still. What the group protects is
+  // unchanged: none of the four is refused as an UNDEFINED comparand.
   {
     name: "{$contains: null} → LIKE '%null%' (#5526)",
     where: { d: { $contains: null } },
@@ -294,11 +281,12 @@ const NULL_CONTROL: Array<{ name: string; where: unknown; tree: unknown }> = [
     where: { $not: { d: { $ne: null } } },
     tree: { kind: 'not', child: { kind: 'leaf', member: 'd', operator: 'set', values: [] } },
   },
-  {
-    name: '{d: [1, null]} → a bare-array $in carrying null',
-    where: { d: [1, null] },
-    tree: { kind: 'leaf', member: 'd', operator: 'in', values: [1, null] },
-  },
+  // [#19888] RE-JUDGED. A row `{d: [1, null]} → d in [1, null]` stood here: a
+  // bare-array implicit `$in` carrying null. Ruling 乙 (#19757) refuses a list in
+  // the equality slot, so that shape is refused whole (INVALID_FILTER / 400,
+  // `where-equality-slot-list-refusal.test.ts`) and is no longer an accepted
+  // position for this group to hold still. A null member of a list keeps its
+  // accepted spelling, `{$in: [null]}`, two rows above.
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

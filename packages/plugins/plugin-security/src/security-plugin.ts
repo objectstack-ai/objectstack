@@ -12,6 +12,9 @@ import { markFilterSubtreeProvenance, FieldMaskingRuleSchema, type FieldMaskingR
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
 import { renderOperationMessage } from '@objectstack/spec/system';
+// [#19989] The engine's own update-dispatch predicate, asked rather than
+// re-derived: step 3.6 needs to know which row the ENGINE will write.
+import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import {
   localWriteEpochSource,
   resolveWriteEpochSource,
@@ -208,8 +211,11 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
  * The write `check` for the writes this middleware cannot judge on
  * its own, installed on the operation context for the engine to run on the
  * rows that will be stored: every row of an insert, single or array, once the
- * `beforeInsert` chain has produced it, and [#19950] every row a predicate
- * (`multi`) update selects, merged with the final payload.
+ * `beforeInsert` chain has produced it, [#19950] every row a predicate
+ * (`multi`) update selects, merged with the final payload, and [#19989] the one
+ * row a by-id update writes, merged with the payload the `beforeUpdate` chain
+ * left. [#20013] The Layer 0 tenant wall's stored-row judgement rides the same
+ * handle (step 3.7), alone or composed after the `check`.
  *
  * Structurally identical to `OperationContext.postHookWriteImageCheck` in
  * `@objectstack/objectql`, and deliberately declared here rather than imported:
@@ -1849,6 +1855,14 @@ export class SecurityPlugin implements Plugin {
       });
     }
 
+    // [#20013] The writes the ADR-0094 permission-set data door executed
+    // ITSELF — it returned without calling `next()`, so no engine write ran.
+    // Filled by the wrapper that registers the door (below), read by the
+    // security middleware's post-`next()` assertion. Keyed by the operation
+    // context the two middlewares share, and private to this plugin, so no
+    // other middleware can put a write in it.
+    const writesExecutedByDataDoor = new WeakSet<object>();
+
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
       // [insert-check commit a016f08b8a] (the original card no longer resolves)
@@ -1859,7 +1873,14 @@ export class SecurityPlugin implements Plugin {
       // seam was honoured — an installed judgement that never ran is a write
       // this middleware did not gate, and it fails CLOSED and loudly rather
       // than passing for an allowed one.
+      //
+      // [#20013] Step 3.7 composes the Layer 0 tenant wall's stored-row
+      // judgement into the same seam, so this one handle can carry either
+      // judgement or both; the two flags say which, for the assertion's
+      // wording and for its one stand-down (the data door, see there).
       let writeImageCheckSeam: WriteImageCheckSeam | null = null;
+      let businessCheckSeamInstalled = false;
+      let tenantWallSeamInstalled = false;
       // [#10757] Retire every memoized permission-set resolution the moment a
       // WRITE passes through the engine. Deliberately the FIRST statement in
       // the middleware — ahead of the `isSystem` bypass immediately below —
@@ -2988,8 +3009,9 @@ export class SecurityPlugin implements Plugin {
       //
       // ── [#16608] WHICH IMAGE, on an INSERT ────────────────────────────────
       //
-      // Both verbs judge THE ROW THAT WILL EXIST. `update` reaches it here, by
-      // merging the caller's pre-image with the change set. `insert` could not:
+      // Both verbs judge THE ROW THAT WILL EXIST. `update` has a pre-image to
+      // merge the change set onto here, though only the change set AS SENT
+      // (the [#19989] note below says what that missed). `insert` could not:
       // it has no pre-image, and this middleware runs BEFORE the engine's
       // operation — so `opCtx.data` is the caller's payload as it arrived, and
       // the `beforeInsert` hooks that derive the row's real values have not run.
@@ -3040,6 +3062,22 @@ export class SecurityPlugin implements Plugin {
       //     selects, known only once every middleware has run, so the same
       //     seam is installed and the engine runs it over each matched row
       //     merged with the final payload.
+      //
+      // ── [#19989] The BY-ID update, after its hooks ────────────────────────
+      //
+      // The by-id image formed HERE is the caller's pre-image merged with the
+      // change set as sent, and this middleware runs before `next()` runs the
+      // `beforeUpdate` chain. A hook that rewrites a checked field (a scoping
+      // column stamped from a re-pointed parent, a status derived from another
+      // field) therefore produced a row nobody judged, and it was stored. So a
+      // by-id update installs the seam too, and the engine runs it on the one
+      // row it writes, merged with the final payload.
+      //
+      // The judgement here STAYS. It refuses a change set whose own values the
+      // check refuses, including one a hook would have overwritten with a
+      // value the check admits; dropping it would admit writes refused today,
+      // and this change only ever refuses more. A by-id update is now judged
+      // twice: the change set as sent, here, and the stored row, in the engine.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
@@ -3120,12 +3158,15 @@ export class SecurityPlugin implements Plugin {
             // produced — [#19964] every row of an array insert.
             writeImageCheckSeam = newWriteImageCheck();
             opCtx.postHookWriteImageCheck = writeImageCheckSeam;
+            businessCheckSeamInstalled = true;
           } else {
             const targetId = this.extractSingleId(opCtx);
             if (targetId != null) {
-              // BY-ID UPDATE — unchanged. Build the post-image: the caller's
-              // pre-image merged with the change set (so a check on an
-              // unchanged field still sees its value).
+              // BY-ID UPDATE, the change set AS SENT. Build the image: the
+              // caller's pre-image merged with the change set (so a check on
+              // an unchanged field still sees its value). Unchanged by
+              // [#19989], which adds the stored-row judgement below rather
+              // than replacing this one (see the block note above).
               let postImage: Record<string, unknown> = { ...(opCtx.data as Record<string, unknown>) };
               if (this.ql) {
                 // Shares the memoized caller pre-image with the step-3.5 owner
@@ -3135,24 +3176,59 @@ export class SecurityPlugin implements Plugin {
               }
               if (!satisfiesCheck(postImage)) denyCheck();
             }
-            // [#19950] PREDICATE UPDATE — the engine runs the judgement over
-            // every row the composed AST selects, each merged with the final
-            // payload (see the block note above). Installed whenever the ENGINE
-            // will not treat the write as addressing one row, which is wider
-            // than `targetId == null`: the engine reads a FALSY scalar id
-            // (`''`, `0`) as no row address at all
-            // (`resolveEngineUpdateDispatch`) and routes the write to its
-            // predicate path, so a falsy id is judged BOTH ways — its by-id
-            // image above, exactly as before, and every matched row here.
-            // Neither judgement alone would do: without the seam a falsy id
-            // would carry a bulk update past the per-row check on the strength
-            // of a change-set-only image. If no image can be formed the write
-            // is not admitted: the engine refuses a predicate update it cannot
-            // route, and a seam it never runs fails CLOSED after `next()`.
-            if (!targetId) {
-              writeImageCheckSeam = newWriteImageCheck();
-              opCtx.postHookWriteImageCheck = writeImageCheckSeam;
+            // [#19989] A FALSY payload id (`''`, `0`) is not a row address to
+            // the engine (`resolveEngineUpdateDispatch`), which then binds a
+            // truthy scalar `where.id` instead and writes THAT row by id. The
+            // image above, and every other by-id gate in this middleware, was
+            // formed from the payload id, so what they judged is not the row
+            // that would be stored. That write used to reach the driver and be
+            // refused only afterwards, by the fail-closed guard below (the
+            // seam was installed for a predicate path the engine never took).
+            // Now that the engine runs the seam on the by-id path too, that
+            // guard would no longer fire, so the write is refused HERE, before
+            // anything runs: one row address, or no write. The question is put
+            // to the engine's own dispatch predicate, never re-derived.
+            if (targetId != null && !targetId) {
+              const engineRoute = resolveEngineUpdateDispatch(opCtx.data as EngineUpdateDispatchData, opCtx.options);
+              if (engineRoute.kind === 'by-id') {
+                const developerMessage =
+                  `[Security] Access denied: the update on '${opCtx.object}' carries the payload id ` +
+                  `'${String(targetId)}', which addresses no row, while the engine would write the row ` +
+                  `'${String(engineRoute.id)}' named by where.id — so the row this gate judged is not the row ` +
+                  `that would be stored, and the row-level CHECK cannot vouch for it. Address the row with ` +
+                  `one id: update(object, { id, ...fields }) or update(object, fields, { where: { id } }).`;
+                ctx.logger.warn(developerMessage, {
+                  operation: opCtx.operation,
+                  object: opCtx.object,
+                  positions,
+                  userId: opCtx.context?.userId ?? 'unknown',
+                });
+                throw new PermissionDeniedError(
+                  userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
+                  { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+                  developerMessage,
+                );
+              }
             }
+            // The stored-row judgement, installed on EVERY update and run by
+            // the engine once the payload is final (a write it never runs
+            // fails CLOSED after `next()`):
+            //
+            //   • [#19989] BY-ID — the one row it writes, merged with the
+            //     payload the `beforeUpdate` chain left;
+            //   • [#19950] PREDICATE — every row the composed AST selects, each
+            //     merged with the final payload. That covers a null id and a
+            //     falsy one the engine routes to its predicate path, which is
+            //     then judged BOTH ways: its by-id image above, and every
+            //     matched row. Without the seam a falsy id would carry a bulk
+            //     update past the per-row check on a change-set-only image.
+            //
+            // If no image can be formed the write is not admitted: the engine
+            // refuses an update it cannot route, and a seam it never runs
+            // fails CLOSED after `next()`.
+            writeImageCheckSeam = newWriteImageCheck();
+            opCtx.postHookWriteImageCheck = writeImageCheckSeam;
+            businessCheckSeamInstalled = true;
           }
         }
       }
@@ -3187,12 +3263,14 @@ export class SecurityPlugin implements Plugin {
       // pre-image already scoped the target to that org — equals the row's current
       // org), so a re-point to any OTHER tenant is denied. A bulk update carrying a
       // cross-tenant `organization_id` change-set is caught too (the check inspects
-      // the change-set value, not a per-row post-image).
+      // the change-set value here, and [#20013] every stored row in the engine).
       //
       // Scope: only a SUPPLIED `organization_id` is validated — an ABSENT value on
       // insert is the organizations-plugin auto-stamp's responsibility, and an
       // update that doesn't touch `organization_id` carries no value here, so
-      // ordinary writes are unaffected. A pure plugin-security deployment has no
+      // ordinary writes are unaffected. [#20013] "Supplied" includes a value the
+      // engine's `beforeInsert` / `beforeUpdate` chain wrote: that half is judged
+      // on the stored row, below. A pure plugin-security deployment has no
       // isolation active (Layer 0 → null), so this is ordering-independent w.r.t.
       // the auto-stamp middleware. System / boot writes carry `isSystem` and
       // short-circuited the whole middleware above, so legitimate cross-org moves
@@ -3299,10 +3377,19 @@ export class SecurityPlugin implements Plugin {
           );
         }
 
-        const suppliedRows = writeRows.filter(
-          (r) => r.organization_id != null && r.organization_id !== '',
-        );
-        if (suppliedRows.length > 0) {
+        // A row carries an organization to judge only when it NAMES one: an
+        // absent or empty value is the auto-stamp's to fill (ADR-0095 D1,
+        // "Not touched": judging it would refuse a legitimate insert before
+        // the stamp runs). One predicate, read by both halves below.
+        const namesOrganization = (r: Record<string, unknown>): boolean =>
+          r.organization_id != null && r.organization_id !== '';
+        const suppliedRows = writeRows.filter(namesOrganization);
+        // The wall is computed when a payload names an organization (as
+        // before) or when a walled posture may have a hook name one ([#20013]
+        // below). The `single` posture composes no Layer 0 at all, so it pays
+        // for nothing it did not already pay for.
+        let tenantParts: Record<string, unknown>[] = [];
+        if (suppliedRows.length > 0 || this.orgScopingEnabled) {
           const tenantCheck = await this.computeWriteTenantCheckFilter(
             permissionSets,
             opCtx.object,
@@ -3315,23 +3402,80 @@ export class SecurityPlugin implements Plugin {
           const delTenantCheck = delegatorSets
             ? await this.computeWriteTenantCheckFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext)
             : null;
-          const tenantParts = [tenantCheck, delTenantCheck].filter(Boolean) as Record<string, unknown>[];
-          // EVERY supplied row must clear the wall — one forged row in a bulk
-          // payload denies the whole write (fail closed, no partial landing).
-          if (
-            tenantParts.length > 0 &&
-            !suppliedRows.every((row) => tenantParts.every((f) => matchesFilterCondition(row as any, f as any)))
-          ) {
-            this.logger.warn?.(
-              `[Security] Layer 0 tenant CHECK FAILED on ${opCtx.operation} '${opCtx.object}' — write denied ` +
-                `(fail-closed); a supplied organization_id is outside the caller's organization scope`,
-            );
-            throw new PermissionDeniedError(
-              `[Security] Access denied: the ${opCtx.operation} would place '${opCtx.object}' in another tenant ` +
-                `(organization_id is outside the caller's organization scope)`,
-              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
-            );
-          }
+          tenantParts = [tenantCheck, delTenantCheck].filter(Boolean) as Record<string, unknown>[];
+        }
+        const clearsWall = (row: Record<string, unknown>): boolean =>
+          tenantParts.every((f) => matchesFilterCondition(row as any, f as any));
+        // The ONE refusal, shared by both halves — so a value the caller sent
+        // and a value a hook wrote are refused identically.
+        const denyTenantPlacement = (source: string): never => {
+          this.logger.warn?.(
+            `[Security] Layer 0 tenant CHECK FAILED on ${opCtx.operation} '${opCtx.object}' — write denied ` +
+              `(fail-closed); ${source} organization_id is outside the caller's organization scope`,
+          );
+          throw new PermissionDeniedError(
+            `[Security] Access denied: the ${opCtx.operation} would place '${opCtx.object}' in another tenant ` +
+              `(organization_id is outside the caller's organization scope)`,
+            { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+          );
+        };
+        // EVERY supplied row must clear the wall — one forged row in a bulk
+        // payload denies the whole write (fail closed, no partial landing).
+        if (tenantParts.length > 0 && !suppliedRows.every(clearsWall)) denyTenantPlacement('a supplied');
+
+        // ── [#20013] The wall on the STORED row, after the hooks ─────────────
+        //
+        // Everything above judges `opCtx.data`, the payload as the caller SENT
+        // it, and runs before `next()` runs the engine's `beforeInsert` /
+        // `beforeUpdate` chain. A hook that writes `organization_id` (derived
+        // from another payload field, a parent, a lookup) therefore produced a
+        // value the wall never saw, and the row was stored in whatever
+        // organization it named. Measured on driver-sql and driver-sqlite-wasm,
+        // `isolated` posture: an insert, an array insert, a by-id update and a
+        // predicate update were all admitted with the row stored outside the
+        // caller's organization scope.
+        //
+        // So the wall also judges the row the engine is about to store, in the
+        // seam the row-level `check` already uses
+        // (`OperationContext.postHookWriteImageCheck`): the rows the insert
+        // chain produced, the prior row merged with the final payload on a
+        // by-id update, and every matched row merged with it on a predicate
+        // update. The predicate is the SAME `tenantParts` — computed here, with
+        // this request's caller and delegator contexts — so a stored row is
+        // held to exactly the wall a supplied value is. On an update the image
+        // carries the row's current organization whenever the final payload
+        // leaves the column alone; that row was selected under this same wall
+        // (step 2.7's pre-image on the by-id path, the composed AST on the
+        // predicate path), so an update that does not touch the column clears
+        // it and nothing ordinary moves.
+        //
+        // The seam is installed whenever the wall applies to the write — a
+        // walled posture, a tenant object, a caller Layer 0 does not exempt —
+        // and NOT only when a business `check` does: step 3.6 installs its own
+        // judgement only when a `check` applies, and the common tenant object
+        // declares none. When step 3.6 installed one, the two are composed
+        // into the one handle the engine runs, in the order this middleware
+        // judges in (the `check`, then the wall).
+        //
+        // The judgement above STAYS. It refuses a supplied value a hook would
+        // have overwritten with an in-scope one; dropping it would admit writes
+        // refused today, and this change only ever refuses more.
+        //
+        // Array UPDATE payloads are left as step 3.6 leaves them: the engine
+        // takes one payload per update, so the seam judges a single payload.
+        if (tenantParts.length > 0 && (opCtx.operation === 'insert' || !Array.isArray(opCtx.data))) {
+          const businessCheck = writeImageCheckSeam;
+          writeImageCheckSeam = {
+            evaluate: (rows) => {
+              businessCheck?.evaluate(rows);
+              for (const row of rows) {
+                if (!row || typeof row !== 'object') continue;
+                if (namesOrganization(row) && !clearsWall(row)) denyTenantPlacement("the stored row's");
+              }
+            },
+          };
+          opCtx.postHookWriteImageCheck = writeImageCheckSeam;
+          tenantWallSeamInstalled = true;
         }
       }
 
@@ -3509,18 +3653,44 @@ export class SecurityPlugin implements Plugin {
 
       // [#16608] FAIL CLOSED on a seam that was never run. `honoured` is set by
       // the engine immediately before it calls the judgement, so an unset flag
-      // means one thing only: the write went past without the insert `check`
-      // being evaluated at all — an engine that does not implement the seam, or
-      // a host that executed the operation itself. The row may already be
+      // means one thing only: the write went past without its stored-row
+      // `check` being evaluated at all — an engine that does not implement the
+      // seam, or a host that executed the operation itself. Every insert and
+      // every update step 3.6 judges is covered ([#19950], [#19989] by-id
+      // included). The row may already be
       // stored, which is exactly why this is LOUD: the alternative is a gate
       // that silently stops gating and a deployment that never finds out.
       // ⛔ Do not soften this into a warning: a middleware that cannot say a
       // write was checked must not report that it was.
-      if (writeImageCheckSeam && writeImageCheckSeam.honoured !== true) {
-        const developerMessage =
-          `[Security] Access denied: the ${opCtx.operation} on '${opCtx.object}' was executed without the row-level CHECK ` +
-          `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +
-          `The write is NOT vouched for by this gate.`;
+      //
+      // [#20013] It covers the Layer 0 tenant wall's stored-row judgement too,
+      // with ONE stand-down, and only for a seam that carries the wall alone:
+      // the ADR-0094 permission-set data door (registered below, inside this
+      // middleware) executes an insert or update of `sys_permission_set`
+      // ITSELF, through the metadata protocol, and never calls `next()`. No
+      // engine write runs there, so no hook chain runs, and the only
+      // `organization_id` such a write can carry is the one the payload
+      // judgement above already cleared; the stored-row half has nothing left
+      // to judge. Measured on the base: a platform administrator's insert
+      // there, under the `isolated` posture, is admitted while Layer 0 walls
+      // the object, so without this stand-down the guard would refuse a write
+      // it has no reason to. The fact is OBSERVED by the wrapper that
+      // registers the data door (it records a write the door never passed on
+      // to `next()`), never declared by an operation field another middleware
+      // could set. A seam carrying a row-level `check` is NOT stood down: that
+      // judgement has no payload half for an insert, and the data door keeps
+      // failing closed under one exactly as before.
+      const standsDown =
+        !businessCheckSeamInstalled && tenantWallSeamInstalled && writesExecutedByDataDoor.has(opCtx);
+      if (writeImageCheckSeam && writeImageCheckSeam.honoured !== true && !standsDown) {
+        const developerMessage = businessCheckSeamInstalled
+          ? `[Security] Access denied: the ${opCtx.operation} on '${opCtx.object}' was executed without the row-level CHECK ` +
+            `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +
+            (tenantWallSeamInstalled ? `The Layer 0 tenant wall was not evaluated on the stored row either. ` : '') +
+            `The write is NOT vouched for by this gate.`
+          : `[Security] Access denied: the ${opCtx.operation} on '${opCtx.object}' was executed without the Layer 0 ` +
+            `tenant wall being evaluated on the stored row — the engine did not run ` +
+            `OperationContext.postHookWriteImageCheck. The write is NOT vouched for by this gate.`;
         // Contract arg order (#5637): `error(message, error?: Error, meta?)` —
         // the structured fields ride in the THIRD position. There is no `Error`
         // to carry here: nothing threw, the seam simply never ran.
@@ -3578,15 +3748,29 @@ export class SecurityPlugin implements Plugin {
     // all passed before a write is translated. Kernels without a capable
     // metadata protocol pass through to the legacy direct write (single
     // store — no split brain to prevent).
+    //
+    // [#20013] Wrapped so the security middleware can tell a write the door
+    // executed itself from one it passed on: the wrapper hands the door a
+    // `next` that records the pass-on, and a write that returns without it is
+    // recorded in `writesExecutedByDataDoor`. Observed, not declared — the
+    // door's own code is unchanged.
+    const permissionSetWriteThrough = createPermissionSetWriteThrough({
+      ql,
+      metadata,
+      getProtocol: () => {
+        try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
+      },
+      logger: ctx.logger,
+    });
     ql.registerMiddleware(
-      createPermissionSetWriteThrough({
-        ql,
-        metadata,
-        getProtocol: () => {
-          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
-        },
-        logger: ctx.logger,
-      }),
+      async (opCtx: any, next: () => Promise<void>) => {
+        let passedOn = false;
+        await permissionSetWriteThrough(opCtx, async () => {
+          passedOn = true;
+          await next();
+        });
+        if (!passedOn && opCtx && typeof opCtx === 'object') writesExecutedByDataDoor.add(opCtx);
+      },
       { object: 'sys_permission_set' },
     );
 

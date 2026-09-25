@@ -1,6 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { FilterCondition } from '@objectstack/spec/data';
+// [#19995] The engine's own shared comparand faces — run on a read scope, alone,
+// at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
+// [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
+import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
@@ -414,6 +418,49 @@ import {
  * already refused by the bare-array arm. {@link assertNoListInEqualitySlot}
  * refuses it in this module's envelope. See there for the measured answers, the
  * reachability reading, and why `$ne` is not judged here.
+ *
+ * ## The ObjectQL ENGINE path refuses a bad comparand in THIS envelope too (#19995)
+ *
+ * The #13640 section above is the vacancy half of the engine path; this is the
+ * comparand half. A scope carrying a comparand the ENGINE's shared comparand
+ * faces refuse was handed to `engine.aggregate` and came back as the engine's
+ * `INVALID_FILTER` / 400, a 4xx whose prose the HTTP doors relay — while the
+ * NativeSQL face and the echo refused the same scope in the withheld envelope
+ * above. One scope, two envelopes, and the 400 one is the disclosure #5367
+ * closed. The engine's refusal does not read the `'policy'` provenance mark
+ * (#8220); only `driver-sql`'s cross-field and bind refusals do.
+ * {@link assertReadScopeComparandsRunnable} closes it at the two engine-bound
+ * merge sites. See there for why its refusal set is exactly the engine's, and
+ * for what it deliberately leaves to the engine.
+ *
+ * ## …and THIS compiler runs the same two faces, after its own gates (#20018)
+ *
+ * The paragraph above held for most shapes, not all of them: this compiler's own
+ * gates are narrower than the two shared faces, so a class of scopes the
+ * ObjectQL face refused was LOWERED here and served by the NativeSQL face and
+ * the echo. Measured on real SQLite (`read-scope-comparand-three-faces.test.ts`
+ * carries the table):
+ *
+ *   - a `null` member of `$in` compiled to `IN (…, NULL)`, which matches nothing
+ *     through the NULL — and under `$not`, or as a `$nin` member, the scope
+ *     admitted ONLY the rows whose column is NULL, which it names as excluded;
+ *   - a `null` ordering comparand or `$between` bound compiled to a comparison
+ *     with NULL: zero rows, silently;
+ *   - a blank `$between` bound was bound and served;
+ *   - a bigint beyond 2^53 and a binary comparand (a package-local bindable,
+ *     `comparand-shape.ts`) bound and matched nothing;
+ *   - a plain-object or other non-plain-object comparand in a scalar position
+ *     was bound, and the DATABASE refused the statement (`DATABASE_ERROR`).
+ *
+ * {@link compileScopedFilterToSql} now calls
+ * {@link assertReadScopeComparandsRunnable} once {@link compileNode} returns.
+ * Both faces are pure walks of the scope, so the order cannot change WHICH
+ * scopes are refused — the verdict is the union of the two gate sets either
+ * way — only which sentence a doubly-refused scope carries. After the lowering,
+ * a shape this compiler already refuses keeps its own message (the #13926
+ * ordering, for the same door-distinguishable log), and the faces add only what
+ * would otherwise have been lowered. The envelope is this module's one
+ * envelope; nothing here re-argues the rulings the faces carry.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -516,6 +563,13 @@ export function compileScopedFilterToSql(
   const quotedAlias = quoteIdent(alias, 'alias');
   const params: unknown[] = [];
   const sql = compileNode(filter, quotedAlias, params, options);
+  // [#20018] The shared comparand faces, on the scope ALONE: the judgement the
+  // ObjectQL execute face makes at its merge sites (#19995), made here too, so
+  // one read scope gets one verdict on all three analytics faces. AFTER the
+  // lowering on purpose: a shape this compiler already refuses keeps its own
+  // sentence, and the faces add exactly the shapes it would otherwise have
+  // lowered. See the module header's #20018 section.
+  assertReadScopeComparandsRunnable(filter, alias);
   return { sql, params };
 }
 
@@ -645,6 +699,69 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
     `[read-scope-sql] read scope for "${objectName}" has an empty $in under negation at ${found.path} — an empty membership matches nothing, ` +
       `so its negation matches every row and the read scope admits the whole table (fail-closed).`,
   );
+}
+
+/**
+ * [#19995] Refuse, in this module's envelope, a read scope the ENGINE would
+ * refuse for one of its comparands — judged on the scope ALONE, before it is
+ * composed with the caller's filter.
+ *
+ * The door for the two ENGINE-bound merges: `ObjectQLStrategy.withReadScope`
+ * (the direct and the cross-object base aggregate) and `resolveFkAttr` (the
+ * referenced object's scope). There the scope used to reach `engine.aggregate`
+ * unjudged, and a comparand the engine refuses came back as its
+ * `INVALID_FILTER` / 400, message relayed. At the merge site the scope is
+ * still a distinguishable object; one line later it is `$and`-composed with
+ * the caller's own filter and no consumer can tell whose clause a refusal
+ * came from — which is why this is a judgement here and ⛔ never a catch
+ * around `executeAggregate`: the caller's own `where` still reaches the
+ * engine's doors for some shapes, and those refusals are the caller's to read.
+ *
+ * [#20018] Its third caller is {@link compileScopedFilterToSql}, after the
+ * lowering, which is how the NativeSQL face and the `/analytics/sql` echo give
+ * the same verdict as the two merges above. There `objectName` is the alias the
+ * scope is compiled for: the object's name on the base table, the join alias on
+ * a joined hop.
+ *
+ * ## Why the refusal set is exactly the engine's
+ *
+ * The two faces called below are the ones the engine runs on every
+ * object-form `where` (`lowerWhereFilterArray`, `@objectstack/objectql`):
+ * `@objectstack/spec/data`'s list-shape face and comparand-type face. Both are
+ * pure walks whose verdict on a subtree does not depend on the rest of the
+ * tree or on any object's schema, so the scope alone answers exactly as the
+ * scope inside `{ $and: [userFilter, scope] }` does. Same functions, same
+ * verdicts: nothing the engine serves is refused here, and a `{ $field }`
+ * reference (served on this path under #7598 Q1 = B) is stepped around by
+ * both, as the engine steps around it.
+ *
+ * ## What it deliberately does not judge
+ *
+ * The engine refuses other scope shapes through doors that read the object's
+ * SCHEMA or the request's CONTEXT (text operators on non-text fields, temporal
+ * comparands, filter placeholders), and `driver-sql` refuses more at compile
+ * time. Judging those here would mean a second copy of rules this package
+ * cannot see; their envelope is the engine's and the driver's to give.
+ *
+ * Anything the two walks throw is attributable to the scope — they read
+ * nothing else — so every throw is re-raised in the one envelope, the walk's
+ * own sentence kept for the operator's log.
+ *
+ * @param scope the `StrategyContext.getReadScope` output, exactly as returned
+ * @param objectName the object the scope was requested for — for the operator's
+ *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
+ *   500 declaration, like every message in this module.
+ */
+export function assertReadScopeComparandsRunnable(scope: unknown, objectName: string): void {
+  try {
+    assertListComparandShapes(scope, undefined, 'readScope');
+    normalizeFilterComparandTypes(scope, undefined, 'readScope');
+  } catch (e) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" carries a comparand the engine refuses — ` +
+        `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
+    );
+  }
 }
 
 /**

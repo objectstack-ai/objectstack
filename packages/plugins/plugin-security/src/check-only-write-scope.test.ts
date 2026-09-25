@@ -283,7 +283,16 @@ function makeEngine() {
       const rows = await this.find(object, { ...options, limit: 1 });
       return rows[0] ?? null;
     },
-    async insert(object: string, data: any) {
+    // [#20013] The INSERT twin of the seam run below: the engine hands an
+    // installed write-image check the rows its `beforeInsert` chain produced —
+    // here (no hooks) the rows as sent. The Layer 0 tenant wall installs that
+    // seam on every walled insert, with or without a `check`.
+    async insert(object: string, data: any, opCtx?: any) {
+      const seam = opCtx?.postHookWriteImageCheck;
+      if (seam) {
+        seam.honoured = true;
+        await seam.evaluate(Array.isArray(data) ? data : [data]);
+      }
       (tables[object] ??= []).push({ ...data });
       return data;
     },
@@ -293,15 +302,16 @@ function makeEngine() {
     // [#19950] `opCtx` is the operation the middleware chain ran on, as the
     // real engine holds it. On the PREDICATE path the engine hands an
     // installed write-image check every matched row merged with the payload
-    // before it writes, so this double does the same: a double that skipped
-    // it would be refused, fail-closed, by the security middleware.
+    // before it writes, and [#19989] on the BY-ID path the one row it writes,
+    // merged with the payload. This double does the same on both: a double
+    // that skipped it would be refused, fail-closed, by the security middleware.
     async update(object: string, data: any, options?: any, opCtx?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);
       const rows = (tables[object] ??= []);
       const targets = dispatch.kind === 'by-id'
         ? rows.filter((r) => r.id === dispatch.id)
         : rows.filter((r) => matches(r, options?.where));
-      const seam = dispatch.kind === 'by-id' ? undefined : opCtx?.postHookWriteImageCheck;
+      const seam = opCtx?.postHookWriteImageCheck;
       if (seam) {
         seam.honoured = true;
         await seam.evaluate(targets.map((r) => ({ ...r, ...data })));
@@ -389,7 +399,7 @@ async function makeStack(opts: { orgScoping?: boolean } = {}): Promise<Stack> {
       await securityMw(opCtx, async () => {
         await sharingMw(opCtx, async () => {
           if (opCtx.operation === 'delete') await engine.delete(opCtx.object, opCtx.options);
-          else if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data);
+          else if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data, opCtx);
           else await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
           reached = true;
         });

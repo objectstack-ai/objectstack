@@ -16,7 +16,11 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
-import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
+import {
+  assertReadScopeCannotVacate,
+  assertReadScopeComparandsRunnable,
+  compileScopedFilterToSql,
+} from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
@@ -650,6 +654,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the same disposition from `compileScopedFilterToSql` itself (#13571);
     // this is the same ruling at the door that compiler never sees.
     assertReadScopeCannotVacate(scope, objectName);
+    // [#19995] …and the comparand half of the same door. A scope carrying a
+    // comparand the engine's shared faces refuse came back as the engine's
+    // `INVALID_FILTER` / 400 — a 4xx the HTTP doors relay verbatim, naming the
+    // policy's field and comparand, where NativeSQL and the echo refuse the
+    // same scope in the withheld `READ_SCOPE_COMPILE_FAILED` / 500 (#5367).
+    // Judged on the scope ALONE, for the attribution reason above; the
+    // caller's own `where` keeps reaching the engine's doors and its 400.
+    assertReadScopeComparandsRunnable(scope, objectName);
     const scopeFilter = markFilterSubtreeProvenance(scope as Record<string, unknown>, 'policy');
     if (!userFilter) return scopeFilter;
     return { $and: [userFilter, scopeFilter] };
@@ -1133,6 +1145,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // landing in the RESTRICTED bucket. Guarded before the mark, so a refused
     // scope is never stamped as vouched-for policy content.
     if (scope != null) assertReadScopeCannotVacate(scope, refObject);
+    // [#19995] …and the comparand half, as at `withReadScope`: a comparand the
+    // engine refuses would come back as its relayed 400, naming the referenced
+    // object's policy. Before the mark, for the same reason as the line above.
+    if (scope != null) assertReadScopeComparandsRunnable(scope, refObject);
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {

@@ -39,7 +39,6 @@ export const Opportunity = ObjectSchema.create({
     }),
     amount: Field.currency({
       label: 'Amount',
-      scale: 2,
       min: 0,
     }),
     probability: Field.percent({

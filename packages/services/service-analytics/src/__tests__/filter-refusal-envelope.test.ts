@@ -94,9 +94,16 @@ const REFUSALS: Array<{
     issueBullet: true,
   },
   {
+    // [#20010] RE-WORDED, same input, same verdict, same envelope. The door now
+    // hands every field entry to the shared comparand-shape face before any
+    // leaf is built, and the face's arity arm answers first, in the words the
+    // FilterArray spelling already got. `fieldLeaves`' own "needs a
+    // two-element" check stays as that function's invariant and is no longer
+    // reached from this door. The row keeps #5352's bullet: the authoring
+    // mistake is the one #5352 named.
     name: '$between without exactly two bounds',
     where: { amount: { $between: [10] } },
-    message: /needs a two-element \[min, max\] array/,
+    message: /Operator "\$between" on field "amount" requires a \[min, max\] value array/,
     issueBullet: true,
   },
   // FLIPPED with the #5322 ruling: these two entries were "$and/$or with an

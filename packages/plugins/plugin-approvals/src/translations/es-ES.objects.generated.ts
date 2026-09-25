@@ -23,6 +23,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de solicitud"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el origen de la solicitud y el registro al que se refiere (calculado al leer)"
+      },
       organization_id: {
         label: "Organización",
         help: "Organización del registro al que se refiere esta solicitud (recurre al contexto del actor cuando el registro no tiene ninguna)."
@@ -211,6 +215,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID de acción"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: la acción y, si consta, su paso (calculado al leer)"
       },
       organization_id: {
         label: "Organización",

@@ -313,6 +313,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Delivery ID",
         help: "UUID — also doubles as the receiver-side idempotency key"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the delivery label, when set, and its target URL (computed on read)"
+      },
       source: {
         label: "Source",
         help: "Provenance domain, e.g. 'webhook' | 'flow'. UNIQUE(source, dedup_key)."

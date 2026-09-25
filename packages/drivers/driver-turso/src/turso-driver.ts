@@ -508,6 +508,78 @@ function refuseRemoteDriftDetection(): never {
   throw err;
 }
 
+// ── Remote media column move planning: refused, never "nothing to move" ──────
+
+/**
+ * [#19894] The Turso REMOTE face cannot plan the ADR-0104 media column move,
+ * and now says so instead of answering that there is nothing to move.
+ *
+ * # The defect this replaces
+ *
+ * `SqlDriver.planMediaColumnMove` is the read-only half of the column step of
+ * `os migrate files-to-references --apply`. It walks `managedObjectFields`,
+ * which the Knex `initObjects` fills (through `registerObjectMetadata`) and no
+ * remote schema door reaches, and it probes each table with `hasTable` and
+ * column introspection through `this.knex`, which in remote mode is the
+ * placeholder `:memory:` database {@link TursoDriver.toKnexConfig} hands the
+ * base constructor. Either reason alone empties the answer. Measured on the
+ * transport's SQLite-backed double
+ * (`turso-remote-media-column-move-refusal.test.ts`): a table `m` with a `file`
+ * and an `image` field, synced through each of the three remote schema doors,
+ * holds its two physical TEXT columns on the remote database, and the remote
+ * face answered `{ plans: [], refusals: [] }` on every door, with
+ * `managedObjectFields` empty and the placeholder reporting no table `m`. The
+ * local and embedded-replica faces planned two `unquote` moves for the same
+ * declaration. The command mapped the empty scan to "nothing to move — this
+ * datastore declares no single-value media column".
+ *
+ * # Why a refusal rather than an implementation
+ *
+ * Planning remotely needs a remote copy of the SQLite arms the planner reads
+ * through Knex (table existence and column introspection), which is the same
+ * second copy {@link refuseRemoteDriftDetection} declines for drift. It would
+ * also need a remote answer to the step after the plan: the command stamps
+ * `columns_moved_at` so the driver writes bare ids from its next boot, and the
+ * remote face never asks for that stamp. The ADR-0104 resolver is supplied to
+ * this driver, but only `SqlDriver.initObjects` asks it, and none of the three
+ * remote schema doors calls that method; `toKnexConfig` forwards no
+ * `fileColumnsMoved` either. Measured: the resolver was taken and asked zero
+ * times on every remote door, and a remote write stored `"file_abc"` (the JSON
+ * encoding) and read it back as `file_abc`. So until both halves exist the
+ * refusal is the honest answer, in the envelope and for the reason
+ * {@link refuseRemoteDriftDetection} records for its sibling gap on this
+ * transport: the call is spelled correctly and the base class declares it, so
+ * the gap is the backend's. `NOT_IMPLEMENTED`/501 is a
+ * {@link StandardErrorCode} member, so there is no new code.
+ *
+ * # What a caller sees
+ *
+ * `os migrate files-to-references` calls the planner only after the backfill
+ * and its self-check have passed, and reports this refusal as a column step it
+ * could not judge, beside the backfill and verify reports and the flag it
+ * recorded. Nothing is planned, no statement is sent, and nothing is stamped.
+ */
+function refuseRemoteMediaColumnMove(): never {
+  const err = new Error(
+    'Planning the ADR-0104 media column move is not supported by the Turso REMOTE transport ' +
+    '(this datasource\'s transport mode is `remote`), so this driver cannot say which single-value ' +
+    'media columns the database holds or how their values are encoded. The planner reads the ' +
+    'physical columns through the SQL driver\'s Knex connection, and in remote mode that connection ' +
+    'is a placeholder in-memory database holding none of this datasource\'s tables; the objects it ' +
+    'walks are the ones the SQL driver\'s own schema sync registers, and remote mode registers its ' +
+    'objects another way. Answering from them would report "nothing to move" for every remote ' +
+    'database, whatever media columns it holds, so the call refuses: nothing was planned and nothing ' +
+    'ran. The call is spelled correctly and `SqlDriver` declares it, so this is a capability gap of ' +
+    'the remote transport rather than a mistake in the request, which is why it answers ' +
+    'NOT_IMPLEMENTED/501 and not a 400. In remote mode this driver keeps these columns on the JSON ' +
+    'encoding: it writes each file id as a JSON string and reads it back as the id, and it does not ' +
+    'read the record of a completed column move.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 // ── Remote operation timeout ─────────────────────────────────────────────────
 
 /**
@@ -2493,6 +2565,19 @@ export class TursoDriver extends SqlDriver {
   ): ReturnType<SqlDriver['detectManagedDrift']> {
     if (this.isRemote) refuseRemoteDriftDetection();
     return super.detectManagedDrift(objects);
+  }
+
+  /**
+   * Plan the ADR-0104 media column move — refused on the REMOTE face, see
+   * {@link refuseRemoteMediaColumnMove}. The inherited planner walks
+   * `managedObjectFields`, which no remote schema door fills, and probes each
+   * table through the placeholder Knex connection remote mode is built with,
+   * so its remote answer was always an empty scan. Local and replica modes
+   * inherit the Knex planner unchanged.
+   */
+  override async planMediaColumnMove(): ReturnType<SqlDriver['planMediaColumnMove']> {
+    if (this.isRemote) refuseRemoteMediaColumnMove();
+    return super.planMediaColumnMove();
   }
 
   override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {

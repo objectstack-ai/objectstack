@@ -23,6 +23,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "リクエスト ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：申請のソースと対象レコード（読み取り時に計算）"
+      },
       organization_id: {
         label: "組織",
         help: "このリクエストの対象レコードが属する組織（レコードに組織がない場合は操作コンテキストにフォールバック）"
@@ -211,6 +215,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "アクション ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：アクションと、記録されている場合はそのステップ（読み取り時に計算）"
       },
       organization_id: {
         label: "組織",
