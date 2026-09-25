@@ -256,7 +256,12 @@ import {
   type EngineUpdateDispatchData,
   type EngineUpdateDispatchInput,
 } from './engine-update-dispatch.js';
-import { applyHaving } from './having-filter.js';
+import {
+  applyHaving,
+  aggregatedRowColumns,
+  assertHavingIsEvaluable,
+  assertHavingIsFilterCondition,
+} from './having-filter.js';
 import {
   auditDanglingReferences,
   type AuditableObject,
@@ -15722,7 +15727,36 @@ export class ObjectQL implements IObjectQLEngine {
       // the `INVALID_FILTER` / 400 envelope are the face's own, so a `having`
       // refusal reads byte for byte as the `where` refusal of the same shape,
       // path aside — and whatever arm the face gains next, `having` gains too.
+      //
+      // [#20099] …and the rest of the doors `where` takes, at the same seam, so
+      // the whole clause is judged once, before any row exists. In order:
+      //  1. `having` is a filter condition at all — `QuerySchema.having` and
+      //     `EngineAggregateOptions.having` declare `FilterConditionSchema`,
+      //     which refuses an array or a scalar. The walker read an array's index
+      //     keys as columns (`[['total','>',100]]` kept no group) and a scalar
+      //     as no condition (every group). ⛔ Not lowered: the `FilterArray`
+      //     sugar is declared on `where` alone, and every later door steps
+      //     silently around a non-node, so this runs first.
+      //  2. the comparand-shape face (above);
+      //  3. the comparand-TYPE door — the same `normalizeFilterComparandTypes`
+      //     `lowerWhereFilterArray` runs on `where`, path rooted at `having`, so
+      //     `{ total: { $eq: { v: 1 } } }` is the `where` refusal of that shape
+      //     rather than a silent `[]`, and an exact-range bigint is narrowed
+      //     copy-on-write exactly as it is there;
+      //  4. the walker's own refusals plus the `{ $field }` reference's
+      //     position and name, judged against the aggregated row's column set
+      //     read off THIS query (`assertHavingIsEvaluable`). The walker raised
+      //     them per aggregated row, so an empty grouped set answered `200 []`
+      //     for a `having` a populated one refused.
+      // A reference that passes is then RESOLVED against each aggregated row
+      // (having-filter.ts `compareWithReference`) on both doors below.
+      assertHavingIsFilterCondition(query.having);
       assertListComparandShapes(object, 'aggregate', query.having, 'having');
+      {
+          const having = normalizeFilterComparandTypes(query.having, `aggregate('${object}')`, 'having');
+          assertHavingIsEvaluable(having, aggregatedRowColumns(query.groupBy, query.aggregations));
+          if (having !== query.having) query = { ...query, having };
+      }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
 
