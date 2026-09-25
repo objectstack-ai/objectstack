@@ -118,7 +118,8 @@ function makeServer(protocol: any) {
         // covers this file, which is what turned that into a compile error
         // rather than a quietly different harness.
         server, protocol as any, {} as any, undefined, undefined, () => 'env_13214',
-        provider, provider, provider, provider, provider, provider, provider,
+        // index 10 is the retired saved-report slot (#20102): typed `undefined`.
+        provider, provider, provider, provider, undefined, provider, provider,
         provider, provider, provider, () => true, provider, undefined, provider,
     );
     return { rs, table: server.table as Map<string, Handler> };

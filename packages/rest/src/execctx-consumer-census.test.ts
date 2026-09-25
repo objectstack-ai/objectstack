@@ -190,7 +190,8 @@ function makeServer(protocol: any) {
     const provider = async () => anyService();
     const rs: any = new RestServer(
         server, protocol as any, {} as any, undefined, undefined, () => 'env_census',
-        provider, provider, provider, provider, provider, provider, provider,
+        // index 10 is the retired saved-report slot (#20102): typed `undefined`.
+        provider, provider, provider, provider, undefined, provider, provider,
         provider, provider, provider, () => true, provider, undefined, provider,
     );
     return { rs, table: server.table as Map<string, Handler> };
