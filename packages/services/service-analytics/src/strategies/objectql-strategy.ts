@@ -1791,16 +1791,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * re-type them. The two `coerceFilterValueForObjectQL` calls this replaced
    * existed only to undo `stringifyForCube`, and undoing it required guessing.
    *
-   * The four LIKE-family arms are the exception, and a contract one:
-   * `filter.zod.ts` declares `$contains` / `$notContains` / `$startsWith` /
-   * `$endsWith` as `z.string()`, so this PRODUCER must hand the engine a real
-   * string — `String(…)`, the same normalisation `like-pattern.ts` applies at the
-   * two SQL emitters and `driver-sql`'s `applyLike` applies at the driver, so one
-   * `$contains` means one thing on every face (#5567's invariant).
+   * The four LIKE-family arms and `$icontains` are the exception, and a
+   * contract one: `filter.zod.ts` declares `$contains` / `$notContains` /
+   * `$startsWith` / `$endsWith` / `$icontains` as `z.string()`, so this PRODUCER
+   * must hand the engine a real string — `String(…)`, the same normalisation
+   * `like-pattern.ts` applies at the two SQL emitters and `driver-sql`'s
+   * `applyLike` applies at the driver, so one `$contains` means one thing on
+   * every face (#5567's invariant).
    *
-   * [#5234] Those four `String(…)` calls now only ever see a value that renders
+   * [#5234] Those `String(…)` calls now only ever see a value that renders
    * faithfully: `fieldLeaves` refuses an object comparand on this family before a
-   * leaf exists. That ordering is load-bearing rather than incidental — this arm
+   * leaf exists (and, for `$icontains`, any empty or non-string one, #20068).
+   * That ordering is load-bearing rather than incidental — this arm
    * is a PRODUCER for the engine, so stringifying an object here would have
    * laundered it into `'[object Object]'` and handed a driver a perfectly
    * well-typed string. A strict driver downstream could never have seen the shape
@@ -1875,6 +1877,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       case 'notContains': return { $notContains: String(v0) };
       case 'startsWith': return { $startsWith: String(v0) };
       case 'endsWith': return { $endsWith: String(v0) };
+      // [#20098] The case-INSENSITIVE twin (#6520) had no arm, so every
+      // `$icontains` — a valid `'acme'` included — fell to the `default:` below
+      // and `/analytics/query` answered an uncoded 500 on a datasource this
+      // strategy serves, while the native face and the echo served the rows.
+      // Like the four above it passes through as the canonical spec operator
+      // (`FILTER_OPERATORS` declares `$icontains`), and the ASCII-only fold
+      // (#4706 Q1 = A) stays where every other face gets it: the engine and
+      // the driver. ⛔ No fold here — lower-casing the comparand would answer
+      // `'café'` for `'CAFÉ'`, a row the contract excludes — and no `$regex`
+      // (#5557). `String(…)` is the family's normalisation, and an identity on
+      // everything that can arrive: the door refuses an empty or non-string
+      // comparand before a leaf exists (#20068).
+      case 'icontains': return { $icontains: String(v0) };
       case 'in': return { $in: all };
       case 'notIn': return { $nin: all };
       default:
