@@ -86,8 +86,8 @@ export const NotificationDelivery = ObjectSchema.create({
         id: Field.text({ label: 'Delivery ID', required: true, readonly: true }),
 
         // [ADR-0079] The record title (`nameField` above). A formula is computed
-        // on read and has no stored column. `channel` and `recipient_id` are all required, so the
-        // expression needs no null guard.
+        // on read and has no stored column. `channel` and `recipient_id` are
+        // both required, so the expression needs no null guard.
         display_title: Field.formula({
             label: 'Title',
             returnType: 'text',

@@ -48,8 +48,8 @@ export const NotificationPreference = ObjectSchema.create({
         id: Field.text({ label: 'Preference ID', required: true, readonly: true }),
 
         // [ADR-0079] The record title (`nameField` above). A formula is computed
-        // on read and has no stored column. `user_id`, `topic` and `channel` are all required, so the
-        // expression needs no null guard.
+        // on read and has no stored column. `user_id`, `topic` and `channel`
+        // are all required, so the expression needs no null guard.
         display_title: Field.formula({
             label: 'Title',
             returnType: 'text',

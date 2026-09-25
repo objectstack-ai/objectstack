@@ -29,7 +29,8 @@ export const SysPresence = ObjectSchema.create({
   // title-eligible field), so a renderer honouring ADR-0079's order (an
   // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
   // page's H1. `titleFormat` stays for renderers that still read it first;
-  // `sys-presence-display-title.test.ts` holds the two to the same text.
+  // `sys-presence-display-title.test.ts` pins the pointer and the formula's
+  // inputs.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{user_id} ({status})',

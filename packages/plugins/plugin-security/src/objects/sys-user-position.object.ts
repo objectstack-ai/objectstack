@@ -64,8 +64,10 @@ export const SysUserPosition = ObjectSchema.create({
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
     // read and has no stored column. It reads only this row's own columns —
-    // the user foreign key and the position name, never a field of the user record — so it shows a reader nothing the row does not already
-    // show them. Both are required, so the expression needs no null guard.
+    // the user foreign key and the position name, never a field of the user
+    // record — and neither is hidden, permission-guarded or masked on this
+    // object, so the title carries nothing the declared read path withholds.
+    // Both are required, so the expression needs no null guard.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',

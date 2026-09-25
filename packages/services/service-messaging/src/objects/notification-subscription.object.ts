@@ -52,8 +52,8 @@ export const NotificationSubscription = ObjectSchema.create({
         id: Field.text({ label: 'Subscription ID', required: true, readonly: true }),
 
         // [ADR-0079] The record title (`nameField` above). A formula is computed
-        // on read and has no stored column. `principal` and `topic` are all required, so the
-        // expression needs no null guard.
+        // on read and has no stored column. `principal` and `topic` are both
+        // required, so the expression needs no null guard.
         display_title: Field.formula({
             label: 'Title',
             returnType: 'text',
