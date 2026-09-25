@@ -26,7 +26,7 @@ What does not change:
 
 - A stored value without U+0000 gets the same answer as before: 0 of 16640 such cells moved on any face.
 - A pattern that is a literal prefix followed only by `%` (`'ab%'`, `'%'`) compiles to the same `GLOB` with the same bound pattern as before. Cutting the value at its first U+0000 cannot change that answer.
-- No index is lost. Under `EXPLAIN QUERY PLAN` over an indexed TEXT column on all three engines, each `$like` pattern measured that starts with a literal (`'ab%'`, `'ab_'`, `'ab%cd'`, `'abc'`, `'a%b%'`) keeps its covering-index search, and each one that starts with a wildcard still scans. A case-exact pattern with a literal prefix now leads with `GLOB '<prefix>*'`, which every matching value satisfies and which is what keeps that search.
+- No index is lost. Under `EXPLAIN QUERY PLAN` over an indexed TEXT column on all three engines, each `$like` pattern measured that starts with a literal (`'ab%'`, `'ab_'`, `'ab%cd'`, `'abc'`, `'a%b%'`) keeps its covering-index search, and each one that starts with a wildcard still scans. A case-exact pattern with a literal prefix now leads with a `GLOB` on that prefix followed by `*`, which every matching value satisfies and which is what keeps that search.
 - `_` still matches one character, as `GLOB`'s `?` does. A character outside the Basic Multilingual Plane is one character to `_` on SQLite and two to `@objectstack/formula`, which counts UTF-16 units. That difference is older than this change, and this change does not alter it.
 - A pattern holding U+0000 is still refused (`INVALID_FILTER` / 400).
 - The Postgres and MySQL arms are untouched.
