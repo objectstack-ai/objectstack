@@ -215,9 +215,13 @@ describe('RemoteTransport bare-Date comparand routing (#1066)', () => {
 
     it('names the object and field, and echoes the comparand', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { closed_at: {} } })).rejects.toThrow(
-        /'deal\.closed_at'/,
-      );
+      // [#20039] Marked author-written: the target is the predicate's detail,
+      // named only for a `where` the caller is known to have written (the #8220
+      // contract), as `driver-sql`'s twin has withheld it since #8197. The
+      // withheld half is pinned in `remote-transport-compile-refusal-seam.test.ts`.
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ closed_at: {} }, 'author') }),
+      ).rejects.toThrow(/'deal\.closed_at'/);
     });
 
     it('refuses an object with no own enumerable keys whatever its prototype', async () => {

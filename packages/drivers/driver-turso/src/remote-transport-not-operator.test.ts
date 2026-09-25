@@ -84,7 +84,15 @@ function transportWithCapturingClient() {
   };
   const t = new RemoteTransport();
   t.setClient(client as any);
-  return { t, calls };
+  // [#20039] The server-side half of a withheld refusal. Inside `$not` this
+  // transport compiles a REWRITE of the operand (the NULL-safe totalisation),
+  // whose nodes the provenance resolver cannot find under the query's root, so
+  // a refusal raised there is withheld even for an author-marked `where` —
+  // fail-closed by construction, as `driver-sql` documents for its own `$not`
+  // rewrite. The pins that read the naming half inside `$not` read it here.
+  const sink: string[] = [];
+  t.setDiagnosticSink((m) => sink.push(m));
+  return { t, calls, sink };
 }
 
 /** The SQL a `find` compiled to, plus its bind list. */
@@ -171,15 +179,24 @@ describe('RemoteTransport $not (#1076)', () => {
       // What the case still proves is what it always proved: the key named in
       // the refusal is the INNER `$eq`, at `where.$not.$eq`. `$not` is the
       // operator it is declared to be, all the way down.
-      const err = (await compile({ $not: { $eq: 'won' } }).catch((e) => e)) as Error & {
+      // [#20039] Marked author-written: the key and its position are named only
+      // for a predicate the caller is known to have written (the #8220
+      // contract); the withheld half is pinned in
+      // `remote-transport-compile-refusal-seam.test.ts`.
+      const { t, sink } = transportWithCapturingClient();
+      const err = (await t
+        .find('deal', { where: markFilterSubtreeProvenance({ $not: { $eq: 'won' } }, 'author') } as unknown as QueryAST)
+        .catch((e) => e)) as Error & {
         code?: string;
         status?: number;
       };
       expect(err).toBeInstanceOf(Error);
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
-      expect(err.message).toContain('"$eq"');
-      expect(err.message).toContain('where.$not.$eq');
+      const named = sink.join('\n');
+      expect(named).toContain('"$eq"');
+      expect(named).toContain('where.$not.$eq');
+      expect(named).not.toContain(`'deal.$not'`);
       expect(err.message).not.toContain(`'deal.$not'`);
     });
   });
@@ -320,6 +337,12 @@ describe('RemoteTransport $not (#1076)', () => {
   });
 
   describe('(e) a `$not` operand that is not a filter node is refused, never read as a column', () => {
+    // [#20039] The operand's kind, its preview and its position are the
+    // predicate's detail, named on the wire only for a `where` the caller is
+    // known to have written (the #8220 contract) — so the pins that read them
+    // mark theirs author-written, as a read-scope merge boundary marks a
+    // caller's own predicate.
+    const own = (where: Record<string, unknown>) => markFilterSubtreeProvenance(where, 'author');
     const cases: Array<[string, unknown, RegExp]> = [
       ['null', null, /is null, not a filter condition/],
       ['undefined', undefined, /is undefined, not a filter condition/],
@@ -334,13 +357,13 @@ describe('RemoteTransport $not (#1076)', () => {
     for (const [label, operand, message] of cases) {
       it(`refuses ${label} as the $not operand`, async () => {
         const { t } = transportWithCapturingClient();
-        await expect(t.find('deal', { where: { $not: operand } as any })).rejects.toThrow(message);
+        await expect(t.find('deal', { where: own({ $not: operand }) as any })).rejects.toThrow(message);
       });
     }
 
     it('names `$not` without an index — it takes one operand, not a list', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { $not: null } as any })).rejects.toThrow(
+      await expect(t.find('deal', { where: own({ $not: null }) as any })).rejects.toThrow(
         /\$not on 'deal'/,
       );
     });
@@ -357,7 +380,7 @@ describe('RemoteTransport $not (#1076)', () => {
 
     it('says what a negation of "no condition" is written as', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { $not: 'won' } as any })).rejects.toThrow(
+      await expect(t.find('deal', { where: own({ $not: 'won' }) as any })).rejects.toThrow(
         /\$not takes exactly ONE condition/,
       );
     });
@@ -388,9 +411,13 @@ describe('RemoteTransport $not (#1076)', () => {
         t.find('deal', { where: { $not: { amount: { $gt: { $field: 'budget' } } } } } as unknown as QueryAST),
       ).rejects.toThrow(/Cross-field comparison is not supported/);
       // #1073: a non-node element of a nested logical array.
-      await expect(t.find('deal', { where: { $not: { $or: [null] } } } as unknown as QueryAST)).rejects.toThrow(
-        /\$or\[0\] on 'deal'/,
-      );
+      // [#20039] Refused inside the `$not` rewrite, so withheld on the wire even
+      // for an author; the sink names the branch.
+      const { t: nested, sink } = transportWithCapturingClient();
+      await expect(
+        nested.find('deal', { where: own({ $not: { $or: [null] } }) } as unknown as QueryAST),
+      ).rejects.toThrow(/is not a filter condition object/);
+      expect(sink.join('\n')).toMatch(/\$or\[0\] on 'deal'/);
     });
 
     it('executes no statement when it refuses', async () => {

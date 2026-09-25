@@ -159,6 +159,15 @@ describe('[#6518] TursoDriver LOCAL and REMOTE answer FILTER_TEXT_CASES identica
   for (const testCase of FILTER_TEXT_CASES) {
     it(testCase.name, async () => {
       if (testCase.expectRejection) {
+        // [#20039] What a WITHHELD answer may still name is the refusal's class
+        // statement — read here off the LOCAL face's answer to the same filter
+        // UNMARKED, which is the withheld sentence every non-author caller gets
+        // (`$icontains`, for the comparand rows: one operator, one class). A
+        // mention that sentence does not carry is the predicate's, and a
+        // withheld remote answer must carry none of those.
+        const classOnly = await local
+          .find(TEXT_OBJECT.name, { where: { ...testCase.filter } } as DriverQuery)
+          .then(() => '', (e: unknown) => String((e as Error).message));
         for (const [face, driver] of [['local', local], ['remote', remote]] as const) {
           // [#20020] The case-set's refusals name the operator and its
           // replacement, which both compilers disclose only for a predicate the
@@ -183,8 +192,11 @@ describe('[#6518] TursoDriver LOCAL and REMOTE answer FILTER_TEXT_CASES identica
           // pinned on the transport itself.
           const withheld = face === 'remote' && err!.message.includes('withheld from the message');
           for (const mention of testCase.mustMention) {
-            if (withheld) expect(err!.message, `${face} — ${mention}`).not.toContain(mention);
-            else expect(err!.message, `${face} — ${mention}`).toContain(mention);
+            if (withheld && !classOnly.includes(mention)) {
+              expect(err!.message, `${face} — ${mention}`).not.toContain(mention);
+            } else {
+              expect(err!.message, `${face} — ${mention}`).toContain(mention);
+            }
           }
         }
         return;
