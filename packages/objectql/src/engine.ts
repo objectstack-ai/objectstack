@@ -16070,7 +16070,10 @@ export class ObjectQL implements IObjectQLEngine {
       //     position and name, judged against the aggregated row's column set
       //     read off THIS query (`assertHavingIsEvaluable`). The walker raised
       //     them per aggregated row, so an empty grouped set answered `200 []`
-      //     for a `having` a populated one refused.
+      //     for a `having` a populated one refused. [#20123] The same column
+      //     set judges every KEY too: a key naming no column read "no value"
+      //     in every group, so a typo for an alias kept no group (every group
+      //     under a negation) with no error.
       // A reference that passes is then RESOLVED against each aggregated row
       // (having-filter.ts `compareWithReference`) on both doors below.
       assertHavingIsFilterCondition(query.having);

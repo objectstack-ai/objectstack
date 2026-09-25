@@ -415,6 +415,43 @@ function malformedFieldReferenceError(path: string, detail: string): Error {
 }
 
 /**
+ * [#20123] A `having` KEY that names no column of the aggregated row — the
+ * twin of {@link unresolvedFieldReferenceError} for the other place a column
+ * is named.
+ *
+ * Refused on the filter, never answered per row: {@link checkCondition} reads
+ * such a key as a column with NO VALUE in every group, so a typo for an alias
+ * (`{ totl: { $gt: 100 } }`) kept no group and a negated test on it
+ * (`$ne`, `$exists: false`, a `$not`) kept every group — an answer
+ * indistinguishable from a real one. It is the same mistake the REST
+ * ingress refuses on `where` for a field the object does not have, and the
+ * opening words follow that refusal's ("filters on 'X', which is not a …";
+ * "the query was refused instead of answered"). The code stays this face's
+ * own `INVALID_FILTER`: the name is a column of the QUERY's own projection,
+ * not a field of the object, which is what `INVALID_FIELD` answers about.
+ *
+ * Every unknown key is named, the first with its position, and the column
+ * list is printed because it is the author's own query, and it is the answer.
+ */
+function unknownHavingColumnError(
+  unknown: ReadonlyArray<{ key: string; path: string }>,
+  columns: readonly string[],
+): Error {
+  const [first] = unknown;
+  const others = [...new Set(unknown.map((u) => u.key))].filter((key) => key !== first.key);
+  const also = others.length ? ` (also: ${others.join(', ')})` : '';
+  const known = columns.length ? columns.join(', ') : '(none — the query projects no column)';
+  return invalidFilterError(
+    `\`having\` filters on '${first.key}' at ${first.path}, which is not a column of the aggregated `
+    + `row${also}. A condition on a column the row does not carry is answered as if that column had no `
+    + `value in every group — a test for a value keeps no group, and a test for its absence or a `
+    + `negation keeps every group — so the query was refused instead of answered. \`having\` filters `
+    + `the aggregated row's own columns — the groupBy projections and the aggregation aliases — which `
+    + `here are: ${known}.`,
+  );
+}
+
+/**
  * [#5905] Operators whose answer for a column with NO VALUE is decided by the
  * operator's own arm below, not by the early exit in {@link checkCondition}.
  *
@@ -496,13 +533,22 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  * - a reference outside the six scalar comparisons —
  *   {@link fieldReferencePositionError};
  * - a reference its declaration refuses (a malformed `addDays`), or one naming
- *   no column of the aggregated row — {@link unresolvedFieldReferenceError}.
+ *   no column of the aggregated row — {@link unresolvedFieldReferenceError};
+ * - [#20123] and, once the whole clause has passed those, a KEY naming no
+ *   column of the aggregated row, at any depth —
+ *   {@link unknownHavingColumnError}. Last on purpose: a condition on a column
+ *   the row does not carry is still read for its operator first (the #20099
+ *   rule above), so the refusal an author meets for `{ nope: { $median: 1 } }`
+ *   is the operator's, and fixing it does not reveal a second one they could
+ *   have been told about already.
  *
  * Read-only; `having` is assumed to have passed
  * {@link assertHavingIsFilterCondition}.
  */
 export function assertHavingIsEvaluable(having: unknown, columns: readonly string[]): void {
-  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns });
+  const unknownKeys: Array<{ key: string; path: string }> = [];
+  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns, unknownKeys });
+  if (unknownKeys.length > 0) throw unknownHavingColumnError(unknownKeys, columns);
 }
 
 /**
@@ -537,16 +583,18 @@ export function assertAggregationFilterIsEvaluable(filter: unknown, index: numbe
 /**
  * [#20122] What one row-independent walk judges against: the clause whose
  * words its refusals use, and — where the position has a closed namespace —
- * the column set a `{ $field }` reference must name.
+ * the column set a key and a `{ $field }` reference must name.
  */
 interface EvaluableScope {
   clause: FilterClause;
   /**
-   * The names a `{ $field }` reference may take. `undefined` when the position
-   * has no closed column set to judge a name against (the per-aggregation
-   * filter reads the object's raw columns).
+   * The names a key and a `{ $field }` reference may take. `undefined` when
+   * the position has no closed column set to judge a name against (the
+   * per-aggregation filter reads the object's raw columns).
    */
   columns?: readonly string[];
+  /** [#20123] Keys naming none of `columns`, collected in walk order. */
+  unknownKeys?: Array<{ key: string; path: string }>;
 }
 
 /** One node: the `$and` / `$or` / `$not` walk {@link matchesHaving} takes. */
@@ -565,6 +613,9 @@ function assertNodeIsEvaluable(cond: unknown, path: string, scope: EvaluableScop
     }
     if (key.startsWith('$')) throw unknownOperator(key, 'logical', [], scope.clause);
     assertConditionIsEvaluable(value, key, here, scope);
+    // [#20123] Rows carry exactly the columns the query projects, so a key
+    // outside them can only ever read "no value" — see unknownHavingColumnError.
+    if (scope.columns && !scope.columns.includes(key)) scope.unknownKeys?.push({ key, path: here });
   }
 }
 

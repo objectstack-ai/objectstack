@@ -667,3 +667,86 @@ describe('[#20099] having — a { $field } reference resolves against the aggreg
     }
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20123] A `having` key names a column of the aggregated row
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('[#20123] having — a key naming no column of the aggregated row is refused, whatever the rows', () => {
+  // `AGG_QUERY` projects exactly three columns.
+  const COLUMNS = ['customer_id', 'order_count', 'total'];
+
+  // Before, measured through `engine.aggregate` on driver-memory and
+  // driver-sql, both doors, and through `POST /data/:object/query`: no row
+  // raised anything. A test for a value kept no group; a test for absence or
+  // a negation — and a `$or` whose first branch held — kept EVERY group.
+  const UNKNOWN_KEY: ReadonlyArray<readonly [string, () => Record<string, unknown>, string, string]> = [
+    ['a typo for an alias under $gt (the triage shape)', () => ({ totl: { $gt: 100 } }), 'totl', 'having.totl'],
+    ['a typo in the implicit-equality slot', () => ({ totl: 500 }), 'totl', 'having.totl'],
+    ['a typo under $ne', () => ({ totl: { $ne: 1 } }), 'totl', 'having.totl'],
+    ['a typo under $exists: false', () => ({ totl: { $exists: false } }), 'totl', 'having.totl'],
+    ['a typo nested in $and', () => ({ $and: [{ total: { $gt: 0 } }, { totl: { $gt: 100 } }] }), 'totl', 'having.$and[1].totl'],
+    ['a typo behind a $or branch that already held', () => ({ $or: [{ total: { $gt: 0 } }, { totl: { $gt: 100 } }] }), 'totl', 'having.$or[1].totl'],
+    ['a typo under $not', () => ({ $not: { totl: { $gt: 100 } } }), 'totl', 'having.$not.totl'],
+    ['a SOURCE column the aggregated row does not project', () => ({ amount: { $gt: 100 } }), 'amount', 'having.amount'],
+    ['a dotted path', () => ({ 'customer_id.name': 'c1' }), 'customer_id.name', 'having.customer_id.name'],
+    ['a key that also carries a { $field } reference', () => ({ totl: { $gt: { $field: 'total' } } }), 'totl', 'having.totl'],
+  ];
+
+  for (const [name, having, key, path] of UNKNOWN_KEY) {
+    it(`${name}: refused at ${path}, naming the columns`, async () => {
+      const message = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: having() }), ROWS);
+      expect(message).toContain(`'${key}' at ${path}`);
+      for (const column of COLUMNS) expect(message).toContain(column);
+    });
+  }
+
+  it('every unknown key is named — the first with its position, the rest after it', async () => {
+    const message = await expectRowIndependentRefusal(
+      offContract({ ...AGG_QUERY, having: { $and: [{ totl: 1 }, { cnt: { $gt: 1 } }, { totl: 2 }] } }), ROWS);
+    expect(message).toContain("'totl' at having.$and[0].totl");
+    expect(message).toContain('(also: cnt)');
+  });
+
+  it('an operator refusal on an unknown column is still the operator\'s — the key is judged last', async () => {
+    // The #20099 rule: a condition on a column the row does not carry is read
+    // for its operator. Held here so the new check cannot jump ahead of it.
+    const floor = syncRefusalOf(() => applyHaving([{ nope: 1 }], { nope: { $median: 1 } } as FilterCondition));
+    const message = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: { nope: { $median: 1 } } }), ROWS);
+    expect(message).toBe(floor!.message);
+  });
+
+  it('the source name of an ALIASED groupBy projection is not a column — its alias is', async () => {
+    // Before: `{ customer_id: 'c1' }` kept no group — the row projects `cust`.
+    const query = (having: FilterCondition): EngineAggregateOptions => ({
+      groupBy: [{ field: 'customer_id', alias: 'cust' }],
+      aggregations: [{ function: 'count', alias: 'order_count' }],
+      having,
+    });
+    const message = await expectRowIndependentRefusal(query({ customer_id: 'c1' }), ROWS);
+    expect(message).toContain("'customer_id' at having.customer_id");
+    expect(message).toContain('cust, order_count');
+    // The alias itself answers, on the door that projects it (the stand-in
+    // native driver groups by `customer_id` and ignores the alias).
+    const { engine } = await makeEngine(ROWS, false);
+    const rows = await engine.aggregate(OBJECT, query({ cust: 'c1' }));
+    expect(rows).toEqual([{ cust: 'c1', order_count: 2 }]);
+  });
+
+  // Every key names a column: answered exactly as before, both doors.
+  const PASSING: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
+    ['a groupBy column', { customer_id: 'c1' }, ['c1']],
+    ['an aggregation alias', { total: { $gt: 100 } }, ['c1', 'c2']],
+    ['a count alias', { order_count: { $gte: 2 } }, ['c1', 'c2']],
+    ['columns nested under $or / $and / $not', { $or: [{ total: { $gt: 1000 } }, { $and: [{ $not: { customer_id: 'c1' } }, { order_count: 1 }] }] }, ['c2', 'c3']],
+    ['a negation of a column', { total: { $ne: 500 } }, ['c2', 'c3']],
+  ];
+  for (const [name, having, expected] of PASSING) {
+    it(`${name} answers ${JSON.stringify(expected)} on both doors`, async () => {
+      for (const [door, native] of DOORS) {
+        const { engine } = await makeEngine(ROWS, native);
+        expect(groups(await engine.aggregate(OBJECT, { ...AGG_QUERY, having })), door).toEqual([...expected]);
+      }
+    });
+  }
+});
