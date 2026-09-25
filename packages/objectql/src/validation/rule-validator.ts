@@ -3063,8 +3063,12 @@ const permissionPredicateCache = new Map<string, boolean>();
  * A non-CEL dialect, or a source that does not parse, answers `false`: the
  * evaluator runs the same parser and cannot evaluate what this cannot read, so
  * the map could not change its outcome.
+ *
+ * [#20082] Exported for the engine's two VALUE sites that bind `current_user`
+ * — a `formula` field and a CEL `defaultValue` — so "does this expression need
+ * the permission map?" has one answer for predicates and values alike.
  */
-function readsPermissionPredicate(cond: string | Expression): boolean {
+export function readsPermissionPredicate(cond: string | Expression): boolean {
   const expr = toExpression(cond);
   if (expr.dialect !== 'cel') return false;
   const source = typeof expr.source === 'string' ? expr.source : '';

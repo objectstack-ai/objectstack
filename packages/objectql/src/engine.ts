@@ -214,7 +214,7 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectPredicateRelationships, evaluateValidationRules, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -981,6 +981,29 @@ function lowerWhereFilterArray<T extends object | undefined>(
   return lowered as T;
 }
 
+/**
+ * [#20082] One operation's effective-permission resolution — see
+ * `ObjectQL.permissionResolution`. `get()` asks the registered resolver at most
+ * once for the operation and hands every caller the same answer, or the same
+ * rejection.
+ */
+interface PermissionResolution {
+  get(): Promise<EvalPermissions>;
+}
+
+/**
+ * Is this `defaultValue` an Expression envelope (`{ dialect, source }`) —
+ * evaluated at insert time — rather than a literal or a runtime token? The one
+ * test {@link ObjectQL.applyFieldDefaults} evaluates by and
+ * {@link ObjectQL.resolveDefaultPermissions} plans by, so the two can never
+ * disagree about which defaults are expressions.
+ */
+function isExpressionDefault(dv: unknown): dv is Expression {
+  return typeof dv === 'object' && dv !== null
+    && Boolean((dv as { dialect?: unknown }).dialect)
+    && typeof (dv as { source?: unknown }).source === 'string';
+}
+
 interface FormulaPlanEntry {
   name: string;
   expression: Expression;
@@ -1497,6 +1520,15 @@ function undeclaredWriteFieldErrors(
  * `{ record }`, so `now()`/`today()` ran against live wall-clock and user/org
  * were unreachable.
  *
+ * [#20082] `permissions` is the acting subject's effective object-permission
+ * map, the one `current_user.can(object, verb)` answers from. The CALLER
+ * resolves it — at most once per operation, and only when a planned formula
+ * calls `can` ({@link ObjectQL.resolveFormulaPermissions}) — because this
+ * function is synchronous and owns no resolver. `undefined` is "no permission
+ * data", never an empty map: a `can`-calling formula then fails to evaluate and
+ * reads `null`, the rule every formula that does not evaluate follows here, and
+ * the caller has already said why in its log line.
+ *
  * That context has the same SHAPE as `applyFieldDefaults`' — the same keys, so
  * one expression vocabulary serves `formula` and `defaultValue` alike — but NOT
  * the same `now` value, and the two are sourced independently on purpose
@@ -1582,6 +1614,7 @@ function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
   execCtx?: ExecutionContext,
+  permissions?: EvalPermissions,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -1591,7 +1624,7 @@ function applyFormulaPlan(
   for (const rec of records) {
     if (rec == null) continue;
     for (const fp of plan) {
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, record: rec });
+      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: rec });
       rec[fp.name] = r.ok ? roundFormulaValue(r.value, fp.scale) : null;
     }
   }
@@ -1623,6 +1656,10 @@ function applyFormulaPlan(
  *  - the execution context is threaded exactly as find threads it, so `os.user`
  *    / `os.org` resolve identically on both sides. Widening what that context
  *    carries is #1979's work and stays out of here.
+ *  - [#20082] the permission map comes from the same place find's does:
+ *    `permissionsFor` is the engine's {@link ObjectQL.resolveFormulaPermissions}
+ *    bound to the WRITE's own resolution, so a write that already resolved the
+ *    map for a default or an option gate reuses it rather than asking again.
  *
  * Evaluates against the record the driver returned (a full row: `create` uses
  * `RETURNING *`, `update` re-reads), so no extra round-trip is needed and no
@@ -1634,18 +1671,19 @@ function applyFormulaPlan(
  * otherwise take a property assignment, which throws under ES module strict
  * mode.
  */
-function hydrateWriteFormulas(
+async function hydrateWriteFormulas(
   schema: any,
   results: unknown[],
-  execCtx?: ExecutionContext,
-): void {
+  execCtx: ExecutionContext | undefined,
+  permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>,
+): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
   );
   if (records.length === 0) return;
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
-  applyFormulaPlan(plan, records, execCtx);
+  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records));
 }
 
 /**
@@ -1683,6 +1721,12 @@ function hydrateWriteFormulas(
  * that compiles and does not EVALUATE yields `null` — `applyFormulaPlan`'s own
  * `r.ok ? … : null`. A caller therefore cannot mistake "this title could not be
  * computed" for a computed value.
+ *
+ * ⚠️ One scope difference, named rather than hidden [#20082]: this helper is
+ * synchronous and passes NO permission map, so a formula that calls
+ * `current_user.can(…)` does not evaluate here and yields `null` by the rule
+ * above. The read and write paths resolve the map first
+ * ({@link ObjectQL.resolveFormulaPermissions}); a helper with no resolver cannot.
  *
  * Returns `undefined` when `field` is not a declared formula field, which is
  * how a caller tells "read the stored column instead" from "the formula
@@ -4159,23 +4203,26 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * [#18783] Where the acting subject's EFFECTIVE object permissions come from —
-   * the map `current_user.can(object, verb)` in a per-option `visibleWhen` is
-   * answered from. Registered by the security plugin (the one producer,
+   * the map `current_user.can(object, verb)` is answered from: in a per-option
+   * `visibleWhen`, and since #20082 in a `formula` field and a CEL
+   * `defaultValue`. Registered by the security plugin (the one producer,
    * `ISecurityService.getEffectiveObjectPermissions`), the same way it
    * registers {@link registerWriteGateProbe}; last registration wins.
    *
    * Unregistered is a DEFINED state, not a fault: the engine then passes NO
    * permission data — ⛔ never an empty map and never one it merged itself — so
-   * a `can` predicate stays loudly unevaluable, exactly as the contract member
-   * prescribes for an absent method. See {@link resolveOptionPermissions} for
-   * when it is asked and what a throw does.
+   * a `can` expression stays loudly unevaluable, exactly as the contract member
+   * prescribes for an absent method. See {@link permissionResolution} for how
+   * one operation asks at most once, and each consumer
+   * ({@link resolveOptionPermissions}, {@link resolveDefaultPermissions},
+   * {@link resolveFormulaPermissions}) for when it asks and what a throw does.
    */
   private _effectiveObjectPermissionsResolver?: (context: unknown) => Promise<unknown>;
 
   /** Wire the effective object-permission source (#18783). Last registration wins. */
   registerEffectiveObjectPermissionsResolver(fn: (context: unknown) => Promise<unknown>): void {
     this._effectiveObjectPermissionsResolver = fn;
-    this.logger.debug('Registered effective object-permission resolver for option visibleWhen can()');
+    this.logger.debug('Registered effective object-permission resolver for current_user.can()');
   }
 
   /**
@@ -4210,18 +4257,20 @@ export class ObjectQL implements IObjectQLEngine {
   private async resolveOptionPermissions(
     schema: unknown,
     payloads: ReadonlyArray<Record<string, unknown> | null | undefined>,
-    context: ExecutionContext | undefined,
+    resolution: PermissionResolution | undefined,
   ): Promise<(payload: Record<string, unknown> | null | undefined) => EvalPermissions | undefined> {
     const none = (): undefined => undefined;
-    const resolver = this._effectiveObjectPermissionsResolver;
-    if (!resolver || !this.buildEvalUser(context)) return none;
+    // [#20082] The write's ONE resolution ({@link permissionResolution}) —
+    // `undefined` on exactly the two conditions this method used to test
+    // itself: no resolver registered, or no acting user.
+    if (!resolution) return none;
     const fields = (schema as { fields?: Parameters<typeof optionVisibilityReadsPermissions>[0] } | null | undefined)?.fields;
     const needs = (payload: Record<string, unknown> | null | undefined): boolean =>
       optionVisibilityReadsPermissions(fields, payload);
     if (!payloads.some(needs)) return none;
     let permissions: EvalPermissions;
     try {
-      permissions = toEvalPermissions(await resolver(context));
+      permissions = await resolution.get();
     } catch (err) {
       return (payload) => {
         if (needs(payload)) throw err;
@@ -4229,6 +4278,158 @@ export class ObjectQL implements IObjectQLEngine {
       };
     }
     return (payload) => (needs(payload) ? permissions : undefined);
+  }
+
+  /**
+   * [#20082] ONE operation's effective-permission resolution — the single
+   * resolver ask every consumer inside that operation shares. On a write those
+   * are its CEL `defaultValue`s ({@link resolveDefaultPermissions}), its option
+   * gates ({@link resolveOptionPermissions}) and the formula fields on its
+   * response ({@link resolveFormulaPermissions}); on a read, its formula fields.
+   * The contract member's "resolve it ONCE per request" is kept per engine
+   * operation: a write that carries a `can` default, a `can` option gate and a
+   * `can` formula asks the resolver once, not three times.
+   *
+   * `undefined` when there is nothing to ask — no resolver registered, or no
+   * acting user (`current_user` is then unbound, and `can` asks about nobody).
+   * Every consumer then passes NO permission data: ⛔ never an empty map, which
+   * is a real answer ("holds nothing") and would deny confidently.
+   *
+   * Lazy and memoised for the operation: the ask happens when the first consumer
+   * NEEDS the map, never earlier, and a later consumer awaits the same promise —
+   * its rejection included, so one failed resolution is the same failure
+   * everywhere in the operation rather than a second, possibly different, ask.
+   * The answer goes through `toEvalPermissions`, formula's one door into
+   * `EvalContext.permissions`, so an off-shape map fails here like a throw.
+   * ⛔ Never kept past the operation: each operation mints its own, because a map
+   * held across operations would serve a grant that may since have been revoked.
+   */
+  private permissionResolution(context: ExecutionContext | undefined): PermissionResolution | undefined {
+    const resolver = this._effectiveObjectPermissionsResolver;
+    if (!resolver || !this.buildEvalUser(context)) return undefined;
+    let pending: Promise<EvalPermissions> | undefined;
+    return {
+      // `Promise.resolve().then(...)` so a resolver that throws SYNCHRONOUSLY is
+      // memoised as a rejection too, rather than escaping `get()` un-memoised
+      // and being asked again by the next consumer.
+      get: () => (pending ??= Promise.resolve()
+        .then(() => resolver(context))
+        .then((answer) => toEvalPermissions(answer))),
+    };
+  }
+
+  /**
+   * [#20082] The permission map a batch of `formula` fields is evaluated with —
+   * a read's (`find`, `findOne`) or a write response's
+   * ({@link hydrateWriteFormulas}).
+   *
+   * Asked only when it can change an answer: the context binds an acting user
+   * (the way {@link applyFormulaPlan} binds `current_user` — a truthy `userId`),
+   * some planned formula CALLS `can` ({@link readsPermissionPredicate}, the same
+   * reading the option gate uses), and there is a record to evaluate. Every
+   * other read pays nothing, and a whole `find` asks at most once, never per row.
+   *
+   * A read cannot refuse a row because one computed field lacks data, so when
+   * the map cannot be had the formula keeps the rule every formula that does not
+   * evaluate follows on this path — it reads `null` — and this method says so,
+   * once per operation, at `warn`, naming the object, the fields and the reason:
+   *
+   *  - `no-permission-source`: no resolver is registered. NO map is passed (the
+   *    contract member's rule for an absent method), so `can()` keeps its own
+   *    loud refusal and the field reads `null`.
+   *  - `permission-resolution-failed`: the resolution threw, or answered a map
+   *    that is not the published shape. Fail CLOSED: ⛔ never read as "no
+   *    grants" (an empty map would publish a confident `false`) and ⛔ never a
+   *    grant — the field reads `null`, with the resolution's error in the line.
+   *
+   * `warn`, not `error`: a formula is computed on read and nothing is persisted
+   * from it, so the degradation is visible to whoever reads the field.
+   */
+  private async resolveFormulaPermissions(
+    object: string,
+    plan: readonly FormulaPlanEntry[],
+    records: readonly unknown[],
+    context: ExecutionContext | undefined,
+    resolution: PermissionResolution | undefined,
+  ): Promise<EvalPermissions | undefined> {
+    if (!context?.userId) return undefined;
+    if (!records.some((r) => r != null && typeof r === 'object')) return undefined;
+    const fields = plan.filter((entry) => readsPermissionPredicate(entry.expression)).map((entry) => entry.name);
+    if (fields.length === 0) return undefined;
+    if (!resolution) {
+      this.logger.warn(
+        `formula field(s) ${fields.join(', ')} on '${object}' call current_user.can(), and no `
+        + 'effective-permission source is registered, so they read null: compose a security '
+        + 'service that registers one (registerEffectiveObjectPermissionsResolver) for can() to '
+        + 'be answered',
+        { object, fields, reason: 'no-permission-source' },
+      );
+      return undefined;
+    }
+    try {
+      return await resolution.get();
+    } catch (error) {
+      this.logger.warn(
+        `formula field(s) ${fields.join(', ')} on '${object}' call current_user.can(), and the `
+        + 'effective-permission resolution failed, so they read null on this read (failed closed: '
+        + 'neither a grant nor a denial was assumed)',
+        { object, fields, reason: 'permission-resolution-failed', error },
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * [#20082] The permission map a write's CEL `defaultValue`s are evaluated with
+   * — a per-row accessor, the shape {@link resolveOptionPermissions} hands back,
+   * over the write's ONE {@link permissionResolution}.
+   *
+   * Asked only when a row will really be defaulted by an expression that calls
+   * `can`: the write has an acting user (the way {@link applyFieldDefaults}
+   * binds `current_user` — a truthy `userId`), and the row leaves such a field
+   * without a value (`applyFieldDefaults`' own `!= null` test). A row that
+   * supplies the field, and an object whose defaults never call `can`, pay
+   * nothing and cannot be refused by a resolution they never depended on.
+   *
+   *  - no resolution (no resolver registered): every row gets `undefined` — NO
+   *    map. The default then does not evaluate and is left unset with
+   *    `applyFieldDefaults`' existing warn, which carries formula's own "carries
+   *    no permission data" refusal; a `required` field so defaulted is refused
+   *    by required-validation, exactly as before this seam existed.
+   *  - the resolution threw (or its map was refused): a row that needs it gets
+   *    the throw, re-raised untouched — the write fails CLOSED with the
+   *    resolution's own error, as an option gate's does. ⛔ Never read as "no
+   *    grants", which would STORE `false` as though it had been measured.
+   */
+  private async resolveDefaultPermissions(
+    object: string,
+    rows: ReadonlyArray<unknown>,
+    context: ExecutionContext | undefined,
+    resolution: PermissionResolution | undefined,
+    /** Only these fields' defaults count — the insert's re-default pass keeps no others. */
+    onlyFields?: readonly string[],
+  ): Promise<(row: unknown) => EvalPermissions | undefined> {
+    const none = (): undefined => undefined;
+    if (!resolution || !context?.userId) return none;
+    const gated = (this.defaultFieldEntries(object) ?? [])
+      .filter((f) => !onlyFields || onlyFields.includes(f.name))
+      .filter((f) => isExpressionDefault(f.defaultValue) && readsPermissionPredicate(f.defaultValue))
+      .map((f) => f.name);
+    if (gated.length === 0) return none;
+    const needs = (row: unknown): boolean =>
+      row != null && typeof row === 'object'
+      && gated.some((name) => (row as Record<string, unknown>)[name] == null);
+    if (!rows.some(needs)) return none;
+    let permissions: EvalPermissions;
+    try {
+      permissions = await resolution.get();
+    } catch (err) {
+      return (row) => {
+        if (needs(row)) throw err;
+        return undefined;
+      };
+    }
+    return (row) => (needs(row) ? permissions : undefined);
   }
 
 
@@ -5123,22 +5324,25 @@ export class ObjectQL implements IObjectQLEngine {
    * `default: true` ({@link resolveOptionDefault}, #7246) — the select idiom,
    * which until then was authorable, spec-valid, and read by nothing on this
    * path.
+   *
+   * [#20082] `permissions` is the acting subject's effective object-permission
+   * map, which an expression default calling `current_user.can(object, verb)`
+   * answers from. This method is synchronous, so the CALLER resolves it — once
+   * per write, only for a row that will be defaulted by such an expression
+   * ({@link resolveDefaultPermissions}, which also owns what a failed resolution
+   * does: it refuses the write before this runs). `undefined` is "no permission
+   * data": a `can` default then does not evaluate and takes this method's rule
+   * for every expression default that does not — left unset, with the warn below.
    */
   private applyFieldDefaults(
     object: string,
     record: Record<string, unknown>,
     execCtx?: ExecutionContext,
     nowSnapshot?: Date,
+    permissions?: EvalPermissions,
   ): Record<string, unknown> {
-    const schema = this.getSchema(object);
-    const fieldsRaw = (schema as any)?.fields;
-    if (!fieldsRaw || typeof fieldsRaw !== 'object') return record;
-    // `fields` may be a Record<string, Field> (canonical) or an array (legacy).
-    const fieldEntries: Array<{
-      name: string; type?: unknown; defaultValue?: unknown; options?: unknown; multiple?: unknown;
-    }> = Array.isArray(fieldsRaw)
-      ? fieldsRaw
-      : Object.entries(fieldsRaw).map(([name, def]) => ({ name, ...(def as object) }));
+    const fieldEntries = this.defaultFieldEntries(object);
+    if (!fieldEntries) return record;
     const out = { ...record };
     const now = nowSnapshot ?? new Date();
     for (const f of fieldEntries) {
@@ -5167,12 +5371,13 @@ export class ObjectQL implements IObjectQLEngine {
         continue;
       }
       const dv = f.defaultValue;
-      if (typeof dv === 'object' && dv !== null && (dv as any).dialect && typeof (dv as any).source === 'string') {
-        const result = ExpressionEngine.evaluate(dv as any, {
+      if (isExpressionDefault(dv)) {
+        const result = ExpressionEngine.evaluate(dv, {
           now,
           timezone: execCtx?.timezone,
           user: execCtx?.userId ? { id: String(execCtx.userId), positions: execCtx?.positions ?? [] } : undefined,
           org: execCtx?.tenantId ? { id: String(execCtx.tenantId) } : undefined,
+          permissions,
           record: out,
           extra: { object },
         });
@@ -5231,6 +5436,24 @@ export class ObjectQL implements IObjectQLEngine {
       }
     }
     return out;
+  }
+
+  /**
+   * The field entries {@link applyFieldDefaults} walks — one reading of an
+   * object's `fields`, shared with {@link resolveDefaultPermissions} so the
+   * planner and the evaluator see the same defaults. `undefined` when the object
+   * declares no fields, which is `applyFieldDefaults`' early return (it hands
+   * the SAME record reference back, and the insert path relies on knowing that).
+   */
+  private defaultFieldEntries(object: string): Array<{
+    name: string; type?: unknown; defaultValue?: unknown; options?: unknown; multiple?: unknown;
+  }> | undefined {
+    const fieldsRaw = (this.getSchema(object) as any)?.fields;
+    if (!fieldsRaw || typeof fieldsRaw !== 'object') return undefined;
+    // `fields` may be a Record<string, Field> (canonical) or an array (legacy).
+    return Array.isArray(fieldsRaw)
+      ? fieldsRaw
+      : Object.entries(fieldsRaw).map(([name, def]) => ({ name, ...(def as object) }));
   }
 
   /**
@@ -10845,8 +11068,14 @@ export class ObjectQL implements IObjectQLEngine {
       try {
           let result = await driver.find(object, hookContext.input.ast as QueryAST, hookContext.input.options as any);
 
-          // Post-process: evaluate formula virtual fields against the raw rows
-          if (Array.isArray(result)) applyFormulaPlan(_findFormula.plan, result, opCtx.context);
+          // Post-process: evaluate formula virtual fields against the raw rows.
+          // [#20082] With the caller's permission map when a formula calls
+          // `can` — one resolution for the whole result set, never per row.
+          if (Array.isArray(result)) {
+            applyFormulaPlan(_findFormula.plan, result, opCtx.context, await this.resolveFormulaPermissions(
+              object, _findFormula.plan, result, opCtx.context, this.permissionResolution(opCtx.context),
+            ));
+          }
 
           // Post-process: expand related records if expand is requested
           if (ast.expand && Object.keys(ast.expand).length > 0 && Array.isArray(result)) {
@@ -11115,7 +11344,12 @@ export class ObjectQL implements IObjectQLEngine {
       let result = await driver.findOne(objectName, hookContext.input.ast as QueryAST, hookContext.input.options as any);
 
       // Post-process: evaluate formula virtual fields against the raw row
-      if (result != null) applyFormulaPlan(_findOneFormula.plan, [result], opCtx.context);
+      // ([#20082] with the caller's permission map when a formula calls `can`).
+      if (result != null) {
+        applyFormulaPlan(_findOneFormula.plan, [result], opCtx.context, await this.resolveFormulaPermissions(
+          objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
+        ));
+      }
 
       // Post-process: expand related records if expand is requested
       if (ast.expand && Object.keys(ast.expand).length > 0 && result != null) {
@@ -11289,10 +11523,18 @@ export class ObjectQL implements IObjectQLEngine {
     // `null` means "clear it"), so neither does an `update`-mode preview.
     const rawRows = Array.isArray(data) ? data : [data];
     const nowSnapshot = new Date();
+    // [#20082] The preview's ONE permission resolution, shared by its CEL
+    // defaults and its option gates below, exactly as the write shares one. A
+    // resolution failure rejects the preview for a row whose `can` default needed
+    // it, as it fails the write.
+    const permissionResolution = this.permissionResolution(options?.context);
+    const defaultPermissionsFor = mode === 'insert'
+      ? await this.resolveDefaultPermissions(object, rawRows, options?.context, permissionResolution)
+      : () => undefined;
     const rows: Record<string, unknown>[] = mode === 'insert'
       ? rawRows.map((row) => this.initializeSummaryFields(
           object,
-          this.applyFieldDefaults(object, row, options?.context, nowSnapshot),
+          this.applyFieldDefaults(object, row, options?.context, nowSnapshot, defaultPermissionsFor(row)),
         ) as Record<string, unknown>)
       : rawRows;
 
@@ -11346,7 +11588,7 @@ export class ObjectQL implements IObjectQLEngine {
     // [#18783] The preview answers a `can`-gated option with the SAME map the
     // write would — resolved once for the whole set, like every posture input
     // above. A resolution failure rejects the preview, as it fails the write.
-    const previewPermissionsFor = await this.resolveOptionPermissions(schemaForValidation, rows, options?.context);
+    const previewPermissionsFor = await this.resolveOptionPermissions(schemaForValidation, rows, permissionResolution);
 
     const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
       const warnings: ValidateDataIssue[] = [];
@@ -11518,16 +11760,43 @@ export class ObjectQL implements IObjectQLEngine {
         (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
           (row) => ({ ...((row ?? {}) as Record<string, unknown>) }),
         );
+      // [#20082] The write's ONE permission resolution, shared by every consumer
+      // below that needs the map: the CEL defaults here, the re-default after
+      // the static-`readonly` strip, the option gates at validation, and the
+      // formula fields on the response. Asked at most once for the whole write.
+      //
+      // A CEL default that calls `current_user.can(…)` is evaluated with it. A
+      // row whose default NEEDED it when the resolution failed is refused with
+      // the resolution's own error (fail CLOSED, see `resolveDefaultPermissions`)
+      // before any hook or producer runs for it: the whole write outside partial
+      // mode; under partial mode that row alone, carried with the declared-field
+      // door's per-row refusals — the array every later pass already reads as
+      // "this row is dead on arrival" (no hook, seeded into `rowErrors`).
+      const permissionResolution = this.permissionResolution(opCtx.context);
+      const payloadRows: unknown[] = isBatch ? (opCtx.data as unknown[]) : [opCtx.data];
+      const defaultPermissionsFor = await this.resolveDefaultPermissions(
+        object, payloadRows.filter((_, i) => undeclaredPerRow[i] === undefined), opCtx.context, permissionResolution,
+      );
+      const defaultPermissions: Array<EvalPermissions | undefined> = payloadRows.map((row, i) => {
+        if (undeclaredPerRow[i] !== undefined) return undefined;
+        try {
+          return defaultPermissionsFor(row);
+        } catch (err) {
+          if (!partialRowMode) throw err;
+          undeclaredPerRow[i] = err as Error;
+          return undefined;
+        }
+      });
       const defaultedData = isBatch
-        ? (opCtx.data as any[]).map((row) =>
+        ? (opCtx.data as any[]).map((row, i) =>
             this.initializeSummaryFields(
               object,
-              this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+              this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[i]),
             ),
           )
         : this.initializeSummaryFields(
             object,
-            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap),
+            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[0]),
           );
 
       // Batch inserts trigger beforeInsert/afterInsert PER ROW, each with the
@@ -11868,7 +12137,22 @@ export class ObjectQL implements IObjectQLEngine {
             // `null` must keep its null (the first defaults pass, ahead of
             // the hooks, is the one that owns those keys).
             if (takenFromRow.length > 0) {
-              const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
+              // [#20082] A re-derived `can` default takes the write's map too —
+              // from the same resolution, so this asks nothing new unless it is
+              // the first pass to need it. Scoped to the TAKEN keys: those are
+              // the only defaults this pass keeps, so no other field's default
+              // can make it ask, or fail.
+              let redefaultPermissions: EvalPermissions | undefined;
+              try {
+                redefaultPermissions = (await this.resolveDefaultPermissions(
+                  object, [stripped], opCtx.context, permissionResolution, takenFromRow,
+                ))(stripped);
+              } catch (err) {
+                if (!partialRowMode) throw err;
+                rowErrors[i] = err;
+                continue;
+              }
+              const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap, redefaultPermissions);
               for (const k of takenFromRow) {
                 if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
               }
@@ -12085,7 +12369,7 @@ export class ObjectQL implements IObjectQLEngine {
         // failure refuses exactly the rows that needed it (per-row under
         // partial mode, like every other row error here).
         const insertPermissionsFor = await this.resolveOptionPermissions(
-          schemaForValidation, rows.filter((_, i) => rowErrors[i] === undefined), opCtx.context,
+          schemaForValidation, rows.filter((_, i) => rowErrors[i] === undefined), permissionResolution,
         );
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
@@ -12229,7 +12513,10 @@ export class ObjectQL implements IObjectQLEngine {
         //    the caller-facing `rowCtx.result` carries the values too.
         // Batch (`insertMany` / `createManyData`) is covered by construction:
         // one hydration pass over every returned row, not one per call site.
-        hydrateWriteFormulas(schemaForValidation, resultRows, opCtx.context);
+        await hydrateWriteFormulas(
+          schemaForValidation, resultRows, opCtx.context,
+          (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
+        );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
           rowCtx.event = 'afterInsert';
@@ -12648,6 +12935,10 @@ export class ObjectQL implements IObjectQLEngine {
      };
 
      await this.executeWithMiddleware(opCtx, async () => {
+       // [#20082] The write's ONE permission resolution, shared by its option
+       // gates and the formula fields on its response — asked at most once, and
+       // only by the first of them that needs the map.
+       const permissionResolution = this.permissionResolution(opCtx.context);
        // [#8738] The declared-field door, the insert path's (#8682) applied to
        // the second write verb — same function, not a second predicate. First
        // act inside the middleware body: after middleware (which may rewrite
@@ -13574,7 +13865,7 @@ export class ObjectQL implements IObjectQLEngine {
                // answered from — resolved only when the PATCH picks one, and a
                // resolution failure fails this write closed right here.
                const updatePayload = hookContext.input.data as Record<string, unknown>;
-               const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], opCtx.context))(updatePayload);
+               const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
                evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
@@ -13852,7 +14143,7 @@ export class ObjectQL implements IObjectQLEngine {
                // [#18783] ONE permission-map resolution for the whole matched
                // set — the patch is shared, so either every row picks a
                // `can`-gated option or none does. Never per row.
-               const bulkPermissions = (await this.resolveOptionPermissions(updateSchema, [bulkPatch], opCtx.context))(bulkPatch);
+               const bulkPermissions = (await this.resolveOptionPermissions(updateSchema, [bulkPatch], permissionResolution))(bulkPatch);
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
@@ -13909,10 +14200,11 @@ export class ObjectQL implements IObjectQLEngine {
            // letting a `typeof` sniff decide. Giving a bulk update a record
            // response is a contract change, not a hydration gap.
            if (!isPredicateWrite) {
-             hydrateWriteFormulas(
+             await hydrateWriteFormulas(
                updateSchema,
                Array.isArray(result) ? result : [result],
                opCtx.context,
+               (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
