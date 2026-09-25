@@ -426,9 +426,13 @@ describe('#7606 §3 — GET /search', () => {
     });
 
     it('every name in the declared set is accepted — asserted against the export', async () => {
+        // A VALID value per name, as in the export twin above: `limit` is read
+        // as a whole number (#20062) and refuses `'x'` with `VALIDATION_FAILED`
+        // for a reason that has nothing to do with the closed set.
+        const validValue: Record<string, string> = { limit: '10', perObject: '5' };
         for (const name of GLOBAL_SEARCH_PARAMS) {
             const { search } = boot();
-            const answer = await search({ [name]: 'x' });
+            const answer = await search({ [name]: validValue[name] ?? 'x' });
             expect(answer.status, `"${name}" is declared supported but was refused`).toBe(200);
         }
     });

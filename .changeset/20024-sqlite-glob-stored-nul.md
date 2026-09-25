@@ -26,4 +26,4 @@ What does not change:
 - `$startsWith` with a comparand without U+0000 compiles to the same `GLOB` with the same bound pattern as before. The stored value's cut cannot change its answer.
 - No index is lost. The SQL `SqlDriver` compiles, run under `EXPLAIN QUERY PLAN` over an indexed TEXT column on all three engines, scanned the table for these four operators under `GLOB` and still does; `$startsWith` keeps its index search.
 - The Postgres and MySQL arms are untouched.
-- `$like` and `$ilike` still compile to `GLOB` on SQLite, so they still read a stored value only up to its first U+0000, and a pattern holding U+0000 is still cut there.
+- `$like` and `$ilike` are outside this entry. Two other entries in this release cover them: on SQLite they now read the whole stored value as well, and every driver that answers `$like` refuses a pattern holding U+0000 (`INVALID_FILTER` / 400).

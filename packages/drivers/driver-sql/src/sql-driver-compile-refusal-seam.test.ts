@@ -99,6 +99,14 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, SECRET],
     klass: 'ending in a lone unpaired backslash',
   },
+  // ── #20041: born in the seam ───────────────────────────────────────────────
+  {
+    builder: 'nulLikePatternError',
+    // U+0000 spelled by code point: a source file never holds the raw byte.
+    where: () => ({ [POLICY_COL]: { $like: `%${SECRET}${String.fromCharCode(0x00)}` } }),
+    secrets: [POLICY_COL, SECRET],
+    klass: 'has a pattern holding the NUL character U+0000',
+  },
   {
     builder: 'unrenderableTextComparandError',
     where: () => ({ [POLICY_COL]: { $startsWith: { k: SECRET } } }),

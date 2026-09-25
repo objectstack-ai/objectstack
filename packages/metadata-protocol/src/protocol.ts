@@ -693,7 +693,9 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
  *     (e.g. `isPinned`, `isDefault`, `sortOrder`) survive the round-trip.
  *     The one exception is filter `operator` spellings, which are grafted back
  *     from `parsed.data` so a save stops minting new legacy-alias rows — see
- *     {@link graftNormalizedOperators}.
+ *     {@link graftNormalizedOperators}. [#20101] A page that omits `type` is
+ *     stored with the default `PageSchema` declares for it — see
+ *     {@link withDeclaredPageTypeDefault}.
  *   - Types without a registered schema (the wiring-layer types
  *     `function`/`service`/`router`, and any plugin types that have not
  *     yet called `registerMetadataTypeSchema()`) fall through unvalidated.
@@ -1322,6 +1324,54 @@ export function graftFoldedFormSections(authored: unknown, parsed: unknown): unk
     // `sections` wins when the author wrote it — including as an empty array,
     // which is what the producer's fold does and therefore what already renders.
     return rest.sections !== undefined ? rest : { ...rest, sections: groups };
+}
+
+/**
+ * [#20101] Give a page body that omits `type` the default `PageSchema`
+ * declares for it, and change nothing else.
+ *
+ * `PageSchema` declares `type: PageTypeSchema.default('record')`, so a page
+ * authored without `type` IS a record page. The save gate parses with that
+ * default and then persists the authored body verbatim (ADR-0005
+ * §"Validation", {@link resolveOverlaySchema}), and every read serves a stored
+ * row without parsing it. A record page written the natural way, with the
+ * defaulted key left out, therefore reached every reader of the served body
+ * with no `type` at all. A consumer that picks an object's record page by
+ * `type === 'record'` never picked it. The parse applied the declared default
+ * and nothing the server sends carried it.
+ *
+ * One function, applied at both seams:
+ *  - the WRITE (`saveMetaItem`, once the schema gate has accepted the body),
+ *    so a new row stores the key and a GET → PUT round-trip of the served
+ *    document stays byte-identical (#4326's invariant). A fix on the read
+ *    side alone breaks that round-trip: the first re-save of every such page
+ *    would write a one-key change and a history row that nobody authored;
+ *  - the READ ({@link ObjectStackProtocolImplementation.convertStoredItem},
+ *    the rehydration seam every stored row passes through), so a row stored
+ *    before this fix is served with the default and never rewritten. The row
+ *    at rest keeps its bytes and there is no migration.
+ *
+ * The value is READ from the registered `page` schema, the one the save gate
+ * validates with, and is never spelled here. A literal would be a second,
+ * silent spelling of the default: the consumer-side `?? 'record'` this
+ * replaces, moved up one layer.
+ *
+ * ⛔ The scope is `type` on `page` and nothing wider. It is not a general
+ * "fill every declared default" pass. Other stored types declare top-level
+ * defaults in the same position, and each of those is its own decision.
+ *
+ * Only an ABSENT key is filled (zod applies a default to `undefined`, not to
+ * `null`), and an explicit value is left as it is. Returns the input itself
+ * when nothing is filled.
+ */
+function withDeclaredPageTypeDefault(type: string, item: unknown): unknown {
+    if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'page') return item;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    if ((item as Record<string, unknown>).type !== undefined) return item;
+    const pageSchema = getMetadataTypeSchema('page') as { shape?: Record<string, z.ZodTypeAny> } | undefined;
+    const declared = pageSchema?.shape?.type?.safeParse(undefined);
+    if (!declared?.success || declared.data === undefined) return item;
+    return { ...(item as Record<string, unknown>), type: declared.data };
 }
 
 /**
@@ -4678,10 +4728,17 @@ export class ObjectStackProtocolImplementation implements
      * executor registry (`reservedNodeTypes`), which this layer does not
      * have. Flows canonicalize at `AutomationEngine.registerFlow` — the
      * execution seam — with the same full-chain policy.
+     *
+     * [#20101] …and a page that omits `type` is read with the default
+     * `PageSchema` declares ({@link withDeclaredPageTypeDefault}). That fill is
+     * applied HERE and not in {@link convertStoredItemDetailed}: it is not an
+     * ADR-0087 conversion and emits no notice, so the stored-migration pass
+     * (the Detailed caller) has nothing to rewrite, and the row at rest keeps
+     * its bytes.
      */
     private convertStoredItem(type: string, data: unknown): unknown {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        return this.convertStoredItemDetailed(type, data, (n) => {
+        const converted = this.convertStoredItemDetailed(type, data, (n) => {
             const name = (data as { name?: unknown } | null | undefined)?.name;
             const key = `${n.conversionId}|${singular}|${String(name ?? '')}`;
             if (this.storedConversionWarned.has(key)) return;
@@ -4692,6 +4749,7 @@ export class ObjectStackProtocolImplementation implements
                 `"os migrate meta --stored --apply") to persist the canonical shape.`,
             );
         }).item;
+        return withDeclaredPageTypeDefault(singular, converted);
     }
 
     /**
@@ -16120,6 +16178,13 @@ export class ObjectStackProtocolImplementation implements
                     graftFoldedFormSections(request.item, parsed.data),
                     parsed.data,
                 );
+                // [#20101] …and a page's declared `type` default, the one
+                // default that a reader of the served body selects on. It is
+                // stored so that the served document and the stored row are
+                // the same bytes, and a GET → PUT round-trip is a no-op. The
+                // read seam fills the same default for rows stored before this
+                // fix. See {@link withDeclaredPageTypeDefault}.
+                request.item = withDeclaredPageTypeDefault(request.type, request.item);
             }
         }
 

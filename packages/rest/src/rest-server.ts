@@ -31,6 +31,9 @@ import {
     // `@objectstack/types` because the producer is a PLUGIN and rest cannot
     // import one.
     strandedDecisionDetails,
+    // [#20061] The thrown `VALIDATION_FAILED` + `fields[]` shape every catch in
+    // this file already maps to `400` — see `readDeclaredQueryNumber` below.
+    validationFailure,
 } from '@objectstack/types';
 import {
     allowPerfDisclosure,
@@ -97,8 +100,11 @@ import {
     BatchEndpointsConfigSchema,
     RouteGenerationConfigSchema,
 } from '@objectstack/spec/api';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
+// [#20061 / #20062] The DECLARED request schemas two query-reading doors parse
+// their numeric parameters through — see `readDeclaredQueryNumber` below.
+import { ListImportJobsRequestSchema, HistoryMetaItemRequestSchema } from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
 // being smuggled past it with `as any` (see `TransportScopedMetaRequest`).
@@ -149,6 +155,7 @@ import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, unrecognisedMetaTypeRefusal }
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -409,6 +416,74 @@ interface ApiAccessOpts {
 type NavServabilityGate = (objectName: string, entry: any, appName: string) => boolean;
 
 /**
+ * [ADR-0046 §6.7] One request's docs-audience view of one caller — THE
+ * resolution behind every audience-gated docs answer this server gives: the
+ * `/meta/doc` list, the `/meta/doc/:name` read, the `/meta/book/:name/tree`
+ * read and the app-nav `doc` arm ({@link NavDocAudienceGate}). Built by
+ * `resolveDocsAudience` from the environment's books; every verdict below is a
+ * `@objectstack/spec/system` helper asked with this caller, so the four answers
+ * cannot drift apart — there is no second resolver to drift.
+ */
+interface DocsAudience {
+    /** The caller as the audience helpers see it (holdings resolved only when a `{ permissionSet }` book exists). */
+    readonly caller: AudienceCaller;
+    /**
+     * The fast path: an authenticated caller and no `{ permissionSet }` book
+     * anywhere, so every doc's effective audience (`org` / `public`) admits
+     * them and no doc corpus is needed to say so.
+     */
+    readonly allReadable: boolean;
+    /** The book `name` names: a declared book, else the implicit per-package book (§6.4). */
+    bookNamed(name: string): Book & { _packageId?: string };
+    /** Whether the book's OWN audience admits this caller — the gate on the whole tree. */
+    admitsBook(book: Book): boolean;
+    /**
+     * The per-doc predicate over `corpus`: the doc's effective audience (the
+     * union over the books claiming it; unclaimed or absent from the corpus →
+     * `org`) admits this caller. Build it once per corpus and ask it per doc —
+     * building it resolves every book against the whole corpus.
+     */
+    docReader(corpus: ResolverDoc[]): (docName: unknown) => boolean;
+    /**
+     * `book` resolved over `docs`, narrowed to the entries this caller may read
+     * — exactly the body `GET /meta/book/:name/tree` serves once the book's own
+     * audience has admitted the caller. `canRead` is a {@link docReader} over
+     * the same `docs` when the caller already holds one.
+     */
+    readableTree(
+        book: Book & { _packageId?: string },
+        docs: ResolverDoc[],
+        canRead?: (docName: unknown) => boolean,
+    ): ResolvedBook;
+    /**
+     * The book's PAGES this caller may read: the docs `book` claims over
+     * `docs` (`resolveBookClaimedDocs` — the membership `resolveDocAudiences`
+     * itself uses) that pass the per-doc predicate. The tree's synthetic
+     * *Uncategorized* group is not among them: the spec defines those orphans
+     * as a rendering convenience, "not an authored membership claim".
+     */
+    readablePages(
+        book: Book & { _packageId?: string },
+        docs: ResolverDoc[],
+        canRead?: (docName: unknown) => boolean,
+    ): string[];
+}
+
+/**
+ * [#19790] The docs-audience gate handed to `filterAppForUser`: given a
+ * `type: 'doc'` nav entry, answer whether the caller may read what it opens.
+ * `true` = serve the entry. Built once per request from ONE
+ * {@link DocsAudience}, so it serves the whole app list the way
+ * {@link NavServabilityGate} does.
+ *
+ * Unlike that gate and the ADR-0057 D10 service gate, the arm it feeds FAILS
+ * CLOSED: this is an authorization boundary (the entry names a book or doc the
+ * caller may not read), so an absent gate prunes every `doc` entry rather than
+ * serving it.
+ */
+type NavDocAudienceGate = (entry: any) => boolean;
+
+/**
  * [#15416] The operation to NAME in a `method-not-allowed` refusal.
  *
  * The message and the `allowed` array are ONE envelope and have to agree. They
@@ -646,6 +721,96 @@ export const DATA_EXPORT_PARAMS: readonly string[] = [
 export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
     'q', 'query', 'objects', 'limit', 'perObject',
 ];
+
+/**
+ * [#20062] The reading of a ROW-COUNT query parameter on a door whose request
+ * has no declared schema (`GET /data/:object/export`, `GET /search`): a whole
+ * number, and nothing about range. Range stays each door's own business — the
+ * export route's `Math.max(1, …)` floor and 50000 cap, `searchAll`'s `[1, 100]`
+ * clamp — because neither card this closes takes a position on bounds; it only
+ * refuses a value the door cannot read as a count at all. The same rule
+ * `@objectstack/runtime`'s `parseIntegerParam` applies without `bounds`, which
+ * this package cannot import (runtime depends on rest).
+ */
+const UNDECLARED_ROW_COUNT_PARAM = z.number().int().optional();
+
+/**
+ * [#20061 / #20062] Read ONE numeric query parameter against the door's own
+ * declared schema for it, and refuse — never substitute — what that schema
+ * refuses.
+ *
+ * The defect this closes is the bare coercion: `Number(q.limit)` does not
+ * fail, it INVENTS a value and the door serves it. Measured on four published
+ * doors, each answering `200`: `GET /data/import/jobs` turned `?limit=0` into
+ * its 50-row default and clamped `?limit=500` to 200 against a declaration of
+ * `min(1).max(200)`; `GET /data/:object/export` turned `?limit=abc` into a
+ * ONE-row export; `GET /meta/:type/:name/history` dropped it and returned the
+ * whole change log; `GET /search` handed `NaN` to `searchAll`, whose overall
+ * cap then never triggered.
+ *
+ * ## How a query string meets a `z.number()` declaration
+ *
+ * A query string carries no types, so the declared schema cannot parse it
+ * directly — and `Number()` alone is the defect. The one coercion made here is
+ * the faithful one: a non-blank string whose `Number()` is not `NaN` is parsed
+ * AS that number (`'50'` → 50, `'1.5'` → 1.5, `'Infinity'` → Infinity), and
+ * everything else — `'abc'`, a blank string, a structured value — is handed to
+ * the schema AS IT CAME, so the declaration refuses it by type rather than
+ * after `Number()` has already invented a `0` or a `NaN` for it. The schema,
+ * not this function, decides what is legal: `int()`, `min()` / `max()` and
+ * zod's own refusal of non-finite numbers all apply exactly as declared, and an
+ * absent parameter meets the schema's own `.default()` / `.optional()`.
+ *
+ * ## The empty string — the one per-door judgement
+ *
+ * `?limit=` is present-but-empty, and what it means is decided from what the
+ * door answered for it before, exactly as `parseEnumParam` (runtime
+ * `query-param.ts`) decides the same spelling: where the old answer already
+ * WAS the absent answer (import jobs' `Number('') || 50`, search's falsy
+ * guard), it stays absent (`emptyIsAbsent: true`) so a defensible answer does
+ * not become a new `400`; where the old answer was an invented `0` — a
+ * one-row export, a zero-event history — refusing it strictly improves on it.
+ *
+ * ## The refusal
+ *
+ * THROWN as `validationFailure` (`@objectstack/types`), never written here:
+ * every door that calls this already sends its catch through
+ * `handleRouteError` / `mapDataError`, which answer `400` with the data
+ * surface's `VALIDATION_FAILED` + `fields[]` envelope — the same shape the
+ * declared-schema body doors in this file answer. `fields[].code` comes from
+ * `zodIssuesToFields`, so it is the ADR-0114 D3 catalog member for the failed
+ * constraint (`invalid_type`, `min_value`, `max_value`), with `field` naming
+ * the parameter.
+ *
+ * Call it AFTER `refuseRepeatedQueryParams` has run for `param`: that gate
+ * refuses a repeated occurrence and unwraps a one-element array, so what
+ * reaches this function is a single string or nothing.
+ */
+function readDeclaredQueryNumber(
+    queryParams: Record<string, unknown> | undefined,
+    param: string,
+    declared: z.ZodType<number | undefined>,
+    opts: { readonly emptyIsAbsent: boolean },
+): number | undefined {
+    const raw = queryParams?.[param];
+    let input: unknown = raw;
+    if (raw === undefined || raw === null || (raw === '' && opts.emptyIsAbsent)) {
+        input = undefined;
+    } else if (typeof raw === 'string' && raw.trim() !== '') {
+        const coerced = Number(raw);
+        if (!Number.isNaN(coerced)) input = coerced;
+    }
+    const parsed = declared.safeParse(input);
+    if (parsed.success) return parsed.data;
+    const fields = zodIssuesToFields(
+        parsed.error.issues.map((issue) => ({ ...issue, path: [param, ...issue.path] })),
+        { [param]: input },
+    );
+    throw validationFailure(
+        `Invalid \`${param}\` query parameter: ${fields[0]?.message ?? 'not a readable number'}`,
+        fields,
+    );
+}
 
 /**
  * [#16674] Which `services.*` slot each `routes.*` key is the address OF.
@@ -2724,16 +2889,144 @@ export class RestServer {
         return [];
     }
 
-    /** Fetch every book of the environment, shaped for the audience resolver. */
-    private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
+    /** Shape a book list for the audience resolver: `_packageId` provenance also as `packageId`. */
+    private static audienceBooksOf(raw: unknown): any[] {
+        return RestServer.metaItemsArray(raw).map((b: any) =>
+            b && typeof b === 'object' ? { ...b, packageId: b._packageId } : b,
+        );
+    }
+
+    /**
+     * The doc header the audience resolver reads — name, the placement keys a
+     * book rule matches on, and provenance. Nothing rendered: a doc's label
+     * orders a group, but never decides which book claims it.
+     */
+    private static docCorpusOf(list: readonly any[]): ResolverDoc[] {
+        return list
+            .filter((d: any) => d && typeof d === 'object')
+            .map((d: any) => ({
+                name: d.name,
+                group: d.group,
+                tags: d.tags,
+                order: d.order,
+                packageId: d._packageId,
+            }));
+    }
+
+    /**
+     * A `getMetaItems` list read that REPORTS a thrown read as `{ fault }`
+     * rather than swallowing it. The two docs-audience reads below go through
+     * here so each caller chooses what an unreadable store means for it — the
+     * docs reads keep answering as they always have, while the app-nav gate
+     * fails closed ({@link resolveNavDocAudience}).
+     */
+    private static async readMetaList(
+        p: RestProtocol,
+        request: TransportScopedMetaRequest<GetMetaItemsRequest>,
+    ): Promise<{ items: any[] } | { fault: unknown }> {
+        return p.getMetaItems(request).then(
+            (raw: unknown) => ({ items: RestServer.metaItemsArray(raw) }),
+            (fault: unknown) => ({ fault }),
+        );
+    }
+
+    /** Every book of the environment, audience-shaped; `{ fault }` when the read throws. */
+    private async readAudienceBooks(
+        p: RestProtocol,
+        environmentId: string | undefined,
+    ): Promise<{ items: any[] } | { fault: unknown }> {
         const booksRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
             type: 'book',
             ...(environmentId ? { environmentId } : {}),
         };
-        const raw = await p.getMetaItems(booksRequest).catch(() => []);
-        return RestServer.metaItemsArray(raw).map((b: any) =>
-            b && typeof b === 'object' ? { ...b, packageId: b._packageId } : b,
-        );
+        const read = await RestServer.readMetaList(p, booksRequest);
+        return 'fault' in read ? read : { items: RestServer.audienceBooksOf(read.items) };
+    }
+
+    /** Every doc of the environment as the resolver's corpus; `{ fault }` when the read throws. */
+    private async readDocCorpus(
+        p: RestProtocol,
+        environmentId: string | undefined,
+    ): Promise<{ items: ResolverDoc[] } | { fault: unknown }> {
+        const docCorpusRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
+            type: 'doc',
+            ...(environmentId ? { environmentId } : {}),
+        };
+        const read = await RestServer.readMetaList(p, docCorpusRequest);
+        return 'fault' in read ? read : { items: RestServer.docCorpusOf(read.items) };
+    }
+
+    /**
+     * Fetch every book of the environment, shaped for the audience resolver.
+     * A read that throws answers `[]` — the docs reads' long-standing
+     * degradation; the app-nav gate reads {@link readAudienceBooks} instead
+     * because it must not fail open.
+     */
+    private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
+        const read = await this.readAudienceBooks(p, environmentId);
+        return 'fault' in read ? [] : read.items;
+    }
+
+    /**
+     * [ADR-0046 §6.7] Build THE {@link DocsAudience} for this request's caller
+     * over `books` (audience-shaped, {@link audienceBooksOf}).
+     *
+     * Every audience-gated docs answer goes through here — the `/meta/doc`
+     * list, `/meta/doc/:name`, `/meta/book/:name/tree` and the app-nav `doc`
+     * arm — so "may this caller read it" has one implementation, spelled in the
+     * spec's own helpers (`audienceAllows`, `resolveDocAudiences`,
+     * `docAudienceAllows`, `resolveBookTree`, `deriveImplicitPackageBook`).
+     *
+     * Holdings are resolved only when a `{ permissionSet }` book exists, and
+     * unresolvable holdings deny those audiences ({@link resolveAudienceCaller},
+     * fail closed per ADR-0049). The fast path is the doc list's own: with no
+     * such book, an authenticated caller reads every doc, so `docReader` needs
+     * no corpus and `readableTree` filters nothing.
+     */
+    private async resolveDocsAudience(
+        environmentId: string | undefined,
+        req: any,
+        books: readonly any[],
+    ): Promise<DocsAudience> {
+        const {
+            audienceAllows, docAudienceAllows, resolveDocAudiences, resolveBookTree, resolveBookClaimedDocs,
+            deriveImplicitPackageBook,
+        } = await import('@objectstack/spec/system');
+        const gated = RestServer.anyPermissionSetAudience(books);
+        const caller = await this.resolveAudienceCaller(environmentId, req, { needPermissionSets: gated });
+        const allReadable = caller.authenticated && !gated;
+        const docReader = (corpus: ResolverDoc[]): ((docName: unknown) => boolean) => {
+            if (allReadable) return () => true;
+            const audiences = resolveDocAudiences(books as any, corpus);
+            return (docName: unknown) => docAudienceAllows(audiences.get(docName as string), caller);
+        };
+        return {
+            caller,
+            allReadable,
+            bookNamed: (name: string) =>
+                books.find((b: any) => b && b.name === name) ?? deriveImplicitPackageBook(name, name),
+            admitsBook: (book: Book) => audienceAllows(book?.audience, caller),
+            docReader,
+            readableTree: (book, docs, canRead) => {
+                const tree = resolveBookTree(book, docs, book._packageId);
+                // The fast path serves the tree whole — no entry can fail an
+                // audience every doc passes, and the empty-group drop below is
+                // part of the narrowing, not of the tree.
+                if (allReadable) return tree;
+                const read = canRead ?? docReader(docs);
+                tree.groups = tree.groups
+                    .map((g) => ({
+                        ...g,
+                        entries: g.entries.filter((e) => !e.doc || read(e.doc)),
+                    }))
+                    .filter((g) => g.entries.some((e) => e.doc || e.href));
+                return tree;
+            },
+            readablePages: (book, docs, canRead) => {
+                const read = canRead ?? docReader(docs);
+                return [...resolveBookClaimedDocs(book, docs, book._packageId)].filter((name) => read(name));
+            },
+        };
     }
 
     /** Heavy path behind `resolveExecCtx` — resolve identity + RBAC/RLS + localization. */
@@ -3152,6 +3445,9 @@ export class RestServer {
      *   so reading the JSON defeated it.
      * - [#7912] SERVABILITY: drops a `type: 'object'` entry whose destination
      *   object could not answer a `list` for anyone — see `servabilityGate`.
+     * - [#19790] DOCS AUDIENCE (ADR-0046 §6.7): drops a `type: 'doc'` entry the
+     *   caller may not read — see `docAudienceGate`. Fails CLOSED, unlike the
+     *   two gates above: no gate means every `doc` entry is dropped.
      *
      * NOT gated here: `visible` (CEL) at any level, and `requiresObject` — both
      * are still evaluated client-side only. That asymmetry is deliberate and
@@ -3187,8 +3483,9 @@ export class RestServer {
         sysPerms: Set<string>,
         serviceGate?: (name: string) => boolean,
         servabilityGate?: NavServabilityGate,
+        docAudienceGate?: NavDocAudienceGate,
     ): any | null {
-        return this.filterAppForUserWithReason(item, sysPerms, serviceGate, servabilityGate).app;
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate, servabilityGate, docAudienceGate).app;
     }
 
     /**
@@ -3240,6 +3537,7 @@ export class RestServer {
         sysPerms: Set<string>,
         serviceGate?: (name: string) => boolean,
         servabilityGate?: NavServabilityGate,
+        docAudienceGate?: NavDocAudienceGate,
     ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
         if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
@@ -3281,6 +3579,23 @@ export class RestServer {
                 const req = Array.isArray(e.requiredPermissions) ? e.requiredPermissions : [];
                 if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) continue;
                 if (typeof e.requiresService === 'string' && serviceGate && serviceGate(e.requiresService) === false) continue;
+                // [#19790] DOCS AUDIENCE — the rule `DocNavItemSchema` declares
+                // and, until this arm, only a renderer honoured: a `doc` entry
+                // naming a doc the caller may not read, or a book with no page
+                // they may read, is not served. Left in the body, the entry's
+                // label and its book / doc names reached every member of the
+                // app however the book was gated, and reading the JSON
+                // defeated whatever the shell pruned (the #4722 lesson again).
+                //
+                // The verdict is the docs reads' own — `docAudienceGate` is one
+                // `DocsAudience` built by the caller, the same resolution
+                // `/meta/doc` and `/meta/book/:name/tree` answer from — and the
+                // arm FAILS CLOSED where its neighbours fail open: no gate, no
+                // `doc` entry. Like every entry-level arm here it is a bare
+                // `continue` with no reason attached; `withheld` reports only
+                // why a whole APP was withheld, and an app this arm empties is
+                // still served, exactly as one emptied by `requiredPermissions`.
+                if (e.type === 'doc' && (!docAudienceGate || !docAudienceGate(e))) continue;
                 // [#7912] SERVABILITY — the gate this filter had no vocabulary
                 // for. A `type: 'object'` entry names its destination in
                 // `objectName`; the object's own `enable` block decides whether
@@ -3560,6 +3875,166 @@ export class RestServer {
             }
             return false;
         };
+    }
+
+    /**
+     * [#19790] Build the docs-audience nav gate for one request: may THIS
+     * caller read what a `type: 'doc'` nav entry opens (ADR-0046 §6.7, the rule
+     * `DocNavItemSchema` declares).
+     *
+     * ## One resolution, not a second one
+     *
+     * Every verdict comes from the {@link DocsAudience} that `/meta/doc`,
+     * `/meta/doc/:name` and `/meta/book/:name/tree` answer from, built over the
+     * same env-wide books the doc reads use and a doc corpus read the way
+     * `/meta/doc/:name` reads it. Per entry shape:
+     *
+     *  - **`doc` alone** — served iff the doc's effective audience admits the
+     *    caller: `docAudienceAllows` over `resolveDocAudiences`, the answer
+     *    `/meta/doc/:name` gives.
+     *  - **`book` alone** — the book the name names (a declared book, else the
+     *    implicit per-package book, §6.4 — the tree read's own lookup) must
+     *    admit the caller by its own audience (the tree read's 401/403), and at
+     *    least one of its PAGES must be readable: a doc the book claims
+     *    (`resolveBookClaimedDocs`, the membership `resolveDocAudiences` uses)
+     *    whose effective audience admits the caller. Not "any entry of the
+     *    tree": `resolveBookTree` appends every doc the book does NOT claim as
+     *    a synthetic *Uncategorized* group, so over an env-wide corpus nearly
+     *    every book's tree holds some readable doc, and the rule would never
+     *    fire. The spec calls those orphans "not an authored membership
+     *    claim"; external `href` links are not pages either.
+     *  - **`book` + `doc`** — served iff BOTH hold: the book's own audience
+     *    admits the caller AND the doc is readable. A doc can be readable while
+     *    the book is not (its effective audience is the UNION over every book
+     *    claiming it, `docAudienceAllows`), but the entry opens that page in
+     *    that book's context, whose tree read answers 401/403 — and the entry
+     *    itself names the gated book. So it is dropped; it does not fall back
+     *    to the page alone.
+     *  - **neither** — dropped. The spec refuses the shape; this filter reads
+     *    untyped stored documents, and an entry with no target has nothing a
+     *    caller could read.
+     *
+     * Existence is `docs/nav-target`'s question, answered at `os build`, and
+     * this gate asks only the resolver's. So a `doc` naming a doc absent from
+     * the corpus is SERVED — the resolver's own default for a doc it has no
+     * entry for is `org` (`docAudienceAllows`), so an authenticated caller may
+     * read it, and there is no gated audience behind a name that resolves to
+     * nothing. A `book` naming no declared book is judged as the implicit book
+     * of a package by that name — what the tree read serves for it — so when no
+     * doc resolves into it, it has no readable page and is NOT served: "no
+     * readable page" is the book rule's own wording.
+     *
+     * ## Fails CLOSED, and says so
+     *
+     * The arm this feeds treats an absent gate as "drop every `doc` entry", and
+     * so does this builder when a read it needs THROWS: the books read (the
+     * doc reads swallow that to `[]`, which reads as "no gated book anywhere")
+     * or the doc corpus read (swallowed to `[]` there too, which reads every
+     * doc as unclaimed, i.e. `org`). Either swallow would serve a
+     * `{ permissionSet }`-gated entry to every member, so here a thrown read
+     * drops the `doc` entries of this one response and logs the fault — the
+     * rest of the navigation is served. Unresolvable permission-set HOLDINGS
+     * already deny inside {@link resolveAudienceCaller} (ADR-0049).
+     *
+     * ## Cost, per `/meta/app` request (measured by this card's tests)
+     *
+     * Nothing, when no app in `apps` carries a `doc` entry: a walk over the nav
+     * trees, and no read at all. Otherwise, ONCE per request whatever the app
+     * count — the same shape as {@link resolveNavServability}:
+     *
+     *  - one `book` list read;
+     *  - one permission-set resolution, only when some book is set-gated
+     *    (the execution context itself is memoised per request);
+     *  - one `doc` list read, only when the fast path does not decide (a
+     *    set-gated book exists) or some entry is `book` alone (its page count
+     *    needs the corpus);
+     *  - off the fast path, one `resolveDocAudiences` pass (a `resolveBookTree`
+     *    per book over the whole corpus) shared by every entry.
+     *
+     * Per entry: a `doc` is one map lookup; a `book` alone is one
+     * `resolveBookClaimedDocs` of that book over the corpus (one
+     * `resolveBookTree`: every doc visited once per group rule) plus one
+     * lookup per claimed page. ⛔ No cache — nothing outlives the request.
+     */
+    private async resolveNavDocAudience(
+        p: RestProtocol,
+        environmentId: string | undefined,
+        req: any,
+        apps: readonly any[],
+    ): Promise<NavDocAudienceGate | undefined> {
+        const entries = RestServer.docNavEntries(apps);
+        // Nothing to judge — and the arm drops a `doc` entry this walk missed,
+        // so a walk that ever falls behind `filterNav` fails closed, not open.
+        if (entries.length === 0) return undefined;
+
+        const failClosed = (what: string, fault: unknown): NavDocAudienceGate => {
+            logWarn(
+                `[REST] app-nav docs-audience gate: the ${what} read failed — failing CLOSED: every ` +
+                    "`type: 'doc'` navigation entry is left out of this response, because whether the " +
+                    'caller may read what it names could not be established. The rest of the navigation ' +
+                    'is served.',
+                (fault as Error)?.message ?? fault,
+            );
+            return () => false;
+        };
+
+        const books = await this.readAudienceBooks(p, environmentId);
+        if ('fault' in books) return failClosed('book', books.fault);
+        const audience = await this.resolveDocsAudience(environmentId, req, books.items);
+
+        const bookAlone = (e: any): boolean =>
+            RestServer.navTarget(e.book) !== undefined && RestServer.navTarget(e.doc) === undefined;
+        let corpus: ResolverDoc[] = [];
+        if (!audience.allReadable || entries.some(bookAlone)) {
+            const read = await this.readDocCorpus(p, environmentId);
+            if ('fault' in read) return failClosed('doc', read.fault);
+            corpus = read.items;
+        }
+        // Built ONCE for every entry of every app in this response.
+        const canRead = audience.docReader(corpus);
+
+        return (entry: any): boolean => {
+            const bookName = RestServer.navTarget(entry?.book);
+            const docName = RestServer.navTarget(entry?.doc);
+            if (bookName === undefined && docName === undefined) return false;
+            if (bookName !== undefined) {
+                const book = audience.bookNamed(bookName);
+                if (!audience.admitsBook(book)) return false;
+                if (docName === undefined) return audience.readablePages(book, corpus, canRead).length > 0;
+            }
+            return canRead(docName);
+        };
+    }
+
+    /** A `doc` nav entry's `book` / `doc` target, when it names one. */
+    private static navTarget(value: unknown): string | undefined {
+        return typeof value === 'string' && value.length > 0 ? value : undefined;
+    }
+
+    /**
+     * Every `type: 'doc'` entry in these apps, in every tree `filterNav` walks —
+     * top-level `navigation`, `areas[].navigation`, and `children` at any depth.
+     */
+    private static docNavEntries(apps: readonly any[]): any[] {
+        const found: any[] = [];
+        const walk = (entries: unknown): void => {
+            if (!Array.isArray(entries)) return;
+            for (const e of entries) {
+                if (!e || typeof e !== 'object') continue;
+                if (e.type === 'doc') found.push(e);
+                walk(e.children);
+            }
+        };
+        for (const app of apps) {
+            if (!app || typeof app !== 'object') continue;
+            walk(app.navigation);
+            if (Array.isArray(app.areas)) {
+                for (const area of app.areas) {
+                    if (area && typeof area === 'object') walk(area.navigation);
+                }
+            }
+        }
+        return found;
     }
 
     /**
@@ -5971,8 +6446,13 @@ export class RestServer {
                                     // object metadata is a per-request fact, not
                                     // a per-app one.
                                     const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
+                                    // [#19790] Likewise once for the whole list:
+                                    // books, holdings and the doc corpus are
+                                    // per-request facts about this caller.
+                                    const docAudienceGate = await this.resolveNavDocAudience(p, environmentId, req, list);
                                     const filtered = list
-                                        .map((it: any) => this.filterAppForUser(it, sysPerms, serviceGate, servabilityGate))
+                                        .map((it: any) => this.filterAppForUser(
+                                            it, sysPerms, serviceGate, servabilityGate, docAudienceGate))
                                         .filter((it: any) => it != null);
                                     visible = Array.isArray(raw)
                                         ? filtered
@@ -6113,12 +6593,9 @@ export class RestServer {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
-                                const { audienceAllows } = await import('@objectstack/spec/system');
-                                const caller = await this.resolveAudienceCaller(environmentId, req, {
-                                    needPermissionSets: RestServer.anyPermissionSetAudience(list),
-                                });
+                                const audience = await this.resolveDocsAudience(environmentId, req, list);
                                 const filtered = list.filter((b: any) =>
-                                    b && typeof b === 'object' && audienceAllows((b as any).audience, caller));
+                                    b && typeof b === 'object' && audience.admitsBook(b));
                                 visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
                             }
                         }
@@ -6132,35 +6609,18 @@ export class RestServer {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
-                                const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
-                                    await import('@objectstack/spec/system');
                                 const books = await this.fetchAudienceBooks(p, environmentId);
-                                const caller = await this.resolveAudienceCaller(environmentId, req, {
-                                    needPermissionSets: RestServer.anyPermissionSetAudience(books),
-                                });
+                                const audience = await this.resolveDocsAudience(environmentId, req, books);
                                 let filtered: any[];
-                                if (caller.authenticated && !RestServer.anyPermissionSetAudience(books)) {
+                                if (audience.allReadable) {
                                     // Fast path: with no gated book anywhere, every
                                     // effective audience admits an authenticated caller.
                                     filtered = list;
                                 } else {
-                                    const corpus = list
-                                        .filter((d: any) => d && typeof d === 'object')
-                                        .map((d: any) => ({
-                                            name: d.name,
-                                            group: d.group,
-                                            tags: d.tags,
-                                            order: d.order,
-                                            packageId: d._packageId,
-                                        }));
-                                    const audiences = resolveDocAudiences(books as any, corpus);
-                                    filtered = list.filter((d: any) => {
-                                        if (!d || typeof d !== 'object') return false;
-                                        const eff = audiences.get(d.name);
-                                        return eff
-                                            ? docAudienceAllows(eff, caller)
-                                            : audienceAllows('org', caller);
-                                    });
+                                    // The corpus is the listed docs themselves.
+                                    const canRead = audience.docReader(RestServer.docCorpusOf(list));
+                                    filtered = list.filter((d: any) =>
+                                        !!d && typeof d === 'object' && canRead(d.name));
                                 }
                                 visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
                             }
@@ -6500,8 +6960,7 @@ export class RestServer {
                         // [#6877] One package scopes the book lookup.
                         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                         const packageId = req.query?.package || undefined;
-                        const { resolveBookTree, deriveImplicitPackageBook, audienceAllows, resolveDocAudiences, docAudienceAllows, resolveDocLocale } =
-                            await import('@objectstack/spec/system');
+                        const { resolveDocLocale } = await import('@objectstack/spec/system');
 
                         const norm = (raw: any): any[] =>
                             Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
@@ -6512,22 +6971,19 @@ export class RestServer {
                             ...(environmentId ? { environmentId } : {}),
                         };
                         const books = norm(await prot.getMetaItems(booksRequest));
-                        let book = books.find((b: any) => b && b.name === req.params.name);
-                        if (!book) {
-                            // Unknown name → the implicit per-package book (§6.4).
-                            book = deriveImplicitPackageBook(req.params.name, req.params.name);
-                        }
+                        // [#19790] The same `DocsAudience` the doc reads and the
+                        // app-nav `doc` arm use — one resolution, four doors.
+                        const audience = await this.resolveDocsAudience(
+                            environmentId, req, RestServer.audienceBooksOf(books));
+                        const caller = audience.caller;
+                        // Unknown name → the implicit per-package book (§6.4).
+                        const book = audience.bookNamed(req.params.name);
 
                         // §6.7 — the book's audience gates the whole tree:
                         // anonymous → `public` only; `{ permissionSet }` →
                         // the caller must hold the named set (fail closed
                         // when holdings cannot be resolved, ADR-0049).
-                        const audienceBooks = books.map((b: any) =>
-                            b && typeof b === 'object' ? { ...b, packageId: b._packageId } : b);
-                        const caller = await this.resolveAudienceCaller(environmentId, req, {
-                            needPermissionSets: RestServer.anyPermissionSetAudience([book, ...audienceBooks]),
-                        });
-                        if (!audienceAllows((book as any).audience, caller)) {
+                        if (!audience.admitsBook(book)) {
                             if (!caller.authenticated) {
                                 sendDeclaredFault(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                             } else {
@@ -6553,8 +7009,6 @@ export class RestServer {
                                 packageId: d._packageId,
                             }));
 
-                        const tree = resolveBookTree(book as any, docs, (book as any)._packageId);
-
                         // §6.7 — the tree's ENTRIES are additionally filtered by
                         // each doc's effective audience (union over claiming
                         // books, unclaimed → org), so an anonymous reader of a
@@ -6562,19 +7016,7 @@ export class RestServer {
                         // fetch, and gated-only docs stay out of non-holders'
                         // trees. The book gate above passed, so this only ever
                         // narrows further for anonymous / non-holder callers.
-                        const gatedTreePossible = !caller.authenticated
-                            || RestServer.anyPermissionSetAudience(audienceBooks);
-                        if (gatedTreePossible) {
-                            const audiences = resolveDocAudiences(audienceBooks as any, docs);
-                            tree.groups = tree.groups
-                                .map((g: any) => ({
-                                    ...g,
-                                    entries: g.entries.filter((e: any) =>
-                                        !e.doc || docAudienceAllows(audiences.get(e.doc), caller)),
-                                }))
-                                .filter((g: any) => g.entries.some((e: any) => e.doc || e.href));
-                        }
-                        res.json(tree);
+                        res.json(audience.readableTree(book, docs));
                     } catch (error: any) {
                         handleRouteError(res, error);
                     }
@@ -7024,7 +7466,12 @@ export class RestServer {
                                     // single-app JSON defeats the filter (the
                                     // #4722 lesson, one gate over).
                                     const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
-                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate, servabilityGate);
+                                    // [#19790] And the same docs-audience gate,
+                                    // for the same reason: a `doc` entry the
+                                    // list route prunes must not come back here.
+                                    const docAudienceGate = await this.resolveNavDocAudience(p, environmentId, req, [visible]);
+                                    const gated = this.filterAppForUserWithReason(
+                                        visible, sysPerms, serviceGate, servabilityGate, docAudienceGate);
                                     visible = gated.app;
                                     if (visible == null) {
                                         // [#8013] A PERMISSION denial is reported as
@@ -7103,8 +7550,6 @@ export class RestServer {
                             // authenticated non-holder; fail closed when holdings
                             // cannot be resolved (ADR-0049).
                             if (isAudienceGatedType && visible) {
-                                const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
-                                    await import('@objectstack/spec/system');
                                 // The document under audience test. [#5563] This
                                 // used to unwrap an envelope-or-document here;
                                 // `visible` is always the document now, so the
@@ -7113,37 +7558,24 @@ export class RestServer {
                                 // DOCUMENT and reading it off an envelope would
                                 // silently grant everyone (`undefined` audience).
                                 const target = visible;
-                                let caller: { authenticated: boolean; permissionSets?: string[] };
+                                let caller: AudienceCaller;
                                 let allowed: boolean;
                                 if (metaType === 'book') {
-                                    caller = await this.resolveAudienceCaller(environmentId, req, {
-                                        needPermissionSets: RestServer.anyPermissionSetAudience([target]),
-                                    });
-                                    allowed = audienceAllows(target?.audience, caller);
+                                    // The book's own audience — holdings resolved
+                                    // only when THIS book is set-gated.
+                                    const audience = await this.resolveDocsAudience(environmentId, req, [target]);
+                                    caller = audience.caller;
+                                    allowed = audience.admitsBook(target);
                                 } else {
                                     const books = await this.fetchAudienceBooks(p, environmentId);
-                                    caller = await this.resolveAudienceCaller(environmentId, req, {
-                                        needPermissionSets: RestServer.anyPermissionSetAudience(books),
-                                    });
-                                    if (caller.authenticated && !RestServer.anyPermissionSetAudience(books)) {
+                                    const audience = await this.resolveDocsAudience(environmentId, req, books);
+                                    caller = audience.caller;
+                                    if (audience.allReadable) {
                                         allowed = true; // no gated book anywhere → org suffices
                                     } else {
-                                        const docCorpusRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                                            type: 'doc',
-                                            ...(environmentId ? { environmentId } : {}),
-                                        };
-                                        const corpus = RestServer.metaItemsArray(
-                                            await p.getMetaItems(docCorpusRequest).catch(() => []))
-                                            .filter((d: any) => d && typeof d === 'object')
-                                            .map((d: any) => ({
-                                                name: d.name,
-                                                group: d.group,
-                                                tags: d.tags,
-                                                order: d.order,
-                                                packageId: d._packageId,
-                                            }));
-                                        const audiences = resolveDocAudiences(books as any, corpus);
-                                        allowed = docAudienceAllows(audiences.get(target?.name), caller);
+                                        const read = await this.readDocCorpus(p, environmentId);
+                                        const corpus = 'fault' in read ? [] : read.items;
+                                        allowed = audience.docReader(corpus)(target?.name);
                                     }
                                 }
                                 if (!allowed) {
@@ -7715,9 +8147,15 @@ export class RestServer {
                     const sinceSeq = req.query?.sinceSeq !== undefined
                         ? Number(req.query.sinceSeq)
                         : undefined;
-                    const limit = req.query?.limit !== undefined
-                        ? Number(req.query.limit)
-                        : undefined;
+                    // [#20062] `limit` is parsed through its DECLARATION
+                    // (`HistoryMetaItemRequestSchema.limit`, `z.number().optional()`),
+                    // not coerced: `?limit=abc` used to be `NaN`, dropped by the
+                    // spread below, and answered with the WHOLE change log; `?limit=`
+                    // became `Number('')` = 0, a zero-event answer. Both are refused
+                    // now. The declaration carries no `int()` and no bounds, so any
+                    // finite number is still forwarded exactly as before.
+                    const limit = readDeclaredQueryNumber(req.query, 'limit',
+                        HistoryMetaItemRequestSchema.shape.limit, { emptyIsAbsent: false });
                     // [#13406] STATE THE ORG PARTITION. `sys_metadata_history`
                     // is a per-org log — `SysMetadataRepository.history()`
                     // filters `organization_id = this.organizationId` by strict
@@ -7801,7 +8239,9 @@ export class RestServer {
                         ...(environmentId ? { environmentId } : {}),
                         ...(historyOrganizationId ? { organizationId: historyOrganizationId } : {}),
                         ...(sinceSeq !== undefined && Number.isFinite(sinceSeq) ? { sinceSeq } : {}),
-                        ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+                        // Already finite or absent — the declared parse above refuses
+                        // anything else, so no `Number.isFinite` drop is left here.
+                        ...(limit !== undefined ? { limit } : {}),
                     };
                     const result = await p.historyMetaItem(historyRequest);
                     res.json(result);
@@ -9720,8 +10160,15 @@ export class RestServer {
                     const filter: Record<string, any> = {};
                     if (typeof q.object === 'string' && q.object) filter.object_name = q.object;
                     if (typeof q.status === 'string' && q.status) filter.status = q.status;
-                    const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
-                    const offset = Math.max(0, Number(q.offset) || 0);
+                    // [#20061] Parsed through the DECLARED `ListImportJobsRequestSchema`
+                    // (limit `int().min(1).max(200).default(50)`, offset
+                    // `int().min(0).default(0)`) rather than clamped: `?limit=0` used to
+                    // answer the 50-row default and `?limit=500` 200 rows, both `200`.
+                    // Absent and empty keep the declared defaults, as they always did.
+                    const limit = readDeclaredQueryNumber(q, 'limit',
+                        ListImportJobsRequestSchema.shape.limit, { emptyIsAbsent: true });
+                    const offset = readDeclaredQueryNumber(q, 'offset',
+                        ListImportJobsRequestSchema.shape.offset, { emptyIsAbsent: true });
                     const jobsListRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: IMPORT_JOB_OBJECT,
                         // [#16337] Canonical QueryAST, not the wire dialect this
@@ -9847,7 +10294,14 @@ export class RestServer {
                     // heavier than a bare value dump, so cap it well below HARD_CAP;
                     // above this the export still succeeds, just without colours.
                     const STYLE_ROW_CAP = 10_000;
-                    const requestedLimit = q.limit != null ? Math.max(1, Number(q.limit) || 0) : 10_000;
+                    // [#20062] Read, not coerced: `?limit=abc` (and `?limit=`) used to
+                    // become `Number(…) || 0` → `Math.max(1, 0)` → a ONE-row export
+                    // answered `200`. No request schema is declared for this door, so
+                    // the reading is "a whole number"; the floor and the cap below
+                    // are this door's own and are unchanged.
+                    const limitParam = readDeclaredQueryNumber(q, 'limit',
+                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: false });
+                    const requestedLimit = limitParam !== undefined ? Math.max(1, limitParam) : 10_000;
                     const limit = Math.min(requestedLimit, HARD_CAP);
                     const chunkSize = Math.min(MAX_CHUNK, Math.max(50, q.page != null ? Number(q.page) || 500 : 500));
                     // Colour cells only for xlsx within the style cap; decided up
@@ -10249,10 +10703,18 @@ export class RestServer {
                     const objects = typeof objectsParam === 'string'
                         ? objectsParam.split(',').map((s: string) => s.trim()).filter(Boolean)
                         : Array.isArray(objectsParam) ? objectsParam : undefined;
+                    // [#20062] Read, not coerced: `?limit=abc` used to reach
+                    // `searchAll` as `NaN`, and `hits.length >= NaN` is never true,
+                    // so the overall cap was silently gone. No request schema is
+                    // declared for this door, so the reading is "a whole number";
+                    // `searchAll`'s own `[1, 100]` clamp is unchanged, and an empty
+                    // `?limit=` stays absent as the old falsy guard had it.
+                    const limit = readDeclaredQueryNumber(req.query, 'limit',
+                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: true });
                     const result = await searchAll.call(p, {
                         q,
                         objects,
-                        limit: req.query?.limit ? Number(req.query.limit) : undefined,
+                        limit,
                         perObject: req.query?.perObject ? Number(req.query.perObject) : undefined,
                         ...(context ? { context } : {}),
                     });

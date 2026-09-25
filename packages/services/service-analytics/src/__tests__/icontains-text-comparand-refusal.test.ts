@@ -254,10 +254,9 @@ describe('[#20068] every analytics face over a real engine: refused before anyth
     for (const [face, run] of WHERE_FACES) {
       expect(await run(undefined), `${face}: no where`).toEqual(ALL);
     }
-    // The ObjectQL engine path is left out of this one row: it cannot express
-    // `$icontains` for ANY comparand today, a separate defect this card records
-    // and does not move.
-    for (const [face, run] of WHERE_FACES.filter(([f]) => !f.includes('ObjectQL'))) {
+    // [#20098] Every face, the ObjectQL ones included: they were left out of
+    // this row while `convertFilter` had no `icontains` arm.
+    for (const [face, run] of WHERE_FACES) {
       expect(await run({ name: { $icontains: 'acme' } }), `${face}: $icontains 'acme'`).toEqual(['a1', 'a2']);
     }
   });

@@ -33,6 +33,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SearchAllPageHitSchema, SearchAllResponseSchema } from '@objectstack/spec/api';
+import { PageSchema } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const text = (name: string) => ({ name, type: 'text' });
@@ -131,6 +132,22 @@ describe('[#13216] searchAll sweeps published pages into `pages`', () => {
         // The whole body still parses against the widened response schema.
         const body = SearchAllResponseSchema.safeParse(JSON.parse(JSON.stringify(result)));
         expect(body.error?.issues ?? []).toEqual([]);
+    });
+
+    it("[#20101] a stored page with no `type` is hit with `pageType` = PageSchema's declared default", async () => {
+        // The sweep reads the SERVED set, so it inherits the read seam's fill:
+        // a page authored without `type` is a record page, and the hit says so
+        // instead of omitting `pageType`. The value is read from the schema.
+        const declared = (PageSchema as unknown as { shape: { type: { parse(v: unknown): unknown } } })
+            .shape.type.parse(undefined);
+        const { p } = makeProtocol({
+            storedRows: [storedPage({ body: { name: 'invoice_record', label: 'Invoice record', object: 'invoice' } })],
+        });
+
+        const result = await p.searchAll({ q: 'invoice' });
+
+        expect(declared).toBe('record');
+        expect(result.pages).toEqual([{ kind: 'page', name: 'invoice_record', title: 'Invoice record', pageType: declared }]);
     });
 
     it('a DRAFT row of the same shape does not surface — the sweep reads the published state only', async () => {

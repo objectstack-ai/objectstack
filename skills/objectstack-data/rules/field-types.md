@@ -179,18 +179,18 @@ Stored as JSON on the parent row — no separate table / FK:
   type: 'currency',
   currencyConfig: {
     precision: 2,
-    currencyMode: 'fixed',   // 'fixed' = one currency for the column;
-                             // 'dynamic' = per-record `{ value, currency }`
+    currencyMode: 'fixed',   // 'fixed' = the column is pinned to
+                             // defaultCurrency; 'dynamic' = tenant default
     defaultCurrency: 'USD',  // ISO 4217
   },
 }
 ```
 
-**Currency resolution (ADR-0053).** A displayed amount resolves its symbol
-through: the field's own `currencyConfig.defaultCurrency` → the tenant
-`localization.currency` default. With neither set, renderers show a plain
-grouped number (never a hardcoded `$`). The same chain backs analytics measures
-(a measure's explicit `currency` wins over the field/tenant default).
+**Currency resolution.** The value is a bare number in both modes (ADR-0104
+D1), never `{ value, currency }`. The displayed symbol: under `'fixed'`,
+`currencyConfig.defaultCurrency`; under `'dynamic'` (default), the tenant
+`localization.currency` setting, not `defaultCurrency`; with neither, a plain
+grouped number (never a hardcoded `$`). A measure's own `currency` wins.
 
 ### Select with Default
 

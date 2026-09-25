@@ -63,7 +63,8 @@ import {
 // SQLite dialects need because GLOB is the only case-exact pattern operator
 // SQLite has and it does not speak `%`/`_`. `driver-turso`'s remote transport
 // compiles the same operator independently and calls the same two functions.
-import { hasDanglingLikeEscape, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [#20041] And the U+0000 gate beside the dangling-escape one, for the same reason.
+import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -2482,6 +2483,46 @@ function danglingLikeEscapeError(
 }
 
 /**
+ * [#20041] A `$like` / `$ilike` pattern holding U+0000 (NUL).
+ *
+ * Refused for the reason {@link danglingLikeEscapeError} is: no meaning survives
+ * every backend. This driver's SQLite arm compiles the pattern to `GLOB`, and
+ * SQLite reads a pattern only up to its first U+0000, so the pattern was CUT
+ * there and answered a different question than the JS faces, with nothing
+ * raised. Measured on better-sqlite3, sql.js and libSQL alike: `'%'` + U+0000
+ * returned every non-NULL row, where `@objectstack/formula` returns only the
+ * values ending in U+0000. There is no NUL-safe SQLite pattern primitive to
+ * compile to instead. `hasNulInLikePattern` is the spec's shared test, asked on
+ * the same walk as the dangling escape, so every face refuses the SAME patterns
+ * — on every dialect of this driver, not only SQLite.
+ *
+ * Asked AFTER the dangling escape, so a pattern that has both keeps the refusal
+ * it already had.
+ */
+function nulLikePatternError(
+  field: string,
+  op: string,
+  pattern: string,
+  path: string,
+  subtree?: unknown,
+): Error {
+  // [#20041, the #8220 contract] The pattern is the predicate's literal, and so
+  // are the field, the path and which of the two pattern operators it was.
+  return withheldFilterError(
+    `A pattern operator ("$like" / "$ilike") in this filter has a pattern holding the NUL character ` +
+      `U+0000. SQLite reads a pattern only up to its first NUL, so such a pattern would match a ` +
+      `different set of rows there than on the other backends, and no escape makes the character ` +
+      `portable. Remove it from the pattern. Which operator it was, the field it was aimed at and ` +
+      `the pattern are withheld from the message; the full diagnostic is in the server log.`,
+    `Operator "${op}" on field "${field}" at ${path} has a pattern holding the NUL character ` +
+      `U+0000 (${JSON.stringify(pattern)}). SQLite reads a pattern only up to its first NUL, so ` +
+      `such a pattern would match a different set of rows there than on the other backends, and ` +
+      `no escape makes the character portable. Remove it from the pattern.`,
+    subtree,
+  );
+}
+
+/**
  * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
  * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
  * `data/filter.zod.ts`), else `null`.
@@ -3769,6 +3810,130 @@ function jsonMembershipPredicate(
 }
 
 /**
+ * [#20024] What the SQLite `$like` / `$ilike` emitter reads off one pattern.
+ * `RemoteTransport.pushLikePattern` in `driver-turso` restates this reading
+ * for the remote transport, and the turso #20024 suite holds the two to the
+ * same statement text and the same rows.
+ */
+interface SqliteLikePatternPlan {
+  /** The whole pattern in GLOB's language ({@link likePatternToGlobPattern}). */
+  readonly glob: string;
+  /**
+   * The pattern's literal prefix, the text before its first unescaped
+   * wildcard, as the GLOB pattern `<prefix>*`, or `null` when that prefix is
+   * empty. A value the pattern matches starts with that prefix.
+   */
+  readonly prefixGlob: string | null;
+  /**
+   * The pattern is its literal prefix followed by one or more `%` and nothing
+   * else, so cutting the value at its first U+0000 cannot change the answer.
+   */
+  readonly cutProof: boolean;
+  /**
+   * The code point each stored U+0000 is replaced with before `GLOB` reads the
+   * value: never U+0000, never an ASCII letter, never a surrogate, and never a
+   * literal character of the pattern.
+   */
+  readonly sentinel: number;
+}
+
+/** [#20024] Read a NUL-free, gated pattern into its {@link SqliteLikePatternPlan}. */
+function sqliteLikePatternPlan(pattern: string): SqliteLikePatternPlan {
+  // First, so a dangling escape still meets that function's backstop throw.
+  const glob = likePatternToGlobPattern(pattern);
+  const literals = new Set<number>();
+  let prefixEnd = pattern.length;
+  let sawWildcard = false;
+  let onlyPercentAfterPrefix = true;
+  for (let i = 0; i < pattern.length; i++) {
+    const escaped = pattern[i] === '\\';
+    if (escaped) i++;
+    if (!escaped && (pattern[i] === '%' || pattern[i] === '_')) {
+      if (!sawWildcard) prefixEnd = i;
+      sawWildcard = true;
+      if (pattern[i] === '_') onlyPercentAfterPrefix = false;
+      continue;
+    }
+    if (sawWildcard) onlyPercentAfterPrefix = false;
+    literals.add(pattern.charCodeAt(i));
+  }
+  const isAsciiLetter = (c: number) => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
+  let sentinel = 0x01;
+  while (literals.has(sentinel) || isAsciiLetter(sentinel) || (sentinel >= 0xd800 && sentinel <= 0xdfff)) {
+    sentinel++;
+  }
+  return {
+    glob,
+    prefixGlob: prefixEnd > 0 ? `${likePatternToGlobPattern(pattern.slice(0, prefixEnd))}*` : null,
+    cutProof: sawWildcard && onlyPercentAfterPrefix,
+    sentinel,
+  };
+}
+
+/**
+ * [#20024] The SQLite `$like` / `$ilike` predicate, which reads the WHOLE stored
+ * value, U+0000s included.
+ *
+ * `glob()` reads the stored value as a C string, only up to its first U+0000,
+ * so a NUL-free pattern over a value holding one answered a different
+ * question: `$like: 'a'` matched `'a'` + U+0000 + `'b'`, and `$like: ''`
+ * matched U+0000 + `'z'`. Measured at base `fe677aeeed` over 108 patterns and
+ * 22 compositions against 59 stored values, identically on better-sqlite3
+ * (SQLite 3.53.4), sql.js (3.49.1), `TursoDriver` local, and `TursoDriver`
+ * remote over a real `@libsql/client` engine (3.45.1): 359 of 3380 cells over a
+ * value holding U+0000 differed from `@objectstack/formula`, and 0 of 3640 over
+ * a value without one inside the Basic Multilingual Plane. SQLite has no
+ * NUL-safe pattern operator (`LIKE` cuts the same way) and `replace()` cannot
+ * target U+0000 (it returns its input unchanged), so the value is rewritten
+ * first and then handed to `GLOB`:
+ *
+ * - **A value without U+0000** takes `col GLOB ?`, exactly as before, so its
+ *   answer cannot move. `instr()` over BLOB finds a U+0000 wherever it is.
+ * - **A value holding U+0000** has each U+0000 replaced by one
+ *   {@link SqliteLikePatternPlan.sentinel} character, found by `instr()` over
+ *   BLOB and spliced by a recursive CTE, one step per U+0000. The rewrite
+ *   cannot change the answer. The pattern holds no U+0000 (the refusal door
+ *   `hasNulInLikePattern` guards that), so a U+0000 in the value can only ever
+ *   be matched by a `%` or a `_`. The sentinel is one character, as U+0000 is,
+ *   so `_` counts it the same way. And it is not a literal of the pattern, so
+ *   no literal position matches it, as none matched U+0000. It is not an ASCII
+ *   letter either, so the `$ilike` fold cannot make it one.
+ * - **A pattern that is its literal prefix plus trailing `%`s** (`'ab%'`,
+ *   `'%'`) keeps the bare `col GLOB ?`. A prefix free of U+0000 lies wholly
+ *   before the value's first U+0000 or is not a prefix at all, so the cut
+ *   cannot change that answer, the same argument `$startsWith` stands on.
+ * - **Any other pattern with a literal prefix**, case-exact, gets `col GLOB
+ *   '<prefix>*'` as a leading conjunct. It is TRUE of every value the pattern
+ *   matches, cut or not, and it keeps the index range `GLOB` gives a literal
+ *   prefix. `$ilike` has no such range to keep, because `lower(col)` is not an
+ *   indexed column.
+ *
+ * NULL stays NULL: `instr(NULL, …) > 0` is NULL, so the `CASE` takes its
+ * `ELSE` arm, and `NULL GLOB ?` is NULL, as before. So the NULL-safe `$not`
+ * wrapper composes unchanged. `_` matches one code point in both arms, as
+ * `GLOB`'s `?` does.
+ */
+function sqliteLikePatternMatch(field: string, pattern: string, fold: boolean): { sql: string; bindings: unknown[] } {
+  const plan = sqliteLikePatternPlan(pattern);
+  // GLOB takes no ESCAPE clause, so the pattern binds alone.
+  const column = fold ? 'lower(??)' : '??';
+  const comparand = fold ? 'lower(?)' : '?';
+  if (plan.cutProof) {
+    return { sql: `${column} GLOB ${comparand}`, bindings: [field, plan.glob] };
+  }
+  const wholeValue =
+    `(WITH RECURSIVE os_like_nul(os_rest, os_head) AS (SELECT CAST(${column} AS BLOB), X'' UNION ALL `
+    + `SELECT substr(os_rest, instr(os_rest, X'00') + 1), `
+    + `os_head || substr(os_rest, 1, instr(os_rest, X'00') - 1) || char(${plan.sentinel}) `
+    + `FROM os_like_nul WHERE instr(os_rest, X'00') > 0) `
+    + `SELECT (os_head || os_rest) GLOB ${comparand} FROM os_like_nul WHERE instr(os_rest, X'00') = 0)`;
+  const sql = `CASE WHEN instr(CAST(?? AS BLOB), X'00') > 0 THEN ${wholeValue} ELSE ${column} GLOB ${comparand} END`;
+  const bindings = [field, field, plan.glob, field, plan.glob];
+  if (fold || plan.prefixGlob === null) return { sql, bindings };
+  return { sql: `(${column} GLOB ${comparand} AND ${sql})`, bindings: [field, plan.prefixGlob, ...bindings] };
+}
+
+/**
  * [#7536] The one place a `$like` / `$ilike` PATTERN becomes SQL.
  *
  * The sibling of {@link textMatchPredicate}, and deliberately a second function
@@ -3790,7 +3955,10 @@ function jsonMembershipPredicate(
  *   the pattern. `LIKE` there folds ASCII unconditionally and cannot be told
  *   not to per statement, so a case-exact pattern match has to change operator
  *   — and changing operator changes the pattern LANGUAGE, which is why the
- *   translation is a shared spec function instead of an escape call.
+ *   translation is a shared spec function instead of an escape call. `GLOB`
+ *   reads a stored value only up to its first U+0000, so a value holding one
+ *   is matched by {@link sqliteLikePatternMatch}'s whole-value program instead
+ *   (#20024).
  * - **Postgres → `LIKE`**, pattern bound verbatim with the bound `ESCAPE`, since
  *   `LIKE` is already case-exact there. The `$ilike` fold is `translate()` over
  *   the 26 ASCII letters — deliberately NOT Postgres's own `ILIKE`, which folds
@@ -3814,13 +3982,10 @@ function likePatternPredicate(
   fold: boolean,
 ): { sql: string; bindings: unknown[] } {
   if (dialect === 'sqlite') {
-    // GLOB takes no ESCAPE clause, so this arm binds two values, not three.
-    const column = fold ? 'lower(??)' : '??';
-    const comparand = fold ? 'lower(?)' : '?';
-    return {
-      sql: `${column} GLOB ${comparand}`,
-      bindings: [field, likePatternToGlobPattern(pattern)],
-    };
+    // [#20024] `glob()` reads the stored value only up to its first U+0000;
+    // {@link sqliteLikePatternMatch} keeps GLOB wherever that cut cannot change
+    // the answer and reads the whole value everywhere else.
+    return sqliteLikePatternMatch(field, pattern, fold);
   }
 
   const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
@@ -4572,6 +4737,11 @@ function classifyFilterKey(
       }
       if (hasDanglingLikeEscape(pattern)) {
         throw danglingLikeEscapeError(key, op, pattern, `${here}.${op}`, value);
+      }
+      // [#20041] A pattern holding U+0000 — SQLite's GLOB cuts it there. The
+      // operator map is the node, as for the dangling escape.
+      if (hasNulInLikePattern(pattern)) {
+        throw nulLikePatternError(key, op, pattern, `${here}.${op}`, value);
       }
     }
   }

@@ -42,6 +42,31 @@
  *
  * Every refusal asserts the ADR-0112 envelope (`code` + `status`); a bare
  * `toThrow()` would be satisfied by any uncoded error.
+ *
+ * ## [#20099] The rest of `where`'s doors, on the same table
+ *
+ * The face above was the only door `having` took. Measured on the base
+ * (aa04ea2964) through `engine.aggregate` on driver-memory and
+ * driver-sqlite-wasm, both doors, the four others answered like this — and the
+ * blocks after the face's extend the same table to each of them:
+ *
+ *   | `having`                                   | `where` (same shape)          | `having` before                    |
+ *   |:--|:--|:--|
+ *   | `{ total: { $gt: { $field: 'max_cap' } } }` | sqlite: the rows, resolved    | no group — the reference never read |
+ *   | `{ total: { $eq: { v: 1 } } }`              | 400, the comparand-TYPE door  | no group                           |
+ *   | `[['total', '>', 100]]`                     | lowered sugar, the rows       | no group — index keys as columns   |
+ *   | `{ total: { $median: 1 } }`                 | 400                           | 400 on a populated set, `200 []` on an empty one |
+ *
+ * 5. the comparand-TYPE door — its own where/having parity table, and the
+ *    `FILTER_COMPARAND_TYPE_CASES` rows that are that door's, now driven down
+ *    the `having` path too;
+ * 6. `having` is a filter condition OBJECT — an array (the `FilterArray` sugar
+ *    is declared on `where` alone) or a scalar is refused, never read;
+ * 7. the walker's own refusals are row-independent — each on an empty and a
+ *    populated grouped set, in the walker's own words;
+ * 8. a `{ $field }` reference resolves against the aggregated row in the six
+ *    scalar comparisons, `addDays` included, and is refused in every other
+ *    position and when it names no column.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -54,6 +79,7 @@ import {
   type FilterCondition,
 } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
+import { applyHaving } from './having-filter.js';
 
 const OBJECT = 'order';
 
@@ -110,18 +136,29 @@ function makeDriver(rows: ReadonlyArray<Record<string, unknown>>, native: boolea
     async commit() {}, async rollback() {},
   };
   if (native) {
-    // Groups and sums itself, ignores `ast.having` — as every real native
-    // driver does today; the engine's post-filter is what makes it live.
-    driver.aggregate = async () => {
+    // Groups by `customer_id` and computes the requested aggregations itself,
+    // ignoring `ast.having` — as every real native driver does today; the
+    // engine's post-filter is what makes it live. [#20099] It reads the
+    // requested aliases rather than hard-coding two, so a `{ $field }`
+    // reference can name a third column (`count` / `sum` / `min` / `max`, with
+    // `applyInMemoryAggregation`'s null-for-an-empty-min/max reading).
+    driver.aggregate = async (_object: string, ast: any) => {
       calls.aggregate += 1;
-      const groups = new Map<string, { customer_id: string; order_count: number; total: number }>();
-      for (const r of rows as Array<{ customer_id: string; amount: number }>) {
-        const g = groups.get(r.customer_id) ?? { customer_id: r.customer_id, order_count: 0, total: 0 };
-        g.order_count += 1;
-        g.total += r.amount;
-        groups.set(r.customer_id, g);
+      const groups = new Map<string, Array<Record<string, any>>>();
+      for (const r of rows as Array<Record<string, any>>) {
+        groups.set(r.customer_id, [...(groups.get(r.customer_id) ?? []), r]);
       }
-      return Array.from(groups.values());
+      return Array.from(groups.entries()).map(([customerId, members]) => {
+        const out: Record<string, unknown> = { customer_id: customerId };
+        for (const a of ast.aggregations as Array<{ function: string; field?: string; alias: string }>) {
+          const values = members.map((m) => m[a.field ?? '']).filter((v) => v != null);
+          if (a.function === 'count') out[a.alias] = members.length;
+          else if (a.function === 'sum') out[a.alias] = values.reduce((s, v) => s + v, 0);
+          else if (a.function === 'min') out[a.alias] = values.length ? values.reduce((m, v) => (v < m ? v : m)) : null;
+          else if (a.function === 'max') out[a.alias] = values.length ? values.reduce((m, v) => (v > m ? v : m)) : null;
+        }
+        return out;
+      });
     };
   }
   return { driver, calls };
@@ -134,7 +171,16 @@ async function makeEngine(rows: ReadonlyArray<Record<string, unknown>>, native: 
   await engine.init();
   engine.registry.registerObject({
     name: OBJECT,
-    fields: { customer_id: { type: 'text' }, amount: { type: 'number' } },
+    fields: {
+      customer_id: { type: 'text' },
+      amount: { type: 'number' },
+      // [#20099] The columns the `{ $field }` rows aggregate — declared so the
+      // `where` doors a per-aggregation filter takes judge a real object.
+      cap: { type: 'number' },
+      placed_on: { type: 'date' },
+      due_on: { type: 'date' },
+      grace: { type: 'number' },
+    },
   } as any);
   return { engine, calls };
 }
@@ -284,7 +330,14 @@ describe('[#19974] having — driven from the shared FILTER_COMPARAND_TYPE_CASES
     }
   });
 
-  for (const c of shapeRows) {
+  // [#20099] …and those rows are now `having`'s too: the engine runs the same
+  // comparand-TYPE door on the clause, path rooted at `having`, so the table
+  // drives BOTH partitions down the having path.
+  it('the type door\'s partition is not empty either — its leg below can never pass on zero rows', () => {
+    expect(otherRows.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const c of [...shapeRows, ...otherRows]) {
     it(`${c.name} — on the having path`, async () => {
       for (const [door, native] of DOORS) {
         const { engine, calls } = await makeEngine(ROWS, native);
@@ -341,6 +394,276 @@ describe('[#19974] having — the verdict belongs to the filter, not to the data
         expectEnvelope(emptyErr);
         expect(emptyErr.message, door).toBe(populatedErr.message);
       }
+    }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20099] The rest of `where`'s doors
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Refused on BOTH doors, on an EMPTY and on a populated grouped set, with one
+ * message, before any driver is asked for a row. Returns the message, so a row
+ * can hold it to the words it owes.
+ */
+async function expectRowIndependentRefusal(
+  query: EngineAggregateOptions,
+  rows: ReadonlyArray<Record<string, unknown>>,
+): Promise<string> {
+  let message: string | undefined;
+  for (const [door, native] of DOORS) {
+    for (const [population, data] of [['empty', []], ['populated', rows]] as const) {
+      const { engine, calls } = await makeEngine(data, native);
+      const err = await refusalOf(() => engine.aggregate(OBJECT, query));
+      expectEnvelope(err);
+      expect(calls, `${door}, ${population}`).toEqual({ aggregate: 0, find: 0 });
+      if (message === undefined) message = err.message;
+      expect(err.message, `${door}, ${population}`).toBe(message);
+    }
+  }
+  return message!;
+}
+
+describe('[#20099] having — the comparand-TYPE door, the same where/having parity table', () => {
+  // Before: every row answered `having` with no group (the walker compared the
+  // object, the Map, the function… and matched nothing), while `where` refused
+  // each one at the type door.
+  const TYPE_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>]> = [
+    ['a plain object under $eq (the triage shape)', () => ({ total: { $eq: { v: 1 } } })],
+    ['undefined in the implicit-equality slot', () => ({ total: undefined })],
+    ['a Map under $eq', () => ({ total: { $eq: new Map() } })],
+    ['a function under $gt', () => ({ total: { $gt: () => 1 } })],
+    ['a Symbol under $ne', () => ({ total: { $ne: Symbol('x') } })],
+    ['an undefined $in member', () => ({ total: { $in: [undefined] } })],
+    ['a bigint beyond 2^53', () => ({ total: { $gt: 2n ** 60n } })],
+    ['a { $field } whose $field is not a string', () => ({ total: { $gt: { $field: 5 } } })],
+    ['a plain object nested in $or', () => ({ $or: [{ order_count: 99 }, { total: { $eq: { v: 1 } } }] })],
+    ['undefined under $not', () => ({ $not: { total: undefined } })],
+  ];
+
+  for (const [name, filter] of TYPE_REFUSED) {
+    it(`${name}: refused as a where AND as a having, one envelope, one wording, both doors, any population`, async () => {
+      const { engine: whereEngine, calls: whereCalls } = await makeEngine(ROWS, true);
+      const whereErr = await refusalOf(() =>
+        whereEngine.aggregate(OBJECT, offContract({ ...AGG_QUERY, where: filter() })));
+      expectEnvelope(whereErr);
+      expect(whereCalls).toEqual({ aggregate: 0, find: 0 });
+      // The type door's own sentence — not some other gate refusing the input.
+      const door = syncRefusalOf(() => normalizeFilterComparandTypes(filter(), `aggregate('${OBJECT}')`));
+      expect(door, 'the type door must refuse this row directly').toBeDefined();
+      expect(whereErr.message).toBe(door!.message);
+
+      const havingMessage = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: filter() }), ROWS);
+      expect(havingMessage).toBe(whereErr.message.replaceAll('where.', 'having.'));
+    });
+  }
+
+  it('an exact-range bigint is NARROWED, as it is in where — and the caller\'s clause is not edited', async () => {
+    // Before: `{ $in: [500n, 20n] }` kept no group — `[500n].includes(500)` is
+    // false — while the same list in `where` is narrowed to numbers first.
+    for (const [door, native] of DOORS) {
+      const having = { total: { $in: [500n, 20n] } };
+      const { engine } = await makeEngine(ROWS, native);
+      const rows = await engine.aggregate(OBJECT, offContract({ ...AGG_QUERY, having }));
+      expect(groups(rows), door).toEqual(['c1', 'c3']);
+      expect(having.total.$in, door).toEqual([500n, 20n]);
+    }
+  });
+});
+
+describe('[#20099] having — a filter condition OBJECT, never an array or a scalar', () => {
+  // Before: an array answered no group (its index keys were read as columns),
+  // `[]` and every scalar answered EVERY group (no condition at all).
+  const NOT_A_CONDITION: ReadonlyArray<readonly [string, () => unknown]> = [
+    ['the FilterArray sugar, a list of comparisons', () => [['total', '>', 100]]],
+    ['the FilterArray sugar, one comparison', () => ['total', '>', 100]],
+    ['the FilterArray sugar, a logical group', () => ['and', ['total', '>', 100], ['order_count', '>=', 2]]],
+    ['an empty array', () => []],
+    ['a string', () => 'total > 100'],
+    ['a number', () => 100],
+    ['a boolean', () => true],
+    ['a Map', () => new Map([['total', 500]])],
+    ['a Date', () => new Date(0)],
+  ];
+
+  for (const [name, having] of NOT_A_CONDITION) {
+    it(`${name}: refused, whatever the rows`, async () => {
+      const message = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: having() }), ROWS);
+      expect(message).toContain('`having`');
+    });
+  }
+
+  it('the FilterArray sugar is still lowered on where — the refusal is about the slot, not the shape', async () => {
+    // Control: the stand-in driver does not filter, so what is pinned is that
+    // `where` ACCEPTS the sugar (lowered, handed on) where `having` refuses it.
+    const { engine } = await makeEngine(ROWS, true);
+    await expect(engine.aggregate(OBJECT, offContract({ ...AGG_QUERY, where: [['amount', '>', 100]] })))
+      .resolves.toBeInstanceOf(Array);
+  });
+
+  const NO_CLAUSE: ReadonlyArray<readonly [string, unknown]> = [
+    ['null', null],
+    ['undefined', undefined],
+    ['{}', {}],
+    ['a null-prototype empty node', Object.create(null)],
+  ];
+  for (const [name, having] of NO_CLAUSE) {
+    it(`${name} is still no clause: every group, both doors`, async () => {
+      for (const [door, native] of DOORS) {
+        const { engine } = await makeEngine(ROWS, native);
+        const rows = await engine.aggregate(OBJECT, offContract({ ...AGG_QUERY, having }));
+        expect(groups(rows), door).toEqual(['c1', 'c2', 'c3']);
+      }
+    });
+  }
+});
+
+describe('[#20099] having — the walker\'s own refusals belong to the filter, not to the data', () => {
+  // Each row: the filter, and a row that walks the per-row evaluator INTO the
+  // refused arm — the floor whose words the engine-level refusal must keep.
+  // Before: every row answered `200 []` on an empty grouped set; the column-
+  // absent row answered `[]` on a populated one too (the no-value exit sat
+  // before the operator switch); and the `$or` row answered EVERY group,
+  // because its first branch held and the walk never reached the second.
+  const WALKER_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, Record<string, unknown>]> = [
+    ['an unknown condition operator', () => ({ total: { $median: 1 } }), { total: 1 }],
+    ['an unknown logical operator', () => ({ $nand: [{ total: 1 }] }), { total: 1 }],
+    ['a retired operator', () => ({ customer_id: { $regex: 'c' } }), { customer_id: 'c1' }],
+    ['a retired operator with its retired sibling', () => ({ customer_id: { $regex: 'c', $options: 'i' } }), { customer_id: 'c1' }],
+    ['an empty $icontains', () => ({ customer_id: { $icontains: '' } }), { customer_id: 'c1' }],
+    ['a non-string $icontains', () => ({ customer_id: { $icontains: 5 } }), { customer_id: 'c1' }],
+    ['a non-$ key beside an operator', () => ({ total: { $gt: 1, foo: 2 } }), { total: 5 }],
+    ['an unknown operator on a column the row does not carry', () => ({ nope: { $median: 1 } }), { nope: 1 }],
+    ['an unknown operator behind a $or branch that already held', () => ({ $or: [{ total: { $gt: 0 } }, { total: { $median: 1 } }] }), { total: -1 }],
+    ['an unknown operator under $not', () => ({ $not: { total: { $median: 1 } } }), { total: 1 }],
+  ];
+
+  for (const [name, filter, floorRow] of WALKER_REFUSED) {
+    it(`${name}: refused on an empty and a populated set, in the walker's own words`, async () => {
+      const floor = syncRefusalOf(() => applyHaving([floorRow], filter() as FilterCondition));
+      expect(floor, 'the per-row walker must refuse this row when it reaches it').toBeDefined();
+      const message = await expectRowIndependentRefusal(offContract({ ...AGG_QUERY, having: filter() }), ROWS);
+      expect(message).toBe(floor!.message);
+    });
+  }
+});
+
+describe('[#20099] having — a { $field } reference resolves against the aggregated row', () => {
+  const REF_ROWS = [
+    { customer_id: 'c1', amount: 100, cap: 50, placed_on: '2026-01-10', due_on: '2026-01-05', grace: 3 },
+    { customer_id: 'c1', amount: 400, cap: 10, placed_on: '2026-01-02', due_on: '2026-01-20', grace: 10 },
+    { customer_id: 'c2', amount: 900, cap: 5000, placed_on: '2026-03-01', due_on: '2026-01-01', grace: 1 },
+    { customer_id: 'c2', amount: 300, cap: 1, placed_on: '2026-02-01', due_on: '2026-02-01', grace: 1 },
+    { customer_id: 'c2', amount: 50, cap: 2, placed_on: '2026-01-15', due_on: '2026-03-01', grace: 1 },
+    { customer_id: 'c3', amount: 20, cap: 20, placed_on: '2026-02-01', due_on: '2026-01-31', grace: 0 },
+  ];
+  // Grouped:   total  max_cap  last_placed   first_due     max_grace
+  //   c1        500       50   2026-01-10    2026-01-05           10
+  //   c2       1250     5000   2026-03-01    2026-01-01            1
+  //   c3         20       20   2026-02-01    2026-01-31            0
+  const REF_QUERY: EngineAggregateOptions = {
+    groupBy: ['customer_id'],
+    aggregations: [
+      { function: 'count', alias: 'order_count' },
+      { function: 'sum', field: 'amount', alias: 'total' },
+      { function: 'max', field: 'cap', alias: 'max_cap' },
+      { function: 'max', field: 'placed_on', alias: 'last_placed' },
+      { function: 'min', field: 'due_on', alias: 'first_due' },
+      { function: 'max', field: 'grace', alias: 'max_grace' },
+    ],
+  };
+
+  // Before: `$eq` / `$gt` / `$gte` / `$lt` / `$lte` kept NO group and `$ne`
+  // kept EVERY group — the reference object itself was the comparand.
+  const RESOLVED: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
+    ['$gt', { total: { $gt: { $field: 'max_cap' } } }, ['c1']],
+    ['$gte', { total: { $gte: { $field: 'max_cap' } } }, ['c1', 'c3']],
+    ['$lt', { total: { $lt: { $field: 'max_cap' } } }, ['c2']],
+    ['$lte', { total: { $lte: { $field: 'max_cap' } } }, ['c2', 'c3']],
+    ['$eq', { total: { $eq: { $field: 'max_cap' } } }, ['c3']],
+    ['$ne', { total: { $ne: { $field: 'max_cap' } } }, ['c1', 'c2']],
+    ['the two-bound spelling the $between refusal prescribes', { total: { $gte: { $field: 'max_cap' }, $lte: 1000 } }, ['c1', 'c3']],
+    ['a groupBy projection as the referent', { customer_id: { $eq: { $field: 'customer_id' } } }, ['c1', 'c2', 'c3']],
+    ['under $not', { $not: { total: { $gt: { $field: 'max_cap' } } } }, ['c2', 'c3']],
+    ['a calendar day with no offset', { last_placed: { $lte: { $field: 'first_due' } } }, []],
+    ['a whole-day addDays literal', { last_placed: { $lte: { $field: 'first_due', addDays: 7 } } }, ['c1', 'c3']],
+    ['an addDays offset read from a column', { last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'max_grace' } } } }, ['c1']],
+  ];
+
+  for (const [name, having, expected] of RESOLVED) {
+    it(`${name} answers ${JSON.stringify(expected)} on both doors`, async () => {
+      for (const [door, native] of DOORS) {
+        const { engine } = await makeEngine(REF_ROWS, native);
+        const rows = await engine.aggregate(OBJECT, { ...REF_QUERY, having });
+        expect(groups(rows), door).toEqual([...expected]);
+      }
+    });
+  }
+
+  it('a missing value on either side follows the declared cross-field reading', () => {
+    // The in-memory evaluator the SQL family is held to: an ordering against a
+    // missing value is false, `$eq` is "both have none", `$ne` is its
+    // complement. Evaluated on rows directly — no aggregate produces them here.
+    const rows = [
+      { g: 'a', t: 5, r: null },
+      { g: 'b', t: null, r: null },
+      { g: 'c', t: 5, r: 5 },
+    ];
+    const kept = (having: FilterCondition) => applyHaving(rows, having).map((row) => row.g);
+    expect(kept({ t: { $gt: { $field: 'r' } } })).toEqual([]);
+    expect(kept({ t: { $gte: { $field: 'r' } } })).toEqual(['c']);
+    expect(kept({ t: { $eq: { $field: 'r' } } })).toEqual(['b', 'c']);
+    expect(kept({ t: { $ne: { $field: 'r' } } })).toEqual(['a']);
+  });
+
+  it('a per-aggregation filter resolves one too, against the SOURCE row — the same walker', async () => {
+    // Before: `amount > { $field: 'cap' }` compared the reference object and
+    // counted no row in any group. The per-aggregation filter forces the
+    // in-memory door, whatever the driver offers.
+    for (const [door, native] of DOORS) {
+      const { engine } = await makeEngine(REF_ROWS, native);
+      const rows = await engine.aggregate(OBJECT, {
+        groupBy: ['customer_id'],
+        aggregations: [{ function: 'count', alias: 'over_cap', filter: { amount: { $gt: { $field: 'cap' } } } }],
+      });
+      const counts = Object.fromEntries(rows.map((r: any) => [r.customer_id, r.over_cap]));
+      expect(counts, door).toEqual({ c1: 2, c2: 2, c3: 0 });
+    }
+  });
+
+  // Before: the bare form was refused only when a grouped row carried the
+  // column (an empty set answered `[]`); every other row answered no group, or
+  // every group under `$nin`, whatever the data.
+  const REFERENCE_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, string]> = [
+    ['a bare reference with no operator', () => ({ total: { $field: 'max_cap' } }), 'having.total'],
+    ['a bare reference carrying addDays', () => ({ last_placed: { $field: 'first_due', addDays: 1 } }), 'having.last_placed'],
+    ['a reference as an $in member', () => ({ total: { $in: [{ $field: 'max_cap' }] } }), 'having.total.$in'],
+    ['a reference as a $nin member', () => ({ total: { $nin: [1, { $field: 'max_cap' }] } }), 'having.total.$nin'],
+    ['a reference as a $contains pattern', () => ({ customer_id: { $contains: { $field: 'customer_id' } } }), 'having.customer_id.$contains'],
+    ['a reference as a $startsWith pattern', () => ({ customer_id: { $startsWith: { $field: 'customer_id' } } }), 'having.customer_id.$startsWith'],
+    ['a reference under $exists', () => ({ total: { $exists: { $field: 'max_cap' } } }), 'having.total.$exists'],
+    ['a reference under $null', () => ({ total: { $null: { $field: 'max_cap' } } }), 'having.total.$null'],
+    ['a reference naming no column', () => ({ total: { $gt: { $field: 'nope' } } }), 'having.total.$gt'],
+    ['a dotted reference (a relation path, not a column)', () => ({ total: { $gt: { $field: 'order.max_cap' } } }), 'having.total.$gt'],
+    ['an addDays offset naming no column', () => ({ last_placed: { $lte: { $field: 'first_due', addDays: { $field: 'nope' } } } }), 'having.last_placed.$lte'],
+    ['a fractional addDays', () => ({ last_placed: { $lte: { $field: 'first_due', addDays: 1.5 } } }), 'having.last_placed.$lte'],
+    ['a string addDays', () => ({ last_placed: { $lte: { $field: 'first_due', addDays: '7' } } }), 'having.last_placed.$lte'],
+    ['an unresolvable reference deep in $or', () => ({ $or: [{ total: { $gt: 0 } }, { total: { $lt: { $field: 'nope' } } }] }), 'having.$or[1].total.$lt'],
+  ];
+
+  for (const [name, having, path] of REFERENCE_REFUSED) {
+    it(`${name}: refused at ${path}, whatever the rows`, async () => {
+      const message = await expectRowIndependentRefusal(offContract({ ...REF_QUERY, having: having() }), REF_ROWS);
+      expect(message).toContain(path);
+    });
+  }
+
+  it('the unresolved-reference refusal names the columns the aggregated row has', async () => {
+    const message = await expectRowIndependentRefusal(
+      offContract({ ...REF_QUERY, having: { total: { $gt: { $field: 'nope' } } } }), REF_ROWS);
+    for (const column of ['customer_id', 'order_count', 'total', 'max_cap', 'last_placed', 'first_due', 'max_grace']) {
+      expect(message).toContain(column);
     }
   });
 });
