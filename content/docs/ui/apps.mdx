@@ -223,9 +223,15 @@ and an item with neither is refused with a message naming both keys:
 - **Audience** — the entry has no gate of its own; it inherits the docs audience
   gate. A `book` entry shows the member only the pages they may read, and is not
   shown to a member with no readable page in it; a `doc` entry the member may not
-  read is not shown. The page content itself is gated on the server by the
-  `/meta/doc` and `/meta/book/:name/tree` reads. `visible` and
-  `requiredPermissions` still apply and can only narrow further.
+  read is not shown. The server applies this rule to the entry itself:
+  `/meta/app` leaves such an entry out of the app it returns, so its label and
+  its book or doc name never reach a member who cannot open it. An item with both
+  `book` and `doc` is also left out when the member may not open that book, even
+  if they may read the page. A book's pages are the docs its groups claim; the
+  *Uncategorized* group the book tree adds does not count. The page content
+  itself is gated on the server by the `/meta/doc` and `/meta/book/:name/tree`
+  reads. `visible` and `requiredPermissions` still apply and can only narrow
+  further.
 
 `os build`, `os validate` and `os lint` refuse a `doc` item whose `book` or `doc`
 names nothing in the package (rule `docs/nav-target`) — checked in the docs step,
