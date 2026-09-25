@@ -2949,8 +2949,8 @@ export class TursoDriver extends SqlDriver {
         `The window door compiles its query with the SQL driver's Knex query builder and runs it on the ` +
           `Knex connection. ${REMOTE_HAS_NO_KNEX_CONNECTION} The remote transport's own compiler has ` +
           'no window-function syntax.',
-        'Use the local or embedded-replica transport for window-function reads, or read the rows ' +
-          'with `find()` and compute the window in the caller.',
+        'Use the local or embedded-replica transport for window-function reads, or send the window ' +
+          'statement through `execute()`, which this face runs on the remote database.',
       );
     }
     return super.findWithWindowFunctions(object, query, options);
