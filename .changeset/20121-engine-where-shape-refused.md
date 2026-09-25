@@ -32,18 +32,34 @@ the seam and the driver ignored it. Measured on `driver-memory` and
   guard refused the call, with no `code`).
 - `update(…, { where, multi: true })` rewrote all four rows, and
   `delete({ where, multi: true })` deleted all four. That held without
-  `SecurityPlugin`, and with it under a system context. For a caller scoped by
-  row-level security, the security middleware wrapped the value into its `$and`,
-  where the driver refused it (`INVALID_FILTER`) and nothing was written.
+  `SecurityPlugin`, and with it under a system context.
+- For a caller scoped by row-level security, it depended on the value.
+  - A string, a number, a `Map`, a `Date`, a `Set` or `true` was wrapped by the
+    security middleware into its `$and`, where the driver refused it
+    (`INVALID_FILTER`) and nothing was written.
+  - The empty string was not refused. The middleware's composition reads a
+    falsy `where` as absent and dropped it, so `find` answered all of the
+    member's rows, and `update(multi)` / `delete(multi)` rewrote or deleted
+    every row the member could reach (2 of 4 on both drivers).
 - Such a `where` also stepped past the unscoped-write guard that a hook opts
   into with `dispatchUnscopedMultiWrite`, because that guard treats only an
   absent or `null` `where` as unscoped.
 
 **Unchanged.** An absent `where`, `null`, `{}` and `[]` still mean "no
-filter". A filter object is accepted whatever its prototype, so an
-`Object.create(null)` object or an instance of your own class carrying the filter
-on its own keys filters exactly as before. A well-formed filter array is lowered
-as before. The REST door already answered a non-filter `?filter=` with
+filter". A filter object is accepted when it is a non-array object whose
+built-in tag (`Object.prototype.toString`) is `[object Object]`. That covers a
+plain object, an `Object.create(null)` object, an instance of your own class
+carrying the filter on its own keys, a `Proxy` of one, and an object from
+another realm, and each filters exactly as before. A well-formed filter array is
+lowered as before.
+
+**One accepted shape is now refused.** An object that overrides
+`Symbol.toStringTag`, as its own key or through its prototype chain, has a
+different built-in tag. It is refused and named by that tag (for example
+`received Criteria`). Before this change such an object filtered correctly on
+its own keys. No producer in this repository creates one: the wire is JSON, and
+the SDK builds arrays or plain objects. If yours does, pass its filter keys in a
+plain object instead. The REST door already answered a non-filter `?filter=` with
 `INVALID_FILTER` / 400 and is not touched.
 
 **Fix.** Pass the predicate you meant as a filter object, for example
