@@ -112,7 +112,9 @@
  *   split, reconciled against `FieldOperatorsSchema` by the face's own test),
  *   so `{$null: undefined}` is refused rather than read as `set`. The boolean
  *   DOMAIN question for an ACCEPTED value (#5347 / #5369 / #6387) is not
- *   touched: `{$null: 'false'}` still lowers as before.
+ *   touched: `{$null: 'false'}` still lowers as before. [#20040] It does not
+ *   any more: the door refuses every non-boolean flag before any node is
+ *   built, and the case below that pinned the old reading is re-judged.
  *
  * `assertDefinedComparands` (#6386) stays as `fieldLeaves`' invariant and still
  * answers the positions the face does not judge — an `undefined` inside an
@@ -480,7 +482,7 @@ describe('[#6386] the #5146 rewrite cannot swallow the leaf — the gate side is
 });
 
 describe('[#6386] what the sweep deliberately leaves alone', () => {
-  it('$null / $exists: an undefined flag is refused by the type face; an accepted flag value reads as before', () => {
+  it('$null / $exists: an undefined flag is refused by the type face; a non-boolean accepted type is refused by the door (#20040)', () => {
     // Same call as `read-scope-sql`'s twin. ⚠️ The two modules read the flag
     // DIFFERENTLY — identity here, truthiness there. Which reading is right for
     // a non-boolean value is the boolean-DOMAIN question (#5347 / #5369,
@@ -496,14 +498,29 @@ describe('[#6386] what the sweep deliberately leaves alone', () => {
     // runs the same face. The domain question is still not decided here: the
     // face accepts every value of the six types, so an accepted non-boolean flag
     // keeps this module's identity reading, unchanged.
+    //
+    // [#20040] RE-JUDGED, the second half. The two lines that closed this case
+    // pinned `{$null: 'false'}` and `{$exists: 'yes'}` → `set` (IS NOT NULL):
+    // the identity reading of an ACCEPTED non-boolean flag, which this file
+    // kept deliberately undecided. #20040 decided it the way #5347 / #5369
+    // decided it for every backend, and #6387 for the sibling door: a
+    // non-boolean flag is REFUSED, because the backends read one in opposite
+    // directions and `'false'` is truthy. The door now refuses it before any
+    // node is built, in its `INVALID_FILTER` / 400 envelope, so the two cells
+    // are asserted as refusals below. The `undefined` half is unchanged: it is
+    // still the type face's refusal, in the face's sentence.
     for (const op of ['$null', '$exists'] as const) {
       const err = refusalFor({ d: { [op]: undefined } });
       expect(err?.code, op).toBe('INVALID_FILTER');
       expect(err?.status, op).toBe(400);
       expect(String(err?.message).startsWith(`Filter comparand at where.d.${op} is undefined.`), op).toBe(true);
     }
-    expect(treeFor({ d: { $null: 'false' } })).toEqual({ kind: 'leaf', member: 'd', operator: 'set', values: [] });
-    expect(treeFor({ d: { $exists: 'yes' } })).toEqual({ kind: 'leaf', member: 'd', operator: 'set', values: [] });
+    for (const [op, value] of [['$null', 'false'], ['$exists', 'yes']] as const) {
+      const err = refusalFor({ d: { [op]: value } });
+      expect(err?.code, op).toBe('INVALID_FILTER');
+      expect(err?.status, op).toBe(400);
+      expect(String(err?.message), op).toContain(`Operator "${op}" on field "d" requires a boolean comparand`);
+    }
   });
 
   it('a combinator with an undefined value gets its own, truer refusal', () => {
