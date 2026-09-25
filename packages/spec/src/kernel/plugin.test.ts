@@ -98,35 +98,45 @@ describe('PluginSchema (descriptor only)', () => {
   });
 });
 
-describe('`version` accepts the whole of the SemVer 2.0.0 grammar (#16365)', () => {
+describe('`version` is SemVer 2.0.0, exactly — the canon for this concept', () => {
   /**
    * The key WAS described `'Semantic Version'`, with no qualifier, and SemVer
    * 2.0.0 defines prerelease and build metadata as PARTS of a semantic version
    * — so the regex that shipped, `/^\d+\.\d+\.\d+$/`, refused strings the
    * key's own declaration called valid. #16365 gave the regex the grammar the
-   * describe already claimed.
+   * describe already claimed: the boot path's, character for character, so the
+   * two declarations converged and `packages/core`'s `assertPluginContract`
+   * could drop the `version` exclusion it carried while they differed.
    *
-   * ⭐ The grammar adopted is `PluginLoader.isSemverShapedVersion`'s
-   * (`packages/core`), character for character, and NOT a third spelling: that
-   * is the check the boot path has always run, so the two declarations now
-   * converge exactly and `packages/core`'s `assertPluginContract` could drop the
-   * `version` exclusion it carried while they differed.
+   * That grammar was still WIDER than the standard, by eight strings, and
+   * #16365's widen-never-narrow ruling left no way to remove them — so #17070
+   * moved the CLAIM instead and pinned the eight as accepted.
    *
-   * ⚠️ #17070 then found the OTHER half of the same mismatch and moved the
-   * describe(), not the regex — see the eight-form pin at the bottom of this
-   * block for what the key actually accepts and why that is deliberate.
+   * ⭐ The maintainer then ruled the canon: one grammar for "the version of a
+   * package or plugin" across all its carriers, and that grammar is SemVer
+   * 2.0.0. This key narrows on those eight and on NOTHING else — every valid
+   * prerelease and build form it accepts today it still accepts, which is what
+   * #16365 protected. Both halves are pinned below, and the second half is the
+   * one that keeps the earlier ruling honoured.
    */
   const parses = (version: string) => PluginSchema.safeParse({ version }).success;
 
   it.each([
     // Every example the SemVer 2.0.0 spec text itself lists as valid that the
-    // old regex refused, plus the two the `packages/core` loader pins by name
-    // and the string two in-repo class-based plugin fixtures actually boot with.
+    // pre-#16365 regex refused, plus the two the `packages/core` loader pins by
+    // name and the string two in-repo class-based plugin fixtures boot with.
+    //
+    // ⛔ This is the list the canon narrowing may NOT touch. A failure here is
+    // not a pin to update: it means a valid prerelease or build form the boot
+    // path accepts has been refused, which is the one thing #16365 forbids.
     '1.0.0-alpha', '1.0.0-alpha.1', '1.0.0-alpha.beta', '1.0.0-0A.is.legal',
     '1.0.0-alpha0.valid', '1.0.0-alpha.0valid', '1.2.3-beta',
     '1.0.0+20230101', '1.1.2+meta', '1.0.0+0.build.1-rc.10000aaa-kk-0.1',
     '1.1.2-prerelease+meta', '1.0.0-rc.1+build.1', '2.0.0-rc.1+build.123',
     '0.0.0-fixture',
+    // Case-preserving, which the standard requires and one sibling carrier used
+    // to refuse.
+    '1.0.0-Beta.1', '1.0.0+Build.5',
   ])('accepts %s, which the pre-#16365 regex refused', (version) => {
     expect(parses(version)).toBe(true);
   });
@@ -145,38 +155,38 @@ describe('`version` accepts the whole of the SemVer 2.0.0 grammar (#16365)', () 
     },
   );
 
-  it('is a strict SUPERSET of the regex it replaced — nothing that parsed stops parsing', () => {
-    // The property the #16365 ruling turns on, asserted rather than asserted
-    // ABOUT: the old grammar's language is contained in the new one. Both
-    // spellings are written out here so the containment is checked, not
-    // narrated — a future tightening of the key fails this line.
-    const before = /^\d+\.\d+\.\d+$/;
-    const after = /^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/;
-    for (const version of ['0.0.4', '1.2.3', '10.20.30', '01.1.1', '1.01.1', '1.1.01', '0.0.0']) {
-      expect(before.test(version), `${version} is the OLD grammar's`).toBe(true);
-      expect(after.test(version), `${version} must survive the widening`).toBe(true);
+  it('the plain release forms the ORIGINAL regex accepted still parse', () => {
+    // The containment #16365 turns on, for the part of the old language the
+    // canon keeps. `01.1.1` and its siblings are deliberately absent — they
+    // moved to the refusal pin below, which is the whole of what this key lost.
+    const original = /^\d+\.\d+\.\d+$/;
+    for (const version of ['0.0.4', '1.2.3', '10.20.30', '0.0.0']) {
+      expect(original.test(version), `${version} is the ORIGINAL grammar's`).toBe(true);
       expect(parses(version), `${version} must still parse`).toBe(true);
     }
   });
 
   /**
-   * #17070 — the eight strings SemVer 2.0.0 forbids that this key accepts, all
-   * of them, pinned as ACCEPTED.
+   * The eight strings SemVer 2.0.0 forbids, all of them, pinned as REFUSED.
    *
-   * ⭐ This block asserts the accept set is WIDER than the standard on purpose.
-   * Read it as a fixture of the ruling, not as a description of a defect: a
-   * future edit that "fixes" the grammar to be standards-correct fails here, and
-   * that failure is the point. #16365 ruled widen-never-narrow on the ground
-   * that nothing which loads today may stop loading, and `01.1.1` has loaded
-   * since before either card — the ORIGINAL `/^\d+\.\d+\.\d+$/` admitted it
-   * too, because `\d+` has always admitted a leading zero. So the accept set is
-   * frozen in both directions, and #17070 repaired the mismatch from the only
-   * side left free: the key's own description.
+   * ⭐ This block IS the narrowing, and it is the whole of it. It replaced an
+   * identical list pinned the other way: under #16365's widen-never-narrow
+   * ruling the eight could not be removed, so #17070 repaired the
+   * declared/enforced mismatch from the only side then free — the key's
+   * description — and pinned these as accepted to make the new name true.
    *
-   * ⛔ Do not narrow this key to the official SemVer 2.0.0 regex to make these
-   * cases pass "properly" — that reverses a recorded ruling and is a published
-   * behaviour change on both this schema and `PluginLoader`. Widening the accept
-   * set needs its own card too; this pin is the tripwire for both directions.
+   * ⭐ Why refusing them does not reverse #16365. That ruling's subject is what
+   * LOADS: nothing which loads today may stop loading. None of these eight is a
+   * valid prerelease, and no precedence order exists for any of them —
+   * `dependency-resolver.ts` (`@objectstack/core`) can place none of them in an
+   * order — so a plugin versioned this way could be published and never
+   * compared against its own successor. Every valid prerelease and build form
+   * the loader accepts is still accepted, and the block above is where that is
+   * asserted rather than claimed.
+   *
+   * ⛔ Do not widen this key back to make one of these pass. That is a published
+   * behaviour change on this schema and on `PluginLoader`, and it needs its own
+   * card; this pin is the tripwire in both directions.
    */
   it.each([
     // SemVer 2.0.0 §2 — numeric identifiers MUST NOT include leading zeroes.
@@ -186,23 +196,24 @@ describe('`version` accepts the whole of the SemVer 2.0.0 grammar (#16365)', () 
     '1.0.0-0123', '1.0.0-alpha..1', '1.0.0-alpha..', '1.0.0-.',
     // §10 — build-metadata identifiers MUST NOT be empty.
     '1.0.0+.',
-  ])('accepts %s, which SemVer 2.0.0 forbids — deliberately, and the describe() now says so', (version) => {
-    expect(parses(version)).toBe(true);
+  ])('refuses %s, which SemVer 2.0.0 forbids and no resolver can order', (version) => {
+    expect(parses(version)).toBe(false);
   });
 
-  it('the describe() no longer claims a standard this key does not implement (#17070)', () => {
-    // The honesty, enforced instead of narrated. The old text was the bare
-    // `'Semantic Version'`; a reader took that as SemVer 2.0.0 conformance and
-    // was wrong for all eight strings above. The replacement has to do two
-    // things: state the grammar in a form an author can predict a verdict from,
-    // and stop asserting conformance to the standard it exceeds.
+  it('the describe() names the standard, and this time the key implements it', () => {
+    // The honesty, enforced instead of narrated — and the assertion had to move
+    // with the grammar. It used to require the text DISCLAIM SemVer 2.0.0,
+    // because the key exceeded it; requiring the disclaimer now would pin the
+    // description to a falsehood in the opposite direction.
     const description = PluginSchema.shape.version.description ?? '';
 
     expect(description).not.toBe('Semantic Version');
-    // States the shape...
+    // Names the standard the key now implements...
+    expect(description).toMatch(/SemVer 2\.0\.0/);
+    // ...and still states the shape, so an author can predict a verdict.
     expect(description).toContain('major.minor.patch');
-    // ...and disclaims the standard rather than merely omitting the word.
-    expect(description).toMatch(/looser than SemVer 2\.0\.0/i);
+    // ...and no longer disclaims conformance it now has.
+    expect(description).not.toMatch(/looser than SemVer/i);
   });
 });
 

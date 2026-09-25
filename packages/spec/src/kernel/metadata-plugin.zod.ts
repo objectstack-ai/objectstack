@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { MetadataManagerConfigSchema } from './metadata-loader.zod';
-import { MAJOR_MINOR_PATCH_VERSION_PATTERN } from './version-grammar';
+import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
 import { ActionSchema } from '../ui/action.zod';
 
 /**
@@ -647,7 +647,7 @@ export const MetadataPluginManifestSchema = lazySchema(() => z.object({
   name: z.literal('ObjectStack Metadata Service').describe('Plugin name'),
 
   /** Plugin version */
-  version: z.string().regex(MAJOR_MINOR_PATCH_VERSION_PATTERN).describe('Plugin version'),
+  version: z.string().regex(SEMVER_2_0_0_VERSION_PATTERN).describe('Plugin version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1)'),
 
   /** Plugin type */
   type: z.literal('standard').describe('Plugin type'),

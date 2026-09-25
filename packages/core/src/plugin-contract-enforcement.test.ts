@@ -348,8 +348,8 @@ describe('E — `version` is the NINTH enforced key, and admitting it refused no
      * `version` used to be filtered out of this check. It was, because the two
      * declarations disagreed: `PluginSchema.version` was `/^\d+\.\d+\.\d+$/`
      * and refused the prerelease and build-metadata forms SemVer 2.0.0 defines,
-     * while `PluginLoader.isSemverShapedVersion` — the check the boot path has
-     * always run — accepted them, deliberately, pinned by `plugin-loader.test.ts`.
+     * while the loader's own predicate — the check the boot path has always run
+     * — accepted them, deliberately, pinned by `plugin-loader.test.ts`.
      *
      * #16365 settled that in `packages/spec` by WIDENING the schema onto the
      * loader's grammar, character for character, so the exclusion had nothing
@@ -377,21 +377,20 @@ describe('E — `version` is the NINTH enforced key, and admitting it refused no
     });
 
     /**
-     * #17070 — the two declarations still share ONE grammar, measured over the
-     * eight strings SemVer 2.0.0 forbids and both of them accept.
+     * The two declarations still share ONE grammar, measured over the eight
+     * strings SemVer 2.0.0 forbids and both of them now refuse.
      *
-     * ⭐ This is the convergence assertion for the pair, and it is the reason
-     * #17070 could repair the CLAIM on both sides from a single card: schema and
-     * loader are one accept set with two names on it. If a future edit moves one
-     * spelling and not the other, this fails — and both docblocks that promise
-     * "character for character" become false at the same moment.
+     * ⭐ This is the convergence assertion for the pair: schema and loader are
+     * one accept set with two names on it, and since the canon ruling they
+     * reference one exported constant rather than two hand-equal literals. If a
+     * future edit moves one and not the other, this fails.
      *
-     * ⛔ The direction here is deliberate and frozen. #16365 ruled widen-never-
-     * narrow, so these eight are pinned as ACCEPTED, not as a defect awaiting
-     * cleanup; `01.1.1` loaded before either card existed. What #17070 changed
-     * is the description on the spec key and the name of the loader's predicate
-     * (`isSemverShapedVersion`), so that the accept set and the claim about it
-     * finally agree.
+     * ⭐ The direction flipped with that ruling, and the flip is bounded. These
+     * eight were pinned as ACCEPTED while #16365's widen-never-narrow freeze
+     * held; the canon narrows the pair on exactly these and on nothing else, so
+     * group E's three prerelease and build cases above — the ones that were only
+     * loading because of the dropped exclusion — still load. That is what makes
+     * this a narrowing of the unorderable fringe rather than a reversal.
      */
     const SEMVER_FORBIDS = [
         '01.1.1', '1.01.1', '1.1.01',                                  // §2
@@ -399,14 +398,14 @@ describe('E — `version` is the NINTH enforced key, and admitting it refused no
         '1.0.0+.',                                                     // §10
     ];
 
-    it.each(SEMVER_FORBIDS)('`PluginSchema` accepts %s — the spec half of the shared grammar', (version) => {
-        expect(PluginSchema.safeParse({ name: 'x', version, init: () => {} }).success).toBe(true);
+    it.each(SEMVER_FORBIDS)('`PluginSchema` refuses %s — the spec half of the shared grammar', (version) => {
+        expect(PluginSchema.safeParse({ name: 'x', version, init: () => {} }).success).toBe(false);
     });
 
-    it.each(SEMVER_FORBIDS)('and `kernel.use()` boots it — the loader half agrees on %s', async (version) => {
+    it.each(SEMVER_FORBIDS)('and `kernel.use()` refuses it — the loader half agrees on %s', async (version) => {
         const kernel = makeKernel();
 
-        await expect(kernel.use(fixture({ name: `com.example.fringe-${version}`, version }))).resolves.toBe(kernel);
+        await expect(kernel.use(fixture({ name: `com.example.fringe-${version}`, version }))).rejects.toThrow();
     });
 
     it('and a malformed version is STILL refused by the loader, with its own message', async () => {

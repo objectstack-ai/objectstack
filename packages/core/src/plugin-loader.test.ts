@@ -126,22 +126,29 @@ describe('PluginLoader', () => {
         });
 
         /**
-         * #17070 — the eight strings SemVer 2.0.0 forbids that this loader
-         * LOADS, all of them, pinned as accepted.
+         * The eight strings SemVer 2.0.0 forbids that this loader used to LOAD,
+         * all of them, pinned as REFUSED.
          *
-         * ⭐ The predicate behind these is `isSemverShapedVersion`, renamed in
-         * #17070 off the name `isValidSemanticVersion`, because a predicate
-         * named for SemVer that answers a wider grammar gets misused by the next
-         * caller no matter what its docblock says. This block is what makes the
-         * new name TRUE rather than merely better-worded: the grammar is a
-         * strict superset of SemVer 2.0.0, and here is the part that exceeds it.
+         * ⭐ The predicate behind these is `isSemverVersion`. It was
+         * `isValidSemanticVersion` over a wider grammar, renamed to
+         * `isSemverShapedVersion` in #17070 because a predicate named for a
+         * standard it does not implement gets misused by the next caller
+         * whatever its docblock says; the maintainer's canon ruling then made
+         * the grammar match the name instead, and this block flipped with it.
          *
-         * ⛔ These pass on purpose. `01.1.1` has loaded since before #16365 —
-         * the pre-#16365 `/^\d+\.\d+\.\d+$/` admitted it too — and #16365
-         * ruled that nothing which loads today may stop loading. Narrowing this
-         * check to the official SemVer regex reverses that ruling and breaks
-         * every plugin published against the wider grammar; it is a published
-         * behaviour change wanting its own card, not a cleanup.
+         * ⭐ Why this does not reverse #16365. That ruling's subject is what
+         * LOADS, and none of these eight is a valid prerelease: they are leading
+         * zeroes in the numeric core (§2), empty and leading-zero prerelease
+         * identifiers (§9), and empty build metadata (§10). No precedence order
+         * exists for any of them — `dependency-resolver.ts` can place none in an
+         * order — so a plugin versioned this way could load and never be
+         * compared against its own successor. Every valid prerelease and build
+         * form this loader accepts still loads, which the two cases above this
+         * block assert directly.
+         *
+         * ⛔ Do not widen the check back to make one of these load. That is a
+         * published behaviour change on this loader and on `PluginSchema`, and
+         * it needs its own card.
          */
         it.each([
             // §2 — numeric identifiers MUST NOT include leading zeroes.
@@ -150,9 +157,32 @@ describe('PluginLoader', () => {
             '1.0.0-0123', '1.0.0-alpha..1', '1.0.0-alpha..', '1.0.0-.',
             // §10 — build-metadata identifiers MUST NOT be empty.
             '1.0.0+.',
-        ])('loads a plugin versioned %s, which SemVer 2.0.0 forbids — deliberately', async (version) => {
+        ])('refuses a plugin versioned %s, which SemVer 2.0.0 forbids', async (version) => {
             const plugin: Plugin = {
                 name: `semver-fringe-${version}`,
+                version,
+                init: async () => {},
+            };
+
+            const result = await loader.loadPlugin(plugin);
+            expect(result.success).toBe(false);
+        });
+
+        /**
+         * The other half of the bound, and the half that keeps #16365 honoured:
+         * every valid prerelease and build form the wider grammar admitted is
+         * still loaded. ⛔ A failure here is not a pin to update — it means the
+         * narrowing overran its mandate.
+         */
+        it.each([
+            '1.0.0-alpha', '1.0.0-alpha.1', '1.0.0-alpha.beta', '1.0.0-0A.is.legal',
+            '1.0.0-alpha0.valid', '1.0.0-alpha.0valid', '1.2.3-beta',
+            '1.1.2+meta', '1.0.0+0.build.1-rc.10000aaa-kk-0.1',
+            '1.1.2-prerelease+meta', '1.0.0-rc.1+build.1', '2.0.0-rc.1+build.123',
+            '0.0.0-fixture', '1.0.0-Beta.1', '1.0.0+Build.5', '17.0.0-rc.5',
+        ])('still loads a plugin versioned %s', async (version) => {
+            const plugin: Plugin = {
+                name: `semver-valid-${version}`,
                 version,
                 init: async () => {},
             };

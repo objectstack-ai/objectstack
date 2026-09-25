@@ -136,7 +136,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `'com.objectstack.metadata'` | ✅ | Metadata plugin ID |
 | **name** | `'ObjectStack Metadata Service'` | ✅ | Plugin name |
-| **version** | `string` | ✅ | Plugin version |
+| **version** | `string` | ✅ | Plugin version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1) |
 | **type** | `'standard'` | ✅ | Plugin type |
 | **description** | `string` | optional (default: `"Core metadata management service for ObjectStack platform"`) | Plugin description |
 | **capabilities** | `{ crud: boolean; query: boolean; overlay: boolean; watch: boolean; … }` | ✅ | Plugin capabilities |

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN } from '../kernel/version-grammar';
+import { SEMVER_2_0_0_VERSION_PATTERN } from '../kernel/version-grammar';
 
 /**
  * Package Version Protocol
@@ -77,8 +77,17 @@ export const PackageManifestSchema = lazySchema(() => z.object({
   /** Manifest ID (must match the parent `sys_package.manifest_id`). */
   id: z.string().describe('Package manifest ID (reverse-domain)'),
 
-  /** Semantic version of this release. */
-  version: z.string().describe('Semver version string (e.g. 1.2.3)'),
+  /**
+   * Version of this release — **SemVer 2.0.0**, the same grammar every other
+   * carrier of this concept enforces.
+   *
+   * ⭐ This key was a bare `z.string()` and constrained NOTHING: `latest`,
+   * `v1.0.0`, `1.0` and the empty string were all accepted and frozen into a
+   * published manifest snapshot, while the sibling `PackageVersionSchema.version`
+   * — the row this manifest belongs to — refused every one of them. A consumer
+   * told "the spec validated it" got no validation at all from this carrier.
+   */
+  version: z.string().regex(SEMVER_2_0_0_VERSION_PATTERN).describe('Version of this release (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1)'),
 
   /** Human-readable display name. */
   name: z.string().describe('Display name'),
@@ -141,11 +150,21 @@ export const PackageVersionSchema = lazySchema(() => z.object({
   /** Parent package this version belongs to. */
   packageId: z.string().uuid().describe('UUID of the parent sys_package row'),
 
-  /** Semantic version string (e.g. `1.2.3`, `2.0.0-beta.1`). */
+  /**
+   * Semantic version string (e.g. `1.2.3`, `2.0.0-beta.1`) — **SemVer 2.0.0**.
+   *
+   * ⭐ The docstring above is the one this card was filed over: it advertised
+   * `2.0.0-beta.1` while a sibling carrier of the same concept refused it. The
+   * grammar is now the standard on every carrier, so the example is true at all
+   * of them.
+   *
+   * Identifiers are case-preserving, which is a widening here: this key used to
+   * refuse `1.0.0-Beta.1`, a string the plugin boot path has always accepted.
+   */
   version: z
     .string()
-    .regex(SEMVER_SHAPED_LOWERCASE_VERSION_PATTERN)
-    .describe('Semantic version string'),
+    .regex(SEMVER_2_0_0_VERSION_PATTERN)
+    .describe('Semantic version string (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1)'),
 
   /** Lifecycle status. Immutable fields freeze on transition to "published". */
   status: PackageVersionStatusSchema.default('draft'),
