@@ -33,7 +33,7 @@ A pattern that ends in a lone unpaired backslash AND holds U+0000 keeps the dang
 
 **Not changed here:**
 
-- A pattern without U+0000 matched against a STORED value that holds U+0000 still differs from `formula` on the SQLite faces, because `GLOB` also reads the stored value only up to its first U+0000. No refusal of the pattern can reach that half.
+- A pattern without U+0000 matched against a STORED value that holds U+0000 is not refused: it is well formed, and on the SQLite faces it reads the whole stored value, by its own entry in this release.
 - `@objectstack/formula` still evaluates such a pattern. It refuses nothing, and answers `false` for a dangling escape rather than refusing it, so it is not one of these doors.
 - `driver-mongodb`, objectql `having` and `service-analytics` refused every `$like` / `$ilike` before this change, and still do.
 
