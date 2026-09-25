@@ -6,7 +6,7 @@ fix(service-analytics)!: both analytics doors refuse the two `$icontains` compar
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: already-registered filter-icontains-comparand-refused-at-parse -->
+<!-- adr-0087: not-required (already-registered filter-icontains-comparand-refused-at-parse) this is the transition that entry already records: its surface names the $icontains comparand in FilterConditionSchema, read-scope rules and analytics filters included, empty or not a string, and its replacement is a non-empty string or no condition. This change adds no new transition; it brings the analytics compile faces under the refusal the entry declares, which the parse door and the drivers already make. -->
 
 **BREAKING**: this narrows what the analytics faces of `@objectstack/service-analytics` accept. An `$icontains` condition whose comparand is the empty string, or is not a string at all (a number, a boolean, `null`, a `Date`), used to compile on the analytics compilers. It is now refused before any SQL statement runs or any `engine.aggregate` call is made. It ships as `minor` under the launch-window convention for accept-set narrowings.
 
