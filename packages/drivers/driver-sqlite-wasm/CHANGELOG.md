@@ -1,5 +1,646 @@
 # @objectstack/driver-sqlite-wasm
 
+## 17.5.0
+
+### Minor Changes
+
+- 8a44ce7: fix(spec, drivers)!: a `$like` / `$ilike` pattern holding U+0000 is refused by every driver that answers `$like`, instead of being cut at the NUL on SQLite
+  
+  Clause-②: yes (narrowing)
+  
+  On the SQLite faces `$like` / `$ilike` compile to `GLOB`, and SQLite reads a pattern only up to its first U+0000. A pattern holding U+0000 was cut there, so the filter answered a different question, and nothing raised. Measured through `find` over 13 stored values (12 non-NULL), against `@objectstack/formula` on the same rows: all 20 U+0000 cases of the probe (10 patterns, bare and under `$not`) differed on `SqlDriver` over better-sqlite3, on `SqliteWasmDriver`, on `TursoDriver`'s local mode, and on its remote mode over a stub and over a real `@libsql/client` engine, with identical answers on all five. For example:
+  
+  - `$like: '%'` + U+0000 returned all 12 non-NULL rows, where `formula` returns the two ending in U+0000;
+  - `$like: 'a'` + U+0000 + `'b'` also returned `'a'`;
+  - `$ilike: 'AB'` + U+0000 also returned `'AB'` and `'ab'`.
+  
+  `driver-memory` answered all 20 as `formula` does. SQLite has no NUL-safe pattern primitive to compile to instead: `LIKE` cuts the same way, `replace()` cannot target U+0000, and `instr()` has no wildcards. So the one contract is a refusal, the way a pattern ending in a lone unpaired backslash is refused.
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **A filter that answered before is now refused**: a `$like` or `$ilike` pattern holding U+0000 anywhere (at the start, in the middle, at the end, alone, or after a backslash) gets `INVALID_FILTER` / 400, on every door that already refused the lone trailing backslash:
+  
+  - `@objectstack/driver-sql`: on the filter walk, before a dialect is chosen, so SQLite, Postgres and MySQL all refuse it. `@objectstack/driver-sqlite-wasm` and `TursoDriver`'s local mode inherit it; `@objectstack/driver-sqlite-wasm`'s own code does not change.
+  - `@objectstack/driver-turso`: the remote transport's `$like` / `$ilike` arm, before anything is sent to the engine.
+  - `@objectstack/driver-memory`: the shape gate of the query path and of the reference matcher `match()`, and the QueryAST `comparison` spelling (`like` / `ilike`).
+  - `@objectstack/spec` exports the shared test, `hasNulInLikePattern`, beside `hasDanglingLikeEscape`, and the `$like` operator's description now names the refusal.
+  
+  On `driver-sql` and the Turso remote transport the refusal goes through the read-scope provenance seam, like every other filter-compile refusal there. On `driver-sql` (and so `driver-sqlite-wasm` and Turso's local mode), a caller whose predicate is marked `'author'` reads the operator, the field, the filter path and the pattern, with U+0000 written as `\u0000`. Any other caller gets only the class statement, and the rest goes to the server log. The remote transport withholds the same way, and through `TursoDriver` in remote mode no mark reaches it, so every caller gets the class statement there. On `driver-memory` every caller reads the full text, as for its dangling-escape refusal.
+  
+  A pattern that ends in a lone unpaired backslash AND holds U+0000 keeps the dangling-escape refusal it had before.
+  
+  **What stays accepted**, pinned per face: every `$like` / `$ilike` pattern without U+0000 answers exactly as before.
+  
+  **Not changed here:**
+  
+  - A pattern without U+0000 matched against a STORED value that holds U+0000 is not refused: it is well formed, and on the SQLite faces it reads the whole stored value, by its own entry in this release.
+  - `@objectstack/formula` still evaluates such a pattern. It refuses nothing, and answers `false` for a dangling escape rather than refusing it, so it is not one of these doors.
+  - `driver-mongodb`, objectql `having` and `service-analytics` refused every `$like` / `$ilike` before this change, and still do.
+  
+  **What an affected author does.** Remove the U+0000 from the pattern. No escape makes it portable: a backslash before it still leaves a U+0000 in the pattern.
+  
+  Blast radius, measured on this tree: no example or template writes a `$like` or `$ilike`, and the published `objectstack-query` skill and the hand-written docs that show one show no pattern holding U+0000. Whether any out-of-repo caller sends one is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing at the filter-compile doors: no key, Zod schema, object definition or stored representation is added, removed or renamed. `$like` and `$ilike` keep their names and their `z.string()` comparand, and the only spec symbol added is the predicate `hasNulInLikePattern`. What moves is which PATTERN VALUES the drivers answer, and no rewrite of a stored pattern keeps its meaning (dropping the U+0000 changes which rows match), so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. -->
+- 51efbf1: feat(driver-sql)!: a text operator over a column whose DECLARED type is temporal answers the type-gated no-match on every SQL face (#15683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. No `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every object definition and filter body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What changes is the ANSWER a published filter surface gives at request time: a text operator aimed at a `date` / `datetime` / `time` column returns the declared no-match instead of the ISO-substring match SQLite happened to give it. The remedy for a caller who was leaning on that match is a different FILTER — the range operators, which are data the caller holds rather than an authored artifact with a stored representation — and it is spelled in the banner below. The one spec change is the membership of an existing exported set (`NON_TEXT_STORED_VALUE_TYPES`), which adds no export and removes none. -->
+  
+  **BREAKING** in the answer sense, on every SQL face, landing in the launch
+  window as `minor` under the lockstep convention this cluster's siblings use.
+  
+  **The behaviour that GOES AWAY, by name: searching a date as a string.** On the
+  SQLite family — `driver-sql` on any SQLite connection, `driver-sqlite-wasm`, and
+  `driver-turso`'s local transport — a `Field.date` / `Field.datetime` /
+  `Field.time` column stores canonical ISO TEXT (ADR-0053), and a text operator
+  matched that text. `{ signed_on: { $contains: '2026' } }` returned every 2026
+  row; `{ made_at: { $startsWith: '2026-01' } }` returned that January's rows;
+  `{ shift_at: { $contains: ':30' } }` returned every half-past shift. **All three
+  now return nothing**, and their `$notContains` mirrors now return every valued
+  row. If you are relying on any of them, this is a row-set change and the
+  replacement is a range filter — spelled out below. The behaviour was never
+  declared by any contract row and it never worked outside SQLite: the same three
+  filters were a `DATABASE_ERROR` 500 on live Postgres.
+  
+  Nothing that was refused becomes admitted, and no new error code is minted — the
+  refusal reused is the one `NON_TEXT_STORED_VALUE_TYPES` already carried for the
+  numeric and boolean classes.
+  
+  Maintainer ruling, 2026-09-05 on #15683, quoted rather than paraphrased:
+  「a text operator over a column whose DECLARED type is temporal is type-gated
+  exactly like the numeric and boolean classes; the SQLite ISO-text match is not
+  a contract」.
+  
+  ## What was wrong — one filter, three answers across one driver family
+  
+  `{ on_day: { $contains: '2026' } }` over a column declared `Field.date` holding
+  `2026-01-05`:
+  
+  | face | before | mechanism |
+  |:--|:--|:--|
+  | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local (SQLite) | **the row** | the column stores canonical ISO TEXT (ADR-0053), so `GLOB '*2026*'` matched it |
+  | `driver-sql` on live PostgreSQL 16.13 | **`DATABASE_ERROR` 500** | `operator does not exist: date ~~ unknown` (SQLSTATE 42883) — the same for `timestamptz` and `time` |
+  | `driver-sql` on MySQL | **NOT MEASURED** | no server was provisionable; reads as coercion via `CAST(col AS BINARY) LIKE` |
+  
+  Three answers to one filter, and no face declared which was canonical. The
+  SQLite answer was the accident of a storage form, not a capability: the same
+  query against Postgres was a 500.
+  
+  ## What it does now
+  
+  The three temporal classes join `NON_TEXT_STORED_VALUE_TYPES`
+  (`@objectstack/spec`), the set the SQL compilers consult at compile time
+  because the stored value is not visible until run time. Every face that reads
+  it — `SqlDriver` (and everything that inherits its compiler),
+  `driver-turso`'s remote transport, `service-analytics`' three SQL lowerings —
+  compiles the positive operators (`$contains` / `$startsWith` / `$endsWith` /
+  `$icontains` / `$like` / `$ilike`) to the FALSE constant and `$notContains` to
+  the TRUE constant. Postgres's 500 becomes that declared answer; complementarity
+  holds; the constants compose with the existing NULL-safe rules and the `$not`
+  rewrite unchanged.
+  
+  **The SQLite ISO-substring match is RETIRED.** A caller who was using it to ask
+  for "records in 2026" writes a range instead, which every dialect has always
+  answered the same way:
+  
+  ```ts
+  // before — matched only on the SQLite family, 500 on Postgres
+  { on_day: { $contains: '2026' } }
+  // after — the prescription, identical on every backend
+  { on_day: { $gte: '2026-01-01', $lt: '2027-01-01' } }
+  ```
+  
+  ## Boundaries, so a reader does not over-read this
+  
+  - **A MULTI-VALUED temporal field is untouched.** `multiple: true` stores a JSON
+    TEXT array, where `$contains` is the MEMBERSHIP spelling #7398 left working on
+    a JSON column — not a substring test. It keeps compiling exactly as before.
+  - **The value-keyed JS evaluators do not move, and they DIVERGE — measured, not
+    caveated.** `driver-memory` canonicalises a declared temporal write to ISO
+    TEXT (#4047), for a `Date` input and a string input alike, so a positive text
+    operator MATCHES there — the exact complement of the answer this changeset
+    declares. That divergence is filed as #17348 and pinned by name in that
+    driver's conformance suite, alongside a correction: the two rows previously
+    read as pinning the no-match answer pass because their comparand omits the
+    milliseconds, not because anything type-gates. `formula` and `having` cannot
+    key on the declaration at all — `matchesFilterCondition(record, filter)` takes
+    a bare record ("this evaluator sees a bare record and has no schema to
+    consult", its own docblock), and `having` filters AGGREGATED rows whose columns
+    carry no field declaration. ⛔ So "on every face" is NOT delivered by this
+    change, and this changeset does not claim it: the SQL family answers the
+    declared rule, the JS faces do not yet.
+  - **`FILTER_TEXT_CASES` grows no temporal column**, deliberately. Every row there
+    is keyed on the STORED value — which is why its non-string column is a number
+    and not a date — so a temporal fixture would assert one stored form across all
+    five drivers that import it, the stored-form guarantee the ruling refused
+    option (b) for.
+  - **MySQL is NOT MEASURED**, not "passing": no server was provisionable, so its
+    cell rests on the compiled-shape pin, which reads the constant a statement
+    would carry without executing one.
+
+### Patch Changes
+
+- fc6ddb8: fix(driver-sqlite-wasm): a text value now round-trips byte-for-byte, as it does through `SqlDriver` on better-sqlite3 — an embedded U+0000 no longer cuts the stored value short, and a leading U+FEFF is no longer dropped when the value is read (#19978)
+  
+  Clause-②: no
+  
+  `SqliteWasmDriver` changed a text value without raising, at two points in sql.js (measured on sql.js 1.14.1, the version the lockfile installs, against better-sqlite3, which round-trips every value below):
+  
+  - **Write.** sql.js binds a string with a length of `-1`, so SQLite stores it only up to the first U+0000: `'a'` + U+0000 + `'b'` was stored as the single byte `61`, and `'ab'` + U+0000 as `6162`.
+  - **Read.** sql.js decodes a text cell up to the first NUL byte, through a decoder that drops a leading byte-order mark: a stored `610062` read back as `'a'`, and a stored text beginning with U+FEFF read back without it. A U+FEFF was always stored, because the write keeps it.
+  
+  What changes:
+  
+  - Every text cell the driver reads is decoded from its stored bytes, so a U+0000 anywhere in it and a U+FEFF at its start come back as stored. This includes values already on disk: a stored text that begins with U+FEFF now reads back with it.
+  - A string value holding U+0000 is bound as its UTF-8 bytes, and the parameter that receives it becomes `+CAST(<parameter> AS TEXT)`, so SQLite stores the same TEXT value better-sqlite3 stores, and compares it the same way. Positional `?`, numbered `?NNN` and named parameters are all numbered as SQLite numbers them. A statement that binds no such string runs exactly as before.
+  - An equality filter on such a value now compares the whole value. Before, the comparand was cut at the same U+0000 as the stored value, so `{ v: 'a' }` also matched a row written as `'a'` + U+0000 + `'b'`. It no longer does.
+  - The local `Field.json` storage backfill (`SqlDriver.backfillCanonicalJsonEncoding`) now converges a legacy json text cell holding a leading U+FEFF or an embedded U+0000 on this driver too: measured on the next `initObjects`, a stored `EFBBBF78` becomes `22EFBBBF7822` and a stored `610062` becomes `22615C75303030306222`, the same bytes better-sqlite3 writes, where before this change both were left as stored because sql.js did not read them back verbatim.
+  - If the loaded sql.js has no `Statement.getBlob` (the one sql.js read that carries a byte length), reading a text cell throws instead of decoding through the lossy path. sql.js 1.14.1 has it in its Node, browser and debug builds.
+  
+  What does not change: a value already stored cut short stays cut short. The bytes after the U+0000 were never written, so nothing can restore them.
+- 9d81af7: fix(driver-sql, driver-turso): on SQLite, a `$contains` / `$notContains` / `$icontains` / `$startsWith` / `$endsWith` comparand holding U+0000 is compared whole, against the whole stored value, instead of being cut at the U+0000 by `GLOB` (#19999)
+  
+  Clause-②: no
+  
+  On the SQLite faces these five operators compile to `GLOB`, and SQLite's `glob()` reads both the pattern and the stored value only up to their first U+0000. Nothing raised, and the filter answered a different question. Measured on `SqlDriver` over better-sqlite3 (SQLite 3.53.4), on `SqliteWasmDriver` over sql.js (3.49.1), and on `TursoDriver`'s remote transport over a local libSQL engine (3.45.1). All three answered alike. Over the values `'a'` + U+0000 + `'b'`, `'ab'` + U+0000, U+0000 + `'z'`, `'plain'` and `''`:
+  
+  - `$contains: U+0000` and `$endsWith: U+0000` returned all five rows;
+  - `$contains: U+0000 + 'b'` returned all five rows, where the JavaScript answer is `'a'` + U+0000 + `'b'` only;
+  - `$startsWith: U+0000` returned `''` and U+0000 + `'z'`, where the JavaScript answer is U+0000 + `'z'` only.
+  
+  What changes: a comparand holding U+0000 now compiles to a length-aware comparison instead. `$contains`, `$notContains`, `$icontains` and `$startsWith` use `instr()`, and `$endsWith` compares the value's trailing bytes over BLOB. Such a filter now returns the rows `driver-memory` and `@objectstack/formula` return for it. The comparand is bound as written, so `*`, `?` and `[` in it are literal, as they were before. `$icontains` still folds ASCII letters only, and `$notContains` still returns a row whose value is NULL.
+  
+  - `@objectstack/driver-sql`: the SQLite arm of `SqlDriver`'s text-operator compiler. `SqliteWasmDriver` and `TursoDriver`'s local mode inherit it.
+  - `@objectstack/driver-sqlite-wasm`: none of its own code changes. It inherits the fix, and its exact-text bind reaches every parameter the new comparison binds.
+  - `@objectstack/driver-turso`: the remote transport's own emitter, changed the same way.
+  
+  What does not change: a comparand without U+0000 compiles to the same `GLOB` with the same bound pattern as before. The Postgres and MySQL arms are untouched. `GLOB` still reads a stored value only up to its first U+0000, so for a comparand without U+0000, `$contains`, `$notContains`, `$icontains` and `$endsWith` over a stored value that holds one still compare only the part before it.
+- 57c2b73: fix(driver-sql, driver-turso): four filter-refusal doors stop naming a read scope's field and comparand unless the refused predicate is marked as the caller's own (#20020)
+  
+  Clause-②: no
+  
+  A read scope is the RLS, sharing or tenant predicate that `plugin-security` (ordinary reads) and `service-analytics` (the ObjectQL analytics face) AND into the caller's `where`. Both merges mark the scope `'policy'` and the caller's own predicate `'author'` (`markFilterSubtreeProvenance`, `@objectstack/spec/data`). When `SqlDriver` refused a scope at one of the four doors below, the `INVALID_FILTER` / 400 message named the scope's field, and for three of them its comparand too. It did not check the mark. Measured on both faces, through `POST /api/v1/analytics/query` and through an ObjectQL `find` under a merge shaped like `plugin-security`'s:
+  
+  - a column the table does not have. This is reachable from a real CEL rule on a field that is declared but has no column yet;
+  - a retired operator (`$regex`, `$options`) or an operator outside the vocabulary;
+  - `$and` / `$or` whose operand is not a list;
+  - a `$null` / `$exists` whose comparand is not a boolean.
+  
+  Each of these doors now reads the mark on the node it refused, the same way the cross-field and target-field refusals already did:
+  
+  - **`'policy'`, unmarked or ambiguous:** same `INVALID_FILTER` / 400. The message says which kind of refusal fired, but names no field, operator, comparand or filter path. Those go to the server log. For the unresolvable column, the message is the unnamed wording the driver already used when it could not parse the dialect's message.
+  - **`'author'`:** the full message, the same text the door answered before.
+  
+  To find the node, the unresolvable-column door looks up the column name the database reported. It discloses only when every node that names that column is marked `'author'`. A `$and` / `$or` with a primitive operand is judged by the node that carries the key.
+  
+  `SqliteWasmDriver` (`@objectstack/driver-sqlite-wasm`) and `TursoDriver` in local mode extend `SqlDriver`, so they inherit this change from it: the same four doors answer the same way there.
+  
+  **What an unmarked caller loses:** its own diagnostic from these four doors. Measured cases where the caller's own predicate reaches the driver unmarked:
+  
+  - no security plugin in the stack;
+  - a system-context call;
+  - an anonymous call;
+  - a `where` that holds a `{placeholder}` token, which the engine rewrites before the merge.
+  
+  That caller gets the withheld wording with the same code and status. A member's plain `where` under `plugin-security` is marked `'author'` and keeps the full text.
+  
+  The same three door classes on the Turso REMOTE transport (`RemoteTransport`) now read the mark too: the retired or unknown operator (including a non-operator key in an operator map), the non-list combinator, and the non-boolean `$null` / `$exists`. The operands go to its diagnostic sink. `TursoDriver`'s remote mode rebuilds every filter node before the transport sees it, so no mark reaches the transport there, and these refusals keep the withheld wording for every caller in that mode. The unresolvable WHERE column has no refusal on the remote face (the transport answers `[]`) and is not changed here.
+  
+  Not changed: which filters are refused, and the code and status of every refusal. The engine's declared-type, temporal-comparand and filter-token doors are not changed here.
+- f09d412: fix(driver-sql, driver-turso): on SQLite, `$like` / `$ilike` read the whole stored value, instead of stopping at its first U+0000 (#20024)
+  
+  Clause-②: no
+  
+  On the SQLite faces `$like` and `$ilike` compiled to `GLOB`, and SQLite's `glob()` reads the stored value only up to its first U+0000. So a pattern without U+0000 answered a different question over a value holding one, and nothing raised. Measured on `SqlDriver` over better-sqlite3 (SQLite 3.53.4), on `SqliteWasmDriver` over sql.js (3.49.1), on `TursoDriver`'s local mode, and on its remote transport over a local libSQL engine (3.45.1). All four answered alike:
+  
+  - `$like: 'a'` returned a value stored as `'a'` + U+0000 + `'b'`, and `$like: ''` returned U+0000 + `'z'`;
+  - `$like: '%b'`, `$like: 'a_b'` and `$ilike: 'A_B'` did not return `'a'` + U+0000 + `'b'`;
+  - `$like: '_'` did not return a value that is a lone U+0000.
+  
+  Over 108 patterns and 22 `$not` / `$or` / `$and` compositions against 59 stored values, 359 of the 3380 cells over values holding U+0000 differed from `@objectstack/formula` on each face.
+  
+  What changes: a stored value holding U+0000 now has each U+0000 replaced by one stand-in character before `GLOB` reads it. The stand-in is never a literal character of the pattern, never an ASCII letter, and never U+0000. A U+0000 in the value can only be matched by `%` or `_`, and so can the stand-in, so the answer is the one the whole value gives. Such a filter now returns the rows `driver-memory` and `@objectstack/formula` return for it, under `$not`, `$or` and `$and` as well: 0 of those 3380 cells differ on any of the four faces. `$ilike` still folds ASCII letters only.
+  
+  - `@objectstack/driver-sql`: the SQLite arm of `SqlDriver`'s `$like` / `$ilike` compiler. `SqliteWasmDriver` and `TursoDriver`'s local mode inherit it.
+  - `@objectstack/driver-sqlite-wasm`: none of its own code changes. It inherits the fix.
+  - `@objectstack/driver-turso`: the remote transport's own emitter, changed the same way.
+  
+  What does not change:
+  
+  - A stored value without U+0000 gets the same answer as before: 0 of 16640 such cells moved on any face.
+  - A pattern that is a literal prefix followed only by `%` (`'ab%'`, `'%'`) compiles to the same `GLOB` with the same bound pattern as before. Cutting the value at its first U+0000 cannot change that answer.
+  - No index is lost. Under `EXPLAIN QUERY PLAN` over an indexed TEXT column on all three engines, each `$like` pattern measured that starts with a literal (`'ab%'`, `'ab_'`, `'ab%cd'`, `'abc'`, `'a%b%'`) keeps its covering-index search, and each one that starts with a wildcard still scans. A case-exact pattern with a literal prefix now leads with a `GLOB` on that prefix followed by `*`, which every matching value satisfies and which is what keeps that search.
+  - `_` still matches one character, as `GLOB`'s `?` does. A character outside the Basic Multilingual Plane is one character to `_` on SQLite and two to `@objectstack/formula`, which counts UTF-16 units. That difference is older than this change, and this change does not alter it.
+  - A pattern holding U+0000 is still refused (`INVALID_FILTER` / 400).
+  - The Postgres and MySQL arms are untouched.
+  
+  Cost, measured over 10,000 rows on the three engines: against a value without U+0000 the new compile adds one `instr()` per row, and those queries took 1.1 to 2.4 times as long as `GLOB` alone, at most 4.5 ms. A value holding U+0000 pays the rewrite: 10,000 rows each holding one to three U+0000 took up to 35 ms, against at most 3 ms for `GLOB`.
+- adbbc5d: fix(driver-sql, driver-turso): on SQLite, `$contains` / `$notContains` / `$icontains` / `$endsWith` read the whole stored value, instead of stopping at its first U+0000 (#20024)
+  
+  Clause-②: no
+  
+  On the SQLite faces these four operators compiled to `GLOB` for a comparand without U+0000, and SQLite's `glob()` reads the stored value only up to its first U+0000. Nothing raised, and the filter answered a different question. Measured on `SqlDriver` over better-sqlite3 (SQLite 3.53.4), on `SqliteWasmDriver` over sql.js (3.49.1), on `TursoDriver`'s local mode, and on its remote transport over a local libSQL engine (3.45.1). All four answered alike:
+  
+  - `$contains: 'b'` did not return a value stored as `'a'` + U+0000 + `'b'`;
+  - `$endsWith: 'a'` returned that value, and `$endsWith: 'b'` did not;
+  - `$notContains: 'b'` returned it;
+  - `$icontains: 'B'` did not return `'A'` + U+0000 + `'B'`.
+  
+  What changes: these four operators now compile to the length-aware comparisons a comparand holding U+0000 already used, for every comparand. `$contains`, `$notContains` and `$icontains` use `instr()`, and `$endsWith` compares the value's trailing bytes over BLOB. An empty `$endsWith` comparand uses `instr()` too, so it still matches every non-NULL value. Such a filter now returns the rows `driver-memory` and `@objectstack/formula` return for it, under `$not`, `$or` and `$and` as well. The comparand is bound as written, so `*`, `?` and `[` in it are literal, as they were before. `$icontains` still folds ASCII letters only, and `$notContains` still returns a row whose value is NULL.
+  
+  - `@objectstack/driver-sql`: the SQLite arm of `SqlDriver`'s text-operator compiler. `SqliteWasmDriver` and `TursoDriver`'s local mode inherit it.
+  - `@objectstack/driver-sqlite-wasm`: none of its own code changes. It inherits the fix.
+  - `@objectstack/driver-turso`: the remote transport's own emitter, changed the same way.
+  
+  What does not change:
+  
+  - `$startsWith` with a comparand without U+0000 compiles to the same `GLOB` with the same bound pattern as before. The stored value's cut cannot change its answer.
+  - No index is lost. The SQL `SqlDriver` compiles, run under `EXPLAIN QUERY PLAN` over an indexed TEXT column on all three engines, scanned the table for these four operators under `GLOB` and still does; `$startsWith` keeps its index search.
+  - The Postgres and MySQL arms are untouched.
+  - `$like` and `$ilike` are outside this entry. Two other entries in this release cover them: on SQLite they now read the whole stored value as well, and every driver that answers `$like` refuses a pattern holding U+0000 (`INVALID_FILTER` / 400).
+- 8d76c2d: fix(driver-sql, driver-turso): every filter-compile refusal stops naming a read scope's field or literal unless the refused predicate is marked as the caller's own (#20039)
+  
+  Clause-②: no
+  
+  A read scope is the RLS, sharing or tenant predicate that `plugin-security` (ordinary reads) and `service-analytics` (the ObjectQL analytics face) AND into the caller's `where`. Both merges mark the scope `'policy'` and the caller's own predicate `'author'` (`markFilterSubtreeProvenance`, `@objectstack/spec/data`). Nine more `SqlDriver` filter-compile refusals did not check the mark, so when one of them refused a scope, its `INVALID_FILTER` / 400 message named the scope's field, and for most of them its literal too. Measured through an ObjectQL `find` under a merge shaped like `plugin-security`'s, with the scope in the `'policy'` arm:
+  
+  - an empty or non-string `$icontains` comparand;
+  - a non-string `$like` / `$ilike` comparand;
+  - a `$like` / `$ilike` pattern ending in a lone backslash;
+  - an object or array comparand on `$contains`, `$notContains`, `$startsWith`, `$endsWith` or `$icontains`;
+  - an `$in` / `$nin` / `$between` member that cannot be bound;
+  - an `undefined` comparand, in any position;
+  - an element of `$and` / `$or`, or the operand of `$not`, that is not a filter condition object;
+  - a `$`-prefixed key in a node position that is not `$and`, `$or` or `$not`;
+  - a `where` that reaches the driver as an array (the message printed the whole array).
+  
+  Each of them now reads the mark on the node it was raised from, as the other compile refusals already did:
+  
+  - **`'policy'`, unmarked or ambiguous:** same `INVALID_FILTER` / 400. The message says which kind of refusal fired, but names no field, operator variant, comparand, list position or filter path. Those go to the server log.
+  - **`'author'`:** the full message, the same text the refusal answered before.
+  
+  With these nine, every refusal on `SqlDriver`'s filter-compile path goes through the same seam.
+  
+  `SqliteWasmDriver` (`@objectstack/driver-sqlite-wasm`) and `TursoDriver` in local mode extend `SqlDriver`, so they inherit this change from it: the same refusals answer the same way there.
+  
+  **What an unmarked caller loses:** its own diagnostic from these refusals. That is every caller whose predicate reaches the driver unmarked, for example with no security plugin in the stack, in a system-context or anonymous call, or with a `where` that holds a `{placeholder}` token (the engine rewrites it before the merge). That caller gets the withheld wording with the same code and status, and the full text is in the server log. A member's plain `where` under `plugin-security` is marked `'author'` and keeps the full text.
+  
+  The Turso REMOTE transport (`RemoteTransport`) compiles filters itself. Its copies of these refusals now read the mark the same way: the `$icontains`, `$like` / `$ilike`, lone-backslash, `undefined`, non-node element or operand, undeclared-key and non-object `where` refusals. So do its two other compile refusals that still named the field: an operator map with no operator in it, and a `$between` that reached the transport without being lowered. The operands go to its diagnostic sink. For six of these classes, the withheld sentence is the local one behind the `[RemoteTransport]` prefix. An object text comparand and an unbindable list member already answered there through its comparand refusal, which withholds. `TursoDriver`'s remote mode rebuilds every filter node before the transport sees it, so no mark reaches the transport there, and these refusals keep the withheld wording for every caller in that mode.
+  
+  Not changed: which filters are refused, and the code and status of every refusal.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [32be735]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [82cb69f]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [d46deba]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [7c2c5ae]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [be5c602]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [9ccc417]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [beac798]
+- Updated dependencies [c164186]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [9bfbacb]
+- Updated dependencies [2274894]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [9d81af7]
+- Updated dependencies [57c2b73]
+- Updated dependencies [f09d412]
+- Updated dependencies [adbbc5d]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8d76c2d]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [fe677ae]
+- Updated dependencies [437bb0d]
+- Updated dependencies [40626bd]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [88a9330]
+- Updated dependencies [3cbcedb]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [77c801e]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [119a02b]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/driver-sql@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

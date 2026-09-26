@@ -1,5 +1,426 @@
 # @objectstack/console
 
+## 17.5.0
+
+### Minor Changes
+
+- 48c91e9: Console (objectui) refreshed to `62597c588072`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 27 releasing of 30 changesets added across 37 non-merge commits; omitted: 3 release-nothing changesets, 7 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — fix(plugin-grid): `object-grid`'s `pagination` and `selection` now read their own presence by the SAME rule — presence enables, an explicit off wins (objectui `62597c588`)
+  - **minor** — A render-time filter refusal now renders a named "this view's filter is malformed" state instead of throwing out of render (objectui#9050). (objectui `804831c2a`)
+  - **minor** — `record:related_list` `add.picker.filter` is declared as the contract's rule array on the authoring face, not as `unknown` (objectui#9964). (objectui `9a9780072`)
+  - **minor** — feat(core): `object-tree` joins the curated public tier — the spec declared the block, the roster withheld it (objectui `c131d9e69`)
+  - **minor** — A signed-in user's language has one source of truth: `sys_user.locale`. (objectui `63f4f928f`)
+  - **minor** — A record form can no longer be saved while an upload is still in flight (objectui#10166). (objectui `e686f4d9a`)
+  - **minor** — Nav `visible`: an ancestor's predicate now reaches the whole subtree, and a group no longer outlives its children (objectui#10119) (objectui `73a3c89af`)
+  - **minor** — A field-backed action param reaches its record picker, and a param whose backing field cannot be read is refused instead of rendered as an empty text box (objectui#10129). (objectui `6cc910b6d`)
+  - **patch** — fix(react): the refused-`data` dev warning can be reset between tests (objectui `befd40ccd`)
+  - **patch** — fix(components): a half-typed `between` range in the filter builder shows itself as incomplete instead of being dropped with no signal (objectui#10061) (objectui `777fca22f`)
+  - **patch** — fix(plugin-detail): a related list resolves `user` columns to names, like every other list (objectui `0d379f571`)
+  - **patch** — fix(core): a date-only value renders the calendar day it names, in every viewer timezone (objectui `516583b54`)
+  - **patch** — fix(plugin-detail): the record-grained write verdict is memoised PER PRINCIPAL (objectui#10107). (objectui `b06c3de2a`)
+  - **patch** — fix(console): a `file` field on a FormView renders the shared upload control, not a text box (objectui `7725c10a0`)
+  - **patch** — Stop the Studio permission matrix' Delegated Admin Scope editor authoring an `adminScope` the framework spec refuses, and make the section's collapsed badge report a scope it is c… (objectui `2d7fff3b8`)
+  - **patch** — fix(console): mint a `sys_file` id for files picked in the global action dialogs (objectui `98178b206`)
+  - **patch** — fix(plugin-detail): `requiredPermissions` on `record:details`, `record:highlights` and `record:related_list` is an ADR-0066 capability set, read fail-closed — it used to pass for… (objectui `c2dabf032`)
+  - **patch** — A form no longer submits — nor offers — a field the CALLER may read but not edit (objectui#10120). (objectui `80c54122e`)
+  - **patch** — fix(components): `page:header` resolves a lookup title candidate instead of handing its expanded object to JSX (objectui#10117) (objectui `4c6f549ef`)
+  - **patch** — `ObjectCalendar`'s user-visible copy now reaches the locale packs. The component was already i18n-aware — it imports and calls both translation hooks — and a set of English senten… (objectui `afb228418`)
+  - **patch** — `useSettledSchema` no longer republishes an EQUAL definition as a new object, so swapping the adapter on a record-bound view costs ONE record query instead of two. (objectui `162621b6a`)
+  - **patch** — A form no longer emits the columns the server owns, and a master-detail batch sends only the cells the user changed (objectui#10108). (objectui `e026e15f9`)
+  - **patch** — fix(plugin-calendar): the month gridcell's accessible name follows the resolved locale (objectui `708f2711b`)
+  - **patch** — The AI build bar, the Studio workbench and the chat transcript's draft cards report the runtime authoring gate's per-draft advisories (objectui#10039) (objectui `e16f504d9`)
+  - **patch** — fix(plugin-detail): `record:quick_actions.requiredPermissions` is an ADR-0066 capability set, read fail-closed — it used to pass for every reader of the object (objectui `28b065800`)
+  - **patch** — fix(plugin-map): the top-level-`style` warning now prescribes a spelling the runtime reads (objectui `2252653d0`)
+  - **patch** — `record:history` refuses a row cap the contract rejects instead of repairing it (objectui#10005). (objectui `cd2cb4183`)
+  
+  **In this console build, declared nowhere** — objectui merged 7 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ docs(agents): 一次派发跑出来的 PR 停在 draft —— 给自行合并条款加第二条例外 (#10213) (objectui `87a0ed8cf`)
+  - _(no changeset)_ docs(agents): state the attribution-footer append as conditional on absence (#10212) (objectui `2ec310198`)
+  - _(no changeset)_ docs(skills): the console guide names the resolver `/` actually has (objectui#10140) (#10215) (objectui `8d7915ed2`)
+  - _(no changeset)_ ci(pm): adopt the board-snapshot archiver — route B, and the five files this repo's own gates demanded (objectui#9387) (#10203) (objectui `0cf2d6644`)
+  - _(no changeset)_ ci: compile objectui against @objectstack/spec@main as the shape gate (objectui#9860) (#9877) (objectui `6cae9a0b3`)
+  - _(no changeset)_ perf(console): move the `types` zod validators off the eager budgeted line (#10082) (objectui `64d250c8a`)
+  - _(no changeset)_ ci(bundle-analysis): retire the exhausted-headroom leg, keep every ceiling (#10151) (objectui `cbda340f0`)
+  
+  objectui range: `87af769e9a3e...62597c588072`
+- fbc12be: Console (objectui) refreshed to `87af769e9a3e`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 584 releasing of 891 changesets added across 1156 non-merge commits; omitted: 307 release-nothing changesets, 279 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — **BREAKING** — a record id is a **string** wherever metadata names one, and on the last `DataSource` door (objectui#9511). An authored `recordId: 42` / `resourceId: 42` no longer… (objectui `87af769e9`)
+  - **minor** — Store a typed percent by shifting the decimal, not by dividing a float by 100 (objectui#9810, maintainer ruling batch #161 item 3, letter B). (objectui `1560d4682`)
+  - **minor** — `object-grid`'s `operations` block is now the CEILING over `rowActions`, instead of one half of a union with it. (objectui `c269ed9e0`)
+  - **minor** — **Breaking — the published `RootRedirect` is removed; `/` now has exactly one resolver.** (objectui `4274861f4`)
+  - **minor** — Report display sites follow the display locale instead of the literal tag `en-US` (objectui#10020). (objectui `f7af6372d`)
+  - **minor** — `ObjectGallerySchema.filter` is typed as the destination its own docblock names — `QueryParams['$filter']` — on both faces, the TS interface in `objectql.ts` and the zod mirror in… (objectui `7cbefa540`)
+  - **minor** — Render the environment admin's read-rate report from the usage endpoint's `readRate` reading (objectui#9954; maintainer ruling on cloud#2333, batch #164 item 3). (objectui `c698a814a`)
+  - **minor** — `DetailViewField` declares `dueLike?: boolean` — the published TypeScript twin now accepts the key its own validator already judged and its own renderer already honours (objectui#… (objectui `8b446f5d0`)
+  - **minor** — feat(console): a "Language" item on the profile page, writing the signed-in user's own `sys_user.locale` (objectui#7501). (objectui `c2f0f4832`)
+  - **minor** — `RecipientPickerField` gains a picker mode for the `field` sharing recipient (objectui#7613; maintainer ruling objectstack#14103, executor objectstack#15072). (objectui `23b99585f`)
+  - **minor** — The console's error-recovery exits follow the declared landing (objectui#7373). (objectui `3fa3b3eb6`)
+  - **minor** — Studio's "publish whole app" reports the runtime authoring gate's per-draft advisories (objectui#6965; server half objectstack#9343). (objectui `ce986aafc`)
+  - **minor** — Client-evaluated `ConditionBuilder` mounts declare the scope roots their own host binds (objectui#9856) — the declared cost of objectui#9645, now paid. (objectui `030a675b0`)
+  - **minor** — **BREAKING** — Build the chat runtime's discriminated tool parts at the PRODUCER, and delete the last `as any` on the `useChat` call (objectui#8426; director seat, decision batch #86, 2026-09-08… (objectui `4dbab84d4`)
+  - **minor** — Drop a saved view's row cap that the contract refuses, at the LOWERING layer every repaired read point sits under — and say so on the one path that has no renderer to say it (obje… (objectui `5eabe8646`)
+  - **minor** — **BREAKING** — Refuse `operators` on `object-grid` by name, and name the correct spelling (objectui#9739, maintainer ruling 2026-09-18, letter C). (objectui `6ee259a8f`)
+  - **minor** — Declare the row-click modifier payload on `ObjectDataTableSchema.onRowClick` (objectui#9799), so the object-arm face stops denying a second argument its node already receives. (objectui `3b6d53bc3`)
+  - **minor** — **BREAKING (authoring surface): `body` is no longer a child-list key. Author `children`.** (objectui `2acd8e109`)
+  - **minor** — Execute the declarative row-level `operation: 'update'` action (objectui#7551, the objectui half of objectstack#14092; consumes `@objectstack/spec` 17.3.0's `ActionSchema.operatio… (objectui `feac43909`)
+  - **minor** — `FlowRunner`: a run that ended with `outcome: 'refused'` renders as a Close-only notice (objectui#7707 — lane 3 of the maintainer ruling on objectstack#14945, decision batch #42;… (objectui `98a6bddf9`)
+  - **minor** — **`resolveRecordSourceConfig`'s `data` parameter now follows the arm it is already told, instead of contradicting it.** (objectui `ab856ed30`)
+  - **minor** — `object-form`'s two seed keys now merge PER MEMBER. `initialData` is registered as the "alternate spelling of `initialValues` … read FIRST", and every presentation arm implemented… (objectui `63bf47da6`)
+  - **minor** — The drill `filter[...]` URL dialect can spell IS NOT NULL (objectui#9508). (objectui `6c06f0b50`)
+  - **minor** — `SchemaRenderer` now applies the objectui#9571 authored-`data` strip to the legacy `props` alias bag as well, so all three authoring spellings of that key lose the React prop seat… (objectui `7649f4364`)
+  - **minor** — fix(app-shell): `ConditionBuilder`'s subject dropdown stops offering roots the host does not bind (objectui `aced50d2e`)
+  - **minor** — `record:*` blocks honour the `aria` bag the protocol declares on them, and `RecordComponentAriaProps.ariaLabel` states the contract's inline locale vocabulary instead of narrowing… (objectui `272a53066`)
+  - **minor** — `object-form.customFields` now MERGES over the metadata-generated field set, as its registered description always promised (objectui#9778, maintainer ruling 2026-09-18, director s… (objectui `5a311a38d`)
+  - **minor** — **BREAKING** — `useNavigationOverlay` stops reading the retired `navigation.view` key, and stops substituting an authored name for the navigation-MODE token (objectui `0c789a402`)
+  - **minor** — Stop `FilterConditionField` writing a `between` row into stored criteria until BOTH bounds are filled in (objectui#9914). (objectui `4d7d322aa`)
+  - **minor** — **BREAKING** — Converge the bare `dashboard` key on `plugin-dashboard`, and retire `view:dashboard` with a by-name tombstone (objectui#9533). (objectui `e356c39ee`)
+  - **minor** — The percent EDIT WIDGET reads `scale` for its fraction width, not `precision` (objectui#9568). (objectui `9aa2a573b`)
+  - **minor** — `objectui generate page` scaffolds its child list as `children` (objectui#9847). (objectui `d2f723fd1`)
+  - **minor** — The VS Code extension no longer ignores a child list spelled `children`, and everything the platform scaffolds now emits that spelling (objectui#7181). (objectui `4b5bb9525`)
+  - **minor** — Declare `scale` on `PercentFieldMetadata` (objectui#9784). (objectui `e7084269f`)
+  - **minor** — Give the `file` grid cell a per-file view/download affordance (objectui#9485). (objectui `f0f204677`)
+  - **minor** — Forward the row-click modifier payload through the three hops that were dropping it (objectui#9462), so Cmd/Ctrl/middle-click on a row reaches a host handler. (objectui `f0f3cd5e0`)
+  - **minor** — A scatter's two numeric axes now honour the spec `ChartAxis` every other chart family already honours, instead of dropping it. (objectui `1b969aec6`)
+  - **minor** — **BREAKING** — The schema-driven condition editor now lints in the scope its host declares (objectui#8167, director ruling of 2026-09-17, batch #150 item 5 letter B). (objectui `95121fb99`)
+  - **minor** — **BREAKING** — `useSpecGesture`'s `onGesture` fallback payload reports the DECLARED spec gesture at every arm, not the recognizer's own name (objectui#9691). (objectui `0ee6e316e`)
+  - **minor** — Take the percent cell's magnitude from the value, never from the column's name (objectui#9452). (objectui `e05553c46`)
+  - **minor** — **BREAKING** — `useSpecGesture` fires a swipe on MEMBERSHIP of the declared direction set (objectui#7974, maintainer ruling of decision batch #70). (objectui `1cfdff814`)
+  - **minor** — Derive the bulk executor's data-source face from `DataSource` and stop erasing the check at the hand-off (objectui#9722). (objectui `20b5e361e`)
+  - **minor** — Honour `columns[].collapsed` on the registered kanban board (objectui#9628). (objectui `dea17b469`)
+  - **minor** — **BREAKING if your code hands a numeric primary key to one of these four** — a record id at the `DataSource` boundary is a `string`, as `@objectstack/spec` declares every record d… (objectui `bbba09840`)
+  - **minor** — Declare `cardTitle` — the canonical card-title spelling — on `ObjectKanbanSchema` (objectui#9606, director seat decision batch #150 item 3 letter 1, maintainer approved 2026-09-17… (objectui `78a9c6744`)
+  - **minor** — **BREAKING** — Stop `collapsible` from honouring an authored `open`, and retire the declaration on both published faces (objectui#8236, ADR-0049 enforce-or-remove). (objectui `ee70287e4`)
+  - **minor** — **BREAKING** — Refuse `onNavigate` and `onAddComment` by name on the `detail-view` JSON authoring face (objectui#9447). (objectui `ac716fff4`)
+  - **minor** — Export `ObjectTreeSchema` from the `@object-ui/types` root barrel (objectui#9550) (objectui `bbe57fdd5`)
+  - **minor** — **`buttonVariant` becomes authorable on `toast` and `sonner`.** Both registrations now declare it in their registry `inputs`, as `type: 'enum'` over exactly the six values the TS… (objectui `72f55c9ec`)
+  - **minor** — Build history rows now state their item count in each language's own grammar (objectui#9266). (objectui `15b33aeb4`)
+  - **minor** — **BREAKING** — `ChatbotSchema` no longer accepts `body`, on either published face (objectui#8572). The chat API's body params are authored as `requestBody`, which is what the rend… (objectui `c42554e94`)
+  - **minor** — **BREAKING** — the calendar date aliases `dateField` and `endField` are retired at both faces (objectui#8355). They are now **declared refusals**: an authored value is rejected **… (objectui `474797d62`)
+  - **minor** — **BREAKING** — Declare the one handler key the `'tree-view'` renderer reads (objectui#7804, the `TreeViewSchema` slice). (objectui `604476d97`)
+  - **minor** — ⚠️ **Behaviour change in the metadata designer: a bare field reference typed into a hook's "Run only when (optional CEL)" is now an ERROR in the editor.** It was accepted. Read th… (objectui `16603b9c9`)
+  - **minor** — One home for the `datetime` display convention in the readonly field widgets, one face per register (objectui#8209, maintainer ruling batch #142 item 2). (objectui `ac0e39a84`)
+  - **minor** — `record:details` honours `hideEmpty` on a section again — an all-empty section hides itself, `hideEmpty: false` keeps its heading and skeleton (objectui `542718f45`)
+  - **minor** — **BREAKING** — `ObjectKanbanSchema` no longer accepts `allowCollapse`, on either published face (objectui#8801). (objectui `d234fa91e`)
+  - **minor** — **`ObjectView` honours a spec-shaped named list view** (objectui#8254, the renderer half objectui#7928's option A requires — decision batch #70, 2026-09-07 — before `ObjectViewSch… (objectui `5226263ef`)
+  - **minor** — **BREAKING** — `AIInsightsSchema` and the `ai-insights` node type are RETIRED from the published type face (objectui#8800, ADR-0049 enforce-or-remove). (objectui `1bd1be7e2`)
+  - **minor** — **BREAKING (shipped as `minor` — see below):** `list` and `timeline` now refuse both content channels by name. Neither renderer reads `body` or `children`, so both keys become `?:… (objectui `53374dc07`)
+  - **minor** — Two frozen cell-renderer censuses now read the registry instead of a literal (objectui#8734) (objectui `3ecc369bf`)
+  - **minor** — **BREAKING** (declared `minor` — this repo pins its major to `@objectstack`, so a breaking change ships as a minor with this banner; AGENTS.md §版本号策略): `WidgetInput.label`, `Widge… (objectui `335abea3e`)
+  - **minor** — `SchemaRenderer` no longer spreads an authored `data` key as a React prop for blocks whose published `data` row is the `ViewData` OBJECT arm (objectui#9571, ruling objectui#8348 Q… (objectui `f0f4d6c8e`)
+  - **minor** — **BREAKING** — fix(components): Tailwind no longer compiles this package's prose into the published stylesheet (objectui `f7fcc2cdb`)
+  - **minor** — **BREAKING** — All three percent surfaces read `scale` for their fraction width, not `precision` (objectui#9295). (objectui `4a94c38b0`)
+  - **minor** — **BREAKING** — Declare the five handler keys the `'list-view'` renderer reads (objectui#7804, the `ListViewSchema` slice). (objectui `f1cd29032`)
+  - **minor** — Say why a capability-gated action is missing, in the action designer (objectui#7234, maintainer ruling 2026-09-08, option B). (objectui `45889f8e9`)
+  - **minor** — `record:chatter` / `record:discussion` now read `feed.filterMode` and `feed.enableMentions` (objectui#8968). (objectui `88561fdc4`)
+  - **minor** — `EventHandlersSchema` is removed from `@object-ui/types` (objectui#6910). (objectui `40f34b4ba`)
+  - **minor** — `ObjectTreeProps.schema` is the published `object-tree` node instead of `any`, and `getTreeConfig`'s parameter with it (objectui#8655). (objectui `009f92d7a`)
+  - **minor** — The four plain `objectql.ts` node faces declare the nine handler keys their registered renderers read (objectui#7804, the `objectql.ts` slice): `ObjectFormSchema.onCancel` / `.onE… (objectui `8d50bc2bf`)
+  - **minor** — **BREAKING (shipped as `minor` — see below):** six component schemas now refuse both content channels by name. `text`, `image`, `icon`, `tabs`, `accordion` and `calendar` (and `ui… (objectui `b7479abc7`)
+  - **minor** — `UIActionSchema` declares the four keys the two action renderers were reading through `as any` — `disabled`, `recordIdField`, `resultDialog`, `undoable` (objectui#8648, the object… (objectui `f95b1409f`)
+  - **minor** — `DataTableSchema` declares the seven handler keys its registered renderer reads: `onAddRecord`, `onBatchSave`, `onCellChange`, `onColumnResize`, `onRowActionDef`, `onRowClick` and… (objectui `75fca9669`)
+  - **minor** — **`NamedListView` declares the 17 members the protocol declares on the same surface, and each one now has a read point** (objectui#8980, director-seat class-one adjudication of 20… (objectui `0e2ddd418`)
+  - **minor** — `InputShorthandSchema` and `UiCalendarSchema` are now named exports of `@object-ui/types` itself, not only of `@object-ui/types/form` and `@object-ui/types/zod` (objectui#9406). (objectui `bbc9dc34e`)
+  - **minor** — The ingestion choke point says out loud when it CANNOT fold a retired spelling (objectui#8938) (objectui `84defabb2`)
+  - **minor** — fix(plugin-calendar): type `ObjectCalendar` at the published `object-calendar` schema, and declare the `calendar` container (objectui `51e144eda`)
+  - **minor** — A record id is a `string` everywhere in the published types, as `@objectstack/spec` has always declared it. Three published declarations that admitted `number` no longer do. (objectui `72d65875c`)
+  - **minor** — `AppAction.items` 上的 `shortcut` 由「静默剥掉」改为「具名拒收」 (objectui `c9f9baedf`)
+  - **minor** — The drill "escape hatch" can spell an empty bucket: the `filter[...]` URL dialect grows an is-null operator on both sides plus a chip for it (objectui#9159). (objectui `136ff4bb3`)
+  - **minor** — **BREAKING** — Retire 23 measured-dead locale keys from all ten packs — two whole families and eleven individual leaves (objectui#8754; director seat summon #22, 2026-09-12, maintainer verbatim… (objectui `ef5200107`)
+  - **minor** — Give a read-only `file` field a per-file view/download affordance (objectui#9161). (objectui `6d5db7b17`)
+  - **minor** — `record:related_list` accepts `relationshipValueField`, and three record renderers stop erasing their own props annotation (objectui#8649). (objectui `541ce4e02`)
+  - **minor** — `list-view`: retire the legacy `title` alias from the export-filename read, and pin the `rowActionDefs` exemption at both of `ListView`'s read sites (objectui#8653, the objectui#8… (objectui `3a9ab021c`)
+  - **minor** — The wrong-layer root advisory asks the platform for its verdict instead of keeping a second copy of it (objectui#9318). (objectui `e3cb47624`)
+  - **minor** — The row/card click props on the view components now declare the modifier payload they have always been invoked with (objectui#9357). (objectui `502eb5880`)
+  - **minor** — **BREAKING** — Declare the two handler keys the `'detail'` renderer reads (objectui#7804, the `plugin-detail` slice; director seat, decision batch #69, 2026-09-07). (objectui `7ca6ddd4b`)
+  - **minor** — **BREAKING (scored `minor` per this repo's version-alignment convention)** — `KanbanRenderer` takes `onCardMove` as an explicit React prop, and the `object-kanban` document face t… (objectui `55f39ee90`)
+  - **minor** — `UseNavigationOverlayOptions.onRowClick` now declares the modifier payload it has always been called with (objectui#9357). (objectui `0ce32d514`)
+  - **minor** — Give the flow `end` node's inspector a typed control for `config.message`, the key a refused outcome requires (objectui#9336). (objectui `d27dcf2c9`)
+  - **minor** — A record page shows a discussion panel if and only if it composes one (objectui#7298). (objectui `7aaa89160`)
+  - **minor** — Take lucide's runtime `icons` record off the console's eager path (objectui#9251, maintainer ruling of 2026-09-13, decision batch #132 item 4). (objectui `67485872e`)
+  - **minor** — One record-overlay shell: all five list-type renderers honour all four overlay `navigation.mode` values (objectui#9299, director seat decision batch #128 item 1, 2026-09-13). (objectui `7098eed36`)
+  - **minor** — **BREAKING** — `RecordDetailsComponentProps` no longer declares `layout` (objectui#9040 item 1). (objectui `63fb72c42`)
+  - **minor** — An unbound map now REFUSES; coordinates are never guessed (objectui#8169, maintainer ruling 2026-09-07, decision batch #67, option B). (objectui `cb725e78f`)
+  - **minor** — **BREAKING** — The console's "app not available" screen now says what it measured, and the by-name app probe stopped folding four answers into one (objectui#9262). (objectui `2bf34f70c`)
+  - **minor** — Name two of objectui#8499's arms on the `@object-ui/types/zod` barrel, and record the other two as absent by decision (objectui#9067, director seat, decision batch #121 item 5, ma… (objectui `279e48e8c`)
+  - **minor** — An `onCardClick` supplied to an `object-kanban` board runs **once** per card click instead of twice, and the published declaration of the key grows the second parameter the surviv… (objectui `a272a4ffe`)
+  - **minor** — **BREAKING** — Retire the "Tremor/simple format" adapter in `ChartRenderer` — the `index`, `category` and `value` reads (objectui#8650, triage ruling `5619609278` on AGENTS.md #0.1: route to the… (objectui `bb383e83d`)
+  - …and 484 more releasing changesets in this range (list capped at 100; see the objectui range below).
+  
+  ⚠️ 98 of these carry a breaking change: 98 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+  
+  **In this console build, declared nowhere** — objectui merged 279 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ ci: one `Test` aggregator becomes the required test context, shards 4 -> 8, dist pins get their own job (#9584) (objectui `eb1c9f9d2`)
+  - _(no changeset)_ docs(skills,AGENTS): teach `action:button` + `actionType`, retire the `events` bag (#9592) (objectui `7550728a6`)
+  - _(no changeset)_ docs(census): state the no-changeset-for-tooling ruling in the census header (objectui#9795) (#10077) (objectui `3631937fc`)
+  - _(no changeset)_ refactor(scripts): the item-carrier disposition is RULED and says it is not a dialect (#10087) (objectui `205b97353`)
+  - _(no changeset)_ docs(guide): remove the lazy-loading promise nothing keeps from the schema-rendering guide (objectui#9989) (#10086) (objectui `66d870feb`)
+  - _(no changeset)_ docs(detail-view): teach `dueLike` where a detail-view field is authored (#10075) (objectui `af57dc729`)
+  - _(no changeset)_ gate(doc-types): walk packages/NAME/README.md, with its ruled DOC_TYPE_EXEMPTIONS entries (#9996) (objectui `6f76bb7ad`)
+  - _(no changeset)_ docs(skills): move the three published guides off the retired `dataSource` expression root (#9378) (objectui `8ec28d73d`)
+  - _(no changeset)_ docs(skills): page-builder.md names the channel that publishes expression roots (objectui#9672) (#9997) (objectui `078f2e4f7`)
+  - _(no changeset)_ docs(skills): gate the usePermissions example on can(), a boolean, and mark its fence (objectui#9671) (#9994) (objectui `3d72fb65f`)
+  - _(no changeset)_ docs(guide): user-state-persistence taught the rejected user_app_state shape (objectui#5950) (#10011) (objectui `ec1de927d`)
+  - _(no changeset)_ docs(changeset): four pending bodies cite the retire-vs-remove discriminator instead of restating it (#9970) (objectui `706e09f27`)
+  - _(no changeset)_ docs(scripts): the $-dialect census keeps its by-name self carve-out, with the reasons pinned (objectui#9891) (#9915) (objectui `2bc9829ea`)
+  - _(no changeset)_ fix(scripts): type-check-coverage stale-entry messages carry no card-ending keyword (#9898) (objectui `fb7dfedbb`)
+  - _(no changeset)_ chore(claude): allow-list the two landing REST calls in settings.json (objectui#9862) (#9900) (objectui `99bcde511`)
+  - _(no changeset)_ feat(scripts): read one changeset against itself, and date the contradiction (#9850) (objectui `5365b4c34`)
+  - _(no changeset)_ fix(scripts): the polarity census reads the optional marker as a decoration, not as part of the key (objectui#9794) (#9831) (objectui `3ae740c4a`)
+  - _(no changeset)_ docs(changeset): date the `MEMBER_PIN_EXEMPTION_CEILING` reading in the pending 8171 body (#9823) (objectui `26ac50369`)
+  - _(no changeset)_ docs(changeset): date the rotted "keeps its own copy" clause in the 5993 note (#9822) (objectui `aed4b4f71`)
+  - _(no changeset)_ docs(plugin-detail): state the Reference Rail opt-in and the option its count is read from (#9811) (objectui `78a0582ba`)
+  - _(no changeset)_ fix(scripts): the polarity census reads a key as a NAME, not as any lowercase token (#9793) (objectui `6a0d1a435`)
+  - _(no changeset)_ docs(changeset): correct the `SpinnerSchema` member attribution in the 5632 pending body (#9763) (objectui `d18322415`)
+  - _(no changeset)_ fix(scripts): forward-parity stale-entry messages carry no card-ending keyword (#9755) (objectui `2414e3751`)
+  - _(no changeset)_ test(ci-cd-doc): read the Playwright reporter through the shared comment mask (#9748) (objectui `5e8a31aa1`)
+  - _(no changeset)_ feat(gate): read BORN-FALSE claims — an address this change's own diff moves (#9744) (objectui `cbb2e45ac`)
+  - _(no changeset)_ fix(scripts): key the indirect registration bypass by collection, not by file (#9724) (objectui `64deb1603`)
+  - _(no changeset)_ fix(scripts): refuse a `-t` name filter that cannot match the title it spells (objectui#9660) (#9730) (objectui `10cc93b79`)
+  - _(no changeset)_ docs(changeset): date the two rotted present-tense declaration claims in the kanban pending entries (#9723) (objectui `2dbb49975`)
+  - _(no changeset)_ fix(scripts): derive the indirect registrations' namespace from the call, not from the hand-kept table (#9716) (objectui `4cf57b6da`)
+  - _(no changeset)_ docs(changeset): stop the pending 8499 entry publishing a stale registry size (#9715) (objectui `e3ff936ca`)
+  - _(no changeset)_ docs(changeset): retire two present-tense "in-flight PR" claims before they publish (objectui#9706) (#9714) (objectui `3172b85fa`)
+  - _(no changeset)_ fix(ci): the lockfile-dedupe gate reports on pull requests instead of blocking (#9707) (objectui `50e5cafe3`)
+  - _(no changeset)_ test(ci): widen the live-reading lock to what required jobs RUN, not just the workflows (#9696) (objectui `dd871fc08`)
+  - _(no changeset)_ docs(changeset): correct the AIInsights paragraph in the 8178 entry (objectui#9625) (#9694) (objectui `a961ad174`)
+  - _(no changeset)_ test(ci): take the live registry reading out of a REQUIRED context (objectui#9562) (#9690) (objectui `29a8a9526`)
+  - _(no changeset)_ docs(plugin-calendar): compile the Direct Component Usage block and gate it (#9678) (objectui `bb2d33570`)
+  - _(no changeset)_ docs(skills): auth-permissions stops teaching `dataSource` as the `data` expression root (objectui#9379) (#9669) (objectui `61b755346`)
+  - _(no changeset)_ feat(scripts): census every page key a renderer reads against PageSchema (objectui#9438) (#9670) (objectui `53f2b189e`)
+  - _(no changeset)_ fix(scripts): the vite resolve oracle stops writing its scratch root into the swept repo root (objectui#9468) (#9658) (objectui `e896c3899`)
+  - _(no changeset)_ docs(tooling): the handler-key gate names the owner its ledger consults, in all three places (objectui#9456) (#9657) (objectui `0fb382eca`)
+  - _(no changeset)_ fix(scripts): the spec-symbol ratchet detects its own dead anchor (objectui#9537) (#9646) (objectui `0b7be13ad`)
+  - _(no changeset)_ chore(labeler): delete the inert `designer` rule and the exemption it needed (objectui#7771) (#9644) (objectui `8ad231846`)
+  - _(no changeset)_ feat(scripts): gate a test source naming a changeset the tree carries (objectui#9583) (#9635) (objectui `dda8f3815`)
+  - _(no changeset)_ fix(e2e): root the live storage-state write and both storageState configs on their own file (#9636) (objectui `8d1242b58`)
+  - _(no changeset)_ fix(census): the continuation-scope docblocks stop crediting a guard that cannot fire there (#9632) (objectui `15f01223d`)
+  - _(no changeset)_ fix(scripts): lint-coverage's stale-entry message stops spelling a closing keyword before its anchor (objectui#9538) (#9595) (objectui `ff29450a9`)
+  - _(no changeset)_ fix(scripts): make the body-dialect census report the key population it counted over (#9599) (objectui `a5b660f21`)
+  - _(no changeset)_ docs(plugins): author the `listViews` filter operator in its canonical spelling (objectui#7993) (#9612) (objectui `fdbfe2302`)
+  - _(no changeset)_ docs(components): document `wrapperClass` and its new refusal on the five pages that omit it (#9614) (objectui `e0a87dbbd`)
+  - _(no changeset)_ fix(scripts): check:spec-symbols reads EVERY occurrence of a claim phrase, not the first (#9608) (objectui `253c31418`)
+  - _(no changeset)_ docs(agents): point AGENTS.md at the invocation guard pin test instead of counting its refusals (objectui#9505) (#9587) (objectui `163630bc9`)
+  - _(no changeset)_ feat(ci): deliver the changeset claim re-read onto the pull request (objectui#9140) (#9581) (objectui `f508000b5`)
+  - _(no changeset)_ test(scripts): stop pinning a pending changeset filename in the two gate suites (#9582) (objectui `29f4c0582`)
+  - _(no changeset)_ docs(agents): record the merge_group leg's SECOND refusal predicate (the contract-review carrier) (#9466) (objectui `4b9a0a8f0`)
+  - _(no changeset)_ fix(scripts): fail on a new bare-name registry collision (objectui#9264) (#9531) (objectui `2904c5c40`)
+  - _(no changeset)_ build(tsconfig): raise test-program `lib` to ES2022 across 31 packages (#9512) (objectui `4e96becf5`)
+  - _(no changeset)_ fix(scripts): label an `any` index signature `index signature`, not `return type` (#9510) (objectui `2e1d0f032`)
+  - _(no changeset)_ fix(devx): refuse an appended path filter that a baked positional already swallows (objectui#7814) (#9504) (objectui `8fa7d69af`)
+  - _(no changeset)_ docs(gate): name key-refusal as a class check-spec-range-floors deliberately does not judge (objectui#9036) (#9481) (objectui `02d424ab3`)
+  - _(no changeset)_ fix(tests): register @testing-library/jest-dom in three test programs' types (#9480) (objectui `360300fea`)
+  - _(no changeset)_ ci(coverage): give the instrumented lane its own per-test budget so the coverage gate can run (#9474) (objectui `511e4024a`)
+  - _(no changeset)_ test(docs): pin command parity for every ci-cd-pipeline.md section by default (#9467) (objectui `db6aa19a9`)
+  - _(no changeset)_ docs: finish objectui#9297 — schema-rendering.md stops teaching silence, and the expression sandbox states its real allowlist (#9461) (objectui `75fc9df6e`)
+  - _(no changeset)_ fix(devx): resolve spec export conditions in the map's key order, and say which arm won (#9455) (objectui `72932dfcd`)
+  - _(no changeset)_ docs: publish each page's own values through the scope channel on the three remaining teaching surfaces (#9376) (objectui `035d3fac3`)
+  - _(no changeset)_ docs(fields): blank line before `## Field Schema` on four field pages (#9435) (objectui `63d9ca6f4`)
+  - _(no changeset)_ refactor(tsconfig): rename tsconfig.base.json to what it is (objectui#9330) (#9426) (objectui `6c7319753`)
+  - _(no changeset)_ docs(api): stop teaching quickAdd and allowCollapse on the object-kanban table (#9353) (objectui `dab9f96ec`)
+  - _(no changeset)_ docs(tooling): reserve --rewrite-governed-file by its condition, not by actor (#9383) (objectui `07da32e28`)
+  - _(no changeset)_ fix(skills): guard the DataSource read in the marked data-integration example (#9352) (objectui `28be0786d`)
+  - _(no changeset)_ hooks: the three remaining guards name the environment their hatch variable must be set in, never a command prefix (#9300) (objectui `a5921a0f8`)
+  - _(no changeset)_ fix(ci): put the `scripts/__tests__` markdown population on the shard trigger (#9141) (objectui `4c0dc090a`)
+  - _(no changeset)_ docs(skills): teach object-nav target exclusivity, not a precedence the spec refuses (#9227) (objectui `bedd7344f`)
+  - _(no changeset)_ docs(agents): require a runtime reading for inertness claims, and a control for any population-size reading (#9226) (objectui `aebc3a31f`)
+  - _(no changeset)_ fix(ci): read a locale-catalogue chunk whose content hash contains a hyphen (#9228) (objectui `2102f6125`)
+  - _(no changeset)_ feat(ci): refuse a merge group whose queued pull request still carries `needs:contract-review` (#9212) (objectui `a94e4d073`)
+  - _(no changeset)_ docs(scripts): record what a re-baseline absorbs, and that BASELINE.commit cannot be checked from `main` (objectui#7848) (#9208) (objectui `75d34d604`)
+  - _(no changeset)_ devx(scripts): register check-bash32-floor.mjs in the upstream port pin at its own ref (#9207) (objectui `0f7f8e61c`)
+  - _(no changeset)_ fix(gate): the expression-carriage blind-spot leg reads the JS object-literal dialect (#9193) (objectui `7696daac0`)
+  - _(no changeset)_ test(scripts): census why the push-lane coverage gate was red, by cause (#9180) (objectui `87f174c00`)
+  - _(no changeset)_ fix(gate): make an unrecognised half status LOUD in the eager-closure fold (#9156) (objectui `af674b99a`)
+  - _(no changeset)_ test(scripts): derive the zero-test workspace members and pin the exclusion so it can expire (objectui#9106) (#9147) (objectui `049f09504`)
+  - _(no changeset)_ fix(prompts): rule each key-teaching section, and widen check:prompt-keys to read them (#9143) (objectui `44a9b4bd2`)
+  - _(no changeset)_ docs(changeset): correct six pending changesets whose claims a later merge falsified (#9139) (objectui `36fc71f1c`)
+  - _(no changeset)_ feat(scripts): derive what each pack-object importer reads off the pack, and how deep (objectui#9046) (#9128) (objectui `c736084bf`)
+  - _(no changeset)_ fix(docs): stop pricing the eager-closure ruling with a page count nothing derives (#9118) (objectui `567f37019`)
+  - _(no changeset)_ test(devx): give layout, test-support and console-starter a package-level test entry (#9105) (objectui `58a4fada7`)
+  - _(no changeset)_ fix(prompts): teach only view keys a real renderer answers, and gate it (#9099) (objectui `d2f0c108c`)
+  - _(no changeset)_ ci(test): run the shards when a markdown document a test READS changes (#9097) (objectui `a92eef266`)
+  - _(no changeset)_ fix(scripts): check-side-effects-array walks every published entry point, not just the source barrel (#9084) (objectui `7f3a7ea69`)
+  - _(no changeset)_ test(ci-docs): pin the Workflow Inventory table, which the inventory test could not see (#9062) (objectui `4ffc333df`)
+  - _(no changeset)_ docs(changeset): correct two now-false sentences in pending types changesets (#9064) (objectui `a7a818383`)
+  - _(no changeset)_ fix(scripts): derive the dead-keys pack-object importer population, pin its readings (#9047) (objectui `13372e19d`)
+  - _(no changeset)_ docs(changeset): drop the stale cardinal from the objectui#8315 changeset (#9023) (objectui `a650bb356`)
+  - _(no changeset)_ fix(ci): trigger Build Docs on what the site build actually consumes (#9015) (objectui `1e433418b`)
+  - _(no changeset)_ fix(ci): make pre-install-import-graph.yml point at its population instead of counting it (#8995) (objectui `e8b7b0785`)
+  - _(no changeset)_ docs(changeset): correct two present-tense claims a later PR falsified (#8994) (objectui `35c6a3453`)
+  - _(no changeset)_ fix(lint): drop git-ignored build output from ESLint's own walk (#8986) (objectui `403d9efde`)
+  - _(no changeset)_ docs(setup): point setup.sh's third "Next steps" read at a doc that exists (#8982) (objectui `6112e0dad`)
+  - _(no changeset)_ test(scripts): census the `$`-dialect lowercase aliases before objectui#8568 is ruled (#8977) (objectui `ca67d42f0`)
+  - …and 179 more commits with no changeset — this list is capped at 100, the range has 279 in total. Run `node scripts/objectui-range.mjs --from 53ded82bf7a4 --to 87af769e9a3e --all` for the complete list.
+  
+  <!-- adr-0087: not-required (no-migration-prescription)
+       This diff moves `.objectui-sha` and the artefacts that travel with it (the console
+       changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`,
+       `packages/sdui-parser/objectui-lockstep.json`, and re-measured `.objectui-sha`
+       read-point citations under `packages/spec/src`). It adds, removes or renames no
+       ObjectStack-authorable key: no Zod schema, no spec declaration and no stored
+       `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here to
+       rewrite, and this body carries no FROM/TO prescription of its own.
+       The declared-breaking entries listed above are objectui's OWN package surfaces,
+       each already carrying its upstream record. Where one of them mirrors an
+       ObjectStack-authorable key, the ledger entry belongs to the `packages/spec` PR that
+       lands the mirror - as `18.ui__ChartConfig__aria`,
+       `18.ui__ObjectGridProps__defaultSort` and `18.ui__ObjectKanbanProps__quickAdd`
+       already do - never to the pin bump, whose diff contains no such key. The tracked
+       `sdui.manifest.json` is generated from PUBLISHED `@object-ui/*`, and the pinned
+       commit declares the same `17.6.0` the old pin did, so this bump moves no
+       declaration-parity reading either.
+       Scope of the claim, stated rather than implied: it is a claim about THIS diff, not
+       a per-entry re-measurement of all 98 upstream declared-breaking entries. The
+       `a472b07167a3...53ded82bf7a4` bump judged its two one at a time; at 98 that is a
+       different exercise and it was not performed here.
+  -->
+  
+  objectui range: `53ded82bf7a4...87af769e9a3e`
+- 0bf85ea: Console (objectui) refreshed to `f8a9d0fb0596`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 86 releasing of 91 changesets added across 92 non-merge commits; omitted: 5 release-nothing changesets, 3 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — `aggregate()` reads the analytics answer in ONE spelling: `rows` on the `AnalyticsResult` that `client.analytics.query` resolves to (objectui#7028). The `{ success, data: { rows }… (objectui `512bc9049`)
+  - **minor** — **BREAKING** — Retire `carousel` from `AIRecommendationsSchema.layout` and from the `ai-recommendations` designer enum (objectui#10330, ADR-0049 enforce-or-remove). (objectui `f98eddf63`)
+  - **minor** — **BREAKING** — feat(types)!: `DetailViewFieldSchema.options` is the spec's authoring `SelectOptionSchema` (objectui#10296) (objectui `6096f20b3`)
+  - **minor** — Honour `filter` and the platform row ceiling on a tree's inline (`provider: 'value'`) data (objectui#9136) — the fourth surface of the objectui#8769 repair, after objectui#9061 po… (objectui `9c08dc6b2`)
+  - **minor** — feat(core): export `declaredNameField`, the one spelling of the ADR-0079 declared name pointer (objectui#9436) (objectui `ba0b61a60`)
+  - **minor** — fix(plugin-detail): `DetailView`'s header and the `record:details` H1 dedupe rank the declared `nameField` above `titleFormat`, the ADR-0079 order (objectui `ba0b61a60`)
+  - **minor** — fix(components): the record page H1 ranks the declared `nameField` above `titleFormat`, the ADR-0079 order (objectui `ba0b61a60`)
+  - **minor** — The grid summary footer and the dashboard metric tile take a currency amount's decimal places from the currency, never from `scale`, and the field designer no longer offers `Scale… (objectui `0651e7ab4`)
+  - **minor** — fix(react): a data object in a node's `properties` / `props` bag reaches the renderer whole, even when it carries a `source` field (objectui `2b5f509bf`)
+  - **minor** — `CalendarSchema.defaultValue` / `.value` cross the JSON/TS boundary once (objectui#10293, objectui#7759 ruling D1-(iii)). (objectui `8c10f4f71`)
+  - **minor** — fix(core): a dashboard `dateRange` that omits `defaultRange` now takes the spec's declared default preset (objectui#10339). (objectui `86982ace0`)
+  - **minor** — **BREAKING** — feat(types): `TooltipSchema.content` is text only, on both faces (objectui#10295) (objectui `90dac98fa`)
+  - **minor** — fix(auth,app-shell,console): a browser that changes hands no longer keeps the previous account's UI language (objectui `b57107d46`)
+  - **minor** — **BREAKING** — `UIEventHandler` and `EventableSchema` are RETIRED from `@object-ui/types`, and `APISchema` loses its `EventableSchema` arm (objectui#6497, ADR-0049 enforce-or-remo… (objectui `cb55718a9`)
+  - **minor** — **BREAKING** — `record:related_list`'s top-level `filter` is declared as the protocol's rule array on the authoring face, not as `any` (objectui#10199). (objectui `e3ea4f97b`)
+  - **minor** — On `tree` and `chart` list views, the toolbar's Filter control and the `UserFilters` chips now narrow the view, and on a `gantt` list view the toolbar's Search box now narrows the… (objectui `af243c1fd`)
+  - **minor** — Refuse the four remaining function-valued mirror keys by name (objectui#7759 group E, the objectui#6124 shape). (objectui `d05fe17f6`)
+  - **minor** — `ObjectView` opens a Cmd/Ctrl/middle-clicked row in a new browser tab (objectui#9806). (objectui `687353f4e`)
+  - **minor** — `CurrencyField` takes its fraction digits from the currency, never from the field-level `precision` (objectui#10276). (objectui `31938f01d`)
+  - **minor** — `object-form`: one rule for section divider rows on the default, modal and drawer layouts, and there a section's own settings apply whether or not it has a heading (objectui#9849… (objectui `8813335bd`)
+  - **minor** — `CommandItem` and `CommandGroup` are now named exports of `@object-ui/types` itself, not only of `@object-ui/types/form` (objectui#9526). They are the element types of `CommandSch… (objectui `3be720ef8`)
+  - **minor** — **BREAKING** — BREAKING (`@object-ui/types`, `@object-ui/plugin-chatbot`): the authoring `ChatToolInvocation.state` union sheds the AI SDK's three runtime-only approval states — `approval-reques… (objectui `b46c58f34`)
+  - **minor** — **BREAKING** — `RecordRelatedListRenderer`'s props type refuses a misspelled key again (objectui#9963). (objectui `905913c0e`)
+  - **minor** — Fix: a `dependsOn` field is no longer permanently gated when it is edited inline on a record's detail page. (objectui `a33803796`)
+  - **minor** — fix(core): the shared date path refuses a calendar day that does not exist, with the marker it already renders for an unparsable value (objectui `ad694ac3d`)
+  - **minor** — fix(plugin-kanban): a kanban lane matches records by its `id` only, never by its `title` (objectui `7a564e004`)
+  - **minor** — feat(plugin-detail): row caps on `record:activity`, `record:history`, `record:chatter` and `record:discussion` admit only a positive integer number, and a refused one warns (objectui `879ecac78`)
+  - **minor** — feat(types): `slider` and `tooltip` single-or-list keys follow their read sites (objectui#10280, objectui#7759 group B) (objectui `f3f4e4c9a`)
+  - **minor** — **BREAKING** — `NamedListView` (one entry of `ObjectViewSchema.listViews`) retires sixteen members on its TypeScript authoring face (objectui#7924). Each is now a `?: never` tombs… (objectui `aa083cd69`)
+  - **minor** — feat(types): `AppComponentSchema`, `DashboardComponentSchema` and `PageNodeSchema` take the spec by reference, like their zod mirrors (objectui `1bbaa163a`)
+  - **minor** — **BREAKING: the unimplemented async export-job path is removed from `@object-ui/types` and `@object-ui/components`** (objectui `8b1f06619`)
+  - **minor** — fix(sdui-parser,components,layout,types): containment is the declared `children` slot, not `isContainer` (objectui#9910) (objectui `5ea623eab`)
+  - **minor** — feat(react): an action's `params` values are templates, evaluated where `properties` are (objectui `95bf1287a`)
+  - **minor** — An action param that declares the spec's `carryOver` is shown read-only and submitted verbatim (objectui#6246) (objectui `06b82b8c3`)
+  - **minor** — A date-only value now renders the calendar day it names, west of UTC, at four more places (objectui#10183). (objectui `4ab4f1ba2`)
+  - **minor** — `ObjectTreeSchema.filter` is declared on both faces, in the shape objectui#9309 settled for `ObjectGallerySchema.filter`: `QueryParams['$filter']` by indexed access on the TS inte… (objectui `d16d0e977`)
+  - **minor** — `object-grid`'s `rowActions` now NARROWS the row kebab's generic Edit / Delete inside the `operations` ceiling — the second half of the ruling whose first half ("`operations` is t… (objectui `185079bdf`)
+  - **minor** — Dates and numbers across the console and the plugins format in the session's display locale instead of the machine's (objectui#9909). (objectui `a78cd378c`)
+  - **patch** — fix(fields): a lookup's candidate queries expand the reference columns they display (objectui `65f1e8dc6`)
+  - **patch** — fix(plugin-list): a list view whose every authored column is denied by field-level security still sends a `$select` (objectui `fb7f38bdf`)
+  - **patch** — fix(plugin-detail): feed diagnostics name the block that carries the bad value (objectui `462bafb9e`)
+  - **patch** — docs(types): the `WidgetInput` divergence docblock lists the serializer's key list with `of` (objectui#10337) (objectui `a5b08c9ce`)
+  - **patch** — fix(console): `FormPage`'s required `*` no longer lands in the control's accessible name (objectui `069ce12b4`)
+  - **patch** — fix(charts): a cartesian chart that declares no series at all now says so instead of drawing an empty frame (objectui#4695) (objectui `f82f85756`)
+  - **patch** — fix(plugin-list): gallery cards now pass a field's declared `scale` to the shared cell renderer, so a number or percent field declaring `scale` renders padded (`25.00%`) exactly a… (objectui `a883ec21a`)
+  - **patch** — Gantt: a row that is not an object is now refused instead of drawn as an empty, unlabelled row (objectui#7364). `items: [0]`, `items: ['x']`, `items: [true]` and `items: [[]]` use… (objectui `0b6b295a1`)
+  - **patch** — fix(plugin-form,plugin-list,plugin-view,react): read `SchemaRendererContext` as declared, not through a cast to `any` (objectui#7209) (objectui `3ed3eec08`)
+  - **patch** — fix(i18n): a translation bundle with no field label is recognised as a spec payload (objectui#10235) (objectui `dc666f70d`)
+  - **patch** — An `action:icon` now runs an action it receives with `autoTrigger` set, the same way `action:button` and `action:menu` do (objectui#10274). (objectui `cff4b7754`)
+  - **patch** — Two display-locale faces now follow the session's display locale (objectui#10232). (objectui `bb5d4eea7`)
+  - **patch** — fix(app-shell): the metadata form's machine-name chip is judged on the field's untranslated source label, so it shows alike in every locale (objectui#8231) (objectui `78b572f60`)
+  - **patch** — fix(fields): a failed image upload is reported in `ImageField`, not swallowed (objectui `1f8ef0a89`)
+  - **patch** — fix(plugin-charts): the legend swatch carries its series colour as a custom property (objectui `a9f34df28`)
+  - **patch** — Saving a view's config no longer turns the view read-only (objectui#10210). (objectui `baf98cde0`)
+  - **patch** — fix(plugin-view): a read-only view's menus no longer open empty or on a leading separator (objectui `b07de29d1`)
+  - **patch** — The two declared display-locale contracts now each name the caller they govern, and each points at the other (objectui#10098). This is documentation only: no module's behaviour mo… (objectui `8cedb0dba`)
+  - **patch** — **The stray-`groupBy` kanban refusal no longer tells an author their view "never came through the validated path".** (objectui `89bb77a11`)
+  - **patch** — The package dialog judges a version with the installed `@objectstack/spec`'s own `ManifestSchema` version field instead of a hand-copied regex, so it accepts exactly what the spec… (objectui `c84221daa`)
+  - **patch** — fix(app-shell): the Studio dataset-filter inspector stores a `between` range as the spec's `$between`, with both bounds required (objectui#10062) (objectui `856bf0f74`)
+  - **patch** — A flow launched from an action that ends with `outcome: 'refused'` without ever pausing at a screen now shows its refusal instead of reporting success (objectui#9973). (objectui `7616d8935`)
+  - **patch** — fix(plugin-dashboard): a field's `format` is read as a date pattern only on a `date` / `datetime` field (objectui `e2bd3e400`)
+  - **patch** — fix(plugin-designer): the Navigation Designer has an entry for the spec's `doc` navigation item type (objectui `1dbb9933c`)
+  - **patch** — A master-detail form's child grid no longer offers a cell the CALLER may read but not edit (objectui#10163). (objectui `6099dd870`)
+  - **patch** — **Behaviour change:** an action whose own declared `visible` gate hides it is no longer run by `autoTrigger`, and the refusal is reported instead of swallowed (objectui#4191). (objectui `978507b9a`)
+  - **patch** — fix(plugin-detail): a related list's row fetch drops a column the principal cannot read once the permission answer has loaded (objectui `5f44cc6f4`)
+  - **patch** — The published `ViewNavigationConfig` docblock no longer teaches the retired `navigation.view` key (objectui#9938). Its example of `mode` being optional on the authoring side used… (objectui `32bf2d6f6`)
+  - **patch** — feat(types): `SliderFieldMetadata` declares `step` (objectui `5f00ff491`)
+  - **patch** — `object-grid`'s `rowActions` now carries a describe, and the `ObjectGridSchema.operations` / `rowActions` docblocks state how the two keys combine: `operations` is the CEILING ove… (objectui `087981282`)
+  - **patch** — fix(plugin-form): `DrawerForm` no longer paints an editable form before the record it edits has loaded (objectui `88a4ef616`)
+  - **patch** — fix(plugin-kanban): `object-kanban` honours the binding's `dataSource.sort` (objectui `c9e073ac8`)
+  - **patch** — fix(plugin-detail,plugin-grid): the record-grained write verdict is forgotten when its record changes, and the row kebab's memo is per principal (objectui#10184). (objectui `fa5fbd9dc`)
+  - **patch** — fix(plugin-form): `customFields` merges on the drawer and modal arms too (objectui `142fdfd87`)
+  - **patch** — On a `gantt` list view, the toolbar's Filter control and the `UserFilters` chips now narrow the chart (objectui#10037). (objectui `0427036f5`)
+  - **patch** — fix(app-shell): the object page no longer re-issues the identical list query on re-renders that change nothing (objectui `5b6d177b2`)
+  - **patch** — `ui:menubar` now draws an item's authored `icon`, and walks submenus to any depth (objectui#6326). (objectui `d7de5348a`)
+  - **patch** — The `dateField` alias refusal that objectui#8355 adds to a calendar binding quotes only the first clause of the calendar refusal screen, "Calendar configuration required": the cla… (objectui `6f96fca95`)
+  - **patch** — `useRecordSearch` no longer keys its search effect on the identity of the caller-supplied `getDisplayName` option (objectui#10044). (objectui `0aacecc08`)
+  - **patch** — fix(fields): a declared `scale` above 100 no longer crashes the number cell or a grid's computed column (#10071) (objectui `0361d6bd4`)
+  - **patch** — `record:activity`'s landmark is named after the heading it shows, not "Discussion" (objectui#9998). (objectui `6358a2d59`)
+  - **patch** — `object-form`: a drawer section that declares `collapsed: true` can be opened again. The drawer now resolves `collapsed` / `collapsible` the way the default layout does (objectui#… (objectui `58d65c50d`)
+  - **patch** — fix(app-shell): the screen-flow runner draws the app's translated flow copy (objectui#5920) (objectui `5d895c13c`)
+  - **patch** — A `record:line_items` grid no longer offers a cell the CALLER may read but not edit (objectui#10163). (objectui `b809375ac`)
+  - **patch** — fix(mobile): `usePullToRefresh` arms on a host that mounts after the first render, and one pull has one owner (objectui#10105) (objectui `6ce001a35`)
+  - **patch** — A wizard no longer writes a record without a file whose upload was still running when the user pressed Next (objectui#10180). (objectui `a04b06db5`)
+  - **patch** — `ElementDataSourceGate` now reports a saved view's refused row cap on the renderer path (objectui#10015). (objectui `7b10befe6`)
+  - **patch** — Full-page search results now read correctly in Russian and Arabic at every count (objectui#10024). (objectui `a507334d2`)
+  
+  ⚠️ 9 of these carry a breaking change: 9 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+  
+  **In this console build, declared nowhere** — objectui merged 3 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ docs(changeset): the 9242 changeset says the stray-groupBy refusal covers the list-view route only (#10364) (objectui `f8a9d0fb0`)
+  - _(no changeset)_ docs(changeset): the manifest serializer forwards seven keys per input, not six (#10318) (objectui `c7ab34836`)
+  - _(no changeset)_ fix(ci): spec-main shape gate re-points the injected spec's declared dependencies (#10238) (objectui `f4f1f4552`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription)
+       This diff moves `.objectui-sha` and the artefacts that travel with it (this console
+       changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`, and the
+       re-recorded and re-measured pin read-points the lockstep and pin-citation gates
+       name). It adds, removes or renames no ObjectStack-authorable key: no Zod schema, no
+       spec declaration and no stored `sys_metadata` shape moves in it, so
+       `objectstack migrate meta` has nothing here to rewrite, and this body carries no
+       FROM/TO prescription of its own.
+       The 9 declared-breaking entries listed above are objectui's OWN package surfaces
+       (`@object-ui/types`, `@object-ui/components`, `@object-ui/plugin-chatbot` and the
+       designer enums), each already carrying its upstream record. Where one of them
+       mirrors an ObjectStack-authorable key, the ledger entry belongs to the
+       `packages/spec` PR that lands the mirror, never to the pin bump, whose diff
+       contains no such key.
+       Scope of the claim, stated rather than implied: it is a claim about THIS diff, not
+       a per-entry re-measurement of the 9 upstream declared-breaking entries.
+  -->
+  
+  objectui range: `62597c588072...f8a9d0fb0596`
+
+### Patch Changes
+
+- 28ce612: The prebuilt Console dist now ships `dist/sdui.manifest.json`: the ADR-0080 public-tier
+  component manifest of the objectui registry at the pinned commit.
+  
+  It is the same file the framework repository tracks at its root and gates on every pull
+  request. `scripts/build-console.sh` copies it in, and one producer writes it:
+  `scripts/gen-sdui-manifest-node.mjs`, which reads objectui's built tree at the pin. No
+  earlier published `@objectstack/console` carried this file. The RC cut used to write a
+  browser-dumped copy into `dist/`, but the release build replaced `dist/` before packing, so
+  none reached a tarball (17.0.0, 17.3.0 and 17.4.0 each list 0 matches). That browser dump is
+  retired. It was byte-identical to the tracked file over the same built tree.
+  
+  For now the file is only present in the tarball. This package's `exports` map exposes
+  `./package.json` and nothing else, so resolving `@objectstack/console/dist/sdui.manifest.json`
+  through `exports` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`. Anything that resolves through
+  `exports` cannot read the file yet. That includes the CLI's JSX-page manifest fallback, which
+  catches the error and keeps parse-level validation, as before.
+
 ## 17.4.0
 
 ### Minor Changes
