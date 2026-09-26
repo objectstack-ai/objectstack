@@ -60,7 +60,7 @@
  * repo), SCREAMING_SNAKE (`^[A-Z][A-Z0-9_]*$` — lint-enforced by
  * `error-code-ledger.test.ts`), with a trailing `//` comment when the name
  * alone doesn't carry the meaning. Prefer a domain prefix for anything not
- * self-evidently global (`ATTACHMENT_*`, `REPORT_*`, `SETTINGS_*`). If the
+ * self-evidently global (`ATTACHMENT_*`, `APPROVAL_*`, `SETTINGS_*`). If the
  * condition is generic (not found / permission / validation / rate limit),
  * use the standard catalog instead of registering a synonym.
  *
@@ -275,13 +275,9 @@ export const ERROR_CODE_LEDGER = {
     'PROJECT_PROVISIONING',       // project exists but is still provisioning
     'PROJECT_PROVISIONING_FAILED',
     'READ_BACK_FAILED',           // approval write recorded, but its read-back is filtered by the caller's org scope — the result envelope cannot be built; the write is NOT rolled back
-    'REPORTS_LIST_FAILED',
-    'REPORT_DELETE_FAILED',
-    'REPORT_GET_FAILED',
-    'REPORT_NOT_FOUND',
-    'REPORT_RUN_FAILED',
-    'REPORT_SAVE_FAILED',
-    'REPORT_SCHEDULE_FAILED',
+    // Seven `REPORT*` rows here and two schedule rows further down
+    // (`SCHEDULES_LIST_FAILED`, `SCHEDULE_DELETE_FAILED`) came out with their
+    // only emitter, the saved-report `/reports` route family (#20102).
     'REQUEST_NOT_FOUND',
     'RESUME_FAILED',              // decision recorded but its flow run could not be resumed
     'RESUME_TARGET_LOST',         // the flow run behind the request no longer exists
@@ -291,8 +287,6 @@ export const ERROR_CODE_LEDGER = {
     'RULE_GET_FAILED',
     'RULE_LIST_FAILED',
     'RULE_NOT_FOUND',
-    'SCHEDULES_LIST_FAILED',
-    'SCHEDULE_DELETE_FAILED',
     'SHARES_LIST_FAILED',
     'SHARE_GRANT_FAILED',
     'SHARE_REVOKE_FAILED',

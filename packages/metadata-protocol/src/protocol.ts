@@ -3432,8 +3432,8 @@ function invalidSortError(
  * This is the one unknown key on this axis that has a KNOWN right answer, so it
  * gets a rejection that carries the translation rather than a generic refusal.
  * `direction` is not a typo — it is the live vocabulary of a neighbouring
- * contract (`IReportService.orderBy`, `spec/src/contracts/report-service.ts`),
- * which `plugin-auth/objectql-adapter.ts` already translates to `order` by hand.
+ * contract (better-auth's adapter `sortBy`), which
+ * `plugin-auth/objectql-adapter.ts` already translates to `order` by hand.
  * A necessary translation nothing enforced is exactly ADR-0049's shape.
  *
  * Measured on `main` before this rejection existed, on the schema side of the
@@ -3460,7 +3460,7 @@ function invalidSortDirectionKeyError(param: string, field: string): Error {
         {
             hint:
                 ` Write \`{ field: '${field}', order: 'desc' }\`. \`direction\` is`
-                + " `IReportService.orderBy`'s vocabulary, a genuinely different contract; on this"
+                + " the better-auth adapter's `sortBy` vocabulary, a genuinely different contract; on this"
                 + ' axis it was silently dropped and `order` fell back to `asc`, so a descending'
                 + ' request came back ascending — and with `limit`, a different set of rows.',
             extra: { field, key: 'direction' },
@@ -9049,8 +9049,8 @@ export class ObjectStackProtocolImplementation implements
             };
             // `order`, NOT `direction`: the QueryAST sort shape is
             // `SortNodeSchema` = `{ field, order }`, and both drivers normalize
-            // off `.order` with no fallback. `direction` is `IReportService`'s
-            // vocabulary and is silently DROPPED here (the schema is not
+            // off `.order` with no fallback. `direction` is another contract's
+            // vocabulary (better-auth's adapter `sortBy`) and is silently DROPPED here (the schema is not
             // `.strict()`), which left this query running ascending — the
             // OLDEST `limit` audit events, i.e. the beginning of an object's
             // life and never its recent changes (#4674). The `as any` is gone
@@ -9513,8 +9513,8 @@ export class ObjectStackProtocolImplementation implements
      * SCOPE: this is an INGRESS gate, so it covers what reaches {@link
      * findData}. The half it cannot reach — a caller handing a `where` straight
      * to `engine.find` / `findOne` / `count` / `aggregate` / `update` /
-     * `delete`, which is how a saved report's `query.filter` travels
-     * (`plugin-reports` forwards it verbatim) — is closed at the engine's own
+     * `delete`, which is how a flow node's `config.filter` travels — is closed
+     * at the engine's own
      * filter seam by `assertFilterIsMaterializable` (`@objectstack/objectql`,
      * `filter-comparand-shape.ts`), with the same `400 INVALID_FIELD` and the
      * same remedy sentence. Same two-door shape, and same reason, as the sort
@@ -9790,9 +9790,9 @@ export class ObjectStackProtocolImplementation implements
      * sentence this gate emits, ruled on #7095 (an ORDER BY the engine cannot
      * apply is a refusal with guidance prose, never a silent drop). What made
      * leaving it at ingress untenable is that the direct path is AUTHOR-
-     * reachable, not merely internal: a saved report's `query.orderBy` is
-     * forwarded verbatim into `engine.find` (`plugin-reports`), and it never
-     * passes through here.
+     * reachable, not merely internal: a saved report's `query.orderBy` was
+     * forwarded verbatim into `engine.find` (by the saved-report stack, since
+     * retired in #20102), and it never passed through here.
      *
      * ONE EDGE, measured and deliberately left: a nested `expand` sort is also
      * forwarded into the expansion sub-read (`expandRelatedRecords`), and the

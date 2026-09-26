@@ -7,9 +7,9 @@
 // (`packages/spec/src/data/query.zod.ts`), and both real drivers normalize off
 // `.order` with no fallback — `sql-driver` maps `item.order === 'desc'`,
 // `mongodb-driver` the same. With `order` absent, `undefined === 'desc'` is
-// false and both land on ASCENDING. `direction` is `IReportService`'s
-// vocabulary; it is a genuinely different contract, which is how the wrong
-// spelling looked plausible.
+// false and both land on ASCENDING. `direction` is another contract's
+// vocabulary (better-auth's adapter `sortBy`); it is a genuinely different
+// contract, which is how the wrong spelling looked plausible.
 //
 // Because both queries carry a `limit`, the wrong direction did not merely
 // reorder a page — it changed WHICH ROWS CAME BACK. So these tests assert on

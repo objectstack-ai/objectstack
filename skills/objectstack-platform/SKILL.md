@@ -359,14 +359,14 @@ mode-dependent — dev hops to the next free port, production fails loudly. See
 Step 4's list is the fixed core. Every other service plugin is opt-in, and
 `requires: [...]` on the stack root is what turns it on. The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
-`packages/cli/src/commands/serve.ts` — all 20 of its entries:
+`packages/cli/src/commands/serve.ts` — its 19 opt-in entries:
 
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
 | `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` | `@objectstack/service-` + the token |
 | `marketplace` | `@objectstack/service-package` |
-| `audit` `email` `sharing` `reports` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
+| `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
 | `mcp` | `@objectstack/mcp` |
 | `triggers` | `@objectstack/trigger-record-change`, plus `trigger-schedule` and `trigger-api`. **Pair it with `job`** — schedule and time-relative triggers run on the job service |

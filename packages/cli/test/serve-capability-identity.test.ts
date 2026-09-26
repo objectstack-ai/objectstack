@@ -113,7 +113,6 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
   sms: 'com.objectstack.service.sms',
   sharing: 'com.objectstack.service.sharing',
   'pinyin-search': 'com.objectstack.plugin.pinyin-search',
-  reports: 'com.objectstack.service.reports',
   approvals: 'com.objectstack.service.approvals',
   settings: 'com.objectstack.service.settings',
   webhooks: 'com.objectstack.plugin-webhook-outbox',

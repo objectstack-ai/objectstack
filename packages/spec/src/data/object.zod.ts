@@ -1631,7 +1631,7 @@ const ObjectSchemaBase = strictObject(
    *
    * - `platform`     — **Default.** User-owned business data. Generic
    *   New / Import / Edit / Delete affordances are all shown. Example:
-   *   the user's own `sys_attachment`, `sys_comment`, `sys_saved_report`.
+   *   the user's own `sys_attachment`, `sys_comment`.
    * - `config`       — Admin-authored metadata / configuration. Generic
    *   New / Edit / Delete shown (admins author via wizard or form), but
    *   CSV Import is suppressed (config rows have nested JSON envelopes

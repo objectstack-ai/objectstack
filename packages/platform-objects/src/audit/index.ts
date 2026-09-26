@@ -13,8 +13,7 @@ export { SysNotification } from './sys-notification.object.js';
 export { SysAttachment } from './sys-attachment.object.js';
 export { SysEmail } from './sys-email.object.js';
 export { SysEmailTemplate } from './sys-email-template.object.js';
-export { SysSavedReport } from './sys-saved-report.object.js';
-export { SysReportSchedule } from './sys-report-schedule.object.js';
+// sys_saved_report / sys_report_schedule retired with the saved-report stack (#20102).
 // sys_approval_request / sys_approval_action moved to @objectstack/plugin-approvals (ADR-0029 K2.b).
 export { SysJob } from './sys-job.object.js';
 export { SysJobRun } from './sys-job-run.object.js';

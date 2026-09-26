@@ -377,38 +377,6 @@
       "closes": "open the fake's update with assertEngineUpdateDispatch(data, options) and run the package's suite"
     },
     {
-      "file": "packages/plugins/plugin-reports/src/report-export-axis.test.ts",
-      "verb": "delete",
-      "unguarded": 1,
-      "kind": "DEBT",
-      "why": "@objectstack/plugin-reports does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
-    },
-    {
-      "file": "packages/plugins/plugin-reports/src/report-export-axis.test.ts",
-      "verb": "update",
-      "unguarded": 1,
-      "kind": "DEBT",
-      "why": "MEASURED (#5480): the `update` slice of this gate is NEW — `resolveEngineUpdateDispatch` did not exist before #5480, so no double in the repo could route through it and the whole discovered set enters this ledger in one act. Not newly written looseness and not a raised ratchet: it is the first measurement of a contract that had no producer-side predicate to measure against, which is exactly what this script's header used to list under deliberately-not-covered (\"update's twin dispatch ... needs its own producer-side predicate extracted first\"). Discovered at line 27. The package does not depend on @objectstack/objectql yet, and the devDependency route is AVAILABLE rather than cyclic. Measured on this branch, not cited: the edge was added to @objectstack/plugin-reports's devDependencies and turbo 2.10.7 accepted the graph (`turbo run build --filter=@objectstack/plugin-reports --dry`, no circular-dependency warning), then the edge was reverted. WHAT THIS ENTRY DOES NOT CLAIM: unlike the #5629 delete batch above it carries NO per-file dormancy probe. Nothing here says the looseness is unexercised — only that the double is structurally free to be looser than ObjectQL.update on the shape a hand-written guard always drops (`where: { id: { $in: [...] } }` looks like an id and is a multi-row predicate) — a shape the producer refuses in `data.id` too since objectstack#5748 put the payload half through the SAME scalar test, so `data.id` still outranks `where` and `multi`, but only when it IS a scalar id.",
-      "closes": "add @objectstack/objectql to this package's devDependencies (verified acyclic — see `why`), then open the fake's update with assertEngineUpdateDispatch(data, options)"
-    },
-    {
-      "file": "packages/plugins/plugin-reports/src/report-service.test.ts",
-      "verb": "delete",
-      "unguarded": 1,
-      "kind": "DEBT",
-      "why": "@objectstack/plugin-reports does not depend on @objectstack/objectql. Pinning needs a devDependency + lockfile change, which is a separate reviewable act.",
-      "closes": "add @objectstack/objectql to devDependencies, then open the fake's delete with assertEngineDeleteDispatch(opts)"
-    },
-    {
-      "file": "packages/plugins/plugin-reports/src/report-service.test.ts",
-      "verb": "update",
-      "unguarded": 1,
-      "kind": "DEBT",
-      "why": "MEASURED (#5480): the `update` slice of this gate is NEW — `resolveEngineUpdateDispatch` did not exist before #5480, so no double in the repo could route through it and the whole discovered set enters this ledger in one act. Not newly written looseness and not a raised ratchet: it is the first measurement of a contract that had no producer-side predicate to measure against, which is exactly what this script's header used to list under deliberately-not-covered (\"update's twin dispatch ... needs its own producer-side predicate extracted first\"). Discovered at line 22. The package does not depend on @objectstack/objectql yet, and the devDependency route is AVAILABLE rather than cyclic. Measured on this branch, not cited: the edge was added to @objectstack/plugin-reports's devDependencies and turbo 2.10.7 accepted the graph (`turbo run build --filter=@objectstack/plugin-reports --dry`, no circular-dependency warning), then the edge was reverted. WHAT THIS ENTRY DOES NOT CLAIM: unlike the #5629 delete batch above it carries NO per-file dormancy probe. Nothing here says the looseness is unexercised — only that the double is structurally free to be looser than ObjectQL.update on the shape a hand-written guard always drops (`where: { id: { $in: [...] } }` looks like an id and is a multi-row predicate) — a shape the producer refuses in `data.id` too since objectstack#5748 put the payload half through the SAME scalar test, so `data.id` still outranks `where` and `multi`, but only when it IS a scalar id.",
-      "closes": "add @objectstack/objectql to this package's devDependencies (verified acyclic — see `why`), then open the fake's update with assertEngineUpdateDispatch(data, options)"
-    },
-    {
       "file": "packages/plugins/plugin-security/src/audience-anchors.test.ts",
       "verb": "update",
       "unguarded": 1,

@@ -313,7 +313,6 @@ control plane.
 | [`@objectstack/plugin-audit`](packages/plugins/plugin-audit) | Audit log object and audit trail |
 | [`@objectstack/plugin-email`](packages/plugins/plugin-email) | Pluggable outbound email transport |
 | [`@objectstack/plugin-webhooks`](packages/plugins/plugin-webhooks) | Durable, cluster-aware outbound webhook delivery |
-| [`@objectstack/plugin-reports`](packages/plugins/plugin-reports) | Saved reports and scheduled email digests |
 | [`@objectstack/plugin-pinyin-search`](packages/plugins/plugin-pinyin-search) | Pinyin recall for CJK search |
 | [`@objectstack/plugin-dev`](packages/plugins/plugin-dev) | Zero-config local development assembly |
 | [`@objectstack/knowledge-memory`](packages/plugins/knowledge-memory) | In-memory knowledge adapter (dev / test) |

@@ -774,8 +774,8 @@
       "id": "dashboards.saved-report-ownership",
       "title": "Saved reports are owner-isolated: cross-owner read/run/delete deny as 404, schedules included",
       "since": "v15.1",
-      "status": "active",
-      "revision": 2,
+      "status": "retired",
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -836,9 +836,10 @@
         "wrong-persona"
       ],
       "source": [
-        "packages/rest/src/rest-route-ledger.ts (reports family)",
-        "packages/plugins/plugin-reports/src/report-service.ts#canAccessReport (canAccessReport #2980; unscheduleReport/listSchedules owner-gated in #6683)",
-        "packages/platform-objects/src/audit/sys-saved-report.object.ts",
+        "packages/rest/src/reports-routes-retired.test.ts (the retirement pin: every former /api/v1/reports path answers the standard unmounted-route 404, byte-identical to a path never mounted)",
+        "packages/spec/src/migrations/entries/semantic/18.saved-report-stack-retired.ts#entry (the ADR-0087 record of the retirement — surface, replacement, and what happens to existing tables)",
+        "packages/spec/src/kernel/platform-capabilities.ts#RETIRED_PLATFORM_CAPABILITY_GUIDANCE (requires: ['reports'] is refused with the retirement prescription)",
+        "HISTORICAL (deleted by #20102): the ownership gate lived in the saved-report service's canAccessReport (#2980; schedule routes owner-gated in #6683) over the sys_saved_report object",
         "docs/plans/release-15.1-test-plan.md §A10 (#2980/#2981/#2975)"
       ],
       "history": [
@@ -853,8 +854,15 @@
           "date": "2026-08-08",
           "change": "D1 fixed in #6683 — unscheduleReport/listSchedules now owner-gated; flipped the known-gap probe clause to a positive deny-as-404 assertion and dropped the expected-FAIL language in negative/source",
           "ref": "#6683"
+        },
+        {
+          "revision": 3,
+          "date": "2026-09-25",
+          "change": "retired — the saved-report stack it exercised was removed (#20102); see retiredReason",
+          "ref": "#20102"
         }
-      ]
+      ],
+      "retiredReason": "Capability removed (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-25, #20102): the saved-report stack — the /api/v1/reports routes this item drove, the sys_saved_report / sys_report_schedule objects, IReportService and @objectstack/plugin-reports — was retired whole, with zero consumers measured across objectstack, objectui and cloud. Every path this item called now answers the standard unmounted-route 404, pinned by packages/rest/src/reports-routes-retired.test.ts. No successor: a report is `report` metadata (dashboards.dataset-report-authoring), and a saved ad-hoc object query is a ListView."
     },
     {
       "id": "dashboards.system-overview-live-counts",
@@ -1054,8 +1062,8 @@
       "id": "dashboards.report-schedule-dispatch-delivery",
       "title": "Scheduled report dispatch: the dispatcher ticks on a stock boot, a due schedule runs under the OWNER's authority or FAILS CLOSED with the refusal recorded on the row — never an RLS-bypassed run — and the delivery/bookkeeping contract (format fork, subject template, next-run advance) holds",
       "since": "v15.1",
-      "status": "active",
-      "revision": 1,
+      "status": "retired",
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1133,18 +1141,13 @@
         "clock-skew",
         "wrong-persona"
       ],
-      "automated": {
-        "kind": "test",
-        "ref": "packages/plugins/plugin-reports/src/report-service.test.ts — the dispatch describes: owner-scoped execution + fails-closed-without-resolver (#2980), csv attachment, subject template, cron/interval advance; the LIVE halves (dispatcher registration, the fail-closed row write on a real boot, the log arms) still need the run"
-      },
       "source": [
-        "packages/plugins/plugin-reports/src/report-service.ts#dispatchDue (dispatchDue: due filter on next_run_at; owner fail-closed with the verbatim #2849/#2980 refusal; format fork + CJK-safe filename; renderSubject; skipped arm), (nextRunAt — cron wins, schedule timezone, warned fallback), (advanceSchedule 'ok'/markSchedule), (scheduleReport — first next_run_at, eager cron validation, recipients required)",
-        "packages/plugins/plugin-reports/src/reports-plugin.ts#resolveOwnerContext (optional email + the no-email warn), (resolveOwnerContext: undefined — the recorded fail-closed posture pending ADR-0073 M2), (dispatcher: job-service arm 'reports.dispatch' or setInterval fallback, min 5s / default 60s)",
-        "packages/plugins/plugin-reports/src/report-service.test.ts (the unit pins cited by clauses 3-5)",
-        "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS (CAPABILITY_PROVIDERS.reports → @objectstack/plugin-reports — the dispatcher runs on stock boots)",
-        "packages/plugins/plugin-email/src/email-plugin.ts#provider (stock provider 'log' → LogTransport, 'mail will NOT be sent' — why delivery evidence is a log line)",
-        "docs/plans/release-15.1-test-plan.md §A10 (reports IDOR / 定时报表 RLS — #2980/#2981/#2975; the ownership half was imported as dashboards.saved-report-ownership, this item is the 定时报表-RLS dispatch leg that never was)",
-        "cross-ref: dashboards.saved-report-ownership (the /reports* owner-isolation surfaces, including schedule routes #6683)"
+        "packages/spec/src/stack.zod.ts#validateKnownCapabilities (a stack still declaring requires: ['reports'] is refused — nothing mounts the retired dispatcher)",
+        "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS (no `reports` row since #20102 — the stock boot mounts no saved-report dispatcher)",
+        "packages/plugins/plugin-email/src/email-plugin.ts#provider (stock provider 'log' → LogTransport — unchanged; cited when this item was active)",
+        "HISTORICAL (deleted by #20102): the dispatch loop lived in the saved-report service's dispatchDue / nextRunAt / scheduleReport and the plugin's resolveOwnerContext, with unit pins in its own test file",
+        "docs/plans/release-15.1-test-plan.md §A10 (reports IDOR / 定时报表 RLS — #2980/#2981/#2975)",
+        "cross-ref: dashboards.saved-report-ownership (retired with this item)"
       ],
       "history": [
         {
@@ -1152,8 +1155,15 @@
           "date": "2026-08-30",
           "change": "new item (2026-08-30 sweep, angle 5): the dispatch loop was the un-imported leg of release-15.1 §A10 (定时报表 RLS) — nothing asserted the dispatcher runs on a real boot or that a due schedule cannot run RLS-bypassed. Grounded against source with one major correction to the register hypothesis: the register's positive framing ('a due schedule fires under the OWNER's RLS … mail lands at dev transport') is unreachable live at head, because reports-plugin.ts wires resolveOwnerContext: undefined (fail-closed pending ADR-0073 M2) and stock mail is the LogTransport — so the LIVE assertion is the fail-closed row write with the verbatim #2849/#2980 refusal (an 'ok' at head is the FAIL), and the owner-scoped/delivery/bookkeeping clauses are pinned at the unit layer with an explicit flip-to-live tripwire for when the resolver lands. Also recorded: no on-demand door drives dispatchDue (tick-wait protocol), and the skipped arm is unreachable through the owner API (deleteReport cascades schedules)",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-25",
+          "change": "retired — the saved-report stack it exercised was removed (#20102); see retiredReason",
+          "ref": "#20102"
         }
-      ]
+      ],
+      "retiredReason": "Capability removed (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-25, #20102): the saved-report schedule dispatcher this item drove left with the rest of the saved-report stack (sys_report_schedule, the /api/v1/reports schedule routes, @objectstack/plugin-reports), which had zero consumers. The platform has no scheduled delivery of a report today; scheduled delivery for `report` metadata is explicitly NOT built by that ruling — a real need is a new card on the metadata kind, and a new item with it."
     }
   ]
 }

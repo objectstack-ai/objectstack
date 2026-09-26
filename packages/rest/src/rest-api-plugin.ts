@@ -21,7 +21,6 @@ import type {
     II18nService,
     IMetadataService,
     IObjectQLEngine,
-    IReportService,
     ISecurityService,
     ISharingRuleService,
     ISharingService,
@@ -417,13 +416,6 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 } catch { return undefined; }
             };
 
-            // Reports service resolver — used by /reports/* routes.
-            const reportsServiceProvider = async (_environmentId?: string): Promise<IReportService | undefined> => {
-                try {
-                    return ctx.getService<IReportService>('reports');
-                } catch { return undefined; }
-            };
-
             // Approvals service resolver — used by /approvals/* routes.
             const approvalsServiceProvider = async (_environmentId?: string): Promise<IApprovalService | undefined> => {
                 try {
@@ -521,7 +513,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // `RouteManager` in the first place.
             let restServer: RestServer | undefined;
             try {
-                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider);
+                restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, /* retired saved-report slot (#20102) */ undefined, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider, tenancyServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');

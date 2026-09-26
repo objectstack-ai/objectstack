@@ -186,7 +186,7 @@ function makeServer(kernelManager: RestKernelManager, defaultEnvironmentId: stri
         /*  8 objectQLProvider             */ provider,
         /*  9 emailServiceProvider         */ provider,
         /* 10 sharingServiceProvider       */ provider,
-        /* 11 reportsServiceProvider       */ provider,
+        /* 11 (retired saved-report slot)  */ undefined,
         /* 12 approvalsServiceProvider     */ provider,
         /* 13 sharingRulesServiceProvider  */ provider,
         /* 14 i18nServiceProvider          */ provider,

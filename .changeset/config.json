@@ -44,7 +44,6 @@
       "@objectstack/organizations",
       "@objectstack/mcp",
       "@objectstack/plugin-pinyin-search",
-      "@objectstack/plugin-reports",
       "@objectstack/plugin-security",
       "@objectstack/plugin-sharing",
       "@objectstack/service-sms",

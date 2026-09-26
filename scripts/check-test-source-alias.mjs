@@ -495,10 +495,6 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   ],
   '@objectstack/plugin-hono-server': ['@objectstack/types'],
   '@objectstack/plugin-pinyin-search': ['@objectstack/objectql', '@objectstack/types'],
-  '@objectstack/plugin-reports': [
-    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
-    '@objectstack/platform-objects',
-  ],
   '@objectstack/plugin-security': [
     '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core',
     '@objectstack/platform-objects', '@objectstack/plugin-sharing', '@objectstack/service-i18n',

@@ -190,7 +190,8 @@ function makeServer(protocol: any) {
     const provider = async () => anyService();
     const rs: any = new RestServer(
         server, protocol as any, {} as any, undefined, undefined, () => 'env_census',
-        provider, provider, provider, provider, provider, provider, provider,
+        // index 10 is the retired saved-report slot (#20102): typed `undefined`.
+        provider, provider, provider, provider, undefined, provider, provider,
         provider, provider, provider, () => true, provider, undefined, provider,
     );
     return { rs, table: server.table as Map<string, Handler> };
@@ -309,7 +310,15 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('77 invocation sites, 99 mentions — the thread\'s two control numbers hold', () => {
+    it('69 invocation sites, 92 mentions — the thread\'s two control numbers hold', () => {
+        // [#20102] 77 → 69 sites / 100 → 92 mentions. The saved-report
+        // `/reports` family was retired whole with the saved-report stack, and
+        // its eight routes each carried ONE bare site (`resolveExecCtx` then
+        // `enforceAuth` on the next line) and no other mention — so both numbers
+        // fall by exactly eight, every one of them from the BARE half. The
+        // caught half (24, 16 on the invocation line) is untouched, which the
+        // next case asserts rather than this comment claiming it.
+        //
         // [#15866] 77 sites UNCHANGED / 98 → 99 mentions — the fourth pattern,
         // and the first entry here that moves the mention count while adding no
         // consumer at all. That card retired the `as any` casts on this file's
@@ -401,11 +410,11 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // naming the seam is the point of the sentence — and the sentence
         // moving only the mention count is this control working: a site was not
         // added, and the number that tracks sites did not move.
-        expect(SITES.length).toBe(77);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(100);
+        expect(SITES.length).toBe(69);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(92);
     });
 
-    it('the split is 24 locally caught / 53 bare — NOT 16 / 53, which does not add to 77', () => {
+    it('the split is 24 locally caught / 45 bare — NOT 16 / 45, which does not add to 69', () => {
         // 16 sites spell the catch on the invocation line; 4 more spell it on
         // the continuation line. A single-line grep sees 16 and the arithmetic
         // silently loses four sites.
@@ -416,27 +425,27 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
         expect(sameLine.length).toBe(16);
         expect(CAUGHT.length).toBe(24);
-        expect(BARE.length).toBe(53);
+        expect(BARE.length).toBe(45);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 24 caught ones is', () => {
+    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 24 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the
         // next statement; the locally-caught ones carry a `.catch` because
         // they are NOT behind that floor and each must decide for itself.
-        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(53);
+        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(45);
         expect(CAUGHT.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(0);
     });
 });
 
 // ---------------------------------------------------------------------------
-// 3. The 53 bare sites, driven
+// 3. The 45 bare sites, driven
 // ---------------------------------------------------------------------------
 
-describe('[#13160] §3 the 53 bare sites — driven, every one of them', () => {
-    it('all 53 are reached by the mounted route table, so none is classified by inference', async () => {
+describe('[#13160] §3 the 45 bare sites — driven, every one of them', () => {
+    it('all 45 are reached by the mounted route table, so none is classified by inference', async () => {
         const reached = sitesOf(await sweep(undefined, 'FULL'));
         const unreached = BARE.map((s) => s.line).filter((l) => !reached.has(l));
         // ⛔ A bare site that stopped being reachable must show up as a
@@ -444,14 +453,14 @@ describe('[#13160] §3 the 53 bare sites — driven, every one of them', () => {
         expect(unreached).toEqual([]);
     }, 120_000);
 
-    it('an absent context is the ANONYMOUS SUBJECT at all 53: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
+    it('an absent context is the ANONYMOUS SUBJECT at all 45: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
         const fault = await sweep(undefined, 'FULL');
         const control = await sweep(ENTITLED, 'FULL');
         const bareLines = new Set(BARE.map((s) => s.line));
         const controlByRoute = new Map(control.map((r) => [r.route, r]));
 
         const rows = fault.filter((r) => r.sites.some((l) => bareLines.has(l)));
-        expect(rows.length).toBeGreaterThanOrEqual(53);
+        expect(rows.length).toBeGreaterThanOrEqual(45);
 
         for (const row of rows) {
             expect(row.status, `${row.route} under an absent context`).toBe(ANONYMOUS_DENY_STATUS);

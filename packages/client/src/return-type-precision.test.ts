@@ -87,8 +87,6 @@ import type {
     ImportObjectResult,
     RecordShare,
     RemoteTable,
-    ReportSchedule,
-    SavedReport,
     SearchResult,
     ShareLink,
     SharingRuleRow,
@@ -154,8 +152,6 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // ── shape class 3: array ELEMENT typed through the client's own unwrap ─
     // These routes answer `{ data: rows }` with no `success` flag, so
     // `unwrapResponse` passes it through and the method folds it to an array.
-    expectTypeOf(await client.reports.list()).toEqualTypeOf<SavedReport[]>();
-    expectTypeOf(await client.reports.listSchedules('rep_1')).toEqualTypeOf<ReportSchedule[]>();
     expectTypeOf(await client.shares.list('lead', 'rec_1')).toEqualTypeOf<RecordShare[]>();
     expectTypeOf(await client.shares.rules.list()).toEqualTypeOf<SharingRuleRow[]>();
     expectTypeOf(await client.shareLinks.list()).toEqualTypeOf<ShareLink[]>();
@@ -239,9 +235,6 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // @ts-expect-error the route answers `{ tables }`, not a bare array
     const wrongTables: RemoteTable[] = await client.datasources.external.listTables('ds');
 
-    // @ts-expect-error `reports.list` answers SavedReport[], not a single row
-    const wrongReport: SavedReport = await client.reports.list();
-
     // @ts-expect-error a flow definition is not an execution log
     const wrongFlow: ExecutionLog = await client.automation.getFlow('flow_a');
 
@@ -259,7 +252,6 @@ export async function returnTypePrecisionPins(): Promise<void> {
 
     void wrongScope;
     void wrongTables;
-    void wrongReport;
     void wrongFlow;
     void wrongSearch;
     void wrongClone;

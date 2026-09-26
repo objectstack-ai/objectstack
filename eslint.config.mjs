@@ -292,7 +292,7 @@ const slotLookupPlugin = {
 // nothing anywhere reports.
 //
 // #4674 is the bill: two internal queries spelled their sort
-// `{ field, direction: 'desc' }` — `IReportService`'s vocabulary — where the
+// `{ field, direction: 'desc' }` — another contract's vocabulary — where the
 // QueryAST shape is `SortNodeSchema` = `{ field, order }`. Both drivers
 // normalize off `.order` with no fallback, so both queries ran ASCENDING, and
 // because both carried a `limit` the wrong direction changed WHICH ROWS came
@@ -352,7 +352,7 @@ export const QUERY_OPTIONS_ANY_MESSAGE =
   'caller `tsc` is the ONLY channel that enforces them: the protocol\'s ingress ' +
   'normalizer does not run on a direct engine call, and the options schemas are not ' +
   '`.strict()`, so an unknown key is silently DROPPED, never rejected. That is #4674 ' +
-  '— two queries sorted by `direction` (IReportService\'s vocabulary) instead of ' +
+  '— two queries sorted by `direction` (another contract\'s vocabulary) instead of ' +
   '`order` (SortNodeSchema\'s), both with a `limit`, so both quietly returned the ' +
   'OLDEST rows: audit history that never showed an object\'s recent changes, and a ' +
   'global search that truncated away the freshly-edited records. The declared type ' +

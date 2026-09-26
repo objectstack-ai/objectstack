@@ -25,9 +25,10 @@ export {
  * (maintainer ruling 2026-08-22). `createMemoryJob()`'s `schedule()` records a
  * job and never fires it, so pre-injecting it made every "prefer the platform
  * job service, else own a timer" consumer take the job-service branch and then
- * silently never run: `plugin-reports` logged `dispatcher registered with job
- * service` and dispatched nothing, ever (measured: 0 reads of
- * `sys_report_schedule` in 5600 ms with the success line present). With no
+ * silently never run: the saved-report plugin (since retired, #20102) logged
+ * `dispatcher registered with job service` and dispatched nothing, ever
+ * (measured: 0 reads of its schedule table in 5600 ms with the success line
+ * present). With no
  * entry here, `getService('job')` throws when no job plugin is installed,
  * every consumer's documented no-job-service path becomes reachable (they all
  * already run on `LiteKernel`, which injects no fallbacks), and the kernel

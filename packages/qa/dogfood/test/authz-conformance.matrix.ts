@@ -24,8 +24,8 @@
 // hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
 // dispatcher domain files.
 //
-// The population comes from `packages/rest/src/rest-route-ledger.ts` (91 rows
-// / 19 families) and `packages/runtime/src/route-ledger.ts` (82 rows / 21
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (83 rows
+// / 18 families) and `packages/runtime/src/route-ledger.ts` (82 rows / 21
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -55,7 +55,9 @@
 // to the wrong change. It moved when #14503 took the three REST package
 // read/delete rows out of the ledger — 94 rows → 91, `sdk` 84 → 81, with
 // families unmoved at 19 because all three departing rows carried
-// `family: packages`, which survives on the publish row. Two stale figures in
+// `family: packages`, which survives on the publish row. (91 → 83 rows and
+// 19 → 18 families later, when #20102 retired the whole `reports` family.)
+// Two stale figures in
 // one docblock with two entirely different causes is the failure mode the pin
 // above ends. Widening a regex instead was refused: it rots on the next
 // added file, which is the mechanism this replaces. Deriving "gated" from

@@ -55,8 +55,8 @@
  *      reverse would be unsatisfied and fail the build. What holds the line is
  *      the declared parameter type here (any narrowing becomes visible AT THE
  *      CALL SITE) plus the type-identity pins in
- *      `sharing-service.test.ts` and the three `exec-context-annotation.pin.ts`
- *      files in `plugin-sharing` / `plugin-approvals` / `plugin-reports`.
+ *      `sharing-service.test.ts` and the `exec-context-annotation.pin.ts`
+ *      files in `plugin-sharing` / `plugin-approvals`.
  *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to

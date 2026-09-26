@@ -191,7 +191,7 @@ All trace to the same `positions==0 && permissions==0 && !userId → skip` predi
 | Instance | Verdict | Issue |
 |:---|:---|:---|
 | Reports `getReport`/`deleteReport`/`listReports` discard the caller and query with `SYSTEM_CTX`; routes only `enforceAuth` → cross-user/cross-tenant IDOR (read+delete any report) | CONFIRMED exploitable | #2980 |
-| Scheduled reports (`packages/plugins/plugin-reports/src/report-service.ts#isSystem` `dispatchDue`) run `executeReport(..., {isSystem:true})` → a member-owned schedule emails the target object's **entire** table, RLS bypassed | CONFIRMED exploitable | #2980 |
+| Scheduled reports (`packages/plugins/plugin-reports/src/report-service.ts` `dispatchDue` — historical and deliberately unlinked: the saved-report stack was retired whole by #20102) run `executeReport(..., {isSystem:true})` → a member-owned schedule emails the target object's **entire** table, RLS bypassed | CONFIRMED exploitable | #2980 |
 | Knowledge/RAG `applyPermissionFilter` (`packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter`) returns **all** hits when `ctx` is missing/system; `chatWithTools`'s `ToolExecutionContext.actor` is optional with a system fallback → agent retrieval escapes the data ceiling | CONFIRMED (framework); exposure gated on cloud impl | #2981 |
 
 These are *not* the `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` fall-open (they use an unconditional `SYSTEM_CTX`), but they are exactly what a D4 conformance row (`caller-scoped?` proof) + the D2 audit would have flagged. Fixed independently of the mechanism, tracked as the mechanism's motivating evidence.

@@ -72,7 +72,8 @@ export const SysJob = ObjectSchema.create({
     // added, because it decides what the declaration is worth: NOTHING does.
     // `DbJobAdapter` writes it (`upsertJobRow`, `schedule.timezone ?? null`) and
     // its three `sys_job` read sites take `id` / `run_count` / `failure_count`
-    // only — the tree's one `row.timezone` read belongs to `sys_report_schedule`.
+    // only — the tree's one other `row.timezone` read belonged to
+    // `sys_report_schedule`, retired with the saved-report stack (#20102).
     // The value the scheduler actually honours travels in memory
     // (`toBoundaryJobSchedule` -> `CronJobAdapter.schedule` -> croner), and
     // `DbJobAdapter.schedule` awaits that call BEFORE `upsertJobRow`, so a
@@ -83,8 +84,8 @@ export const SysJob = ObjectSchema.create({
     // The door this declaration actually closes is the OTHER one: a direct write
     // to the object (Studio, REST, a script), which had no validation whatever.
     //
-    // ⚠️ `maxLength` deliberately still says 100 while `sys_report_schedule`
-    // says 64. Converging it is the card's third dimension and is NOT landed
+    // ⚠️ `maxLength` deliberately still says 100 where `sys_report_schedule`
+    // (retired since, #20102) said 64. Converging it is the card's third dimension and is NOT landed
     // here: `maxLength` is not only a write bound, it reaches DDL — narrowing a
     // physical `varchar(100)` produces `driver-sql`'s `narrow_varchar` op at
     // severity `error`, category destructive ("narrowing may truncate",

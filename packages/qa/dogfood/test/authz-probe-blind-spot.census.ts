@@ -101,7 +101,7 @@
 // conclusion that gets re-derived from scratch otherwise:
 //
 // WHAT THE LEDGERS DO COVER — richly, and more than this table ever has.
-//   `packages/rest/src/rest-route-ledger.ts`: 91 audited rows over 19 families,
+//   `packages/rest/src/rest-route-ledger.ts`: 83 audited rows over 18 families,
 //     every route `@objectstack/rest` mounts, enumerated through
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
@@ -324,25 +324,28 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     file: 'packages/rest/src/rest-route-ledger.ts',
     kinds: ['ROUTE_ENUMERATION'],
     probes: 1,
-    keys: 19,
-    population: 91,
-    reachable: 91,
+    keys: 18,
+    population: 83,
+    reachable: 83,
     blindSpot: 0,
     populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
-    controls: { "route: '": 91, "family: '": 91, RestRouteLedgerEntry: 2 },
+    controls: { "route: '": 83, "family: '": 83, RestRouteLedgerEntry: 2 },
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
-      'and therefore cannot be silently absent from the authz ratchet either. 19 families; 1 classified by a ' +
-      'matrix row (metadata), 18 enumerated in the shrink-only baseline. Re-measured 94 -> 91 when the ' +
+      'and therefore cannot be silently absent from the authz ratchet either. 18 families; 1 classified by a ' +
+      'matrix row (metadata), 17 enumerated in the shrink-only baseline. Re-measured 91 -> 83 (19 -> 18 families) ' +
+      'when the whole saved-report `reports` family left with its eight routes, all eight carrying the family, so ' +
+      '`reachable` moved with `population`. Earlier re-measured 94 -> 91 when the ' +
       'three REST package read/delete rows (GET /packages, GET /packages/:id, DELETE /packages/:id) left the ' +
       'ledger with their routes; each carried `family: packages`, so `reachable` moved with ' +
       '`population` (91/91) and the blind spot stays 0 -- the family itself survives on the publish row.',
     // The 94 -> 91 re-measurement above landed with #14503 (the REST registrar
     // keeps only POST /packages/publish; the dispatcher domain is the single
-    // implementation of the reads and the delete). The id lives here, not in
+    // implementation of the reads and the delete). The 91 -> 83 one landed with
+    // #20102 (the saved-report stack retired whole). The ids live here, not in
     // the string: a runtime string reaches readers who cannot resolve it.
   },
   {
@@ -374,9 +377,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION', 'TRIPWIRE'],
     probes: 3,
     keys: 1,
-    population: 80,
+    population: 72,
     reachable: 19,
-    blindSpot: 61,
+    blindSpot: 53,
     populationRule:
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
       '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
@@ -457,9 +460,16 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // subtrahend itself, pinned at 1, so a low population with it at 1 is a
     // real drop and a low population with it off 1 is the slice eating too
     // much. It is deliberately the one SLICE-scoped control on this row.
+    // [#20102] 80 / 19 / 61 -> 72 / 19 / 53, and `private register*Endpoints(`
+    // 17 -> 16: `registerReportsEndpoints` was deleted whole with the retired
+    // saved-report stack — eight direct `this.routeManager.register(` sites
+    // (73 -> 65), each guarded, so `enforceAuth` 64 -> 56 (eight call sites; the
+    // registrar's comments did not name the term). None of the eight was
+    // inside `registerMetadataEndpoints`, so `reachable` does not move and the
+    // blind spot shrinks by exactly the eight routes that no longer exist.
     controls: {
-      'private register*Endpoints(': 17,
-      'this.routeManager.register(': 73,
+      'private register*Endpoints(': 16,
+      'this.routeManager.register(': 65,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -467,12 +477,12 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 64,
+      enforceAuth: 56,
     },
     note:
-      'The single non-tripwire probe names ONE registrar of 17. The other 16 can never mint a key: ' +
-      'registerCrudEndpoints, registerApprovalsEndpoints, registerDataActionEndpoints, registerReportsEndpoints, ' +
-      'registerSharingRuleEndpoints, registerUiEndpoints and the rest. A runtime mount census reads 85/19/66. ' +
+      'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
+      'registerCrudEndpoints, registerApprovalsEndpoints, registerDataActionEndpoints, ' +
+      'registerSharingRuleEndpoints, registerUiEndpoints and the rest. A runtime mount census reads 77/19/58. ' +
       'registerUiEndpoints is NOT special — it is simply the registrar a census happened to walk past.',
   },
   {
@@ -638,7 +648,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
 /**
  * Entry points inside the probe table's OWN files that no mintable key can
  * reach, counting only the route/handler surfaces the ratchet's completeness
- * claim is about: rest-server.ts (61 static / 66 runtime), http-dispatcher.ts
+ * claim is about: rest-server.ts (53 static / 58 runtime), http-dispatcher.ts
  * (13) and domains/mcp.ts (1).
  *
  * hono-plugin.ts's 6 mounts are deliberately EXCLUDED from this total and
@@ -646,8 +656,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
  * them in would overstate the data surface. Its real finding is the dead probe,
  * not the six.
  */
-export const BLIND_SPOT_TOTAL_STATIC = 75;
-export const BLIND_SPOT_TOTAL_RUNTIME = 80;
+// [#20102] 75 / 80 -> 67 / 72: the retired saved-report routes left rest-server.ts.
+export const BLIND_SPOT_TOTAL_STATIC = 67;
+export const BLIND_SPOT_TOTAL_RUNTIME = 72;
 
 /**
  * Re-measure every row above from the same sources the probes read.
