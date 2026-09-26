@@ -1810,6 +1810,33 @@ export class RemoteTransport {
     return 0;
   }
 
+  /**
+   * [#20055] The statement behind `TursoDriver.distinct()` on the remote face:
+   * `SELECT DISTINCT` over one column, with the caller's filter compiled by
+   * {@link buildWhereSQL}, the compiler every other remote read uses. The
+   * driver passes the filter through `toRemoteFilter` first, as it does for
+   * `find()` and `count()`.
+   *
+   * It COMPILES and does not execute. `SqlDriver.distinct` guards only the
+   * execution with its backend-fault classifier, so a refusal raised while the
+   * filter compiles keeps its own envelope instead of being reclassified as a
+   * database fault. The driver runs the statement through {@link execute}
+   * inside the same classifier, which is how the two faces give one answer to
+   * an unknown column (`INVALID_FIELD` / 400) and to anything else the backend
+   * refuses.
+   *
+   * The column is a REFERENCE, so it keeps the identifier gate, as
+   * `aggregate()`'s group-by field does.
+   */
+  compileDistinct(object: string, field: string, where: unknown): { sql: string; args: unknown[] } {
+    this.assertSafeIdentifier(object);
+    this.assertSafeIdentifier(field);
+    const { whereClauses, args } = this.buildWhereSQL(object, where);
+    let sql = `SELECT DISTINCT "${field}" FROM "${object}"`;
+    if (whereClauses) sql += ` WHERE ${whereClauses}`;
+    return { sql, args };
+  }
+
   // ===================================
   // Bulk Operations
   // ===================================
@@ -2671,7 +2698,7 @@ export class RemoteTransport {
     path = 'where',
   ): { whereClauses: string; args: any[] } {
     // [#8220] Resolve a redacted refusal's provenance at the OUTERMOST frame
-    // only — `path === 'where'` is true exactly for the five external call
+    // only — `path === 'where'` is true exactly for the six external call
     // sites, and the root they hand over is the tree the read-scope merge
     // boundaries marked. Recursive frames rethrow untouched so one refusal is
     // resolved once, against the whole tree. Fail-closed like the SqlDriver

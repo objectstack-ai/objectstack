@@ -123,15 +123,24 @@ const users = await driver.find('users', { where: { active: true } });
 
 Each call below is refused in remote mode with `code: 'NOT_IMPLEMENTED'` and
 `status: 501`: the call is valid, and the remote transport does not have the
-capability. The check runs before the call reads or writes anything.
+capability. The check runs before the call reads or writes anything. Every other
+public `SqlDriver` method is answered in remote mode; the section after the
+table lists the ones that answer differently from local mode.
 
 | Operation | Refused call | Use instead |
 |:---|:---|:---|
-| Transactions | `beginTransaction()`, `commit()`, `rollback()`, and `options.transaction` passed to any `RemoteTransport` method in the tree above, to `aggregate()` or to `syncSchemasBatch()` | The local or embedded-replica transport, which run Knex transactions and honour `options.transaction` |
+| Transactions | `beginTransaction()`, `commit()`, `rollback()` (and their deprecated aliases `commitTransaction()` and `rollbackTransaction()`), and `options.transaction` passed to any `RemoteTransport` method in the tree above, to `aggregate()` or to `syncSchemasBatch()` | The local or embedded-replica transport, which run Knex transactions and honour `options.transaction` |
 | Record numbers | `create()`, `bulkCreate()`, and an `upsert()` with no `id`, `_id` or `conflictKeys`, when a row leaves an `autonumber` field empty (`undefined`, `null` or `''`) | The local or embedded-replica transport, which generate record numbers, or a value you supply, which is written unchanged |
 | Deferring schema DDL | `setDeferredDdl(true)`, which `os migrate plan` calls. `setDeferredDdl(false)` is accepted | Run the command against a local SQLite copy of the database (a `file:` URL) |
 | Schema drift detection | `detectManagedDrift()` | `os migrate plan` against a local SQLite copy of the database (a `file:` URL) |
 | Planning the ADR-0104 media column move | `planMediaColumnMove()`, the column step of `os migrate files-to-references` | The local or embedded-replica transport, which plan it |
+| Applying drift entries | `applyMigrationEntries()`, with or without entries | An ordinary boot against the datasource (`os serve` / `os start`) performs the additive schema sync |
+| Schema introspection | `introspectSchema()`, which the datasource connection test and the federation validation sweep call | A datasource pointed at a local SQLite copy of the database (a `file:` URL) or at an embedded replica |
+| Window-function reads | `findWithWindowFunctions()` | The local or embedded-replica transport, or the window statement sent through `execute()` |
+| Query plans | `explain()`, `analyzeQuery()` | The same query against the local or embedded-replica transport |
+| Shard rotation (ADR-0057) | `rotateShards()` | The local or embedded-replica transport. In remote mode the lifecycle service enforces the same window with an age-based reap (see below) |
+| The Knex instance | `getKnex()`: remote mode builds Knex with no connection | `execute()`, or the libSQL client from `getLibsqlClient()` |
+| Tenant-scoped distinct values | `distinct()` with `options.tenantId` on an object that has a tenant column | The same call without `tenantId`, or the local or embedded-replica transport |
 
 - **Transactions.** Remote mode declares `supports.transactionsUnsupported: true`.
   When the remote driver is the engine's default datasource, `engine.transaction()`
@@ -149,6 +158,28 @@ capability. The check runs before the call reads or writes anything.
   `aggregations` entry with a non-empty `filter`. `engine.aggregate()` never
   sends either one to this driver: it fetches the rows and computes both in
   memory. The local transport also refuses a per-aggregation `filter`.
+
+Answered in remote mode, differently from local mode:
+
+- **`distinct()`** runs a `SELECT DISTINCT` on the remote database and answers
+  the values local mode answers for the same rows: the same filter, the same
+  presentation (a declared boolean reads back as `true` / `false`), and an
+  unknown column refused with `INVALID_FIELD` / 400. A tenant-scoped call is
+  refused (table above), because no remote read applies the tenant scope.
+- **`reclaimSpace()`** sends the statement local mode issues,
+  `PRAGMA incremental_vacuum`, to the remote database. It returns free pages
+  only on a database whose `auto_vacuum` mode is `INCREMENTAL`: local mode sets
+  that mode when it connects, and remote mode does not. A server that refuses
+  the statement answers `DATABASE_ERROR` / 500.
+- **`supportsRotation`** is `false`. The lifecycle service reads it, and for an
+  object that declares `lifecycle.storage.strategy: 'rotation'` it then takes the
+  path it has for a driver that cannot shard: an age-based reap bounded by the
+  same `shards` × `unit` window, instead of rotating shard tables.
+- **`setFileColumnsMovedResolver()`** returns `false` ("not taken"). Remote
+  mode writes media columns in the JSON encoding and never asks the resolver.
+- **`getSchemaSyncStats()`** answers `{ created: 0, existing: 0 }`, which the
+  `IDataDriver` contract reads as "cannot say": remote schema sync does not
+  count the tables it creates.
 
 ### Auto-Detection
 
@@ -332,18 +363,27 @@ interface TursoDriverConfig {
 
 ## Capabilities
 
-TursoDriver declares enhanced capabilities beyond the base SqlDriver:
+The capabilities TursoDriver declares are its `supports` getter, and it
+declares only the flags the engine acts on: everything `SqlDriver` declares,
+plus `batchSchemaSync: true`. Remote mode also declares
+`transactionsUnsupported: true` and no native date bucketing
+(`queryDateGranularity: {}`). It declares nothing about the SQLite features in
+the table below. That table records what each mode was measured to do; the
+engine does not read it.
 
-| Capability | SqlDriver | TursoDriver (local) | TursoDriver (remote) |
-|:---|:---:|:---:|:---:|
-| FTS5 Full-Text Search | ❌ | ✅ | ✅ |
-| JSON1 Query | ❌ | ✅ | ✅ |
-| Common Table Expressions | ❌ | ✅ | ✅ |
-| Savepoints | ❌ | ✅ | ✅ |
-| Indexes | ❌ | ✅ | ✅ |
-| Connection Pooling | ✅ | ❌ (concurrency limits) | ❌ |
-| Embedded Replica Sync | — | ✅ | — |
-| Serverless/Edge | — | — | ✅ |
+| Feature | Local and embedded replica | Remote |
+|:---|:---:|:---:|
+| FTS5, JSON1 and common table expressions, through `execute()` | ✅ | ✅ |
+| Declared indexes (`indexes`, and a field's `unique`) | ✅ | ✅ |
+| Savepoints inside a transaction | ✅ (Knex transactions) | ❌ (transactions are refused) |
+| Raw `SAVEPOINT` statements through `execute()` | ✅ | ✅ through a `file:` client; not measured against a server |
+| Window functions | ✅ (`findWithWindowFunctions()`, or `execute()`) | Through `execute()` only |
+| Schema introspection (`introspectSchema()`) | ✅ | ❌ (refused) |
+| Embedded replica sync | ✅ (replica) | — |
+| No native module (serverless / edge) | — | ✅ |
+
+The remote column was measured through a libSQL `file:` client, which runs
+the same SQLite engine as a Turso server but not its network protocol.
 
 ## Plugin Registration
 
