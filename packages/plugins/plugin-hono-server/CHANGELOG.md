@@ -1,5 +1,539 @@
 # @objectstack/plugin-hono-server
 
+## 17.5.0
+
+### Minor Changes
+
+- 89a652b: feat(cli): `objectstack dev --cert <path> --key <path>` terminates TLS in the dev process, and the canonical origin follows the listener (#16804)
+  
+  An interactive MCP client refuses to start an OAuth sign-in against a non-TLS
+  URL, so the self-serve identity path the product advertises — "interactive
+  clients just open a browser login" — could not be exercised against a local dev
+  server at all. The only way round it was a hand-built https reverse proxy plus
+  `OS_AUTH_URL`, a page of setup that every developer, demo and video recording
+  repeated off-camera.
+  
+  **Bring your own certificate.** Nothing here generates one, and nothing here —
+  not the code, not `--help`, not any doc page — says anything about installing a
+  certificate into a system trust store. 「⛔ 不生成自签 CA；⛔ 不打印、不文档化任何
+  「把 CA 装进系统信任库」的指引——信任库是开发者自己的事」. The trust store is the
+  developer's own business; this feature's whole job is to *use* the certificate
+  they already have.
+  
+  ```bash
+  objectstack dev --cert ./localhost.pem --key ./localhost-key.pem
+  ```
+  
+  Both flags are required together — half a pair is refused by name — and an
+  unreadable file is refused rather than degraded to a plain-http listener.
+  
+  **What follows the listener.** With both flags given, everything this boot
+  advertises is `https://localhost:<port>`: the two `/.well-known/*` discovery
+  documents, the CSRF allow-list, the ready banner's `API:` / `MCP:` rows, the
+  `🤖 MCP server` connect hint, and the runtime state file the `os dev` parent and
+  external supervisors dial. Only the built-in default at the end of the base-URL
+  chain moves — `OS_AUTH_URL`, `BETTER_AUTH_URL` and `OS_BASE_URL` keep winning,
+  an `http://` value included, because they name where a deployment is *reached*
+  rather than what this process *bound*.
+  
+  **Without the flags nothing changes**, byte for byte — pinned by ablation legs
+  rather than asserted.
+  
+  `@objectstack/plugin-hono-server` gains the option this is built on:
+  `HonoPluginOptions.tls` (`{ cert, key }` PEM bytes) makes the adapter bind a TLS
+  listener with the same fetch handler, the same route table and the same graceful
+  drain. Absent, the listener is plain http exactly as before.
+- 74832b6: **Breaking (shipped as `minor` under the launch-window convention).** Under a **walled** tenancy posture (`group` / `isolated`), a legacy unscoped `admin_full_access` grant row no longer confers `PLATFORM_ADMIN`; platform standing there is derived from `OS_PLATFORM_OWNER_EMAIL` and from nothing else. The migration pointer that announced this since 17.3.0 is retired with it: `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` are **removed from `@objectstack/core`'s published entry** (#18336, #11663 leg L5).
+  
+  ⚠️ **The `single` posture is untouched, deliberately.** Its zero-config first-user promotion still mints that row and that row still confers `PLATFORM_ADMIN` — a development environment started for a moment cannot be asked to declare an administrator first. Choice 4A (#11974) rules that promotion correct, and the maintainer's 2026-09-08 ruling on #16682 is verbatim: 「retiring the walled write must not retire the `single` one」. The `single` half's disposition is #11979's. ADR-0131 D5, as amended 2026-09-17 (#18413), is the governing record.
+  
+  **What a walled deployment must do.** Declare each administrator's **verified** address in `OS_PLATFORM_OWNER_EMAIL` (comma-separated for several) before upgrading. A walled rig that upgrades with the variable undeclared and an unscoped grant row still in place has **zero** platform administrators; the bootstrap now says so **at error**, naming the variable, the row and its holder — L4 used to skip that line for exactly this rig, on the ground that the deprecation pointer carried the remedy instead, and both halves of that arrangement have now expired.
+  
+  - **17.3.0 opened the window, this closes it.** L4 (17.3.0) stopped the walled bootstrap from ever *writing* the row and started the once-per-process pointer; L5 stops the walled derivation from *reading* it. The window was time-boxed and loud by design (#11663 P5).
+  - **The retirement takes the ANCHOR, not the ROW.** Nothing here writes, deletes or re-owns any grant row — a walled holder keeps the `admin_full_access` permission set they hold, and loses only platform-admin *standing*: the rung and the built-in `platform_admin` position. That row's ownership is ADR-0131 C3's, on the v18 line.
+  - **No new query.** The posture gate reads the environment, never the engine, so the recorded query multiset is identical under both of its answers — measured, not asserted. Under a wall the guard's grade-1 scan is skipped outright, so that path issues one read fewer.
+  - **`@objectstack/plugin-auth` moves with it, at TWO readers.** `ensureDefaultOrganization`'s step-2 legacy fallback is keyed on the same expression: under a wall it no longer answers「which user is the platform admin?」from the oldest unscoped grant, so the account it would have bound as the Default Organization's `owner` — and handed the org's seeded rows to — is no longer selected. ⛔ That reader does not merely count the population, it **confers** on it, which is why it is keyed here rather than sequenced. Its bootstrap-trigger predicate retires the matching `sys_user_permission_set`-insert arm under a wall with it (cost only; the `sys_user` arms are untouched, and on a walled rig the declared owner's verifying update is the only write that ever grows the population). And:
+  - **`@objectstack/plugin-auth`'s break-glass guard moves with it.** `last-admin-guard.ts` enumerates the administrator population from the SAME anchor, and its contract is to answer the same question the derivation answers. Its grade-1 (grant-anchored) enumeration is now keyed on the identical expression, so under a wall the guard no longer counts a holder the derivation does not recognise. Consequence on a walled rig: a write that would end the last **config**-anchored administrator's standing is now REFUSED where it was permitted, and a write that removes the now-inert grant row is no longer refused as though it removed the last administrator. Under `single` the guard is unchanged. Its two zero-population refusals also gained a walled clause, because「restore the `admin_full_access` row」stopped being a remedy that ends the emptiness there.
+  - **`@objectstack/organizations`' walled bootstrap moves with it.** That package wraps `ensureDefaultOrganization` and is the runtime that actually performs the default-organization bootstrap on a walled deployment (plugin-auth's own wiring skips it there). With the helper's legacy fallback keyed off, a walled rig carrying a legacy grant row **no longer** has a Default Organization created for that holder, and that holder is no longer bound as its `owner`; the bootstrap waits for a declared administrator to verify instead. ⚠️ Named because the behaviour an operator gets **from this package** moves — its own source does not change, and the pin re-authored inside it is not the reason.
+  - **Why `@objectstack/runtime` and `@objectstack/plugin-hono-server` are named.** Neither package's own source changes. Both carry `export * from '@objectstack/core'` (`runtime/src/index.ts`, `plugin-hono-server/src/adapter.ts`) and their built `.d.ts` carry that statement, so the two removed names leave their published surfaces too. All publishable packages sit in one Changesets `fixed` group, so naming them moves no version — it is named so the tombstone reaches the CHANGELOG an upgrading consumer of THOSE packages greps. Precedent is mixed (a core-only declaration exists); this follows the `ApiRegistry` precedent, which named every package the removal reached.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing here is a metadata surface: the two removed symbols are plain runtime functions in `packages/core/src/security/platform-admin.ts` with no Zod schema, no `packages/spec` declaration and no stored representation, and the behaviour change is an authorization derivation keyed on an environment variable. `objectstack migrate meta` therefore has nothing to rewrite — the channels that reach an affected consumer are the compiler (for the removed exports) and the boot-time fail-closed log line (for the walled standing). No grant row is written, deleted or re-owned by this change; that rows own migration is ADR-0131 D10/C3 and stays on the v18 line. The plugin-auth guard change and the two re-export packages add no metadata surface either. -->
+- cefe068: fix(plugin-hono-server): an escaped throw that declares an ADR-0112 envelope is answered as that envelope, not as a bare `500 INTERNAL_ERROR "No response from handler"` (#16545)
+  
+  `HonoHttpServer.wrap()` is the seam **every direct-mount route passes** — `get` /
+  `post` / `put` / `delete` / `patch` each register `this.wrap(handler)`, and
+  `IHttpServer` is how `service-datasource`, `packages/rest` and the dispatcher
+  bridge all mount. Until now a throw that escaped a route handler was answered
+  there as `500 { code: 'INTERNAL_ERROR', message: 'No response from handler' }`,
+  with the thrown value discarded — so a producer that had *declared* its refusal
+  lost both halves of the declaration on the way to the caller.
+  
+  The measured case: `service-datasource`'s `requireDatasourceAdmin` re-raises
+  `AuthzStoreUnavailableError` (declared `status: 503`, declared `code:
+  SERVICE_UNAVAILABLE`) when the authorization store cannot be read — deliberately,
+  per the #13279 ruling that an unreadable store licenses no verdict. The operator's
+  outage reached the caller as a generic fault naming the wrong component: the
+  declared code never arrived, and the message said "No response from handler".
+  
+  **What changed.** An escaped throw carrying **both** a declared ADR-0112 status
+  (a key of `HttpStatusErrorCodeMap`) **and** a code registered in `ErrorCode`
+  (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) is now rendered as that envelope,
+  with the producer's `details` and `userMessage` channels forwarded. The status
+  and code are read through `resolveThrownHttpError` — the one rule the REST
+  registrar and the dispatcher already share — so this seam agrees with the other
+  doors by construction rather than by a second ladder.
+  
+  **What did NOT change**, pinned in the same PR:
+  
+  - an escaped throw that is **not** such an envelope answers exactly the bytes it
+    answered before — 500, no cause in the body. A partial declaration (status but
+    no code, code but no status), an unregistered code, and a status ADR-0112 does
+    not declare all take that arm;
+  - a handler that simply wrote nothing is untouched;
+  - a handler that **wrote and then threw** keeps what it wrote;
+  - the `notFound` fallback seam still answers `Fallback handler failed` — a
+    fallback that threw is a broken consumer, not a refusal it declared;
+  - ⛔ no error code is minted and no ledger row is added. A code on this path that
+    is not registered is a ledger gap under the #16404 ruling, and takes the
+    unchanged 500 arm rather than being registered in passing.
+  
+  The 5xx disclosure filter every door emitting a thrown message already runs
+  (`looksLikeInternalErrorLeak`, #3867 / #8086) is applied here from this seam's
+  first day: a driver dump on a declared 5xx is withheld, where the old bare 500
+  disclosed nothing at all. The escaped-throw diagnosis (#5848) still fires exactly
+  once at `error`, and now names the answer that was really sent instead of
+  claiming an opaque 500.
+  
+  ⚠️ **Known-unreached door, stated rather than left silent.** A route mounted
+  through `getRawApp()` funnels through neither `wrap()` nor any registrar wrapper,
+  so it is **not** repaired by this change and still answers a non-envelope
+  `text/plain` 500. That is out of this card's scope by the `domain:cli` seat's
+  ruling and is filed separately.
+
+### Patch Changes
+
+- 3c48234: The UI auto-discovery block in `HonoServerPlugin.start()` no longer names the retired plugin type `ui-plugin`: the `plugin.type === 'ui-plugin'` disjunct and its "Support legacy" comment are removed, and the block mounts `type: 'ui'` plugins only (#15638).
+  
+  Clause-②: no
+  
+  - **Why nothing a plugin declares moves.** `ui-plugin` is not a member of the closed plugin-type set (`'standard'` plus `CORE_PLUGIN_TYPES`), and `kernel.use()` already refuses it on both published kernels, before the block can see it, with `PLUGIN_CONTRACT_VIOLATION ... at 'type'`. `LiteKernel.use()` throws it as-is; `ObjectKernel.use()` throws it behind its `Failed to load plugin: NAME - ` prefix. The disjunct was reachable through neither kernel's `use()`, so the deletion changes no accept or reject verdict for any declared value, and the refusal is the generic closed-set one. There is no message specific to this spelling.
+  - **The one object that stops mounting.** The contract validates at `use()` and stores the plugin object by reference, so an object admitted as `ui` that then rewrites its own `type` to `ui-plugin` before `start()` used to be mounted by the removed disjunct. It no longer is.
+  - **Fix**: declare `type: 'ui'`, with `staticPath` and `slug` (both required for that type).
+- 0318faf: feat: the server answers `current_user.can(object, verb)` in an option's `visibleWhen` (#18783)
+  
+  A `select` / `multiselect` / `radio` / `checkboxes` option can gate itself on the acting subject's grants:
+  
+  ```ts
+  stage: Field.select({
+    label: 'Stage',
+    options: [
+      { value: 'open', label: 'Open' },
+      { value: 'escalated', label: 'Escalated', visibleWhen: "current_user.can('crm_account', 'edit')" },
+    ],
+  }),
+  ```
+  
+  `@objectstack/formula` answers `can` from `EvalContext.permissions` and refuses loudly when none is passed — and until now nothing on the write path passed one. Every authenticated write that picked such an option took the evaluator's fail-open branch: the value was admitted, one `warn` said the predicate "failed to evaluate", and the gate was never enforced for anyone.
+  
+  **What changes.** The write path now evaluates the predicate with the subject's effective object permissions — on `insert` (single and batch), by-id `update`, bulk `update`, and the `validate()` preview. A subject whose map withholds the verb is refused with `VALIDATION_FAILED` and a field error `invalid_option` on that field; a subject who holds it is admitted. Options whose `visibleWhen` never calls `can` are unaffected.
+  
+  **Where the map comes from — one producer.**
+  
+  - `@objectstack/plugin-security` implements `ISecurityService.getEffectiveObjectPermissions` (declared optional in `@objectstack/spec`) and registers the same method on the engine.
+  - `@objectstack/objectql` gains `registerEffectiveObjectPermissionsResolver(fn)`. The engine asks it at most ONCE per write (an N-row bulk update is one resolution), only when a picked option's predicate calls `can`, never for a write with no acting user, and never keeps the answer past the write. The answer goes through formula's `toEvalPermissions`, so a map that is not the published shape is refused rather than answered from.
+  - `@objectstack/core` exports `buildEffectiveObjectPermissions`: the most-permissive merge plus the super-user seed, wildcard fold, managed-write clamp and `apiOperations` annotation. `/auth/me/permissions` builds its `objects` slot with it and the new security method returns it, so the console and the server's own `can()` read the same map. The four folds (`foldWildcardSuperUser`, `clampManagedObjectWrites`, `seedSuperUserRestrictedObjects`, `annotateEffectiveApiOperations`) and the `ManagedSchemaLike` / `ApiExposureSchemaLike` types moved from `@objectstack/plugin-hono-server` to `@objectstack/core`; `@objectstack/plugin-hono-server` re-exports them under the same names, so no import changes. The `/auth/me/permissions` response is byte-identical for the same resolved sets (measured on five fixtures against the previous build).
+  
+  **Failure stance.**
+  
+  - If the security service cannot resolve the map, a write that needs it is refused with the resolution's own error — fail closed. It is never read as "no grants".
+  - With no security plugin, or an engine older than the seam, there is no permission data. The gate stays unevaluable and the value is admitted with the same `warn` as before, which names the missing input. The security plugin logs one `warn` at start when the engine lacks the seam.
+  
+  **Plain-wildcard coverage, closed in this release.** `can()` reads only the per-object entries of the map. Before #20083, `/auth/me/permissions` listed an object for a `'*'` wildcard grant only when that grant carried a super-user bit, so a subject whose access to an object came only from a plain wildcard — for example `organization_admin_no_bypass`, which a deployment without an organization wall grants to organization owners and admins — got `false` from `current_user.can()` for that object, although the data plane admits the write, and was refused on a `can`-gated option. That gap is closed in this same release by #20083 (`.changeset/20083-effective-map-plain-wildcard.md`): `buildEffectiveObjectPermissions` now puts each set's plain `'*'` on the registered public objects that set does not name, so that population's map — and any client that answers `can()` from the same `/auth/me/permissions` map — carries an entry for each object the wildcard covers, with the wildcard's grants, narrowed on a guarded managed object by the same managed-write clamp as every other entry. The map still differs from `PermissionEvaluator.checkObjectPermission` for subjects holding a super-user wildcard: an entry the super-user set itself names narrower can read as granted. Its missing `transfer` is closed in this same release (`.changeset/20134-super-user-entries-every-bit.md`).
+  
+  **No spec key, route or config key is added or removed.**
+- 2767af8: `/auth/me/permissions` now reports an unrestricted object's effective operation set whenever the export axis withholds `export`, so the Console stops rendering an Export button the server answers `403 EXPORT_NOT_PERMITTED` (#18931).
+  
+  `Clause-②: no`
+  
+  The endpoint builds its per-object map in four passes — seed, fold, clamp, annotate. `seedSuperUserRestrictedObjects` resolved each registered schema **without** the export slot and skipped every `unrestricted` one; `annotateEffectiveApiOperations` resolves **with** it and iterates existing entries only. Two predicates for one question, and they disagreed on exactly one population: a principal whose only grant is a `'*'` wildcard carrying `modifyAllRecords` and no `allowExport` — which, since #8681 removed the wildcard export grant from the built-in admin sets, is every platform administrator holding no app-authored set.
+  
+  For that principal an unrestricted object got no entry, so annotate never saw it and the response said nothing about it at all. The client reads `apiOperations: undefined`, takes the default-allow path #3391 gave it, renders **Export**, and the click is refused. A sibling object declaring `apiMethods` got an entry, an `apiOperations` without `export`, and no button — the same principal, the same session, two answers.
+  
+  - **The seed and annotate cannot diverge again.** Since #20134 the seed places an entry for every registered object a super-user wildcard reaches that the merge left without one, and `annotateEffectiveApiOperations` alone decides which entries carry `apiOperations`: an object that is unrestricted **and** keeps `export` gets none.
+  - **The export axis is the only axis this reaches.** Measured across the `enable` shapes an unrestricted object can carry: withholding `export` subtracts `export` and nothing else, and `mode` stays `unrestricted` either way — which is why the old `mode`-only guard could not tell the two cases apart. The CRUD axis needed no annotation and still gets none.
+  - **What the response gains**: for such a principal, one entry per unrestricted object, each the full closure minus `export`. Its CRUD bits are folded `true` — the same answer the client already computed by falling back to `'*'`, now stated explicitly rather than inherited.
+  - **Denial is unchanged.** `enforceExportPermission` → `security.canExport` still answers `403 EXPORT_NOT_PERMITTED`, and no request that was refused is now accepted. This is the affordance half: the channel that is supposed to tell the client now does.
+- 215840f: `/auth/me/permissions` now answers a wildcard-only `viewAllRecords` principal instead of staying silent about every object it can reach.
+  
+  `seedSuperUserRestrictedObjects` was guarded to `modifyAllRecords` super-users alone. A principal that reaches an object only through a wildcard `viewAllRecords` grant therefore got **no entry at all**: the client fell back to its default-allow path and rendered write and Export affordances the server answers `403 EXPORT_NOT_PERMITTED`. Same silence, same consequence, different principal class from the one framework#18931 closed.
+  
+  - **One predicate admits both classes.** The seed now asks the wildcard READ bypass — `viewAllRecords || modifyAllRecords` — which is the same question `foldWildcardSuperUser` already asks to decide whose `allowRead` it pulls true, and the same one `PermissionEvaluator` applies server-side. It is now a single module-local reading both call sites share, so the seed can never materialise an entry for a principal the fold leaves entirely false.
+  - **A plain wildcard grant carrying neither bypass bit is still not seeded.** That is what makes the admission the read bypass rather than "any wildcard": the fold pulls nothing true for it, so a seeded entry would be an all-false claim with no server behaviour behind it.
+  - **The seeded entry is the truth, not an overreach.** It starts `{allow*: false}`, the fold pulls `allowRead` true, and the write bits stay false. The seed only ever touches objects with **no explicit entry**, and on those a viewAll-only principal really can only read — so "explicit false" for edit is what is true about it, where the silence it replaces was not.
+  - **`apiOperations` is attached through the predicate already shared with the modify-all class** — an unrestricted object whose export stays allowed still gets no `apiOperations` (the entry itself is seeded since #20134), because for it the client's default-allow path is already right.
+  
+  ⚠️ **This is a deliberate behaviour change on an existing published channel, ruled rather than inferred.** For a viewAll-only principal a client that reads "no entry" as default-allow now reads an explicit `allowEdit: false` instead. Two pins asserting the old silence (`toBeUndefined` for the viewAll-only principal, one of them added by the framework#18931 PR that pinned this boundary while saying the pin was not a ruling that the silence was correct) are inverted on purpose under that ruling. Payload growth is the same one-entry-per-object framework#18931 accepted, now also for viewAll principals.
+- ca31ff6: Take the fix for the fifteen OSV advisories that turned `Validate Package Dependencies` red on every PR.
+  
+  The advisory database moved; the lockfile did not. `origin/main`'s `pnpm-lock.yaml` is byte-identical to the tree that scanned GREEN the day before and RED the day after, so this is a repo-wide condition rather than any PR's regression, and every one of the fifteen names a published fix version — the take-the-fix path `osv-scanner.toml`'s header describes, not the exemption path. That ledger keeps its zero entries and is untouched here, as is `.github/workflows/validate-deps.yml`.
+  
+  Two published packages change what a downstream install resolves, which is what this changeset grades:
+  
+  - **`@objectstack/plugin-email`** declares `nodemailer` `^9.1.1` (was `^9.0.5`), clearing GHSA-2x7j-588g-ccc2 (7.5), GHSA-cc9r-2j5m-2m83 (6.5), GHSA-wmmp-3585-3rmp (6.5) — all fixed in 9.1.0 — and GHSA-8m3c-c648-2xjj (5.9), fixed in 9.1.1. The range takes the higher of the two fix lines so one floor covers all four. The 10.x major is deliberately not taken.
+  - **`@objectstack/plugin-hono-server`** declares `hono` `^4.13.5` (was `^4.13.2`), clearing GHSA-crvj-82cr-hjcx (5.9), GHSA-g6gw-c38x-mqfc (5.3) and GHSA-gqvv-2mrq-wpjv (6.5).
+  
+  No exported symbol, payload key or accept/reject behaviour of ours moves — the published surface is unchanged and both grade `patch`.
+  
+  The rest of the sweep releases nothing and is named here only so the set is readable in one place: the `sharp` override target lifts to `^0.35.4` (GHSA-rgj7-g3m4-5g8c, 8.9) and the `hono` override target to `^4.13.5`, both target-only lifts whose selectors already sit at the compatibility boundary; the private docs app takes `next` 16.3.3 (GHSA-2xp9-vwfh-vxw4 9.5 and GHSA-p293-qw3h-jr36 9.0, the two Criticals); and the `vitest` devDependency line takes 4.1.11 across the workspace, with `@vitest/coverage-v8` moved in lockstep because its peer on `vitest` is exact (GHSA-82fw-gwwq-j7x9, 5.9, which flagged both `vitest` and `@vitest/mocker`).
+  
+  `hono` was flagged at TWO resolved versions and both are gone: the override lift is what collapses them. The transitive copy `@modelcontextprotocol/sdk` pulled sat exactly on the old `^4.12.34` floor and so was never re-resolved, while our own three declarations floated up to 4.13.2; `^4.13.5` excludes the floor, both edges re-resolve, and the tree now holds one `hono`. A bump that moved only our declarations would have left the transitive copy flagged and the gate red.
+- 0ced0aa: **`getRawApp()` mounts now answer an escaped throw with the declared ADR-0112 envelope.** A route mounted on the Hono handle funnels through neither the adapter's `wrap()` nor any registrar wrapper, so an escaped throw was answered by Hono's own default handler — `500 text/plain "Internal Server Error"`, no `success` flag, no `code`, and the thrown value's own declared `status` / `code` discarded. A transport error seam on the raw handle now renders the same throw-to-envelope rule a direct-mount route already used, so both doors answer one shape: a throw declaring `503` / `SERVICE_UNAVAILABLE` answers `503 application/json` with `{"success":false,"error":{"code":"SERVICE_UNAVAILABLE",…}}`, and a throw declaring no envelope still answers `500` with no cause in the body.
+  
+  The escape hatch is unchanged: consumers still mount framework-natively, still stay outside `getMountedRoutes()`, and still need no adapter verb. A thrown value carrying its own `Response` (Hono's `HTTPException`) keeps the response it declared. A consumer that installs its own `getRawApp().onError(...)` replaces the seam.
+  
+  Also fixed alongside it: `afterResponse` observers — and therefore `http_requests_total{status}` — reported a hard-coded `500` for any request that ended in a throw, which stops being the status actually sent once a declared envelope is rendered.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [c164186]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [2274894]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [fe677ae]
+- Updated dependencies [437bb0d]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [119a02b]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+  - @objectstack/observability@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

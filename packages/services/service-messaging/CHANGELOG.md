@@ -1,5 +1,614 @@
 # @objectstack/service-messaging
 
+## 17.5.0
+
+### Minor Changes
+
+- a370073: `sys_inbox_message` rows now carry **`actor_id`** — who caused the notification — and the actor travels there end to end from the `emit()` that raised the event.
+  
+  Until now an inbox row could not answer "did I cause this?". The actor stopped one layer upstream on `sys_notification.actor_id`, and the shipped default permission sets grant a member no read on `sys_notification`, so the value was behind an FK hop into an object the reader cannot open. Consumers implementing the standard "do not notify me of my own action" rule had nothing to compare, and the visible failure was the notification that says *you* just did the thing you just did.
+  
+  The path, one leg per seam, no new read anywhere:
+  
+  - **`Notification.actorId?: string`** (`channel.ts`) — the per-recipient unit every channel implementation consumes gains an optional member, with the same semantics as `sys_notification.actor_id`.
+  - **`emit()`** projects `EmitInput.actorId` onto that unit on the P0 inline path, and **`enqueueDeliveries`** snapshots it into the delivery row's payload on the P1 outbox path — beside the rendered title/body, under the rule the enqueue path already states in its own comment: an event edited after enqueue cannot rewrite an in-flight send. `DeliveryPayload.actorId?: string` is declared rather than left to that type's index signature.
+  - **The dispatcher** reads it back off that snapshot in `processRow`. It deliberately does **not** re-read `sys_notification`, which would cost one read per delivery and break the snapshot rule.
+  - **The inbox channel** writes `actor_id: n.actorId ?? null`, and `sys_inbox_message` declares `actor_id` as a `sys_user` lookup.
+  
+  **A digest row keeps `actor_id` null by construction.** A collapsed group has no single actor, so asserting "you caused this" over a message that also carries other people's events would be wrong; `processDigestGroup` sets no actor and the object's own description says so.
+  
+  **Existing rows read `actor_id` null**, which a consumer's `row.actor_id === currentUserId` evaluates as "not mine" — the pre-change behaviour for rows written before this release. Nothing is backfilled: the value was never captured on those rows, so any backfill would be invented.
+- 690f083: `NotificationDispatcher` reaps once per tick instead of once per claim, backs off while the outbox is idle, and `emit()` wakes it (#17610)
+  
+  **What an idle dispatcher cost.** Against an EMPTY `sys_notification_delivery` outbox every tick walked `partitionCount` partitions (default 8) and ran `claim()` and `claimDigest()` in each — and each of those opened with the environment-wide visibility-timeout reap before its candidate SELECT. Measured on a real `ObjectQL` + `SqlDriver`: **32 statements a tick, 16 of them the identical reap UPDATE**, on a fixed 500 ms interval that never let up, one loop per warm kernel. On remote Turso every statement is an HTTP round trip.
+  
+  **Now:**
+  
+  - **The reap runs once per tick**, before any claim — an idle tick is `1 + 2 × partitionCount` = 17 statements. Its predicate names no partition, so one run returns every claim that had expired when the tick began; a claim that expires during the tick is returned by the next one. A crashed node's `in_flight` rows are still recovered within one tick of `claimTtlMs` passing, and a claim is still never re-taken before its TTL.
+  - **The loop backs off while idle.** Every tick that claims nothing doubles the delay to the next, from `intervalMs` up to `maxIdleIntervalMs` (default 30 s; `MessagingServicePlugin` option `dispatchMaxIdleIntervalMs`). A tick that claims work snaps back to `intervalMs`. With the defaults, ten idle minutes are 24 ticks instead of 1,201.
+  - **`emit()` wakes the dispatcher.** `MessagingService.setOutbox(outbox, { onEnqueued })` fires once per `emit()` that enqueued at least one delivery; the plugin points it at the new `NotificationDispatcher.wake()`, which ticks immediately — or once more, right after a tick already in flight.
+  
+  **Latency bound.** A notification emitted in the process that runs the dispatcher goes out on the tick `wake()` starts, no later than before. While idle, work nobody announces is noticed within one backed-off interval, at most `maxIdleIntervalMs` (30 s by default): a deferred delivery coming due (retry schedule, quiet hours, digest window), a row enqueued by a process that does not run this dispatcher, and a crashed node's expired claim (recovered within `claimTtlMs` + `maxIdleIntervalMs`). Set `dispatchMaxIdleIntervalMs` to `dispatchIntervalMs` to keep the fixed interval.
+  
+  **Contract additions — all optional, nothing to change on upgrade.** `INotificationOutbox` gains an optional `reap(opts: ReapOptions)` — the visibility-timeout recovery `claim()` / `claimDigest()` already open with, as a method of its own — and `ClaimOptions` gains an optional `skipReap`. Both built-in stores (`SqlNotificationOutbox`, `MemoryNotificationOutbox`) implement them. A custom outbox without `reap()` keeps working as it is: the dispatcher probes for the method and, when it is absent, lets each claim reap as before — correct, at the old per-claim cost; implementing `reap()` and honouring `skipReap` is what earns the once-per-tick cost. Direct callers of `claim()` / `claimDigest()` are unaffected: without `skipReap` they reap exactly as before. Also new: `NotificationDispatcher.wake()`, the dispatcher's `maxIdleIntervalMs` option, and `MessagingService.setOutbox`'s optional second argument.
+- e7fea46: `sys_notification_delivery` reaps its terminal-failure rows after **7 days** instead of 90 (#17611)
+  
+  **⚠️ Operational consequence, stated plainly: `dead` and `suppressed` delivery rows are now deleted 7 days after they were created.** Any report, SLA reading, dashboard or manual investigation that consulted them — "which notifications failed to send, and why" — must now read inside that window. Before this change those rows survived for 90 days. Nothing else about the table changes: `pending`, `in_flight` and `success` rows keep the same 90-day window they have always had, and no row is reaped sooner than before except the two terminal-failure statuses.
+  
+  **What was wrong.** Fan-out writes one delivery row per `(event × recipient × channel)`. A tenant with no transport configured for one of those channels dead-letters that channel's row on its **first** attempt, and every `notify` writes another one. Measured on a production tenant: 2,876 `email`/`dead` rows against 2,876 `inbox`/`success` rows, `max(attempts) = 1`, zero pending, growing +316 rows/day. Those rows carry no work — nothing ever claims, retries or acks them again — but they sat in the table the dispatcher's claim query reads on every hop for the full 90-day window, so the cost of every claim rose linearly with time.
+  
+  **The change** is one declaration on the object, using spec keys that already ship and are already consumed by the platform Reaper:
+  
+  ```ts
+  lifecycle: {
+      class: 'telemetry',
+      ttl: { field: 'created_at', expireAfter: '90d' },
+      retention: {
+          maxAge: '7d',
+          onlyWhen: { status: { $in: ['dead', 'suppressed'] } },
+      },
+  },
+  ```
+  
+  `retention.onlyWhen` scopes the short window to the terminal-failure statuses — the same shape `sys_job_queue`, `sys_automation_run` and `sys_upload_session` already declare. No channel interface member, no new status value, no change to fan-out.
+  
+  The `ttl` leg is not new behaviour: it restates the 90-day bound the object has always declared. `lifecycle.retention` is a single block, so scoping it to terminal rows would otherwise have left `pending` / `in_flight` / `success` with **no age bound at all** — unbounding the larger half of this table's growth on the very change that exists to bound it. Both legs run: `LifecycleService.reapObject` takes `ttl` and `retention` in independent branches. `success` is deliberately outside the scope; delivery history stays at the table window.
+  
+  **If you override this object's lifecycle windows through the `lifecycle` settings namespace, re-read your configuration.** `retention_overrides.maxAge` for `sys_notification_delivery` used to move the whole table's window; it now moves the **terminal-failure** window only, and `expireAfter` moves the table window. An override left in place keeps parsing and keeps applying — to a narrower set of rows than it did before.
+  
+  **⚠️ This is worth nothing where the Reaper does not run.** The whole benefit is delivered by `LifecycleService`, which `OS_LIFECYCLE_DISABLED=1` or the plugin switch turns off. A deployment with lifecycle disabled kept these rows forever before this change and keeps them forever after it; a declaration is not a sweeper. Check that the Reaper is enabled before reading this entry as a bound on your table.
+- a9096af: `HttpDispatcher` reaps once per tick instead of once per partition, backs off while `sys_http_delivery` is idle, and `enqueueHttp()` / `redeliverHttp()` wake it (#17623)
+  
+  **What an idle dispatcher cost.** Against an EMPTY `sys_http_delivery` outbox every tick walked `partitionCount` partitions (default 8) and ran `claim()` in each — and each claim opened with the environment-wide visibility-timeout reap before its candidate SELECT. Measured on a real `ObjectQL` + `SqlDriver`: **16 SQL statements a tick, 8 of them the identical reap UPDATE**, on a fixed 500 ms `setInterval` that never let up, one loop per warm kernel. It is the shape #17610 removed from `NotificationDispatcher`, still running beside it. On remote Turso every statement is an HTTP round trip.
+  
+  **Now:**
+  
+  - **The reap runs once per tick**, before any claim — an idle tick is `1 + partitionCount` = 9 statements. Its predicate names no partition, so one run returns every claim that had expired when the tick began; a claim that expires during the tick is returned by the next one. A crashed node's `in_flight` rows are still recovered within one tick of `claimTtlMs` passing, and a claim is still never re-taken before its TTL.
+  - **The loop backs off while idle.** Every tick that claims nothing doubles the delay to the next, from `intervalMs` up to `maxIdleIntervalMs` (default 30 s, the notification dispatcher's default). A tick that claims work snaps back to `intervalMs`. With the defaults, ten idle minutes are 24 ticks and 216 statements instead of 1,201 ticks and 19,216.
+  - **`MessagingServicePlugin`'s `dispatchMaxIdleIntervalMs` sets the ceiling for both dispatchers**, the way `dispatchIntervalMs` and `partitionCount` already govern both.
+  - **Writes in this process wake the dispatcher.** `MessagingService.setHttpOutbox(outbox, { onEnqueued })` fires after an `enqueueHttp()` that enqueues a delivery — not one that parks an undeliverable record, which is `dead` on arrival — and after a `redeliverHttp()`. The plugin points it at the new `HttpDispatcher.wake()`, which ticks immediately, or once more right after a tick already in flight.
+  
+  **Latency bound.** A delivery enqueued or redelivered in the process that runs the dispatcher goes out on the tick `wake()` starts. While idle, work nobody announces is noticed within one backed-off interval, at most `maxIdleIntervalMs` (30 s by default):
+  
+  - a retry coming due is attempted less than `min(its delay + intervalMs, maxIdleIntervalMs)` late, because the backoff restarts from `intervalMs` at the attempt that scheduled it;
+  - a row enqueued by a process that does not run this dispatcher;
+  - a crashed node's expired claim, recovered within `claimTtlMs` + `maxIdleIntervalMs` (about 35 s at defaults, where it was about 5.5 s).
+  
+  Set `dispatchMaxIdleIntervalMs` to `dispatchIntervalMs` to keep the fixed interval.
+  
+  **Contract additions — all optional, nothing to change on upgrade.** `IHttpOutbox` gains an optional `reap(opts: HttpReapOptions)` — the visibility-timeout recovery `claim()` already opens with, as a method of its own — and `HttpClaimOptions` gains an optional `skipReap`. Both built-in stores (`SqlHttpOutbox`, `MemoryHttpOutbox`) implement them. A custom outbox without `reap()` keeps working as it is: the dispatcher probes for the method and, when it is absent, lets each claim reap as before — correct, at the old per-claim cost. Direct callers of `claim()` are unaffected: without `skipReap` they reap exactly as before. Also new: `HttpDispatcher.wake()`, the dispatcher's `maxIdleIntervalMs` option, the `HttpReapOptions` type, and `MessagingService.setHttpOutbox`'s optional second argument.
+  
+  **One loop, not two copies.** The timer loop — idle backoff, collapsing wakes into one follow-up tick, `stop()` — moved out of `NotificationDispatcher` into a module both dispatchers share. `NotificationDispatcher`'s behaviour and public surface are unchanged; its #17610 tests pass as they were.
+- 4be4e04: `IHttpOutbox.ack()` takes an optional third argument, the claim credential, and `HttpDispatcher` now always passes it (#17634). A late ack from a claim the visibility-timeout reap had taken back — a send that outran `claimTtlMs` while another dispatcher re-claimed the row — used to write its outcome by row id over that dispatcher's live attempt: a delivery still in progress could be marked `dead`, or one attempt's outcome overwrite another's. Handed the credential, `SqlHttpOutbox` and `MemoryHttpOutbox` perform the compare-and-set `INotificationOutbox.ack()` has performed since #11859: the outcome is written only while the row is still `in_flight` under the same (`claimedBy`, `claimedAt`) pair `claim()` stamped on it. A lost claim writes nothing and throws the new `HttpAckError` (`DELIVERY_NOT_ELIGIBLE`, the code this package already raises for a delivery row in the wrong state); the dispatcher logs `http-dispatcher: ack refused, claim no longer held`, carries on with the rest of its batch, and whoever holds the row re-drives the delivery.
+  
+  Nothing written against the two-argument `ack(id, result)` has to change. An `IHttpOutbox` implementation that does not read the third argument compiles and works as before, and a caller that does not pass it gets the by-id write it always got — that arity is deprecated, because it checks no ownership. New exports: `HttpClaimCredential` and `HttpAckError`. A subclass that overrides a built-in store's `ack()` should forward the third argument to `super.ack()`, or its dispatcher acks keep the old unchecked write.
+- a2c2852: Notification fan-out asks a channel whether the tenant can send on it before writing anything, so a channel with no transport no longer produces `sys_notification_delivery` rows that exist only to dead-letter (#17732).
+  
+  `MessagingChannel` gains one **optional** member, `isAvailable(ctx, { organizationId })`, answering `{ available: true }` or `{ available: false, reason }` from the closed vocabulary `CHANNEL_UNAVAILABLE_REASONS` (today: `transport_not_configured`). `emit()` consults it once per channel per emit — availability is a property of `(tenant × channel)`, not of a recipient — and a channel that answers unavailable gets no delivery row and no `send()` call on either the outbox (P1) or the inline (P0) path.
+  
+  - **Optional means available.** A channel that does not implement the member is treated exactly as before. Every existing implementation, in this repo and in yours, keeps working unchanged with no edit; the same is true of a channel that is registered but unknown to this version. ⛔ There is no way to configure the opposite default.
+  - **The suppression is recorded, not swallowed.** `sys_notification` gains one key, `suppressed_channels` — `[{ channel, reason }]`, `NULL` when nothing was suppressed — written in the *same* insert that creates the event row, so the feature costs no additional write. `EmitResult` gains the matching `suppressed` array, so a caller is never handed a delivery count that silently omits a channel it asked for.
+  - **The `email` channel answers from the transport it was handed** — a service-registry lookup, no I/O, nothing cached. Mail configuration in this tree is the `mail` settings namespace at `scope: 'global'`, materialised into a single in-memory transport that the settings change bus hot-swaps, so there is no per-tenant row to read and a memoized answer would survive the settings save that fixed it. The query still takes the tenant context so a future tenant-scoped transport needs no interface change.
+  - **A probe that throws is treated as available** and logged at `warn`: a broken availability check degrades into today's behaviour, never into a silent notification outage.
+  - ⚠️ **Unchanged on purpose**: a channel named in `channels` that is not *registered* at all keeps its existing path — the inline fan-out reports it as a failed delivery, the outbox enqueues a row the dispatcher dead-letters. It has no implementation to ask, and widening this ruling to cover it is filed separately.
+- e07eecf: Mount the email and SMS channels per lookup instead of deciding once at `kernel:ready`
+  
+  The messaging plugin registered its email and SMS channels behind `if (getEmail())` /
+  `if (getSms())` inside a `kernel:ready` hook. That guard ran exactly once, so a transport
+  service that registered later in the same boot — from a plugin ordered after this one, from
+  `kernel:bootstrapped` / `kernel:listening`, or at runtime — never got its channel, and every
+  `notify` naming that channel was refused as "not registered" for the life of the process.
+  
+  New public surface (which is why this grades `minor` and not `patch`, per the 2026-09-04 ruling
+  that a purely additive widening of a published surface takes at least a minor):
+  `MessagingService.registerChannelProvider(id, resolve)` mounts a channel that is resolved on
+  every lookup, and the plugin now mounts both channels through it: the mount tracks the
+  transport instead of recording a verdict about it, and the dispatcher — which has always
+  looked channels up dynamically — picks up a late transport without a restart. A composition
+  that never registers the transport is unchanged: the channel is not mounted, fan-out refuses
+  it, no delivery row is written, and nothing is recorded in
+  `sys_notification.suppressed_channels`.
+
+### Patch Changes
+
+- 920f887: `DbQueueAdapter` backs off while `sys_job_queue` is idle instead of polling flat at 1 s, and the loop that does it is now published from `@objectstack/core` as `DispatchLoop` (#17612).
+  
+  A registered-but-idle queue issued **3600 candidate reads an hour, per queue**, whatever was in the table — on a remote driver, 3600 HTTP round trips an hour of pure idle cost. Measured over one simulated idle hour on the engine boundary the adapter really talks to: **3601 reads before, 124 after**, with the flat-poll number re-measured on the same harness as a control so the new one is a reading about the backoff rather than about a loop that stopped ticking.
+  
+  - **One mechanism, not a third copy.** The idle-backoff loop was written for `NotificationDispatcher` (#17610), shared with `HttpDispatcher` (#17623), and lived unexported inside `@objectstack/service-messaging`. `DbQueueAdapter` was the third polling worker needing it. It moves to `@objectstack/core` — the package all three already depend on — because it is a timing primitive owned by neither the messaging domain nor the queue domain, and having `service-queue` depend on `service-messaging` to reach it would invert the dependency direction. **New export from `@objectstack/core`: `DispatchLoop`, `DispatchLoopOptions`, `DEFAULT_MAX_IDLE_INTERVAL_MS`.**
+  - **Nothing published moved.** `@objectstack/service-messaging` exports only its `index`, which never carried the loop; its two dispatchers now import it from `@objectstack/core` and its own surface is byte-unchanged.
+  - **New option `DbQueueAdapterOptions.maxIdleIntervalMs`** (default 30 s). Each tick that claims nothing doubles the delay to the next from `pollIntervalMs` up to this ceiling; anything claimed, and every wake, snaps it straight back. **Setting it at or below `pollIntervalMs` restores the flat poll exactly.**
+  - ⚠️ **What the backoff costs, and what it does not.** Work published through this adapter now wakes the loop, so a due `publish()` and `replay()` are picked up at the base interval as before — the ceiling is never on their latency path. What it does cost is up to `maxIdleIntervalMs` of extra latency on work this process was never told about: a row another node wrote, a deferred row coming due, a crashed worker's lease expiring. A deferred `publish()` deliberately does **not** wake the loop, since that tick would claim nothing and would throw the backoff away.
+- 879b512: `email-channel` and `sms-channel` — `send()` now REFUSES when its transport is not installed, instead of returning `{ ok: true }` for a delivery nothing was sent for (#18424).
+  
+  Two members of one object answered one condition differently, and the one a caller acts on said success: `isAvailable()` correctly returned `{ available: false, reason: 'transport_not_configured' }` while `send()` returned `{ ok: true }` — "capability not installed — no-op". The `sys_notification_delivery` row reached `status: 'success'`, nothing went red, no row dead-lettered, and a deployment with an unconfigured email or SMS transport reported every notification as delivered.
+  
+  - **`send()` now answers with the reason `isAvailable()` already returns.** `{ ok: false, error: "transport_not_configured: no 'email' service is registered; nothing was sent to '<recipient>'" }`. The token is the declared `CHANNEL_UNAVAILABLE_REASONS` member, held inside that closed set by its type annotation — ⛔ no new error code, so nothing new to aggregate on.
+  - **`classifyError()` grades it `permanent`**, so the row dead-letters on attempt one rather than burning the retry ladder against a transport no attempt can install. Driven, ⛔ not assumed: in the composition `MessagingServicePlugin` ships, the mount gate (`lazyChannelMount`, #18050) already answers this same condition by unmounting the channel, and the dispatcher acks such a row `dead` with `attempts: 1`. Both compositions now end one condition the same way.
+  - **⛔ Not a suppression.** A suppression is fan-out's pre-write answer on `sys_notification.suppressed_channels`; by the time `send()` runs the delivery row exists and `SendResult` has no suppression arm. `channel-availability.test.ts`'s boundary — an unmounted channel is REFUSED, ⛔ not suppressed (#18041) — is unmoved, and this change lands on its refusal side.
+  
+  **What changes for a consumer:** a delivery attempted with no transport now reports failure. If you compose these channels yourself through the public `createEmailChannel` / `createSmsChannel` exports with a resolver that can answer `undefined`, deliveries that silently "succeeded" will now appear as `dead` rows carrying `transport_not_configured` — register the transport, or drop the channel from the notify's channel list. Deployments using `MessagingServicePlugin` are unaffected: there the channel is not mounted at all while its transport is absent, and fan-out already refused it.
+  
+  Clause-②: no
+- cd5fdaa: docs(email): the shipped carriers said "best-matching locale"; the resolver matches `(name, locale)` exactly (#18499)
+  
+  Clause-②: no — no accept set moves and no published payload key changes; the
+  corrected prose ships as JSDoc in each package's `dist/*.d.ts` (and, for
+  `@objectstack/service-messaging`, inside the bundled `dist/index.js`), which is
+  why this is a changeset rather than `skip-changeset`.
+  
+  `packages/plugins/plugin-email/src/template-loader.ts` already enumerates
+  "the EmailService picks the best-matching locale" as a FALSE declaration, and
+  three shipped carriers still stated it. Measured against the code at this
+  branch's base rather than against the card's transcription:
+  
+  - `createSysEmailTemplateLoader.load` — `locale` given ⇒ exact `{ name, locale }`
+    match ordered by `id`, or `null`; `locale` absent ⇒ `{ name, locale: 'en-US' }`
+    first, and only if that misses `{ name }` ordered by `locale` ascending;
+  - `EmailService.resolveAndRenderTemplate` — `wanted = input.locale?.trim() ||
+    'en-US'`, then exactly one retry at the literal `'en-US'` when the call NAMED a
+    locale, then `TEMPLATE_NOT_FOUND`; the unpinned rung is reachable only for a
+    call that named no locale.
+  
+  No language-subtag folding anywhere on that path, and nothing that could be
+  called a "best match". Corrected:
+  
+  - `sys_email_template`'s object doc (`@objectstack/platform-objects`) now states
+    the exact match, the single `en-US` rung and the no-locale last resort;
+  - `sys_notification_template.locale`'s sibling-declaration comment
+    (`@objectstack/service-messaging`) said "both resolve a template by
+    best-matching locale", which was false in a second way: the two resolvers do
+    not agree. `NotificationTemplateStore.load` walks `(topic, channel, locale)`
+    through a candidate list — the named tag, its primary subtag, then
+    `DEFAULT_LOCALE` (`'en'`) — so it DOES fold a subtag, where
+    `sys_email_template` does not. Only the shared 16-char BCP-47 bound is shared;
+    the resolution is not, and the comment now says so;
+  - `template-loader.ts`'s own "What was wrong" block quoted two sentences it can
+    no longer quote — one was already stale at this base (the
+    `EmailTemplateDefinitionSchema.locale` text it reproduces has zero occurrences
+    in `packages/spec` today) and the other is corrected above. Both bullets are
+    now cited rather than quoted, so a later rewording cannot strand them again.
+  
+  No resolution behaviour changes: every edit in this changeset is prose.
+- 564ac2f: `sms-channel` now declares `isAvailable()`, so fan-out can suppress it on an absent transport exactly as it already suppresses `email` (#18567 — #17732's unfinished half).
+  
+  `email-channel` was the only implementation of the optional `MessagingChannel.isAvailable` member in the repository. Fan-out's `resolveChannelAvailability` treats a channel without that member as AVAILABLE — the deliberate default that keeps every third-party channel working — so one condition, "there is no transport", was answered two ways depending on which channel was asked: `email` was suppressed before any `sys_notification_delivery` row was written, while `sms` got a row per recipient that the pipeline could only dead-letter.
+  
+  - **The answer is the token `send()` already refuses with**, read off the `TRANSPORT_NOT_CONFIGURED` constant rather than retyped: `{ available: false, reason: 'transport_not_configured' }`. ⛔ No new error code and no new reason token — the vocabulary stays the closed `CHANNEL_UNAVAILABLE_REASONS` set, so the refusal on the delivery row, the suppression record on `sys_notification.suppressed_channels` and the availability answer all name one condition.
+  - **The probe does no I/O.** It is a service-registry closure call, so fan-out consults it inline and holds no cache — the `sms` settings namespace is `scope: 'global'` and its transport is hot-swapped by the settings change bus, so a memo would save nothing and would keep answering "unavailable" straight through the settings save that fixed it.
+  - **⛔ It does not weaken #18424 / PR #18562.** `send()`'s refusal is unchanged; it now answers the residue a pre-write suppression cannot cover — a transport present at emit and gone by dispatch, where the delivery row already exists.
+  
+  **What changes for a consumer:** if you compose the `sms` channel yourself through the public `createSmsChannel` export with a resolver that can answer `undefined`, an `emit()` targeting `sms` with no transport installed now writes **no** `sys_notification_delivery` rows for that channel and instead records `{ channel: 'sms', reason: 'transport_not_configured' }` on the `sys_notification` event's `suppressed_channels`, returned to the caller as `EmitResult.suppressed`. Those are the same rows that previously existed only to dead-letter, so `result.enqueued` drops and `result.suppressed` gains an entry. Deployments using `MessagingServicePlugin` are unaffected: there the mount gate refuses first and the channel is never registered, which is a composition fact and ⛔ not a suppression.
+  
+  Clause-②: no
+- 7e6ca17: fix(plugin-approvals, service-automation, service-messaging): five system objects title their records with a text formula instead of the raw id (#20015)
+  
+  Clause-②: no
+  
+  ADR-0079 resolves a record's title as `nameField`, then `displayNameField`, then a derivation, and an explicit `nameField` takes precedence over the render-only `titleFormat`. Five system objects declared `nameField: 'id'` beside a composite `titleFormat`. A renderer that follows ADR-0079's order therefore showed the raw record id as the record page's title for:
+  
+  - `sys_approval_request`, whose `titleFormat` is `{process_name} · {record_id}`;
+  - `sys_approval_action`, whose `titleFormat` is `{action} · {step_name}`;
+  - `sys_approval_approver`, whose `titleFormat` is `{approver} · {request_id}`;
+  - `sys_automation_run`, whose `titleFormat` is `{flow_name} · {node_id}`;
+  - `sys_http_delivery`, whose `titleFormat` is `{label} → {url}`.
+  
+  Each object now declares `display_title`, a formula field with `returnType: 'text'` over the same columns, and points `nameField` and `displayNameField` at it. This is the migration the `titleFormat` schema text prescribes: "a composite to a formula field designated as nameField". The record title is now the text the `titleFormat` described. Where a source column is nullable (`step_name`, `node_id`, `label`), a row without it is titled by the other column alone.
+  
+  A formula field is computed when a record is read. It adds no database column, so no schema migration runs. Record reads and write responses now carry `display_title`. For these objects the server-side title accessor (`resolveRecordTitle`) now returns the formula's text instead of the raw id.
+  
+  `titleFormat` stays on all five objects, unchanged, for renderers that still read it first. `$search` resolution is unchanged: a formula field is never a search target, and neither was `id`.
+- d4c897e: fix(plugin-approvals, plugin-security, service-messaging, service-realtime): nine system objects that relied on `titleFormat` declare a title pointer, so their record title is no longer the raw id (#20044)
+  
+  Clause-②: no
+  
+  ADR-0079 resolves a record's title as `nameField`, then `displayNameField`, then a derivation, and an explicit `nameField` takes precedence over the render-only `titleFormat`. Nine system objects declared a `titleFormat` and no pointer. When such an object is registered, the registry's designate-only pass picks the first title-eligible field as `nameField`, and for these nine that field is `id`. A `/meta` read serves that pointer as if it had been declared, so a renderer that follows ADR-0079's order showed the raw record id as the record page's title.
+  
+  Eight of the titles are composites. Each of those objects now declares `display_title`, a formula field with `returnType: 'text'` over the same columns, and points `nameField` and `displayNameField` at it:
+  
+  - `sys_approval_delegation`: `{delegator_id} → {delegate_id}`;
+  - `sys_position_permission_set`: `{position_id} → {permission_set_id}`;
+  - `sys_user_permission_set`: `{user_id} → {permission_set_id}`;
+  - `sys_user_position`: `{user_id} → {position}`;
+  - `sys_notification_delivery`: `{channel} → {recipient_id}`;
+  - `sys_notification_preference`: `{user_id} · {topic} · {channel}`;
+  - `sys_notification_subscription`: `{principal} · {topic}`;
+  - `sys_presence`: `{user_id} ({status})`.
+  
+  `sys_notification_receipt`'s title is the single column `{state}`, so its `nameField` and `displayNameField` now name `state` directly.
+  
+  This is the migration the `titleFormat` schema text prescribes: "Migrate a single-field title to nameField, a composite to a formula field designated as nameField". The record title is now the text the `titleFormat` described. Every column these titles read is required, so the formulas carry no null guard. Each formula reads only its own row's columns, never a field of a looked-up record.
+  
+  A formula field is computed when a record is read. It adds no database column, so no schema migration runs. Record reads and write responses of the eight objects now carry `display_title`, and the server-side title accessor (`resolveRecordTitle`) returns the title text instead of the raw id. No row scope, permission set or API method changes.
+  
+  `titleFormat` stays on all nine objects, unchanged, for renderers that still read it first. The set of fields `$search` scans is unchanged: a formula field is never a search target, and neither was `id`. On `sys_notification_receipt`, `state` was already in the set and now leads it. No search-companion column is provisioned for any of the nine.
+  
+  The new `display_title` label and help text are in each package's English bundle. The zh-CN, ja-JP and es-ES bundles carry the generator's English fill for them, recorded in the source-hash companions.
+- 7010085: fix(service-messaging): the durable fan-out refuses a channel nobody registered instead of writing a delivery row for it
+  
+  `MessagingService.emit()` on the reliable-delivery (outbox) path wrote one
+  `sys_notification_delivery` row per recipient for a channel the composition had
+  never registered, and the dispatcher dead-lettered every one of them on attempt
+  one. The inline path had always refused this case; only the durable path wrote
+  the rows, so a deployment whose flows notify on `['inbox','email']` without an
+  email plugin accumulated guaranteed-dead rows in the hot delivery table.
+  
+  The durable path now reports the same failed delivery outcome the inline path
+  reports — `ok: false`, `error: "channel '<id>' not registered"`, counted in
+  `EmitResult.failed` — and writes no row. The refusal is logged once per channel
+  per emit with the number of rows it refused, not once per recipient.
+  
+  The refusal is deliberately **not** recorded in
+  `sys_notification.suppressed_channels`: that key answers "why can this tenant not
+  send on this channel", and an unregistered channel is a composition fact,
+  identical for every tenant in the process. The event row's column set is
+  unchanged.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [305e7fc]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [b6471ba]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [758ac40]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [cd5fdaa]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [74fb2f7]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [c736eaa]
+- Updated dependencies [4d0bd23]
+- Updated dependencies [4045781]
+- Updated dependencies [ecf56e7]
+- Updated dependencies [0e658fb]
+- Updated dependencies [9529989]
+- Updated dependencies [236cec1]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [eec56c3]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [c164186]
+- Updated dependencies [6aa3188]
+- Updated dependencies [a34c27c]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [2274894]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [d624002]
+- Updated dependencies [fe677ae]
+- Updated dependencies [437bb0d]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [72eeabd]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [9cc5010]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [6af2901]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [576d5df]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [029d8a4]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [119a02b]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

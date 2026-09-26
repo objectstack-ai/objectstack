@@ -1,5 +1,555 @@
 # @objectstack/connector-rest
 
+## 17.5.0
+
+### Minor Changes
+
+- b929e0a: feat(connectors): a connector's declared `retryConfig` and `requestTimeoutMs` are executed, not just parsed (#18975)
+  
+  Clause-②: yes (widening)
+  
+  `ConnectorSchema.retryConfig` (eight sub-keys) and the two timeouts beside it
+  parsed, stored, and reached nothing. An author who wrote a retry policy — the
+  one `packages/spec/docs/SYNC_ARCHITECTURE.md` points at for a rate-limited
+  upstream, whose `retryableStatusCodes` default includes `429` — got
+  configuration that looked applied and did nothing, with no error and no
+  warning. ADR-0049 owed these keys a decision and ruled **implement**.
+  
+  **Where it landed: one wrapper, not a gateway.** `resilientFetch`
+  (`@objectstack/spec/shared`) already was the platform's outbound-HTTP call for
+  connectors — it gave every attempt a 30s timeout and a fixed exponential
+  backoff. What it could not express was the declared policy, so it gains exactly
+  the knobs that were missing (`strategy`, `backoffMultiplier`, `maxDelayMs`,
+  `jitter`, `retryOnNetworkError`), each defaulting to the behaviour it already
+  had. One new function, `connectorFetchOptions()`
+  (`@objectstack/spec/integration`), is the single mapping from a connector's
+  declared policy onto those options — one execution site, not one per connector
+  package.
+  
+  **How the authored value gets there.** `ConnectorProviderContext` gains
+  `retryConfig` and `requestTimeoutMs`, read-only and
+  resolved from the entry (the automation service parses `retryConfig` so a
+  factory reads real values instead of re-deriving the schema's defaults), so a
+  custom provider that does its own I/O can honour them. The built-in HTTP
+  providers — `rest` and `openapi` — honour them by construction.
+  
+  What an author now gets from each key: `strategy` picks the growth shape
+  (`exponential_backoff` / `linear_backoff` / `fixed_delay` / `no_retry`);
+  `maxAttempts` bounds the calls (it counts TOTAL attempts with the first
+  included, the contrast `content/docs/automation/flows.mdx` already draws against
+  `maxRetries`, and `maxAttempts: 0` still makes the one call and never retries);
+  `initialDelayMs` and `backoffMultiplier` shape the delay; `maxDelayMs` caps it,
+  applied after jitter so the declared ceiling is a real one — and an upstream
+  `Retry-After` longer than that ceiling ends the retry loop and returns the
+  response, rather than sleeping past a maximum the author declared;
+  `retryableStatusCodes` both widens and narrows what is retried;
+  `retryOnNetworkError` governs a thrown attempt; `jitter` can now be turned off;
+  `requestTimeoutMs` becomes the per-attempt deadline.
+  
+  **Two behaviour changes to know about.** A connector that declares a policy now
+  retries per that policy where it previously did not retry at all — that is the
+  fix, and a connector that declares none is on exactly its prior behaviour.
+  Separately, `connector-openapi`'s generated actions went through a naked
+  `fetch`: unbounded, never retried, and the one built-in HTTP path an authored
+  policy could never reach. They now go through the same wrapper as
+  `connector-rest` and `connector-slack`, which gives them the 30s per-attempt
+  timeout and bounded retry those two already had.
+  
+  **⚠️ `connectionTimeoutMs` is NOT made live, deliberately, and is the one thing
+  the ruling assumed that measurement refused.** A connector's call is a WHATWG
+  `fetch`, whose only cancellation surface is one `AbortSignal` over the whole
+  operation; nothing in that interface observes the connection phase separately.
+  Bounding time-to-response with it would kill a slow-but-connected upstream the
+  author meant to allow with a large `requestTimeoutMs` — breaking the very
+  promise the key makes. So this change leaves it unenforced, with the reason
+  recorded at the mapping and in `packages/spec/liveness/connector.json`, whose
+  row for it stays `dead`. That left it owed a second, narrower ADR-0049
+  decision, and this same release takes it: `connector.connectionTimeoutMs` is
+  **retired**, and its own entry in this release says what to write instead. The
+  key never reaches `ConnectorProviderContext` in any release.
+  
+  Nine of the ten ledger rows flip `dead` → `live` with the consumer site named;
+  the tenth is `connectionTimeoutMs`, above. This change itself moves no
+  declaration: it leaves every key, every bound and every default on the
+  connector schema as it found them.
+
+### Patch Changes
+
+- fc29c74: feat(spec)!: retire `connector.connectionTimeoutMs` — declared, bounded, defaulted, served back, and never applied as a deadline
+  
+  **BREAKING** — `connector.connectionTimeoutMs` is removed. ADR-0049
+  enforce-or-remove; maintainer ruling 2026-09-22, letter A. It is the narrower
+  **second** decision this key was owed: the earlier ruling that made its nine
+  liveness siblings live (`retryConfig.*`, `requestTimeoutMs`) left this one dead
+  on a stated reason rather than by oversight, and `packages/spec/liveness/connector.json`
+  has been asking for this decision since.
+  
+  The key was bounded (`min(1000).max(300000)`), defaulted (`30000`),
+  `.describe()`d, authorable on both carriers and served back by
+  `/meta/connector`. Every signal an authoring surface can give said it worked.
+  
+  ### FROM → TO
+  
+  | removed | what to write instead |
+  | --- | --- |
+  | `connector.connectionTimeoutMs` (on `Connector` and on `DeclarativeConnectorEntry`, so `stack.connectors[]` and `PUT /meta/connector/:name`) | `requestTimeoutMs` — the deadline the platform keeps, applied as `resilientFetch`'s per-attempt timeout. For a connect-only bound, configure it at a connector provider or upstream gateway on a transport that can separate the phases. |
+  | `ConnectorProviderContext.connectionTimeoutMs` (handed to every `ConnectorProviderFactory` — added after `@objectstack/spec@17.4.0` and never in a release, see below) | `ctx.requestTimeoutMs`, or the factory's own `providerConfig` where the provider owns the vocabulary. |
+  | The `ZodObject` combinators on `ConnectorSchema` and `DeclarativeConnectorEntrySchema` — `.extend()`, `.omit()`, `.pick()`, `.partial()`, `.merge()`, `.strict()`, `.keyof()`, `.safeExtend()` | Both exports are now `z.preprocess` **pipes** (the residue stage below), so those methods no longer exist on them. **Build on the object and re-wrap:** `acceptRetiredDefaultResidue(<your extended object>, { connectionTimeoutMs: 30000 })`, the `EffectiveObjectPermissionSchema` route. ⚠️ `.superRefine()` still *exists* on a pipe but returns a schema with no read-through `shape`, so refine before wrapping, not after. Parsing, `z.input` / `z.infer`, and the read-through `.shape` are unchanged. |
+  
+  **The one-line fix: delete the key.** `os migrate meta --from 17` lists the
+  mechanical edits for existing sources; apply them by hand.
+  
+  The three interface members withdrawn with it were **never in a release**:
+  `ConnectorProviderContext.connectionTimeoutMs`,
+  `RestConnectorOptions.connectionTimeoutMs` and
+  `OpenApiConnectorConfig.connectionTimeoutMs` all entered with `b929e0a662`,
+  after the `@objectstack/*@17.4.0` tag, and leave in this same release. A factory
+  or caller built against a released version never saw them; only code written
+  against an unreleased `main` in between can read them, and it stops.
+  
+  ⚠️ Runtime behaviour is **unchanged for every shipped provider**, because none
+  ever applied the value: a connector that authored `connectionTimeoutMs: 1000`
+  made exactly the same calls, with exactly the same deadlines, as one that did
+  not. What does change is observable and intended: the def served by
+  `GET /connectors` no longer echoes a connect deadline nobody keeps.
+  
+  ### ⭐ This is NOT the zero-mention retirement shape
+  
+  Measured with `git grep -n connectionTimeoutMs SHA -- . ':!packages/spec'` at
+  `e07843b5a6`, the tree this retirement landed on: **thirteen** non-test source
+  occurrences over seven files in five
+  packages — **six reads** (`openapi-connector.ts:242`, `openapi-provider.ts:193`,
+  `rest-connector.ts:134`, `rest-provider.ts:64`, `plugin.ts:307`,
+  `plugin.ts:1589`), **four type declarations**, and **three** surviving hardcoded
+  `30000` writes. Reading the retirement as "nothing referenced it" loses the
+  finding. Measured across all six reads, every one is a **pass-through**: the
+  value's only termini were the def `GET /connectors` echoes and the fingerprint
+  that decides whether to re-materialize. `connectorFetchOptions()` — the one
+  mapping from authored policy onto the platform's outbound `fetch` — was handed
+  `{ retryConfig, requestTimeoutMs }` only. Carrying a number is not honouring it,
+  and ADR-0049 forbids the parsed-unmarked-unenforced state whether the inert
+  value travels or sits still.
+  
+  Nor was the `实现` arm available. A connector's outbound call is a WHATWG
+  `fetch`, whose only cancellation surface is ONE `AbortSignal` covering the whole
+  operation; nothing in that interface observes the connection phase. Bounding
+  "time until the response arrives" with this key would kill a slow-but-connected
+  upstream the author meant to allow with a large `requestTimeoutMs` — breaking
+  the very promise the key makes. (undici's `connectTimeout` needs a custom
+  dispatcher: Node-only, and a new subsystem underneath every connector, which the
+  ruling that made the siblings live forbids.)
+  
+  ### The retirement kit
+  
+  - The **authorable key** is a `retiredKey()` tombstone on `ConnectorSchema`,
+    registered as `integration/Connector:connectionTimeoutMs` and
+    `integration/DeclarativeConnectorEntry:connectionTimeoutMs` in
+    `RETIRED_KEYS_BY_MAJOR[18]`. The schema is not `.strict()`, so a bare deletion
+    would strip an authored key in silence (ADR-0104): the tombstone is audible in
+    both channels — `tsc` (input type `never`) and the parse, which raises the
+    prescription itself. `DeclarativeConnectorEntrySchema` carries it too — both
+    published carriers wrap the same private `ConnectorBaseSchema` — so
+    `stack.connectors[]` and the `/meta/connector` door refuse it too: every value
+    but the retired default `30000`, which the residue stage below strips first.
+  - **A D2 conversion, `connector-connection-timeout-ms-removed`** — one strip per
+    `connectors[]` entry, a pure lossless delete. ⭐ The ruling left whether one was
+    owed to be **measured** ("a D2 conversion only if a stored connector row can
+    carry the key"). It can, and both legs were measured before the tombstone
+    landed: `getMetadataTypeSchema('connector')` — what `PUT /meta/connector/:name`
+    validates against — parsed a body carrying the key and its output **retained**
+    the authored value, so the number reached `sys_metadata`; and
+    `applyConversionsToStoredItem('connector', …)` is live for this type. Rows
+    written on 17.x therefore replay clean.
+  - **A D3 semantic entry,
+    `connector-provider-context-connection-timeout-ms-retired`**, for the withdrawn
+    `ConnectorProviderContext` member (never in a release, above). A provider
+    factory is code: there is no authored source and no `sys_metadata` row for a
+    conversion to rewrite, so the removal reaches a factory author who read it —
+    possible only against an unreleased `main` — as a `tsc` error and as that
+    entry.
+  - **No def leaves.** The key was a bare `z.number()`, never a `ConfigSchema`
+    shape, so `RETIRED_DEFS_BY_MAJOR[18]` gains nothing — and `api-surface/` and
+    `json-schema.manifest/` are byte-identical, which is the correct reading for a
+    key-only tombstone rather than a missed regeneration.
+  - `authorable-surface/integration.json` gains two `[RETIRED]` rows;
+    `authorable-defaults/integration.json` loses the two `= 30000` rows.
+  - The liveness row **stays** `dead` with a `REMOVED` note, because `retiredKey()`
+    keeps the key in the walked shape. Its previous note claimed "every occurrence
+    outside `packages/spec` is a WRITE". That reading was **correct at the SHA the
+    card cited and dated** (`0870fb5418` — exactly five non-spec source hits, all
+    five `connectionTimeoutMs: 30000,`) and was superseded by `b929e0a662`, the PR
+    the card itself flagged as pending. It is **stale, not false**, and the row now
+    carries both readings with their trees rather than one undated claim.
+  - **An `acceptRetiredDefaultResidue` stage** (#12840), `{ connectionTimeoutMs: 30000 }`
+    on both carriers. The key was `.optional().default(30000)`, so a 17.x parse
+    materialized it into **every** connector — measured on both sides of the
+    retirement: the released
+    `@objectstack/spec@17.4.0` emits `connectionTimeoutMs: 30000` for an entry that
+    authored only `name`/`label`/`type`, and the tombstone **without the stage**
+    refuses that exact object at `connectionTimeoutMs`. With the stage, as it
+    ships, that object is **accepted and the key stripped** before the tombstone
+    reads it — on `ConnectorSchema`, `DeclarativeConnectorEntrySchema`, the
+    `/meta/connector` schema and `stack.connectors[]` alike.
+    The D2 does **not** discharge the obligation, and the precedent shows it:
+    `ObjectPermission:allowPurge` carries a D2 **and** the residue stage, for its
+    own reason (a released toolchain materialized its default into every built
+    artifact's entries). The reason *here* is a different one — this schema has a
+    second door: `AutomationEngine.registerConnector` parses `ConnectorSchema` for
+    a def a plugin or provider factory builds **in code**, where no conversion
+    ever runs, and in 17.4.0 all four shipped connector packages put that `30000`
+    straight into the def literal. So the emitted `30000` is accepted-and-stripped,
+    while every other value (`15000`, `1000`, the string `"30000"`) keeps the
+    tombstone's refusal — at `connectionTimeoutMs`, or at
+    `connectors.0.connectionTimeoutMs` inside a stack — and nothing is un-retired:
+    `z.input` stays `never` and the `[RETIRED]` row stays.
+  - **No deprecation window** (maintainer 2026-08-27: 「项目在创业阶段，用户也很少，短期不考虑渐进」),
+    and no staged retirement.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec`
+  is published, so this is breaking for consumers no download, dependent or source
+  telemetry was consulted for. The pinned sibling checkout **was** measured: zero
+  occurrences of the name at objectui `87af769e`, against a lit control on the same
+  command and scope, so no sibling fix or pin bump rides with this.
+  
+  `Clause-②: yes (narrowing)` — a published authorable key is removed on two
+  carriers, so the accept set a consumer writes against narrows. Nothing is
+  widened and nothing is renamed. Contract-review tier.
+  
+  <!-- adr-0087: registered connector-connection-timeout-ms-removed, connector-provider-context-connection-timeout-ms-retired -->
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [c164186]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [2274894]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [fe677ae]
+- Updated dependencies [437bb0d]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [119a02b]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

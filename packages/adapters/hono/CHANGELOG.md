@@ -1,5 +1,67 @@
 # @objectstack/hono
 
+## 17.5.0
+
+### Patch Changes
+
+- Updated dependencies [7f62536]
+- Updated dependencies [7d0f911]
+- Updated dependencies [fdeeea0]
+- Updated dependencies [3c48234]
+- Updated dependencies [08b213e]
+- Updated dependencies [89a652b]
+- Updated dependencies [4af758d]
+- Updated dependencies [bdb247d]
+- Updated dependencies [cea85fd]
+- Updated dependencies [1a25f4a]
+- Updated dependencies [182bbde]
+- Updated dependencies [75237a9]
+- Updated dependencies [310760d]
+- Updated dependencies [2b6a207]
+- Updated dependencies [2b08a72]
+- Updated dependencies [758ac40]
+- Updated dependencies [156792e]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [74832b6]
+- Updated dependencies [c17ff70]
+- Updated dependencies [74327d3]
+- Updated dependencies [2cac363]
+- Updated dependencies [0318faf]
+- Updated dependencies [4fef271]
+- Updated dependencies [a484966]
+- Updated dependencies [2767af8]
+- Updated dependencies [215840f]
+- Updated dependencies [13d5294]
+- Updated dependencies [0b4022b]
+- Updated dependencies [0862063]
+- Updated dependencies [f9977c1]
+- Updated dependencies [95fb417]
+- Updated dependencies [3fd3a4f]
+- Updated dependencies [90ff10a]
+- Updated dependencies [b7b6cdd]
+- Updated dependencies [b81da66]
+- Updated dependencies [fa00ebf]
+- Updated dependencies [76ddab7]
+- Updated dependencies [ea4d164]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [cefe068]
+- Updated dependencies [288fe9c]
+- Updated dependencies [e77a23f]
+- Updated dependencies [6e3462d]
+- Updated dependencies [331a1a2]
+- Updated dependencies [e6965dd]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [ca31ff6]
+- Updated dependencies [0ced0aa]
+- Updated dependencies [777d0c2]
+- Updated dependencies [f04be62]
+- Updated dependencies [4280055]
+- Updated dependencies [de1a611]
+  - @objectstack/types@17.5.0
+  - @objectstack/runtime@17.5.0
+  - @objectstack/plugin-hono-server@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

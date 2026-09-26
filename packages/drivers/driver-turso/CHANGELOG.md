@@ -1,5 +1,1071 @@
 # @objectstack/driver-turso
 
+## 17.5.0
+
+### Minor Changes
+
+- be5c602: fix(driver-sql,driver-turso): eight more `IDataDriver` doors publish their declared return type, not a nested `any` (#17690)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (PR #15280 for `SqlDriver.update()` and the `TursoDriver.update()` override, PR #14434 before it on `@objectstack/driver-memory`, PR #17258 for the five `SqlDriver` doors of #15267, PR #17689 for `aggregate()`). No runtime behaviour changes.
+  
+  Eight doors published an annotation whose `any` sat **inside** a wider type, while `packages/spec/src/contracts/data-driver.ts` had already declared each one narrower. A consumer holding one of these classes got `any` back and the compiler stopped checking:
+  
+  | class | door | published | now |
+  |---|---|---|---|
+  | `SqlDriver` | `find` | `Promise<any[]>` | `Promise<Record<string, unknown>[]>` |
+  | `SqlDriver` | `upsert` | `Promise<Record<string, any>>` | `Promise<Record<string, unknown>>` |
+  | `SqlDriver` | `bulkUpdate` | `Promise<Record<string, any>[]>` | `Promise<Record<string, unknown>[]>` |
+  | `SqlDriver` | `temporalFilterValue` | `any` | `unknown` |
+  | `TursoDriver` | `find` (override) | `Promise<any[]>` | `Promise<Record<string, unknown>[]>` |
+  | `TursoDriver` | `upsert` (override) | `Promise<Record<string, any>>` | `Promise<Record<string, unknown>>` |
+  | `TursoDriver` | `bulkUpdate` (override) | `Promise<Record<string, any>[]>` | `Promise<Record<string, unknown>[]>` |
+  | `RemoteTransport` | `beginTransaction` | `Promise<any>` | `Promise<unknown>` |
+  
+  The `TursoDriver` rows are separate sites, not consequences: an override re-declares the door in that package's own `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a consumer holding a `TursoDriver`.
+  
+  **What a consumer does.** A cell read off a row now arrives as `unknown` and is typed before use (`String(row.name)`, `Number(cell)`, or a `typeof` narrowing); `Array.prototype.find` over a result set answers `… | undefined` and the absent arm is separated rather than asserted past. Measured across the whole consumer closure of both packages at this change's tree — 115 `typecheck` tasks — the repo-wide cost is **11 sites**, all inside `@objectstack/driver-sql` (9) and `@objectstack/driver-sqlite-wasm` (2), and **zero** outside the driver packages.
+  
+  `TursoDriver.beginTransaction` is deliberately NOT narrowed here and stays `Promise<any>`. It overrides `SqlDriver.beginTransaction(): Promise<Knex.Transaction>` — narrower than the contract, the honest direction, and the binding declaration for an override — so the contract's `Promise<unknown>` does not compile there (TS2416). That `any` masks an LSP violation, not an un-narrowed door, and closing it is a separate decision.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No metadata key, no authored property, no config field, no accepted request shape and no stored artifact changes spelling or shape: the edit is eight declared RETURN TYPES on two driver classes and one transport class, plus their docblocks, so `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. The party this change addresses is a TYPESCRIPT CONSUMER and the delivery channel is the compiler at their own call site — the audience the ADR-0087 ledger explicitly does not serve. This changeset carries no FROM/TO rewrite block for stored metadata; the "what a consumer does" paragraph above is a source-code prescription, which is exactly the distinction #13080 records this refusal cannot make on its own.
+       `type-surface-only` is the category built for this class of change, and it is NOT claimed here because it is UNAVAILABLE on ALL EIGHT doors — measured by driving the gate, not assumed, and refused on TWO INDEPENDENT legs.
+       Leg 1 — the six record-shaped doors. Predicate 4 (`narrowed-from-erased`) reads the base annotation through `isErasedType`, whose line is "the type IS `any`/`unknown`", never "the type CONTAINS `any`". Driven with `packages/drivers/driver-sql/src/sql-driver.ts#find`, the gate answers: "[predicate 4: narrowed-from-erased] is FALSE: at the merge base the return annotation of `find` was already CONCRETE (`Promise<any[]>`), not `any` / `unknown` / unannotated." `Promise<Record<string, any>>` and `Promise<Record<string, any>[]>` read the same way. That is this card's own subject one layer up: the predicate cannot express the question, so its refusal is about the spelling rather than about the change.
+       Leg 2 — the two `unknown`-destination doors, `SqlDriver.temporalFilterValue` (`any` to `unknown`) and `RemoteTransport.beginTransaction` (`Promise<any>` to `Promise<unknown>`). Their BASE side is erased, so leg 1 does not reach them; their HEAD side is refused instead. Driven with `packages/drivers/driver-turso/src/remote-transport.ts#beginTransaction`, the gate answers: "[predicate 4: narrowed-from-erased] is false at HEAD: the return annotation of `beginTransaction` is still `Promise<unknown>`. This category is for a surface that MOVED OFF an erased type. One that is still erased narrowed nothing." `unknown` is a real narrowing to a TypeScript consumer — it admits no property read, which is the whole break — but `isErasedType` groups it with `any`.
+       The two legs are each other's control: the same citation form and the same marker grammar produce two DIFFERENT refusals naming two different revs, so the probe is discriminating rather than rejecting everything handed to it. The **BREAKING** banner is carried rather than dropped — that erosion is what #13080 was filed about. Leg 2 is the erased-destination wrinkle #15267's changesets already had to write around; both legs are filed separately rather than worked around here. An instrument's silence is only evidence if the instrument could have spoken. -->
+- 5ba2ec3: feat(spec,core,objectql,driver-sql,driver-turso): a transport can declare it has no transactions, and every transaction gate reads the declaration instead of method presence (#18063)
+  
+  Maintainer ruling, decision batch #148 item 3, letter B, 「同意」 2026-09-17, verbatim and untranslated:
+  
+  > `packages/spec`: the driver contract gains a way for a transport to **declare 「no transactions」** (the dev picks the smallest spelling the existing capability/contract surface already has — a capability bit is preferred over a new key), and the engine's transaction gating reads the declaration instead of method presence.
+  
+  **`DriverCapabilities` gains one live bit, `transactionsUnsupported`.** A transport sets it to say that a handle it issued would be a FALSE SUCCESS rather than a missing feature: the caller gets a handle, the writes execute and are already durable, `rollback()` resolves and undoes nothing. Absence means `false`, exactly like `batchSchemaSync`, so a driver that declares nothing keeps the behaviour it has today.
+  
+  **⛔ This is not `DriverCapabilities.transactions` un-retired, and the difference is not cosmetic.** That key was tombstoned in 17.0.0 under ADR-0049 enforce-or-remove and STAYS tombstoned — writing it is still a compile error and still a parse refusal carrying its prescription. It claimed "I support transactions" and nothing read it; this one declares "my transport cannot honour one" and the engine dispatches on it. Reviving the name would have inverted the record's own `absence = false` convention into a tri-state, turned a documented refusal into silent acceptance of a value whose meaning had changed underneath it, and made the tombstone's published text ("no code in any repository ever read it") false. A new key costs one bit; the name costs all of that.
+  
+  **Adding a bit to a record enforce-or-remove has pruned SATISFIES that ADR rather than reversing it.** The audit removed thirty-one bits for one stated reason — no code anywhere read them — and kept the three where method presence provably cannot carry the signal. This change is the creation of the missing reader: `driverSupportsTransactions()` (exported from `@objectstack/spec`) is the one definition of the gate, and all FOUR places that used to spell `typeof driver.beginTransaction === 'function'` ask it — `ObjectQL.transaction()`, `ScopedContext.transaction`, the `ScopedContext` begin/commit/rollback trio, and `@objectstack/core`'s `engineCanRollBack`. The bit arrives WITH its reader, in the same change, which is the honest order the ADR asks for.
+  
+  **Why method presence could not carry it.** `TursoDriver extends SqlDriver`, whose `beginTransaction()` opens a real knex transaction, so the inherited method reported the libSQL REMOTE transport as transactional. It is not — `RemoteTransport`'s data methods take no `options` argument at all, so a handle cannot reach the statement that would have to join it. A subclass cannot opt out of a door it did not open. This is the mirror of `batchSchemaSync`, which exists because a subclass can inherit `syncSchemasBatch` from a base whose transport batches while its own cannot.
+  
+  **What changes for a caller.** On a datasource whose driver declares the bit, `engine.transaction()` now takes the DECLARED non-transactional path (ADR-0119 D1) instead of opening a transaction it cannot honour: the degrade warns once per datasource — naming the declaration, not a missing method — and `{ require: true }` throws `TransactionUnsupportedError` before the callback writes anything. `ScopedContext.transaction` and the discrete begin/commit/rollback trio read the same predicate; the trio's `begin` returns `null`. Both are the answers a driver with no `beginTransaction` already received.
+  
+  **`driver-turso`.** The remote face declares `transactionsUnsupported: true`; local and embedded-replica inherit `false` from the base and are untouched. `TursoDriver.beginTransaction()` publishes the inherited declaration instead of `Promise<any>` — the annotation the earlier `any` was masking an LSP violation to avoid, dissolved rather than widened: the remote arm returns `never` (it refuses), so the only arm that still returns is the base's. `SqlDriver.beginTransaction()` keeps its narrow `Promise<Knex.Transaction>`; nothing in the base was widened.
+  
+  **`@objectstack/core`.** `engineCanRollBack()` — the ADR-0119 D4 gate that `@objectstack/metadata-protocol` uses for `batchData` / `updateManyData` / `deleteManyData` under `options.atomic`, and that `runMigrationJournal()` uses to decide whether to start at all — reads the same predicate. It has to: it does not open the transaction itself, it vouches that `engine.transaction()` will, and on a driver that declares the bit the engine now takes its non-transactional path. A gate still reading method presence would vouch for a runtime that is about to run the callback with no transaction, so the atomic batch would answer `rollback` over writes that stayed on disk and the journal would write `chunk_done` rows its own contract says mean "committed". What a caller sees on such a datasource instead: `batchData({ atomic: true })` refuses with `501 NOT_IMPLEMENTED` — retry without `atomic`, or probe `capabilities.transactionalBatch` on `/discovery` first — and `runMigrationJournal()` refuses with `MigrationJournalRefusal('NOT_IMPLEMENTED')` before writing a single journal row. Both are the answers a driver with no `beginTransaction` already received.
+  
+  **`RemoteTransport` loses `beginTransaction()`, `commit()` and `rollback()`.** They are a published surface, and this is **minor** rather than major on the ruling's own stated ground: that transport never honoured a transaction, so no working behaviour is withdrawn. They had already become unreachable from every caller in the repository when the driver started refusing them; they are now gone, and the declaration keeps them gone by design rather than by audit.
+- 62bce5c: `TursoDriver` in **remote** mode now **refuses** transactions with `NOT_IMPLEMENTED` / `501` instead of accepting them and silently doing nothing with them. Local and embedded-replica modes are unchanged — they inherit `SqlDriver`'s knex transactions and still honour `options.transaction`.
+  
+  **What was wrong.** `@objectstack/spec`'s `driver.zod.ts` states the delivery mechanism verbatim: *"A transaction handle to be passed to subsequent operations via `options.transaction`."* On the remote transport nothing could receive it. `RemoteTransport` names a transaction in exactly three members (`beginTransaction()`, `commit(t)`, `rollback(t)`) and **zero** of its data methods take an `options` argument at all — against 13 data methods present in the file, which is what makes that zero a reading. So a write issued between `beginTransaction()` and `rollback()` executed on the plain connection, was **already durable**, and the rollback resolved having undone nothing. Every step reported success.
+  
+  **What refuses now**, on the remote arm only:
+  
+  - `beginTransaction()`, `commit()` and `rollback()` — the capability is never handed out, so the sequence above cannot start.
+  - Any driver method that arrives carrying `options.transaction` — `find`, `findOne`, `count`, `aggregate`, `create`, `update`, `upsert`, `delete`, the three bulk methods, `updateMany`, `deleteMany`, `execute`, `syncSchema`, `syncSchemasBatch`, `dropTable`. This second door is not redundant: the engine's `buildDriverOptions` reads `execCtx.transaction` **first**, so a handle threaded through `ExecutionContext` reaches a data method without ever passing through `beginTransaction()`.
+  
+  The refusal fires on the **handle**, not on remote mode: a remote call with no transaction in it is untouched, which is every call the platform makes today. It is raised before any statement is built, so a refused call costs no round trip and leaves no partial write.
+  
+  **If this refusal now fires for you, it is telling you that you never had the transaction.** The remedies, in order: use the **local or embedded-replica** transport for work that needs atomicity; or take the non-transactional path deliberately — `engine.transaction()` without `require: true` on a driver with no transactions runs the callback with no rollback and says so (ADR-0119 D1). `NOT_IMPLEMENTED` / `501` rather than a `400` because the request is spelled correctly and the spec declares the members: the gap is the backend's, the same two-class taxonomy this driver already applies to remote `auto_number`, aggregate functions and date buckets.
+  
+  Implementing real transactions on the remote transport is a separate, larger piece of work and is deliberately **not** part of this change.
+- e07843b: fix(driver-turso): a REMOTE `TursoDriver` refuses to arm deferred schema DDL instead of accepting it and running the DDL anyway (#19823)
+  
+  Clause-②: no (narrowing)
+  
+  **BREAKING for callers that arm DDL deferral on a remote Turso datasource** — `TursoDriver.setDeferredDdl(true)` in `remote` transport mode (a `libsql://`, `https://`, `http://`, `wss://` or `ws://` URL with no `syncUrl`) now throws a `NOT_IMPLEMENTED` / `501` error, where it used to be accepted and then ignored. The five `os migrate` commands that arm it — `plan`, `apply`, `duplicates`, `account-issuer` and `multi-value-columns` — therefore exit non-zero against a remote Turso database, where they used to exit 0 after changing it. Disarming (`setDeferredDdl(false)`) is accepted, and the `local` and `replica` modes defer exactly as before.
+  
+  What the refusal replaces, measured on the transport's SQLite-backed test double: arming was accepted, but none of the remote schema doors reads the flag. The engine's boot sync (`syncSchemasBatch`) ran `CREATE TABLE` and `ALTER TABLE … ADD COLUMN` through `RemoteTransport`; the `syncSchema` / `initObjects` doors ran the same DDL plus the canonical temporal backfill, rewriting stored `datetime` / `time` values in place; and `previewDeferredSchemaWork()` and `flushDeferredSchemaDdl()` both answered `[]`. So `os migrate plan` changed the database and then reported no pending work, and `os migrate apply` asked for confirmation after the schema work had already run.
+  
+  - **Refused at the setter.** Every deferring caller passes through `setDeferredDdl`, and it runs before any schema work: a refused arm sends nothing to the database and leaves the driver un-armed.
+  - **The driver's message is what the operator reads.** The CLI prints it verbatim. It names the `remote` transport mode, says why the promise cannot be kept, and says what to do instead.
+  - **No new error code.** `NOT_IMPLEMENTED` / `501` is a standard code, the envelope this transport already uses for its remote transaction and auto-number refusals.
+  - **Ordinary boots are unchanged.** A boot that does not arm the deferral (`os serve`, `os start`, `os dev`) syncs a remote schema exactly as before.
+  
+  **If you are refused:** to preview schema work, run the command against a local SQLite copy of the database (a `file:` URL); the local and embedded-replica faces defer DDL. To perform the additive schema work, let an ordinary boot against the remote datasource (`os serve` / `os start`) run it directly.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or reshaped: no spec key, no export, no stored row and no config key — `setDeferredDdl` keeps its name and its signature. There is no old spelling that maps to a new one: the refused call asked the remote transport for a capability it never delivered, and the refusal itself carries the remedy. -->
+- 1f0b341: fix(driver-turso): a REMOTE `TursoDriver` refuses to detect schema drift instead of answering that there is none (#19845)
+  
+  Clause-②: no (narrowing)
+  
+  **BREAKING for callers that read schema drift from a remote Turso datasource** — `TursoDriver.detectManagedDrift()` in `remote` transport mode (a `libsql://`, `https://`, `http://`, `wss://` or `ws://` URL with no `syncUrl`) now throws a `NOT_IMPLEMENTED` / `501` error, with or without an explicit object list, where it used to answer `[]`. The `local` and `replica` modes detect drift exactly as before.
+  
+  What the refusal replaces, measured on the transport's SQLite-backed test double: the inherited detector reads the physical schema through Knex, and a remote driver's Knex connection is a placeholder in-memory database holding none of the datasource's tables. A synced table carrying an extra physical column the declaration omits therefore read `unmapped_column` / `drop_column` on the local face and `[]` on the remote one. The artifact-pinned boot gate of `os serve` (`OS_ARTIFACT_URL`), which refuses a boot on destructive drift, read that `[]` as "never drifted" and let every remote-Turso boot through.
+  
+  - **The boot gate now says it could not check.** It already treats a failed drift detection as "the check did not run": it prints a warning carrying the driver's message and the boot continues. A remote-Turso boot is therefore not refused by this change; it is told the schema was not checked, where before it was told nothing.
+  - **No other caller in this repository reaches it.** The `os migrate` commands that read drift (`plan`, `apply`, `multi-value-columns`) arm deferred schema DDL first, which the remote face already refuses.
+  - **No new error code.** `NOT_IMPLEMENTED` / `501` is a standard code, the envelope this transport already uses for its remote transaction, auto-number and deferred-DDL refusals.
+  
+  **If you are refused:** to check a remote Turso database for drift, run `os migrate plan` against a local SQLite copy of it (a `file:` URL), where the physical schema is introspected.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or reshaped: no spec key, no export, no stored row and no config key — `detectManagedDrift` keeps its name and its signature. There is no old spelling that maps to a new one: the refused call asked the remote transport for a capability it never delivered, and the refusal itself carries the remedy. -->
+- 0142415: fix(driver-turso)!: a local or replica `TursoDriver` on a remote url, or a replica off a local file, is refused at construction
+  
+  Clause-②: no (narrowing)
+  
+  A remote `url` beside `syncUrl` was classified as an embedded replica, and the local SQLite engine that every replica read and write goes through was handed `:memory:`. Writes succeeded and read back, then vanished on restart, and none of them reached the remote. `@libsql/client` builds no embedded replica for a remote url: it routes `libsql://` / `https://` / `http://` to its HTTP client and `wss://` / `ws://` to its WebSocket client, neither of which reads `syncUrl`. A forced `mode: 'replica'` or `mode: 'local'` beside a remote url was handed the same `:memory:` engine, and so was a replica on `:memory:`. Measured before the change, with `create`, `find`, then a fresh driver on the same config:
+  
+  ```
+  libsql:// + syncUrl (sync.onConnect: false)  -> 1 row back, 0 rows after restart
+  libsql:// + mode: 'replica' or mode: 'local' -> 1 row back, 0 rows after restart
+  :memory: + syncUrl + a supplied client       -> 1 row back, 0 rows after restart
+  file: + syncUrl (unchanged)                  -> 1 row back, 1 row after restart
+  ```
+  
+  With the driver building its own client and the default `sync.onConnect`, two of these did fail at `connect()`, but on a libsql error that did not say why: `libsql://` + `syncUrl` with `SYNC_NOT_SUPPORTED`, and `:memory:` + `syncUrl` with `URL_INVALID`.
+  
+  **BREAKING** accept-set narrowing on a published driver option, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **The constructor now refuses configurations it accepted before**, at `new TursoDriver()`, ahead of the Knex base and of any client, with the ADR-0112 envelope `code: 'VALIDATION_ERROR'`, `status: 400`. A remote url here means one of the schemes `TursoDriver.detectMode` classifies as remote: `libsql://`, `https://`, `http://`, `wss://`, `ws://`. The #19976 entry in this same version matches them in any letter case, so an uppercase `LIBSQL://` is a remote url too. Refused:
+  
+  - a remote url beside `syncUrl`;
+  - a remote url under a forced `mode: 'replica'` or `mode: 'local'`;
+  - a replica on a url `@libsql/client` reads as in-memory (`:memory:`, or `file::memory:` with or without a query string), beside `syncUrl` or under a forced `mode: 'replica'`. `@libsql/client` refuses such an embedded replica itself. For `:memory:` and a bare `file::memory:` the local engine was a private in-memory database. With a query string it was a file literally named after the url's path (for example `:memory:?cache=shared`) in the working directory, which no sync reaches;
+  - under a forced `mode: 'replica'`, a `url` that is none of `:memory:`, a `file:` url or a remote url, such as a bare path or an unsupported scheme. The #19976 entry in this same version refuses such a url in every local or replica mode, and matches the `file:` scheme in any letter case: an uppercase `FILE:` url naming a file is a `file:` url and is not refused, and the replica runs on that file (`FILE::memory:` is refused as in-memory, like `file::memory:`).
+  
+  The remote-url refusal names the scheme it met. Neither refusal echoes the url, which may carry a token. Both loaders (`@objectstack/runtime`'s host factory and the datasource factory) reach this refusal through the same constructor, so a datasource declaring one of these configurations now fails by name when its loader builds the driver.
+  
+  **What stays accepted**, pinned by preservation tests: a `file:` url with `syncUrl` (the embedded replica), a `file:` or `:memory:` local database, a remote url on its own or with `mode: 'remote'`. `TursoDriver.detectMode()` still classifies a remote url beside `syncUrl` as `'replica'`: the refusal sits in the constructor, not in a re-classification.
+  
+  **Not refused by this change:** a url with no `mode` that is none of a lowercase `file:` url, `:memory:` or a lowercase remote scheme, such as an uppercase `LIBSQL://`, an uppercase `FILE:` url or a bare path like `./data/app.db`, auto-detected `'local'` with or without `syncUrl`, and the local engine was handed `:memory:`. Under a forced `mode: 'local'` the same url got the same `:memory:` engine. The #19976 entry in this same version removes that fall-through: it matches every scheme in any letter case, so an uppercase remote url is a remote url and an uppercase `FILE:` url is a `file:` url, and it refuses every other url in a local or replica mode. No configuration runs on an in-memory database it did not name.
+  
+  **What an affected author does.** Each refusal names its ways out. For a remote url in a local or replica mode:
+  
+  - to use the remote database, drop `syncUrl` (and `sync`) and any forced `mode`; the remote url alone sends every read and write to it;
+  - for an embedded replica, point `url` at a local file and keep the remote in `syncUrl`: `url: 'file:./data/replica.db', syncUrl: 'libsql://my-db.turso.io'`.
+  
+  For a replica off a local file, point `url` at a local `file:` path beside `syncUrl`. A throwaway in-memory database instead drops `syncUrl` (and `sync`) and any forced `mode: 'replica'`, and keeps `url: ':memory:'`.
+  
+  Blast radius, measured on this tree: no example, template, published skill, hand-written doc or factory default declares a remote url beside `syncUrl`, and the host boot path (`OS_DATABASE_URL`) passes no `syncUrl`. Outside this package's own tests, the in-repo configurations carrying the pair are test fixtures that never construct the real driver: loader fixtures that exercise the config builder or a capturing constructor, stored-row redaction fixtures and a schema-parse fixture. Whether any out-of-repo deployment declares it is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed at the driver constructor: no key, spec symbol, Zod schema, object definition or stored representation is added, removed or renamed — `TursoDriverConfig.url`, `syncUrl` and `mode` keep their names and types, and both `TursoConfigSchema` copies are untouched. What moves is which CONFIGURATIONS `new TursoDriver()` accepts, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. Each refusal names its ways out, and which one an author wants (a remote database, an embedded replica on a local file, or a plain local database) is authoring intent no ledger line can decide. -->
+- a0920b4: fix(driver-turso): a REMOTE `TursoDriver` refuses to plan the ADR-0104 media column move instead of answering that there is nothing to move, and `os migrate files-to-references` reports that refusal as a column step it could not judge (#19894)
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING for callers that plan the media column move on a remote Turso datasource** — `TursoDriver.planMediaColumnMove()` in `remote` transport mode (for example a `libsql://` URL) now throws a `NOT_IMPLEMENTED` / `501` error, where it used to answer `{ plans: [], refusals: [] }`. The `local` (`:memory:` and `file:`) and `replica` modes plan exactly as before, and the local modes plan exactly what `SqlDriver` plans for the same declaration.
+  
+  What the refusal replaces, measured on the transport's SQLite-backed test double: a table with a `file` and an `image` field, synced through each of the three remote schema doors (`syncSchemasBatch`, `syncSchema`, `initObjects`), held its two TEXT media columns on the remote database, and the remote face answered an empty scan on every door. The inherited planner walks the objects `SqlDriver`'s own schema sync registers, which no remote schema door reaches, and probes each table through the placeholder in-memory Knex connection a remote driver is built with. The local and embedded-replica faces planned two `unquote` moves for the same declaration. `os migrate files-to-references` printed that empty scan as "Column step: nothing to move — this datastore declares no single-value media column".
+  
+  - **The command reports the refusal instead of failing on it.** `os migrate files-to-references` calls the planner only after the backfill and its self-check have passed, and an `--apply` run has recorded the deployment flag by then. Measured on the command's own test doubles before this change, a planner that throws ended the run with the error alone (`--json`: `{"error": …, "code": "NOT_IMPLEMENTED"}`) and exit 1, with no backfill report, no verify report and no word about the flag it had recorded. The column step now catches a `NOT_IMPLEMENTED` refusal by its code and reports it as a skip: the text face prints `Column step: NOT JUDGED` with the driver's message, and `--json` gains `columnMoveRefused` — `{ error, code }` when the driver refused, `null` otherwise — beside `columnMove: null` and `columnsMovedAt: null`. The backfill, verify and flag reports are emitted as on any other run, nothing is stamped, and the exit code is the self-check's, as it already was for the command's other column-step skips.
+  - **Any other throw from the planner still fails the command**, through the same error report and exit 1 as before.
+  - **A genuinely empty scan still reads "nothing to move".**
+  - **No new error code.** `NOT_IMPLEMENTED` / `501` is a standard code, the envelope this transport already uses for its remote transaction, auto-number, deferred-DDL and drift-detection refusals.
+  
+  **If you are refused:** the backfill, its self-check and, on `--apply`, the deployment flag are unaffected. A remote Turso datasource keeps its single-value media columns on the JSON encoding: measured on the same double, the remote face writes a file id as a JSON string and reads it back as the id, and it does not read the record of a completed column move.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or reshaped: no spec key, no export, no stored row and no config key — `planMediaColumnMove` keeps its name and its signature, and the command's `--json` document only gains a key. There is no old spelling that maps to a new one: the refused call asked the remote transport for a capability it never delivered, and the refusal itself says what the datasource keeps. -->
+- 61609ed: fix(driver-turso)!: a url scheme matches in any letter case, and a url the driver cannot open is refused instead of running on a private in-memory database
+  
+  Clause-②: no (narrowing)
+  
+  `TursoDriver.detectMode` matched `file:` and the five remote schemes case-sensitively, and answered `'local'` for any other url with no `mode`. The local engine can open only a `file:` path or `:memory:`, so for everything else it was handed `:memory:`: writes succeeded and read back, then vanished on restart. `@libsql/client` reads a scheme in any letter case (`@libsql/core@0.17.4` routes on `uri.scheme.toLowerCase()`), so an uppercase `LIBSQL://` url that the client routes to the remote database ran on that local `:memory:` engine instead. `@objectstack/cli` and `@objectstack/runtime` select this driver for an `OS_DATABASE_URL` matching `libsql://` in any letter case and hand it the url as written, so an uppercase `OS_DATABASE_URL` reached that engine too. Measured before the change, with `initObjects`, `create`, `find`, then a fresh driver on the same config:
+  
+  ```
+  LIBSQL://… (no mode)                -> local, 1 row back, 0 rows after restart
+  FILE:<path> (no mode)               -> local, 1 row back, 0 rows after restart, file never created
+  ./<dir>/app.db (no mode)            -> local, 1 row back, 0 rows after restart, file never created
+  <tmp>/app.db (no mode)              -> local, 1 row back, 0 rows after restart, file never created
+  ./<dir>/app.db + mode: 'local'      -> local, 1 row back, 0 rows after restart, file never created
+  file:<path> (unchanged)             -> local, 1 row back, 1 row after restart
+  ```
+  
+  **The scheme now matches in any letter case**, as it does in `@libsql/client`, in `detectMode` and in every constructor check. `LIBSQL://`, `HTTPS://`, `Http://`, `WSS://` or `Ws://` with no `mode` is remote. `FILE:<path>` is a local file, and an embedded replica beside `syncUrl`. The url itself is passed to the client as written.
+  
+  **BREAKING** accept-set narrowing on a published driver option, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **The constructor now refuses configurations it accepted before**, at `new TursoDriver()`, ahead of the Knex base and of any client, with the ADR-0112 envelope `code: 'VALIDATION_ERROR'`, `status: 400`. Refused:
+  
+  - in a local or replica mode, a `url` that is none of `:memory:`, a `file:` url or a remote url (`libsql://`, `https://`, `http://`, `wss://`, `ws://`, in any letter case). That is a bare path (`./data/app.db`, `data/app.db`, `/var/lib/app.db`, `C:\data\app.db`), an unsupported scheme (`sqlite:`, `memory://`), `:MEMORY:`, a remote scheme with no `//`, a url behind leading whitespace, and an empty url. Newly refused with no `mode` (with or without `syncUrl`) and under a forced `mode: 'local'`. Under a forced `mode: 'replica'` it was already refused, and the refusal now names the `file:` spelling for the replica. `@libsql/client@0.17.4` refuses each of these urls itself, as `URL_INVALID` or `URL_SCHEME_NOT_SUPPORTED`;
+  - an uppercase remote url beside `syncUrl` (no `mode`), or under a forced `mode: 'local'`. Both constructed on the private `:memory:` engine before, and both now meet the refusal their lowercase spelling already met. Under a forced `mode: 'replica'` it was already refused, now with that same remote-url refusal;
+  - an uppercase `WSS://` or `WS://` url with a non-zero `timeout`, no `mode` and no `syncUrl`. It is now detected as remote, so the existing refusal of a `timeout` on the WebSocket transport reaches it;
+  - `FILE::memory:` beside `syncUrl` (no `mode`), refused as an in-memory replica exactly like `file::memory:`. Under a forced `mode: 'replica'` it was already refused.
+  
+  The unrecognised-url refusal names the `file:` spelling (`url: 'file:./data/app.db'`, or `url: 'file:./data/replica.db'` beside `syncUrl`) and never echoes the url, which may carry a token. `TursoDriver.detectMode()` now answers `'replica'` for such a url beside `syncUrl` (it answered `'local'`), which is what the declaration asks for. The refusal sits in the constructor, not in a re-classification.
+  
+  **Newly accepted:** an uppercase or mixed-case `FILE:` url naming a file, under a forced `mode: 'replica'`, with or without `syncUrl`. The #19893 change refused it, because under a forced `mode: 'replica'` it refused every url that did not start with a lowercase `file:`. With this change it is a `file:` url: the replica runs on that file, and its rows survive a restart (pinned). It is the one configuration the #19893 change refused that this change accepts.
+  
+  **What stays accepted**, pinned by preservation tests: a lowercase `file:` url, alone or with `syncUrl`; `:memory:` as a local database; a lowercase remote url on its own or with `mode: 'remote'`. A forced `mode: 'remote'` runs no local engine, so this change does not judge its url: a bare path there still constructs, and `@libsql/client` refuses it at `connect()` as `URL_INVALID`.
+  
+  **What an affected author does.** A local database file needs the `file:` prefix: `url: 'file:./data/app.db'`. For a throwaway in-memory database, `url: ':memory:'`. An uppercase remote url with no `mode` and no `syncUrl` now reaches the remote database and needs no change. Beside `syncUrl` or under a forced local or replica mode it is refused with the same ways out as the lowercase spelling.
+  
+  The #19893 entry in this same version (the constructor refusal of a remote url in a local or replica mode) describes this fall-through as not refused by that change, and names this entry as the one that removes it.
+  
+  Blast radius, measured on this tree: no example, template, hand-written doc, published skill or factory default, and no test fixture outside this package's own tests, spells a turso url with an uppercase scheme or as a bare path. Neither host url sniffer selects this driver for a bare path (both select it only for `libsql://` or an `http(s)://` url naming a `.turso.` host); only an explicit `OS_DATABASE_DRIVER=turso` or a datasource declaring `driver: 'turso'` hands it one. Whether any out-of-repo deployment declares such a url is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed at the driver constructor, together with a case-insensitive reading of the url scheme: no key, spec symbol, Zod schema, object definition or stored representation is added, removed or renamed — `TursoDriverConfig.url`, `syncUrl` and `mode` keep their names and types, and both `TursoConfigSchema` copies are untouched. What moves is which CONFIGURATIONS `new TursoDriver()` accepts and how it classifies an uppercase scheme, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The refusal names the `file:` spelling, and whether an author meant a local file, a replica or a remote database is authoring intent no ledger line can decide. -->
+- 8a44ce7: fix(spec, drivers)!: a `$like` / `$ilike` pattern holding U+0000 is refused by every driver that answers `$like`, instead of being cut at the NUL on SQLite
+  
+  Clause-②: yes (narrowing)
+  
+  On the SQLite faces `$like` / `$ilike` compile to `GLOB`, and SQLite reads a pattern only up to its first U+0000. A pattern holding U+0000 was cut there, so the filter answered a different question, and nothing raised. Measured through `find` over 13 stored values (12 non-NULL), against `@objectstack/formula` on the same rows: all 20 U+0000 cases of the probe (10 patterns, bare and under `$not`) differed on `SqlDriver` over better-sqlite3, on `SqliteWasmDriver`, on `TursoDriver`'s local mode, and on its remote mode over a stub and over a real `@libsql/client` engine, with identical answers on all five. For example:
+  
+  - `$like: '%'` + U+0000 returned all 12 non-NULL rows, where `formula` returns the two ending in U+0000;
+  - `$like: 'a'` + U+0000 + `'b'` also returned `'a'`;
+  - `$ilike: 'AB'` + U+0000 also returned `'AB'` and `'ab'`.
+  
+  `driver-memory` answered all 20 as `formula` does. SQLite has no NUL-safe pattern primitive to compile to instead: `LIKE` cuts the same way, `replace()` cannot target U+0000, and `instr()` has no wildcards. So the one contract is a refusal, the way a pattern ending in a lone unpaired backslash is refused.
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **A filter that answered before is now refused**: a `$like` or `$ilike` pattern holding U+0000 anywhere (at the start, in the middle, at the end, alone, or after a backslash) gets `INVALID_FILTER` / 400, on every door that already refused the lone trailing backslash:
+  
+  - `@objectstack/driver-sql`: on the filter walk, before a dialect is chosen, so SQLite, Postgres and MySQL all refuse it. `@objectstack/driver-sqlite-wasm` and `TursoDriver`'s local mode inherit it; `@objectstack/driver-sqlite-wasm`'s own code does not change.
+  - `@objectstack/driver-turso`: the remote transport's `$like` / `$ilike` arm, before anything is sent to the engine.
+  - `@objectstack/driver-memory`: the shape gate of the query path and of the reference matcher `match()`, and the QueryAST `comparison` spelling (`like` / `ilike`).
+  - `@objectstack/spec` exports the shared test, `hasNulInLikePattern`, beside `hasDanglingLikeEscape`, and the `$like` operator's description now names the refusal.
+  
+  On `driver-sql` and the Turso remote transport the refusal goes through the read-scope provenance seam, like every other filter-compile refusal there. On `driver-sql` (and so `driver-sqlite-wasm` and Turso's local mode), a caller whose predicate is marked `'author'` reads the operator, the field, the filter path and the pattern, with U+0000 written as `\u0000`. Any other caller gets only the class statement, and the rest goes to the server log. The remote transport withholds the same way, and through `TursoDriver` in remote mode no mark reaches it, so every caller gets the class statement there. On `driver-memory` every caller reads the full text, as for its dangling-escape refusal.
+  
+  A pattern that ends in a lone unpaired backslash AND holds U+0000 keeps the dangling-escape refusal it had before.
+  
+  **What stays accepted**, pinned per face: every `$like` / `$ilike` pattern without U+0000 answers exactly as before.
+  
+  **Not changed here:**
+  
+  - A pattern without U+0000 matched against a STORED value that holds U+0000 is not refused: it is well formed, and on the SQLite faces it reads the whole stored value, by its own entry in this release.
+  - `@objectstack/formula` still evaluates such a pattern. It refuses nothing, and answers `false` for a dangling escape rather than refusing it, so it is not one of these doors.
+  - `driver-mongodb`, objectql `having` and `service-analytics` refused every `$like` / `$ilike` before this change, and still do.
+  
+  **What an affected author does.** Remove the U+0000 from the pattern. No escape makes it portable: a backslash before it still leaves a U+0000 in the pattern.
+  
+  Blast radius, measured on this tree: no example or template writes a `$like` or `$ilike`, and the published `objectstack-query` skill and the hand-written docs that show one show no pattern holding U+0000. Whether any out-of-repo caller sends one is NOT measured and is not claimed to be zero.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing at the filter-compile doors: no key, Zod schema, object definition or stored representation is added, removed or renamed. `$like` and `$ilike` keep their names and their `z.string()` comparand, and the only spec symbol added is the predicate `hasNulInLikePattern`. What moves is which PATTERN VALUES the drivers answer, and no rewrite of a stored pattern keeps its meaning (dropping the U+0000 changes which rows match), so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. -->
+- 2491729: fix(driver-turso)!: a REMOTE `TursoDriver` no longer needs `better-sqlite3` installed, and the two inherited calls that answered from its private in-memory database now reject (#20054)
+  
+  Clause-②: no (narrowing)
+  
+  `package.json` declares `better-sqlite3` an optional peer, and the README tells a remote-only deployment (Vercel, an Edge runtime) that it does not need it. The code did not keep that promise. With `better-sqlite3` absent, `new TursoDriver({ url: 'libsql://…' })` threw knex's `Knex: run $ npm install better-sqlite3 --save` error at construction, before any remote call.
+  
+  The cause: remote mode handed the `SqlDriver` base a `better-sqlite3` Knex config on `:memory:`, and knex loads a dialect's native driver whenever the config carries a `connection`. Remote mode now builds that Knex instance with no `connection`. It loads no native module, opens no pool and holds no private in-memory database. With `better-sqlite3` absent, a remote driver constructs, connects and runs CRUD through `@libsql/client`.
+  
+  **BREAKING** — two calls on a remote driver that resolved before now reject. This is an accept-set narrowing on a published driver, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). The calls are `SqlDriver` methods that remote mode does not override, and they now reject with knex's `Unable to acquire a connection` error:
+  
+  - `introspectSchema()` used to resolve `{ tables: {} }`, "no tables", whatever the remote database held;
+  - `reclaimSpace()` used to resolve.
+  
+  Both old answers came from the private in-memory database, not from the remote one. The per-method answer or refusal for these inherited calls is carried by #20055.
+  
+  **Error wording only, not the narrowing.** On a remote driver:
+  
+  - `findWithWindowFunctions()` still rejects. The error is now knex's `Unable to acquire a connection` instead of a missing-table error from the in-memory database.
+  - `analyzeQuery()` and `explain()` still resolve the compiled SQL with an `error` field. That field now carries knex's message instead of a missing-table error.
+  - `distinct()` answers the same `DATABASE_ERROR` / 500 as before.
+  
+  **Unchanged:**
+  
+  - **Local and embedded-replica modes.** Their `toKnexConfig` arms are untouched and still run on `better-sqlite3`, so a local driver (`:memory:` or a `file:` url) still fails at construction without it.
+  - **Every call remote mode sends to `RemoteTransport` behaves as before**, including raw SQL through `execute()`. None of them used the Knex instance.
+  - **The `NOT_IMPLEMENTED` / 501 refusals of `detectManagedDrift()` and `planMediaColumnMove()` on a remote driver** still refuse, with the same code and status. Their messages no longer say that remote mode's Knex connection is a placeholder in-memory database; they say that remote mode has no Knex connection.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A narrowing of which calls a remote `TursoDriver` answers: no key, spec symbol, Zod schema, object definition or stored representation is added, removed or renamed — `TursoDriverConfig` and both `TursoConfigSchema` copies are untouched, and `introspectSchema` / `reclaimSpace` keep their names and signatures. What moves is only that a remote driver no longer answers those two calls from a private in-memory database, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The per-method answer or refusal on the remote face is carried by #20055. -->
+- e2c55ed: `driver-turso`: the REMOTE canonical temporal backfill no longer overwrites a bare-number cell with the date SQLite reads it as (#6009).
+  
+  `RemoteTransport.mapFieldTypeToSQL` declares every temporal column `TEXT`, so a `Field.datetime` / `Field.time` column can hold a digits-only string such as `'2026'`, `'86400'` or the keyword `'now'`. SQLite's time-value grammar accepts a bare number as a JULIAN DAY and `now` as the wall clock, so for those two shapes `strftime` answers confidently instead of returning NULL and the `coalesce(strftime(…), col)` that is supposed to preserve unparseable values never fires. The convergence `UPDATE` in `backfillRemoteCanonicalColumn` therefore wrote that answer over the stored bytes, and no later run could get them back — measured on better-sqlite3 13.0.3 / SQLite 3.53.4 with the column declared `TEXT`:
+  
+  ```text
+  '2026'  -> -4707-06-11T12:00:00.000Z    'now' -> the wall clock, now
+  '86400' -> -4476-06-15T12:00:00.000Z    '12'  -> -4713-12-06T12:00:00.000Z
+  ```
+  
+  The local (Knex) half of this was fixed for `SqlDriver` in the same tracker; the remote path is a separate module that builds its own statements and did not inherit it.
+  
+  - **The rows are withheld from the `UPDATE` and they also BLOCK the canonical mark.** Withholding alone would not be enough: a marked column drops the read-side repair, and the raw `'2026'` would then compare as TEXT instead of as the instant the repair reads it as. A withheld row is by construction `col IS NOT canonical`, so it stays inside the probe's `residual`, which the mark already requires to be zero. The column keeps its (unindexed) repair and every query answer is bit-for-bit what it was.
+  - **The predicate is the driver's own, handed across the module boundary — never copied.** `TursoDriver` now passes `{ canonical, nonTemporalText }` where it passed a bare canonical expression, the second arm being `SqlDriver.sqliteNonTemporalTextSql`. Nothing in the shared READ expression changes: `sqliteCanonicalDatetimeSql` / `sqliteCanonicalTimeSql` still misread a bare number exactly as before, deliberately, per the 2026-08-03 cloud#1005 ruling that refused a heuristic in a public expression that runs on every read.
+  - **The third position of `probeRemoteCanonicalColumns`, `backfillRemoteCanonicalColumn` and `backfillRemoteCanonicalColumns` now accepts either shape**, so a caller compiled against the earlier release keeps compiling: `RemoteBackfillSqlRules` (`{ canonical, nonTemporalText }`) is the shape to pass, and a bare `CanonicalSqlFor` is FAIL-CLOSED rather than a fallback — with no guard to withhold by, the convergence phase is refused, the column reports `error` and stays unmarked, and reads stay correct on the repair. The 后果 B epoch recovery still runs on that arm. To move off it: pass `{ canonical: <what you passed before>, nonTemporalText: <the driver's sqliteNonTemporalTextSql> }`.
+  - **New on the per-column report: `nonTemporalTextRowsWithheld`** — what the guard declined to write, or `null` when no guard was supplied and the count was therefore never measured. It is deliberately NOT folded into `unresolvedEpochTextRows`, whose documented meaning is *recorded and harmless to the mark*; these rows are the opposite.
+  - **A documented sentence is corrected in the same change.** The module said rows outside the epoch-recovery band "do not block the canonical mark, because they are fixpoints of the shared repair". That is true only ABOVE SQLite's julian-day ceiling, where `strftime` returns NULL. Below it — `'12'`, `'2026'`, `'86400'` — the repair answers, the row is not a fixpoint, and dropping the repair changes what it matches. Both halves are now stated with the measurement behind them.
+  - **The two bands do not meet, so the guard costs the epoch recovery nothing.** A bare number is read as a julian day only for `0 <= v < 5373484.5` (`'5373484.4'` parses, `'5373484.5'` returns NULL); `REMOTE_BACKFILL_EPOCH_MS_MIN` is `1e12`. The epoch-text `UPDATE` is also structurally out of reach for a second, independent reason: its SET wraps `cast(col as real)`, whose `typeof()` is always `'real'`, so the canonical expression takes its `'unixepoch'` limb and never the `coalesce`/julian one.
+  
+  No read path, no filter compilation and no stored value changes for any column that holds none of this shape: a table with nothing but ordinary legacy rows converges and is marked exactly as before.
+- 88a9330: feat(driver-turso): the `aggregate()` override publishes its declared return type, not `any` (#17277)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention. `TursoDriver` does not merely inherit this door from `SqlDriver` — it OVERRIDES `aggregate()`, and the override was written out with its own explicit `Promise<any>`. So this package's emitted `.d.ts` re-declared the door as `any` on its own and would NOT have picked up the `@objectstack/driver-sql` narrowing — the same shape PR #15280 had to fix separately for `update()` and PR #15267 for four more doors.
+  
+  Both branches already answered the contract's type: the remote branch passes `RemoteTransport.aggregate()`, already declared `Promise<Record<string, unknown>[]>`, and the local branch forwards to `SqlDriver.aggregate()`, narrowed alongside (#17277). The override now declares what it has always answered. A caller that read a cell straight off an aggregate row through the `any` now types what it reads. No runtime behaviour changes.
+  
+  Out of scope and deliberately unmoved: `upsert()` and `beginTransaction()` keep their annotations.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-turso/src/turso-driver.ts#aggregate) A published driver method override's declared return moves off an explicit `any` onto the contract's own shape; no metadata key moves, `packages/spec` is untouched, and the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. -->
+- 3cbcedb: feat(driver-turso): the overridden `IDataDriver` doors publish their honest types, not `any` (#15267)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention. `TursoDriver` does not merely inherit these doors from `SqlDriver` — it OVERRIDES `findOne()`, `create()`, `bulkCreate()` and `execute()`, and each override was written out with its own explicit `Promise<any>`. So this package's emitted `.d.ts` re-declared four of the five doors as `any` on its own and would NOT have picked up the `@objectstack/driver-sql` narrowing — the same shape PR #15280 had to fix separately for `update()`.
+  
+  Both branches of every one of the four already answered the contract's type: the local branch forwards to `SqlDriver`'s door (narrowed alongside, #15267) and the remote branch passes `RemoteTransport`'s result — already declared `Record<string, unknown> | null`, `Record<string, unknown>`, `Record<string, unknown>[]` and `unknown` respectively — through the generic `formatRemoteRow` / `formatRemoteRows`. Each override now declares what it has always answered. A caller that read fields off `findOne()` through the `any` now narrows the `null` arm first. No runtime behaviour changes.
+  
+  `explain()` is not overridden here and reaches these consumers through `@objectstack/driver-sql`. Out of scope and deliberately unmoved: `upsert()`, `aggregate()` and `beginTransaction()` keep their annotations.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-turso/src/turso-driver.ts#findOne, packages/drivers/driver-turso/src/turso-driver.ts#create, packages/drivers/driver-turso/src/turso-driver.ts#bulkCreate) Published driver method overrides' declared returns move off an explicit `any` onto the contract's own shapes; no metadata key moves, `packages/spec` is untouched, and the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. The same change to `execute` is not named above because its destination is the contract's own `unknown`, which `isErasedType` counts as erased (TSO-U6), so predicate 4 cannot read it as narrowed-from-erased; it carries the identical disposition and the body states it in full. -->
+- 51efbf1: feat(driver-sql)!: a text operator over a column whose DECLARED type is temporal answers the type-gated no-match on every SQL face (#15683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. No `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every object definition and filter body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What changes is the ANSWER a published filter surface gives at request time: a text operator aimed at a `date` / `datetime` / `time` column returns the declared no-match instead of the ISO-substring match SQLite happened to give it. The remedy for a caller who was leaning on that match is a different FILTER — the range operators, which are data the caller holds rather than an authored artifact with a stored representation — and it is spelled in the banner below. The one spec change is the membership of an existing exported set (`NON_TEXT_STORED_VALUE_TYPES`), which adds no export and removes none. -->
+  
+  **BREAKING** in the answer sense, on every SQL face, landing in the launch
+  window as `minor` under the lockstep convention this cluster's siblings use.
+  
+  **The behaviour that GOES AWAY, by name: searching a date as a string.** On the
+  SQLite family — `driver-sql` on any SQLite connection, `driver-sqlite-wasm`, and
+  `driver-turso`'s local transport — a `Field.date` / `Field.datetime` /
+  `Field.time` column stores canonical ISO TEXT (ADR-0053), and a text operator
+  matched that text. `{ signed_on: { $contains: '2026' } }` returned every 2026
+  row; `{ made_at: { $startsWith: '2026-01' } }` returned that January's rows;
+  `{ shift_at: { $contains: ':30' } }` returned every half-past shift. **All three
+  now return nothing**, and their `$notContains` mirrors now return every valued
+  row. If you are relying on any of them, this is a row-set change and the
+  replacement is a range filter — spelled out below. The behaviour was never
+  declared by any contract row and it never worked outside SQLite: the same three
+  filters were a `DATABASE_ERROR` 500 on live Postgres.
+  
+  Nothing that was refused becomes admitted, and no new error code is minted — the
+  refusal reused is the one `NON_TEXT_STORED_VALUE_TYPES` already carried for the
+  numeric and boolean classes.
+  
+  Maintainer ruling, 2026-09-05 on #15683, quoted rather than paraphrased:
+  「a text operator over a column whose DECLARED type is temporal is type-gated
+  exactly like the numeric and boolean classes; the SQLite ISO-text match is not
+  a contract」.
+  
+  ## What was wrong — one filter, three answers across one driver family
+  
+  `{ on_day: { $contains: '2026' } }` over a column declared `Field.date` holding
+  `2026-01-05`:
+  
+  | face | before | mechanism |
+  |:--|:--|:--|
+  | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local (SQLite) | **the row** | the column stores canonical ISO TEXT (ADR-0053), so `GLOB '*2026*'` matched it |
+  | `driver-sql` on live PostgreSQL 16.13 | **`DATABASE_ERROR` 500** | `operator does not exist: date ~~ unknown` (SQLSTATE 42883) — the same for `timestamptz` and `time` |
+  | `driver-sql` on MySQL | **NOT MEASURED** | no server was provisionable; reads as coercion via `CAST(col AS BINARY) LIKE` |
+  
+  Three answers to one filter, and no face declared which was canonical. The
+  SQLite answer was the accident of a storage form, not a capability: the same
+  query against Postgres was a 500.
+  
+  ## What it does now
+  
+  The three temporal classes join `NON_TEXT_STORED_VALUE_TYPES`
+  (`@objectstack/spec`), the set the SQL compilers consult at compile time
+  because the stored value is not visible until run time. Every face that reads
+  it — `SqlDriver` (and everything that inherits its compiler),
+  `driver-turso`'s remote transport, `service-analytics`' three SQL lowerings —
+  compiles the positive operators (`$contains` / `$startsWith` / `$endsWith` /
+  `$icontains` / `$like` / `$ilike`) to the FALSE constant and `$notContains` to
+  the TRUE constant. Postgres's 500 becomes that declared answer; complementarity
+  holds; the constants compose with the existing NULL-safe rules and the `$not`
+  rewrite unchanged.
+  
+  **The SQLite ISO-substring match is RETIRED.** A caller who was using it to ask
+  for "records in 2026" writes a range instead, which every dialect has always
+  answered the same way:
+  
+  ```ts
+  // before — matched only on the SQLite family, 500 on Postgres
+  { on_day: { $contains: '2026' } }
+  // after — the prescription, identical on every backend
+  { on_day: { $gte: '2026-01-01', $lt: '2027-01-01' } }
+  ```
+  
+  ## Boundaries, so a reader does not over-read this
+  
+  - **A MULTI-VALUED temporal field is untouched.** `multiple: true` stores a JSON
+    TEXT array, where `$contains` is the MEMBERSHIP spelling #7398 left working on
+    a JSON column — not a substring test. It keeps compiling exactly as before.
+  - **The value-keyed JS evaluators do not move, and they DIVERGE — measured, not
+    caveated.** `driver-memory` canonicalises a declared temporal write to ISO
+    TEXT (#4047), for a `Date` input and a string input alike, so a positive text
+    operator MATCHES there — the exact complement of the answer this changeset
+    declares. That divergence is filed as #17348 and pinned by name in that
+    driver's conformance suite, alongside a correction: the two rows previously
+    read as pinning the no-match answer pass because their comparand omits the
+    milliseconds, not because anything type-gates. `formula` and `having` cannot
+    key on the declaration at all — `matchesFilterCondition(record, filter)` takes
+    a bare record ("this evaluator sees a bare record and has no schema to
+    consult", its own docblock), and `having` filters AGGREGATED rows whose columns
+    carry no field declaration. ⛔ So "on every face" is NOT delivered by this
+    change, and this changeset does not claim it: the SQL family answers the
+    declared rule, the JS faces do not yet.
+  - **`FILTER_TEXT_CASES` grows no temporal column**, deliberately. Every row there
+    is keyed on the STORED value — which is why its non-string column is a number
+    and not a date — so a temporal fixture would assert one stored form across all
+    five drivers that import it, the stored-form guarantee the ruling refused
+    option (b) for.
+  - **MySQL is NOT MEASURED**, not "passing": no server was provisionable, so its
+    cell rests on the compiled-shape pin, which reads the constant a statement
+    would carry without executing one.
+
+### Patch Changes
+
+- ef67b47: fix(objectql,driver-turso): "is this field multi-valued" is `isMultiValueField` here too — the `domain:engine` half of the one-definition ruling (#18408)
+  
+  Maintainer ruling, 2026-09-13 (decision batch #128 item 5, option 1′): there is
+  ONE definition of 「is this field multi-valued」, `@objectstack/spec`'s
+  `isMultiValueField`, and storage follows it. `driver-sql` was aligned by #17469
+  and `os generate migration` by #18199. These four sites were the remainder: they
+  read `field.multiple` raw, which answers `true` on types the predicate calls
+  single-valued (`text`, `master_detail`, `tree`, `number`, …) and `false` on the
+  inherently-multi option types (`multiselect` / `checkboxes` / `tags`) that carry
+  no flag at all.
+  
+  **`@objectstack/driver-turso`** — `RemoteTransport.mapFieldTypeToSQL` short-
+  circuited its whole type switch on the raw flag, so a `{ type: 'number',
+  multiple: true }` field was declared `TEXT` in remote mode while the SAME
+  driver's local transport (`SqlDriver`, aligned since #17469) declared `float`:
+  one declaration, two storage classes, chosen by which URL the deployment
+  happens to hold. New columns for such a field are now declared by the field's
+  own type. Genuinely multi-valued fields (`lookup` / `select` / `file` / `image`
+  / `user` flagged `multiple`, and the inherently-multi option types with or
+  without it) are unchanged — still the JSON-array `TEXT` column.
+  
+  **`@objectstack/objectql`** — three sites, all deciding the SHAPE of a stored
+  value:
+  
+  - the option-derived insert default (`resolveOptionDefault`) assembles an array
+    for a multi-valued field. A `multiselect` / `checkboxes` / `tags` field with an
+    option marked `default: true` and no `multiple` flag was defaulted to a bare
+    scalar, which this engine's own validator then refused as
+    `invalid_type_array` on the insert the default was resolved for;
+  - the referential-integrity dependents probe (`referenceProbeFilter`) composes
+    `$contains` for a multi-valued reference and bare equality for a scalar one. A
+    `master_detail` flagged `multiple` is outside `MULTI_CAPABLE_TYPES`, so every
+    aligned storage side builds it a scalar column — the probe now asks that column
+    the question it can answer, instead of a substring match repaired afterwards by
+    a second narrowing pass;
+  - the cascade-delete `multiValued` verdict, which that probe, the `set_null`
+    write shape and the required-FK escalation all read.
+  
+  **What a deployment feels.** Only declarations that are already off-spec move:
+  `FieldSchema` has refused `multiple` on a non-capable type since #17469 (ADR-0087
+  semantic entry 18), so these shapes now reach the engine and the driver only
+  through doors that never run it — `registerExternalObject` / `initObjects` and a
+  driver's own unvalidated input. Existing columns are untouched: the remote
+  transport only ever declares types for columns it is creating. A deployment
+  holding one of these shapes should re-declare the field — drop the flag if the
+  value really is single, or move the field to a multi-capable type if it is not —
+  which is the same prescription entry 18 already carries.
+  
+  No export is added, removed or renamed in either package, and no authorable key
+  changes its name, type or optionality.
+- a484966: The TypeScript examples in these packages' **published** `README.md` now compile against the package they document — 43 of the 44 blocks the `measure-markdown-ts-blocks` census reported as syntactically valid and wrong, in documents that ship inside the npm tarball.
+  
+  `README.md` is listed in every one of these packages' `files[]`, so these bytes are the artefact a consumer — or a consumer's AI — reads and copies. What the census counted was not style: the examples named options the packages no longer accept, chained a method that returns a promise, and implemented interfaces they never imported.
+  
+  The corrections, by class:
+  
+  - **Legacy option vocabulary.** `@objectstack/client-react`'s hooks take `fields` / `orderBy` / `limit` / `where`, not `select` / `sort` / `top` / `filters`, and `PaginatedResult` carries `records`, not `value`. `@objectstack/service-job` takes `timeoutMs`, `@objectstack/service-queue` takes `maxAttempts`, and `IDataEngine.find` takes `where`.
+  - **Async registration used synchronously.** `ObjectKernel.use()` returns `Promise<this>`, so `kernel.use(a).use(b)` does not chain; the examples now `await` each registration. `ObjectKernelConfig` has no `plugins` member.
+  - **Interfaces implemented but never imported.** Several plugin examples wrote `implements Plugin` with no import, which bound to the DOM's `Plugin`; they now import `Plugin` / `PluginContext` and declare the required `init`. `PluginContext.getService<T>()` has no default type argument, so the examples that read a service now name its contract.
+  - **Removed or never-existing API.** `@objectstack/driver-memory`'s default export is a legacy `onEnable` object that `kernel.use()` refuses — the quick start now registers through `DriverPlugin`; its persistence adapters take an options bag under `persistence.adapter`. `defineStack` has no `driver` key. `@objectstack/rest`'s `RestServer` takes the host `IHttpServer` first and `registerRoutes()` takes no arguments; `RouteManager` is constructed on a server. `@objectstack/spec`'s `ObjectSchema.parse()` returns the value — the `{ success, data }` envelope is `safeParse`'s. `useMutation` has no `onMutate` / mutation context.
+  
+  No runtime code changed and no gate was added (#18715 ruling F). One block is deliberately left: `@objectstack/knowledge-ragflow`'s README writes `source.options.datasetId`, which is what the shipped adapter reads and what `KnowledgeSourceSchema` does not declare — correcting the document either way would contradict one of the two, so the conflict is reported rather than papered over.
+- 95fb417: **The declared `zod` floor moves from `^4.4.3` to `^4.6.1`**, because on zod below 4.6.1 the three standard error formatters — `z.treeifyError()`, `error.format()` and `error.flatten()` — cannot render a refusal these packages actually emit (#19581).
+  
+  Clause-②: no
+  
+  **What breaks below the new floor.** All three formatters walked an issue's `path` by reading `curr[el]` and testing it for truthiness before creating a node, so a path element naming a member of `Object.prototype` was answered by the prototype and no node was ever created. Two different failures follow:
+  
+  | path shape | what happened on `^4.4.3` |
+  |:---|:---|
+  | terminal element (`['assignments','__proto__']`, `['x','toString']`) | the inherited member is adopted as the node, then `node._errors.push(...)` runs on it — `TypeError: Cannot read properties of undefined (reading 'push')` |
+  | non-terminal element (`['__proto__', …]`) | the walk continues **into** `Object.prototype` and writes the next segment onto it — the message is silently dropped from the returned tree and the process gains a global prototype key |
+  
+  **Why it reached this platform's consumers.** `@objectstack/spec` refuses a `__proto__` key on its open-key authoring surfaces, and that refusal's issue path is `['assignments','__proto__']` — precisely the terminal shape. Anything that formatted one of these refusals for display crashed on it, and the crash was in the formatter, not in the guard. The guards themselves are unchanged and still necessary: 4.6.1 still drops a `__proto__` key from `z.record()` and `.catchall()` output, which is what they exist to refuse.
+  
+  **What an upgrading consumer must do.** Nothing, if `zod` is resolved through these packages — the floor does it. A consumer that pins `zod` itself must move that pin to `^4.6.1` or higher; a pin below it reintroduces the crash on any refusal whose path names an `Object.prototype` member, including the ones these packages emit.
+  
+  `@objectstack/lint` also moves, but only in `devDependencies`, so nothing it publishes changes for a consumer and it takes no release here.
+  
+  ## The second half the floor move needs: an unknown key refuses TERMINALLY again
+  
+  From zod 4.5.0 an `unrecognized_keys` issue carries `continue: true`, so it no
+  longer aborts the shape that raised it. Two things follow, and both were
+  measured on this package with the same bodies on 4.4.3 and 4.6.1:
+  
+  1. **A closed shape's own refinements now run after the refusal**, adding a
+     second complaint that contradicts the first.
+  2. **A union containing that shape loses its envelope.** zod's
+     `handleUnionResults` returns a single non-aborted member's issues
+     *unwrapped* instead of raising `invalid_union`, so the union's message
+     becomes whichever branch zod judged closest.
+  
+  At `PUT /api/v1/meta/view` that turned a retired-value refusal into the wrong
+  branch's prescription. Writing `type: 'page'` on a ViewItem answered:
+  
+  ```
+  Unrecognized key(s) on this view container: `viewKind`, `config`.
+    • `viewKind` belongs to a single VIEW, not to the container. Wrap it: …
+  ```
+  
+  — naming neither `page` nor its removal. It now answers, as it did before:
+  
+  ```
+  config.type: 'page' was removed from the list-view `type` enum in
+  @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — …
+  ```
+  
+  **What an upgrading consumer must do.** Nothing. No key or value changed
+  status: everything this package accepted before it accepts now, and everything
+  it refused it still refuses. What changed is which of several competing
+  complaints an author reads, and that a refusal behind a union is again
+  reported as `invalid_union` with its branches, which is what `z.treeifyError()`
+  and this package's own `formatZodError` expand.
+  
+  ⚠️ A closed shape declared with a bare `z.object(…).strict()` or
+  `z.strictObject(…)` — zod's own, not this package's `strictObject` — does NOT
+  get this and will still collapse its union. Build closed authoring shapes with
+  `strictObject`, or re-declare an existing one through `closedObject`.
+- 1f89ba0: A remote Turso deployment now reads, writes and filters the objects it synced at boot by their declared field types. "Remote" means a `libsql://`, `https://`, `http://`, `wss://` or `ws://` URL with no `syncUrl`, or an explicit `mode: 'remote'` (#19844).
+  
+  The engine's boot schema sync (`ObjectQLPlugin`) reaches this driver through `syncSchemasBatch`, because the driver declares `supports.batchSchemaSync`. On the remote transport that method ran the DDL and stopped. It skipped the field-type registration that its sibling doors, `syncSchema` and `initObjects`, run afterwards. For every object a remote app synced at boot, that meant:
+  
+  - **Reads came back as stored.** A declared `boolean` read back as `1`/`0`, and a `json` field as its stored text. A `datetime`, `time` or `date` field read back exactly as stored, for example as an offset-bearing string or epoch text rather than the canonical `…Z` form. The `created_at` / `updated_at` audit columns were a partial exception: a zone-naive cell shaped `YYYY-MM-DD HH:MM:SS` or `YYYY-MM-DDTHH:MM:SS`, optionally with a fractional second, was read as UTC and read back canonical (the column default writes the first shape); any other cell read back as stored, including one ending in `Z` or in an offset such as `+08:00` (so a canonical cell stays canonical), an epoch number or its text, and anything that does not parse as a date. This held for records read through the driver and through the engine's `find` / `findOne`, including the rows an `afterFind` hook receives. A CEL expression or an in-memory `$ne: true` filter evaluated over such a record, such as `field != true`, was therefore true even for a stored `true`. Write-side hook contexts did see `true`/`false`, because the engine converts declared booleans there: the `afterInsert` / `afterUpdate` results and the `previous` record on update and delete hooks.
+  - **Writes were not converted either.** A `datetime` or `time` value in any spelling other than the canonical one (with an offset, a zone-naive wall clock, an epoch number) was stored as sent. A `Date` given to a `datetime` was the exception: it was stored in canonical form. A `date` given as a `Date` or a full timestamp was stored as a full timestamp. An object or array in a `json` field was stored as it would have been anyway. A scalar `json` value (a string, number or boolean) was stored without its JSON encoding.
+  - **Filters compared text as spelled.** A filter on a `datetime` or `time` field compared the stored text with the comparand exactly as the caller wrote it, converting neither side. Rows whose cell or comparand used another spelling of the same value were missed or matched wrongly. For example, a bare-day upper bound `$lte: '2025-07-28'` left out that day's rows stored as ISO text.
+  - **Paging was not deterministic.** A paged read with no `orderBy` got no `id` tie-breaker, so walking the pages could serve one row twice and skip another. The driver logged `Paged read of '…' is NOT deterministic`.
+  
+  `syncSchemasBatch` now finishes the way the other two doors do. It registers each object's field types, keyed by the `object` name it was given, and then runs the canonical temporal backfill once for the whole batch. A DDL failure still rejects before anything is registered. Reads, writes and filters on those objects now convert exactly as they do through `syncSchema` and `initObjects`.
+  
+  What happens on disk at the first boot after upgrading: the one write this change adds is that backfill, which the `syncSchema` and `initObjects` doors already ran. It rewrites `datetime` and `time` cells stored in a non-canonical spelling, including any this door wrote unconverted, into the canonical spelling of the same value. It leaves alone a cell it cannot safely read as a time. Nothing else on disk is touched, so two kinds of cells this door wrote unconverted stay as they are:
+  
+  - A `date` stored as a full timestamp reads back as its calendar day, but an equality filter on that day does not match it.
+  - A scalar `json` value stored without its encoding reads back as whatever its text parses to. A stored `true` reads back as `1`, and a numeric-looking string reads back as a number.
+  
+  Local and embedded-replica deployments are unaffected.
+- 467fa76: A remote Turso deployment now converges, at its first boot after upgrading, the `date` and `json` cells that the engine's boot schema sync wrote without converting them before #19844, where the cell's original value can be read exactly from its stored text. "Remote" means a `libsql://`, `https://`, `http://`, `wss://` or `ws://` URL with no `syncUrl`, or an explicit `mode: 'remote'` (#19868).
+  
+  What a first boot now rewrites:
+  
+  - **A `date` stored as a full timestamp.** A `Date`, or a string such as `2025-07-28T10:00:00Z`, `2025-07-28T01:00:00+08:00` or `2025-07-28 10:00:00`, was stored as written, and a `Date` as its ISO text. Such a cell is rewritten to the calendar day the driver reads it as since the #19844 read fix, which is the day the write path stores today for the same value: the leading `YYYY-MM-DD` of the text, after surrounding whitespace is trimmed. A `Date` gives its UTC day. That is not necessarily the day a caller meant when it built the `Date` at local midnight east of UTC, and no stored cell records which day that was. The rewrite changes no read, because the #19844 read fix already returns that day. An equality filter on the day (`{ day: '2025-07-28' }`), or a bare-day bound such as `$lte: '2025-07-28'`, now matches these rows. The time of day in the stored text is dropped. Since the #19844 read fix, which ships in the same release, no read of a `date` field returns it. Before that fix, an object synced at boot read such a cell back exactly as stored, time of day included.
+  - **A `json` string stored bare whose text does not parse as JSON** (for example `hello`, or an empty string). It is rewritten as its JSON string (`"hello"`), which is what the write path stores for it today. It reads back as the same string as before.
+  
+  What it deliberately leaves as stored, because the original value cannot be told from the stored bytes:
+  
+  - **Any `json` cell whose text parses.** This includes a stored `true`, which reads back as `1`. The column is TEXT, and a boolean `true` became the text `1`. A string `'1'` left the same text, and `1` is also what the write path stores for the number `1` today. A string `'42'` reads back as the number `42`, and its text `42` is also what the write path stores for the number `42`. A string `'true'` reads back as `true`, and its text is what the write path stores for the boolean `true`. These cells keep reading as the #19844 read fix reads them. Before that fix, an object synced at boot read them back as their stored text. Correct the affected records by writing them again through the API.
+  - **JSON nested deeper than SQLite's JSON depth limit**, which SQLite reports as invalid although it parses. It reads back as the structure it is.
+  - **Single-value `image` / `file` / `avatar` / `video` / `audio` columns.** Whether their ids are stored quoted or bare depends on the deployment. Both forms read back the same.
+  
+  The pass runs after every remote schema sync. On an already converged database it costs one read round-trip, and it writes nothing. It works in batches. A large table that does not finish in one boot continues at the next schema sync. A failure is logged at `warn` and never stops a boot. Local and embedded-replica deployments are unaffected. Their schema sync registers the field types before any write, so their write path converts these values, and this pass does not run there.
+- 9bfbacb: fix(driver-sql): the local SQLite `Field.json` storage backfill no longer turns a deeply nested array or object into a string on the next schema sync (#19912)
+  
+  The backfill that converges legacy json cells on their JSON-encoded form (it came with the change that made the SQLite write path JSON-encode every json value; the issue number that change cites no longer resolves, and its live record is the `SqlDriver.backfillCanonicalJsonEncoding` doc block and `sql-driver-12380-json-roundtrip.test.ts`) ran one `UPDATE … set col = json_quote(col)` over every TEXT cell SQLite's `json_valid()` rejects. `json_valid()` answers 0 for JSON nested more than 1000 levels deep (SQLite's JSON depth limit in every build this repository bundles), while the driver reads such a cell with `JSON.parse` without trouble. So a deep array written correctly through the driver was quoted into a JSON string by the next `syncSchema` / `initObjects`, and read back as a string from then on — silently, with no error.
+  
+  SQL now only pre-selects the candidate cells, a page at a time. The driver's own codec decides each one: a cell `JSON.parse` reads is left exactly as stored; a cell it cannot read is a legacy plain string and is rewritten to `JSON.stringify` of that string, byte-for-byte what the old statement wrote for it wherever the engine reads the stored bytes back verbatim. A cell the engine does not read back verbatim is left as stored and keeps reading as it did, where the old statement rewrote it: text holding invalid UTF-8, measured on better-sqlite3 and sql.js. `SqlDriver` on better-sqlite3, `TursoDriver` in local mode (which runs on better-sqlite3 too) and `SqliteWasmDriver` (sql.js) were each measured to read such a cell back with U+FFFD in place of the invalid bytes, so the text the rewrite would be decided from is not the stored text, and the cell is left alone. A legacy text with a leading U+FEFF or an embedded NUL is read back verbatim on all three faces, and is rewritten like any other plain string. Each rewrite is a compare-and-set on the text it was decided from, so a value written concurrently is never overwritten, and a re-run over a converged table still writes nothing. This covers every local SQLite face that inherits the backfill: `SqlDriver` on every client it treats as SQLite (`better-sqlite3`, `sqlite3` and its alias `sqlite`), `SqliteWasmDriver`, and `TursoDriver` in local mode.
+  
+  The decision rule is exported from `@objectstack/driver-sql` as `recoverUnencodedJsonText(stored)`, and `@objectstack/driver-turso`'s remote codec-residue backfill now imports it instead of carrying its own copy, so the local and remote backfills apply one rule. That is a new public export on `@objectstack/driver-sql`'s root entry, and the reason this package takes `minor`: the function returns `null` for text `JSON.parse` accepts and `JSON.stringify(stored)` for text it rejects, and it is exported so that `SqlDriver.backfillCanonicalJsonEncoding` and the remote backfill's `recoverResidueCell` decide each cell by one shared rule rather than by two copies that could drift apart. The remote backfill's behaviour is unchanged.
+- 9d81af7: fix(driver-sql, driver-turso): on SQLite, a `$contains` / `$notContains` / `$icontains` / `$startsWith` / `$endsWith` comparand holding U+0000 is compared whole, against the whole stored value, instead of being cut at the U+0000 by `GLOB` (#19999)
+  
+  Clause-②: no
+  
+  On the SQLite faces these five operators compile to `GLOB`, and SQLite's `glob()` reads both the pattern and the stored value only up to their first U+0000. Nothing raised, and the filter answered a different question. Measured on `SqlDriver` over better-sqlite3 (SQLite 3.53.4), on `SqliteWasmDriver` over sql.js (3.49.1), and on `TursoDriver`'s remote transport over a local libSQL engine (3.45.1). All three answered alike. Over the values `'a'` + U+0000 + `'b'`, `'ab'` + U+0000, U+0000 + `'z'`, `'plain'` and `''`:
+  
+  - `$contains: U+0000` and `$endsWith: U+0000` returned all five rows;
+  - `$contains: U+0000 + 'b'` returned all five rows, where the JavaScript answer is `'a'` + U+0000 + `'b'` only;
+  - `$startsWith: U+0000` returned `''` and U+0000 + `'z'`, where the JavaScript answer is U+0000 + `'z'` only.
+  
+  What changes: a comparand holding U+0000 now compiles to a length-aware comparison instead. `$contains`, `$notContains`, `$icontains` and `$startsWith` use `instr()`, and `$endsWith` compares the value's trailing bytes over BLOB. Such a filter now returns the rows `driver-memory` and `@objectstack/formula` return for it. The comparand is bound as written, so `*`, `?` and `[` in it are literal, as they were before. `$icontains` still folds ASCII letters only, and `$notContains` still returns a row whose value is NULL.
+  
+  - `@objectstack/driver-sql`: the SQLite arm of `SqlDriver`'s text-operator compiler. `SqliteWasmDriver` and `TursoDriver`'s local mode inherit it.
+  - `@objectstack/driver-sqlite-wasm`: none of its own code changes. It inherits the fix, and its exact-text bind reaches every parameter the new comparison binds.
+  - `@objectstack/driver-turso`: the remote transport's own emitter, changed the same way.
+  
+  What does not change: a comparand without U+0000 compiles to the same `GLOB` with the same bound pattern as before. The Postgres and MySQL arms are untouched. `GLOB` still reads a stored value only up to its first U+0000, so for a comparand without U+0000, `$contains`, `$notContains`, `$icontains` and `$endsWith` over a stored value that holds one still compare only the part before it.
+- 3557f85: `README.md` — the remote branch of the architecture tree no longer lists `beginTransaction`, `commit` and `rollback` as `RemoteTransport` operations. `RemoteTransport` has no transaction methods, and remote mode refuses all three with `NOT_IMPLEMENTED` / 501. A new "What remote mode refuses" section lists every `NOT_IMPLEMENTED` / 501 the remote face raises: transactions (including `options.transaction` passed to the remote data and schema methods), a record number for an empty `autonumber` field on `create`, `bulkCreate` and an `upsert` with no `id`, `_id` or `conflictKeys`, `setDeferredDdl(true)`, `detectManagedDrift()`, `planMediaColumnMove()`, and two `aggregate()` shapes that `engine.aggregate()` computes in memory instead (a `groupBy` entry with a `dateGranularity`, an `aggregations` entry with a non-empty `filter`).
+  
+  Also corrected: the remote-mode bullet no longer says every operation is delegated to `RemoteTransport`, the remote example no longer says every CRUD call works as in local mode, and the local branch no longer lists array-style filters, which the driver refuses.
+  
+  - **No behaviour moves.** The driver's source and every published export are byte-identical; only the README text shipped in this package's `files[]` changes.
+- 57c2b73: fix(driver-sql, driver-turso): four filter-refusal doors stop naming a read scope's field and comparand unless the refused predicate is marked as the caller's own (#20020)
+  
+  Clause-②: no
+  
+  A read scope is the RLS, sharing or tenant predicate that `plugin-security` (ordinary reads) and `service-analytics` (the ObjectQL analytics face) AND into the caller's `where`. Both merges mark the scope `'policy'` and the caller's own predicate `'author'` (`markFilterSubtreeProvenance`, `@objectstack/spec/data`). When `SqlDriver` refused a scope at one of the four doors below, the `INVALID_FILTER` / 400 message named the scope's field, and for three of them its comparand too. It did not check the mark. Measured on both faces, through `POST /api/v1/analytics/query` and through an ObjectQL `find` under a merge shaped like `plugin-security`'s:
+  
+  - a column the table does not have. This is reachable from a real CEL rule on a field that is declared but has no column yet;
+  - a retired operator (`$regex`, `$options`) or an operator outside the vocabulary;
+  - `$and` / `$or` whose operand is not a list;
+  - a `$null` / `$exists` whose comparand is not a boolean.
+  
+  Each of these doors now reads the mark on the node it refused, the same way the cross-field and target-field refusals already did:
+  
+  - **`'policy'`, unmarked or ambiguous:** same `INVALID_FILTER` / 400. The message says which kind of refusal fired, but names no field, operator, comparand or filter path. Those go to the server log. For the unresolvable column, the message is the unnamed wording the driver already used when it could not parse the dialect's message.
+  - **`'author'`:** the full message, the same text the door answered before.
+  
+  To find the node, the unresolvable-column door looks up the column name the database reported. It discloses only when every node that names that column is marked `'author'`. A `$and` / `$or` with a primitive operand is judged by the node that carries the key.
+  
+  `SqliteWasmDriver` (`@objectstack/driver-sqlite-wasm`) and `TursoDriver` in local mode extend `SqlDriver`, so they inherit this change from it: the same four doors answer the same way there.
+  
+  **What an unmarked caller loses:** its own diagnostic from these four doors. Measured cases where the caller's own predicate reaches the driver unmarked:
+  
+  - no security plugin in the stack;
+  - a system-context call;
+  - an anonymous call;
+  - a `where` that holds a `{placeholder}` token, which the engine rewrites before the merge.
+  
+  That caller gets the withheld wording with the same code and status. A member's plain `where` under `plugin-security` is marked `'author'` and keeps the full text.
+  
+  The same three door classes on the Turso REMOTE transport (`RemoteTransport`) now read the mark too: the retired or unknown operator (including a non-operator key in an operator map), the non-list combinator, and the non-boolean `$null` / `$exists`. The operands go to its diagnostic sink. `TursoDriver`'s remote mode rebuilds every filter node before the transport sees it, so no mark reaches the transport there, and these refusals keep the withheld wording for every caller in that mode. The unresolvable WHERE column has no refusal on the remote face (the transport answers `[]`) and is not changed here.
+  
+  Not changed: which filters are refused, and the code and status of every refusal. The engine's declared-type, temporal-comparand and filter-token doors are not changed here.
+- f09d412: fix(driver-sql, driver-turso): on SQLite, `$like` / `$ilike` read the whole stored value, instead of stopping at its first U+0000 (#20024)
+  
+  Clause-②: no
+  
+  On the SQLite faces `$like` and `$ilike` compiled to `GLOB`, and SQLite's `glob()` reads the stored value only up to its first U+0000. So a pattern without U+0000 answered a different question over a value holding one, and nothing raised. Measured on `SqlDriver` over better-sqlite3 (SQLite 3.53.4), on `SqliteWasmDriver` over sql.js (3.49.1), on `TursoDriver`'s local mode, and on its remote transport over a local libSQL engine (3.45.1). All four answered alike:
+  
+  - `$like: 'a'` returned a value stored as `'a'` + U+0000 + `'b'`, and `$like: ''` returned U+0000 + `'z'`;
+  - `$like: '%b'`, `$like: 'a_b'` and `$ilike: 'A_B'` did not return `'a'` + U+0000 + `'b'`;
+  - `$like: '_'` did not return a value that is a lone U+0000.
+  
+  Over 108 patterns and 22 `$not` / `$or` / `$and` compositions against 59 stored values, 359 of the 3380 cells over values holding U+0000 differed from `@objectstack/formula` on each face.
+  
+  What changes: a stored value holding U+0000 now has each U+0000 replaced by one stand-in character before `GLOB` reads it. The stand-in is never a literal character of the pattern, never an ASCII letter, and never U+0000. A U+0000 in the value can only be matched by `%` or `_`, and so can the stand-in, so the answer is the one the whole value gives. Such a filter now returns the rows `driver-memory` and `@objectstack/formula` return for it, under `$not`, `$or` and `$and` as well: 0 of those 3380 cells differ on any of the four faces. `$ilike` still folds ASCII letters only.
+  
+  - `@objectstack/driver-sql`: the SQLite arm of `SqlDriver`'s `$like` / `$ilike` compiler. `SqliteWasmDriver` and `TursoDriver`'s local mode inherit it.
+  - `@objectstack/driver-sqlite-wasm`: none of its own code changes. It inherits the fix.
+  - `@objectstack/driver-turso`: the remote transport's own emitter, changed the same way.
+  
+  What does not change:
+  
+  - A stored value without U+0000 gets the same answer as before: 0 of 16640 such cells moved on any face.
+  - A pattern that is a literal prefix followed only by `%` (`'ab%'`, `'%'`) compiles to the same `GLOB` with the same bound pattern as before. Cutting the value at its first U+0000 cannot change that answer.
+  - No index is lost. Under `EXPLAIN QUERY PLAN` over an indexed TEXT column on all three engines, each `$like` pattern measured that starts with a literal (`'ab%'`, `'ab_'`, `'ab%cd'`, `'abc'`, `'a%b%'`) keeps its covering-index search, and each one that starts with a wildcard still scans. A case-exact pattern with a literal prefix now leads with a `GLOB` on that prefix followed by `*`, which every matching value satisfies and which is what keeps that search.
+  - `_` still matches one character, as `GLOB`'s `?` does. A character outside the Basic Multilingual Plane is one character to `_` on SQLite and two to `@objectstack/formula`, which counts UTF-16 units. That difference is older than this change, and this change does not alter it.
+  - A pattern holding U+0000 is still refused (`INVALID_FILTER` / 400).
+  - The Postgres and MySQL arms are untouched.
+  
+  Cost, measured over 10,000 rows on the three engines: against a value without U+0000 the new compile adds one `instr()` per row, and those queries took 1.1 to 2.4 times as long as `GLOB` alone, at most 4.5 ms. A value holding U+0000 pays the rewrite: 10,000 rows each holding one to three U+0000 took up to 35 ms, against at most 3 ms for `GLOB`.
+- adbbc5d: fix(driver-sql, driver-turso): on SQLite, `$contains` / `$notContains` / `$icontains` / `$endsWith` read the whole stored value, instead of stopping at its first U+0000 (#20024)
+  
+  Clause-②: no
+  
+  On the SQLite faces these four operators compiled to `GLOB` for a comparand without U+0000, and SQLite's `glob()` reads the stored value only up to its first U+0000. Nothing raised, and the filter answered a different question. Measured on `SqlDriver` over better-sqlite3 (SQLite 3.53.4), on `SqliteWasmDriver` over sql.js (3.49.1), on `TursoDriver`'s local mode, and on its remote transport over a local libSQL engine (3.45.1). All four answered alike:
+  
+  - `$contains: 'b'` did not return a value stored as `'a'` + U+0000 + `'b'`;
+  - `$endsWith: 'a'` returned that value, and `$endsWith: 'b'` did not;
+  - `$notContains: 'b'` returned it;
+  - `$icontains: 'B'` did not return `'A'` + U+0000 + `'B'`.
+  
+  What changes: these four operators now compile to the length-aware comparisons a comparand holding U+0000 already used, for every comparand. `$contains`, `$notContains` and `$icontains` use `instr()`, and `$endsWith` compares the value's trailing bytes over BLOB. An empty `$endsWith` comparand uses `instr()` too, so it still matches every non-NULL value. Such a filter now returns the rows `driver-memory` and `@objectstack/formula` return for it, under `$not`, `$or` and `$and` as well. The comparand is bound as written, so `*`, `?` and `[` in it are literal, as they were before. `$icontains` still folds ASCII letters only, and `$notContains` still returns a row whose value is NULL.
+  
+  - `@objectstack/driver-sql`: the SQLite arm of `SqlDriver`'s text-operator compiler. `SqliteWasmDriver` and `TursoDriver`'s local mode inherit it.
+  - `@objectstack/driver-sqlite-wasm`: none of its own code changes. It inherits the fix.
+  - `@objectstack/driver-turso`: the remote transport's own emitter, changed the same way.
+  
+  What does not change:
+  
+  - `$startsWith` with a comparand without U+0000 compiles to the same `GLOB` with the same bound pattern as before. The stored value's cut cannot change its answer.
+  - No index is lost. The SQL `SqlDriver` compiles, run under `EXPLAIN QUERY PLAN` over an indexed TEXT column on all three engines, scanned the table for these four operators under `GLOB` and still does; `$startsWith` keeps its index search.
+  - The Postgres and MySQL arms are untouched.
+  - `$like` and `$ilike` are outside this entry. Two other entries in this release cover them: on SQLite they now read the whole stored value as well, and every driver that answers `$like` refuses a pattern holding U+0000 (`INVALID_FILTER` / 400).
+- 8d76c2d: fix(driver-sql, driver-turso): every filter-compile refusal stops naming a read scope's field or literal unless the refused predicate is marked as the caller's own (#20039)
+  
+  Clause-②: no
+  
+  A read scope is the RLS, sharing or tenant predicate that `plugin-security` (ordinary reads) and `service-analytics` (the ObjectQL analytics face) AND into the caller's `where`. Both merges mark the scope `'policy'` and the caller's own predicate `'author'` (`markFilterSubtreeProvenance`, `@objectstack/spec/data`). Nine more `SqlDriver` filter-compile refusals did not check the mark, so when one of them refused a scope, its `INVALID_FILTER` / 400 message named the scope's field, and for most of them its literal too. Measured through an ObjectQL `find` under a merge shaped like `plugin-security`'s, with the scope in the `'policy'` arm:
+  
+  - an empty or non-string `$icontains` comparand;
+  - a non-string `$like` / `$ilike` comparand;
+  - a `$like` / `$ilike` pattern ending in a lone backslash;
+  - an object or array comparand on `$contains`, `$notContains`, `$startsWith`, `$endsWith` or `$icontains`;
+  - an `$in` / `$nin` / `$between` member that cannot be bound;
+  - an `undefined` comparand, in any position;
+  - an element of `$and` / `$or`, or the operand of `$not`, that is not a filter condition object;
+  - a `$`-prefixed key in a node position that is not `$and`, `$or` or `$not`;
+  - a `where` that reaches the driver as an array (the message printed the whole array).
+  
+  Each of them now reads the mark on the node it was raised from, as the other compile refusals already did:
+  
+  - **`'policy'`, unmarked or ambiguous:** same `INVALID_FILTER` / 400. The message says which kind of refusal fired, but names no field, operator variant, comparand, list position or filter path. Those go to the server log.
+  - **`'author'`:** the full message, the same text the refusal answered before.
+  
+  With these nine, every refusal on `SqlDriver`'s filter-compile path goes through the same seam.
+  
+  `SqliteWasmDriver` (`@objectstack/driver-sqlite-wasm`) and `TursoDriver` in local mode extend `SqlDriver`, so they inherit this change from it: the same refusals answer the same way there.
+  
+  **What an unmarked caller loses:** its own diagnostic from these refusals. That is every caller whose predicate reaches the driver unmarked, for example with no security plugin in the stack, in a system-context or anonymous call, or with a `where` that holds a `{placeholder}` token (the engine rewrites it before the merge). That caller gets the withheld wording with the same code and status, and the full text is in the server log. A member's plain `where` under `plugin-security` is marked `'author'` and keeps the full text.
+  
+  The Turso REMOTE transport (`RemoteTransport`) compiles filters itself. Its copies of these refusals now read the mark the same way: the `$icontains`, `$like` / `$ilike`, lone-backslash, `undefined`, non-node element or operand, undeclared-key and non-object `where` refusals. So do its two other compile refusals that still named the field: an operator map with no operator in it, and a `$between` that reached the transport without being lowered. The operands go to its diagnostic sink. For six of these classes, the withheld sentence is the local one behind the `[RemoteTransport]` prefix. An object text comparand and an unbindable list member already answered there through its comparand refusal, which withholds. `TursoDriver`'s remote mode rebuilds every filter node before the transport sees it, so no mark reaches the transport there, and these refusals keep the withheld wording for every caller in that mode.
+  
+  Not changed: which filters are refused, and the code and status of every refusal.
+- 55daf89: fix(driver-turso): in remote mode, a `$between` that is not two bounds is refused with `INVALID_FILTER` / 400 and its message names no field or value (#20094)
+  
+  Clause-②: no
+  
+  In remote mode, `TursoDriver` lowers `$between` to `$gte` / `$lte` before the filter reaches its transport. When the range was not two bounds (`[x]`, `[x, y, z]`, `[]`, a number, a string, `null` or an object), the lowering threw a plain `Error` with no `code` and no `status`. Its message named the object and field and repeated the value, and every caller got it, including when the range came from a read scope such as `plugin-security`'s RLS or sharing predicate. Local mode refuses the same filter with `INVALID_FILTER` / 400 and withholds the field.
+  
+  The lowering now passes such a range on as written, and the transport refuses it the way it refuses every other filter it cannot compile:
+  
+  - `INVALID_FILTER` / 400, the code and status local mode answers;
+  - the message states the refusal's class, `Operator "$between" in this filter requires a [min, max] value array.`, behind the transport's `[RemoteTransport]` prefix, and says the field is withheld;
+  - the field and the value go to the driver's logger, at `warn`.
+  
+  Remote mode rebuilds every filter node before the transport sees it, so no provenance mark reaches the transport. As with the transport's other refusals, a filter marked as the caller's own therefore also gets the withheld message in remote mode. Local mode gives that caller the full text.
+  
+  Not changed: which filters are refused, local mode's answers, and how a two-bound `$between` is lowered, including the whole-day upper bound for a bare `YYYY-MM-DD` on a `datetime` field.
+- bdea10a: fix(driver-turso): remote mode materializes every declared object-level index, not only field-level `unique` (#17609)
+  
+  ## What was wrong
+  
+  In remote mode (`libsql://` / `https://`), `TursoDriver` provisions tables through `RemoteTransport`, and the only index DDL that path could emit came from field-level `unique`. An object's declared `indexes: [...]` — unique or not — had no consumer there, so no remote database ever carried one. The local face (`SqlDriver`) created all of them, so nothing failed and no local test noticed: on a remote tenant database `sys_notification_delivery` (five declared indexes) and `sys_job_queue` (three) held only their primary-key autoindex, and the delivery claim query answered every poll with a full table scan (`SCAN sys_notification_delivery` + `USE TEMP B-TREE FOR ORDER BY`).
+  
+  ## What changes
+  
+  - Remote mode now creates **every** declared index: field-level `unique` plus the object's own `indexes`, unique and non-unique, including `unique: 'organization'` with its NULL-safe `COALESCE(<tenant>, '__global__')` key part. Names and keys come from the same shared normalizers `SqlDriver` and the drift differ use (`uniqueIndexesFromFields`, `normalizeDeclaredIndex`, `buildIndexName`), so both faces land the same index set — pinned by a new local/remote parity suite that compares `sqlite_master` on both.
+  - New tables get their indexes in the same batch as `CREATE TABLE`.
+  - **Existing tables are retrofitted on the next schema sync** with `CREATE [UNIQUE] INDEX IF NOT EXISTS`. No row is read-modified or rewritten.
+  - An index the retrofit cannot create is reported once at `error`, naming the index, the table and the database's own cause. A declared `unique` index over rows that already violate it is **not** forced and no data is repaired: de-duplicate the key's values and re-run schema sync.
+  - Steady-state cost goes down: a sync now reads the existing index names once (one statement, folded into the column-probe batch it already sends) and issues no index DDL when every declared index exists. Before, every boot re-sent one `CREATE UNIQUE INDEX IF NOT EXISTS` per field-level unique index on an existing table.
+  
+  ## Upgrading
+  
+  Nothing to change in metadata or configuration. The first kernel build after upgrading creates the missing indexes on each existing remote database — on a large table that one build pays the index build time. Watch the boot log for `could not create the declared` lines at `error`: each names an index that is still absent and why.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [32be735]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [82cb69f]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [d46deba]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [7c2c5ae]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [be5c602]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [9ccc417]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [beac798]
+- Updated dependencies [c164186]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [9bfbacb]
+- Updated dependencies [2274894]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [9d81af7]
+- Updated dependencies [57c2b73]
+- Updated dependencies [f09d412]
+- Updated dependencies [adbbc5d]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8d76c2d]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [fe677ae]
+- Updated dependencies [437bb0d]
+- Updated dependencies [40626bd]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [88a9330]
+- Updated dependencies [3cbcedb]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [77c801e]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [119a02b]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/driver-sql@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

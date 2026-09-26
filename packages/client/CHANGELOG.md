@@ -1,5 +1,1333 @@
 # @objectstack/client
 
+## 17.5.0
+
+### Minor Changes
+
+- 6b2ec3b: fix(client): `oauth.applications.register` declares `redirect_uris` optional, matching the body schema of the route it posts to (#17215)
+  
+  `ObjectStackClient.oauth.applications.register` declared `redirect_uris` **required**. `POST /api/v1/auth/oauth2/create-client` is mounted verbatim from `@better-auth/oauth-provider`, and that route's body schema declares the member **optional** — so a request the route accepts had no spelling through this SDK. The caller never got a wrong answer; they got a call they could not write.
+  
+  ## What changes for a caller
+  
+  Nothing they have to do. Every existing call still compiles — this only *adds* spellings:
+  
+  ```ts
+  // now expressible, and accepted by the route:
+  await client.oauth.applications.register({ client_name: 'My App' });
+  
+  // unchanged, and still the right call when you have redirect URIs:
+  await client.oauth.applications.register({
+    client_name: 'My App',
+    redirect_uris: ['https://app.example.com/cb'],
+  });
+  ```
+  
+  ⛔ Not breaking in this direction — relaxing a required member to optional keeps every existing call valid. Tightening it back later would be breaking, which is why the parity is now pinned.
+  
+  ## Measured at runtime, not read off a `.d.ts`
+  
+  The vendor body schema was re-introspected the way the card's original measurement was taken: instantiate `oauthProvider()`, walk `endpoints`, find the endpoint whose `path` is `/oauth2/create-client`, read `options.body`. At the installed **1.7.3** (the card measured 1.7.2; the package has since moved) the object still declares **21 members and every one of them is optional**, and `body.safeParse({ client_name: '…' })` succeeds with `redirect_uris` absent.
+  
+  ⚠️ Optional does **not** mean an empty array will do: the vendor refuses `[]`, so when the member is present it must be non-empty. Omitting it and passing `[]` are different requests and only the first is legal. Nor does it mean a client registered without redirect URIs is *usable* — it cannot complete an `authorization_code` flow. The type states what the route accepts, never that every accepted call yields a client fit for every grant; the docblock now says both.
+  
+  ## Why it was required, for the record
+  
+  Not as a guard. It is residue from the method's first commit, which declared `client_name` required too; the same-day follow-up relaxed `client_name` and left this one behind. No comment, test, ADR or review thread ever asserted a reason for it — which is exactly why it read as a defect to the next auditor.
+  
+  Nothing else on the signature moves: the other ten members are byte-identical.
+- cb04f45: fix(client): `organizations.invitations.resend` forwards `teamId`, so resending a team invitation keeps its team (#17274)
+  
+  `resend` has declared `teamId?: string | null` since the `organizations.*` family's first commit and has never forwarded it. The re-invite it issues carried `email`, `role` and `organizationId` only, so a caller resending a TEAM invitation passed the team, the compiler accepted it, the request succeeded — and the invitation landed with no team. Nothing refused, nothing warned, and the success path carried no trace of the loss. The published type is the contract a caller reads, and it promised a placement the call could not make.
+  
+  **Which of the two repairs this is, and what decided it.** The card left the direction open between forwarding the member and deleting it, and required the endpoint to be DRIVEN rather than read off the vendor's types. Driven — a real `AuthManager` (better-auth 1.7.3, organization plugin, `teams: { enabled: true }`, the posture `auth-manager.ts` hard-wires) over a real `SqliteWasmDriver`, with the SDK's own `fetch` handing each `Request` to `AuthManager.handleRequest`:
+  
+  | body sent to `POST /organization/invite-member` | answer |
+  |:--|:--|
+  | `{ …, teamId: '<a real team>' }` | `200`, and the invitation's `teamId` is that team |
+  | `{ …, teamId: 'team_does_not_exist' }` | `400` `Team not found` (`TEAM_NOT_FOUND`) |
+  | `{ …, teamId: null }` | `400` `[body.teamId] Invalid input` (`VALIDATION_ERROR`) |
+  | `{ … }` — no `teamId` member | `200`, and the invitation's `teamId` is `null` |
+  
+  Row 1 settles it: the endpoint accepts a team on this call, the placement is stored on the invitation row and read back by `invitations.list`. Deleting the member would therefore have removed a capability the wire really has, so it is forwarded.
+  
+  **It is not forwarded verbatim, and rows 3 and 4 are why.** `null` is this SDK's own spelling of "no team" — `invitations.list` answers `teamId: string | null`, and handing that object straight back to `resend` is the ordinary way to resend. The vendor's spelling of the same fact is ABSENCE. A bare spread would put `teamId: null` on the wire and convert today's silent drop into a `400` for every round-tripping caller: a second defect wearing the fix's clothes. So `invite` lifts `teamId` out of the spread and sends it only when it is a string; `null` and an omitted member both send no `teamId` at all. ⛔ Nothing else is normalised — an unknown id keeps reaching the vendor, because `TEAM_NOT_FOUND` is the loud refusal that replaces the silent drop.
+  
+  **`organizations.invite` gains the same `teamId?: string | null` member.** It is the only route `resend` has to the wire, and declaring the member is what lets the placement be typed rather than smuggled. Purely additive on a published request type: every existing call compiles and sends byte-identical requests, which the sibling byte pins on `invite` assert unchanged.
+  
+  `resend` also stops spelling its own `role ?? 'member'` and takes `invite`'s default instead — one family, one substitution, no second copy to drift. Behaviour-neutral: an omitted or explicitly-`undefined` `role` still reaches the wire as `'member'`, in the same position, and a caller-named role still survives.
+  
+  Pinned in `packages/client/src/organization-invitation-resend-team-placement.test.ts`: the placement over the real vendor, its read-back through `list()`, the `TEAM_NOT_FOUND` refusal, the `null` round trip that fails on the verbatim forward, and full-string equality on the request bytes for both methods.
+- be7382d: fix(client): the four `packages` READ members declare the stage their door is declared at (#17536)
+  
+  Clause-②: yes
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface WIDENING, shipped as `minor` under the launch-window convention (`check-changeset-no-major` refuses `major` until GA; breaking-ness is carried by this banner and the ADR-0087 disposition below, never by the level). No runtime behaviour changes, and none is possible here: only a declaration moved, and the values these four methods resolve to are the values they have always resolved to.
+  
+  `ObjectStackClient.packages.list` / `.get` and their `ScopedEnvironmentClient` twins returned `InstalledPackage` — the AUTHORING manifest stage, imported from `@objectstack/spec/kernel`. Since PR #17517 both read doors have been declared at EITHER stage: `ListInstalledPackagesResponseSchema.packages` is `z.array(InstalledPackageAtEitherStageSchema)` and `GetInstalledPackageResponseSchema.data` is that same schema. ⇒ A response the server is declared able to send was one this SDK's own types said could not arrive.
+  
+  `packages/spec` is the one contract between producers and consumers, and `packages/client` is a consumer of it, so the consumer's declaration is what moves. All four now declare `InstalledPackageAtEitherStage` from `@objectstack/spec/api`.
+  
+  **What the union is.** It is a union over the two manifest stages — `InstalledPackageSchema` and `AssembledInstalledPackageSchema` — which differ in exactly one key, `manifest`. Every other member of the row (`id`, `name`, `version`, `status`, `enabled`, `installedAt`, …) is common to both branches and reads exactly as it did, so code that reads only those members needs no change at all.
+  
+  **Where the RUNTIME and the TYPE disagree, measured at this head.** The runtime schema is the strict half: `InstalledPackageAtEitherStageSchema.safeParse(row)` answers `success: false` for a row whose `manifest` belongs to neither stage — measured on a `{ bogus: 1, objects: 'not-even-an-array' }` manifest and on an empty `{}` one. The published TYPE is NOT that strict: on the assembled branch `manifest` is declared `Record<string, unknown>`, so both of those same rows COMPILE against the declared return type. ⛔ Do not read this widening as a type-level guarantee about `manifest` — the guarantee is the parse's. The type-level tolerance is a known gap, tracked as **#19324**; its root cause is the deliberate `z.ZodType<Record<string, unknown>, …>` annotation at `packages/spec/src/stack.zod.ts:1283` (#14513 — TS7056 and a declaration-chunk ceiling), and it is ⛔ not this change's to fix. It is recorded as a pin in `packages/client/src/return-type-precision.test.ts`, which reddens the day the gap closes.
+  
+  **What a consumer does, concretely.** A member read off `manifest` on the union arrives as `unknown` (measured: `pkg.manifest.objects` is `unknown`). ⇒ a caller that reaches INTO `manifest` narrows by PARSING the row with a `packages/spec` schema and reading the parse's output:
+  
+  ```ts
+  import { AssembledInstalledPackageSchema } from '@objectstack/spec/api';
+  import { InstalledPackageSchema } from '@objectstack/spec/kernel';
+  
+  const row = await client.packages.get(id);
+  const parsed = AssembledInstalledPackageSchema.safeParse(row);
+  if (parsed.success) {
+    // parsed.data.manifest — the ASSEMBLED stage, object definitions
+  } else {
+    const authoring = InstalledPackageSchema.parse(row);
+    // authoring.manifest.objects — the AUTHORING stage, glob strings
+  }
+  ```
+  
+  ⛔ Do NOT narrow with `Array.isArray(pkg.manifest.objects)`, or with any other structural guess. It separates the stages on NEITHER level: at the type level `pkg.manifest` is the same union inside both branches of that `if`, and at runtime BOTH stages' `objects` are arrays — `z.array(z.string())` at the authoring stage against `z.array(ObjectSchema)` at the assembled one. (Measured: a row carrying no `objects` at all parses as either stage, which is the right answer for it — the key such a guess would read is not there.)
+  
+  In this repository the whole consumer cost is zero sites outside `packages/client` itself: no other workspace package calls either read member.
+  
+  **The WRITE members did not move** and stay declared at the authoring stage — all four of them: `install`, `enable`, `disable`, `update` still answer `Promise<InstalledPackage>`. `install` answers the row its own request contract produced (`PackageInstallRequestSchema` declares `manifest: ManifestSchema`), and PR #17517 moved the read doors alone. That asymmetry is the measurement, not an oversight, and it is pinned.
+  
+  The type is reached the same way `InstalledPackage` always was, from `@objectstack/spec` rather than re-exported here: this SDK has never re-exported the package row, and this change does not start.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No metadata key, no authored property, no config field, no accepted request shape and no stored artifact changes spelling or shape: the edit is four declared RETURN TYPES on one SDK class pair plus their docblocks, so `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. The party addressed is a TYPESCRIPT CONSUMER and the delivery channel is the compiler at their own call site — the audience the ADR-0087 ledger explicitly does not serve. The "what a consumer does" paragraph above is a source-code statement about narrowing a union, not a stored-metadata rewrite, which is the distinction #13080 records this refusal cannot make on its own.
+       `type-surface-only` is NOT claimed here, and it is unavailable on the merits rather than on a resolution defect — measured by driving the gate, not assumed. That category was added for a published TYPE-surface NARROWING, and its predicate 4 (`narrowed-from-erased`) reads the base annotation through `isErasedType`, whose line is "the type IS `any` / `unknown`". At the merge base all four members carried a CONCRETE annotation (`Promise<InstalledPackage>`, `Promise<{ packages: InstalledPackage[]; total: number }>`), so nothing moved off an erased type; and this change runs in the opposite direction from the one the category names. The **BREAKING** banner is carried rather than dropped — that erosion is exactly what #13080 was filed about. -->
+- 62a6dc3: **BREAKING** — `client.environments.updateVisibility(id, visibility)` is REMOVED from the published SDK surface.
+  
+  Clause-②: no
+  
+  A `major`-class change, recorded as `minor` under the launch-window convention. Director-seat decision batch #132 item 1, maintainer 「同意」, 2026-09-13; ADR-0049 enforce-or-remove.
+  
+  **Why.** The method's only behaviour was a write the control plane refuses. It PATCHed the generic `/api/v1/cloud/environments/:id` route with `{ visibility }`, and `visibility` is one of the server-owned columns that route rejects — the same accept-set (`display_name`, `is_default`, `metadata`) the `update` docblock already records. Its own docblock described a whole capability ("`public` lists the environment and freely exposes all revisions") that does not exist. The 2026-09-12 maintainer ruling keeps `visibility` server-owned and forced to `private` until the public-listing feature ships, at which point that capability arrives on its **own** endpoint rather than on this generic update — so this method was never going to be its carrier, even once it lands. A published method that is known never to be implemented is removed rather than left throwing forever.
+  
+  ## No FROM → TO mapping, and why this section is not one
+  
+  There is no replacement to rewrite a call into, and stating one would be false. **Delete the call.** No behaviour is lost: the write it issued was already refused. The channel that reaches every affected consumer is the compiler, at their own call site — strictly more precise than any prose here. When the public-listing endpoint ships, a NEW method is written against it; ⛔ restoring this signature would re-declare the refused generic-update write.
+  
+  `objectstack migrate meta` has nothing to reach: an SDK call site is source code, not stored metadata, so no ADR-0087 conversion entry and no migration-chain step can act on it.
+  
+  Also in the same change: `packages/runtime/src/http-dispatcher.ts` loses an orphaned control-plane route-table docblock that documented routes that file does not serve — `/cloud/*` is skipped there, and the table repeated the corrected accept-set. Comment-only; no runtime byte moves.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/client/src/index.ts#ObjectStackClient) the removed member is a published runtime SDK method with no metadata surface — no Zod schema, no `packages/spec` declaration, no stored representation — so `objectstack migrate meta` has nothing to rewrite and the compiler is the notification channel; the retirement's structured TODO (surface, reason, acceptance) is left at the removal site in `packages/client/src/index.ts` -->
+- e6c34f6: The identity read routes now serve what `@objectstack/spec/identity` declares: `metadata` arrives DECODED on every organization route that reads the row back, and `updatedAt` is declared optional on `Organization` / `Member` / `Invitation` — the shape better-auth's own serializer documents (#18728).
+  
+  Clause-②: yes (widening) — `updatedAt` moves from required to optional on three published schemas, so the set a consumer may hand to `OrganizationSchema` / `MemberSchema` / `InvitationSchema` grows by exactly one shape: the key being absent. Nothing previously admitted is refused, nothing is renamed, and no producer is required to write it. Contract-review tier.
+  
+  Three published schemas could not parse a served response. `OrganizationSchema` declared `updatedAt` required and `metadata` an object; the four organization read routes (`setActive`, `get`, `delete`, `list`) carried no `updatedAt` at all and served `metadata` as the stored JSON text. `@objectstack/client` had recorded that as three 「not relayed」 notes rather than as a defect, and with zero in-repo consumers nothing went red — the audience was entirely external. Maintainer ruling C (batch #158 item 4) fixed the producer and made the one remaining key conditional on a measurement, which is what decided each half:
+  
+  - **`metadata` is decoded at the producer, unconditionally** — it is our column. plugin-auth's data adapter decodes `sys_organization.metadata` out of its stored JSON text on its READ verbs, so all four routes serve the object the spec declares, and an unset column is OMITTED rather than sent as `null`. ⛔ The write verbs are deliberately untouched: better-auth's own organization adapter decodes the `create` / `update` echoes itself and discriminates on the value still being a string, so decoding there would fold the create echo's `metadata` to `undefined`. Both directions are pinned.
+  - **`updatedAt` aligns to the documented wire** — ruling C's own fallback A, and its two conditions were measured against the installed better-auth 1.7.3 rather than assumed. The routes are better-auth's endpoints mounted through a single catch-all, each answering `ctx.json(...)` with no ObjectStack post-processing; and the vendor's `organization`, `member` and `invitation` models declare no `updatedAt` field, while its adapter factory's output transform iterates the declared fields only, so an undeclared column is dropped before any route sees it. Control, in the same file: the vendor's `team` and `organizationRole` models DO declare `updatedAt`, so the absence is a reading. For `member` and `invitation` there is additionally no column to serve — `sys_member` and `sys_invitation` are `managedBy: 'better-auth'`, the one disposition under which the platform injects no audit family, and neither declares `updated_at` itself.
+  - **`@objectstack/client` relays the schemas.** `OrganizationWire` is the spec's `Organization`, `OrganizationMemberWire` is `Member`, and `OrganizationInvitationWire` is `Invitation` with `status` narrowed per route plus the three members the platform adds on top (`teamId` and the two ADR-0105 D8 placement fields, which the non-strict schema strips). The three 「not relayed」 notes are gone.
+  - **The negative controls are the point.** "The client relays the spec schemas" and "the client stopped validating" look identical from a green positive test, so every accepted body is paired with a refused one — a required field genuinely missing, `metadata` still arriving as the stored JSON TEXT, and a `createdAt` or `updatedAt` present but not a datetime. `.optional()` widened the accept set by absence ONLY; a value that is there is still held to `z.string().datetime()`.
+  
+  **Not declared breaking, and the reason is the repo's own criterion** rather than the level being convenient. AGENTS.md binds the breaking class to removing or renaming something an author can write, and to the `(narrowing)` arm of the clause-② pair. Neither holds here: nothing is removed, renamed or retired; the one `packages/spec` edit only widens an accept set; and the `metadata` half is a producer brought into line with a contract this package has published all along — `OrganizationSchema.metadata` has declared an object since it was written, and the client's own comment called the served text 「not relayed」 rather than a shape anyone was promised. No ADR-0087 disposition is claimed because no breaking change is declared: no authored metadata moves, so `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. These three schemas are not metadata types — not in `DEFAULT_METADATA_TYPE_REGISTRY`, no authorable surface. ⚠️ Stated here rather than assumed silently, because it is the one judgement in this diff that the contract review the `Clause-②: yes` declaration commissions should confirm.
+  
+  **What a consumer notices**, and where it is delivered: `organization.metadata` was the stored JSON text and is now the decoded object, so a caller that decoded it itself drops that step.
+  
+  ```ts
+  // before — the caller decoded what the route sent
+  const meta = JSON.parse(org.metadata ?? '{}');
+  // after — the producer decoded it; the key is ABSENT when unset
+  const meta = org.metadata ?? {};
+  ```
+  
+  The channel that reaches that caller is the compiler, on the line that used to work: `JSON.parse` no longer accepts the value. `updatedAt` needs nothing in either direction — it was never on this family's wire, so no caller can have been reading a value, and the declaration now says so out loud instead of promising one.
+- 0b4022b: feat(automation): `GET /automation/:name/runs` retires `cursor` and computes `hasMore` (#19543)
+  
+  This door declared a pagination parameter it never spent and then reported, as a
+  literal, that there was nothing more to fetch. Both halves are closed here, per
+  the maintainer-approved ruling of 2026-09-21 (decision batch #204 item 2,
+  letter C of three).
+  
+  **BREAKING** — `cursor` no longer parses on `ListRunsRequestSchema`, its slot
+  is gone from `IAutomationService.listRuns`, and `@objectstack/client` no longer
+  declares or sends it on any of the three run-list surfaces
+  (`automation.runs.list`, `automation.listRuns`,
+  `client.environment(id).automation.listRuns`). It was declared on the wire,
+  *validated* at the boundary, forwarded into the service contract, appended by
+  the SDK, and read by no implementation. No emit site has ever written the
+  response half `nextCursor`, and the only ordering this door has is a required
+  but non-unique `startedAt` timestamp that nothing ever minted a resume point
+  from — so a caller looping "until the cursor runs out" re-read the first and
+  only window forever, with no error.
+  
+  ```
+  FROM  ListRunsRequestSchema.parse({ name: 'f', cursor: 'n_007' })
+        -> { name: 'f', limit: 20, cursor: 'n_007' }   // forwarded, then dropped
+  
+  TO    ListRunsRequestSchema.parse({ name: 'f', cursor: 'n_007' })
+        -> throws: '`cursor` was removed from GET /api/v1/automation/:name/runs in
+                    @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) …'
+  ```
+  
+  `cursor` is a `retiredKey()` tombstone rather than a deletion: the request
+  schema is not `.strict()`, so a bare deletion would have made Zod silently strip
+  whatever a generated client kept sending — a clean parse and a parameter that
+  never takes effect, which is this defect re-created one layer down (ADR-0104).
+  Writing the key is now a `tsc` error and a parse error carrying the
+  prescription.
+  
+  **The SDK is retired in the same stroke, and that is what makes the sentence
+  above true.** Retiring the key in the schema alone would have left the one
+  generated client this repo ships typing it `string` and sending it into a route
+  that no longer reads it — the exact ADR-0104 shape the tombstone exists to
+  prevent, re-created one layer down, for the channel most callers actually reach
+  this door through. So the option is gone from all three surfaces and no
+  `?cursor=` is appended on any of them; an untyped caller cannot smuggle it past
+  the retired schema either, which is pinned. Same call as when #6361 retired the
+  notifications `cursor`: the client dropped the option and recorded the removal
+  in its docblock.
+  
+  ```
+  FROM  client.automation.runs.list('f', { limit: 5, cursor: 'abc' })
+        -> GET …/automation/f/runs?limit=5&cursor=abc   // the key is dropped server-side
+  
+  TO    client.automation.runs.list('f', { limit: 5 })
+        -> GET …/automation/f/runs?limit=5
+        // `{ cursor }` is now a TS2353 excess-property error; widen `limit`
+        // (1..100) and read `hasMore` instead.
+  ```
+  
+  **⛔ `limit` is NOT retired, and its `.default(20)` stays.** The sibling
+  `/packages` door retired *its* `limit` alongside `cursor` (#17667) because
+  nothing read it. That does not transfer, and the ruling says so explicitly: here
+  `limit` is read end to end — the HTTP boundary enforces the declared `1..100`
+  range read off the schema itself, the service takes it as an option, and the
+  engine spends it as the run store's history window. Retiring it would have been
+  a regression, not a narrowing.
+  
+  **`hasMore` is now computed, and this is a behaviour change callers can see.**
+  The door shipped `{ runs, hasMore: false }` with the `false` written as a
+  literal, beside a list the engine had already cut with `.slice(0, limit)`. A
+  caller asking for one row of a thousand was handed one row and told that was all
+  of them. A request whose window is shorter than the matching run set now
+  receives `hasMore: true` where it previously received `false`; a caller that
+  read `false` as "this is the whole history" was always wrong and is now told so.
+  `nextCursor` stays absent — nothing mints one.
+  
+  Read the new `false` with **one qualification**: unfiltered it is exact, but
+  under `?status=` it means "no further match inside the window that was scanned"
+  rather than "none exists", because the durable history source has no status slot
+  and the window is taken before the filter is applied. Pushing the filter down is
+  a `RunStore` contract change this card did not scope. The published
+  `RunListResult.hasMore` docblock and the response schema's own description both
+  carry that qualification, so a consumer meets it where they meet the field.
+  
+  **How truncation is established, because the obvious signal is wrong.**
+  `runs.length === limit` cannot tell a flow holding exactly `limit` runs from one
+  holding ten thousand; the two windows are byte-identical. So
+  `AutomationEngine` over-reads its history source by exactly one row and compares
+  the merged, filtered, ordered set against the caller's window.
+  `RunStore.listHistory`'s signature is deliberately unchanged — over-reading is
+  expressible in the `limit` it already takes.
+  
+  **New:** `IAutomationService.listRunsPage`, an optional member returning
+  `{ runs, hasMore }` (the shape `IExportService.listExportJobs` already uses,
+  minus the cursor nothing mints), plus the exported `RunListResult`. The engine
+  implements it and `listRuns` is its `runs` half, so there is one implementation
+  and no second copy to rot. A deployment whose automation service does not
+  implement it answers `501` naming the member, never a `200` carrying a guessed
+  `hasMore`.
+  
+  **One strictness regression, stated because it reverses a recorded decision.**
+  `?cursor=a&cursor=b` used to answer `400 VALIDATION_FAILED` and now answers
+  `200` with the key ignored, like any other unrecognised query name. #7300
+  validated the key rather than deciding it, so that a future cursor
+  implementation would not be the one to discover the type was unenforced; this
+  ruling decides it instead — there will be no cursor implementation on this
+  door — so the refusal would be validating a key the contract no longer has.
+  This route declares no closed query-parameter set, so an unrecognised name has
+  never been refused here on its own account.
+  
+  Clause-②: yes
+  
+  <!-- adr-0087: registered automation-runs-cursor-retired -->
+- b76aad5: fix(client)!: every `limit` query-parameter emitter sends what the caller wrote, so `{ limit: 0 }` is no longer silently swapped for the server's default window on three methods (#19567)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime behaviour change in the SDK's query-string building: no spec key, export, type or stored shape is added, removed or renamed, so objectstack migrate meta has nothing to rewrite, and the one caller-side adjustment is to leave limit out rather than pass 0 or null -->
+  
+  **BREAKING** — a narrowing, shipped as `minor` under the launch-window convention
+  (`check-changeset-no-major` refuses `major` until GA; the breaking-ness is carried by
+  this banner and the ADR-0087 disposition above, not by the level). A call that used
+  to answer `200` can now answer `400`.
+  
+  **What changed.** The SDK set the `limit` query parameter behind three different
+  guards, so one input got a different answer depending on the method. Seven methods
+  already sent every value except `undefined`. Three used a truthy test, so `0` and
+  `NaN` never left the client and the server answered `200` with its default window —
+  rows the caller did not ask for. Four used `!= null`, which dropped an untyped `null`
+  as the truthy three did, while the seven others sent it as the text `null`. All
+  fourteen emitters now leave only an absent (`undefined`) `limit` off the wire and send
+  everything else as written; the door that declares the bound decides. The SDK itself
+  still does not validate `limit`.
+  
+  | method | what changes on the wire |
+  |:--|:--|
+  | `automation.runs.list` | `0`, `NaN` and `null` are now sent; the door declares `1..100` and refuses all three with `400 VALIDATION_FAILED` |
+  | `notifications.list` | `0`, `NaN` and `null` are now sent; the inbox clamps `0` to one row (its declared clamp into `1..200`) and refuses `NaN` / `null` with `400` |
+  | `environments.listRevisions` | `0`, `NaN` and `null` are now sent to the control-plane door |
+  | `automation.listRuns`, `environment(id).automation.listRuns` | an untyped `null` is now sent and refused with `400` (`0` and `NaN` were already sent) |
+  | `data.listImportJobs`, `environment(id).data.listImportJobs` | an untyped `null` is now sent; the door reads it as its default of 50, so the answer does not move |
+  
+  `meta.getHistory`, `meta.getAudit`, `search`, `ai.conversations.list`,
+  `ai.pendingActions.list`, `data.export` and `environment(id).meta.getHistory`
+  already sent every value except `undefined`, and are unchanged.
+  
+  **If you relied on the old behaviour:** a call that passed `limit: 0` (or `null`) to
+  mean "the server's default window" should leave `limit` out instead. Every `limit`
+  here is typed `number | undefined`, so `null` only reaches these methods through an
+  untyped caller.
+- d61139f: feat(client): a bearer-mode `ObjectStackClient` keeps the session the server rotates it onto (#16534)
+  
+  Three better-auth routes ROTATE the caller's session on success — they mint a new session, install it in `Set-Cookie` (and, through `bearer()`, in the `set-auth-token` response header), and DELETE the row the caller was presenting:
+  
+  | route | where the new credential is |
+  | --- | --- |
+  | `auth.twoFactor.verifyTotp()` on the enrolment lane | body — `token`, and it is the LIVE one (plugin-auth's `two-factor-rotated-token-echo` repairs the vendor's stale echo) |
+  | `auth.changePassword({ revokeOtherSessions: true })` | body — `token` |
+  | `auth.twoFactor.disable()` | **response header only** — the body is `{ status: true }` |
+  
+  A browser is carried across all three by its own cookie. A bearer client — this SDK's own mode — kept presenting the DELETED session's token, so its very next call answered `401 UNAUTHORIZED`. Measured against a real `AuthManager` (better-auth 1.7.2) over a real driver, driven through the real `ObjectStackClient`, `login → enable → verifyTotp → disable → deleteUser` could not run to the end without the caller re-seating `client.token` by hand between the steps.
+  
+  The three methods now adopt the rotated credential themselves, the way `login()` already adopts the token it is handed. The `token` members stay on the wire and stay declared, so a caller that keeps its own credential store is unaffected; what changes is that it no longer has to.
+  
+  **No public surface moves.** No new export, no new option or flag, no new key on any declared request or response type — the SDK stores a token the server already sends and this package already declares. Graded `minor` rather than `patch` because the published runtime behaviour of three methods moves for existing callers.
+  
+  ## What does NOT change, deliberately
+  
+  The adoption is on those three routes only, never in the shared `fetch` wrapper. `set-auth-token` rides **every** response that stages a session cookie — `POST /update-user` stages one to carry the updated user without rotating anything — and it carries the SIGNED `<token>.<sig>` spelling while every JSON `token` echo carries the UNSIGNED one. A wrapper-level read would therefore rewrite the stored credential into a different spelling of the SAME session on ordinary traffic. `auth.me()`, `auth.sessions.list()`, `auth.updateUser()` and `auth.twoFactor.verifyBackupCode()` (which does not rotate — the vendor echoes the session it resolved at entry) all leave the stored credential byte-identical, and that is pinned.
+  
+  A cookie-only deployment sends no `set-auth-token`; there is then nothing to adopt and `twoFactor.disable()` leaves the stored credential exactly as it was. `changePassword` without `revokeOtherSessions` answers `token: null` and likewise stores nothing.
+  
+  The three TSDoc warnings that told bearer callers "this SDK does not store it" are updated in the same change.
+- 1c4270f: feat(client): `environments.delete` gains `purge` and documents the hosted control plane's two-step delete (#17636)
+  
+  The hosted control plane's `DELETE /api/v1/cloud/environments/:id` follows cloud ADR-0014: a live environment is **archived**, and only a second call with `?purge=1` on the now-archived environment tears it down. `?force=1` confirms a production environment and is never a purge. The SDK sent `force` only, so an SDK caller could archive an environment but never purge one.
+  
+  - `opts.purge?: boolean` sends `?purge=1`. It combines with `force`: a production environment is torn down with `{ force: true }`, then `{ force: true, purge: true }`. Calls that pass no options, or `force` alone, build exactly the URL they built before.
+  - The return type declares the two answers the route actually sends, discriminated by `deleted`:
+    - archive: `{ environmentId, deleted: false, archived: true, purgeDeferred, retentionDays, warnings, message }`
+    - teardown: `{ environmentId, deleted: true, purged: true, warnings }`
+  
+    Both members carry every key the old declaration named (`deleted`, `environmentId`, `warnings`), so existing reads still compile.
+  - The JSDoc no longer describes a one-call cascade delete: a live environment is archived, `purge` acts only on an archived environment, `force` is the production confirmation, and a `failed` environment is torn down in one call.
+  - `organizations.delete`'s JSDoc no longer claims that server-side hooks tear down the organization's environments. No hook does; delete each environment first.
+  
+  Graded `minor`: a purely additive widening of a published method's accepted options and declared answer (the "WHICH LEVEL" rule in `.github/workflows/pr-automation.yml`). Nothing is removed or renamed.
+- f904e61: fix(client): `organizations.getActiveMember(organizationId)` answers the organisation the caller NAMES, not whichever one the session has active (#16568)
+  
+  **BREAKING** — the answer this published method gives moves for existing inputs. The signature, the declared return type and the export are byte-identical; what changes is the response an existing call observes, stated below as a before/after pair per input.
+  
+  The method built `GET /organization/get-active-member?organizationId=…`, and better-auth 1.7.2's handler for that path reads `session.session.activeOrganizationId` and never looks at `ctx.query`. The query string was dead on arrival: a client doing a permission check for organisation B while A was active got **A's** membership row back, with a 200 and no diagnostic — the wrong-but-plausible answer, silently. The SDK's own JSDoc promised "the calling user's membership row in the given organisation", so this was a declared capability the runtime did not deliver.
+  
+  It now asks the question honestly, in two requests:
+  
+  1. `GET /get-session` — the caller's own user id;
+  2. `GET /organization/list-members?organizationId=…&filterField=userId&filterValue=<the caller>&limit=1` — the row, unwrapped from the one-entry page.
+  
+  `list-members` reads `ctx.query.organizationId`, and its rows carry the identical shape (`OrganizationMemberWithUserWire`, user projection included), so the signature and the declared return type are unchanged and no caller's types move.
+  
+  ## What an existing call observes, before and after
+  
+  Everything here is measured against a real `AuthManager` (better-auth 1.7.2, organization plugin) over a real `SqlDriver`. Each bullet is one input, with the response it drew before and the response it draws now.
+  
+  - **An organisation id other than the session's active one.** Before: a 200 carrying the **active** organisation's membership row, whatever id was named. After: a 200 carrying the **named** organisation's row. An input that named the active organisation's own id drew that organisation's row before and draws the same row after — `auth.me()` is where that id is readable, on `session.activeOrganizationId`.
+  - **An organisation the caller is not a member of.** Before: the named organisation was never consulted, so the answer was about the **active** one — a 200 carrying the active organisation's row, or `400 MEMBER_NOT_FOUND` when the caller had no row there either. After: `403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION`, the server's own refusal, about the organisation that was actually named.
+  - **Any id, on a session with no active organisation.** Before: `400 NO_ACTIVE_ORGANIZATION`. After: a 200 carrying the caller's row in the named organisation. `setActive` has stopped being a precondition, which is the point of naming the organisation.
+  - **An empty `organizationId`.** Before: a 200 carrying the **active** organisation's row — better-auth resolves `ctx.query.organizationId || session.activeOrganizationId`, so an empty string fell through to session state and the wrong-but-plausible answer survived on that one input. After: the SDK refuses it before the wire, with a thrown `[ObjectStack] organizations.getActiveMember: organizationId is required`.
+  
+  Two things do not move: an anonymous caller still draws `401 UNAUTHORIZED`, thrown by the same session middleware that guarded the old route; and the row's shape is the same on both sides. The method now makes two HTTP requests where it made one.
+  
+  Graded `minor` rather than `patch`: the method's published behaviour moves for existing callers, which is the same clause-② judgement this PR declares, and the maintainer's ruling of 2026-09-04 (decision batch #35) holds that a change to a published package's public surface takes at least `minor` — a commit type may raise a bump, never lower it below what the act requires. The banner above carries the breaking-ness that the level cannot, per the ruling recorded on #16568 on 2026-09-08.
+  
+  The auth route ledger's `GET /api/v1/auth/organization/get-active-member` row is rebooked from `sdk` to `server-only` in the same change: `sdk` means "expressed by the SDK", and no SDK method builds that URL any more. The `get-session` and `list-members` rows gain the method in their notes, since it now builds both. Ledger-internal, nothing published moves with it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) SDK call-site change, no metadata conversion -->
+- fb6a2de: fix(client): `packages.get` binds the bare `InstalledPackage` row on both the global and the environment-scoped client, replacing a `{ package }` envelope no surface emits (#12034)
+  
+  `client.packages.get(id)` and `ScopedEnvironmentClient.packages.get(id)` now resolve to **`InstalledPackage`** — the row itself — instead of an object wrapping it.
+  
+  **Migration — read the row directly, not `.package`:**
+  
+  ```ts
+  // before
+  const { package: pkg } = await client.packages.get('com.acme.crm');
+  const pkg2 = (await scoped.packages.get('com.acme.crm')).package;
+  
+  // after
+  const pkg = await client.packages.get('com.acme.crm');
+  const pkg2 = await scoped.packages.get('com.acme.crm');
+  ```
+  
+  FROM `{ package: any }` (global) and `{ package: InstalledPackage }` (scoped) TO `InstalledPackage` on both.
+  
+  This is a **narrowing**: a `.package` read compiles today and stops compiling after this change. That is the point of the change rather than a side effect of it — the wrapper was never what the wire sent, so every one of those reads was already `undefined` at runtime, and on the global method the `any` member is what kept the falsehood invisible. Nothing about the request or the wire changes; only the declaration moves to match what the server has been sending.
+  
+  Why it can be bound now, when #11925 deliberately left it erased: this route used to be served by two implementations that disagreed — the runtime dispatcher sent the bare row, the `@objectstack/rest` registrar sent `{ package }` — so no declaration was true on both. The registrar's read routes were removed in #16628, leaving the dispatcher's `/packages` domain as the single implementation. It builds the detail body with the same expression it maps over every `list` row, which is why this type now agrees with the `InstalledPackage[]` that `packages.list` has already declared, and with `GetInstalledPackageResponseSchema` in `@objectstack/spec`, which has declared `data: InstalledPackageSchema` all along.
+  
+  The environment-scoped method is the sharper half of the change: its member was a real `InstalledPackage`, not `any`, so `.package` reads there looked type-safe while returning `undefined` against every surface that has served that path since #16628.
+- bccf311: fix(client): `oauth.applications.register` declares only the members `/oauth2/create-client` accepts — `name`, `scopes` and `metadata` are removed (#15447)
+  
+  **BREAKING** — three members leave a published request type. A caller who sets one compiles today and gets a type error after this release. That is the point: the route never honoured any of them, so what the compiler now refuses is code that was already having its value thrown away.
+  
+  ## What a caller passing these members should do instead
+  
+  | you were passing | pass instead | why |
+  |---|---|---|
+  | `name: 'My App'` | `client_name: 'My App'` | same `string`, and `client_name` is the member the route reads |
+  | `scopes: ['openid', 'profile']` | `scope: ['openid', 'profile'].join(' ')` | ⚠️ **not** a rename — `scope` is one space-delimited string; posting an array is refused with `400 [body.scope] Invalid input: expected string, received array` |
+  | `metadata: { tenant: 'acme' }` | nothing — delete the member | no door this SDK can reach accepts it (see below) |
+  
+  ## ⚠️ These were the vendor's RECORD vocabulary, not typos
+  
+  `client_name` writes the DB column literally named **`name`**; `scope` writes the DB column literally named **`scopes`**, as a JSON array. The removed members were the *column* names offered next to the *wire* names in the same declared type — an author picking the adjacent one of two got a success receipt and no value. Treating them as misspellings would be the wrong reading of what they were; the prescription above is still the wire member either way.
+  
+  ## Why they had to go rather than be honoured here
+  
+  `POST /api/v1/auth/oauth2/create-client` is mounted verbatim from `@better-auth/oauth-provider@1.7.2`. Its body schema declares 21 members and sets no `catchall`, so it is zod's default **strip**: an unknown key is dropped, not refused, and the caller gets **HTTP 201 and a client that quietly does not have the value**. Driven end to end against a real `betterAuth` + `oauthProvider` over a real ObjectQL engine on a real socket, through this client: each of the three came back absent from the response, absent from `oauth.applications.get`, absent from `oauth.applications.list`, and `null` in the `sys_oauth_application` row.
+  
+  A second, independent barrier stands behind that strip — the handler funnels the parsed remainder into the opaque-metadata envelope, and all three names sit in `OPAQUE_METADATA_RESERVED_FIELDS` — so no amount of loosening on the SDK side could ever have made them arrive. `metadata` in particular is honoured only by `PATCH /admin/oauth2/update-client`, which is `SERVER_ONLY` and therefore not an HTTP route at all: over the wire it answers 404 with a zero-byte body.
+  
+  Nothing else on the method moves. The two members the route does honour, `client_name` and `scope`, are declared exactly as before and still reach the server byte for byte; the method's return type, its URL and its request-building step are unchanged.
+  
+  Graded `minor` rather than `patch` because a published package's public surface moves, per the maintainer's ruling of 2026-09-04 (decision batch #35) that such a change takes at least `minor`; the banner above carries the breaking-ness the level cannot.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Claimed on a POSITIVE argument rather than on the detector finding nothing. Stated plainly: the table above IS a prescription, and it is addressed to a TYPESCRIPT CONSUMER at their own call site, delivered by the compiler — the audience ADR-0087's D8 addendum says the ledger explicitly does not serve. Nothing authorable moves: no spec key, no Zod schema, no object definition, no config field and no stored representation changes spelling or shape, so `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. Minting a ledger id here would put a prescription in the one ledger this gate keeps true that none of its three consumers can project. The other four categories are closed on facts: `@objectstack/client` publishes to npm (not `unpublished`); no id pre-dates the base (not `already-registered`); no named symbol is a non-metadata runtime interface whose members moved (not `runtime-interface-only`); and `type-surface-only` fails its predicate 4 (`narrowed-from-erased`), because the request type was concretely declared at the merge base rather than `any` — this narrowing removes members from a concrete type instead of replacing an erased one. ⚠️ Residual declared rather than hidden: the vocabulary still has no category for a source-author prescription the ledger must not carry, which is D8's blind spot reached from a third direction; raised for the maintainer in the PR report rather than resolved by dropping the BREAKING banner. -->
+- 9bd4344: feat(auth)!: adopt better-auth's account-issuer rollback — drop `sys_account.issuer`, retire the backfill, lift the `@better-auth/*` family to an exact `1.7.3` (#17440)
+  
+  <!-- adr-0087: registered sys-account-issuer-retired -->
+  
+  **BREAKING** — a platform object drops a declared field and `@objectstack/plugin-auth`
+  drops six published symbols. Shipped as `minor` under the launch-window convention
+  (`major` is refused by `check-changeset-no-major`; breaking-ness is carried by this
+  banner plus the ADR-0087 disposition above). The hand-migration prescription is
+  registered under protocol major 18 as `sys-account-issuer-retired`.
+  
+  better-auth `1.7.3` removed the issuer-scoped account identity outright
+  (`better-auth/better-auth#10909`): `createLocalAccountIssuer` is deleted,
+  `accountSchema.issuer` is gone, `AccountKey` is `(providerId, accountId)` again, and the
+  `account.issuer` column and its unique index are gone from `get-tables`. There is no
+  drop-in replacement. `#16186` pinned the family at an exact `1.7.2` as a stopgap; this is
+  the durable half, per the maintainer ruling of 2026-09-10 on `#16629`.
+  
+  ## 迁移:FROM → TO
+  
+  | FROM | TO | the one-line fix |
+  |:--|:--|:--|
+  | `sys_account.issuer` (column + `{ fields: ['issuer','account_id'], unique: true }`) | — | nothing replaces it; identity is `(provider_id, account_id)`, declared UNIQUE on `sys_account` since the object was created |
+  | reading `account.issuer` off a row or off `client.accounts.list()` | `sys_sso_provider.issuer`, resolved through the account's `provider_id` | `provider_id` is unique per environment, so it names the authority on its own |
+  | `backfillAccountIssuer(ql, …)` | — | delete the call; there is no successor pass |
+  | `CREDENTIAL_ISSUER` / `oauthIssuerFor(id)` | — | drop the argument; `internalAdapter.createAccount({ userId, providerId, accountId, password })` takes no `issuer` |
+  | `ResolvedSocialProvider`, `BackfillAccountIssuerOptions`, `BackfillAccountIssuerResult` | — | delete the import; the compiler names every site |
+  | `@better-auth/*` at an exact `1.7.2` (eleven members) | an exact `1.7.3` (eleven members) | the family moves as ONE line — `@better-auth/core@1.7.2` and `@better-auth/kysely-adapter@1.7.3` are mutually incompatible in both directions |
+  
+  ## ⭐ Existing deployments: run the pre-flight BEFORE the column is dropped
+  
+  Uniqueness moves from `(issuer, account_id)` to `(provider_id, account_id)` — a
+  **narrower** key. Two rows sharing `provider_id` + `account_id` and differing only in
+  `issuer` are legal under the old key and are ONE account under the new one.
+  
+  ```
+  os migrate account-issuer          # read-only; exits non-zero when the drop must not proceed
+  # … take a backup (the operator's act, and the apply step's precondition) …
+  os migrate apply --allow-destructive
+  os migrate account-issuer          # post-check: reads zero
+  ```
+  
+  The pre-flight reads **rows**, never the index declaration. `syncDeclaredIndexes` logs a
+  plain UNIQUE whose CREATE failed on existing duplicates onto the durability channel and
+  lets the boot continue (`#14902` / `#15479`), so a database can carry the declaration
+  without the constraint — and on such a database the drop does not fail loudly, it
+  degrades silently: the rows become indistinguishable and a sign-in can resolve onto the
+  wrong user's account. `os migrate apply --allow-destructive` re-runs the same pre-flight
+  and refuses the drop before writing any DDL. A read that throws, or a scan that
+  truncates, refuses too — an unread table is not a clean one.
+  
+  ⛔ Colliding rows are never merged or dropped for you: which row survives is application
+  knowledge, and two different people can be behind one colliding key. Keep the row whose
+  provider account is live, delete the rest so a fresh sign-in re-links, and re-run.
+  
+  The boot refusal is unchanged and needs no new machinery: a runtime already refuses to
+  start against unapplied destructive drift, naming the command to run, and never
+  auto-migrates.
+  
+  ## ⚠️ A `provider_id` re-pointed at a different IdP must have its bindings REBUILT
+  
+  This is the one case `issuer` still discriminated. After the drop no column records which
+  IdP vouched for a row, so if a re-pointed provider's new IdP mints a subject the old one
+  had already issued to somebody else, the key resolves that sign-in onto the other
+  person's account. Under the old key that failed loudly (`unable_to_link_account`); under
+  the new one it is silent.
+  
+  ⇒ `sys_sso_provider` now **refuses an `issuer` change while `sys_account` rows are still
+  bound to that `provider_id`** (`RESOURCE_CONFLICT` / 409). Delete the provider's account
+  bindings first; each user re-links on their next sign-in.
+  
+  ## Why the column was a liability, not an asset
+  
+  A credential row whose `issuer` was not the local credential issuer was invisible to
+  `findAccountByKey`, so sign-in failed `INVALID_EMAIL_OR_PASSWORD` behind a "User not
+  found" warn pointing at the `sys_user` row rather than at the account. **Four checklist
+  items had that recorded as a knownGap, each rediscovering it.** Its discriminating power
+  here was near zero anyway: `sys_sso_provider` declares `{ fields: ['provider_id'], unique:
+  true }`, so `provider_id → issuer` is a function within an environment.
+  
+  ## Also in this change
+  
+  `pnpm check:vendor-export-contract` (from `#16186`) keeps its exactness requirement and
+  still resolves every named symbol — its self-test re-anchors from the now-retired
+  `@better-auth/core/db` specimen onto a live edge, and gains a case asserting the two
+  deleted names are imported nowhere. `#11627`'s hash-shadow-key machinery is untouched: it
+  is a generic driver capability serving five UNIQUE members of the >768-char class.
+
+### Patch Changes
+
+- 3c86008: `client.ai`'s docblock says the AI slot answers 501, names the 401-first and `GET /ai/agents` arms, and stops promising a 404
+  
+  The `ai` namespace docblock described the pre-`capabilityUnavailable`
+  behaviour: that this repo's dispatcher *"404s `AI service is not configured`
+  when the service is absent (the open-source default)"*. The dispatcher has
+  answered **501** since the shared exit landed. `/ai/*` is registered
+  **unconditionally** (`createAiDomain`, plus the host wildcard across four
+  methods in every branch of the scoping conditional), so a request reaches a
+  handler with nothing behind it — which is 501 Not Implemented, not 404.
+  `packages/runtime/src/domains/unavailable.ts` exists to draw exactly that line:
+  404 means *the route is not there*, and for `/ai/*` that is false.
+  
+  **Why the replacement is narrower than "`/ai/*` answers 501".** That sentence
+  is not true either, and a caller branching on status needs both exceptions.
+  Verified against the unserveable-slot branch in
+  `packages/runtime/src/domains/ai.ts`, in its own evaluation order:
+  
+  ```
+  FROM  any /ai/* with no AI service  ->  404 `AI service is not configured`
+  
+  TO    anonymous caller              ->  401  (ANONYMOUS_DENY_STATUS; the 501 and
+                                                the courtesy below are capability
+                                                disclosures, owed to nobody who has
+                                                not authenticated)
+        GET /ai/agents                ->  200  { agents: [] } under the envelope's
+                                                `data` — a console polls it on every
+                                                navigation to decide whether to show
+                                                AI affordances
+        every other /ai/* route       ->  501  serviceUnavailableMessage('ai')
+  ```
+  
+  All three arms are already test-pinned in
+  `domains/ai-anonymous-deny-ordering.test.ts` — this changeset moves no
+  behaviour, only the sentence describing it.
+  
+  **The `GET /ai/agents` courtesy was mentioned nowhere in this docblock**, which
+  is the one an SDK reader actually opens, so it is added rather than merely
+  corrected. Also stated now: the 501 body is not a local string — it comes from
+  the shared `serviceUnavailableMessage`, the same sentence
+  `discovery.services.ai` reports for the slot, so the two cannot drift into
+  naming different remedies.
+  
+  ⛔ No behaviour changes. This is a docblock; no export, authorable key, accept
+  set or response byte moves.
+  
+  **This is shipped, which is why it carries a changeset rather than
+  `skip-changeset`.** `@objectstack/client`'s published `files[]` ships `dist`,
+  and this TSDoc is emitted into all four built artifacts — `dist/index.d.ts`,
+  `dist/index.d.mts`, `dist/index.js` and `dist/index.mjs` — measured on the
+  built tree, with the stale `AI service is not configured` sentence absent from
+  every built file afterwards and the docblock's own neighbouring sentence
+  present as the lit control. The declarations are what a consumer's editor shows
+  on hover and what an upgrading agent greps, and they change.
+  
+  The two sibling corrections in the same change do **not** publish and are not
+  named here: `packages/runtime/src/route-ledger.ts` is a CI-audit ledger that is
+  not exported from the runtime entry (`ROUTE_LEDGER` is absent from
+  `packages/runtime/dist` entirely), and the `domains/ai.ts` implementation
+  comment is not emitted — three pre-existing comments from that same file were
+  probed as controls and none appears in the built output.
+- 7baf04a: `oauth.applications.register`'s docblock says where a plain `name` IS honoured, and that it is not this route
+  
+  A caller who wants to name an OAuth client reaches for `name`. On the route this
+  method posts — the provider's `/oauth2/create-client` — that member is not in
+  the body schema and is stripped: driven on a real socket, the call answered
+  **201** and the value was absent from the response, from `applications.get`,
+  from `applications.list`, and `null` in the `sys_oauth_application` row's `name`
+  column. Nothing in the answer says so.
+  
+  The spelling is not wrong everywhere, which is what made it worth writing down:
+  `POST /api/v1/auth/sys-oauth-application/register` — the session-required
+  ObjectStack mount behind the Console's *Setup → OAuth Applications* form —
+  answered **200** to the same body, mapped `name` onto `client_name`, and set
+  that column. That mount is `disposition: 'server-only'` in the auth route ledger
+  and objectstack#17210 ruled it stays that way, so no SDK method builds its URL.
+  
+  The docblock now states both halves where the caller reads them: post
+  `client_name` to name a client from here, and `redirect_uris` must arrive
+  pre-split — the newline-separated-textarea split is the Console wrapper's, not
+  this route's.
+  
+  Docblock only. No method is added, no request or response type changes, and the
+  ledger row is untouched — but the text ships inside `dist/*.d.ts` as editor
+  hover, so it is a `patch` rather than a no-publish change.
+- 400167a: `environments.update`'s JSDoc no longer advertises writes the control plane refuses, and `environments.updateVisibility` carries a current-state note.
+  
+  The `update` comment listed `display_name, plan, status, is_default, metadata` as the updatable set, and the namespace route table listed `plan` and `status` too. `plan` and `status` are read-only columns on the control plane; the generic `PATCH /api/v1/cloud/environments/:id` route answers an unknown or read-only key with a **400** rather than dropping it, so the comment was actively teaching a call that fails. The same prose implied `visibility` was writable while it is server-owned.
+  
+  Three prose sites move, all in `packages/client/src/index.ts`:
+  
+  - **The namespace route-table docblock.** The PATCH accept-set now reads `display_name, is_default, metadata`, with the redirects stated: plan changes go through the billing routes, status changes through the lifecycle actions (archive / restore / suspend / resume), and `visibility` is server-owned.
+  - **`update`'s JSDoc.** The same accept-set with per-field detail, and — the sentence that matters most to a caller — that an unknown or read-only key is answered with a 400 and is **not** dropped silently. Silent-drop is the assumption a caller reasonably makes today, and it is the wrong one.
+  - **`updateVisibility`'s JSDoc.** A note that the call is refused today, so the paragraph describing what `public` does describes a capability that does not exist yet. The 2026-09-12 maintainer ruling keeps `visibility` server-owned and forced to `private` until the public-listing feature ships, at which point it gets its own endpoint rather than this generic update.
+  
+  ⛔ **No signature, type or runtime byte moves.** `patch` stays `Record<string, unknown>` and `updateVisibility`'s signature and body are byte-for-byte unchanged (verified by hash, before and after). Narrowing a published accept-set is as much a breaking change as widening one, and retiring, re-signing or throwing from a published SDK method is a maintainer ruling — neither is a doc fix's to make. What reaches consumers is the hover text in `dist/index.d.ts`.
+  
+  ⚠️ The 400 is an **inherited reading**, not one measured from this repo: `/api/v1/cloud/*` is served by `objectstack-ai/cloud`, which is not readable from here, so no gate here can check it. The comments say so at the point of the claim rather than leaving a later reader to try.
+- 156792e: The package-install request contract now names the door that actually serves it, declares the two body forms that door accepts, and the door honours `enableOnInstall` instead of ignoring it (#18058).
+  
+  `PackageInstallRequestSchema` was declared, published and bound to `POST /api/v1/packages/install` — a path the composed runtime mounts nowhere: the dispatcher answers `handled=false` and `@objectstack/rest`'s registrar mounts only `POST /api/v1/packages/publish`. Meanwhile `POST /api/v1/packages`, the door that answers `201`, had no declared request contract at all, so the read contract was strictly more truthful than the write contract producing the rows it describes.
+  
+  Clause-②: yes (widening)
+  
+  **What moved on the published surface**
+  
+  - `PackageApiContracts.installPackage.path` — `'/api/v1/packages/install'` → `'/api/v1/packages'`. A caller that read the constant to build a URL was building one nothing serves; a caller that hard-coded the old string gets a `404` today and should send `POST /api/v1/packages`. The method (`POST`) is unchanged and is what distinguishes this entry from `listPackages`.
+  - `PackageApiContracts.installPackage.input` — `PackageInstallRequestSchema` → the new `PackageInstallBodySchema`. The wrapped schema is still exported and still parses the wrapped form; the new export is a union that also parses a bare manifest.
+  - `PackageInstallRequestSchema` gains **`overwrite?: boolean`**. This is a declaration of behaviour that already shipped: the door reads `overwrite` from the body (or `?overwrite=true`) to opt back in to replacing an already-installed id instead of answering `409 Conflict`, the first-party SDK sends it, and no schema declared it — so any parse at that door would have silently stripped it and turned a deliberate re-install into a conflict.
+  - **`PackageInstallBodySchema`** / `PackageInstallBody` / `PackageInstallBodyParsed` are new. The door reads `body.manifest || body`, and first-party callers really do post a bare manifest as the whole body, so the contract declares both forms as a union — every parse is a full parse of one coherent form, never a tolerant shape. The two branches are disjoint, but only the BARE one is CLOSED: `PackageInstallRequestSchema` is a plain `z.object`, so an unknown key on the wrapped form is DROPPED (`{ manifest, bogus: 1 }` parses and `bogus` is gone) while the same key on a bare manifest is refused by name. That asymmetry matches the door, which reads four keys off the wrapper and ignores the rest — closing the wrapped branch would refuse bodies the door answers `201` to. The bare form carries no install options: `settings`, `enableOnInstall` and `overwrite` are not manifest keys and the manifest surface is closed, so a bare-form caller reaches `overwrite` through the query string alone.
+  
+  **What moved at the runtime**
+  
+  `POST /api/v1/packages` now honours `enableOnInstall: false` in the wrapped body: the package installs `disabled`, through the same registry flip and durable state write `PATCH /packages/:id/disable` uses, so a restart does not re-enable what the caller switched off. `true` and absent install enabled, which is the declared default. Previously the key was declared in three schemas, sent by the SDK, and read by no handler at all.
+  
+  The durable write happens on **both** arms, not just the disable. `POST /packages` is a create that an already-installed id reaches through `overwrite`, and `DELETE /packages/:id` does not clear this record either, so an install could answer `201` with `enabled: true` while the state file still listed the id as disabled — and `SchemaRegistry.installPackage` reads that file at boot, re-installing the package DISABLED one restart later with nothing red in between. The mirror of that risk is why the write follows the ROW this door returned rather than the request's intent: `SchemaRegistry.installPackage` lands an id in the boot-seeded `initialDisabledPackageIds` DISABLED whatever the request says, and `enableOnInstall` defaults to `true`, so persisting the request would clear an operator's earlier disable off disk on the SDK's default call while the row being served says `enabled: false`. A flag-absent install of a seeded id therefore answers `enabled: false` and records it disabled — wire, registry and disk agree, and the next boot reads the same. Every install now persists the state it returned.
+  
+  **What the declaration does NOT cover — the measured residual**
+  
+  This is a subset description of the live door, deliberately, and it is recorded rather than implied. Measured through `HttpDispatcher.handlePackages`, the door also answers `201` to: a manifest missing `type` and/or `version` (both of the runtime's own door drives post one); unknown keys on either form (refused by name on the bare branch, dropped on the wrapped one, `201` either way); a string-typed `enableOnInstall` / `overwrite`, which is compared against `true`/`false`/`'true'` and therefore treated as absent — `enableOnInstall: 'false'` installs ENABLED; and install options spelled on the bare form, which are ignored. In the opposite direction the door answers `400` to a whitespace-only `id` this declaration admits. `ManifestSchema` is not relaxed to close any of that.
+  
+  **Documentation**
+  
+  `packages/client`'s README install example could not parse against the manifest contract — no `id`, no `type`, and a `label` key the closed manifest surface refuses by name — and the live door answered it `400 Package id is required`. It is now a manifest that parses, and the example names the `overwrite` opt-in beside it.
+- d6137fd: `auth.me()` and the `/auth/*` wire table say what `/get-session` answers an anonymous caller TODAY: `401 UNAUTHENTICATED`, not `200 null`
+  
+  objectstack#17881 (`374d9d3afa`) landed `plugin-auth`'s
+  `refuseAnonymousSession`, which converts better-auth's `200` + the literal JSON
+  `null` on `GET /api/v1/auth/get-session` into the declared ADR-0112 refusal
+  envelope — HTTP `401`, `code: UNAUTHENTICATED` — before it leaves the process.
+  `@objectstack/client` reaches the server over the wire, so that is exactly what
+  it sees. Three present-tense statements in the SDK still described the retired
+  shape, none of them carrying a rev or a date, so none of them read as history.
+  
+  **FROM → TO for a caller.** An anonymous `auth.me()` no longer RESOLVES with
+  the literal `null`; it REJECTS. The SDK's shared `fetch` wrapper throws on the
+  non-2xx, so:
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `const s = await client.auth.me(); if (s === null) …` | `try { await client.auth.me() } catch (e) { if (e.code === 'UNAUTHENTICATED') … }` |
+  
+  That is the behaviour objectstack#17881 shipped; what moves here is only the
+  SDK's description of it. A reader coding against the old table wrote a `null`
+  branch that can never be taken and omitted the rejection branch that now fires.
+  
+  **What changed**
+  
+  - `normalizeSessionResponse`'s `/auth/*` transcript no longer lists the
+    anonymous `200 null` row among the bodies that helper is handed — it is not
+    handed that body at all, because the rejection happens one frame out. The
+    current answer is stated separately, anchored to the producer.
+  - The closing `!body`-guard paragraph no longer claims that guard carries the
+    anonymous answer, and no longer says closing the gap needs the published
+    return annotation to widen. objectstack#17238 ruled the opposite: the
+    producer moved and `SessionResponseSchema` is untouched.
+  - `auth.me()`'s docblock says the anonymous call rejects rather than resolving
+    outside its declared type.
+  
+  ⛔ No behaviour changes. `SessionResponseSchema`, every published return
+  annotation and the `!body` guard's own code are byte-identical; only what the
+  SDK says about them moves.
+  
+  **This is shipped, which is why it carries a changeset rather than
+  `skip-changeset`.** `@objectstack/client`'s published `files[]` is
+  `["dist","README.md","CHANGELOG.md"]`, and `auth.me()` is a member of the
+  exported `ObjectStackClient`, so its TSDoc is emitted into the shipped
+  declarations — measured on the built artifact: the corrected sentence is
+  present in `dist/index.d.ts`, `dist/index.d.mts`, `dist/index.js` and
+  `dist/index.mjs`, the retired sentence is absent from `dist` afterwards, and
+  `getActiveMember` was carried as the lit control, found in the same four files.
+  
+  Clause-②: no — no schema key moves, no accept set widens or narrows, no export
+  changes, and `ERROR_CODE_LEDGER` / `StandardErrorCode` are untouched
+  (`UNAUTHENTICATED` is an existing standard member that objectstack#17881
+  already derives via `standardErrorCodeForHttpStatus`). The direction is a
+  pull-back: the runtime already answers 401 and the SDK's self-description was
+  lagging.
+- be7aeb8: fix(client): `normalizeSessionResponse`'s JSDoc records the `data.user.image` gap as closed, not as tracked (#18510)
+  
+  Clause-②: no
+  
+  No declaration, accept set, export or runtime behaviour moves. What moves is one
+  sentence of developer commentary and the pin that now holds it honest.
+  
+  The block above `normalizeSessionResponse` says what the lift compensates for,
+  so it names the cards that opened and closed each compensation. One clause was
+  still in the present tense:
+  
+  > … with one gap that is NOT this: `data.user.image` served `null` against a
+  > declared `string | undefined` (#17235, tracked separately).
+  
+  Both halves went false when `SessionUserSchema.image` widened to
+  `z.string().nullish()` and #17235 closed — the sentence described a live gap
+  that no longer existed and pointed the next reader at a closed card as somewhere
+  to go look. It now reads in the past tense, naming the widening that closed it
+  and the residue list in `auth-login-register-envelope.test.ts` that is pinned
+  empty. Nothing else in the block moves.
+  
+  **Why this is a `patch` and not `skip-changeset`, measured rather than
+  assumed.** "Only comments changed" is not "nothing published moves", and on this
+  package the two answers differ. `@objectstack/client` ships `dist`, `README.md`
+  and `CHANGELOG.md`; `dist` is six files (`index.js`, `index.mjs`, `index.d.ts`,
+  `index.d.mts` and a `.map` beside each of the two bundles — this package emits no
+  `*.cjs` and no `*.d.cts`). Built from the same tree before and after the change:
+  
+  - the comment text reaches **none** of the six (`no longer residue`,
+    `data.user.image` and `tracked separately` each 0 hits), while the positive
+    controls land — `{@link normalizeSessionResponse}` appears 3× in each bundle
+    and 3× in each `.d.ts`, carried there by the JSDoc of the **exported**
+    `auth.login` / `auth.register` / `auth.me` that link to it, and `set-auth-token`
+    4× / 3×. So comment text from this file does reach the published types; this
+    block's own text does not, because the function it documents is not exported;
+  - `index.js`, `index.mjs`, `index.d.ts` and `index.d.mts` are **byte-identical**
+    across the change (sha256, same build, reproducibility control re-run);
+  - both `.map` files **differ**. Neither carries `sourcesContent`, so no comment
+    text ships inside them either — the position table shifts because the rewritten
+    comment is two lines longer than the one it replaced.
+  
+  So the published tarball's bytes do move, and a released package whose shipped
+  bytes move takes a changeset.
+- c23cfb3: fix(client): take `InstalledPackageAtEitherStage` from `@objectstack/spec/api-assembled` (#18576)
+  
+  `@objectstack/spec` moved the declarations that embed the assembled package body — `InstalledPackageAtEitherStage` among them — off `@objectstack/spec/api` into the new `@objectstack/spec/api-assembled` entry. The client's `packages.list` / `packages.get` return types (and their scoped twins) name that type, so the published declarations now import it from the new entry. The return types are the same type as before; nothing a caller writes changes. It is a type-only import, erased from the client's bundle.
+- be7763a: docs(client): the published README's `packages.install` example is a manifest `ManifestSchema` actually accepts (#18607)
+  
+  The example shipped in the `@objectstack/client` npm tarball was refused on three
+  counts when parsed against the contract its own call site declares
+  (`PackageInstallRequestSchema`, whose `manifest` key is `ManifestSchema`):
+  `invalid_type` at `[manifest, id]`, `invalid_value` at `[manifest, type]` — both
+  required and absent — and `unrecognized_keys` at `[manifest]` for a `label` key
+  that `ManifestSchema`'s `strictObject` close refuses by name.
+  
+  ```diff
+   await client.packages.install({
+  -  name: 'vendor_plugin',
+  -  label: 'Vendor Plugin',
+  +  id: 'com.vendor.plugin',
+  +  type: 'plugin',
+  +  name: 'Vendor Plugin',
+     version: '1.0.0',
+   });
+  ```
+  
+  `label` is not a root manifest key and never was: the root shape declares `name`
+  for the human-readable string (measured — `ManifestSchema` declares 25 root keys
+  and `label` is not among them), so the example's `label` value moves to `name`
+  and the machine identifier becomes the reverse-domain `id` the key documents.
+  `type: 'plugin'` is the enum member the example's own subject names — a
+  general-purpose functionality extension, not the consumer-installable `app`
+  bundle. Required root keys, read off the schema rather than the prose: `id`,
+  `name`, `type`, `version`.
+  
+  Nothing parses that contract at the install door today, so the example "worked"
+  by being posted unvalidated — which is what made it a timed charge rather than a
+  live outage: closing the door turns a silently-wrong published example into a
+  loudly-broken one for every reader who copied it.
+  
+  Pinned in `packages/client/src/readme-package-install-example.test.ts`, which
+  parses every `packages.install` manifest literal in this README against that
+  schema and fails if the corpus is ever empty.
+  
+  Clause-②: no
+  
+  No schema, export, type or runtime behaviour changes. It ships because the README
+  is listed in this package's `files[]` and is the first thing a new integrator
+  copies.
+- 55523fd: `organizations.getActiveMember`'s own prose says what an anonymous caller gets TODAY: `401 UNAUTHENTICATED` on request ONE — not `200 null` and then a `401 UNAUTHORIZED` from `list-members`
+  
+  objectstack#17881 (`374d9d3afa`) landed `plugin-auth`'s
+  `refuseAnonymousSession`, which converts better-auth's `200` + the literal JSON
+  `null` on `GET /api/v1/auth/get-session` into the declared ADR-0112 refusal
+  envelope — HTTP `401`, `code: UNAUTHENTICATED` — before it leaves the process.
+  `@objectstack/client` reaches the server over the wire, so that is what it
+  sees. Three present-tense statements in and around `getActiveMember` still
+  described the retired shape, and they were wrong on two axes at once: the CODE
+  (`UNAUTHORIZED` vs `UNAUTHENTICATED`) and the REQUEST the refusal arrives on
+  (the second one, `list-members`, vs the first, `/get-session` itself).
+  
+  **FROM → TO for a caller.** `getActiveMember` makes two requests for a
+  signed-in caller. For an anonymous one it now makes ONE, and rejects:
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `try { await c.organizations.getActiveMember(id) } catch (e) { if (e.code === 'UNAUTHORIZED') … }` | `… catch (e) { if (e.code === 'UNAUTHENTICATED') … }` |
+  
+  The behaviour is objectstack#17881's and shipped then; what moves here is only
+  the SDK's description of it. A reader coding against the old prose caught the
+  wrong code, and expected the refusal on a request that is never put on the
+  wire.
+  
+  **What changed**
+  
+  - Step 1 of the two-request list no longer says `/get-session` serves "the
+    literal `null` for an anonymous one". The signed-in arm keeps its
+    `(measured)` tag, which is still the 2026-09-09 drive's; the anonymous
+    answer is stated separately and anchored to the producer, including that
+    step 2 never reaches the wire.
+  - The anonymous bullet of that drive's delta list no longer says an anonymous
+    caller "still gets `401 UNAUTHORIZED`, thrown from the `list-members`
+    request". It is RE-ANCHORED rather than restamped — the drive's own row is
+    kept in the past tense and today's answer is stated from the producer, the
+    same disposition objectstack#18642 used on this family's sibling statements.
+  - The inline comment on the `userId` read no longer says `Anonymous → null`.
+    It says an anonymous caller never reaches that line, and says why the
+    `| null` annotation and the `?? ''` fallback stay as the defensive branch
+    they always were.
+  
+  ⛔ No behaviour changes. `packages/client/src/index.ts` changes COMMENTS ONLY —
+  verified mechanically: of every line the diff touches in that file, zero are
+  outside a comment.
+  
+  **This is shipped, which is why it carries a changeset rather than
+  `skip-changeset`.** `@objectstack/client`'s published `files[]` is
+  `["dist","README.md","CHANGELOG.md"]` and `getActiveMember` is a member of the
+  exported `ObjectStackClient`, so its TSDoc is emitted into the shipped
+  artifacts. Measured on the built `dist` at `13e09a5e3c`: the corrected sentence
+  is present exactly once in `dist/index.d.ts`, `dist/index.d.mts`,
+  `dist/index.js` and `dist/index.mjs`; the retired sentence is absent from all
+  four; and `getActiveMember` was carried as the lit control, found in every one
+  of them. ⚠️ This package emits no `.d.cts` and no `.cjs` — its CJS pair is
+  `index.js` + `index.d.ts` and its ESM pair is `index.mjs` + `index.d.mts`, so
+  a `*.d.cts` check here would have measured an absent file.
+  
+  Clause-②: no — no schema key moves, no closed set gains or loses a member, no
+  published export changes and no registry row is touched. `UNAUTHENTICATED` is
+  an existing `StandardErrorCode` that objectstack#17881 already derives through
+  `standardErrorCodeForHttpStatus(401)`; nothing is minted here. The direction is
+  a pull-back: the runtime has answered `401` since objectstack#17881 and the
+  SDK's self-description was lagging.
+- a484966: The TypeScript examples in these packages' **published** `README.md` now compile against the package they document — 43 of the 44 blocks the `measure-markdown-ts-blocks` census reported as syntactically valid and wrong, in documents that ship inside the npm tarball.
+  
+  `README.md` is listed in every one of these packages' `files[]`, so these bytes are the artefact a consumer — or a consumer's AI — reads and copies. What the census counted was not style: the examples named options the packages no longer accept, chained a method that returns a promise, and implemented interfaces they never imported.
+  
+  The corrections, by class:
+  
+  - **Legacy option vocabulary.** `@objectstack/client-react`'s hooks take `fields` / `orderBy` / `limit` / `where`, not `select` / `sort` / `top` / `filters`, and `PaginatedResult` carries `records`, not `value`. `@objectstack/service-job` takes `timeoutMs`, `@objectstack/service-queue` takes `maxAttempts`, and `IDataEngine.find` takes `where`.
+  - **Async registration used synchronously.** `ObjectKernel.use()` returns `Promise<this>`, so `kernel.use(a).use(b)` does not chain; the examples now `await` each registration. `ObjectKernelConfig` has no `plugins` member.
+  - **Interfaces implemented but never imported.** Several plugin examples wrote `implements Plugin` with no import, which bound to the DOM's `Plugin`; they now import `Plugin` / `PluginContext` and declare the required `init`. `PluginContext.getService<T>()` has no default type argument, so the examples that read a service now name its contract.
+  - **Removed or never-existing API.** `@objectstack/driver-memory`'s default export is a legacy `onEnable` object that `kernel.use()` refuses — the quick start now registers through `DriverPlugin`; its persistence adapters take an options bag under `persistence.adapter`. `defineStack` has no `driver` key. `@objectstack/rest`'s `RestServer` takes the host `IHttpServer` first and `registerRoutes()` takes no arguments; `RouteManager` is constructed on a server. `@objectstack/spec`'s `ObjectSchema.parse()` returns the value — the `{ success, data }` envelope is `safeParse`'s. `useMutation` has no `onMutate` / mutation context.
+  
+  No runtime code changed and no gate was added (#18715 ruling F). One block is deliberately left: `@objectstack/knowledge-ragflow`'s README writes `source.options.datasetId`, which is what the shipped adapter reads and what `KnowledgeSourceSchema` does not declare — correcting the document either way would contradict one of the two, so the conflict is reported rather than papered over.
+- 7ffddfa: `ObjectStackClient.environments` — the docblock that licenses the namespace's erased `any` now names where the family is enumerated, and the enumeration exists (#19383).
+  
+  Fourteen methods on `environments.*` and the nested `environments.packages.*` return types that **contain** `any` and carry **no return annotation**. They are deliberate: the `/api/v1/cloud/*` control plane speaks snake_case, its row contracts left this repo with `@objectstack/spec/cloud`, and binding them here would typecheck and be false. Nothing mechanical held the family, though — `check:exported-any-returns` asks whether an awaited return type **IS** `any` and never whether it **CONTAINS** one (a documented scope that buys the gate zero false positives), and with no annotation on any signature line there is no text for a search to find. A 15th such method landed silently green under a paragraph that licensed it in advance.
+  
+  - **What changed for a consumer**: one paragraph of published TSDoc on `environments`. It bounds the licence — the family is enumerated by name in the package's own `environments-any-family.pin.test.ts`, and a method that pin does not list is not covered by the paragraph. No export, signature, envelope key or runtime behaviour moves; the emitted declarations are otherwise byte-identical.
+  - **Pinned by membership, not by a CONTAINS-any detector.** A `ts.createProgram` + `TypeChecker` census over the SDK surface shows CONTAINS-any has no canonical boundary here: the population is a function of how many hops the walk is allowed (24 at three, 43 at four, 57 at five and six), an unbounded walk does not terminate, and 144 callables are still unexplored at six hops — so such a gate's green would mean "no `any` within N hops", never "no `any`".
+  - **And a package-wide rule would refuse the protected class.** The only other unannotated `any`-containing sites on the surface are `organizations.list` (better-auth organisation `metadata`) and `oauth.applications.list` (`Record<string, any>[]`), which is precisely the caller-shaped class the ratchet's ledger protects by name.
+- 01388fe: `auth.login` and `auth.register` now deliver the `SessionResponse` envelope they declare.
+  
+  Both methods annotate their return as `SessionResponse`, whose base `BaseResponseSchema` declares
+  `success` as a required boolean. Both carried an inline lift that filled `data` and never wrote
+  `success`, so neither delivered the type it advertises and every consumer keying on the envelope
+  flag — `ObjectStackClient.unwrapResponse` keys on exactly this — read `undefined` rather than
+  `true` or `false`. They now run the same lift `auth.me` / `auth.refreshToken` use, so the family
+  cannot deliver two different envelopes again.
+  
+  The credential is unchanged: `data.token` is still the token the route puts in the response body,
+  byte-identical, and `login` / `register` still arm the client's bearer token from it.
+  
+  Known residue, unchanged by this release: `data.session` is still absent from what these two
+  methods return. `POST /sign-in/email` and `POST /sign-up/email` serve no session object, id or
+  expiry in the body or in any header, so the member is not obtainable without a second
+  `GET /get-session` call — read it from `auth.me()`. Nothing is synthesized in its place.
+- 5de9372: fix(client): `auth.me` / `auth.refreshToken` deliver the `SessionResponse` envelope they declare, and `refreshToken` reads the token the route actually serves (#16760)
+  
+  Both methods annotate their return as `SessionResponse` — ObjectStack's REST
+  `{ success, data }` envelope — for `GET /api/v1/auth/get-session`. better-auth
+  owns those bytes and answers **bare**. Measured against a real `AuthManager`
+  (better-auth 1.7.2, organization plugin) over a real driver:
+  
+  ```
+  GET /api/v1/auth/get-session  (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
+  GET /api/v1/auth/get-session  (anonymous) -> 200 null
+  ```
+  
+  So `(await client.auth.me()).data.user` type-checked and was `undefined` at
+  runtime, while `.user` — the real payload — did not type-check. The annotation
+  pointed every caller at the wrong key.
+  
+  ## What changed
+  
+  - The bare answer is now lifted into the declared envelope, the same lift
+    `auth.login` has always carried for `/sign-in/email`. `SessionResponse` is
+    **unchanged** and so is each method's published return annotation: the fix is
+    in what the methods produce, not in what they promise.
+  - The lift fills `success` as well as `data`. `SessionResponseSchema` is
+    `BaseResponseSchema.extend(…)` and that base declares `success` as a required
+    boolean, so a body carrying `data` alone still would not parse as the declared
+    type.
+  - The raw `.user` / `.session` keys are **kept** alongside `data`. They are what
+    callers were pushed onto while the declared shape was unreachable; dropping
+    them would trade one silent breakage for another.
+  - `auth.refreshToken` now reads `data.session.token`. It used to read
+    `data.data?.token` — a field this route does not produce at any nesting, so
+    the method returned successfully having captured nothing. A bearer-mode client
+    calling it to refresh kept whatever credential it already had, silently.
+  
+  ## The read was not a consequence of the envelope
+  
+  Worth stating because the reverse is the natural assumption: enveloping the body
+  does **not** put a token at `data.token`, because the route serves no top-level
+  `token` to lift. The only credential in the body is `session.token`, and that is
+  now the read. Fixing the shape alone would have left `refreshToken` exactly as
+  inert as it was.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `(await client.auth.me()).user` | still works — kept deliberately |
+  | `(await client.auth.me()).data.user` | now populated (was `undefined`) |
+  | `(await client.auth.refreshToken(t)).data.token` | `.data.session.token` |
+  
+  `refreshToken` stores the **unsigned** session token, which is the spelling
+  `/get-session` serves; `bearer()` accepts it and the signed
+  `token.signature` form interchangeably, so a client that held the signed form
+  stays signed in across the call.
+  
+  Three answers sat outside the declared type when this change was written and
+  are **not** addressed by it. Each has since been answered on its own card, so a
+  caller reading this entry does not have to code around any of them:
+  
+  - the **anonymous** `/get-session` answer, recorded above as `200 null`. It no
+    longer needs the published return annotation to widen, because the producer
+    moved instead: since #17881 `plugin-auth`'s `refuseAnonymousSession` converts
+    better-auth's `200` plus the literal JSON `null` into the declared ADR-0112
+    refusal — HTTP `401` with `code: UNAUTHENTICATED` — before it leaves the
+    process. The SDK's shared `fetch` wrapper throws on any non-2xx, so an
+    anonymous `auth.me()` **rejects** rather than resolving outside its own type.
+    Ruled by #17238: the producer moved and `SessionResponseSchema` is untouched.
+  - `SessionUser.image`, then declared `z.string().optional()` against a route
+    that serves `null` (#17235). It is now declared `z.string().nullish()`, so
+    the `"image": null` every `/auth/*` session body carries parses.
+  - the sibling `auth.login` / `auth.register`, which then normalized into `data`
+    but set no `success` (#17234). They now run this entry's own lift, which
+    fills `success` as well as `data`.
+- f8fea00: fix(client): `organizations.invite` defaults `role` to `'member'`, so the shorter call it declares actually works (#16582)
+  
+  `organizations.invite` declares `role?` as **optional** and forwarded the caller's object to better-auth verbatim. better-auth 1.7.2's body schema for `POST /organization/invite-member` makes `role` **required**, so the documented-looking minimal call was refused before it reached any ObjectStack code:
+  
+  ```
+  client.organizations.invite({ email, organizationId })   ->  400  [body.role] Invalid input   (VALIDATION_ERROR)
+  ```
+  
+  Omitting `role` now sends `'member'`. **No published type moves** — `role` stays optional, and a caller who names a role still gets exactly that role on the wire (including `role: undefined`, which is treated as omission rather than dropped).
+  
+  The default is `'member'` because the sibling `organizations.invitations.resend` has always substituted exactly that over the **same** vendor endpoint. That asymmetry is why the gap stayed invisible: one member of the family papered over the vendor's requirement and the other did not, so only the shorter form ever failed. It is also the least-privileged name in the closed membership vocabulary (ADR-0108 D1 — `orgRoleGrade` floors at `member` and rises only for `owner`/`admin`), and an invitation is a pending row the invitee must still accept, so the implicit choice cannot confer reach the caller did not ask for.
+  
+  Measured against a real `AuthManager` (better-auth 1.7.2, organization plugin, `teams: { enabled: true }`) over a real `SqlDriver` (better-sqlite3), before and after:
+  
+  ```
+  before:  POST /organization/invite-member  ->  400  {"message":"[body.role] Invalid input","code":"VALIDATION_ERROR"}
+  after:   POST /organization/invite-member  ->  200  {"role":"member","status":"pending", ...}
+  ```
+  
+  No caller had to change: the census found no in-repo or Console caller using the two-argument form, so this repairs a path that was declared and unreachable rather than one that was in use.
+- 032452a: fix(client): the scoped SDK reads `metadata.prefix` off the advertised routes instead of restating `/meta`
+  
+  `metadata.prefix` is a live `RestServerConfig` key: REST mounts every metadata
+  route under `metaPath = ${basePath}${metadata.prefix}` and the discovery handler
+  advertises the same value as `routes.metadata = ${realBase}${metadata.prefix}`.
+  Three surfaces describe one set of paths — the mounts, the discovery document,
+  and this SDK.
+  
+  `ScopedEnvironmentClient` restated `/meta` as a literal in all six of its
+  metadata methods — `getTypes`, `getItems`, `getItem`, `saveItem`, `deleteItem`,
+  `getHistory` — so on a deployment that moved the prefix, every one of them
+  called a path the server does not mount. The unscoped twin of each method was
+  already correct (it builds `${baseUrl}${getRoute('metadata')}`), so one SDK
+  disagreed with itself: the unscoped half read the advertised value while the
+  scoped half guessed. Measured on a live server booted at
+  `metadata: { prefix: '/metadata' }`, all six went to
+  `/api/v1/environments/<id>/meta`, which that deployment answers 404.
+  
+  The six now build through `metaUrl()`, which takes its base from `_apiBase()`
+  and its prefix from the new `_metaPrefix()` — the exact sibling of the
+  `_dataPrefix()` derivation that fixed `crud.dataPrefix`, fallback discipline
+  included. `_metaPrefix()` prefers the advertised `routes.metadata`, recovers the
+  prefix from `routes.data` as a second equation over the same `realBase` when the
+  advertised value is not the conventional one, and **declines to `/meta`**
+  whenever the document does not determine the answer: an SDK must not become
+  unusable because a server's discovery document is missing a key.
+  
+  Deployments on the default prefix are unaffected, by construction and by
+  measurement: the conventional-suffix rule is taken first, so a default
+  deployment is answered from `routes.metadata` alone, and a client that never
+  connected never reaches a rule at all. The pinned negative control asserts the
+  six request URLs of a default deployment byte for byte, for a connected client
+  and for an unconnected one, and that the unconnected client puts no discovery
+  request on the wire.
+  
+  The unscoped metadata methods are untouched.
+- ab1c585: `POST /two-factor/verify-totp` and `/two-factor/verify-otp` now echo the user row as it stands when the response is written, instead of the pre-rotation snapshot the vendor closes over.
+  
+  On the enrolment lane — a signed-in caller confirming a new factor — better-auth writes `twoFactorEnabled: true`, rotates the session, and only then calls the `valid(ctx)` closure it built at entry. That closure still holds the pre-rotation session, so a successful verification answered `user.twoFactorEnabled: false` to the very caller who had just switched 2FA on. An account portal reading that body renders the factor as still OFF right after enrolment, and a bearer client that caches the echoed user carries the wrong flag until its next `get-session`.
+  
+  `two-factor-rotated-token-echo` already repaired the body's other stale member, `token`, on exactly these routes and on exactly this predicate — the response staged a session cookie whose token differs from the one echoed. The `user` member is stale for the same reason, so it is repaired under the same predicate rather than a new one.
+  
+  - **Two narrowings, both load-bearing.** Only the members the vendor already echoed are written, so the published payload shape (`AuthWireUser`) cannot widen — better-auth's own output filter is a deny-list, and forwarding a raw row would put every column it happens to carry on the wire. And the row is re-read through `internalAdapter` by the id the response itself published, so the repair travels the same output transform that produced the echo (a driver that stores booleans as `1`/`0` cannot change a member's wire type) and can never substitute a different principal into a response.
+  - **`/two-factor/verify-backup-code` is untouched.** It does not rotate and already echoed the live row; it is in neither path list, its row is not read, and it is pinned as a negative control on both the in-memory engine and a real `SqlDriver` — an unconditional re-read would have "fixed" the broken lane and quietly rewritten one that was already right.
+  - **The failure posture is inherited.** A row read that throws or answers nothing degrades to the vendor's own echo, never to a failed verification and never to a lost `token` repair, which is written first for that reason.
+  
+  `@objectstack/client` drops the `AuthTwoFactorVerificationResult.user` warning that told callers to re-read the session for the live flag; the wire shape it declares is unchanged.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [6057357]
+- Updated dependencies [a60e04d]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [7d0f911]
+- Updated dependencies [48f5200]
+- Updated dependencies [245f360]
+- Updated dependencies [d0f1845]
+- Updated dependencies [9dcdb77]
+- Updated dependencies [6175da8]
+- Updated dependencies [324968e]
+- Updated dependencies [7843663]
+- Updated dependencies [ce57857]
+- Updated dependencies [744a0a3]
+- Updated dependencies [c7d4825]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [0b788da]
+- Updated dependencies [f7a3495]
+- Updated dependencies [97f4f8c]
+- Updated dependencies [482d34d]
+- Updated dependencies [7a25a3e]
+- Updated dependencies [839d1b0]
+- Updated dependencies [2fc092b]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [3d8779d]
+- Updated dependencies [0bd7dae]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [271d6bb]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [8b48903]
+- Updated dependencies [2d235bc]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [0e51278]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [8271c81]
+- Updated dependencies [c9eb773]
+- Updated dependencies [fbc12be]
+- Updated dependencies [ec2ede0]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [9059a94]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2c1011b]
+- Updated dependencies [12bb672]
+- Updated dependencies [97233b9]
+- Updated dependencies [c199772]
+- Updated dependencies [f5a7250]
+- Updated dependencies [1a2bb9e]
+- Updated dependencies [eea7ccc]
+- Updated dependencies [097d268]
+- Updated dependencies [182bbde]
+- Updated dependencies [5ce3705]
+- Updated dependencies [24d622b]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [497655f]
+- Updated dependencies [ada7012]
+- Updated dependencies [3a9ad22]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [092d460]
+- Updated dependencies [09e16a5]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [d93400f]
+- Updated dependencies [b1d3945]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [5c28cc7]
+- Updated dependencies [b0eb9a5]
+- Updated dependencies [e233db9]
+- Updated dependencies [176b035]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [d3a2331]
+- Updated dependencies [51297e9]
+- Updated dependencies [2d892dd]
+- Updated dependencies [156792e]
+- Updated dependencies [5ba2ec3]
+- Updated dependencies [abb01f1]
+- Updated dependencies [e64ae15]
+- Updated dependencies [02bdeaa]
+- Updated dependencies [66abef3]
+- Updated dependencies [25c9a83]
+- Updated dependencies [ee5812a]
+- Updated dependencies [68fea8b]
+- Updated dependencies [c049e74]
+- Updated dependencies [bb9794a]
+- Updated dependencies [d402e32]
+- Updated dependencies [63a8eb4]
+- Updated dependencies [9a910c4]
+- Updated dependencies [adabccf]
+- Updated dependencies [340b6dc]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [99fcb4a]
+- Updated dependencies [55095cc]
+- Updated dependencies [0f1cd83]
+- Updated dependencies [a3d4c59]
+- Updated dependencies [74832b6]
+- Updated dependencies [1aa5026]
+- Updated dependencies [2b80461]
+- Updated dependencies [2bdb81f]
+- Updated dependencies [b9d5422]
+- Updated dependencies [c7448dc]
+- Updated dependencies [627382b]
+- Updated dependencies [0b31d90]
+- Updated dependencies [4b58dcf]
+- Updated dependencies [c23cfb3]
+- Updated dependencies [559041d]
+- Updated dependencies [e0d0553]
+- Updated dependencies [5100c42]
+- Updated dependencies [596090e]
+- Updated dependencies [5380daa]
+- Updated dependencies [00b38d7]
+- Updated dependencies [47a9002]
+- Updated dependencies [7056ca5]
+- Updated dependencies [731f020]
+- Updated dependencies [5eebc9e]
+- Updated dependencies [72c1640]
+- Updated dependencies [5e5ec9f]
+- Updated dependencies [170fd83]
+- Updated dependencies [922923b]
+- Updated dependencies [2cac363]
+- Updated dependencies [e6c34f6]
+- Updated dependencies [062f5cd]
+- Updated dependencies [0318faf]
+- Updated dependencies [5d8319f]
+- Updated dependencies [43f4766]
+- Updated dependencies [8e8ea99]
+- Updated dependencies [a484966]
+- Updated dependencies [021755a]
+- Updated dependencies [b929e0a]
+- Updated dependencies [dbd4744]
+- Updated dependencies [14a762f]
+- Updated dependencies [b146102]
+- Updated dependencies [75c0dac]
+- Updated dependencies [9bb059d]
+- Updated dependencies [07c6f82]
+- Updated dependencies [502f179]
+- Updated dependencies [f20fe29]
+- Updated dependencies [362035c]
+- Updated dependencies [7e0bfce]
+- Updated dependencies [c120dbd]
+- Updated dependencies [32b5831]
+- Updated dependencies [74554a3]
+- Updated dependencies [e56112c]
+- Updated dependencies [aeaaa44]
+- Updated dependencies [43460b9]
+- Updated dependencies [44a2332]
+- Updated dependencies [f34dda6]
+- Updated dependencies [488f4f5]
+- Updated dependencies [15f9284]
+- Updated dependencies [a4ca69a]
+- Updated dependencies [1ff3a8f]
+- Updated dependencies [61dd96f]
+- Updated dependencies [b971924]
+- Updated dependencies [6afa59d]
+- Updated dependencies [e37ea4d]
+- Updated dependencies [8f6d831]
+- Updated dependencies [fa29803]
+- Updated dependencies [b01bdbc]
+- Updated dependencies [adbdbc5]
+- Updated dependencies [ba77509]
+- Updated dependencies [408ca2e]
+- Updated dependencies [7e1b048]
+- Updated dependencies [342808c]
+- Updated dependencies [b3615f1]
+- Updated dependencies [0b4022b]
+- Updated dependencies [a60c913]
+- Updated dependencies [5c5b67f]
+- Updated dependencies [3f9e2ea]
+- Updated dependencies [77f54bf]
+- Updated dependencies [ccccdcc]
+- Updated dependencies [48c91e9]
+- Updated dependencies [2b52a5b]
+- Updated dependencies [0f057b6]
+- Updated dependencies [1c16889]
+- Updated dependencies [1912237]
+- Updated dependencies [fc29c74]
+- Updated dependencies [95fb417]
+- Updated dependencies [4ec3987]
+- Updated dependencies [5b9402d]
+- Updated dependencies [2cf9db7]
+- Updated dependencies [dc1b986]
+- Updated dependencies [655e8c0]
+- Updated dependencies [041c8cf]
+- Updated dependencies [e3277c3]
+- Updated dependencies [cc6dfd9]
+- Updated dependencies [7536721]
+- Updated dependencies [9df3934]
+- Updated dependencies [0b83e01]
+- Updated dependencies [ebc6afe]
+- Updated dependencies [6696056]
+- Updated dependencies [0e06f3b]
+- Updated dependencies [c1dfa52]
+- Updated dependencies [2548ba5]
+- Updated dependencies [9282578]
+- Updated dependencies [ecf90b2]
+- Updated dependencies [90ff10a]
+- Updated dependencies [c164186]
+- Updated dependencies [6aa3188]
+- Updated dependencies [ae7a35a]
+- Updated dependencies [2274894]
+- Updated dependencies [b5853da]
+- Updated dependencies [4ac9319]
+- Updated dependencies [0bf85ea]
+- Updated dependencies [1df29df]
+- Updated dependencies [8a44ce7]
+- Updated dependencies [fe677ae]
+- Updated dependencies [437bb0d]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [a362e0e]
+- Updated dependencies [f26fb8e]
+- Updated dependencies [bc2ec80]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [e81c4e5]
+- Updated dependencies [28f9277]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [fb59fb5]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [e08c8b0]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [0a56d3b]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c86d351]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [96451ec]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [2bd53f1]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [fb2bccf]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [f04be62]
+- Updated dependencies [de1a611]
+- Updated dependencies [4fba503]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [7607076]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [a49e8ae]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [119a02b]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes
