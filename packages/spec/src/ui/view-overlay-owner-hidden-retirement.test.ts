@@ -343,8 +343,14 @@ describe('overlay owner/hidden retirement — ADR-0087 registration', () => {
     expect(entry.reason).toContain('Measured writers in this repository and its sibling UI: zero');
     expect(entry.reason).toContain('NOT MEASURED');
     expect(entry.acceptanceCriteria.length).toBeGreaterThan(0);
-    // One family, one record: no other entry of the step claims this conversion.
-    const claimants = semantic.filter((s) => JSON.stringify(s).includes('view-overlay-owner-hidden-removed'));
-    expect(claimants.map((s) => s.id)).toEqual(['view-overlay-owner-hidden-retired']);
+    // One family, one record. Another entry may NAME this conversion only as a
+    // cross-reference that points at this record (the view item family's D3
+    // entry does, to say the overlay pair is a separate family) — never as a
+    // second record of its own.
+    const naming = semantic.filter((s) => JSON.stringify(s).includes('view-overlay-owner-hidden-removed'));
+    expect(naming.map((s) => s.id)).toContain('view-overlay-owner-hidden-retired');
+    for (const other of naming.filter((s) => s.id !== 'view-overlay-owner-hidden-retired')) {
+      expect(JSON.stringify(other), other.id).toContain('view-overlay-owner-hidden-retired');
+    }
   });
 });
