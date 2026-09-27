@@ -422,8 +422,9 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   /**
    * CHECK clause - Validation of every row an insert or an update writes,
    * enforced at application level through the engine's
-   * `OperationContext.postHookWriteImageCheck` seam (#16608, #19950, #19964,
-   * #19989):
+   * `OperationContext.postHookWriteImageCheck` seam (introduced for inserts
+   * by commit a016f08b8a, whose original card no longer resolves; extended by
+   * #19950, #19964 and #19989):
    * - an insert, an array insert included: each row as its `beforeInsert`
    *   hooks leave it. Values the engine fills in after that point (an
    *   autonumber, a `secret` field's stored reference, an absent tenant
