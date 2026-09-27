@@ -1,56 +1,79 @@
 ---
-'@objectstack/runtime': patch
+'@objectstack/runtime': minor
 ---
 
 fix(runtime): `POST /api/v1/packages` parses the whole body through `PackageInstallBodySchema` instead of reading it key by key (#19328)
 
-Clause-②: no
+Clause-②: no (narrowing)
 
-The install door parsed two legs of the manifest (`id`, `version`) and read
-every other key positionally off the raw body. So four classes of body that
-the published declaration, `PackageInstallBodySchema` (the wrapped request, or
-a bare manifest as the whole body), has always refused still installed and
-answered `201`. The door now parses the body once through that union and
-answers a failure with the envelope its `id` and `version` refusals already
-use: `400` / `VALIDATION_ERROR`, nothing installed. Nothing in
-`@objectstack/spec` moves. The declaration was already right, and neither of
-its branches is relaxed.
+**BREAKING for callers of the install door.** Four shapes of body are now
+refused with `400` / `VALIDATION_ERROR` and install nothing. Each used to
+answer `201`, and two of them used to be honoured. For each one, change what
+you send FROM the refused shape TO the declared one:
 
-**What is now refused, and what to send instead.** Measured against the door
-on `main` before the change, then after it:
+- **A manifest with no `type`, in either body form.** FROM
+  `{ "manifest": { "id": …, "name": …, "version": … } }` (or the same manifest
+  sent bare) TO the same manifest with a declared `type`: one of `app`,
+  `plugin`, `ui`, `driver`, `server`, `theme`, `agent`, `objectql`, `module`,
+  `gateway` or `adapter`, e.g. `"type": "app"`. It used to install anyway.
+- **An unknown key inside the manifest, or on a bare body.** Example: a
+  transposed `namesapce`. FROM a manifest carrying the undeclared key TO the
+  manifest with that key removed, or spelled as the declared key it was meant
+  to be (`namespace`). The refusal names the key. The key used to be STORED
+  with the package.
+- **A string-typed `enableOnInstall` or `overwrite`.** FROM
+  `"enableOnInstall": "false"` / `"overwrite": "true"` TO JSON booleans,
+  `"enableOnInstall": false` / `"overwrite": true`. `'false'` used to install a
+  fresh package ENABLED, which is the opposite of what the caller asked for.
+  `'true'` for `overwrite` was read as absent, which answered `409` on an
+  installed id.
+- **Install options spelled on the BARE form (`enableOnInstall`, `overwrite`,
+  `settings`).** FROM `{ "id": …, …, "overwrite": true }` TO the wrapped form,
+  `{ "manifest": { "id": …, … }, "enableOnInstall": …, "overwrite": …,
+  "settings": … }`. `overwrite` may also go on the query string instead
+  (`?overwrite=true`), which a bare body may keep using. Before this change the
+  door handled these key by key: `enableOnInstall` was ignored, but
+  **`overwrite: true` and `settings` were HONOURED** (an installed id was
+  overwritten, and the settings reached the install). All three were also
+  stored as manifest keys. They are refused now. This is the part of the
+  change that removes behaviour a caller could have been relying on.
 
-- **A manifest with no `type`** (either body form). It used to install. Now:
-  `400`. **Send instead:** a `type` from the declared set (`app`, `plugin`,
-  `ui`, `driver`, `server`, `theme`, `agent`, `objectql`, `module`, `gateway`,
-  `adapter`), e.g. `type: "app"`.
-- **An unknown key inside the manifest, or on a bare body** (e.g. a transposed
-  `namesapce`). It used to install and was STORED with the package. Now:
-  `400`, and the refusal names the key. **Send instead:** the declared key
-  spelled correctly, or no key at all.
-- **A string-typed `enableOnInstall` or `overwrite`.** `enableOnInstall:
-  'false'` used to install a fresh package ENABLED, the opposite of what the
-  caller asked. `overwrite: 'true'` was read as absent (`409`). Now: `400`.
-  **Send instead:** a JSON boolean, `enableOnInstall: false` /
-  `overwrite: true`. The first-party SDK (`client.packages.install(m,
-  { enableOnInstall, overwrite, settings })`) already sends booleans in the
-  wrapped form and is unaffected.
-- **Install options spelled on the BARE form** (`{ id, …, enableOnInstall }`).
-  They were handled key by key: `enableOnInstall` ignored, `overwrite` and
-  `settings` honoured, all three stored as manifest keys. Now: `400`, and the
-  refusal names the misplaced keys and the wrapped form. **Send instead:** the
-  wrapped form, `{ "manifest": { … }, "enableOnInstall": …, "overwrite": …,
-  "settings": … }`. `overwrite` may also ride the query string
-  (`?overwrite=true`), which a bare body may keep using.
+The accept set only shrinks back to what the published declaration has always
+said. `PackageInstallBodySchema` in `@objectstack/spec` is a union of two
+branches: the wrapped request, or a bare manifest as the whole body.
+`ManifestSchema` requires `type` and closes the manifest against unknown keys.
+The wrapped request types `enableOnInstall` and `overwrite` as booleans. Its
+docblock says a bare manifest carries no install options: «a caller that needs
+an option sends the wrapped form». Until now, the door parsed only two legs of
+the manifest (`id` and `version`) and read every other key positionally off
+the raw body. That is «declared ≠ enforced» on a published API contract. Now
+the door parses the body once through the declared union and reads
+`overwrite`, `settings` and `enableOnInstall` off the parsed request. Nothing
+in `@objectstack/spec` moves, and neither branch of the union is relaxed.
 
-**What does not change.** A well-formed body installs exactly as before, in
-both forms and on both install limbs (the protocol primitive and the
-bare-registry fallback). The manifest is stored as sent, with no parse-time
-defaults added. The refusals for a missing or malformed `id`, and for a
-missing or malformed `version`, keep their own sentences and still come
-first. Every request-shape refusal is still answered ahead of the duplicate-id
-`409`. Boot-time and in-process installs never pass through this door.
+**What is not affected.**
+
+- A well-formed body installs exactly as before, in both forms and on both
+  install limbs (the protocol primitive and the bare-registry fallback).
+- The first-party SDK (`client.packages.install(m, { enableOnInstall,
+  overwrite, settings })`) already sends the wrapped form with JSON booleans.
+  Studio's create-package dialog sends `{ manifest }` with a declared `type`.
+- The manifest is stored as sent, with no parse-time defaults added.
+- The refusals for a missing or malformed `id` and `version` keep their own
+  sentences and still come first.
+- Every request-shape refusal is still answered ahead of the duplicate-id
+  `409`.
+- Boot-time and in-process installs reach `SchemaRegistry.installPackage` /
+  `ObjectQL.registerApp` directly and never pass through this door.
 
 **Still accepted, because the declaration accepts it.** An unknown key at the
-top level of the wrapped form (`{ manifest, bogus }`) is dropped, not refused:
+top level of the wrapped form (`{ manifest, bogus }`) is dropped, not refused.
 `PackageInstallRequestSchema` is declared in strip mode, and the door now does
 exactly what the declaration says.
+
+**If you are refused.** The refusal names the key and the form it read the body
+as. A misplaced install option also gets the wrapped form (and, for
+`overwrite`, `?overwrite=true`) spelled out. So the prescription arrives with
+the `400` rather than in a changelog.
+
+<!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or reshaped: no spec key, no export, no stored row. `objectstack migrate meta` has nothing to reach, because there is no old spelling that maps to a new one — every refused shape is one the published declaration already refused, and a caller repairs it by sending the declared shape (a declared `type`, the declared key, a JSON boolean, the wrapped form). The refusal itself carries the remedy. -->
