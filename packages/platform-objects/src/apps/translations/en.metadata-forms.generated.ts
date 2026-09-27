@@ -438,7 +438,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       precision: {
         label: "Precision",
-        helpText: "Decimal places (e.g., 2 for $10.50)"
+        helpText: "Total digits"
       },
       scale: {
         label: "Scale",
