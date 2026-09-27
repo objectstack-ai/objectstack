@@ -40,6 +40,7 @@ import {
   type AuthoringCommand,
   type AuthoringFinding,
 } from '@objectstack/lint';
+import { stackFilterJudge } from './authoring-filter-judge.js';
 import { lowerCallables } from './lower-callables.js';
 import { resolveSduiManifest } from './sdui-manifest.js';
 
@@ -98,6 +99,8 @@ export function runScaffoldAuthoringRules(config: unknown): ScaffoldRuleReport {
     // [#16546] Same ref set the other three doors compute — keeps this
     // door's hook write-set findings at the same `path` as they are.
     loweredHookRefs: lowering.loweredHookRefs,
+    // [#20158] The same engine judge the other three doors hand the table.
+    judgeFilter: stackFilterJudge(result.data as Record<string, unknown>),
   });
   const { errors, advisories } = splitBySeverity(findings);
 
