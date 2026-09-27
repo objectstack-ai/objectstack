@@ -41,11 +41,14 @@ export const ShowcaseProjectDataset = defineDataset({
   ],
   measures: [
     { name: 'project_count', label: 'Projects', aggregate: 'count' },
-    // `budget`/`spent` are currency fields with NO declared currency code. The
-    // renderer resolves the symbol through the field's `currencyConfig.default-
-    // Currency` → the tenant `localization.currency` default (ADR-0053); with
-    // neither set it shows a plain grouped number (never a hardcoded "$"). To
-    // pin a symbol, set a field `currencyConfig` or a measure `currency`.
+    // `budget`/`spent` are currency fields with NO fixed currency (no
+    // `currencyConfig`, so no currency of their own). The column's currency
+    // resolves through the measure's own `currency` → the field's
+    // `currencyConfig.defaultCurrency`, read only under `currencyMode: 'fixed'`
+    // → the tenant `localization.currency` default; with none set it shows a
+    // plain grouped number (never a hardcoded "$"). To pin a symbol, set a
+    // measure `currency`, or give the field a fixed currency:
+    // `currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' }`.
     { name: 'budget_sum', label: 'Total Budget', aggregate: 'sum', field: 'budget', format: '0,0' },
     { name: 'spent_sum', label: 'Total Spent', aggregate: 'sum', field: 'spent', format: '0,0' },
   ],

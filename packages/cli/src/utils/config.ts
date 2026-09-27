@@ -128,6 +128,35 @@ function refuseConfig(message: string, hints: readonly string[], display?: strin
 }
 
 /**
+ * The filenames {@link resolveConfigPath} auto-detects, in the order it tries
+ * them.
+ */
+const CONFIG_FILE_CANDIDATES = [
+  'objectstack.config.ts',
+  'objectstack.config.js',
+  'objectstack.config.mjs',
+] as const;
+
+/**
+ * The config file auto-detection would load from `cwd` (default
+ * `process.cwd()`), or `null` when there is none: {@link resolveConfigPath}'s
+ * search WITHOUT its refusal.
+ *
+ * For the caller that treats "no project here" as an answer rather than an
+ * error: `os generate` works outside a project too, and reads the manifest
+ * only when there is one to read. Sharing the candidate list is what keeps
+ * that caller from ever finding a different file than the one `os validate`
+ * then loads.
+ */
+export function findConfigPath(cwd: string = process.cwd()): string | null {
+  for (const candidate of CONFIG_FILE_CANDIDATES) {
+    const abs = path.resolve(cwd, candidate);
+    if (fs.existsSync(abs)) return abs;
+  }
+  return null;
+}
+
+/**
  * Resolve the config file path. Supports:
  * - explicit path (objectstack.config.ts)
  * - auto-detection (searches for objectstack.config.{ts,js,mjs})
@@ -183,16 +212,8 @@ export function resolveConfigPath(source?: string): string {
   }
 
   // Auto-detect
-  const candidates = [
-    'objectstack.config.ts',
-    'objectstack.config.js',
-    'objectstack.config.mjs',
-  ];
-
-  for (const candidate of candidates) {
-    const abs = path.resolve(process.cwd(), candidate);
-    if (fs.existsSync(abs)) return abs;
-  }
+  const found = findConfigPath();
+  if (found) return found;
 
   refuseConfig(
     'No objectstack.config.{ts,js,mjs} found in current directory',
