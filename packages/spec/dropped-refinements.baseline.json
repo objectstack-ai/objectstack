@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 211,
-    "droppedRefinementSites": 604,
+    "droppedRefinementSites": 610,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -55,6 +55,7 @@
         "manifest.connectors.element.out",
         "manifest.dashboards.element.globalFilters.element",
         "manifest.dashboards.element.widgets.element",
+        "manifest.dashboards.element.widgets.element.filter",
         "manifest.datasets.element",
         "manifest.datasets.element.filter",
         "manifest.datasets.element.include.element",
@@ -156,6 +157,7 @@
         "data.options[1].manifest.connectors.element.out",
         "data.options[1].manifest.dashboards.element.globalFilters.element",
         "data.options[1].manifest.dashboards.element.widgets.element",
+        "data.options[1].manifest.dashboards.element.widgets.element.filter",
         "data.options[1].manifest.datasets.element",
         "data.options[1].manifest.datasets.element.filter",
         "data.options[1].manifest.datasets.element.include.element",
@@ -241,6 +243,7 @@
         "options[1].manifest.connectors.element.out",
         "options[1].manifest.dashboards.element.globalFilters.element",
         "options[1].manifest.dashboards.element.widgets.element",
+        "options[1].manifest.dashboards.element.widgets.element.filter",
         "options[1].manifest.datasets.element",
         "options[1].manifest.datasets.element.filter",
         "options[1].manifest.datasets.element.include.element",
@@ -287,6 +290,7 @@
         "data.packages.element.options[1].manifest.connectors.element.out",
         "data.packages.element.options[1].manifest.dashboards.element.globalFilters.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element",
+        "data.packages.element.options[1].manifest.dashboards.element.widgets.element.filter",
         "data.packages.element.options[1].manifest.datasets.element",
         "data.packages.element.options[1].manifest.datasets.element.filter",
         "data.packages.element.options[1].manifest.datasets.element.include.element",
@@ -1162,12 +1166,14 @@
       "sites": [
         "globalFilters.element",
         "widgets.element",
+        "widgets.element.filter",
         "widgets.element.filter.lazy"
       ]
     },
     "ui/DashboardWidget": {
       "sites": [
         "",
+        "filter",
         "filter.lazy"
       ]
     },
