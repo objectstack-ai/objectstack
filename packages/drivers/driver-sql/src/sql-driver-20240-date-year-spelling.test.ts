@@ -17,8 +17,13 @@
  * | PostgreSQL | 6 / 0 / 1 | 6 / 0 / 1 | the server's `DATE` parser reads `999-06-15` as year 999 |
  *
  * A direct `create` / `update` stored `999-06-15` on SQLite (PostgreSQL stored
- * the day). Each row below asserts one answer for the number, its `Date` and
- * its ISO string, plus a 2026 control. A year below 0 or above 9999 is refused
+ * the day). A shorter year is worse on PostgreSQL: under its default
+ * `DateStyle` (`ISO, MDY`) the server reads `9-03-04` as 2004-09-03 — a
+ * different day, stored or compared silently — and refuses `99-03-04`
+ * (`22008`). The unpadded spelling was restored by ablation to measure those
+ * two, since this file's 0999 fixture reads right there. Each row below asserts
+ * one answer for the number, its `Date` and its ISO string, plus a 2026
+ * control. A year below 0 or above 9999 is refused
  * as a comparand one layer up, at the engine's temporal-comparand door
  * (`@objectstack/objectql`); this driver's `where` is not that door.
  */
@@ -47,6 +52,8 @@ const ROWS = [
 ];
 
 const Y0999 = -30627504000000; // 0999-06-15T00:00:00.000Z
+const Y0099 = Date.parse('0099-03-04T00:00:00.000Z');
+const Y0009 = Date.parse('0009-03-04T00:00:00.000Z');
 const N = 1769940000000; //       2026-02-01T10:00:00.000Z — the control
 
 const ALL = ['o1', 'o2', 'o3', 'o4', 'o5', 'o6', 'o7'];
@@ -58,6 +65,8 @@ const CELLS: ReadonlyArray<readonly [string, number, string, string[]]> = [
   ['0999-06-15', Y0999, '$eq', ['o7']],
   ['0999-06-15', Y0999, '$gte', ALL],
   ['0999-06-15', Y0999, '$ne', ['o1', 'o2', 'o3', 'o4', 'o5', 'o6']],
+  ['0099-03-04', Y0099, '$lt', []],
+  ['0009-03-04', Y0009, '$gt', ALL],
   ['2026-02-01 (control)', N, '$gt', ['o3']],
   ['2026-02-01 (control)', N, '$lt', ['o1', 'o2', 'o5', 'o7']],
   ['2026-02-01 (control)', N, '$eq', ['o4', 'o6']],
