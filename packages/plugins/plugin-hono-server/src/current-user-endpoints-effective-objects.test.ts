@@ -36,11 +36,16 @@ const RESOLVED = [
     { name: 'sales', objects: { deal: { allowRead: true, allowEdit: false } }, fields: {} },
 ];
 
-/** Registered schemas: plain, better-auth-managed, and one whose `apiMethods` tighten exposure. */
+/**
+ * Registered schemas: plain, better-auth-managed, one whose `apiMethods` tighten exposure,
+ * [#20135] one with its API switched off, and one private.
+ */
 const SCHEMAS: Record<string, any> = {
     deal: { name: 'deal' },
     sys_member: { name: 'sys_member', managedBy: 'better-auth' },
     report: { name: 'report', enable: { apiMethods: ['get', 'list'] } },
+    hidden: { name: 'hidden', enable: { apiEnabled: false } },
+    vault: { name: 'vault', access: { default: 'private' } },
 };
 
 const ql = {
@@ -114,6 +119,31 @@ describe('[#18783] /auth/me/permissions `objects` is the one effective-map funct
         expect(body.objects.report).toMatchObject({ allowRead: true, allowEdit: true });        // named by no set
         expect(body.objects.deal).toMatchObject({ allowRead: true, allowEdit: true });          // another set's wildcard widens it
         expect(body.objects.sys_member).toMatchObject({ allowRead: true, allowEdit: false });   // the clamp still has the last word
+    });
+
+    it('[#20135] apiOperations offers what the REST door serves — the same bytes', async () => {
+        // The platform admin's super-user wildcard beside a plain export-only one.
+        const resolved = [
+            RESOLVED[0],
+            { name: 'exporter', objects: { '*': { allowExport: true } }, fields: {} },
+        ];
+        const body: any = await (await mount(resolved).request(`http://localhost${ME_PERMISSIONS}`)).json();
+        const expected = buildEffectiveObjectPermissions(resolved, {
+            allSchemas: () => ql.registry.getAllObjects(),
+            schemaOf: (name) => ql.getSchema(name),
+        });
+        expect(JSON.stringify(body.objects)).toBe(JSON.stringify(expected));
+        // `enable.apiEnabled: false`: the door answers 404 OBJECT_API_DISABLED for every verb, so
+        // nothing is offered — while the entry keeps the grants the data plane honours.
+        expect(body.objects.hidden.apiOperations).toEqual([]);
+        expect(body.objects.hidden).toMatchObject({ allowRead: true, allowEdit: true });
+        // A private object: the plain `'*'` does not reach it and the super-user `'*'` grants no
+        // export, so the export door answers 403 EXPORT_NOT_PERMITTED — and export is not offered…
+        expect(body.objects.vault.apiOperations).toBeDefined();
+        expect(body.objects.vault.apiOperations).not.toContain('export');
+        // …while a public object the plain `'*'` covers keeps its whole closure, export included.
+        expect(body.objects.deal).not.toHaveProperty('apiOperations');
+        expect(body.objects.report.apiOperations).toContain('export');
     });
 
     it('keeps the rest of the envelope on its own merges', async () => {

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { buildEffectiveObjectPermissions } from '@objectstack/core';
 import {
   annotateEffectiveApiOperations,
   foldWildcardSuperUser,
@@ -43,6 +44,44 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       locked: { name: 'locked', enable: { apiMethods: [] } },
     }));
     expect(objects.locked.apiOperations).toEqual([]);
+  });
+
+  // [#20135] The REST door answers `404 OBJECT_API_DISABLED` for every verb on
+  // an object with `enable.apiEnabled: false`, whatever `apiMethods` says and
+  // whatever the caller may export — the spec's `apiExposureDenialReason`
+  // judges it first. An entry left bare reads as default-allow to the client.
+  describe('an API-disabled object (#20135)', () => {
+    it('is annotated `[]` even when it is otherwise unrestricted and export is granted', () => {
+      const objects: Record<string, any> = { hidden: { allowRead: true, allowExport: true } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        hidden: { name: 'hidden', enable: { apiEnabled: false } },
+      }));
+      expect(objects.hidden.apiOperations).toEqual([]);
+    });
+
+    it('is annotated `[]` when the export axis narrows it, not the closure minus export', () => {
+      const objects: Record<string, any> = { hidden: { allowRead: true } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        hidden: { name: 'hidden', enable: { apiEnabled: false } },
+      }));
+      expect(objects.hidden.apiOperations).toEqual([]);
+    });
+
+    it('is annotated `[]` whatever its `apiMethods` subset says', () => {
+      const objects: Record<string, any> = { hidden: { allowRead: true, allowExport: true } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        hidden: { name: 'hidden', enable: { apiEnabled: false, apiMethods: ['get', 'list'] } },
+      }));
+      expect(objects.hidden.apiOperations).toEqual([]);
+    });
+
+    it('`apiEnabled: true` is the control: nothing withheld, no annotation', () => {
+      const objects: Record<string, any> = { shown: { allowRead: true, allowExport: true } };
+      annotateEffectiveApiOperations(objects, schemaOf({
+        shown: { name: 'shown', enable: { apiEnabled: true } },
+      }));
+      expect('apiOperations' in objects.shown).toBe(false);
+    });
   });
 
   it('skips the wildcard entry', () => {
@@ -123,13 +162,16 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       expect('apiOperations' in objects.deal).toBe(false);
     });
 
-    // The merge keeps `'*'` and named objects as independent keys, but the
-    // SERVER evaluator does not — `resolveObjectPermission` falls back to the
-    // wildcard for any object a set has no explicit entry for. Reading it here
-    // too is what keeps the shown button and the accepted request the same
-    // decision; without it an admin's `'*': {allowExport:true}` would have its
-    // Export button hidden on every object it never names explicitly.
-    it("inherits the '*' export grant when the object entry declares none", () => {
+    // [#20135] INVERTED on purpose. This read "inherits the '*' export grant
+    // when the object entry declares none" and asserted `export` here. The
+    // merged `'*'` cannot say WHICH set's wildcard reaches WHICH object: the
+    // server's `resolveObjectPermission` answers per set — a set's explicit
+    // entry is its whole answer, and a plain wildcard never covers a private
+    // object — so the fallback annotated `export` on objects the export door
+    // answers `403 EXPORT_NOT_PERMITTED`. Each set's `'*'` now reaches the
+    // entries it covers upstream, in `buildEffectiveObjectPermissions`'
+    // coverage passes (the next case), and this pass reads the entry alone.
+    it("reads the entry's own export grant, never the map's '*'", () => {
       const objects: Record<string, any> = {
         '*': { allowRead: true, allowExport: true },
         deal: { allowRead: true }, // no allowExport of its own
@@ -137,7 +179,26 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
       annotateEffectiveApiOperations(objects, schemaOf({
         deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
       }));
-      expect(objects.deal.apiOperations).toContain('export');
+      expect(objects.deal.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+    });
+
+    it("a '*' export grant reaches an object through the composition, exactly where the server resolves it", () => {
+      const schemas: Record<string, ApiExposureSchemaLike> = {
+        deal: { name: 'deal', enable: { apiMethods: ['get', 'list'] } },
+      };
+      const source = { allSchemas: () => Object.values(schemas), schemaOf: (n: string) => schemas[n] };
+      // ANOTHER set's wildcard: it covers `deal` for that set, so the export door admits.
+      const other: any = buildEffectiveObjectPermissions(
+        [{ objects: { '*': { allowRead: true, allowExport: true } } }, { objects: { deal: { allowRead: true } } }],
+        source,
+      );
+      expect(other.deal.apiOperations).toContain('export');
+      // The SAME set names `deal` without the grant: its explicit entry is its whole answer there.
+      const same: any = buildEffectiveObjectPermissions(
+        [{ objects: { '*': { allowRead: true, allowExport: true }, deal: { allowRead: true } } }],
+        source,
+      );
+      expect(same.deal.apiOperations).not.toContain('export');
     });
 
     it("an explicit per-object allowExport:false overrides a '*' grant", () => {
@@ -244,10 +305,13 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
     expect(objects.locked.apiOperations).toEqual([]);
   });
 
+  // [#20135] Through the composition: the wildcard's `allowExport` reaches the
+  // seeded entry in the per-set super-user fold, and annotate reads the entry.
   it('end-to-end: a super-user wildcard CARRYING the export grant keeps export', () => {
-    const objects: Record<string, any> = { '*': { modifyAllRecords: true, allowExport: true } };
-    seedSuperUserRestrictedObjects(objects, schemas);
-    annotateEffectiveApiOperations(objects, (name) => schemas.find((s) => s.name === name));
+    const objects: any = buildEffectiveObjectPermissions([{ objects: { '*': { modifyAllRecords: true, allowExport: true } } }], {
+      allSchemas: () => schemas,
+      schemaOf: (name) => schemas.find((s) => s.name === name),
+    });
     expect(objects.widget.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
   });
 
@@ -298,10 +362,14 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
       // The control: same schema, same super-user bits, `allowExport` granted.
       // Nothing is withheld, so there is no `apiOperations` to say and the
       // client's default-allow path for the operation set is correct.
-      const objects: Record<string, any> = wildcardOnlyAdmin();
-      objects['*'].allowExport = true;
-      seedSuperUserRestrictedObjects(objects, unrestricted);
-      annotateEffectiveApiOperations(objects, (name) => unrestricted.find((s) => s.name === name));
+      // [#20135] Through the composition: the grant reaches the entry in the
+      // per-set super-user fold, and annotate reads the entry.
+      const wildcard: Record<string, any> = wildcardOnlyAdmin();
+      wildcard['*'].allowExport = true;
+      const objects: any = buildEffectiveObjectPermissions([{ objects: wildcard }], {
+        allSchemas: () => unrestricted,
+        schemaOf: (name) => unrestricted.find((s) => s.name === name),
+      });
       expect(objects.crm_lead).toBeDefined();
       expect(objects.crm_lead).not.toHaveProperty('apiOperations');
     });
@@ -339,10 +407,11 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
       // export stays allowed" — is annotate's skip, and it is the SAME skip the
       // modify-all control above pins; [#20134] the entry itself is no longer
       // skipped, so `can()` reads the read the server grants.
-      const objects: Record<string, any> = { '*': { viewAllRecords: true, allowExport: true } };
-      seedSuperUserRestrictedObjects(objects, unrestricted);
-      foldWildcardSuperUser(objects);
-      annotateEffectiveApiOperations(objects, (name) => unrestricted.find((s) => s.name === name));
+      // [#20135] Through the composition, as the case above.
+      const objects: any = buildEffectiveObjectPermissions([{ objects: { '*': { viewAllRecords: true, allowExport: true } } }], {
+        allSchemas: () => unrestricted,
+        schemaOf: (name) => unrestricted.find((s) => s.name === name),
+      });
       expect(objects.crm_lead).toMatchObject({ allowRead: true, allowEdit: false });
       expect(objects.crm_lead).not.toHaveProperty('apiOperations');
     });
