@@ -48,6 +48,8 @@ interface SchemaNode {
   items?: SchemaNode;
   /** `true` = an open map with untyped values; an object = the schema every value takes. */
   additionalProperties?: boolean | SchemaNode;
+  /** The keys of `properties` this object requires (JSON Schema `required`). */
+  required?: string[];
   xExpression?: string;
 }
 
@@ -83,9 +85,9 @@ const ROLE_BY_MARKER: Record<string, FlowNodeExpressionRole> = {
 function collectExpressionProps(
   schema: SchemaNode | undefined,
   prefix = '',
-): { path: string; marker: string }[] {
+): { path: string; marker: string; required: boolean }[] {
   if (!schema || typeof schema !== 'object') return [];
-  const out: { path: string; marker: string }[] = [];
+  const out: { path: string; marker: string; required: boolean }[] = [];
 
   if (schema.properties) {
     for (const [key, prop] of Object.entries(schema.properties)) {
@@ -96,7 +98,11 @@ function collectExpressionProps(
       const here = prefix
         ? `${prefix}.${key}${isObjectArray ? '[]' : ''}`
         : `${key}${isObjectArray ? '[]' : ''}`;
-      if (typeof prop.xExpression === 'string') out.push({ path: here, marker: prop.xExpression });
+      // [#19961] Whether the declaring object REQUIRES the slot — read off the
+      // same schema the marker is, so the ledger's `required` flag is
+      // reconciled against the contract rather than restated beside it.
+      const required = Array.isArray(schema.required) && schema.required.includes(key);
+      if (typeof prop.xExpression === 'string') out.push({ path: here, marker: prop.xExpression, required });
       if (isObjectArray) out.push(...collectExpressionProps(prop.items, here));
       else out.push(...collectExpressionProps(prop, here));
     }
@@ -110,7 +116,8 @@ function collectExpressionProps(
   const values = schema.additionalProperties;
   if (values && typeof values === 'object') {
     const here = prefix ? `${prefix}.*` : '*';
-    if (typeof values.xExpression === 'string') out.push({ path: here, marker: values.xExpression });
+    // A map value is never "required": the map's keys are the author's own.
+    if (typeof values.xExpression === 'string') out.push({ path: here, marker: values.xExpression, required: false });
     out.push(...collectExpressionProps(values, here));
   }
   return out;
@@ -119,7 +126,7 @@ function collectExpressionProps(
 const engine = new AutomationEngine(silentLogger());
 installBuiltinNodes(engine, ctx());
 
-type DeclaredSlot = { nodeType: string; path: string; role: FlowNodeExpressionRole };
+type DeclaredSlot = { nodeType: string; path: string; role: FlowNodeExpressionRole; required: boolean };
 
 /** Resolve an `xExpression` marker to its ledger role, failing loudly on an unknown one. */
 function roleOf(nodeType: string, path: string, marker: string): FlowNodeExpressionRole {
@@ -137,8 +144,8 @@ function declaredFromDescriptors(): DeclaredSlot[] {
   const found: DeclaredSlot[] = [];
   for (const descriptor of engine.getActionDescriptors()) {
     const schema = descriptor.configSchema as SchemaNode | undefined;
-    for (const { path, marker } of collectExpressionProps(schema)) {
-      found.push({ nodeType: descriptor.type, path, role: roleOf(descriptor.type, path, marker) });
+    for (const { path, marker, required } of collectExpressionProps(schema)) {
+      found.push({ nodeType: descriptor.type, path, role: roleOf(descriptor.type, path, marker), required });
     }
   }
   return found;
@@ -163,8 +170,8 @@ function declaredFromDescriptors(): DeclaredSlot[] {
 function declaredFromSchemalessConfigs(): DeclaredSlot[] {
   const found: DeclaredSlot[] = [];
   for (const [nodeType, json] of Object.entries(getSchemalessNodeConfigJsonSchemas())) {
-    for (const { path, marker } of collectExpressionProps(json as SchemaNode)) {
-      found.push({ nodeType, path, role: roleOf(nodeType, path, marker) });
+    for (const { path, marker, required } of collectExpressionProps(json as SchemaNode)) {
+      found.push({ nodeType, path, role: roleOf(nodeType, path, marker), required });
     }
   }
   return found;
@@ -211,6 +218,23 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     // declared property.
     const stale = FLOW_NODE_EXPRESSION_PATHS.map(key).filter((k) => !declared.has(k));
     expect(stale, 'stale ledger entries — no descriptor or schemaless schema declares these').toEqual([]);
+  });
+
+  /**
+   * [#19961] The ledger's `required` flag is what makes the resolver emit an
+   * ABSENT value for the doors to refuse — so it must say exactly what the
+   * declaring channel's `required` list says, in both directions. A flag the
+   * contract does not back would refuse a legal omission (an absent
+   * `visibleWhen` shows the field); a requirement the ledger misses is the
+   * #19961 shape again — declared required, admitted absent at every door.
+   */
+  it('the ledger marks `required` exactly the slots the declaring channel requires (#19961)', () => {
+    const declared = declaredEverywhere();
+    const requiredByChannel = declared.filter((d) => d.required).map(key).sort();
+    const requiredByLedger = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.required).map(key).sort();
+    expect(requiredByLedger, 'ledger `required` flags disagree with the declaring channel').toEqual(requiredByChannel);
+    // Non-vacuous: the one required slot there is today is derived, not assumed.
+    expect(requiredByChannel).toEqual(['decision.conditions[].expression (predicate)']);
   });
 
   it('decision.conditions[].expression is covered — the #4439 hole', () => {

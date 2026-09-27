@@ -107,6 +107,9 @@ describe('FlowSchema.parse refuses a blank string in a ledger predicate slot (#1
       expect(FlowSchema.safeParse(flowWith(loopAround(decision('item.done')))).success).toBe(true);
     });
 
+    // A screen field's `visibleWhen` is optional, and a decision with no
+    // `conditions` declares no branch. An ABSENT decision BRANCH predicate is
+    // another matter since #19961 (`flow-decision-branch-expression-absent.test.ts`).
     it('an absent predicate is still not a malformed one', () => {
       expect(FlowSchema.safeParse(flowWith(screen(undefined))).success).toBe(true);
       expect(FlowSchema.safeParse(flowWith({ id: 'branch', type: 'decision', label: 'B', config: {} })).success).toBe(true);
@@ -114,8 +117,11 @@ describe('FlowSchema.parse refuses a blank string in a ledger predicate slot (#1
 
     it('a NON-string in a predicate slot is not this door\'s to refuse — #15572 refuses it at the other two', () => {
       // Scoped to what was ruled: the flow parse's accept set moves for blank
-      // STRINGS only. The envelope is refused at `registerFlow` and
-      // `objectstack validate` by the same `predicateSlotRefusal`, unchanged.
+      // STRINGS only — and, since #19961, for the absent / `null` value of a
+      // `required` slot (`flow-decision-branch-expression-absent.test.ts`),
+      // where nothing was authored at all. The envelope is refused at
+      // `registerFlow` and `objectstack validate` by the same
+      // `predicateSlotRefusal`, unchanged.
       expect(predicateIssues(flowWith(decision({ dialect: 'cel', source: 'x > 1' })))).toEqual([]);
       expect(predicateIssues(flowWith(screen({ dialect: 'cel', source: '   ' })))).toEqual([]);
     });
