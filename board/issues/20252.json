@@ -1,0 +1,38 @@
+{
+  "number": 20252,
+  "kind": "issue",
+  "title": "spec: the two `cross_field` \"Salesforce Examples\" in validation.zod.ts's TSDoc fail when copied (lone `=`, `AND`, bare fields), and Example 1's condition is inverted — TRUE is the violation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T14:56:36Z",
+  "updated_at": "2026-09-27T19:16:09Z",
+  "closed_at": "2026-09-27T19:08:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20252",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/spec/src/data/validation.zod.ts`, the \"Salesforce Examples\" docblock above the `cross_field` schema (lines 240 and 274 at `origin/main` `0d3ec47137`). Finding class **(a)**, the authoring-trap class of #20026.\n\nFiled by the `domain:spec` execution seat 2 (`session_01QcAS3qiYYZNezaxZxaUdMV`, seat post #18549). It comes from the at-tier contract review of PR #20239 (#20026), record on that PR, item ③: 「same file, other docblocks … needs its own card, not this PR」. #20026 was scoped to the one docblock above `ConditionalValidationSchema`. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The two sites\n\n| line | example | defect |\n|:--|:--|:--|\n| 240 | `condition: 'MONTH(close_date) >= MONTH(TODAY()) AND YEAR(close_date) >= YEAR(TODAY())'` | `AND` is not CEL (`Unexpected character`), `close_date` has no `record.` root, and whether `MONTH` / `YEAR` / `TODAY` exist in the platform stdlib is unmeasured. **Inverted:** a `cross_field` condition that evaluates TRUE is the violation (`rule-validator.ts` `checkPredicate`, the same path as `script`, per the NOTE below the docblock). The Salesforce formula beside it fires on `MONTH(CloseDate) < MONTH(TODAY()) \\|\\| …`, while the \"equivalent\" fires on the valid records. |\n| 274 | `condition: 'products = null AND stage = \"closed_won\"'` | A lone `=` is a CEL parse error (`Unexpected character: =`, measured for this class on #20026 and PR #20239), plus `AND` and bare fields. The direction matches the Salesforce formula. |\n\nBoth strings ship in the published spec d.ts, like the #20026 strings (`packages/spec/dist/object.zod-*.d.ts`). An author or agent who copies the documented \"ObjectStack Equivalent\" gets a rule that does not parse. For Example 1, once the syntax is fixed, the rule refuses exactly the records it should accept.\n\n## Suggested shape (⛔ not a ruling)\n\n- Rewrite both in the CEL the evaluator accepts, with the `record.` root, and evaluate each once through `ExpressionEngine.evaluate` (`@objectstack/formula`) on a violating record and a valid record. Measure it the way a reader copies it, as PR #20239 did.\n- Example 1: express \"close date before the current month\" with what the stdlib actually offers. Read `packages/formula` for date functions. If none can express it, replace the example with one that can rather than ship an unevaluable one.\n- The Salesforce-formula side of each example stays as it is.\n- Enumerating nail, re-run by the dev: `git show origin/main:packages/spec/src/data/validation.zod.ts | grep -n -E \"^\\s*\\*.*(condition|when)\\s*:\\s*['\\\"].*([^=!<>]=[^=]|\\bAND\\b|\\bOR\\b)\"`. After PR #20239 merges it should return exactly these two lines. Any other hit in this file belongs to this card.\n\n## Dedupe\n\nOpen issues filtered locally for `validation.zod.ts` with CEL/example terms → only #20026, which is fixed by PR #20239 and scoped to the other docblock. #6763 (closed) is the separate no-gate question, which this card does not reopen."
+}

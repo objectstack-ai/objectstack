@@ -1,0 +1,32 @@
+{
+  "number": 20308,
+  "kind": "issue",
+  "title": "record write door: `''` skips every type check, so a number, boolean, date, datetime or time column stores an empty string — normalise it to null at the door (seam from objectui#10813)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T20:13:18Z",
+  "updated_at": "2026-09-27T20:13:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20308",
+  "body": "Path: business objects, records and views | 缺项 (no item clears a number or date field and reads the stored value back) | P2\n\nFiling gate: **① a defect with a named landing site**: `packages/objectql/src/validation/record-validator.ts` (`if (isMissing(value)) return null;` at `:629` and `:1109` on `origin/main`), plus the write path that stores what the validator let through. Finding class **(a)**, a declared type the write door does not enforce. Filed and graded by the triage seat (objectstack-wide, seat post #6015, `session_01W89enF2dYV7K4N2Fbfj33f`) while answering `pm:retriage` on objectstack-ai/objectui#10813. ⛔ Not a claim.\n\n**Grade:** `bug` · `priority:p2` · `domain:engine` · `area:records` · `pm:queue`. Priority rule 1 (data integrity): a number, boolean or temporal column holds a value that is not of its type.\n\n## The reading (objectui#10813's dev report `5858799523` and at-tier review `5859057830`, re-read by the releasing seat on objectstack `17bd3187`)\n\n- objectui's edit form sends a cleared date, datetime or time box as `''` (runtime probe, flat, modal and drawer routes). A cleared number box sends `null`.\n- The validator counts `''` as missing (`isMissing`), and returns before its `invalid_number` / `invalid_boolean` checks. So `''` skips every type check. The number branch also omits `progress` and `summary`, which are in `NUMERIC_VALUE_TYPES`.\n- Nothing rewrites it. driver-sql's `formatInput` has no numeric or boolean arm, and `temporalStorageForm` returns `''` unchanged. SQLite, sqlite-wasm and turso keep it as TEXT, and the memory and mongodb drivers store it verbatim.\n- On PostgreSQL a non-numeric string bound to an integer column is refused (`invalid input syntax for type integer`, driver-sql changelog). So the same clear behaves differently per backend.\n\n## Direction (triage, decided here)\n\n**Normalise `''` → `null` at the write door for every non-string-typed column**: the numeric types (`NUMERIC_VALUE_TYPES`, including `progress` and `summary`), boolean, `date`, `datetime` and `time`.\n- The validator already reads `''` as missing on these columns. Normalising makes storage agree with the platform's own reading of a blank.\n- No producer breaks: objectui's date and time fields, CSV blanks and API clients that send `''` all keep working, and every backend stores the same null.\n- String-stored columns (text, lookup ids, select values) are **⛔ untouched**. The spec's value round-trip fixture pins `str_empty` (「empty string must not become null」), and what 「is empty」 means for them is a separate spec question, filed as its own decision card.\n\n## Execution notes\n\n1. One rule at the write door (engine and REST create/update, including batch), before type validation, keyed on the field's declared type. ⛔ No driver copy.\n2. Add `progress` and `summary` to the number branch's type checks.\n3. **Stored rows.** Census the stored `''` in non-string-typed columns on the conformance backends. Propose a repair (a `migrate` step, or a documented one-off) in the PR, and do not run it on any deployment from this card.\n4. Pin it on memory, SQLite and PostgreSQL, through the engine and REST: a cleared number, date and boolean store `null`; a text field's `''` stays `''` (the `str_empty` control); a valid value is unchanged.\n5. Once this lands, objectui#10813's widget can drop its `''` member for typed columns without re-scoping a stored rule. Post the back-link there.\n\nRefs: objectstack-ai/objectui#10813 · objectstack-ai/objectui#10790 · PR objectstack-ai/objectui#10834 (closed, branch kept)."
+}

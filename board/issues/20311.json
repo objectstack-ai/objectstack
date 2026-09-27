@@ -1,0 +1,31 @@
+{
+  "number": 20311,
+  "kind": "issue",
+  "title": "[Decision] what 「is empty」 means on a text column and on a multi-value column: null only (the spec's lowering today), or null OR `''` / `[]` — three objectui builders disagree, and a stored sharing rule's rows depend on the answer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T20:13:58Z",
+  "updated_at": "2026-09-27T20:13:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20311",
+  "body": "Path: permissions that actually hold | 缺项 (no item authors 「is empty」 on a sharing-rule criterion) | P2\n\nFiling gate: **② a decision only the maintainer can make**: it is the meaning of a declared operator in `@objectstack/spec`, and changing it re-scopes stored rules. Filed and graded by the triage seat (objectstack-wide, seat post #6015, `session_01W89enF2dYV7K4N2Fbfj33f`) while answering `pm:retriage` on objectstack-ai/objectui#10813, whose stop valve tripped. ⛔ Not a claim.\n\n**Grade:** `needs-user-decision` · `priority:p2` · `domain:spec` · `area:records`.\n\n## 维护者速读\n\n**事情**:「为空」这个筛选条件,在平台里有三种意思。\n- 协议(spec)把它翻成「值是 null 或缺失」。\n- objectui 的数据集桥写成「字段不存在」。\n- 最常用的那个筛选控件(共享规则、汇总字段的过滤都用它)写成「null **或空字符串**」。\n\n同一个条件,在不同地方挑出的记录不一样。\n\n**为什么要你拍板**:开发实测过,**清空的文本框存的是空字符串 `''`,不是 null**。平台底层有一条测试专门钉住「空字符串不能变成 null」。所以如果照协议现在的写法(只认 null),用户眼里空着的文本记录,「为空」反而筛不出来。而改控件的写法,会改变已存共享规则能看到的记录。这是协议语义加存量数据的决定,席位不能自己选。\n\n⭐ 数值、日期、布尔字段里存了 `''`,是写入环节的缺陷,不需要你裁,已单独立卡 #20308,在写入口统一转成 null。**本卡只问文本字段和多值字段。**\n\n**选项**:\n- **A**:「为空」只认 null。写入口把文本的 `''` 也转成 null,并迁移存量数据。代价:推翻那条「空字符串不能变成 null」的底层约定,还要做数据迁移。\n- **B(荐)**:协议声明「为空」按字段类型展开:文本类 = null **或** `''`;多值类(多选、标签、多值查找)= null **或** `[]`;其它类型 = null。三个构建器都改成读协议的这一个展开。代价:协议里多一张按类型展开的表,但只写这一处。\n- **C**:不动,把三种意思写进文档。\n\n**席位意见**:荐 **B**。\n- 用户眼里「空着」就是空。主流平台也这么处理:Salesforce 把空白文本存成 null,ServiceNow、Airtable 的「为空」都匹配空字符串(⚠️ 本席未重新实测这三家)。\n- B 不动存储,不需要迁移,也保住了「空字符串不能变成 null」的底层约定。\n- 已测到零条存量规则会因为 B 改变结果(objectui、objectstack 都是 0 条;生产环境读不到)。\n\n⚠️ 没测的:生产环境里有没有共享规则用了「为空」,读不到。\n\n**你要做的**:回一个字母 —— **A / B / C**。\n\n<!-- os-decision-facets -->\nos-decision-facets\n\n- **① 项目长远合理性**:一个操作符在协议里只该有一个意思,并且只写在一处。B 把「为空」按类型的展开写进协议,三个构建器改成读它,以后不会再出现第四种意思。A 也只剩一个意思,但要推翻已钉住的存储约定。C 让分歧永久存在。\n- **② 实际业务拉动**:共享规则和汇总字段过滤用的正是那个控件。今天「为空」在多值字段上还会直接报错:控件写出 `$in: ['']`,而 SQL 驱动拒绝对 JSON 列做 `$in`。这是真实的、会报错的路径,不是理论问题。\n- **③ 防 AI 写代码/写元数据犯错**:三种意思意味着 AI 在不同构建器里写同一个条件,得到不同的记录集。B 让协议自己回答「为空」是什么,构建器只照读。\n- **④ 创业阶段不扩散**:B 不是新能力,是给已声明的操作符补上它缺的类型展开。A 需要一次数据迁移,是三者里最重的。\n\n**Governing text:**\n- `packages/spec/src/data/filter.zod.ts:2307-2308` (`'is_empty': '$null'`, `'is_not_empty': '$null'`);\n- the spec's value round-trip fixture `VALUE_ROUNDTRIP_CASES` row `str_empty` (「empty string must not become null」);\n- objectui#10813's measurements (dev report `5858799523`, review `5859057830`, release `5859079825`).\n\n## After the ruling\n\n- **B:** `domain:spec` declares the per-type lowering once (`filter.zod.ts`). objectui#10813 then converges `FilterConditionField` and `datasetFilterCondition.ts` on it, including the multi-value arm that today writes `$in: ['']` onto JSON columns.\n- **A:** the write-door card (#20308) extends its normalisation to string columns, with a data migration, and the fixture row changes by ruling.\n- **C:** the three meanings are documented where each builder offers the operator.\n\nRefs: objectstack-ai/objectui#10813 · objectstack-ai/objectui#10790 · PR objectstack-ai/objectui#10834 (closed)."
+}

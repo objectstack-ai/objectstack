@@ -1,0 +1,34 @@
+{
+  "number": 20280,
+  "kind": "issue",
+  "title": "driver-sql on MySQL reads a year 0..99 back a century late — REST create stores `placed_on: \"0009-03-04\"` correctly, and `…/query` returns `\"1909-03-04\"`; a `datetime` `0009-03-04T10:00Z` returns `2004-09-03T10:00Z`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T18:06:08Z",
+  "updated_at": "2026-09-27T20:09:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20280",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/drivers/driver-sql/src/sql-driver.ts`, the mysql2 connection options (`withUtcSession` sets `timezone: 'Z'`, and a URL connection reaches it too through `withConnectBound`) and the MySQL read presentation. They feed mysql2 3.23.1's `lib/packets/packet.js` `parseDate` / `parseDateTime`.\n\nFinding class **(a)**. `reach:` was measured at the public REST door (below).\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20240 dev's patch-round report (finding 5), re-measured by the delta review of PR #20261 (record 5858382903). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\nMeasured at `e46218674b` (base) and at PR #20261's head, which are identical for every cell below. The stack is SqlDriver on a live MySQL 8.0.46 (server `time_zone='+08:00'`, as CI runs it) through mysql2 3.23.1, via REST `POST /api/v1/data/:object` and `POST /api/v1/data/:object/query`.\n\n| field | written | stored (`CAST(… AS CHAR)`) | returned by `…/query` |\n|:--|:--|:--|:--|\n| `date` | `\"0009-03-04\"` | `0009-03-04` | **`\"1909-03-04\"`** |\n| `date` | `\"0099-03-04\"` | `0099-03-04` | **`\"1999-03-04\"`** |\n| `date` | `\"0000-06-15\"` | `0000-06-15` | **`\"1900-06-15\"`** |\n| `date` | `\"0999-06-15\"` | `0999-06-15` | `\"999-06-15\"` at base; `\"0999-06-15\"` once PR #20261 lands |\n| `datetime` | `\"0009-03-04T10:00:00.000Z\"` | `0009-03-04 10:00:00.000` | **`\"2004-09-03T10:00:00.000Z\"`** |\n| `datetime` | `0099-…` / `0000-…` | stored right | **`1999-03-04T10:00Z`** / **`2000-06-15T10:00Z`** |\n\n- **The write is right and the read is wrong.** `where placed_on $eq \"0009-03-04\"` finds the row, then presents it as `1909-03-04`. `$eq \"1909-03-04\"` finds nothing.\n- **Mechanism (read from source, measured live):**\n  - `parseDate` under `timezone: 'Z'` rebuilds a DATE as `new Date(Date.UTC(y, m-1, d))`, and the default / `'local'` zones use `new Date(y, m-1, d)`. Both map a year 0..99 to 1900..1999.\n  - `parseDateTime` hands `'0009-03-04 10:00:00.000Z'` to V8's non-ISO `Date` parser, which reads it as 2004-09-03.\n  - SQLite and PostgreSQL read these years right.\n- **No measured writer** stores these years. The reach is the public door, not an observed caller.\n\n## Suggested shape (⛔ not a ruling)\n\n- The review measured two remedy hints. `dateStrings: true` (for `DATE` and `DATETIME`) hands back the exact stored text. A `'+00:00'` zone takes mysql2's padded string-constructor arm for `DATE` only.\n- Whichever is chosen, the read presentation must then go through the one storage rule (`temporalStorageForm`), as the other dialects do.\n- Pin it on live MySQL for years 9, 99, 0, 999 and a 2026 control, on `date` and `datetime`, through the engine and REST.\n\n## Filing-gate answers\n\n- **Class**: ① (a defect with a named landing site); finding class (a), measured.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `driver-sql`). It is a different mechanism and position from #20264 (years outside what a text or backend holds) and #20240 (the rule's padding), so it is not folded into either.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `mysql date year below 100 read back 1900s mysql2 parseDate` → #20264, #3942 and #4022, none this;\n  - `mysql2 timezone Z date read wrong century Date.UTC two digit year` → #3942, #11389 (PostgreSQL day-early, fixed) and #4022, none this.\n\nDedupe words: `mysql date year below 100 read back 1900s` · `mysql2 parseDate Date.UTC year 0009 1909` · `mysql datetime year 9 presented 2004`"
+}

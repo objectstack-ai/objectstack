@@ -1,0 +1,37 @@
+{
+  "number": 20248,
+  "kind": "pull_request",
+  "title": "docs(spec): field-scale docblock states number's ruled absent width",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "protocol:data",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T14:35:32Z",
+  "updated_at": "2026-09-27T15:35:54Z",
+  "closed_at": "2026-09-27T15:35:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-27T15:35:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20248",
+  "body": "Fixes #19628\nClause-②: no\n\n## What this does\n\nThis is the spec half of ruling 5791809146 (batch 215 item 2, letter A′, maintainer 「215 同意」), item 1 only. It changes docblock prose and one test case's title and comment. No key, schema, export or behaviour changes.\n\n- `packages/spec/src/data/field-scale.ts`: the `number` bullet under \"Why the table has exactly one row\" now states the ruled answer instead of the open question. An absent `scale` on a `number` field means NO fixed width, the value's natural precision. That is the platform's declared answer, not an open question, and the bullet cites the ruling by its record.\n  - The closing sentence that said `number` 「still awaits its own ruling」 now says its absent value is ruled to be no fixed width.\n  - Grouping is named as `FieldSchema.useGrouping`'s to decide. The interim heuristic for an absent `useGrouping` reads the DECLARED `scale` only, never a resolved width (ruling item 4).\n  - The `currency` bullet is byte-identical.\n  - **No `number` row.** No code token moves (evidence below).\n- `packages/spec/src/data/field-scale.test.ts`: the existing pin `resolveFieldScale({ type: 'number' })` returning `undefined` now has its own case, whose title and comment carry the ruling. The `currency` assertion keeps its own case, and its comment facts are unchanged. No assertion was added, removed or altered.\n\nItems 2–4 of the ruling live on objectstack-ai/objectui#9843, which carries them on its own card. Those items are: every consumer reads the width through `resolveFieldScale` and drops its private `?? 0`; computed results round to the widest decimal count among their inputs; grouping reads the declared `scale` only. This PR does not touch objectui.\n\n## Evidence (all at HEAD `bf7b0ff03`, base `c02fa1276`)\n\n- **No code token of `field-scale.ts` moves.** I compared base and head with the TypeScript scanner, comments skipped.\n  - Result: 123 = 123 tokens, `identical=true`, and the sha256 prefix of the token stream is `65aed4895c596175` on both sides.\n  - Control: a copy with one code token changed (`percent: 0` to `percent: 1`) answers `identical=false`, exit 1. The raw bytes do differ (`cmp` exit 1), since the comments changed.\n- **Tests.**\n  - `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/data/field-scale.test.ts`: 13 passed, exit 0.\n  - Full spec suite `vitest run --project local --maxWorkers=2`: 546 files, 16071 passed and 2 todo, exit 0.\n  - `pnpm --filter @objectstack/spec typecheck`: exit 0. This runs tsc, the scripts program and `check:test-typecheck`. The test program lists `field-scale.test.ts` (1 hit via `--listFilesOnly`); the main `tsconfig.json` excludes tests.\n- **Gates.** `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 77 families, and `--ran` reconciles them as 74 run, 3 NOT MEASURED and 0 unrun, with every exit code recorded.\n  - All 74 exit 0. `check:doc-formula-expressions` first answered exit 3 (its formula, sdui-parser and lint closure was not built). After building that closure it exits 0.\n  - NOT MEASURED, exit 3, `PREREQUISITE NOT MET` (each needs a full workspace build, so CI runs them): `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:type-check-debt`.\n  - Five roster families whose roster sits in a directory this diff touches all exit 0: `check:meta-url-spelling`, `check:spec-changes`, `check:authz-resolver`, `check:error-code-casing`, `check:filter-alias-parity`.\n- **Lint, narrowed.** `eslint --no-inline-config --format json` over the 2 touched files lints 2 files with 0 errors and 0 warnings. The resolved config for this path carries no `parserOptions.project` or `projectService`, so no type-aware rule runs. That means this diff cannot move the verdict of any untouched file. The repo-wide `pnpm lint` is CI's.\n\n## Changeset: none, `skip-changeset`\n\nThe dispatch asked for a `patch` changeset on the premise that the docblock ships. I measured it after `pnpm --filter @objectstack/spec build`, and it does not.\n\n- The module docblock reaches none of `@objectstack/spec`'s `files[]` paths. `dist`, `json-schema`, `liveness`, `prompts`, `llms.txt`, `README.md`, `CHANGELOG.md`, `api-surface` and `spec-changes.json` give 0 hits for the docblock heading, the old sentence, the new text and the ruling id.\n- Positive control: the unchanged `resolveFieldScale` TSDoc does hit, in `dist/data/index.d.ts` and `dist/data/index.d.mts`.\n- `field-scale.ts` is not matched by `src/**/*.zod.ts`, so it does not ship as source either.\n\nA diff that publishes nothing takes `skip-changeset`, so the changeset I first added was removed in `bf7b0ff03`.\n\n## Acceptance notes\n\n- **Changeset.** This deviates from the dispatch, as measured above; the agent definition's criterion governs on conflict.\n- **Grouping heuristic description.** The `FieldSchema.useGrouping` TSDoc in `packages/spec/src/data/field.zod.ts` gives the interim heuristic's example as \"`scale: 0` + no upper bound reads as a plain count and keeps grouping\". The objectui heuristic reads differently: at the pinned `.objectui-sha` `f8a9d0fb`, `packages/core/src/utils/number-display.ts:166-171` is `scale !== 0`, with no bound. The control token got 0 hits.\n  - This is comment drift outside this claim's file surface, and it is not filed. Carrier: none.\n- `field-scale.test.ts:40-42` still describes a declared `0` as \"rendered ungrouped\" without naming `useGrouping`. That is true of the interim heuristic for an absent `useGrouping` (ruling item 4). It is outside the claimed lines and was left alone.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CiCTczDo7tGhafXjf61dUJ)_\n"
+}

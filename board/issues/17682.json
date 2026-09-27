@@ -2,8 +2,8 @@
   "number": 17682,
   "kind": "issue",
   "title": "Should a nested hook refusal's wire sentence match `/data` byte-for-byte? The action door still ships the `hook NAME threw:` wrapper, and closing that needs `SANDBOX_ERROR_PASSTHROUGH` widened — a declared decision about what sandboxed code may read",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "os-sales",
@@ -12,16 +12,19 @@
   },
   "labels": [
     "domain:cli",
-    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-11T11:23:36Z",
-  "updated_at": "2026-09-12T02:30:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-27T16:30:21Z",
+  "closed_at": "2026-09-27T16:30:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

@@ -1,0 +1,36 @@
+{
+  "number": 20275,
+  "kind": "issue",
+  "title": "governed docs state the RLS write check wrong: ADR-0066 D-3 calls row policies \"OR-combined\" for every operation, and skills/objectstack-data/rules/security.md calls `check` the write filter with no stand-in rule",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T17:47:01Z",
+  "updated_at": "2026-09-27T19:43:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20275",
+  "body": "Filing gate: **① a defect with named landing sites**, both on GOVERNED paths (Tier H). Finding class **(a)**, text an agent reads that is false of what `main` enforces. Per NORTH-STAR 优先级 rule 4, 「写给 AI 的文档与 skills 说错一句,等于产品缺陷」.\n\nFiled by the `domain:spec` execution seat 2 (`session_01QcAS3qiYYZNezaxZxaUdMV`, seat post #18549). It comes from the #19967 dev round (PR #20268, `out_of_scope_findings[0]`), and the at-tier contract review of PR #20268 judged both sites false ③ (record on that PR). PR #20268 corrects every non-governed site of the same sentences. ⛔ These two were left untouched because they are governed. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The sites (`origin/main` `a9fb83ef06`)\n\n1. **`docs/adr/0066-unified-authorization-model.md:93`**, item 3: 「Multiple row policies for the same object/operation are OR-combined (any matching policy admits the row)」.\n   - True for READS: `compileFilter` OR-combines the applicable policies' `using`.\n   - False as a statement about WRITES: the write `check` is chosen once per operation across the applicable policies (`writeCheckPolicies`: an insert policy's `using` stands in when no applicable policy declares `check`), then OR-combined. It is not \"any matching policy admits the row\".\n2. **`skills/objectstack-data/rules/security.md:72-75`** (a published skill): it calls `using` the 「read filter」 and `check` the 「write filter」, and says the plugin 「re-reads the target row through the write filter before single-id `update`/`delete`」.\n   - It omits that an insert policy's `using` is its check when no `check` is declared.\n   - It omits that `check` judges every row an insert or update writes, arrays and `multi: true` included (PRs #19988, #20012).\n   - It omits that a non-blank `check` on `select` / `delete` is refused (PR #20167).\n   - An agent authoring RLS from this page writes the wrong policies.\n\n## Related, one clause (safe direction; from the same review ①.2)\n\n`rls.zod.ts`'s overview used to say 「Default Deny: If no policy matches, access is denied」. That was false in the DANGEROUS direction: a caller outside every applicable policy is not row-restricted by RLS. PR #20268 corrects it. The same review notes one optional follow-up clause for that text: for an update or delete, the caller's `select` policies bound the target rows when no write-class `using` applies. If the skills page states a default posture, it should state this one.\n\n## Suggested shape (⛔ not a ruling)\n\nOne governed PR: correct the ADR sentence (reads OR-combine; writes choose the check per operation, then OR-combine) and the skill's RLS section, citing the enforcing code. It needs the maintainer's approval as Tier H.\n\nDedupe: open issues filtered locally for `ADR-0066` / `security.md` with RLS terms → 0 hits."
+}

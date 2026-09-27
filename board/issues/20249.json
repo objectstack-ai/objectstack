@@ -1,0 +1,33 @@
+{
+  "number": 20249,
+  "kind": "issue",
+  "title": "spec: `PackageInstallRequestSchema`'s wrapped branch refuses top-level unknown keys by name — ruling A on #19328",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T14:35:33Z",
+  "updated_at": "2026-09-27T20:16:16Z",
+  "closed_at": "2026-09-27T20:15:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20249",
+  "body": "Filed by the director seat (summon #30 续, `session_01AsCNgFBs8HCjwhyHQsFbx3`) from the maintainer's ruling on #19328 (batch #227 item 3, letter A, maintainer 「开始总监决裁」). Reader who acts: the `domain:spec` execution seat. ⛔ Not a claim. Grading beyond what is written here is triage's.\n\n## What the ruling settles\n\n`POST /api/v1/packages` answers exactly what `PackageInstallBodySchema` declares since PR #20218 (`packages/runtime/src/domains/packages.ts`: `const declaredBody = PackageInstallBodySchema.safeParse(body)`, one hit on `origin/main` `ab820016b3`). Three of the four residual classes on #19328 are closed by that landing. The last one is the wrapped form's **top level**: `PackageInstallRequestSchema`'s wrapped branch (`packages/spec/src/api/package-api.zod.ts`, docblock at `:381` 「⛔ Do NOT close the wrapped branch with `.strict()` … (ruling A)」) is declared strip-mode, so a caller who writes `{ manifest, enabledOnInstall: false }` (a misspelling of `enableOnInstall`) has the key dropped silently and the package installs **enabled**.\n\nThe docblock's ruling A (5716042643, #18058, batch #148 item 4) rested on 「the declaration must not refuse a body the door answers 201 to」 at a time when the door did not parse the body at all. Since PR #20218 the door answers what the declaration says, so that premise is circular and no longer constrains the choice. The manifest and the bare form are already strict; the maintainer ruled the wrapped top level joins them: one rule for the whole install contract (the Kubernetes `fieldValidation=Strict` / Terraform provider-schema idiom).\n\n## Work\n\n1. `PackageInstallRequestSchema`, wrapped branch: strip → strict. An unknown top-level key is refused by name, with the same envelope the manifest's and the bare form's unknown keys already get (`400 VALIDATION_ERROR`, the key named, the remedy: remove it or spell the declared option). ⛔ No alias, no grace window.\n2. The docblock at `package-api.zod.ts:381`: replace the ruling-A sentence with this ruling's citation (#19328 batch #227 item 3, letter A) and the reason above; do not leave the retired reasoning in place.\n3. Pins: `package-api.test.ts`'s wrapped-branch rows assert the refusal (a misspelled option, a private key) and the controls (`manifest` alone; `manifest` + the four declared options round-trip). PR #20218's §5 alignment pin (「the door answers what the declaration says」) flips from strip to refusal on its own: re-read its expectation and correct it in the same PR if it asserted the strip.\n4. Changeset: `@objectstack/spec` `minor`, `**BREAKING**` banner, `Clause-②: no (narrowing)`, ADR-0087 `registered` disposition (the wording of #19120 / #19417). Reach measured first-party by the #19328 dev: the SDK sends only `manifest` / `settings` / `enableOnInstall` / `overwrite`; the objectui package dialog sends `{ manifest }`. Out-of-repo callers are NOT MEASURED; say so in the changeset.\n5. #20219 (the spec docblocks PR #20218 made false) touches the same docblock region; the two may land as one PR if the same dev holds both. Neither is a claim on the other.\n\n## Acceptance\n\n- A wrapped body with an unknown top-level key is refused `400 VALIDATION_ERROR` naming the key at the spec door and, through #20218's alignment, at `POST /api/v1/packages`; a well-formed wrapped body installs exactly as before.\n- `Check Changeset` / ADR-0087 registration green; `Clause-②: no (narrowing)` line-leading in the changeset.\n- On landing, #19328 (`pm:blocked` on this card, `Blocked-by:` in its body) closes; its four residual classes are then all closed.\n\nClause-②: no (narrowing)"
+}

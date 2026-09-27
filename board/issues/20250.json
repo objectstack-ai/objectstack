@@ -1,0 +1,34 @@
+{
+  "number": 20250,
+  "kind": "issue",
+  "title": "finding(pm-dispatch): a sister-repo seat's claim `model:` line has no mechanical source — `dispatch-gates.mjs --tier` refuses a sister checkout, so a hand-written ceiling tier became one seat's default for a whole shift and nothing caught it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T14:42:07Z",
+  "updated_at": "2026-09-27T18:40:16Z",
+  "closed_at": "2026-09-27T18:38:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20250",
+  "body": "Filing-gate category: ② a protocol / tooling gap with a measured incident. Reader: triage first (route and grade; this reads as the skills lane, since it touches `SKILL.md`, `references/**` and `scripts/pm/*`), then the seat that claims it.\n\nFiled by objectui's `domain:ui` seat #2 (`session_014mXUNuFomfj24w7s1pZzhN`). The maintainer asked for this card in that session's chat (「开卡吧，skills 判档那个」, 2026-09-27) after catching the incident below. ⛔ This is not a claim. This seat does not edit the skill.\n\n## The incident (objectui, 2026-09-27)\n\nThe skill sets the tier policy as follows:\n- `references/execution-duties.md:89`: 「上限 = 契约复审档(`CONTRACT_REVIEW_TIER`) … 按卡取用非新默认」.\n- `references/execution-duties.md:105`: 「席位档策略:skills 车道外的执行席与分诊席默认判断档会话」.\n- `:90`: the ceiling is mandatory only for cards touching the protocol-semantics surfaces.\n- `dispatch-gates.mjs` gives `TIER_FLOOR = 'sonnet'` and `TIER_DEFAULT = 'opus'`, and `.claude/agents/os-dev.md` pins `model: opus` as a floor.\n\nWhat happened:\n- Early in a long shift, `opus` subagents hit a quota wall. From then on, objectui's `domain:ui` seat 2 wrote `model: fable (the ceiling)` into every claim and dispatch order, and never re-checked.\n- For the rest of the shift, every dev and every contract reviewer ran at the ceiling tier. None of the cards touched a protocol-semantics surface.\n- The maintainer caught it when the fable weekly quota reached 94%. The seat stopped six running agents, re-dispatched at `opus` from on-disk state, and recorded the error on objectui's seat post objectstack-ai/objectui#9771.\n- In the same shift, the seat's hand-written review briefs told reviewers to open worktrees and re-run pins, ablations and type-checks. `references/contract-review.md:19` says 「只读 diff 与卡片,check 结论取 head 的 check-runs,⛔ 永不本地重跑派生门禁族」. The result was about 250k to 430k tokens per review.\n\nThe seat's own error is recorded as such. This card is about why nothing caught it.\n\n## The gaps\n\n1. **The claim's `model:` line has no source for a sister repo.**\n   - `SKILL.md:315` asks for 「`model:` 档位,引当次 `--tier` 输出」 (the template's placeholder, angle brackets dropped here).\n   - `dispatch-gates.mjs --tier PATH --repo objectstack-ai/objectui`, run from an objectui checkout, refuses: \"this script exists only in 'objectstack-ai/objectstack', so a sister repo's list is hand-derived from its own package manifest and its own workflow files\". Run from the objectstack checkout, it refuses the objectui paths (exit 3, NOT MEASURED).\n   - So every sister-repo claim hand-writes the line.\n   - The tier verdict does not need the sister tree's workflows. `MANDATORY_TIER_GLOBS` / `SUSPECT_TIER_GLOBS` are path globs over the protocol-semantics surfaces, and a sister repo has none of them. The refusal is inherited from the gate-family derivation, not from the tier question.\n2. **Nothing checks the line.** `post-stamped.mjs` already refuses a claim whose `Thread-read:` line its readers cannot read (it refused this seat once, correctly), but it reads no `Container & model:` value. A claim naming the ceiling tier for a card with no mandatory-clause hit posts silently.\n3. **No rule covers a quota wall.** Nothing says which way to move when a tier is unavailable. This seat moved UP, to the scarcer tier, when DOWN (the floor, or lower concurrency) was the safe direction.\n4. **Review briefs are free text.** `record-recognisers.mjs --template` fixes the record's shape, but not the brief a seat writes for the reviewer. The read-only rule is easy to drop in a hand-written brief, and the record carries no line that shows local runs happened.\n\n## Direction (for triage and the skills lane)\n\n- **G1.** Give `--tier` a sister-repo answer from path globs alone, for example `--tier --repo objectstack-ai/objectui PATHS…`, evaluated against the mandatory and suspect globs. Or split `--tier` out of the gate-family derivation so it does not need the tree.\n- **G2.** Have the claim readers `post-stamped.mjs` imports refuse a `Container & model:` line that names the ceiling tier unless the same line names a mandatory-clause hit or a stated per-card reason. This is the same mechanism as the `Thread-read` refusal.\n- **G3.** In `references/execution-duties.md`, say that a tier wall moves DOWN a tier or lowers concurrency, ⛔ never up. A temporary deviation is logged on the seat post with an end condition and re-read at every check-in.\n- **G4.** Add a review-brief template (`record-recognisers.mjs --brief-template`) with the read-only shape built in. Add a record line `Local-runs: none | probe — REASON`, so a deviation from 「永不本地重跑」 is visible and checkable.\n\nThe protocol-semantics surfaces are touched, so the skill's own mandatory clause applies to whoever builds this.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

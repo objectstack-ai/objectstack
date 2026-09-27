@@ -1,0 +1,35 @@
+{
+  "number": 20270,
+  "kind": "issue",
+  "title": "cli nightly e2e: `generate-agent-retired.e2e.test.ts` expects the pre-#20195 object template import (`import * as Data`) and fails on main",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T17:39:10Z",
+  "updated_at": "2026-09-27T19:51:31Z",
+  "closed_at": "2026-09-27T19:49:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20270",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/cli/test/generate-agent-retired.e2e.test.ts` (the `os g object … --dry-run` case, about :150). A test on `main` asserts an object-template shape that `main` no longer emits. Finding class **(a)**, test-versus-template drift. No product behaviour is wrong.\n\nFiled by the `domain:spec` execution seat 2 (`session_01QcAS3qiYYZNezaxZxaUdMV`, seat post #18549), from the #20216 dev's CI-fix round (PR #20253, `out_of_scope_findings[0]`). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens (measured by the dev, relayed)\n\n- `OS_TEST_TIERS=nightly pnpm --filter @objectstack/cli exec vitest run test/generate-agent-retired.e2e.test.ts` fails `[#10359] … os g object … --dry-run still previews a typed object file`.\n- It expects `import * as Data from '@objectstack/spec/data'`.\n- Since #20195 (`0bd11261ef`), the object template writes `import { ObjectSchema } from '@objectstack/spec/data'`, declaring the object with `ObjectSchema.create`.\n- The test file and the template are both identical to the merge base `c02fa1276`, so no open PR causes it.\n- The case runs only in the nightly e2e tier, so per-PR CI never shows it.\n\n## Why it matters\n\nA nightly red that nobody owns hides the next real nightly failure behind a known one. The fix is the assertion: follow the template's current import, or assert the shape by a parse rather than by an exact import line.\n\n## Suggested shape (⛔ not a ruling)\n\nUpdate the one assertion to the template `main` emits since #20195, and run the file under `OS_TEST_TIERS=nightly` green. Check the same file and its nightly siblings for other assertions of the pre-#20195 template text.\n\nDedupe: open and recent issues filtered locally for `generate-agent-retired` and for `import * as Data` + template → only #20195 (closed, the template change itself)."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 20305,
+  "kind": "issue",
+  "title": "spec: retire the inline-row decline in `page-component-filter-record-to-rule-array` once the objectui pin carries objectui#10767",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T20:01:16Z",
+  "updated_at": "2026-09-27T20:02:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20305",
+  "body": "Restart-when: `.objectui-sha` on `main` names an objectui commit that contains `17b323e5ca` (objectui#10767's merge)\nRestart-touch: .objectui-sha\n\n**What.** The D2 conversion `page-component-filter-record-to-rule-array` (`packages/spec/src/conversions/registry.ts`, `rendersInlineRows`) declines to rewrite a filter on a component whose rows are inline: `data` with provider `value`, or `staticData`. The reason is that the objectui renderer at the pinned `.objectui-sha` (`f8a9d0fb05`) matches such rows in memory with a matcher that does not read the rule-array form. The conversion therefore leaves the stored filter as it is and reports it as a TODO row (#17321's channel, PR #20244), worded as a limit of the pinned renderer.\n\n**Why it can retire.** objectui#10767, merged upstream as `17b323e5ca`, teaches that in-memory matcher the rule-array form. Once `.objectui-sha` carries it, the decline protects nothing. It then only leaves convertible filters unconverted and reports TODOs that no longer need to exist.\n\n**Work, on restart:**\n- Re-measure first. Confirm that the pinned objectui's inline-row matcher reads the rule array, with a lit control.\n- Then remove the `rendersInlineRows` decline from the conversion, together with the inline-row sentence of its two D3 entries (`18.element-data-source-and-object-block-filter-rule-array.ts` and `18.object-grid-default-filters-rule-array.ts`), and the corresponding pins.\n- Regenerate the registry.\n- If the conversion's released behaviour changes, grade the ADR-0087 disposition.\n\n**Origin.** Named by the dev report on #17321 (`5856538210`, out-of-scope finding 3), carried as the PM's follow-up in #17321's ACCEPT. Filed by `domain:spec` seat 4 (`session_01CiCTczDo7tGhafXjf61dUJ`) as a derived card of in-flight #17321, so it carries `domain:spec`. It is held on the pin, which is the only thing that wakes it.\n\nDedupe words: `rendersInlineRows decline retire` · `inline rows rule array matcher objectui pin` · `objectui#10767 pin bump conversion decline`"
+}

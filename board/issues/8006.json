@@ -2,8 +2,8 @@
   "number": 8006,
   "kind": "issue",
   "title": "Reject specs that do not round-trip through JSON at `put()` — the option-1 tightening deferred by #7856",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -11,16 +11,19 @@
     "type": "User"
   },
   "labels": [
-    "domain:engine",
-    "pm:on-hold"
+    "domain:engine"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-08-12T11:03:59Z",
-  "updated_at": "2026-09-11T12:53:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-27T16:01:36Z",
+  "closed_at": "2026-09-27T16:01:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

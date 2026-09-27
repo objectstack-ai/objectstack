@@ -2,8 +2,8 @@
   "number": 20212,
   "kind": "issue",
   "title": "RLS: a policy's compiled filter skips the shared comparand-shape faces, so a null list member or null ordering bound reaches driver-sql, and the read and the write check disagree (the read hides a row its own check admits)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T09:25:00Z",
-  "updated_at": "2026-09-27T13:53:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-27T14:42:52Z",
+  "closed_at": "2026-09-27T14:41:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20212",
   "body": "Filing gate: **① a product defect with a reproduction**, finding class **(b)**: a declared refusal is not enforced on one path.\n- `reach:` one real-stack probe by the #19951 dev (report `5854600917`, `out_of_scope_findings[0]`): a throwaway SecurityPlugin + ObjectQL + SqlDriver (`better-sqlite3`) stack at objectstack `560b724c`. ⛔ Not re-run by this seat.\n- The refusal is ruled: the 2026-08-31 null-member ruling and the 2026-09-01 null-ordering ruling refuse these comparands at the shared face (`packages/spec/src/data/filter-comparand-shape.ts`, `assertListComparandShapes` / `normalizeFilterComparandTypes`).\n\nFound by the `os-dev` round on #19951 (PR #20210). Filed by `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). Devs do not open issues. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n**Acting reader**: triage grades and routes it. On the dev's reading, the landing site is the engine seam: `packages/objectql` applies the shared faces to the caller's `where` only, and the RLS filter from `plugin-security` `RLSCompiler.compileFilter` is AND-composed past that seam. The check path is `formula` `matchesFilterCondition`.\n\n## Reproduction (the dev's probe; caller `usr_member`, rows `r_open` = open, `r_closed` = closed)\n\n| RLS predicate | as `using` (read) | as `check` (write) |\n|:--|:--|:--|\n| `!(record.status in ['open', null])` | `[]`: `r_closed` hidden, no WARN | insert `closed` **admitted**, insert `open` 403 |\n| `record.status in ['open', null]` | `['r_open']` (acts as `in ['open']`) | `open` admitted, `closed` 403 |\n| `record.status > null`, `record.status <= null` | `[]` | 403 / 403 |\n| `record.status in [null]` | `[]` | 403 / 403 |\n\n⇒ **The first row is the defect's sharpest form**: the read hides a row that the same policy's write check admits. SQL's three-valued `NOT IN (…, NULL)` excludes every row, while the check evaluator admits `closed`. It is over-restrictive on read (not a leak), and the two halves of one policy disagree. `driver-memory/src/memory-matcher.ts` records these cells as 「constructively unreachable through the compile face」. On the RLS path they are reachable.\n\n- **The contrast measured in the same probe**: the type family (membership-key `==` / `!=`, `in current_user`, …) IS refused per request (a `DENY (fail closed)` WARN, 0 rows, check 403). Only the null family slips through.\n- **Analytics refuses the same scope** (`assertReadScopeComparandsRunnable`, read from code by the dev and not re-measured), so one policy answers differently on the data path and the analytics path.\n\n## Authoring side, already covered\n\nPR #20210 (#19951) makes `validateRlsPredicateEnforceability` report these null shapes at `os validate`, judged by the same two faces analytics runs. That closes new authoring through the CLI. It does not close policies already stored, or policies saved without `os validate`. #20158 (open) is the policy-save door.\n\n## Related, not duplicates\n\n- #13496 (closed): `compileCelToFilter` lowered a null MEMBER into an RLS `$in`; the fix put the refusal in the shared face. This card is the path that never meets that face.\n- #20010 (open, `service-analytics`): the analytics object-form `where` skips the same face's null arms. Same family, different door.\n- #20158 (open): RLS admission at policy save / `objectstack validate` (#19995 ruling C). That is the authoring door, not the runtime seam.\n\n## Dedupe (the MCP repo-scoped issue search, closed included)\n\n- `RLS predicate null list member read and check disagree comparand shape face skipped RLSCompiler` → 21 hits. The top 10 are #19951, #20158, #19975, #13496, #20039, #6778, #6762, #6641, #14234 and #8241. None is this defect.\n- `rls filter null member in list not in null ordering bound driver-sql bypasses assertListComparandShapes` → 14 hits. The top 10 are #20158, #20010, #19885, #19951, #13496, #19888, #20039, #13549, #5298 and #4918. None is this defect.\n\nSeam: `spec:assertListComparandShapes` null-member / null-ordering arms → `runtime:objectql` engine seam (caller `where` only) + `plugin-security` `RLSCompiler.compileFilter` | `formula` `matchesFilterCondition` (check).\n\nDedupe words: `rls null list member shared face bypass` · `rls filter skips comparand shape check` · `check evaluator disagrees with read null member`"

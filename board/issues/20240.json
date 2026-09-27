@@ -2,8 +2,8 @@
   "number": 20240,
   "kind": "issue",
   "title": "core `temporalStorageForm`: the `date` arm leaves a year outside 1000..9999 unpadded — over REST the epoch-ms number for 0999-06-15 counts `$gt` 0 / `$lt` 7 on InMemoryDriver and SQLite (correct 6 / 0); its ISO string counts 6 / 0",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T13:22:39Z",
-  "updated_at": "2026-09-27T14:20:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-27T18:30:39Z",
+  "closed_at": "2026-09-27T18:29:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20240",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/core/src/utils/temporal-storage-form.ts`, `canonicalCalendarDay`, the `Date`/number arm of the `date` rule. `y` comes from `getUTCFullYear()` and is spelled `${y}-${m}-${d}`. The month and day are padded to width 2; the year is never padded to width 4, and a negative or 5-digit year has no fixed-width form.\n\nFinding class **(a)**. `reach:` was measured at the public REST door on `main` `615c468746` (below).\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20203 dev's report (`os-dev-report` 5855694754, `out_of_scope_findings[1]` and `open_questions[0]`), under seat ruling 5855727555 (A: file separately). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## What happens\n\n- Before PR #20224 (#20203), only an in-process `Date` reached this arm: a `Date` is not JSON.\n- Since `615c468746`, a finite epoch-ms number on a `date` field takes the same conversion, so the unpadded spelling is reachable over REST.\n- A direct rule call at `615c468746` gives:\n  - `0999-06-15`: the number and the `Date` both spell `\"999-06-15\"`, but the ISO string `\"0999-06-15T00:00:00.000Z\"` spells `\"0999-06-15\"`;\n  - `10000-01-01`: the number spells `\"10000-01-01\"`;\n  - year −1: the number spells `\"-1-01-01\"`.\n\nMeasured on `main` `615c468746` through `POST /api/v1/data/:object/query` (a real `RestServer`, a JSON round-tripped body, `TZ=America/New_York`). The drivers are a real `InMemoryDriver`, a real `SqlDriver` on better-sqlite3, and a live PostgreSQL 16. The fixture is seven rows of a `date` field `placed_on`: six 2026 days, plus `\"0999-06-15\"` written through the REST create door (201 on all three drivers, read back verbatim).\n\n| comparand | op | memory | SQLite | PostgreSQL | correct |\n|:--|:--|:--|:--|:--|:--|\n| number for 0999-06-15 (`-30627504000000`) | `$gt` / `$lt` / `$eq` | **0 / 7 / 0** | **0 / 7 / 0** | 6 / 0 / 1 | 6 / 0 / 1 |\n| ISO `\"0999-06-15T00:00:00.000Z\"` | `$gt` / `$lt` / `$eq` | 6 / 0 / 1 | 6 / 0 / 1 | 6 / 0 / 1 | 6 / 0 / 1 |\n| bare day `\"0999-06-15\"` | `$gt` / `$lt` / `$eq` | 6 / 0 / 1 | 6 / 0 / 1 | 6 / 0 / 1 | 6 / 0 / 1 |\n| number for 10000-01-01 (`253402300800000`) | `$gt` / `$lt` / `$eq` | **6 / 1** / 0 | **6 / 1** / 0 | 0 / 7 / 0 | 0 / 7 / 0 |\n| number for −1-01-01 (`-62198755200000`) | `$gt` / `$lt` / `$eq` | 7 / 0 / 0 | 7 / 0 / 0 | **500 / 500 / 500** | 7 / 0 / 0 |\n| control, number for 2026-02-01T10:00Z | `$gt` / `$lt` / `$eq` | 1 / 4 / 2 | 1 / 4 / 2 | 1 / 4 / 2 | 1 / 4 / 2 |\n\n- **The number and the ISO string for the same day give opposite answers** on InMemoryDriver and SQLite: `\"999-06-15\"` sorts above every padded `YYYY-MM-DD` as text (`'9' > '0'`), and `\"10000-01-01\"` sorts below `\"2026-…\"`. PostgreSQL reads them through its native `DATE` parser and answers correctly.\n- The year −1 counts on memory and SQLite are right only by accident: a leading `-` sorts below every digit.\n- PostgreSQL answers HTTP 500 `{\"error\":\"Internal server error\",\"code\":\"DATABASE_ERROR\"}` for year −1. The driver log reads: `[sql-driver] DATABASE_ERROR — the backend refused a read on 'year_probe_object' (22009) … where \"placed_on\" > $1 - time zone displacement out of range: \"-62198755200000\"`. That value is the raw number, not the rule's `\"-1-01-01\"`. Which layer passes the raw number to PostgreSQL is not established.\n- The #20224 review (5855881108, item 8) measured the same cells at the PR head, and found four extreme-year cells worse than before that PR. Before it, a raw number never met the day text.\n- **No measured writer** stores or queries days outside 1000..9999. The reach is the public query door, not an observed caller.\n\n## Suggested shape (⛔ not a ruling)\n\nA decision, then one edit in the one rule (`temporalStorageForm`, `@objectstack/core`). ⛔ Not a copy in a driver.\n- Years 0..999: pad to 4 digits (`0999-06-15`), which is the spelling the ISO-string and bare-day arms already produce.\n- Years past 9999 and below 0 have no `YYYY-MM-DD` spelling. Decide one reading: refuse at the temporal-comparand door (`INVALID_FILTER` / 400) as outside the `date` range, or define an ordered form. This moves `Date` cells, deliberately.\n- Pin on memory, SQLite and PostgreSQL through the engine and REST, with the number, the `Date` and the ISO string for the same day, plus the 2026 control.\n- Related: `driver-mongodb`'s own `storageDateValue` copy (an acceptance note in PR #20202 and PR #20224, carrier none).\n\n## Filing-gate answers\n\n- **Class**: ① (a defect with a named landing site); finding class (a), measured on `main`.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/core` and the SQL / memory drivers).\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `date field year below 1000 unpadded calendar day spelling getUTCFullYear YYYY-MM-DD` → 0 hits;\n  - `toDateOnly year padding extended year 10000 negative year date comparand text order` → 0;\n  - `date year spelling padding` → 0;\n  - `temporalStorageForm date arm Date before year 1000` → 0;\n  - `date calendar day four digit year ISO extended year` → 0;\n  - `date out of range year DateTimeParseError 22008 date field` → 1 hit, #3942 (MySQL `TIMESTAMP` range, closed), which is not this.\n  - Control query: `epoch millisecond number against a date field` → #20203, the parent, closed.\n\nDedupe words: `date arm year not padded to four digits` · `calendar day spelling year outside 1000 9999` · `epoch ms number year 999 date field text order`"
