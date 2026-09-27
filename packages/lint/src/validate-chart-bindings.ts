@@ -14,11 +14,17 @@
  *
  * Surfaces covered here:
  *
- *   1. **Report charts** — `report.chart` and `report.blocks[].chart`.
+ *   1. **Report charts** — `report.chart` on a non-`joined` report.
  *      `ReportChartSchema` narrows `xAxis`/`yAxis` from ChartConfig's
  *      object/array shapes to bare STRINGS, which is why simply pointing the
  *      dashboard rule at reports would find nothing: its `Array.isArray(yAxis)`
  *      guard skips a string silently. `series[].name` keeps the array shape.
+ *      A `joined` report draws no chart (#20161): its container `chart` is
+ *      refused by `ReportSchema` and a block has no `chart` key, so neither is
+ *      a binding this rule checks. Checking one would tell the author their
+ *      axes are fine on a chart that is refused at parse and never drawn —
+ *      an invitation to author it. A block's own SELECTION (`dataset` /
+ *      `rows` / `columns` / `values`) is still checked, below.
  *   2. **List-view charts** — `ListChartConfigSchema` (`dataset` +
  *      `dimensions` + `values`), reachable through `views[].list`,
  *      `views[].listViews.<key>`, and `objects[].listViews.<key>`.
@@ -510,7 +516,8 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     checkAgainst(ds, binding.dataset, binding);
   };
 
-  // ── 1. Report charts (report.chart + report.blocks[].chart) ──
+  // ── 1. Report charts (report.chart on a non-joined report) + every report
+  //      surface's own selection, blocks included ──
   const reports = recordsOf(stack.reports);
   for (let ri = 0; ri < reports.length; ri++) {
     const report = reports[ri];
@@ -535,8 +542,13 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
      * groups against the ONE resolved dataset, because they sit at different
      * depths and their findings should say so: `reports[i].rows[j]` under
      * `report "x"`, `reports[i].chart.yAxis` under `report "x" · chart`.
+     *
+     * `drawsChart` is false for a `joined` container and for every block
+     * (#20161): no renderer draws a chart there and `ReportSchema` refuses one,
+     * so its axes are not a binding and this rule stays silent about them
+     * rather than vouching for a chart that will never plot.
      */
-    const checkReportSurface = (container: AnyRec, where: string, path: string) => {
+    const checkReportSurface = (container: AnyRec, where: string, path: string, drawsChart: boolean) => {
       const dsName = strName(container.dataset);
       const ds = resolveDataset(dsName, where, path);
       if (!ds || !dsName) return;
@@ -555,6 +567,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
         path,
       });
 
+      if (!drawsChart) return;
       const chart = container.chart;
       if (!isRec(chart)) return;
       const xAxisName = strName(chart.xAxis);
@@ -579,7 +592,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       });
     };
 
-    checkReportSurface(report, `report "${reportName}"`, `reports[${ri}]`);
+    checkReportSurface(report, `report "${reportName}"`, `reports[${ri}]`, report.type !== 'joined');
 
     const blocks = Array.isArray(report.blocks) ? report.blocks : [];
     for (let bi = 0; bi < blocks.length; bi++) {
@@ -589,6 +602,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
         block,
         `report "${reportName}" · block "${strName(block.name) ?? `#${bi}`}"`,
         `reports[${ri}].blocks[${bi}]`,
+        false,
       );
     }
   }

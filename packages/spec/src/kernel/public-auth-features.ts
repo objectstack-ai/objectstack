@@ -307,7 +307,7 @@ type WithRequiresFeature = {
   /**
    * Already normalized by ExpressionInputSchema to the `{dialect, source}`
    * envelope — except for the literal arm, which surfaces here verbatim on the
-   * surfaces that declare one (`ActionSchema.visible`, #5970).
+   * surfaces that declare one (`ActionSchema.visible`, commit 97e7e3caa).
    */
   visible?: boolean | ({ dialect?: unknown; source?: unknown } & Record<string, unknown>);
 };
@@ -325,7 +325,7 @@ type WithRequiresFeature = {
  *   hand-written convention).
  * - Existing `visible: true` → the gate alone. `true && <gate>` IS `<gate>`, so
  *   an author who spelled the default out explicitly gets the same lowering as
- *   one who omitted the key (the literal arm arrived with #5970).
+ *   one who omitted the key (the literal arm arrived with commit 97e7e3caa).
  * - Existing `visible: false` → loud parse error. Here the boolean algebra runs
  *   the other way: `false && <gate>` is `false` whatever the flag says, so the
  *   gate could never take effect and the declaration is inert on arrival —

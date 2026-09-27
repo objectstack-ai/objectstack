@@ -722,9 +722,11 @@ export function declaredFieldClasses(fields: unknown): Map<string, AggregatedCol
 /**
  * [#20176] The storage rule a column of `cls` takes, or `undefined` for a class
  * that has none (numeric, text, boolean) and for a column whose class the
- * declaration cannot tell.
+ * declaration cannot tell. [#20263] Also the kind the `having` temporal-comparand
+ * door judges a comparand by, so the rule that reads it and the door that
+ * refuses it name one kind.
  */
-function temporalKindOf(cls: AggregatedColumnClass | undefined): TemporalComparandKind | undefined {
+export function temporalKindOf(cls: AggregatedColumnClass | undefined): TemporalComparandKind | undefined {
   return cls === 'date' || cls === 'datetime' || cls === 'time' ? cls : undefined;
 }
 

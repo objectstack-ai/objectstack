@@ -294,7 +294,7 @@ export interface ProjectionOverrideContext {
 
 /**
  * ⭐ The ONE call through which `z.toJSONSchema` is reached anywhere
- * **`packages/spec` writes a published JSON Schema artifact**. Four producers,
+ * **`packages/spec` writes a published JSON Schema artifact**. Five producers,
  * named because the claim is only worth as much as its enumeration:
  *
  *   1. `build-schemas.ts` — the generator's three attempts, writing
@@ -307,11 +307,16 @@ export interface ProjectionOverrideContext {
  *      `json-schema/openapi.json`. That file ships in the tarball (`files[]`
  *      carries `json-schema`) and is exported as `./openapi.json`, so it is a
  *      published projection like any other; it reached this list late, and the
- *      shape of the gap is the point — see below.
+ *      shape of the gap is the point — see below;
+ *   5. `build-react-blocks-contract.ts` — the react-tier contract generator,
+ *      rendering its block schemas' projection as markdown prop tables into
+ *      the published skills catalog (`skills/objectstack-ui/references/
+ *      react-blocks.md`). Not a JSON Schema file, but a published description
+ *      of the same schemas, so it projects the way (1) does.
  *
  * ## ⛔ What is NOT behind it — stated so the next reader need not re-derive it
  *
- * This helper governs the projection CALL for the four producers above. It is
+ * This helper governs the projection CALL for the five producers above. It is
  * ⛔ not a repo-wide guarantee, and three populations sit deliberately outside
  * it. Naming them is the difference between a claim and a slogan; each was
  * measured, not assumed:
@@ -323,12 +328,10 @@ export interface ProjectionOverrideContext {
  *     question.
  *   - **Producers outside `packages/spec`'s own artifacts** — the CLI's
  *     `os generate` writes a JSON Schema of `ObjectStackDefinitionSchema` into
- *     an author's project, and `build-react-blocks-contract.ts` renders block
- *     prop tables into the published skills catalog. Both call
- *     `z.toJSONSchema` directly, and the first was measured DIVERGENT from this
- *     projection at seven declared sites. They are a separate decision about
- *     how wide the published-projection guarantee reaches, ⛔ not an oversight
- *     to be silently swept in here.
+ *     an author's project. It calls `z.toJSONSchema` directly and was measured
+ *     DIVERGENT from this projection at seven declared sites. That is a
+ *     separate decision about how wide the published-projection guarantee
+ *     reaches, ⛔ not an oversight to be silently swept in here.
  *   - **Runtime derivations** (`packages/metadata-protocol`) project schemas to
  *     SERVE them, not to publish an artifact; they are governed by their own
  *     contracts.

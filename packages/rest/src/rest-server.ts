@@ -67,6 +67,7 @@ import {
     // organization. One predicate for every `/meta` item write door on both
     // transports — never a REST-local restatement.
     metaWriteCapabilityVerdict,
+    type MetaWriteCapabilityVerdict,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -155,22 +156,37 @@ import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, unrecognisedMetaTypeRefusal }
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
-import type { ResolverDoc } from '@objectstack/spec/system';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document, and the
 // docs-audience and app-nav gates it is built from — one implementation, which
 // this server and the runtime dispatcher's `/meta` domain both call. The
-// private helpers below keep their names as one-line delegates into it.
+// private helpers below that still have a caller here keep their names as
+// one-line delegates into it.
+//
+// [#20237] …and THE per-caller LIST gate of `GET /meta/:type`
+// (`createMetaListReadGate`), which the list route below calls whole. The
+// delegates only that route called (`filterAppForUser`,
+// `filterDashboardForUser`, `resolveRegisteredServices`,
+// `resolveNavServability`, `resolveNavDocAudience`, `fetchAudienceBooks`,
+// `docCorpusOf`) went with it: a delegate with no caller is a second place to
+// read a rule that nothing runs.
 import * as metaReadGate from './meta-item-read-gate.js';
 import type {
     DocsAudience,
     MetaItemReadGateSources,
     MetaItemReadRefusal,
     MetaReadGateAudienceSources,
+    MetaReadGateCaller,
     MetaReadGateListSource,
     MetaReadGatePolicy,
-    NavDocAudienceGate,
-    NavServabilityGate,
 } from './meta-item-read-gate.js';
+// [#20237] The server-side app filter, by name, at the path ADR-0056's
+// verification table cites for it (`rest-server.ts#filterAppForUser`, row 18):
+// the one implementation is `meta-item-read-gate.ts`'s, and this re-export is
+// where that pointer lands — one hop from it. It is NOT on the package barrel
+// (`index.ts` names this file's exports one by one). Re-anchoring the ADR row
+// to the implementation is a governed-surface edit, so it is left to the
+// maintainer; this line goes when that row moves.
+export { filterAppForUser } from './meta-item-read-gate.js';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -2773,21 +2789,6 @@ export class RestServer {
         return metaReadGate.audienceBooksOf(raw);
     }
 
-    /** The doc header the audience resolver reads — `docCorpusOf` in `./meta-item-read-gate.ts`. */
-    private static docCorpusOf(list: readonly any[]): ResolverDoc[] {
-        return metaReadGate.docCorpusOf(list);
-    }
-
-    /**
-     * Every book of the environment, audience-shaped — `fetchAudienceBooks`
-     * in `./meta-item-read-gate.ts`. A read that throws THROWS its own fault
-     * (ADR-0046 §6.7, fail closed per ADR-0049): `[]` would read as "no gated
-     * book anywhere" and grant. The fault reaches `handleRouteError`.
-     */
-    private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
-        return metaReadGate.fetchAudienceBooks(this.metaListSource(p, environmentId));
-    }
-
     /**
      * [ADR-0046 §6.7] Build THE {@link DocsAudience} for this request's caller
      * over `books` — `resolveDocsAudience` in `./meta-item-read-gate.ts`, the
@@ -3196,34 +3197,6 @@ export class RestServer {
     }
 
     /**
-     * Filter an `App` metadata item by the current user's `systemPermissions`
-     * — the ADR-0045 §3 publish gate (`_unpublished`, never `hidden`), the
-     * `requiredPermissions` gate, the ADR-0057 D10 service gate, [#7912] the
-     * servability gate and [#19790] the docs-audience entry arm.
-     * `filterAppForUser` in `./meta-item-read-gate.ts` is the one
-     * implementation; its docblock (and `filterAppForUserWithReason`'s) carries
-     * every rule and its measurement. `null` when the app is withheld whole.
-     */
-    private filterAppForUser(
-        item: any,
-        sysPerms: Set<string>,
-        serviceGate?: (name: string) => boolean,
-        servabilityGate?: NavServabilityGate,
-        docAudienceGate?: NavDocAudienceGate,
-    ): any | null {
-        return metaReadGate.filterAppForUser(item, sysPerms, serviceGate, servabilityGate, docAudienceGate);
-    }
-
-    /**
-     * ADR-0057 D10 (dashboards): strip dashboard widgets whose `requiresService`
-     * names a service that isn't registered — `filterDashboardForUser` in
-     * `./meta-item-read-gate.ts`, the one implementation.
-     */
-    private filterDashboardForUser(item: any, serviceGate?: (name: string) => boolean): any {
-        return metaReadGate.filterDashboardForUser(item, serviceGate);
-    }
-
-    /**
      * [#20156 · #20193] THE read gate of one `/meta/:type/:name` document, for
      * the plain read and every door beside it — `createMetaItemReadGate` in
      * `./meta-item-read-gate.ts`, the ONE implementation both transports call
@@ -3245,7 +3218,8 @@ export class RestServer {
         policy: MetaReadGatePolicy,
     ): (document: any) => Promise<MetaReadVerdict> {
         const judge = metaReadGate.createMetaItemReadGate(
-            this.metaItemReadGateSources(environmentId, req, p), metaType, name, documents, policy,
+            this.metaItemReadGateSources(environmentId, req, p, policy.app === 'author-exempt'),
+            metaType, name, documents, policy,
         );
         return async (document) => {
             const verdict = await judge(document);
@@ -3286,26 +3260,52 @@ export class RestServer {
      * caller from {@link resolveExecCtx} (an authz-store outage re-raised,
      * never read as anonymous), the protocol's list read, the security service
      * provider, the service probe, and this instance's prune-log dedupe.
+     *
+     * `withItemWriteVerdict` — [#20156] the door's policy honours the author
+     * exemption, so the caller carries its `mayWriteItem` (see
+     * {@link metaReadAudienceSources}).
      */
     private metaItemReadGateSources(
         environmentId: string | undefined,
         req: any,
         p: RestProtocol,
+        withItemWriteVerdict = false,
     ): MetaItemReadGateSources {
         return {
-            ...this.metaReadAudienceSources(environmentId, req),
+            ...this.metaReadAudienceSources(environmentId, req, withItemWriteVerdict),
             ...this.metaListSource(p, environmentId),
             serviceProbe: (caller) => this.serviceProbeFor((caller as any)?.__kernel),
             navPruneLogged: this.navPruneLogged,
         };
     }
 
-    /** [#20193] The caller half of {@link metaItemReadGateSources}. */
-    private metaReadAudienceSources(environmentId: string | undefined, req: any): MetaReadGateAudienceSources {
+    /**
+     * [#20193] The caller half of {@link metaItemReadGateSources}.
+     *
+     * [#20156] `withItemWriteVerdict`: the caller also carries
+     * `mayWriteItem`, THIS transport's save-door admission of `:type/:name`
+     * ({@link metaSaveVerdict}, the one spelling `PUT /meta/:type/:name`
+     * asks), for a door whose policy honours ruling 5856774816's author
+     * exemption. Only there: a pure verdict over the context this read has
+     * already resolved (memoised per request) and the static type registry, so
+     * it costs no read — but a door that does not honour it is not handed one.
+     * The context is COPIED, never written: the same memoised object serves
+     * every other consumer of this request.
+     */
+    private metaReadAudienceSources(
+        environmentId: string | undefined,
+        req: any,
+        withItemWriteVerdict = false,
+    ): MetaReadGateAudienceSources {
+        let withVerdict: MetaReadGateCaller | undefined;
         return {
             resolveCaller: async () => {
                 const caller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                return caller;
+                if (!withItemWriteVerdict || !caller) return caller;
+                return (withVerdict ??= {
+                    ...caller,
+                    mayWriteItem: RestServer.metaSaveVerdict(caller, req.params.type).allowed,
+                });
             },
             resolveSecurityService: async () => (
                 this.securityServiceProvider ? this.securityServiceProvider(environmentId) : undefined
@@ -3412,12 +3412,48 @@ export class RestServer {
     }
 
     /**
+     * [#20156] A `diffMetaItem` answer whose EMITTED values are read off the
+     * two sides as {@link metaItemReadGate} served them ({@link diffSides}
+     * rebuilt, then judged): `added` from `to`, `removed` from `from`,
+     * `changed` from both. For a side the gate serves as given this is the
+     * answer unchanged; for an app side it serves pruned (ruling 5856774816:
+     * a caller who may open the app but not write it), the entries the plain
+     * read withholds from that caller leave with neither value.
+     *
+     * The comparison stays the protocol's, over the stored bodies, and no
+     * entry is added or dropped — only values are substituted. That is the
+     * redaction precedent one frame down (`diffMetaItem`: diff raw, emit the
+     * projected values, ruling 5299845282 option B) and the ADR-0106 mask
+     * beside this call, so the three projections of one answer agree on its
+     * shape.
+     */
+    private static diffEmittedFrom(
+        diff: any,
+        from: Record<string, any>,
+        to: Record<string, any>,
+    ): any {
+        if (!diff || typeof diff !== 'object') return diff;
+        const emit = (bucket: unknown, project: (e: any) => any): unknown => (Array.isArray(bucket)
+            ? bucket.map((e) => (typeof e?.path === 'string' ? project(e) : e))
+            : bucket);
+        return {
+            ...diff,
+            ...('added' in diff ? { added: emit(diff.added, (e) => ({ ...e, value: to[e.path] })) } : {}),
+            ...('removed' in diff ? { removed: emit(diff.removed, (e) => ({ ...e, value: from[e.path] })) } : {}),
+            ...('changed' in diff
+                ? { changed: emit(diff.changed, (e) => ({ ...e, from: from[e.path], to: to[e.path] })) }
+                : {}),
+        };
+    }
+
+    /**
      * [#20156] Does {@link metaItemReadGate} judge this type per caller? The
      * question a door serving no document of its own asks before it fetches the
      * current one — a type the answer is no for costs that door no extra read
      * and no new failure mode. `dashboard` is never judged per caller (its gate
-     * answers per deployment). `app` always is: even its `pending-decision` arm
-     * answers the plain read's refusal of an app refused WHOLE.
+     * answers per deployment). `app` always is: an app the plain read refuses
+     * WHOLE is refused on every door, to an author as to anyone (ruling
+     * 5856774816), and a non-author is served it pruned.
      */
     private static gatesPerCaller(metaType: string): boolean {
         return metaType === 'book' || metaType === 'doc' || metaType === 'app';
@@ -3426,21 +3462,45 @@ export class RestServer {
     /**
      * [#20156] The policy of the doors that serve STORED versions for authoring
      * — the layered view (`/layers`, `?layers=`) and `/diff`. One constant, so
-     * the two cannot come to disagree about the pending `app` cells.
+     * the two cannot come to disagree about the `app` row.
+     *
+     * `app: 'author-exempt'` — ruling 5856774816 (letter B, confirmed
+     * 5856866273): a caller who may write the app ({@link metaSaveVerdict},
+     * carried on the caller as `mayWriteItem`) reads the full stored version,
+     * and every other caller who may open the app reads exactly what the plain
+     * read gives them, pruned. See `MetaReadGatePolicy.app`.
      */
     private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = Object.freeze({
         arms: 'per-caller',
-        app: 'pending-decision',
+        app: 'author-exempt',
     });
 
     /**
-     * Probe which `requiresService` capability gates referenced anywhere in
-     * `items` are actually registered — `resolveRegisteredServices` in
-     * `./meta-item-read-gate.ts`, over {@link serviceProbeFor}. `null` when
-     * nothing can be probed (the service gates then fail OPEN, ADR-0057 D10).
+     * [#12702 · #20156] May this caller SAVE `:type/:name`? The admission of
+     * `PUT /meta/:type/:name`, spelled ONCE: that door asks it, and so does the
+     * stored-version read doors' author exemption (ruling 5856774816, item 1:
+     * 「whoever can save it must see it whole, or a save drops entries
+     * silently」). A second spelling of the question at the read doors could
+     * drift from the door it stands for — an exempt reader the save refuses, or
+     * a saver the exemption prunes, which is the silent drop itself.
+     *
+     * The whole admission is this verdict: the save door refuses on nothing
+     * else about the CALLER before `saveMetaItem` (whose own refusals judge the
+     * item and the scope, the same for every admitted caller). `rawType` is
+     * the URL segment, folded here at the boundary ([folded-type commit
+     * 26f3588fb] — see the PUT door's org-scope comment) so the verdict and
+     * the door's scope decision read one spelling; the organization is the
+     * context's `tenantId`, the very value `organizationIdForMetaWrite`
+     * threads.
      */
-    private async resolveRegisteredServices(kernel: any, items: any[]): Promise<Set<string> | null> {
-        return metaReadGate.resolveRegisteredServices(this.serviceProbeFor(kernel), items);
+    private static metaSaveVerdict(ctx: any, rawType: string): MetaWriteCapabilityVerdict {
+        return metaWriteCapabilityVerdict({
+            isSystem: ctx?.isSystem === true,
+            systemPermissions: ctx?.systemPermissions,
+            canonicalType: canonicalMetaUrlType(rawType),
+            activeOrganizationId: ctx?.tenantId,
+            operation: 'save',
+        });
     }
 
     /**
@@ -3459,40 +3519,6 @@ export class RestServer {
             return async (name) => { try { return exists(name) === true; } catch { return false; } };
         }
         return null;
-    }
-
-    /**
-     * [#7912] The nav-servability gate for one request —
-     * `resolveNavServability` in `./meta-item-read-gate.ts` (its docblock
-     * carries the three fail-open cases and the logged prune), over this
-     * transport's object list read and this instance's prune-log dedupe.
-     */
-    private async resolveNavServability(
-        p: RestProtocol,
-        environmentId: string | undefined,
-    ): Promise<NavServabilityGate | null> {
-        return metaReadGate.resolveNavServability({
-            ...this.metaListSource(p, environmentId),
-            navPruneLogged: this.navPruneLogged,
-        });
-    }
-
-    /**
-     * [#19790] The docs-audience nav gate for one request —
-     * `resolveNavDocAudience` in `./meta-item-read-gate.ts` (its docblock
-     * carries the per-entry rules, the fail-closed reads and the cost), over
-     * this transport's caller and list read.
-     */
-    private async resolveNavDocAudience(
-        p: RestProtocol,
-        environmentId: string | undefined,
-        req: any,
-        apps: readonly any[],
-    ): Promise<NavDocAudienceGate | undefined> {
-        return metaReadGate.resolveNavDocAudience(
-            { ...this.metaReadAudienceSources(environmentId, req), ...this.metaListSource(p, environmentId) },
-            apps,
-        );
     }
 
     /**
@@ -3828,24 +3854,33 @@ export class RestServer {
         // the plain read's own), then `code` and `overlay`: a layer the caller
         // may not read is not served beside one they may. `per-caller` because
         // these are STORED versions, loaded by Studio's designer and saved
-        // back; an app the caller may see only in PART is `pending-decision`
-        // — see `MetaReadGatePolicy.app`.
+        // back.
+        //
+        // [#20156] Each layer is SERVED as the gate serves it, never as
+        // stored: ruling 5856774816 — a caller who may write an app reads
+        // every layer whole, and any other caller who may open it reads each
+        // layer pruned, exactly as the plain read prunes it (see
+        // `MetaReadGatePolicy.app`). Every layer is judged before any is
+        // replaced, so a refusal sends nothing of the others.
         {
             const metaType = RestServer.metaTypeSingular(req.params.type);
             const present = (['effective', 'code', 'overlay'] as const)
-                .map((layer) => (layered as any)?.[layer])
-                .filter((document) => document != null);
+                .filter((layer) => (layered as any)?.[layer] != null);
             const judge = this.metaItemReadGate(
-                environmentId, req, p, metaType, req.params.name, present,
+                environmentId, req, p, metaType, req.params.name,
+                present.map((layer) => (layered as any)[layer]),
                 RestServer.STORED_VERSION_DOOR_POLICY,
             );
-            for (const document of present) {
-                const verdict = await judge(document);
+            const served = new Map<(typeof present)[number], unknown>();
+            for (const layer of present) {
+                const verdict = await judge((layered as any)[layer]);
                 if (verdict.kind === 'refuse') {
                     verdict.send(res);
                     return;
                 }
+                served.set(layer, verdict.document);
             }
+            for (const [layer, document] of served) (layered as any)[layer] = document;
         }
         // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
         // `code`, `overlay` and `effective` are each a full object schema.
@@ -5842,14 +5877,6 @@ export class RestServer {
                         };
                         const items = await p.getMetaItems(listRequest);
 
-                        // RBAC-filter app metadata for authenticated users so
-                        // privileged apps (Studio, Setup, etc.) and gated nav
-                        // items are stripped before reaching the client. We
-                        // intentionally leave anonymous responses untouched —
-                        // the anonymous-deny gate blocks
-                        // them upstream; when disabled, the demo / public
-                        // surface keeps its prior behaviour.
-                        //
                         // `getMetaItems` is typed as `{type, items[]}` but the
                         // objectql implementation actually returns the raw
                         // array. Handle both shapes defensively.
@@ -5913,36 +5940,37 @@ export class RestServer {
                             }
                         }
 
-                        if (RestServer.metaTypeSingular(req.params.type) === 'app') {
-                            const raw = items as unknown;
+                        // [#20237] THE per-caller LIST gate — the app nav
+                        // filter (privileged apps and gated nav entries
+                        // stripped for an authenticated caller; an anonymous
+                        // list left to the anonymous-deny floor upstream), the
+                        // ADR-0057 D10 dashboard widget gate, and the ADR-0046
+                        // §6.7 book and doc audience prunes.
+                        // `createMetaListReadGate` in `./meta-item-read-gate.ts`
+                        // is the ONE implementation, which this route and the
+                        // runtime dispatcher's `/meta` list branch both call;
+                        // its docblock carries each type's rule, and ⛔ a list
+                        // gate is added there, never here.
+                        //
+                        // It runs where the app filter always ran: BEFORE
+                        // `?id=` narrows (the next block says why that order is
+                        // a disclosure rule), and on the raw doc items, before
+                        // the locale collapse, so `_packageId` provenance is
+                        // still present for membership scoping.
+                        {
+                            const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
                                 : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
                                     ? ((raw as any).items as any[])
                                     : null;
                             if (list) {
-                                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                                if (ctx?.userId) {
-                                    const sysPerms = new Set<string>(
-                                        Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
-                                    );
-                                    const registered = await this.resolveRegisteredServices((ctx as any).__kernel, list);
-                                    const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    // [#7912] Resolved ONCE for the whole list —
-                                    // object metadata is a per-request fact, not
-                                    // a per-app one.
-                                    const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
-                                    // [#19790] Likewise once for the whole list:
-                                    // books, holdings and the doc corpus are
-                                    // per-request facts about this caller.
-                                    const docAudienceGate = await this.resolveNavDocAudience(p, environmentId, req, list);
-                                    const filtered = list
-                                        .map((it: any) => this.filterAppForUser(
-                                            it, sysPerms, serviceGate, servabilityGate, docAudienceGate))
-                                        .filter((it: any) => it != null);
-                                    visible = Array.isArray(raw)
-                                        ? filtered
-                                        : { ...(raw as any), items: filtered };
+                                const judged = await metaReadGate.createMetaListReadGate(
+                                    this.metaItemReadGateSources(environmentId, req, p),
+                                    RestServer.metaTypeSingular(req.params.type),
+                                )(list);
+                                if (judged !== list) {
+                                    visible = Array.isArray(raw) ? judged : { ...(raw as any), items: judged };
                                 }
                             }
                         }
@@ -6023,28 +6051,6 @@ export class RestServer {
                             }
                         }
 
-                        // ADR-0057 D10: gate dashboard widgets by `requiresService`
-                        // the same way app nav entries are gated above.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'dashboard') {
-                            const raw = visible as unknown;
-                            const list: any[] | null = Array.isArray(raw)
-                                ? (raw as any[])
-                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
-                                    ? ((raw as any).items as any[])
-                                    : null;
-                            if (list) {
-                                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                                const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, list);
-                                const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                if (serviceGate) {
-                                    const filtered = list.map((it: any) => this.filterDashboardForUser(it, serviceGate));
-                                    visible = Array.isArray(raw)
-                                        ? filtered
-                                        : { ...(raw as any), items: filtered };
-                                }
-                            }
-                        }
-
                         // View switcher query: GET /meta/view?object=<object>
                         // returns ONLY the independent ViewItems bound to that
                         // object (the `package` layer of "Object has-many
@@ -6067,51 +6073,6 @@ export class RestServer {
                                     .sort((a: any, b: any) =>
                                         ((a.order ?? 0) as number) - ((b.order ?? 0) as number) ||
                                         String(a.name).localeCompare(String(b.name)));
-                                visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
-                            }
-                        }
-
-                        // ADR-0046 §6.7 — book list is audience-filtered: anonymous
-                        // callers see only `public` books; `{ permissionSet }`-gated
-                        // books require the caller to hold the named set (resolved
-                        // through the security service; unresolvable → fail closed).
-                        if (RestServer.metaTypeSingular(req.params.type) === 'book') {
-                            const raw = visible as unknown;
-                            const list = RestServer.metaItemsArray(raw);
-                            if (list.length > 0) {
-                                const audience = await this.resolveDocsAudience(environmentId, req, list);
-                                const filtered = list.filter((b: any) =>
-                                    b && typeof b === 'object' && audience.admitsBook(b));
-                                visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
-                            }
-                        }
-
-                        // ADR-0046 §6.7 — doc list is audience-filtered by each
-                        // doc's EFFECTIVE audience (union over the books that
-                        // claim it; unclaimed docs default to `org`). Runs on the
-                        // raw items (before locale collapse) so `_packageId`
-                        // provenance is still present for membership scoping.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'doc') {
-                            const raw = visible as unknown;
-                            const list = RestServer.metaItemsArray(raw);
-                            if (list.length > 0) {
-                                // [#20129] A book-read fault THROWS here and the
-                                // list is not served — never filtered against an
-                                // empty book list, which clears every doc for an
-                                // authenticated caller ({@link fetchAudienceBooks}).
-                                const books = await this.fetchAudienceBooks(p, environmentId);
-                                const audience = await this.resolveDocsAudience(environmentId, req, books);
-                                let filtered: any[];
-                                if (audience.allReadable) {
-                                    // Fast path: with no gated book anywhere, every
-                                    // effective audience admits an authenticated caller.
-                                    filtered = list;
-                                } else {
-                                    // The corpus is the listed docs themselves.
-                                    const canRead = audience.docReader(RestServer.docCorpusOf(list));
-                                    filtered = list.filter((d: any) =>
-                                        !!d && typeof d === 'object' && canRead(d.name));
-                                }
                                 visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
                             }
                         }
@@ -6947,10 +6908,12 @@ export class RestServer {
                             // {@link metaItemReadGate}, with their history, so a
                             // door cannot serve this document past a gate this
                             // read applies. This read runs every arm and serves a
-                            // partly-withheld app PRUNED — the answer the census
-                            // in `meta-alternate-door-read-gates.test.ts` holds
-                            // each door to, less the partly-withheld app cells it
-                            // declares pending a decision (see
+                            // partly-withheld app PRUNED, to every caller, its
+                            // authors included (read-to-display is per user) —
+                            // the answer the census in
+                            // `meta-alternate-door-read-gates.test.ts` holds each
+                            // door to, save the stored-version doors' author
+                            // exemption (ruling 5856774816, see
                             // `MetaReadGatePolicy.app`).
                             //
                             // [plural-spelling commit 83a3b1f2e] (the original
@@ -7122,17 +7085,16 @@ export class RestServer {
                     // very value `organizationIdForMetaWrite` threads below, so
                     // an admitted write can only land org-scoped in the caller's
                     // own partition: never env-wide, never another org's.
+                    //
+                    // [#20156] Asked through {@link metaSaveVerdict}, the ONE
+                    // spelling the stored-version read doors' author exemption
+                    // asks too (ruling 5856774816): whoever this door admits
+                    // reads the stored version whole there, whatever the plain
+                    // read withholds from them — so what they save back is
+                    // everything that was stored.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     {
-                        const verdict = metaWriteCapabilityVerdict({
-                            isSystem: ctx?.isSystem === true,
-                            systemPermissions: ctx?.systemPermissions,
-                            // [#10340] Folded at the boundary — the verdict and
-                            // the scope decision below read one spelling.
-                            canonicalType: canonicalMetaUrlType(req.params.type),
-                            activeOrganizationId: ctx?.tenantId,
-                            operation: 'save',
-                        });
+                        const verdict = RestServer.metaSaveVerdict(ctx, req.params.type);
                         if (!verdict.allowed) {
                             res.status(403).json({
                                 error: {
@@ -8209,19 +8171,29 @@ export class RestServer {
                     // side the caller may not read is not served beside one
                     // they may. `per-caller`, the stored-version doors' policy —
                     // see `MetaReadGatePolicy`.
+                    //
+                    // [#20156] And each side is EMITTED as the gate serves it:
+                    // ruling 5856774816 — a caller who may write an app reads
+                    // both sides whole, and any other caller who may open it
+                    // reads each side pruned, exactly as the plain read prunes
+                    // it ({@link diffEmittedFrom}).
+                    let served: any = result;
                     if (diffGated) {
                         const { from, to } = RestServer.diffSides(diffCurrent, result);
                         const judge = this.metaItemReadGate(
                             environmentId, req, p, diffMetaType, req.params.name, [diffCurrent, from, to],
                             RestServer.STORED_VERSION_DOOR_POLICY,
                         );
+                        const sides: any[] = [];
                         for (const side of [diffCurrent, from, to]) {
                             const verdict = await judge(side);
                             if (verdict.kind === 'refuse') {
                                 verdict.send(res);
                                 return;
                             }
+                            sides.push(verdict.document);
                         }
+                        served = RestServer.diffEmittedFrom(result, sides[1], sides[2]);
                     }
                     // [ADR-0106 D5(4)] The object mask on the one key it
                     // projects, `fields`, in every bucket and on both sides —
@@ -8229,8 +8201,7 @@ export class RestServer {
                     // are compared raw, the EMITTED values are the projected
                     // ones), so a field the caller may not read is not served
                     // as a diff value either.
-                    let served: any = result;
-                    if (diffMaskPosture.kind === 'project' && result && typeof result === 'object') {
+                    if (diffMaskPosture.kind === 'project' && served && typeof served === 'object') {
                         let faulted = false;
                         const maskFields = (value: unknown): unknown => {
                             if (faulted || !value || typeof value !== 'object' || Array.isArray(value)) return value;
@@ -8245,10 +8216,10 @@ export class RestServer {
                         const bucket = (list: unknown, keys: readonly string[]) =>
                             (Array.isArray(list) ? list.map((e) => onFields(e, keys)) : list);
                         served = {
-                            ...(result as Record<string, unknown>),
-                            added: bucket((result as any).added, ['value']),
-                            removed: bucket((result as any).removed, ['value']),
-                            changed: bucket((result as any).changed, ['from', 'to']),
+                            ...(served as Record<string, unknown>),
+                            added: bucket((served as any).added, ['value']),
+                            removed: bucket((served as any).removed, ['value']),
+                            changed: bucket((served as any).changed, ['from', 'to']),
                         };
                         // `maskObjectDocument` already answered the ADR-0106 D6
                         // 5xx: a side projected to NO fields is never served.

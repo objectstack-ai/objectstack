@@ -13,7 +13,7 @@ import {
   holdersOf,
 } from '../../scripts/lib/export-origins-testkit';
 
-// ─── [#11846] Preview mode is RETIRED: the `'preview'` RuntimeMode value and
+// ─── [commit 0c2334f6c] Preview mode is RETIRED: the `'preview'` RuntimeMode value and
 //     the whole `previewMode` / `PreviewModeConfig` block ────────────────────
 //
 // ADR-0049 enforce-or-remove; maintainer ruling 2026-08-27 (Option A: remove).

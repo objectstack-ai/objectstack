@@ -22,9 +22,9 @@ export const entry: SemanticMigration = {
     + '(ADR-0029 D7) injects navigation, and code-level extension lives in the plugin itself '
     + '(`init`/`start`)',
   reason:
-    'ADR-0049 enforce-or-remove; #11332 (triage graded 2026-08-23, cloud precondition '
-    + 'discharged 2026-08-29 on #12400). #11332 measured, monorepo-wide and non-test with '
-    + 'control probes, ZERO reads of each container itself, which settles all eight keys '
+    'ADR-0049 enforce-or-remove, dispatched once the cloud half of the census below came '
+    + 'back clean. A census, monorepo-wide and non-test with control probes, measured ZERO '
+    + 'reads of each container itself, which settles all eight keys '
     + 'beneath them — a key cannot be read if the object holding it never is. The census '
     + 'stands on three repos: objectstack (re-verified on current main at claim time; every '
     + 'bare `.capabilities` hit classifies to a different surface — driver loader contracts, '

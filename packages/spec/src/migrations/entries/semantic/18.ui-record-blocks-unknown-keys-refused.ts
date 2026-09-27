@@ -21,8 +21,10 @@ export const entry: SemanticMigration = {
     + 'declared until the renderer reads the contract spelling; `visibleWhen` / `visibility` '
     + 'on the alert → `visible`; a locale map as history text → a literal string)',
   reason:
-    'These were the four `record:*` components the #4001/#5068 gate could not reach after '
-    + '#8691 closed the rail: each had a registered objectui renderer (and, bar '
+    'These were the four `record:*` components the component-props unknown-key gate (an '
+    + 'authorable surface refuses a key it does not declare; for a component\'s `properties`, '
+    + 'by parsing them against the type\'s `ComponentPropsMap` row) could not reach after '
+    + 'the rail was given its strict row: each had a registered objectui renderer (and, bar '
     + '`record:discussion`, a `PageComponentType` entry and a console palette slot) but no '
     + '`ComponentPropsMap` row, so the props gate\'s dispatch skipped them as unregistered and '
     + 'every authored key rode through. A typo\'d `severty` on the platform\'s own banner '

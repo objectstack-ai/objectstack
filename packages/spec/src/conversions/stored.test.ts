@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyConversionsToStoredItem } from './stored.js';
-import type { ConversionNotice } from './types.js';
+import { CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice } from './types.js';
 
 // The stored pass replays the FULL chain (ADR-0087 addendum, #3903): a row at
 // rest was written under some past protocol and has no author to be taught by
@@ -209,5 +209,38 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
     // A live executor owns 'webhook' → the rename is refused and reported.
     expect(out.nodes[0]!.type).toBe('webhook');
     expect(conflicts).toEqual(['webhook']);
+  });
+
+  // [#17321] The TODO lane rides through the stored seam the way the conflict
+  // lane does: `StoredConversionOptions` omits only `includeRetired`, so
+  // `onTodo` reaches the (retired, replayed-at-rest) filter conversion.
+  it('threads the TODO sink through — a stored page filter left as stored is reported, not silent', () => {
+    const page = {
+      name: 'pipeline',
+      regions: [
+        {
+          name: 'main',
+          components: [
+            { type: 'object-grid', properties: { objectName: 'deal', filter: { stage: 'open' } } },
+            { type: 'object-kanban', properties: { objectName: 'deal', filter: { $or: [{ stage: 'open' }, { stage: 'won' }] } } },
+          ],
+        },
+      ],
+    };
+    const notices: ConversionNotice[] = [];
+    const todos: ConversionTodoNotice[] = [];
+    const out = applyConversionsToStoredItem('page', page, {
+      onNotice: (n) => notices.push(n),
+      onTodo: (t) => todos.push(t),
+    }) as typeof page;
+    const components = out.regions[0]!.components as Array<{ properties: { filter: unknown } }>;
+    expect(components[0]!.properties.filter).toEqual([{ field: 'stage', operator: 'equals', value: 'open' }]);
+    // Byte-identical: the combinator is never flattened, only named.
+    expect(components[1]!.properties.filter).toEqual({ $or: [{ stage: 'open' }, { stage: 'won' }] });
+    expect(notices.map((n) => n.path)).toEqual(['pages[0].regions[0].components[0].properties.filter']);
+    expect(todos.map((t) => [t.code, t.conversionId, t.path])).toEqual([
+      [CONVERSION_TODO_CODE, 'page-component-filter-record-to-rule-array', 'pages[0].regions[0].components[1].properties.filter'],
+    ]);
+    expect(todos[0]!.reason).toContain('`$or`');
   });
 });

@@ -27,18 +27,20 @@
  *
  *    For `app` they refuse, like every other door, an app the plain read
  *    refuses WHOLE (an app-level `requiredPermissions` the caller lacks; an
- *    unpublished app to a non-builder, ADR-0045 §3).
+ *    unpublished app to a non-builder, ADR-0045 §3) — to an author as to
+ *    anyone.
  *
- *    ⚠️ **Their PARTIAL `app` cells are a DECLARED PENDING-DECISION
- *    EXEMPTION** (decision anchor #20156, `PENDING_DECISION` below): a caller
- *    the plain read would serve only PART of an app. Both ways of pulling those
- *    cells to the plain read's answer draw a new permission boundary, which is
- *    the maintainer's to rule: a PRUNED stored app is deleted entries once
- *    Studio's designer saves back what it loaded, and a REFUSED one locks out
- *    an author — a platform admin included — who lacks one entry's permission.
- *    So exactly those cells answer what they answered before this card (the
- *    stored app, unpruned), and this file pins that, under the anchor, so the
- *    exemption stays loud and cannot widen until it is ruled.
+ *    **The author exemption** (ruling 5856774816, letter B, confirmed
+ *    5856866273 — `AUTHOR_EXEMPTION` below): on these three doors a caller
+ *    who may WRITE the app — the one the app's save door admits — reads the
+ *    full stored version, and every other caller who may open it reads
+ *    exactly what the plain read gives them, pruned. ADR-0106 D4's shape
+ *    carried from object schemas to apps: read-to-display is pruned per
+ *    user, read-to-edit is whole for whoever may edit, because Studio's
+ *    designer saves back what it loaded and a pruned load would delete the
+ *    withheld entries. The exemption is a CALLER property, honoured by these
+ *    three doors and by no other: the plain read and `/published` still
+ *    prune for an author.
  *  - **`/history` and `/audit` serve events, never a body**: they refuse where
  *    the plain read refuses the item whole, and otherwise serve the events.
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
@@ -149,22 +151,41 @@ const previousVersionOf = (type: string, doc: any): any =>
 // ── Callers ───────────────────────────────────────────────────────────────────
 
 interface Caller {
-    ctx?: { userId: string; systemPermissions: string[] };
+    ctx?: { userId: string; systemPermissions: string[]; tenantId?: string };
     holdings: string[];
     readableFields: string[];
+    /**
+     * Does `PUT /meta/app/:name` admit this caller? DECLARED here and checked
+     * against the save door itself below — the author exemption's predicate is
+     * that door's answer (ruling 5856774816, item 1), so the census cannot
+     * call a caller an author the save door refuses, or the reverse.
+     */
+    savesApps: boolean;
 }
-const CALLERS: Record<'reader' | 'non-reader' | 'anonymous', Caller> = {
+const CALLERS: Record<'reader' | 'non-reader' | 'author' | 'anonymous', Caller> = {
     reader: {
         ctx: { userId: 'u_reader', systemPermissions: ['finance.access', 'payroll.access', 'studio.access'] },
         holdings: ['crm_admin'],
         readableFields: ['amount', 'secret_margin'],
+        savesApps: false,
     },
     'non-reader': {
         ctx: { userId: 'u_member', systemPermissions: [] },
         holdings: [],
         readableFields: ['amount'],
+        savesApps: false,
     },
-    anonymous: { holdings: [], readableFields: [] },
+    // An author the plain read serves only PART of `crm`: they may write
+    // metadata, but hold neither `finance.access` nor `crm_admin`. And no
+    // builder capability either, so the unpublished `launchpad` stays
+    // invisible to them (ADR-0045 §3 — the exemption lifts no whole refusal).
+    author: {
+        ctx: { userId: 'u_author', systemPermissions: ['manage_metadata'] },
+        holdings: [],
+        readableFields: ['amount'],
+        savesApps: true,
+    },
+    anonymous: { holdings: [], readableFields: [], savesApps: false },
 };
 type CallerName = keyof typeof CALLERS;
 
@@ -205,8 +226,8 @@ function shallowDiff(from: Record<string, any>, to: Record<string, any>) {
     return { added, removed, changed };
 }
 
-function setup(callerName: CallerName) {
-    const caller = CALLERS[callerName];
+function setup(who: CallerName | Caller) {
+    const caller = typeof who === 'string' ? CALLERS[who] : who;
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
@@ -243,6 +264,8 @@ function setup(callerName: CallerName) {
             const from = found ? previousVersionOf(t, clone(found)) : {};
             return { type: t, name, fromVersion: 1, toVersion: 2, ...shallowDiff(from, to) };
         }),
+        // The save door's protocol call — reached only past its admission.
+        saveMetaItem: vi.fn(async ({ type, name }: any) => ({ success: true, type: singular(type), name })),
         findReferencesToMeta: vi.fn(async () => ({ references: [] })),
         findData: vi.fn().mockResolvedValue([]),
     };
@@ -275,6 +298,16 @@ async function drive(rest: any, suffix: string, type: string, name: string, quer
     return res;
 }
 
+/** `PUT /meta/:type/:name` — the save door whose admission IS the author exemption's predicate. */
+async function save(rest: any, type: string, name: string, item: any) {
+    const path = `${META}/:type/:name`;
+    const route = rest.getRoutes().find((r: any) => r.method === 'PUT' && r.path === path);
+    if (!route) throw new Error(`PUT ${path} is not registered`);
+    const res = makeRes();
+    await route.handler({ method: 'PUT', path: `${META}/${type}/${name}`, params: { type, name }, query: {}, body: item, headers: {} }, res);
+    return res;
+}
+
 /** The ADR-0112 minimum: the status and the machine code, never the prose. */
 const envelope = (res: any) => ({ status: res.statusCode, code: res.body?.code ?? res.body?.error?.code });
 const text = (res: any): string => JSON.stringify(res.body ?? null);
@@ -299,34 +332,31 @@ const DOORS: Record<string, Door> = {
 };
 
 /**
- * ⚠️ THE DECLARED PENDING-DECISION EXEMPTION — decision anchor #20156.
+ * THE AUTHOR EXEMPTION — ruling 5856774816 (letter B, confirmed 5856866273).
  *
- * The PARTIAL `app` cells of the stored-version doors: a caller the plain read
- * would serve only part of an app (`plain` answer `pruned`). Pulling those
- * cells to the plain read's answer draws a NEW permission boundary either way
- * (a pruned stored app is deleted entries once the designer saves back; a
- * refused one locks out an author, a platform admin included, who lacks one
- * entry's permission), and a new boundary is the maintainer's to rule. Until
- * it is, these cells answer exactly what they answered before the gate
- * existed — the stored app, unpruned — and the census pins THAT, under this
- * anchor: when the ruling lands, they go red and are rewritten deliberately,
- * never drifted into.
+ * 「On the three stored-version doors (`/layers`, `?layers=true`, `/diff`) a
+ * caller who may write the app reads the full stored version; every other
+ * caller who may open the app reads exactly what the plain read gives them,
+ * pruned.」 ADR-0106 D4's shape, carried from object schemas to apps: the
+ * exemption is a CALLER property ("may write" = the save door admits them,
+ * `savesApps` above, checked against that door below), and these three doors
+ * are the only ones that honour it.
  *
- * ⛔ An app the plain read refuses WHOLE is NOT in the exemption: that refusal
- * is the plain read's own answer, and every door gives it. A test below holds
- * the exemption to exactly the `pruned` answer, on exactly these three doors,
- * and to the exact cells that yields — so widening it to a whole-refusal cell,
- * or to a fourth door, fails that test rather than passing silently.
+ * So on an exempt cell the door owes the STORED app whole where the plain
+ * read would prune it — and nothing else changes: an app the plain read
+ * refuses WHOLE is refused there too, author or not. Tests below hold the
+ * exemption to exactly the author's partial `app` cells of exactly these
+ * three doors: widening it to a fourth door, to a rendered door, to a
+ * non-author, or to a whole refusal fails them rather than passing silently.
  */
-const PENDING_DECISION = Object.freeze({
-    anchor: '#20156',
+const AUTHOR_EXEMPTION = Object.freeze({
+    ruling: '5856774816',
     type: 'app',
     doors: Object.freeze(['?layers=true', '/layers', '/diff']),
-    answer: 'pruned' as PlainAnswer['kind'],
 });
-const isPendingDecision = (type: string, doorName: string, want: { kind: string }): boolean =>
-    type === PENDING_DECISION.type && PENDING_DECISION.doors.includes(doorName)
-    && want.kind === PENDING_DECISION.answer;
+const authorExempt = (type: string, doorName: string, callerName: CallerName): boolean =>
+    type === AUTHOR_EXEMPTION.type && AUTHOR_EXEMPTION.doors.includes(doorName)
+    && CALLERS[callerName].savesApps;
 
 // ── The subjects, and what the plain read answers each caller ────────────────
 
@@ -360,40 +390,52 @@ interface Subject {
 const SUBJECTS: Subject[] = [
     {
         type: 'doc', name: 'crm_admin_runbook', secrets: [DOC_SECRET],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, author: { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
     },
     {
         type: 'doc', name: 'crm_intro', secrets: [],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'whole' }, anonymous: ANON },
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'whole' }, author: { kind: 'whole' }, anonymous: ANON },
     },
     {
         type: 'book', name: 'admin_guide', secrets: [BOOK_SECRET],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, author: { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
     },
     {
         type: 'app', name: 'crm', secrets: ['nav_finance_ledger', 'nav_admin_runbook'],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'pruned' }, anonymous: ANON },
+        // The plain read prunes for the AUTHOR too: read-to-display is per user.
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'pruned' }, author: { kind: 'pruned' }, anonymous: ANON },
     },
     {
         type: 'app', name: 'payroll', secrets: ['nav_payroll_runs'],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, author: { kind: 'refused', status: 403, code: 'PERMISSION_DENIED' }, anonymous: ANON },
     },
     {
         type: 'app', name: 'launchpad', secrets: ['nav_launchpad_home'],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'refused', status: 404, code: 'RESOURCE_NOT_FOUND' }, anonymous: ANON },
+        plain: {
+            reader: { kind: 'whole' },
+            'non-reader': { kind: 'refused', status: 404, code: 'RESOURCE_NOT_FOUND' },
+            author: { kind: 'refused', status: 404, code: 'RESOURCE_NOT_FOUND' },
+            anonymous: ANON,
+        },
     },
     {
         type: 'dashboard', name: 'ops', secrets: [],
-        plain: { reader: { kind: 'deployment-pruned' }, 'non-reader': { kind: 'deployment-pruned' }, anonymous: ANON },
+        plain: {
+            reader: { kind: 'deployment-pruned' },
+            'non-reader': { kind: 'deployment-pruned' },
+            author: { kind: 'deployment-pruned' },
+            anonymous: ANON,
+        },
     },
     {
         type: 'object', name: 'invoice', secrets: ['secret_margin'],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'masked' }, anonymous: ANON },
+        // ADR-0106 D4: whoever may write a schema reads it whole.
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'masked' }, author: { kind: 'whole' }, anonymous: ANON },
     },
     // Control: a type the plain read gates for nobody.
     {
         type: 'view', name: 'all_leads', secrets: [],
-        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'whole' }, anonymous: ANON },
+        plain: { reader: { kind: 'whole' }, 'non-reader': { kind: 'whole' }, author: { kind: 'whole' }, anonymous: ANON },
     },
 ];
 
@@ -447,51 +489,84 @@ describe('[#20156] the plain read answers what the census declares', () => {
     }
 });
 
-describe('[#20156] the pending-decision exemption is declared, anchored, and no wider than the partial app cells of three doors', () => {
-    it(`exactly the \`pruned\` app answer, on exactly /layers, ?layers=true and /diff, anchored to ${PENDING_DECISION.anchor}`, () => {
-        expect(PENDING_DECISION.anchor).toBe('#20156');
-        expect(PENDING_DECISION.type).toBe('app');
-        // The PARTIAL answer only — never `refused`, the plain read's own.
-        expect(PENDING_DECISION.answer).toBe('pruned');
-        // Literal, not derived from `DOORS`: a new stored-version door is gated
-        // by default and must be exempted by a deliberate edit here, never by
-        // inheriting a kind.
-        expect([...PENDING_DECISION.doors].sort()).toEqual(['/diff', '/layers', '?layers=true']);
-        for (const doorName of PENDING_DECISION.doors) expect(DOORS[doorName]?.kind, doorName).toBe('stored');
+const LAYERS = ['code', 'overlay', 'effective'] as const;
+const bucketPaths = (diff: any): string[][] =>
+    (['added', 'removed', 'changed'] as const).map((b) => (diff?.[b] ?? []).map((e: any) => e.path));
+
+describe(`[#20156] ruling ${AUTHOR_EXEMPTION.ruling} — the author exemption is declared, and no wider than the author's partial app cells of three doors`, () => {
+    it('it names exactly /layers, ?layers=true and /diff — every stored-version door, and no other', () => {
+        expect(AUTHOR_EXEMPTION.ruling).toBe('5856774816');
+        expect(AUTHOR_EXEMPTION.type).toBe('app');
+        // Literal, not derived from `DOORS`: a door is exempted by a deliberate
+        // edit here, never by inheriting a kind.
+        expect([...AUTHOR_EXEMPTION.doors].sort()).toEqual(['/diff', '/layers', '?layers=true']);
+        // ...and the literal is every stored-version door: none is left
+        // pruning an author, none that renders is exempted.
+        const storedDoors = Object.entries(DOORS).filter(([, d]) => d.kind === 'stored').map(([n]) => n);
+        expect(storedDoors.sort()).toEqual([...AUTHOR_EXEMPTION.doors].sort());
     });
 
-    it('the cells it yields are exactly the partial app cells — no whole-refusal cell, no reader, no anonymous caller', () => {
-        const cells: string[] = [];
-        const wholeRefusals: string[] = [];
+    it('the cells whose answer it changes are exactly the author\'s partial app cells — no whole refusal, no other caller, no rendered door', () => {
+        const changed: string[] = [];
+        const stillRefused: string[] = [];
         for (const doorName of Object.keys(DOORS)) {
             for (const subject of SUBJECTS) {
                 for (const callerName of Object.keys(CALLERS) as CallerName[]) {
+                    if (!authorExempt(subject.type, doorName, callerName)) continue;
                     const want = subject.plain[callerName];
-                    if (!isPendingDecision(subject.type, doorName, want)) continue;
-                    cells.push(`${doorName} ${subject.type}/${subject.name} × ${callerName}`);
-                    if (want.kind === 'refused') wholeRefusals.push(`${doorName} ${subject.name} × ${callerName}`);
+                    const cell = `${doorName} ${subject.type}/${subject.name} × ${callerName}`;
+                    if (want.kind === 'refused') stillRefused.push(cell);
+                    else if (want.kind !== 'whole') changed.push(cell);
                 }
             }
         }
-        expect(wholeRefusals).toEqual([]);
-        expect(cells.sort()).toEqual([
-            '/diff app/crm × non-reader',
-            '/layers app/crm × non-reader',
-            '?layers=true app/crm × non-reader',
+        expect(changed.sort()).toEqual([
+            '/diff app/crm × author',
+            '/layers app/crm × author',
+            '?layers=true app/crm × author',
         ]);
+        // The whole refusals it does NOT lift — each is held to the plain
+        // read's refusal by its census row below.
+        expect(stillRefused.sort()).toEqual([
+            '/diff app/launchpad × author',
+            '/diff app/payroll × author',
+            '/layers app/launchpad × author',
+            '/layers app/payroll × author',
+            '?layers=true app/launchpad × author',
+            '?layers=true app/payroll × author',
+        ]);
+    });
+
+    it('its predicate is the save door\'s answer: `savesApps` is exactly who `PUT /meta/app/crm` admits', async () => {
+        for (const callerName of Object.keys(CALLERS) as CallerName[]) {
+            const { rest, protocol } = setup(callerName);
+            const res = await save(rest, 'app', 'crm', clone(CRM_APP));
+            if (CALLERS[callerName].savesApps) {
+                expect(res.statusCode, callerName).toBe(200);
+                expect(protocol.saveMetaItem, callerName).toHaveBeenCalledTimes(1);
+            } else {
+                expect(envelope(res), callerName).toEqual(
+                    CALLERS[callerName].ctx
+                        ? { status: 403, code: 'FORBIDDEN' }
+                        : { status: 401, code: 'UNAUTHENTICATED' },
+                );
+                expect(protocol.saveMetaItem, callerName).not.toHaveBeenCalled();
+            }
+        }
     });
 });
 
-describe('[#20156] every alternate door answers what the plain read answers, or refuses — save the declared partial app cells', () => {
+describe(`[#20156] every alternate door answers what the plain read answers, or refuses — save the author exemption of ruling ${AUTHOR_EXEMPTION.ruling}`, () => {
     for (const [doorName, door] of Object.entries(DOORS)) {
         if (door.kind === 'exempt') continue;
         describe(doorName, () => {
             for (const subject of SUBJECTS) {
                 for (const callerName of Object.keys(CALLERS) as CallerName[]) {
                     const want = subject.plain[callerName];
-                    const pending = isPendingDecision(subject.type, doorName, want);
+                    // A whole refusal is refused to an author as to anyone.
+                    const exempt = authorExempt(subject.type, doorName, callerName) && want.kind !== 'refused';
                     const title = `${subject.type}/${subject.name} × ${callerName}`
-                        + (pending ? ` — PENDING-DECISION ${PENDING_DECISION.anchor}: the stored app, unpruned, as before the gate` : '');
+                        + (exempt ? ` — AUTHOR, ruling ${AUTHOR_EXEMPTION.ruling}: the full stored version` : '');
                     it(title, async () => {
                         const { rest, protocol } = setup(callerName);
                         const plain = await drive(rest, '', subject.type, subject.name);
@@ -499,22 +574,16 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
                         const res = await drive(rest, door.suffix, subject.type, subject.name, door.query);
                         const stored = find(subject.type, subject.name);
 
-                        if (pending) {
-                            // The pre-gate ANSWER, pinned under the anchor — it
-                            // passes on the pre-gate code too, by design. LOUD by
-                            // construction: the entries the plain read withholds from
-                            // this caller ARE in this body — the exposure the
-                            // decision waits on. That the whole-app gate still runs
-                            // on these doors is pinned by the whole-refusal cells
-                            // (`payroll`, `launchpad`), not here.
+                        if (exempt) {
+                            // A caller who may write the app reads what is STORED —
+                            // every entry the plain read withholds from them
+                            // included, so a save of what they loaded keeps them.
                             expect(res.statusCode).toBe(200);
                             for (const s of subject.secrets) expect(text(res)).toContain(s);
                             if (door.suffix === '/diff') {
                                 expect(res.body).toEqual(await protocol.diffMetaItem.mock.results.at(-1)?.value);
                             } else {
-                                for (const layer of ['code', 'overlay', 'effective']) {
-                                    expect(res.body?.[layer]).toEqual(stored);
-                                }
+                                for (const layer of LAYERS) expect(res.body?.[layer]).toEqual(stored);
                             }
                             return;
                         }
@@ -545,14 +614,29 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
                             return;
                         }
 
-                        // door.kind === 'stored' — the `pruned` answer belongs to
-                        // the partial app cells alone, which are pending above.
-                        expect(want.kind).not.toBe('pruned');
+                        // door.kind === 'stored'
                         expect(res.statusCode).toBe(200);
+                        if (want.kind === 'pruned') {
+                            // Every other caller who may open the app reads exactly
+                            // what the plain read gives them, pruned — on every
+                            // layer, and on both sides of a diff, whose entries
+                            // are kept and whose VALUES are the pruned ones.
+                            for (const s of subject.secrets) expect(text(res)).not.toContain(s);
+                            const expected = navIds(plainItem(plain));
+                            if (door.suffix === '/diff') {
+                                const raw = await protocol.diffMetaItem.mock.results.at(-1)?.value;
+                                expect(bucketPaths(res.body)).toEqual(bucketPaths(raw));
+                                const navigation = res.body?.added?.find((e: any) => e.path === 'navigation')?.value;
+                                expect(navIds({ navigation })).toEqual(expected);
+                            } else {
+                                for (const layer of LAYERS) expect(navIds(res.body?.[layer])).toEqual(expected);
+                            }
+                            return;
+                        }
                         if (want.kind === 'masked') {
                             for (const s of subject.secrets) expect(text(res)).not.toContain(s);
                             if (door.suffix !== '/diff') {
-                                for (const layer of ['code', 'overlay', 'effective']) {
+                                for (const layer of LAYERS) {
                                     expect(fieldNames(res.body?.[layer])).toEqual(fieldNames(plainItem(plain)));
                                 }
                             }
@@ -566,7 +650,7 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
                         // whole
                         for (const s of subject.secrets) expect(text(res)).toContain(s);
                         if (door.suffix !== '/diff') {
-                            for (const layer of ['code', 'overlay', 'effective']) {
+                            for (const layer of LAYERS) {
                                 expect(res.body?.[layer]).toEqual(stored);
                             }
                         }
@@ -622,6 +706,49 @@ describe('[#20156] edges', () => {
         expect(plainApp.statusCode).toBe(200);
         expect(navIds(published.body)).toEqual(navIds(plainItem(plainApp)));
         expect(navIds(published.body)).not.toContain('nav_admin_runbook');
+        // [ruling 5856774816] And on a stored-version door, to a caller who
+        // may not write the app (this reader holds `crm_admin` but not
+        // `manage_metadata`): the same composite answer, never the stored app.
+        const layers = await drive(rest, '/layers', 'app', 'crm');
+        expect(layers.statusCode).toBe(200);
+        for (const layer of LAYERS) expect(navIds(layers.body?.[layer]), layer).toEqual(navIds(plainItem(plainApp)));
+    });
+
+    it('[ruling 5856774816] "may write" is the save door\'s WHOLE question, not a capability name: an org-scoped presentation author writes views, not apps, so the app is pruned for them', async () => {
+        // `manage_org_presentation` admits a save only of an org-overridable
+        // type, scoped to the session's own organization — `app` is not one.
+        const presenter: Caller = {
+            ctx: { userId: 'u_presenter', systemPermissions: ['manage_org_presentation'], tenantId: 'org_1' },
+            holdings: [],
+            readableFields: ['amount'],
+            savesApps: false,
+        };
+        const { rest, protocol } = setup(presenter);
+
+        // The control: the same caller IS a writer, of a type they may write.
+        const view = await save(rest, 'view', 'all_leads', clone(LEADS_VIEW));
+        expect(view.statusCode).toBe(200);
+        expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
+        // The app's save door refuses them...
+        const app = await save(rest, 'app', 'crm', clone(CRM_APP));
+        expect(envelope(app)).toEqual({ status: 403, code: 'FORBIDDEN' });
+        expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
+        // ...so every stored-version door serves them the plain read's pruned app.
+        const plain = await drive(rest, '', 'app', 'crm');
+        const expected = navIds(plainItem(plain));
+        expect(expected).not.toEqual(navIds(CRM_APP));
+        for (const doorName of AUTHOR_EXEMPTION.doors) {
+            const door = DOORS[doorName];
+            const res = await drive(rest, door.suffix, 'app', 'crm', door.query);
+            expect(res.statusCode, doorName).toBe(200);
+            for (const s of ['nav_finance_ledger', 'nav_admin_runbook']) expect(text(res), doorName).not.toContain(s);
+            if (door.suffix === '/diff') {
+                const navigation = res.body?.added?.find((e: any) => e.path === 'navigation')?.value;
+                expect(navIds({ navigation }), doorName).toEqual(expected);
+            } else {
+                for (const layer of LAYERS) expect(navIds(res.body?.[layer]), `${doorName} ${layer}`).toEqual(expected);
+            }
+        }
     });
 
     it('a gated type with nothing behind the name: /diff answers the plain read\'s absence, /history its events', async () => {

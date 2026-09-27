@@ -37,6 +37,22 @@ export const CONVERSION_NOTICE_CODE = 'OS_METADATA_CONVERTED' as const;
 export const CONVERSION_CONFLICT_CODE = 'OS_METADATA_CONVERSION_CONFLICT' as const;
 
 /**
+ * Stable code for a **conversion TODO** — a site a conversion recognised as a
+ * pre-protocol shape and deliberately LEFT AS STORED, because no lossless
+ * rewrite exists for it.
+ *
+ * ADR-0087 D3's model, applied to one site: convert where lossless, a
+ * structured TODO otherwise — never silence. A conversion that declines part
+ * of its own surface (a filter carrying a combinator the canonical shape
+ * cannot spell, say) returns that site unchanged, so no
+ * {@link ConversionNotice} fires for it; without this channel the pass that
+ * reads the notices would count the site as already canonical. The TODO is
+ * what lets an operator answer "did it convert my row" from the pass's own
+ * output.
+ */
+export const CONVERSION_TODO_CODE = 'OS_METADATA_CONVERSION_TODO' as const;
+
+/**
  * A structured deprecation notice emitted once per applied conversion.
  *
  * Machine-readable first (ADR-0087 D4): the loader, `validate`, and the future
@@ -95,6 +111,45 @@ export interface ConversionConflictNotice {
 }
 
 /**
+ * The per-site detail a conversion reports when it recognises a pre-protocol
+ * shape on its surface and leaves it as stored, because no lossless rewrite
+ * exists (see {@link CONVERSION_TODO_CODE}).
+ */
+export interface ConversionTodoDetail {
+  /** Where the site is, e.g. `pages[0].regions[0].components[1].properties.filter`. */
+  path: string;
+  /** The pre-protocol shape left in place, as seen in the source (serialized). */
+  from: string;
+  /**
+   * Why no lossless rewrite exists — naming the part that blocks it (the
+   * combinator, the operator, the key) and the node it sits on — and what the
+   * hand rewrite has to decide. Actionable, like a conflict's `reason`.
+   */
+  reason: string;
+}
+
+/**
+ * A structured TODO notice: a site left as stored because no lossless rewrite
+ * exists. Same machine-first shape as {@link ConversionNotice}; different code,
+ * and no `to` — nothing was converted.
+ */
+export interface ConversionTodoNotice {
+  code: typeof CONVERSION_TODO_CODE;
+  /** The {@link MetadataConversion.id} whose surface the site is on. */
+  conversionId: string;
+  /** Dotted surface the conversion governs. */
+  surface: string;
+  /** The pre-protocol shape left in place. */
+  from: string;
+  /** Where in the stack the site is. */
+  path: string;
+  /** Why no lossless rewrite exists (see {@link ConversionTodoDetail.reason}). */
+  reason: string;
+  /** Derived, human-facing one-liner. */
+  message: string;
+}
+
+/**
  * Environment-supplied context for a conversion pass. Empty on the pure
  * build/validate seam (no runtime registry to consult); populated on the
  * runtime load seam (`engine.registerFlow`) so a rename over an *open*
@@ -110,6 +165,12 @@ export interface ConversionContext {
   reservedNodeTypes?: ReadonlySet<string>;
   /** Sink for a refused rewrite (see {@link ConversionConflictDetail}). */
   reportConflict?: (detail: ConversionConflictDetail) => void;
+  /**
+   * Sink for a site left as stored because no lossless rewrite exists (see
+   * {@link ConversionTodoDetail}). Absent unless the caller asked for TODOs; a
+   * conversion calls it optionally and leaves the site unchanged either way.
+   */
+  reportTodo?: (detail: ConversionTodoDetail) => void;
 }
 
 /**
@@ -177,7 +238,9 @@ export interface MetadataConversion {
    * new) stack and calls `emit` once per rewritten site. A conversion over an
    * open namespace consults `context` (when supplied) to refuse — and report via
    * `context.reportConflict` — a rewrite whose old token is a live name; a
-   * conversion over a closed surface ignores `context`.
+   * conversion over a closed surface ignores `context`. A conversion that
+   * recognises a pre-protocol shape on its surface but has no lossless rewrite
+   * for it leaves the site unchanged and reports it via `context.reportTodo`.
    */
   apply(
     stack: Record<string, unknown>,

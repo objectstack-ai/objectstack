@@ -332,9 +332,14 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
    * view-family conversion strips collides with that identity set — this pins
    * that, so a later conversion whose key DOES collide fails here rather than
    * silently deleting a row's binding.
+   *
+   * [#20230] `owner` left the identity set on purpose: the overlay's `owner` /
+   * `hidden` are retired (ADR-0049) and `view-overlay-owner-hidden-removed`
+   * strips them. It is asserted GONE below, by that entry, while every key
+   * that still binds or orders the row survives.
    */
   it('never touches the overlay identity/round-trip fields', () => {
-    const { out } = convertViewRow({
+    const { out, notices } = convertViewRow({
       name: 'crm_lead.all',
       object: 'crm_lead',
       viewKind: 'list',
@@ -355,9 +360,11 @@ describe('view conversions reach the flattened-overlay spelling (payload at top 
     expect(out.isDefault).toBe(true);
     expect(out.order).toBe(3);
     expect(out.scope).toBe('user');
-    expect(out.owner).toBe('usr_1');
     expect(out.columnState).toEqual({ order: ['name'], widths: { name: 120 } });
-    expect('striped' in out).toBe(false); // the one key that IS retired
+    // The two retired keys on this row — each stripped by its own entry.
+    expect('striped' in out).toBe(false);
+    expect('owner' in out).toBe(false);
+    expect(pathsFor(notices, 'view-overlay-owner-hidden-removed')).toEqual(['views[0].owner']);
   });
 });
 

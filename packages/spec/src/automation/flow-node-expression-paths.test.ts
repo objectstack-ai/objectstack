@@ -325,8 +325,57 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
     // Same rule on the other predicate slot — one class, not one node type.
     expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: true }] })
       .map((f) => [f.path, f.value])).toEqual([['fields[0].visibleWhen', true]]);
-    // `null` / absent stay "not authored" — a refusal needs something authored.
+    // `null` / absent stay "not authored" on a slot that is NOT required — a
+    // refusal needs something authored. (A `required` slot is the exception,
+    // #19961: see the block below.)
     expect(resolveFlowNodeExpressions('screen', { fields: [{ visibleWhen: null }] })).toEqual([]);
+  });
+
+  /**
+   * [#19961] A `required` predicate slot — `decision`'s
+   * `conditions[].expression`, which `DecisionConditionSchema` declares
+   * `z.string()` — emits an ABSENT or `null` value on a branch that exists, for
+   * every door to refuse through `predicateSlotRefusal`. It used to be skipped
+   * as "not authored", and the executor then evaluated the branch as a
+   * condition with no `source` and failed the run there.
+   */
+  describe('a required predicate slot emits its absent value (#19961)', () => {
+    it('the required set is exactly the decision branch predicate — the absent arm is worded for it', () => {
+      // `predicateSlotRefusal`'s absent arm names a decision branch and its
+      // prescription; a second `required` entry must re-word it, so its
+      // arrival fails here rather than shipping a sentence about the wrong slot.
+      expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.required).map((e) => `${e.nodeType}.${e.path} (${e.role})`))
+        .toEqual(['decision.conditions[].expression (predicate)']);
+    });
+
+    it('emits `undefined` for a branch with no `expression` key, and `null` for `expression: null`', () => {
+      const found = resolveFlowNodeExpressions('decision', {
+        conditions: [
+          { label: 'first', expression: 'record.amount > 10' },
+          { label: 'absent' },
+          { label: 'null', expression: null },
+          { label: 'aliased', condition: 'record.amount > 5' },
+        ],
+      });
+      expect(found.map((f) => [f.path, f.value, f.entry.role])).toEqual([
+        ['conditions[0].expression', 'record.amount > 10', 'predicate'],
+        ['conditions[1].expression', undefined, 'predicate'],
+        ['conditions[2].expression', null, 'predicate'],
+        // The edge's spelling on a branch is not `expression`: the branch has none.
+        ['conditions[3].expression', undefined, 'predicate'],
+      ]);
+    });
+
+    it('judges only a branch that exists — no `conditions`, or an empty list, declares no branch', () => {
+      expect(resolveFlowNodeExpressions('decision', {})).toEqual([]);
+      expect(resolveFlowNodeExpressions('decision', { conditions: [] })).toEqual([]);
+      expect(resolveFlowNodeExpressions('decision', { conditions: 'nope' })).toEqual([]);
+    });
+
+    it('a slot that is NOT required keeps skipping its absent value — an absent `visibleWhen` shows the field', () => {
+      expect(resolveFlowNodeExpressions('screen', { fields: [{ name: 'amount' }] })).toEqual([]);
+      expect(resolveFlowNodeExpressions('screen', { fields: [{ name: 'amount', visibleWhen: null }] })).toEqual([]);
+    });
   });
 
   describe('predicateSlotRefusal (#15572)', () => {
@@ -365,6 +414,36 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
       // No `dialect` ⇒ not envelope-shaped, so no source is claimed from it.
       expect(predicateSlotRefusal({ source: 'x' })?.source).toBe('x');
       expect(predicateSlotRefusal(42)?.source).toBe('');
+    });
+
+    /**
+     * [#19961] No value at all — the resolver hands one over only for a
+     * `required` slot, and this is the ONE refusal every door answers it with.
+     * The prescription is the blank's minus the run it kept (an absent branch
+     * predicate never evaluated — the run failed at the branch), so the
+     * load-bearing clauses are pinned by name.
+     */
+    it('REFUSES no value at all — absent and `null` — under the same sentence, with the branch prescription (#19961)', () => {
+      const absent = predicateSlotRefusal(undefined);
+      const nulled = predicateSlotRefusal(null);
+      for (const [refusal, found] of [[absent, 'Found nothing — the key is absent'], [nulled, 'Found `null`']] as const) {
+        expect(refusal?.message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+        expect(refusal?.message).toContain(found);
+        // The prescription: write the rule; `condition` belongs in `expression`;
+        // `'false'` keeps the branch and never takes it; not by dropping the
+        // only branch.
+        expect(refusal?.message).toContain('Write the predicate the branch was meant to test');
+        expect(refusal?.message).toContain('`condition` is the edge\'s spelling — belongs in `expression`');
+        expect(refusal?.message).toContain('There is no run to keep');
+        expect(refusal?.message).toContain('write `expression: \'false\'`');
+        expect(refusal?.message).toContain('Not by dropping a decision\'s only branch');
+        // Nothing was authored, so nothing is attributed.
+        expect(refusal?.source).toBe('');
+      }
+      // Its own detail, never the envelope's or the blank's.
+      expect(absent?.message).not.toContain('Found a undefined');
+      expect(absent?.message).not.toContain('envelope is the `value`-role spelling');
+      expect(absent?.message).not.toContain('the value the blank evaluated to');
     });
   });
   /**
