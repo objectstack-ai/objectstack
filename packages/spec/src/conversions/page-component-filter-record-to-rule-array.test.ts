@@ -423,7 +423,9 @@ describe('§7 jurisdiction — retired from authoring, replayed at rest and by t
   });
 
   it('`os migrate meta --from 17` replays it and lists the edit', () => {
-    const result = applyMetaMigrations({ pages: [structuredClone(authored)] }, 17);
+    // Explicit `toMajor`: protocol 18 is the major in preparation, so the running
+    // default would stop the chain at 17.
+    const result = applyMetaMigrations({ pages: [structuredClone(authored)] }, 17, 18);
     const component = (((result.stack.pages as Dict[])[0]!.regions as Dict[])[0]!.components as Dict[])[0]!;
     expect((component.properties as Dict).filter).toEqual([
       { field: 'stage', operator: 'equals', value: 'open' },
