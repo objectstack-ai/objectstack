@@ -20,7 +20,7 @@
 //     test would report a clean audit over source it never opened — the exact
 //     shape the rule itself is about, turned on the rule (#4930). So the root is
 //     resolved up front, and the walk tolerates exactly one error: an entry its
-//     own listing named that has since VANISHED, judged the same way at the stat
+//     own listing named that is gone when it is read, judged at the stat
 //     (`statListedEntry`), at a listed directory's `readdirSync`
 //     (`readListedDirectory`) and at the sweep's `readFileSync`
 //     (`readCollectedFile`). Every other error is rethrown.
@@ -80,10 +80,11 @@ const LEDGER: Readonly<Record<string, string>> = {};
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'coverage', '.cache', '.next', 'tmp']);
 
 /**
- * Whether `err`, thrown by a read of `path`, means the entry VANISHED since the
- * listing that named it: the read answered `ENOENT` AND an `lstat` of `path`
- * answers `ENOENT` too. The rule is the one the error-status walker pins
- * (`statListedEntry` in `check-error-status-conformance.mjs` under `scripts/`).
+ * Whether `err`, thrown by a read of `path`, means the entry was ABSENT at that
+ * read after the walk's own listing named it: the read answered `ENOENT`, and an
+ * `lstat` of `path` does not find a symlink there. The rule is the one the
+ * error-status walker pins (`statListedEntry` in `check-error-status-conformance.mjs`
+ * under `scripts/`), carried from the stat to the two reads that follow it.
  *
  * Why it exists: this suite runs inside the same turbo run as package builds and
  * other packages' tests, and both leave transient entries under `packages/`.
@@ -92,29 +93,29 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'c
  * gone by the stat, by its own `readdirSync` or by the sweep's `readFileSync`,
  * and a bare read then threw `ENOENT` and failed the whole corpus.
  *
- * `false` for everything else, which the caller rethrows:
+ * `true` when the `lstat` answers `ENOENT` (the entry vanished), and also when
+ * it finds a non-symlink back under the same name: the read still found nothing,
+ * and reading again would be a retry. `false` for everything else, which the
+ * caller rethrows:
  *   - any code but `ENOENT`, `ENOTDIR` and `EACCES` included;
  *   - a dangling symlink (the read answers `ENOENT`, `lstat` finds the link):
- *     the entry exists, and skipping it would shrink the corpus;
- *   - an entry back under the same name by the `lstat`: no retry, the original
- *     error stands.
+ *     the entry exists, and skipping it would shrink the corpus.
  * A missing ROOT never reaches here: no listing named it, and the root's own
  * `readdirSync` is bare. Nothing is matched by name. ⛔ Never a retry.
  */
-function vanishedSince(err: unknown, path: string): boolean {
+function absentAtRead(err: unknown, path: string): boolean {
   if ((err as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') return false;
   try {
-    lstatSync(path);
+    return !lstatSync(path).isSymbolicLink();
   } catch (again) {
     if ((again as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return true;
     throw again;
   }
-  return false;
 }
 
 /**
  * `statSync(path)` for an entry the walk's own listing just named, or `null`
- * when that entry VANISHED since. It applies `vanishedSince`'s rule inline,
+ * when that entry VANISHED since. It applies `absentAtRead`'s rule inline,
  * because this leg alone keeps the `lstat` result: an entry absent at the stat
  * and back under the same name by the `lstat` is audited as present, since for
  * a non-symlink `lstat` IS its `stat`. A dangling symlink still throws the
@@ -142,27 +143,27 @@ function statListedEntry(path: string): Stats | null {
 
 /**
  * `readdirSync(dir)` for a directory the walk's own listing named, or `null`
- * when it VANISHED before this read (`vanishedSince`). A listed directory
+ * when it was ABSENT at this read (`absentAtRead`). A listed directory
  * replaced by a file answers `ENOTDIR`, which throws.
  */
 function readListedDirectory(dir: string): string[] | null {
   try {
     return readdirSync(dir);
   } catch (err) {
-    if (vanishedSince(err, dir)) return null;
+    if (absentAtRead(err, dir)) return null;
     throw err;
   }
 }
 
 /**
- * `readFileSync(file)` for a file the walk collected, or `null` when it VANISHED
- * before the sweep read it (`vanishedSince`).
+ * `readFileSync(file)` for a file the walk collected, or `null` when it was
+ * ABSENT at the sweep's read (`absentAtRead`).
  */
 function readCollectedFile(file: string): string | null {
   try {
     return readFileSync(file, 'utf8');
   } catch (err) {
-    if (vanishedSince(err, file)) return null;
+    if (absentAtRead(err, file)) return null;
     throw err;
   }
 }
@@ -172,9 +173,9 @@ function readCollectedFile(file: string): string | null {
  *
  * No `catch` of its own: an error during the walk means the corpus was only
  * partly read, which must not be reported as a clean audit. The one tolerated
- * error, an entry that vanished after a listing named it, is decided by
- * `vanishedSince` above. The ROOT's own listing is bare, so a missing root
- * throws.
+ * error, an entry a listing named that is gone when it is read, is decided by
+ * `statListedEntry` and `absentAtRead` above. The ROOT's own listing is bare,
+ * so a missing root throws.
  */
 function collectSourceFiles(root: string): string[] {
   const out: string[] = [];
