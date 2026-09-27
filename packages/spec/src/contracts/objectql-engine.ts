@@ -293,10 +293,11 @@ export interface IObjectQLEngine extends IDataEngine {
      *
      * Why it exists (#19995 ruling C): a caller that composes a policy scope
      * into a query must learn whether the scope can run before it composes.
-     * Otherwise the refusal comes back mixed with the caller's own `where`,
-     * attributed to the caller. The engine is the single judge of that
-     * question, so the caller asks the engine rather than copying its doors.
-     * The same member serves authoring-time admission (ADR-0058 D2).
+     * Otherwise the engine refuses the composed query, and its diagnostic
+     * hands the policy's fields and comparands to whoever sent the query. The
+     * engine is the single judge of that question, so the caller asks the
+     * engine rather than copying its doors. The same member serves
+     * authoring-time admission (ADR-0058 D2).
      *
      * OPTIONAL by that ruling: a caller holding an engine without it keeps
      * its existing behaviour, so it probes before calling
