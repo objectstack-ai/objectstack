@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 210,
-    "droppedRefinementSites": 577,
+    "droppedRefinementSites": 580,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -622,7 +622,8 @@
     },
     "data/EqualityOperator": {
       "sites": [
-        "$eq"
+        "$eq",
+        "$ne"
       ]
     },
     "data/Field": {
@@ -638,6 +639,7 @@
         "$between.items[1]",
         "$eq",
         "$in",
+        "$ne",
         "$nin"
       ]
     },
@@ -704,6 +706,7 @@
         "lazy.$not.options[0].valueType.$between.items[1]",
         "lazy.$not.options[0].valueType.$eq",
         "lazy.$not.options[0].valueType.$in",
+        "lazy.$not.options[0].valueType.$ne",
         "lazy.$not.options[0].valueType.$nin"
       ]
     },

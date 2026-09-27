@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 82 rows.
+ * CENSUS (generated): this list holds 81 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -429,7 +429,8 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── automation ────────────────────────────────────────────────────────────
   { route: 'POST /automation/trigger/:name', domain: '/automation', disposition: 'sdk', client: 'automation.trigger',
     note: 'legacy verb-first shape; duplicates execute() against a different URL — candidates for consolidation' },
-  { route: 'GET /automation', domain: '/automation', disposition: 'sdk', client: 'automation.list' },
+  // `GET /automation` (flow list, `automation.list`) — RETIRED by #19543 (door ④):
+  // unmounted, and the flow list is `GET /meta/flow`. No row, because nothing serves it.
   { route: 'POST /automation', domain: '/automation', disposition: 'sdk', client: 'automation.create',
     note: "authored metadata, so `manage_metadata` gates it (#10145): a flow definition lives on the metadata plane (ADR-0106), and this door now asks the capability every other door onto that plane already asks. Fail-closed by construction — an absent executionContext, an absent `systemPermissions` or an empty one all fall through to the refusal, 403 with code `PERMISSION_DENIED` (ADR-0112); only engine self-invocation (`isSystem`, never settable from the wire) bypasses. WHICH routes is one predicate, `isFlowAuthoringWrite` in `domains/automation.ts` — this row, PUT/DELETE `/:name` below, and (since the #10243 ruling) `POST /:name/toggle`, with the execution doors (trigger / execute / resume) deliberately outside it. Second layer, not the first: the #5519 anonymous floor answers an unidentified caller 401 here, not 403. Pinned in `domains/automation-write-capability-gate.test.ts`" },
   { route: 'GET /automation/actions', domain: '/automation', disposition: 'sdk', client: 'automation.listActions' },

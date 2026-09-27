@@ -16,6 +16,11 @@
  * `LIST_COMPARAND_OPERATORS` docblock records. A module both import breaks the
  * tie. It imports nothing.
  *
+ * [#19886] The `$ne` slot is the second tenant, for the same reason. Ruling A
+ * (record 5805254639) refuses an array under `$ne` at the shared face and at
+ * `FieldOperatorsSchema.$ne` with "one remedy text", so that sentence is
+ * assembled here too, by {@link arrayInequalityComparandMessage}.
+ *
  * ## Why it is NOT in the `data` barrel
  *
  * Nothing here is a contract a consumer calls; the two refusals are, and they
@@ -36,6 +41,18 @@
  * the list against `AST_OPERATOR_MAP`.
  */
 export const IN_OPERATOR_SPELLINGS: readonly string[] = ['in'];
+
+/**
+ * [#19886] The authoring spellings that lower to `$nin`.
+ *
+ * `$nin` is the list-negation operator `FieldOperatorsSchema` declares ("Not
+ * in list"), and it is what the `$ne` refusal prescribes. So, as with
+ * {@link IN_OPERATOR_SPELLINGS}, the face's `LIST_COMPARAND_OPERATORS` reads its
+ * `$nin` row from here, and the refusal of a malformed `$nin` and the `$ne`
+ * refusal (which prescribes `$nin`) name one spelling list.
+ * `filter-comparand-shape.test.ts` reconciles the list against `AST_OPERATOR_MAP`.
+ */
+export const NIN_OPERATOR_SPELLINGS: readonly string[] = ['nin', 'not_in', 'notin'];
 
 /**
  * [#19757] The ARRAY-CONTAINMENT operator the equality-slot refusal prescribes,
@@ -135,11 +152,86 @@ export function arrayEqualityComparandMessage(
   site: ArrayEqualityComparandSite,
 ): string {
   const position = site.op
-    ? `Operator "${site.op}"${site.field === undefined ? '' : ` on field "${site.field}"`}`
+    ? operatorPosition(site.op, site.field)
     : `The implicit-equality comparand on field "${site.field}"`;
-  const location = site.path === undefined ? '' : ` at ${site.path}`;
+  return singleValueSlotMessage(position, value, site.path, ARRAY_EQUALITY_COMPARAND_REMEDY);
+}
+
+/**
+ * [#19886] The ONE remedy for an array under `$ne`: the declared list-negation
+ * operator, by its spec spelling and its authoring spellings, then the sentence
+ * a caller cannot infer from a status code.
+ *
+ * Ruling A on #19886 (record 5805254639) asks for exactly this: "one remedy
+ * text, naming the declared list-negation operator by its spec spelling", read
+ * off `FieldOperatorsSchema`, where `$nin` is the operator declared as "Not in
+ * list". ⛔ Nothing else is offered. `$notContains` is declared on a STRING
+ * comparand and is not a list operator, and a second remedy here would be an
+ * invented one. `$nin` is also the remedy the formula evaluator and
+ * `driver-mongodb` already name for the same shape.
+ *
+ * Written like {@link ARRAY_EQUALITY_COMPARAND_REMEDY}: no field wrapper and
+ * `…` for the value, because the field is the subject of the sentence in front
+ * of this one.
+ */
+export const ARRAY_INEQUALITY_COMPARAND_REMEDY: string =
+  `For "none of these values" use {"$nin": […]} (authoring: ${NIN_OPERATOR_SPELLINGS.join(', ')}). ` +
+  `The filter was NOT applied, and an unapplied filter would have returned the ` +
+  `UNFILTERED result set.`;
+
+/**
+ * [#19886] Where the refused array under `$ne` sits, as far as the calling door
+ * can see. The same rules as {@link ArrayEqualityComparandSite}'s `$eq` arm:
+ * `FieldOperatorsSchema.$ne` judges one field's operator map and cannot see the
+ * field, and the face passes `path` because a zod refinement cannot know it.
+ */
+export type ArrayInequalityComparandSite = { readonly field?: string; readonly path?: string };
+
+/**
+ * [#19886] The refusal of an ARRAY under `$ne`, as both doors print it — the
+ * shared comparand-shape face and `FieldOperatorsSchema.$ne`.
+ *
+ * The leading sentence is `driver-memory`'s `arrayComparandError` for the same
+ * operator, word for word, so one condition keeps one wording across packages
+ * (#5240's rule). Then the received list, bounded by {@link shapePreview}, the
+ * location when the door knows it, and {@link ARRAY_INEQUALITY_COMPARAND_REMEDY}.
+ *
+ * As with {@link arrayEqualityComparandMessage}, the two doors print the same
+ * characters for a given value, except that the face adds ` at <path>` and names
+ * the field. `filter-ne-array-schema-door.test.ts` pins exactly that.
+ */
+export function arrayInequalityComparandMessage(
+  value: unknown,
+  site: ArrayInequalityComparandSite,
+): string {
+  return singleValueSlotMessage(
+    operatorPosition('$ne', site.field),
+    value,
+    site.path,
+    ARRAY_INEQUALITY_COMPARAND_REMEDY,
+  );
+}
+
+/** `Operator "$op"`, plus ` on field "f"` when the door can see the field. */
+function operatorPosition(op: string, field: string | undefined): string {
+  return `Operator "${op}"${field === undefined ? '' : ` on field "${field}"`}`;
+}
+
+/**
+ * The sentence both single-value-slot refusals share: the position, the words
+ * `driver-memory` uses for this condition, the received list, the location and
+ * the slot's own remedy. One template, so the `$eq` and `$ne` refusals cannot
+ * drift apart in their first sentence.
+ */
+function singleValueSlotMessage(
+  position: string,
+  value: unknown,
+  path: string | undefined,
+  remedy: string,
+): string {
+  const location = path === undefined ? '' : ` at ${path}`;
   return (
     `${position} requires a single comparable value, but received an array ` +
-    `(${shapePreview(value)})${location}. ${ARRAY_EQUALITY_COMPARAND_REMEDY}`
+    `(${shapePreview(value)})${location}. ${remedy}`
   );
 }

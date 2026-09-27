@@ -232,7 +232,14 @@ describe('[#13906 / 1A] the outage reaches the transport envelope as 503 SERVICE
     //
     // The 501 on the failed leg is the defect on the wire: byte-for-byte the
     // "never registered" answer, i.e. the ex-member was ADMITTED.
-    const AUTOMATION = 'GET /api/v1/automation';
+    //
+    // [#19543] Driven through `GET /automation/_status` since door ④ retired
+    // the `GET /automation` flow list (the path is no longer mounted). The
+    // seam this pins is route-independent — the tenancy verdict and the
+    // anonymous floor run ahead of every automation route, and the domain's
+    // service probe answers the same 501 for each — so the three legs keep the
+    // readings in the table above.
+    const AUTOMATION = 'GET /api/v1/automation/_status';
     const withKey = { headers: { 'x-api-key': RAW_EXMEMBER }, query: {} };
 
     it('POSITIVE CONTROL on the wire: healthy `isolated` tenancy → the ex-member key is refused on the anonymous floor (401)', async () => {
