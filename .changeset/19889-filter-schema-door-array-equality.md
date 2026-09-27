@@ -21,7 +21,7 @@ Two request doors parse these carriers, and they now answer before the analytics
 ## What does NOT change
 
 - **Nothing stored is rewritten, and nothing is dropped.** The parse fails and strips nothing. The read path does not re-validate stored rows, so a stored document keeps loading, and its next save is refused. Such a filter has failed every query since the equality-slot change, so the refusal is a repair.
-- **The reach is the face's, and no wider.** A field spec with no `$` key, such as the nested-relation condition `{ account: { region: ['a'] } }`, is not judged, because the face does not judge it either. The analytics `where` door does refuse that shape when a dataset or measure filter is charted.
+- **The reach is the face's, and no wider.** A field spec with no `$` key, such as the nested-relation condition `{ account: { region: ['a'] } }`, is not judged by `FilterConditionSchema`, because the face does not judge it either. The analytics `where` door does refuse that shape, because it flattens the relation to a dotted member. So the two carriers that door charts, the dataset `filter` and the measure `filter`, refuse it on save as well, in the same words. That is a separate change in this release, ADR-0087 entry `dataset-filter-nested-relation-equality-array-refused-at-save`.
 - **The data-engine calls' `where` option still parses.** Its type is a union whose first arm is an open record. The face refuses the shape when the call runs.
 - **`$ne` carrying an array is not judged.**
 - The list operators keep their arrays, `$in: []` and `$nin: []` included. Every scalar, `null`, a `Date` and a `{ $field }` reference pass as before.

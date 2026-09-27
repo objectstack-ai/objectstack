@@ -53,8 +53,10 @@ export const entry: SemanticMigration = {
     + 'with no $ key (a nested-relation or deep-equality condition), which the face never '
     + 'descends either. ⚠️ Three positions therefore still refuse only at execution. (1) A list '
     + 'inside a nested-relation condition, { account: { region: ["a"] } }: the analytics where '
-    + 'door flattens that to the dotted member account.region and refuses it when a dataset or '
-    + 'measure filter is charted. (2) The where option of the data-engine calls (find, count, '
+    + 'door flattens that to the dotted member account.region and refuses it when the filter is '
+    + 'charted; a dataset filter and a measure filter refuse it on save as well, which is the '
+    + 'sibling entry dataset-filter-nested-relation-equality-array-refused-at-save. (2) The where '
+    + 'option of the data-engine calls (find, count, '
     + 'update, delete, aggregate, vector find): its type is a union whose first arm is an open '
     + 'record, so it parses and the face refuses it when the call runs. (3) $ne carrying a '
     + 'list, which no ruling has decided. Two request doors parse these carriers and now answer '
@@ -79,5 +81,7 @@ export const entry: SemanticMigration = {
     + 'query. ⛔ A clean re-save is NOT a complete sweep for the three positions the reason '
     + 'names: grep nested-relation conditions and data-engine where options for a field whose '
     + 'value is a list, and exercise them, where the runtime doors refuse with INVALID_FILTER '
-    + '/ 400 naming the field and the path.',
+    + '/ 400 naming the field and the path. A dataset filter or a measure filter is the '
+    + 'exception: its nested-relation lists are refused on save too '
+    + '(dataset-filter-nested-relation-equality-array-refused-at-save).',
 };

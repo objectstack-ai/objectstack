@@ -708,15 +708,50 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 
 #### `QUOTA_EXCEEDED`
 **HTTP Status:** 429  
-**Meaning:** Monthly/daily quota exceeded  
-**Envelope:** none — no producer emits it
+**Meaning:** A user's daily AI chat-turn cap is spent  
+**Envelope:** nested — emitted by one route only, the ObjectOS agent chat route, and
+only to a JSON-mode request
 
-**Not emitted today.** `QUOTA_EXCEEDED` is a registered member of the standard
-error-code catalog (`StandardErrorCode`, `packages/spec/src/api/errors.zod.ts`),
-but no ObjectStack producer emits it. No response carries this code, and none
-carries a quota `details` bag — do not write a client branch against it.
+**One producer.** `POST /api/v1/ai/agents/:agentName/chat` answers `QUOTA_EXCEEDED` when
+the deployment has switched on its per-user daily chat-turn cap and the calling user has
+spent that cap. The route belongs to the in-product chat runtime, which ships in ObjectOS
+rather than in the open edition (see [AI](/docs/ai)). No other route emits this code.
 
-Quota enforcement that does exist answers with its own code rather than this one
+**JSON mode only.** The route streams by default. A request whose `stream` flag is absent
+or `true` gets the refusal as an ordinary assistant text message on HTTP 200, and no
+error code reaches it. Only a request with `stream: false` gets the 429 body below.
+`client.ai.agents.chat()` sends `stream: false` and throws an error carrying this body's
+`code` and `details`. `client.ai.agents.chatStream()` streams and receives the text.
+
+**Example:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "QUOTA_EXCEEDED",
+    "message": "Daily AI assistant limit reached (50 messages/day). It resets at 2026-09-28T00:00:00.000Z; to continue now, contact your administrator or upgrade your plan.",
+    "httpStatus": 429,
+    "details": {
+      "resetAt": "2026-09-28T00:00:00.000Z"
+    },
+    "category": "rate_limit"
+  }
+}
+```
+
+- `error.code` is the field to branch on.
+- `error.details.resetAt` is an ISO-8601 timestamp: the moment the cap lifts. It is
+  the only recovery time the response carries. The route sets no `Retry-After` header
+  and sends no `retryAfterSeconds`.
+- `error.category` is `rate_limit`.
+- `error.message` is the refusal copy written for the end user. Show it to the user;
+  don't parse it.
+
+Don't feed this 429 to a retry loop that only checks the status, such as the
+`RATE_LIMIT_EXCEEDED` example above. It has no `Retry-After` to wait on, and every
+retry before `resetAt` is refused again.
+
+Other quota enforcement answers with its own code rather than this one
 (the SMS daily quota answers `TOO_MANY_REQUESTS`). For request pacing, the code
 on the wire is `RATE_LIMIT_EXCEEDED` above, whose `Retry-After` header and
 `retryAfterSeconds` / `resetAt` details are what a client acts on.

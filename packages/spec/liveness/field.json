@@ -274,10 +274,10 @@
     },
     "currencyConfig": {
       "status": "live",
-      "verifiedAt": "2026-08-10",
+      "verifiedAt": "2026-09-27",
       "evidenceScope": "cross-repo",
-      "evidence": "objectui: packages/i18n/src/currency.ts:32 reads field.currencyConfig.defaultCurrency as the second step of resolveFieldCurrency's ADR-0053 precedence chain; objectui: packages/fields/src/widgets/CurrencyField.tsx:45 calls resolveFieldCurrency and applies the resolved code at :51 through formatAmount, which passes it to Intl.NumberFormat — measured objectui @11c1e71e",
-      "note": "RE-CITED 2026-08-10 (#7133/#7142): the old pointer 'packages/fields/src/index.tsx:469' now lands in formatRelativeDays, a date-phrase helper with no currency involvement — the resolver moved to @object-ui/i18n and packages/fields/src/currency.ts:14 only re-exports it, which is why the old line drifted onto unrelated code rather than disappearing. Verdict unchanged: LIVE, and now cited at both the reader that consumes the key and the widget that applies the resolved currency."
+      "evidence": "objectui: packages/i18n/src/currency.ts:60 reads field.currencyConfig.defaultCurrency ONLY when currencyConfig.currencyMode is 'fixed' — the second step of resolveFieldCurrency's precedence chain; a 'dynamic' config, or one naming no mode, skips it for the tenant default localization.currency; objectui: packages/fields/src/widgets/CurrencyField.tsx:55 calls resolveFieldCurrency and applies the resolved code at :91 through formatAmount, which passes it to Intl.NumberFormat via formatDisplayNumber — measured objectui @25c7d584",
+      "note": "RE-CITED 2026-09-27 (#20126): since objectui#10461 the reader takes defaultCurrency only under currencyMode 'fixed', and the chain no longer cites the date/datetime-semantics ADR, which never names currency; line pointers moved with it (currency.ts :32 → :60, CurrencyField.tsx :45/:51 → :55/:91). Verdict unchanged: LIVE. RE-CITED 2026-08-10 (#7133/#7142): the old pointer 'packages/fields/src/index.tsx:469' now lands in formatRelativeDays, a date-phrase helper with no currency involvement — the resolver moved to @object-ui/i18n and packages/fields/src/currency.ts:14 only re-exports it, which is why the old line drifted onto unrelated code rather than disappearing. Verdict unchanged: LIVE, and now cited at both the reader that consumes the key and the widget that applies the resolved currency."
     },
     "dimensions": {
       "status": "live",
