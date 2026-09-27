@@ -81,7 +81,12 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // in its own I/O (`MetaItemReadGateSources`) and writes the DATA verdict
 // (`MetaItemReadVerdict`) on its own wire, in its own envelope — the same split
 // `repeatedQueryParamMessage` above makes.
-export { createMetaItemReadGate } from './meta-item-read-gate.js';
+//
+// [#20237] …and its LIST twin, for `GET /meta/:type` — the doc and book
+// audience prunes, the app nav filter and the dashboard widget gate — over the
+// same ports. The judge answers the pruned ITEMS; each caller rewraps them in
+// its own list envelope.
+export { createMetaItemReadGate, createMetaListReadGate } from './meta-item-read-gate.js';
 export type {
     MetaItemReadGateSources,
     MetaItemReadRefusal,

@@ -235,7 +235,9 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // but not enforced yet. A fourth reason covers far more keys and has no row
   // at all: the ADR-0010 provenance/lock overlay, whose one reason is
   // `FRAMEWORK_FIELDS` above — a root row naming one of its keys is refused by
-  // the resolve test below.
+  // the resolve test below. A fifth, a renderer-owned vocabulary, is read off
+  // the key's `describe()` and the forms together; its admission test heads
+  // its group below.
   //
   // `view` rows are here although `view` is outside the top-level direction
   // until its per-arm forms exist: each reason holds on every arm, so none of
@@ -350,6 +352,20 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'onSuccess',
     why: 'declared, not enforced yet — both of its children (`navigate`, `openIn`) carry the liveness verdict `planned`: no console consumer reads the block yet. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+
+  // Renderer-owned vocabulary — a key is admitted here only when all three
+  // hold: its `describe()` says the spec declares no vocabulary for its value;
+  // every server-side meaning it has is superseded by another key this form
+  // already offers; and every other word it carries is a display hint whose
+  // vocabulary the renderers that read it declare. A control over such a key
+  // is a free-text box with no contract behind it.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'format',
+    why: "renderer-owned vocabulary — the schema's own words: `The spec declares NO vocabulary for it and checks nothing but that it is a string` (a bare `z.string()`). Its one server-side meaning is the autonumber pattern shorthand, which `resolveAutonumberFormat` reads only after the canonical `autonumberFormat` (that key wins when both are present), and both forms that author a field already offer `autonumberFormat` on an autonumber: this form at its root, and the object designer's `fields` quick-add grid. Every other word is a display hint the Studio renderers declare and read (the text-cell format-to-renderer map, the date and datetime display styles). A free-text control would invite the guess its describe warns about: `format: 'email'` on an autonumber mints `email1`",
   },
 
   // Measured, and deliberately NOT recorded: seven `view` keys with no

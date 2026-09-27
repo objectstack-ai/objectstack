@@ -24,8 +24,9 @@ export const entry: SemanticMigration = {
     + 'A view an author marked as one user\'s, or hid from the switcher, has always been listed to '
     + 'every user who can read the object — its name, its columns, its filters and its sort. '
     + 'Whether anything in such a view was meant to stay private, and whether it should now be '
-    + 'deleted rather than kept, is the author\'s call. A flattened view overlay keeps its own '
-    + '`owner` and `hidden`: those live on a different door that this retirement does not touch.',
+    + 'deleted rather than kept, is the author\'s call. A flattened view overlay\'s own `owner` and '
+    + '`hidden` are a separate family on a different door, with their own D2 conversion '
+    + '`view-overlay-owner-hidden-removed` and their own D3 entry `view-overlay-owner-hidden-retired`.',
   acceptanceCriteria: 'No view item record in `views` or in an assembled artifact carries `owner` or '
     + '`hidden`; the parse refuses both by name, and an artifact assembled before the upgrade '
     + 'registers without a refusal over them. For every view that had carried either key, the '

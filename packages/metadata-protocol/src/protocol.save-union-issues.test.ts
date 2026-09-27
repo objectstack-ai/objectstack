@@ -31,6 +31,7 @@ import { describe, expect, it } from 'vitest';
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation, zodIssuesToMetadataIssues } from './protocol.js';
 
@@ -46,8 +47,16 @@ interface Row {
 const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
 
-/** The engine surface the repository write path touches. */
-function makeProtocol() {
+/**
+ * The engine surface the repository write path touches.
+ *
+ * [#20230] `seed` (optional; default none, so every other test's double is
+ * unchanged) makes `findOne` answer the READ a `getMetaItem` performs against
+ * `sys_metadata` with a stored row, and gives the registry the two read verbs
+ * that path consults — answering nothing, so the served item is the stored row
+ * after the rehydration seam and nothing else.
+ */
+function makeProtocol(seed: Array<{ type: string; name: string; metadata: Record<string, unknown> }> = []) {
     // ⚠️ Keyed BY TABLE. `find`/`findOne` below answer nothing, so this harness
     // cannot serve a `sys_metadata_history` row as a `sys_metadata` row the way
     // #16223 measured — but one flat map still made `rows.size` the total of
@@ -65,7 +74,15 @@ function makeProtocol() {
     let nextId = 0;
     const engine: any = {
         async findOne(object: string, query?: EngineFindOneQueryInput) {
-                          assertEngineFindOnePredicate(object, query); return null; },
+            assertEngineFindOnePredicate(object, query);
+            if (object !== 'sys_metadata' || seed.length === 0) return null;
+            const where = ((query as { where?: Record<string, unknown> } | undefined)?.where ?? {});
+            const hit = seed.find((r) => r.type === where.type && r.name === where.name
+                && (where.state ?? 'active') === 'active' && (where.organization_id ?? null) === null);
+            return hit
+                ? { id: `seed_${hit.name}`, type: hit.type, name: hit.name, organization_id: null, state: 'active', metadata: JSON.stringify(hit.metadata) }
+                : null;
+        },
         async find() { return []; },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
@@ -81,7 +98,9 @@ function makeProtocol() {
             assertEngineDeleteDispatch(opts);
             return { deleted: 0 };
         },
-        registry: { registerItem: () => {}, registerObject: () => {} },
+        registry: seed.length === 0
+            ? { registerItem: () => {}, registerObject: () => {} }
+            : { registerItem: () => {}, registerObject: () => {}, getItem: () => undefined, getObject: () => undefined },
     };
     const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map());
     return { protocol, rows };
@@ -361,5 +380,109 @@ describe('#5364 zodIssuesToMetadataIssues — the shared ranking, verbatim', () 
     it('a non-array `issues` yields an empty envelope rather than throwing', () => {
         expect(zodIssuesToMetadataIssues(undefined)).toEqual([]);
         expect(zodIssuesToMetadataIssues(null)).toEqual([]);
+    });
+});
+
+/**
+ * #20230 — the flattened overlay's retired `owner` / `hidden`, at the door the
+ * retirement exists for: `saveMetaItem`, the `PUT /api/v1/meta/view/:name` write
+ * path the console and an MCP author reach.
+ *
+ * Before: a bound lean overlay `{ object, viewKind, hidden: true }` saved, one
+ * row persisted with the key, and nothing ever read it — measured on this same
+ * harness by the #20085 dev. After: refused with the ADR-0112 envelope, nothing
+ * persisted, and the retirement prescription located at the key. Pinned HERE
+ * and not only in spec because this envelope is what Studio and an MCP caller
+ * receive — a spec tombstone that did not reach it would be a refusal nobody sees.
+ */
+describe('#20230 a flattened overlay carrying a retired owner/hidden is refused at the save door', () => {
+    // Spread, not a literal: the spec's tree-scoped absence pin reads object
+    // literals, and these bodies are refusals, not authorings.
+    const BOUND_LIST = { object: 'task', viewKind: 'list' } as const;
+    const BOUND_FORM = { object: 'task', viewKind: 'form' } as const;
+    const PRESCRIPTION: Record<'owner' | 'hidden', RegExp> = {
+        owner: /^`view\.owner` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049/,
+        hidden: /^`view\.hidden` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049/,
+    };
+
+    for (const [key, value] of [['owner', 'usr_7'], ['hidden', true]] as const) {
+        for (const [family, bound] of [['list', BOUND_LIST], ['form', BOUND_FORM]] as const) {
+            it(`a bound ${family} overlay with \`${key}\` answers 422 INVALID_METADATA and persists nothing`, async () => {
+                const { protocol, rows } = makeProtocol();
+
+                const err = await rejection(save(protocol, { name: 'task_list', ...bound, [key]: value }));
+
+                expect(err.code).toBe('INVALID_METADATA');
+                expect(err.status).toBe(422);
+                expect(rows.size).toBe(0);
+                // The prescription, located at the key the author sent.
+                const atKey = err.issues.find((i: any) => i.path === key);
+                expect(atKey, `an issue located at \`${key}\``).toBeDefined();
+                expect(atKey.code).toBe('invalid_type');
+                expect(atKey.message).toMatch(PRESCRIPTION[key]);
+                expect(err.message).toContain(`\`view.${key}\` was removed`);
+            });
+        }
+    }
+
+    /**
+     * The hide-only residue, at the door it is refused by. The card's measured
+     * stored shape `{ object, viewKind, hidden: true }` (plus the stamped
+     * `name`) is served stripped by the rehydration seam — identity only — and
+     * a whole-row PUT of what was served is refused by the identity
+     * precondition. Stated in the D2 docblock, the D3 acceptance criteria and
+     * the changeset; the remedy is to delete the row or add the setting its
+     * author meant.
+     */
+    it('RESIDUE: a whole-row PUT of a stripped hide-only row answers 422 INVALID_METADATA ("only identity fields")', async () => {
+        const stored = { name: 'task_list', ...BOUND_LIST, hidden: true };
+        const served = applyConversionsToStoredItem('view', stored) as Record<string, unknown>;
+        expect(served).toEqual({ name: 'task_list', ...BOUND_LIST });
+
+        const { protocol, rows } = makeProtocol();
+        const err = await rejection(save(protocol, served));
+
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        expect(rows.size).toBe(0);
+        expect(err.message).toContain('only identity fields');
+        // Not the retirement prescription: the key is already gone.
+        expect(err.message).not.toContain('was removed in @objectstack/spec');
+    });
+
+    it('RESIDUE CONTROL: the same stripped row plus a real view key (a toolbar toggle) saves', async () => {
+        const served = applyConversionsToStoredItem('view', { name: 'task_list', ...BOUND_LIST, hidden: true }) as Record<string, unknown>;
+        const { protocol, rows } = makeProtocol();
+        const result = await save(protocol, { ...served, isDefault: true });
+        expect(result.success).toBe(true);
+        expect(rows.size).toBe(1);
+    });
+
+    it('READ PATH: `getMetaItem` serves a stored overlay without `owner` / `hidden` — valid with content, invalid when hide-only', async () => {
+        const { protocol } = makeProtocol([
+            { type: 'view', name: 'task_list', metadata: { name: 'task_list', ...BOUND_LIST, isDefault: true, order: 2, owner: 'usr_7', hidden: true } },
+            { type: 'view', name: 'task_hidden', metadata: { name: 'task_hidden', ...BOUND_FORM, hidden: true } },
+        ]);
+
+        const content = (await protocol.getMetaItem({ type: 'view', name: 'task_list' })).item;
+        expect(content).not.toHaveProperty('owner');
+        expect(content).not.toHaveProperty('hidden');
+        expect(content.isDefault).toBe(true);
+        expect(content.order).toBe(2);
+        expect(content._diagnostics).toEqual({ valid: true });
+
+        const hideOnly = (await protocol.getMetaItem({ type: 'view', name: 'task_hidden' })).item;
+        expect(hideOnly).not.toHaveProperty('hidden');
+        expect(hideOnly._diagnostics?.valid).toBe(false);
+        expect(JSON.stringify(hideOnly._diagnostics)).toContain('only identity fields');
+    });
+
+    it('CONTROL: the same bound overlays without the keys still save, one row each', async () => {
+        for (const bound of [BOUND_LIST, BOUND_FORM]) {
+            const { protocol, rows } = makeProtocol();
+            const result = await save(protocol, { name: 'task_list', ...bound, isDefault: true, order: 2 });
+            expect(result.success).toBe(true);
+            expect(rows.size).toBe(1);
+        }
     });
 });

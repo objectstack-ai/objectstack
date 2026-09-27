@@ -2,9 +2,10 @@
 //
 // Generates the react-tier component contract from packages/spec/src/ui/
 // react-blocks.ts: the `data` (config) props are read from each block's SPEC
-// zod schema via z.toJSONSchema (single source — no re-authoring); the
-// binding/controlled/callback props come from the hand-authored interaction
-// overlay. Emits ONE artifact:
+// zod schema via projectPublishedJsonSchema (single source — no re-authoring;
+// the same projection, refinement override included, that every published
+// JSON Schema artifact goes through); the binding/controlled/callback props
+// come from the hand-authored interaction overlay. Emits ONE artifact:
 //   - skills/objectstack-ui/references/react-blocks.md            (AI-facing)
 //
 // It used to emit a second, machine-readable rendering of the same table at
@@ -20,9 +21,9 @@
 process.env.OS_EAGER_SCHEMAS = '1';
 
 import path from 'path';
-import { z } from 'zod';
 import { REACT_BLOCKS, type ReactInteractionProp } from '../src/ui/react-blocks';
 import { createSink } from './lib/generated-output';
+import { projectPublishedJsonSchema } from './lib/refinement-projection';
 
 const REPO = path.resolve(__dirname, '../../..');
 const OUT_MD = path.join(REPO, 'skills/objectstack-ui/references/react-blocks.md');
@@ -72,7 +73,7 @@ interface Prop {
 function dataProps(schema: any, allow?: string[]): Prop[] {
   let js: any;
   try {
-    js = resolveRoot(z.toJSONSchema(schema, { unrepresentable: 'any' } as any));
+    js = resolveRoot(projectPublishedJsonSchema(schema, { unrepresentable: 'any' }));
   } catch {
     return [];
   }

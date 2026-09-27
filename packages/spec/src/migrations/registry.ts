@@ -5324,8 +5324,7 @@ const step18: MigrationStep = {
     + 'as a lossless delete, in both collections a record travels in — `views` (stack sources '
     + 'and stored rows) and the assembled-manifest `viewItems` channel (package export, '
     + 'environment artifacts), whose registration parse would otherwise refuse an artifact '
-    + 'assembled before this release; a flattened overlay keeps its own `owner` / `hidden`, '
-    + 'which are declared on a different door this retirement does not touch. '
+    + 'assembled before this release. '
     + 'It also retires a `joined` report\'s `chart` at both coordinates (#20161, ADR-0049 '
     + 'enforce-or-remove): the joined renderer draws each block as a table and returns before '
     + 'the one container `chart` read, and no renderer reads a block\'s `chart` at all, so a '
@@ -5336,7 +5335,21 @@ const step18: MigrationStep = {
     + '`report-joined-chart-removed` strips both as a pure lossless delete — neither ever had '
     + 'an effect to lose — because a stored report row CAN carry them (the Studio report form '
     + 'offered a block `chart` input until this change); it is retired from the load path, so '
-    + 'authors are refused at parse rather than rewritten.',
+    + 'authors are refused at parse rather than rewritten. '
+    + 'It retires the view item\'s `owner` / `hidden` pair on the flattened overlay door too '
+    + '(#20230, ADR-0049; triage '
+    + 'direction 「follow #20085\'s disposition for the same key pair」): the lean personalization '
+    + 'PUT with no `config` declared its own `owner` / `hidden`, accepted and stored them, and '
+    + 'nothing read either. Both are `retiredKey()` tombstones on the two overlay members with '
+    + 'the view item\'s own prescription texts, and the D2 conversion '
+    + '`view-overlay-owner-hidden-removed` strips them from the flattened spelling (no `config`, '
+    + 'no container slot) in `views` and `viewItems`, so a stored overlay row is served without '
+    + 'them. A row that held other view keys is then valid again and re-saves; a row that held '
+    + 'nothing but its identity and the two keys is left identity-only, which the door refuses, '
+    + 'so it is badged invalid, refused on a whole-row re-save and reported `failed` by '
+    + '`os migrate meta --stored --apply` until it is deleted or given the setting its author '
+    + 'meant. Its D3 record is the semantic entry '
+    + '`view-overlay-owner-hidden-retired`.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5375,6 +5388,7 @@ const step18: MigrationStep = {
     'page-component-filter-record-to-rule-array',
     'view-item-owner-hidden-removed',
     'report-joined-chart-removed',
+    'view-overlay-owner-hidden-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -10146,6 +10160,71 @@ const step18: MigrationStep = {
         + 'answering the `FILTER_TEXT_CASES` stored-value row (objectstack#14079), so a '
         + 'driver-level test is not evidence about this migration in either direction.',
     },
+    // The absent half of the decision-branch predicate rule. A SEPARATE entry from
+    // `flow-predicate-slot-blank-string-refused` on purpose: that one keeps the
+    // run a blank predicate made (it evaluated `false`, so `'false'` runs the same
+    // route), while an absent predicate made no run to keep — the executor refused
+    // it at the branch — so the two carry different prescriptions, and only the
+    // decision branch is in this one (an absent screen `visibleWhen` stays legal).
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-decision-branch-expression-absent-refused',
+      surface:
+        'a decision node branch — an element of config.conditions[] — written without its expression '
+        + 'key, or with expression: null, at any depth including an ADR-0031 region body. That includes '
+        + 'a branch whose predicate sits under another key (condition is the edge spelling). Reachable '
+        + 'wherever a flow is authored or stored: defineStack({ flows }) sources, defineFlow(), an '
+        + 'exported stack passed to objectstack validate, a flow saved from the Studio flow designer '
+        + 'with a branch row whose expression cell is empty, and a flow row already sitting in '
+        + 'sys_metadata',
+      replacement:
+        'the predicate the branch was meant to test, as non-blank bare CEL text under `expression` '
+        + '(`{ label: \'high\', expression: \'record.amount > 10000\' }`); a predicate written under '
+        + '`condition` moves to `expression`. To keep the branch and its label but never take it, '
+        + 'write `expression: \'false\'` — that is a CHANGE of behaviour, not a preserved one: a run '
+        + 'that reached the branch used to fail there (`condition evaluation error`), and now routes on '
+        + 'to the next branch or the declared fallback. ⚠️ Not by dropping a decision\'s only branch: '
+        + 'with no `conditions` the node routes by its out-edges alone, so the out-edge that branch '
+        + 'labelled is no longer held back',
+      reason:
+        'Card #19961. `DecisionConditionSchema` declares a branch `{ label, expression }` with '
+        + '`expression` a required `z.string()`, but nothing parses a decision node\'s open config '
+        + 'against it, and the expression-ledger resolver skipped an absent value as "not authored" — '
+        + 'so a branch with no predicate passed `FlowSchema.parse`, `AutomationEngine.registerFlow` and '
+        + '`objectstack validate`, and the decision executor then handed `evaluateCondition` an envelope '
+        + 'with no `source`, which it refuses: the build accepted what the run refused. The ledger now '
+        + 'marks the slot `required` (reconciled against that schema\'s own `required` list), the '
+        + 'resolver emits the absent value there, and all three doors refuse it through '
+        + '`predicateSlotRefusal`, leading with `PREDICATE_SLOT_STRING_REFUSAL` — the walk, function '
+        + 'and sentence that already refuse the blank string. '
+        + '⚠️ No D2 conversion: the platform cannot know the rule the author left out, and `\'false\'` '
+        + 'would change what the flow does rather than keep it. '
+        + '⚠️ Where such a branch already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0032.',
+      acceptanceCriteria:
+        'Grep every flow node in `defineStack({ flows })` sources, exported stacks and every flow '
+        + 'row in `sys_metadata` — including nodes inside a `loop` / `parallel` / `try_catch` region '
+        + 'body — for a `decision` node whose `config.conditions[i]` has no `expression` key, or '
+        + '`expression: null`. Each refusal names the node and the branch: `FlowSchema.parse` anchors '
+        + 'a `custom` issue at `nodes.N.config.conditions.I.expression` (or the region path '
+        + '`nodes.N.config.body.nodes.M.config…`), and `objectstack validate` prints the same path; '
+        + '`validateStackExpressions` phrases it as '
+        + '`node \'check\' (decision) decision branch expression at config.conditions[0].expression`. '
+        + 'For each hit write the predicate the branch was meant to test, or `expression: \'false\'` '
+        + 'where the branch should keep its label and never be taken. Two proofs. (1) For a stack '
+        + 'authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm '
+        + 'each flow REGISTERS: no `failed to register flow` warn for it (the three boot paths spell '
+        + 'it `[Automation] failed to register flow`, `[Automation] flow re-sync: failed to register '
+        + 'flow` and `[Automation] cold-boot flow bind: failed to register flow`) — that warn line is '
+        + 'the locator for a row that exists only in `sys_metadata`. A branch carrying a non-blank '
+        + 'predicate parses and registers byte-identically to before, a decision with no `conditions` '
+        + 'still routes by its out-edges, and an absent screen field `visibleWhen` is still legal.',
+    },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
     {
@@ -13468,8 +13547,8 @@ const step18: MigrationStep = {
       replacement:
         'the list operator the comparison was standing in for. "One of these values" is in: '
         + 'record.status in ["open", "pending"]. "None of these values" is the negated in: '
-        + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands and '
-        + '{ $field } references evaluate exactly as before',
+        + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands, and '
+        + '{ $field } references between single-valued columns evaluate exactly as before',
       reason:
         'Ruling A on #19886 refuses an array comparand under $ne, and the equality slot is ruling '
         + '乙 on #19757; stage 2a of #19886 lands both on the formula face, the evaluator '
@@ -13494,6 +13573,56 @@ const step18: MigrationStep = {
         + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
+    },
+    // Stage 2e of #19886: the mirror of stage 2d's ordering refusal, with the list on
+    // the RECORD's side. The shape is legal, a field ordered against one bound; what
+    // the write-check evaluator now refuses is the VALUE the record holds there, a
+    // list or an object, the way driver-sql's read already refuses the same
+    // comparison on a column it stores as JSON text. Recorded as its own entry
+    // because the surface an author rewrites is a CEL predicate string.
+    {
+      id: 'rls-predicate-stored-list-ordering-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].check, and .using where it stands in as the check — '
+        + 'a CEL predicate ordering a field against a bound (>, >=, <, <=) where the field holds a list '
+        + 'or an object on the record being written, as a json column or a multiple lookup does, or as '
+        + 'a list written into a text or number field does. In a filter passed to matchesFilterCondition, '
+        + '$gt / $gte / $lt / $lte and $between on a field whose value on the record is a list or a plain '
+        + 'object, whatever the comparand',
+      replacement:
+        'a comparison that names one value. Order a single-valued column (record.priority > 2), or test '
+        + 'membership in the list with in (record.status in ["open", "pending"]); a json or multiple '
+        + 'field has no ordering. A record whose json column holds one scalar is compared exactly as '
+        + 'before, and so are null and Date values, and every equality (==, !=, in) against a stored '
+        + 'list',
+      reason:
+        'Stage 2e of #19886, the mirror of stage 2d with the list on the record\'s side, measured '
+        + 'through the real plugin-security on driver-sql and driver-memory. record.tags > "a", with '
+        + 'tags a json column holding ["m"], lowered to { tags: { $gt: "a" } }, and the write-check '
+        + 'evaluator compared the list\'s JavaScript string form ("m" > "a"), so the check admitted and '
+        + 'stored the write; record.meta < "a" with meta holding { a: 1 } compared "[object Object]" and '
+        + 'did the same, and so did a multiple lookup. driver-sql\'s read refuses every ordering '
+        + 'comparison, and $between, on a column it stores as JSON text, by declared type (400), because '
+        + 'such a comparison can never mean what the caller wrote; the in-process write check now '
+        + 'follows it, per record: INVALID_FILTER / 400 and nothing stored, on an insert and on a by-id '
+        + 'update, including one that edits another field of a row whose stored column holds a list. '
+        + 'A list written into a text or number field under an ordering check, admitted before and '
+        + 'stored as the text "[500]" by driver-sql, is refused the same way. driver-memory, a test '
+        + 'driver, still compares a stored list element by element on a read, so there the write and '
+        + 'the read part. Shipped producers were counted before the change: no shipped row-level or '
+        + 'sharing-rule predicate orders a field at all. '
+        + 'Metadata AT REST is not rewritten and this entry adds no D2 conversion: the platform cannot '
+        + 'tell which comparison an ordering over a list was standing in for, and rewriting it on the '
+        + 'author\'s behalf would change which writes it admits, which is the policy author\'s decision. '
+        + 'ADR-0058 D4 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity check predicates of your permission sets, and the using predicates '
+        + 'of policies that declare no check, for >, >=, < or <= whose field is a json field or a '
+        + 'multiple lookup, and rewrite each as the replacement says. Then write a record through each '
+        + 'such policy: a write whose compared field holds a list now answers 400 rather than being '
+        + 'admitted by string comparison, so re-check what the policy is supposed to admit.',
     },
     // The saved-report stack and the `report` metadata kind shared a word and
     // nothing else; this retires the stack and leaves the kind untouched.
@@ -15903,8 +16032,9 @@ const step18: MigrationStep = {
         + 'A view an author marked as one user\'s, or hid from the switcher, has always been listed to '
         + 'every user who can read the object — its name, its columns, its filters and its sort. '
         + 'Whether anything in such a view was meant to stay private, and whether it should now be '
-        + 'deleted rather than kept, is the author\'s call. A flattened view overlay keeps its own '
-        + '`owner` and `hidden`: those live on a different door that this retirement does not touch.',
+        + 'deleted rather than kept, is the author\'s call. A flattened view overlay\'s own `owner` and '
+        + '`hidden` are a separate family on a different door, with their own D2 conversion '
+        + '`view-overlay-owner-hidden-removed` and their own D3 entry `view-overlay-owner-hidden-retired`.',
       acceptanceCriteria: 'No view item record in `views` or in an assembled artifact carries `owner` or '
         + '`hidden`; the parse refuses both by name, and an artifact assembled before the upgrade '
         + 'registers without a refusal over them. For every view that had carried either key, the '
@@ -15993,6 +16123,61 @@ const step18: MigrationStep = {
         + 'read and nothing is refused on read: a row that fails is served exactly as stored until it is '
         + 'saved. Verify by re-saving each stored overlay that carries `options` (a GET then a PUT of the '
         + 'same body) and reading a `200`.',
+    },
+    // #20230 (ADR-0049 enforce-or-remove; triage direction 「follow #20085's
+    // disposition for the same key pair」) — the D3 entry of the
+    // `view-overlay-owner-hidden-removed` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). Registered keys: `owner` /
+    // `hidden` on `ui/ViewMetadata`, the door the two flattened overlay members are
+    // reached through. The same key pair on the view item RECORD is a separate
+    // family with its own conversion and its own D3 entry, disjoint from this one
+    // by `config`; the two share the prescription texts, not a conversion.
+    {
+      id: 'view-overlay-owner-hidden-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'view.owner / view.hidden on a flattened view overlay — the lean PUT /api/v1/meta/view/:name body '
+        + 'with no config that the console saves for a view it personalizes',
+      replacement:
+        '(removed — no per-user view scope and no switcher filter exists.) A view is listed to everyone '
+        + 'who can read its object. A view that must not be listed is deleted, or no longer shipped from '
+        + 'source; per-user view scoping is a parked direction (ADR-0017), not a shipped mechanism.',
+      reason:
+        'The D2 conversion `view-overlay-owner-hidden-removed` deletes both keys from every flattened '
+        + 'overlay (a view body with no `config` and no container slot) — in `views` (stack sources, and '
+        + 'every stored row, replayed on each read before it is served or badged) and in the '
+        + 'assembled-manifest view item channel — and the delete is lossless: both switcher read paths '
+        + 'filter on the view kind and object and sort on `order`, so an overlay saved with '
+        + '`hidden: true` hid nothing and no scope ever read `owner`. The judgment is about exposure, '
+        + 'the same one the view item record\'s retirement leaves. A view someone hid or marked as one '
+        + 'user\'s through its overlay has always been listed to every user who can read the object. '
+        + 'The delete is lossless but does not always close the row: an overlay row that held nothing '
+        + 'but its identity and these keys is left identity-only, a body the view door refuses, so '
+        + 'that row needs its author (see the acceptance criteria). '
+        + 'Measured writers in this repository and its sibling UI: zero (no source, example or skill, '
+        + 'and objectui at its pinned commit and at main writes neither key on an overlay; the HotCRM '
+        + 'app writes neither). NOT MEASURED: clients outside this repository, and production stored '
+        + 'rows — the write door accepted and stored both until this release, and no deployment store '
+        + 'is reachable from here.',
+      acceptanceCriteria:
+        'No flattened view overlay you save carries `owner` or `hidden`: the write door refuses either '
+        + 'with 422 INVALID_METADATA, the issue located at the key and the retirement prescription as '
+        + 'its message. A stored overlay row that held either is stripped of it on every read, and what '
+        + 'follows depends on what else the row holds. (1) A row with any other view key (a column '
+        + 'state, a sort, a default flag, an order) is served and badged valid without the keys, a GET '
+        + 'then a PUT of the whole row answers 200 (if it was otherwise valid), and '
+        + '`os migrate meta --stored --apply` rewrites it. (2) A hide-only row — nothing but its '
+        + 'identity (name, object, viewKind, label) and `owner` / `hidden`, such as '
+        + '`{ object, viewKind, hidden: true }` — is left with identity only, which the view door '
+        + 'refuses ("only identity fields"): it is served badged invalid (it was badged valid before '
+        + 'this release), a whole-row re-save or one that adds only identity answers 422 '
+        + 'INVALID_METADATA, and `--apply` reports it `failed` and leaves it as stored. A write that '
+        + 'adds a real view key, such as a toolbar toggle, saves. Resolve each such row: delete it (it '
+        + 'never changed what anyone saw), or add the personalization setting its author meant and '
+        + 'save that. For every view whose overlay had carried either key, its author has confirmed '
+        + 'that the view may be listed to all readers of its object, or has deleted it. No switcher '
+        + 'read path ever read either key, so which views the switcher lists does not change.',
     },
     // The display page size a view gets when it declares none moved from 25 to 50
     // (maintainer ruling on objectui#9853). A default move reaches every silent
@@ -19891,6 +20076,32 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `properties`, so no gate judges this row.
     // D2: `view-item-owner-hidden-removed`.
     'ui/ViewItemWire:owner',
+    // #20230 (ADR-0049 enforce-or-remove; triage direction 「follow #20085's
+    // disposition for the same key pair」). The flattened view overlay's `hidden` —
+    // the lean personalization PUT with no `config`, members 3 and 4 of the `view`
+    // union `saveMetaItem` validates — was declared by `flattenedViewOverlayFields()`
+    // separately from the view item's, accepted, stored verbatim, and read by
+    // nothing: both switcher read paths filter on `viewKind` + `object` only, so a
+    // `hidden: true` overlay hid no view. No writer in this framework, its examples,
+    // objectui at its pin and at `main`, or the HotCRM app (cloud not reachable).
+    // Tombstoned with `retiredKey()` on both overlay members, with the view item's
+    // own prescription text; `.strip()` members, so a bare deletion would have
+    // dropped the key in silence. Registered under `ui/ViewMetadata`, the exported
+    // door the overlay members are reached through (the members themselves are not
+    // exported). ⚠️ No gate below can JUDGE this row: `ui/ViewMetadata` is in
+    // `unemitted-schemas.baseline.json` (its `config: z.undefined()` guards have no
+    // JSON Schema form), so `authorable-surface/` carries no `ui/ViewMetadata:*`
+    // line and check (b) never sees the tombstone — the row is declared, not
+    // checked. D2: `view-overlay-owner-hidden-removed`.
+    'ui/ViewMetadata:hidden',
+    // #20230 — the overlay door's `owner`, the sibling of `ui/ViewMetadata:hidden`
+    // (see that row for the measurement and the registration's def key). It named
+    // a user nothing ever read: no per-user scope exists for a view (ADR-0017,
+    // parked), so an overlay marked as one user's changed nothing for anyone.
+    // Tombstoned with `retiredKey()` on both overlay members, with the view item's
+    // own prescription text. Same blind spot as its sibling: the def is unemitted,
+    // so no gate judges this row. D2: `view-overlay-owner-hidden-removed`.
+    'ui/ViewMetadata:owner',
     // </os-generated retired-key:18>
   ],
 };
