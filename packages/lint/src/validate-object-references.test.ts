@@ -670,3 +670,96 @@ describe('[#19289] validateObjectReferences — a `user` target comes from the T
     expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
   });
 });
+
+/**
+ * [#20216] A view CONTAINER's own `object` — the key `getViewsByObject()`
+ * indexes by. Modelled on an `os init -t app` project (namespace `my_app`),
+ * where the object is `my_app_order_line` and the pre-fix `os generate view`
+ * template wrote the bare short name.
+ */
+describe('[#20216] validateObjectReferences — view container `object`', () => {
+  const appStack = (views: unknown, extra: Record<string, unknown> = {}) => ({
+    manifest: { id: 'com.example.my_app', namespace: 'my_app' },
+    objects: [
+      { name: 'my_app_order', fields: { name: { type: 'text' } } },
+      { name: 'my_app_order_line', fields: { name: { type: 'text' } } },
+    ],
+    views,
+    ...extra,
+  });
+  const container = (object: string, name = 'order_line') => ({
+    name,
+    label: 'Order Line',
+    object,
+    list: { type: 'grid', columns: [{ field: 'name' }] },
+  });
+
+  it('refuses a container bound to the un-prefixed short name, and names the prefixed object', () => {
+    const findings = validateObjectReferences(appStack([container('order_line')]));
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('error');
+    expect(f.rule).toBe(OBJECT_REFERENCE_UNKNOWN);
+    expect(f.where).toBe('view "order_line"');
+    expect(f.path).toBe('views[0].object');
+    expect(f.message).toContain('view container object "order_line"');
+    // The namespace prescription names the ONE spelling that resolves…
+    expect(f.hint).toContain('manifest.namespace "my_app"');
+    expect(f.hint).toContain('write "my_app_order_line", not "order_line"');
+    // …and the hint still lists every object the stack does declare.
+    expect(f.hint).toContain('Defined objects: my_app_order, my_app_order_line.');
+    // What the miss costs, not only that it is a miss.
+    expect(f.hint).toContain('getViewsByObject()');
+  });
+
+  it('CONTROL — the correctly prefixed container is clean', () => {
+    expect(validateObjectReferences(appStack([container('my_app_order_line')]))).toEqual([]);
+  });
+
+  it('reads the map form of `views` too, locating the finding by position', () => {
+    const findings = validateObjectReferences(
+      appStack({ order_line: { object: 'order_line', list: { type: 'grid', columns: ['name'] } } }),
+    );
+    expect(findings.map((f) => [f.path, f.where, f.rule])).toEqual([
+      ['views[0].object', 'view "order_line"', OBJECT_REFERENCE_UNKNOWN],
+    ]);
+  });
+
+  it('a miss that is NOT a missing prefix is refused without the namespace prescription', () => {
+    const findings = validateObjectReferences(appStack([container('invoice')]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('views[0].object');
+    // `my_app_invoice` is not declared, so prefixing is not the fix and is not offered.
+    expect(findings[0].hint).not.toContain('namespace prefix');
+    expect(findings[0].hint).toContain('Defined objects: my_app_order, my_app_order_line.');
+  });
+
+  it('passes a container over an object a `packages[]` sibling provides (rung ①, artifact scope)', () => {
+    const CORE_BODY = { id: 'com.example.core', objects: [{ name: 'crm_account', fields: {} }] };
+    const UI_BODY = { id: 'com.example.ui', namespace: 'crm', views: [container('crm_account', 'crm_account')] };
+    const perPackage = { ...UI_BODY, manifest: UI_BODY, packages: [{ manifest: UI_BODY }, { manifest: CORE_BODY }] };
+    expect(validateObjectReferences(perPackage)).toEqual([]);
+    // Control: the same package judged ALONE refuses it — the context is what resolves it.
+    const alone = validateObjectReferences({ ...UI_BODY, manifest: UI_BODY });
+    expect(alone.map((f) => [f.path, f.severity])).toEqual([['views[0].object', 'error']]);
+  });
+
+  it('keeps the platform ladder: a known platform object passes, an unregistered platform name advises', () => {
+    expect(validateObjectReferences(appStack([container('sys_user', 'sys_user')]))).toEqual([]);
+    const findings = validateObjectReferences(appStack([container('sys_approval_process', 'approvals')]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNREGISTERED_PLATFORM);
+    expect(findings[0].path).toBe('views[0].object');
+  });
+
+  it('stays silent on a stack with no views, and on a container that carries no `object`', () => {
+    expect(validateObjectReferences(appStack(undefined))).toEqual([]);
+    expect(validateObjectReferences(appStack([]))).toEqual([]);
+    // No top-level `object`: the binding falls back to `list.data.object` /
+    // `name`, a different reference this leg does not own.
+    const unbound = { list: { type: 'grid', data: { provider: 'object', object: 'order_line' }, columns: ['name'] } };
+    expect(validateObjectReferences(appStack([unbound]))).toEqual([]);
+  });
+});
