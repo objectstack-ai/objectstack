@@ -27,6 +27,7 @@ import { z } from 'zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { retiredStandardErrorCodeMessage } from './retired-error-codes';
 export const ErrorCategory = z.enum([
   'validation',      // Input validation errors (400)
   'authentication',  // Authentication failures (401)
@@ -104,7 +105,6 @@ export const StandardErrorCode = z.enum([
   // Rate Limiting (429)
   'RATE_LIMIT_EXCEEDED',        // Too many requests
   'QUOTA_EXCEEDED',             // API quota exceeded
-  'CONCURRENT_LIMIT_EXCEEDED',  // Too many concurrent requests
 
   // Server Errors (500)
   'INTERNAL_ERROR',             // Generic internal server error
@@ -117,7 +117,18 @@ export const StandardErrorCode = z.enum([
   'EXTERNAL_SERVICE_ERROR',     // External API call failed
   'INTEGRATION_ERROR',          // Integration service error
   'WEBHOOK_DELIVERY_FAILED',    // Webhook delivery failed
-]);
+], {
+  // A retired spelling answers with its prescription; every other invalid code
+  // keeps zod's own enum message (see `retired-error-codes.ts` for the three
+  // catalogue doors that share this map).
+  error: retiredStandardErrorCodeMessage,
+});
+// Retired (ADR-0049 enforce-or-remove, #17707, ruling A narrowed to this code):
+// CONCURRENT_LIMIT_EXCEEDED — a 429 for "too many concurrent requests" that no
+// producer in this repository emitted. Parsing it now answers with the
+// prescription in `retired-error-codes.ts`; request pacing is
+// RATE_LIMIT_EXCEEDED. Its neighbour QUOTA_EXCEEDED stays, unchanged: a hosted
+// AI agent route emits it and the console's chatbot plugin reads it.
 // Retired (ADR-0112 amendment 2026-08-18, ADR-0049 enforce-or-remove, #9266):
 // BATCH_PARTIAL_FAILURE / BATCH_COMPLETE_FAILURE / TRANSACTION_FAILED — never
 // emitted by any producer in the repo's history; the batch surface reports these

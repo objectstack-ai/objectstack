@@ -202,11 +202,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '24 — R6, the ASSIGNMENT form, and the two bounds that keep it honest.': 4,
   '25 — `z.enum([...])` members: the ONE extra segment `lookup` walks, and the': 3,
   '26 — a code the DOOR TRANSLATES away is not a wire producer: derived from': 8,
+  '27 — the vocabulary parse reads the enum ARRAY and stops at its bracket: an': 2,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 27;
+const SELF_TEST_BATTERY_FLOOR = 28;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -696,9 +697,17 @@ export function deriveDoorMap(errorsZodSource) {
   return out;
 }
 
-/** The reconciled vocabulary: `StandardErrorCode`'s members. */
+/**
+ * The reconciled vocabulary: `StandardErrorCode`'s members.
+ *
+ * The member block ends at the array's own closing bracket — the first line that
+ * BEGINS with `]` — and never at a later `]);`. The enum carries an `error` map
+ * (`z.enum([...], { error })`, the retired-spelling prescription), so its call no
+ * longer closes on `]);`; anchored there, the lazy match ran on through the next
+ * declarations and read their quoted codes as members too (the 27th battery).
+ */
 export function parseStandardErrorCodes(errorsZodSource) {
-  const block = /export const StandardErrorCode = z\.enum\(\[([\s\S]*?)\]\);/.exec(errorsZodSource);
+  const block = /export const StandardErrorCode = z\.enum\(\[([\s\S]*?)\n\]/.exec(errorsZodSource);
   if (!block) throw new Error(`${ERRORS_ZOD}: StandardErrorCode enum not found — the deriver's anchor moved.`);
   return [...block[1].matchAll(/'([A-Z][A-Z0-9_]*)'/g)].map((m) => m[1]);
 }
@@ -1721,7 +1730,28 @@ function selfTest() {
     && passthroughDoor.emitted.get('FEEDS_DISABLED')?.has(403) === true,
     JSON.stringify([passthroughDoor.translations, [...passthroughDoor.emitted.keys()]]));
 
-  const CASES = 58;
+  // 27 — the vocabulary parse reads the enum ARRAY and stops at its bracket: an
+  //      options object after it (`z.enum([...], { error })`) and the quoted codes
+  //      of the declarations below it are NOT members. Anchored on a trailing
+  //      `]);`, the lazy match ran past an options-carrying enum to the next
+  //      `]);` and counted a later map's values — duplicates of real members, and
+  //      a code the options map merely names, as members of the catalogue.
+  battery('27 — the vocabulary parse reads the enum ARRAY and stops at its bracket: an');
+  const ENUM_WITH_OPTIONS =
+    "export const StandardErrorCode = z.enum([\n  'TIMEOUT',\n  'VALIDATION_ERROR',\n], {\n"
+    + "  error: (issue) => (issue.input === 'RETIRED_SPELLING' ? 'removed' : undefined),\n});\n"
+    + "export const HttpStatusErrorCodeMap = {\n  400: 'VALIDATION_ERROR',\n  504: 'TIMEOUT',\n  599: 'NOT_A_MEMBER',\n};\n"
+    + "export const RetryStrategy = z.enum([\n  'no_retry',\n]);\n";
+  const withOptions = parseStandardErrorCodes(ENUM_WITH_OPTIONS);
+  check('27 an options object after the array adds no member, and the next declaration is not read',
+    JSON.stringify(withOptions) === JSON.stringify(['TIMEOUT', 'VALIDATION_ERROR']),
+    JSON.stringify(withOptions));
+  const plainClose = parseStandardErrorCodes(`${ZOD_ENUM_DECL}\nexport const M = {\n  599: 'NOT_A_MEMBER',\n};\n`);
+  check('27b the plain `]);` close reads the same members (control)',
+    JSON.stringify(plainClose) === JSON.stringify(['TIMEOUT', 'VALIDATION_ERROR']),
+    JSON.stringify(plainClose));
+
+  const CASES = 60;
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
