@@ -12,10 +12,13 @@ import { BaseResponseSchema } from './contract.zod';
  * Industry alignment: Salesforce Data Export, Airtable CSV Export,
  * Dynamics 365 Data Management.
  *
- * The export-job API family that used to live here (async export jobs, their
- * progress / download / list shapes, scheduled exports and
- * `ExportApiContracts`) was retired whole in @objectstack/spec 18 (ADR-0049
- * enforce-or-remove, #17158) — see the note at section 2 below.
+ * The export the platform serves is the synchronous streaming door
+ * `GET /api/v1/data/:object/export`, which answers the file itself in one of
+ * the `ExportFormat` formats. The asynchronous export-job API that used to be
+ * declared here (export jobs, their progress / download / list shapes,
+ * scheduled exports and `ExportApiContracts`) was never served by any route and
+ * was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove); a recurring
+ * export is a `Job` whose handler you write.
  */
 
 // ==========================================
