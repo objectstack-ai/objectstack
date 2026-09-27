@@ -9190,8 +9190,9 @@ const connectorConnectionTimeoutMsRemoved: MetadataConversion = {
       connectors: [
         // Minimal by the §3 disjointness contract: the retired key and nothing
         // else this major's other `connectors[]` entries also walk
-        // (`errorMapping`, `health.circuitBreaker.monitoringWindow`,
-        // `triggers[].interval`), so every notice here is attributable to this id.
+        // (`errorMapping`, `health` / `status` / `webhooks` — `health` once as
+        // `health.circuitBreaker.monitoringWindow` — and `triggers[].interval`),
+        // so every notice here is attributable to this id.
         { name: 'ledger_api', label: 'Ledger API', type: 'api', connectionTimeoutMs: 15000 },
         // A connector that never authored the key keeps its identity — the
         // copy-on-write contract `stripKeys` / `mapCollection` are built on.
