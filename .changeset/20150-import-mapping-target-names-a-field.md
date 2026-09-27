@@ -4,9 +4,9 @@
 "@objectstack/lint": minor
 ---
 
-fix(rest,lint): an import mapping target that names no field is refused on the dry run, on the commit and at `objectstack validate` alike (#20150)
+fix(spec,rest,lint): an import mapping target that names no field is refused on the dry run, on the commit and at `objectstack validate` alike (#20150)
 
-Clause-②: yes
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed: `ImportFieldMappingSchema.target` keeps its declared shape and meaning ("Target object field(s)"), no stored mapping or record moves, and every mapping parses byte-identically to before. What narrows is the ACCEPT SET of the import door and of the published author-time checker, and only for mappings whose target already names no field of the object: those failed every row on the commit before this change, so no import that wrote anything is refused now. The remedy is per mapping and the refusal names it in full (the mapping, the target, its position and the object); there is no stored representation for `objectstack migrate meta` to rewrite. -->
 
