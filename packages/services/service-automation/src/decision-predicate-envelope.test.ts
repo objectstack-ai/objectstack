@@ -121,11 +121,23 @@ describe('decision branch predicate — envelope in a `z.string()` slot (#15572)
      * string is now refused here too — by `FlowSchema.parse` inside
      * `registerFlow`, under this slot's own sentence. A non-blank string and an
      * absent predicate still register, exactly as this test always said.
+     *
+     * RE-JUDGED IN PLACE AGAIN (#19961) — the absent half. It pinned
+     * `decisionFlow('str_absent', undefined)` as registering: "an absent
+     * predicate still registers". That was "not authored" on the resolver's
+     * side only. `DecisionConditionSchema` declares `expression` a REQUIRED
+     * `z.string()`, and the executor evaluates every branch it reaches, so a
+     * branch with no `expression` failed the run at the branch — the build
+     * accepted what the run refused. The ledger now marks the slot `required`
+     * and the absent value is refused through the same `predicateSlotRefusal`
+     * as the blank, under the same sentence, with its own detail.
      */
-    it('leaves non-blank string predicates alone — and refuses the whitespace-only one (#17493)', () => {
+    it('leaves non-blank string predicates alone — and refuses the whitespace-only one (#17493) and the absent one (#19961)', () => {
         expect(() => engine.registerFlow('str_ok', decisionFlow('str_ok', 'record.rating >= 4'))).not.toThrow();
         expect(() => engine.registerFlow('str_ws', decisionFlow('str_ws', '   '))).toThrow(PREDICATE_SLOT_STRING_REFUSAL);
-        expect(() => engine.registerFlow('str_absent', decisionFlow('str_absent', undefined))).not.toThrow();
+        const absent = () => engine.registerFlow('str_absent', decisionFlow('str_absent', undefined));
+        expect(absent).toThrow(PREDICATE_SLOT_STRING_REFUSAL);
+        expect(absent).toThrow('Found nothing — the key is absent where the slot is required');
     });
 
     /**

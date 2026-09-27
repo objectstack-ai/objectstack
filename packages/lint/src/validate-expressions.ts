@@ -1401,7 +1401,14 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
    * a field-existence pass would report every field name as unknown.
    */
   const checkDeclaredPredicate = (where: string, raw: unknown): { refused: boolean } => {
-    if (raw == null) return { refused: false };
+    // [#19961] No `raw == null` early return: whether an absent value is a
+    // finding is the resolver's call, not this pass's. It emits absent / `null`
+    // only for a `required` ledger slot (a `decision` branch's `expression`),
+    // and there it is a refusal — the one `predicateSlotRefusal` gives the
+    // other two doors. An early return here answered "valid" for the very
+    // value `FlowSchema.parse` refuses, for any caller of
+    // `validateStackExpressions` that did not parse first.
+    //
     // [#15572] The slot is declared bare CEL TEXT, so a non-string — the
     // `{ dialect, source }` envelope above all — is refused on SHAPE before
     // anything tries to read a source out of it. The refusal is the spec's,

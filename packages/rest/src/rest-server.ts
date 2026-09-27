@@ -156,11 +156,19 @@ import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, unrecognisedMetaTypeRefusal }
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
-import type { ResolverDoc } from '@objectstack/spec/system';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document, and the
 // docs-audience and app-nav gates it is built from — one implementation, which
 // this server and the runtime dispatcher's `/meta` domain both call. The
-// private helpers below keep their names as one-line delegates into it.
+// private helpers below that still have a caller here keep their names as
+// one-line delegates into it.
+//
+// [#20237] …and THE per-caller LIST gate of `GET /meta/:type`
+// (`createMetaListReadGate`), which the list route below calls whole. The
+// delegates only that route called (`filterAppForUser`,
+// `filterDashboardForUser`, `resolveRegisteredServices`,
+// `resolveNavServability`, `resolveNavDocAudience`, `fetchAudienceBooks`,
+// `docCorpusOf`) went with it: a delegate with no caller is a second place to
+// read a rule that nothing runs.
 import * as metaReadGate from './meta-item-read-gate.js';
 import type {
     DocsAudience,
@@ -170,9 +178,15 @@ import type {
     MetaReadGateCaller,
     MetaReadGateListSource,
     MetaReadGatePolicy,
-    NavDocAudienceGate,
-    NavServabilityGate,
 } from './meta-item-read-gate.js';
+// [#20237] The server-side app filter, by name, at the path ADR-0056's
+// verification table cites for it (`rest-server.ts#filterAppForUser`, row 18):
+// the one implementation is `meta-item-read-gate.ts`'s, and this re-export is
+// where that pointer lands — one hop from it. It is NOT on the package barrel
+// (`index.ts` names this file's exports one by one). Re-anchoring the ADR row
+// to the implementation is a governed-surface edit, so it is left to the
+// maintainer; this line goes when that row moves.
+export { filterAppForUser } from './meta-item-read-gate.js';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -2775,21 +2789,6 @@ export class RestServer {
         return metaReadGate.audienceBooksOf(raw);
     }
 
-    /** The doc header the audience resolver reads — `docCorpusOf` in `./meta-item-read-gate.ts`. */
-    private static docCorpusOf(list: readonly any[]): ResolverDoc[] {
-        return metaReadGate.docCorpusOf(list);
-    }
-
-    /**
-     * Every book of the environment, audience-shaped — `fetchAudienceBooks`
-     * in `./meta-item-read-gate.ts`. A read that throws THROWS its own fault
-     * (ADR-0046 §6.7, fail closed per ADR-0049): `[]` would read as "no gated
-     * book anywhere" and grant. The fault reaches `handleRouteError`.
-     */
-    private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
-        return metaReadGate.fetchAudienceBooks(this.metaListSource(p, environmentId));
-    }
-
     /**
      * [ADR-0046 §6.7] Build THE {@link DocsAudience} for this request's caller
      * over `books` — `resolveDocsAudience` in `./meta-item-read-gate.ts`, the
@@ -3198,34 +3197,6 @@ export class RestServer {
     }
 
     /**
-     * Filter an `App` metadata item by the current user's `systemPermissions`
-     * — the ADR-0045 §3 publish gate (`_unpublished`, never `hidden`), the
-     * `requiredPermissions` gate, the ADR-0057 D10 service gate, [#7912] the
-     * servability gate and [#19790] the docs-audience entry arm.
-     * `filterAppForUser` in `./meta-item-read-gate.ts` is the one
-     * implementation; its docblock (and `filterAppForUserWithReason`'s) carries
-     * every rule and its measurement. `null` when the app is withheld whole.
-     */
-    private filterAppForUser(
-        item: any,
-        sysPerms: Set<string>,
-        serviceGate?: (name: string) => boolean,
-        servabilityGate?: NavServabilityGate,
-        docAudienceGate?: NavDocAudienceGate,
-    ): any | null {
-        return metaReadGate.filterAppForUser(item, sysPerms, serviceGate, servabilityGate, docAudienceGate);
-    }
-
-    /**
-     * ADR-0057 D10 (dashboards): strip dashboard widgets whose `requiresService`
-     * names a service that isn't registered — `filterDashboardForUser` in
-     * `./meta-item-read-gate.ts`, the one implementation.
-     */
-    private filterDashboardForUser(item: any, serviceGate?: (name: string) => boolean): any {
-        return metaReadGate.filterDashboardForUser(item, serviceGate);
-    }
-
-    /**
      * [#20156 · #20193] THE read gate of one `/meta/:type/:name` document, for
      * the plain read and every door beside it — `createMetaItemReadGate` in
      * `./meta-item-read-gate.ts`, the ONE implementation both transports call
@@ -3533,16 +3504,6 @@ export class RestServer {
     }
 
     /**
-     * Probe which `requiresService` capability gates referenced anywhere in
-     * `items` are actually registered — `resolveRegisteredServices` in
-     * `./meta-item-read-gate.ts`, over {@link serviceProbeFor}. `null` when
-     * nothing can be probed (the service gates then fail OPEN, ADR-0057 D10).
-     */
-    private async resolveRegisteredServices(kernel: any, items: any[]): Promise<Set<string> | null> {
-        return metaReadGate.resolveRegisteredServices(this.serviceProbeFor(kernel), items);
-    }
-
-    /**
      * [ADR-0057 D10] This transport's service-existence probe. Prefer the
      * per-request kernel (multi-env, resolved via kernelManager). Fall back to
      * the single-env service-existence provider — in single-kernel deployments
@@ -3558,40 +3519,6 @@ export class RestServer {
             return async (name) => { try { return exists(name) === true; } catch { return false; } };
         }
         return null;
-    }
-
-    /**
-     * [#7912] The nav-servability gate for one request —
-     * `resolveNavServability` in `./meta-item-read-gate.ts` (its docblock
-     * carries the three fail-open cases and the logged prune), over this
-     * transport's object list read and this instance's prune-log dedupe.
-     */
-    private async resolveNavServability(
-        p: RestProtocol,
-        environmentId: string | undefined,
-    ): Promise<NavServabilityGate | null> {
-        return metaReadGate.resolveNavServability({
-            ...this.metaListSource(p, environmentId),
-            navPruneLogged: this.navPruneLogged,
-        });
-    }
-
-    /**
-     * [#19790] The docs-audience nav gate for one request —
-     * `resolveNavDocAudience` in `./meta-item-read-gate.ts` (its docblock
-     * carries the per-entry rules, the fail-closed reads and the cost), over
-     * this transport's caller and list read.
-     */
-    private async resolveNavDocAudience(
-        p: RestProtocol,
-        environmentId: string | undefined,
-        req: any,
-        apps: readonly any[],
-    ): Promise<NavDocAudienceGate | undefined> {
-        return metaReadGate.resolveNavDocAudience(
-            { ...this.metaReadAudienceSources(environmentId, req), ...this.metaListSource(p, environmentId) },
-            apps,
-        );
     }
 
     /**
@@ -5950,14 +5877,6 @@ export class RestServer {
                         };
                         const items = await p.getMetaItems(listRequest);
 
-                        // RBAC-filter app metadata for authenticated users so
-                        // privileged apps (Studio, Setup, etc.) and gated nav
-                        // items are stripped before reaching the client. We
-                        // intentionally leave anonymous responses untouched —
-                        // the anonymous-deny gate blocks
-                        // them upstream; when disabled, the demo / public
-                        // surface keeps its prior behaviour.
-                        //
                         // `getMetaItems` is typed as `{type, items[]}` but the
                         // objectql implementation actually returns the raw
                         // array. Handle both shapes defensively.
@@ -6021,36 +5940,37 @@ export class RestServer {
                             }
                         }
 
-                        if (RestServer.metaTypeSingular(req.params.type) === 'app') {
-                            const raw = items as unknown;
+                        // [#20237] THE per-caller LIST gate — the app nav
+                        // filter (privileged apps and gated nav entries
+                        // stripped for an authenticated caller; an anonymous
+                        // list left to the anonymous-deny floor upstream), the
+                        // ADR-0057 D10 dashboard widget gate, and the ADR-0046
+                        // §6.7 book and doc audience prunes.
+                        // `createMetaListReadGate` in `./meta-item-read-gate.ts`
+                        // is the ONE implementation, which this route and the
+                        // runtime dispatcher's `/meta` list branch both call;
+                        // its docblock carries each type's rule, and ⛔ a list
+                        // gate is added there, never here.
+                        //
+                        // It runs where the app filter always ran: BEFORE
+                        // `?id=` narrows (the next block says why that order is
+                        // a disclosure rule), and on the raw doc items, before
+                        // the locale collapse, so `_packageId` provenance is
+                        // still present for membership scoping.
+                        {
+                            const raw = visible as unknown;
                             const list: any[] | null = Array.isArray(raw)
                                 ? (raw as any[])
                                 : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
                                     ? ((raw as any).items as any[])
                                     : null;
                             if (list) {
-                                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                                if (ctx?.userId) {
-                                    const sysPerms = new Set<string>(
-                                        Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
-                                    );
-                                    const registered = await this.resolveRegisteredServices((ctx as any).__kernel, list);
-                                    const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    // [#7912] Resolved ONCE for the whole list —
-                                    // object metadata is a per-request fact, not
-                                    // a per-app one.
-                                    const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
-                                    // [#19790] Likewise once for the whole list:
-                                    // books, holdings and the doc corpus are
-                                    // per-request facts about this caller.
-                                    const docAudienceGate = await this.resolveNavDocAudience(p, environmentId, req, list);
-                                    const filtered = list
-                                        .map((it: any) => this.filterAppForUser(
-                                            it, sysPerms, serviceGate, servabilityGate, docAudienceGate))
-                                        .filter((it: any) => it != null);
-                                    visible = Array.isArray(raw)
-                                        ? filtered
-                                        : { ...(raw as any), items: filtered };
+                                const judged = await metaReadGate.createMetaListReadGate(
+                                    this.metaItemReadGateSources(environmentId, req, p),
+                                    RestServer.metaTypeSingular(req.params.type),
+                                )(list);
+                                if (judged !== list) {
+                                    visible = Array.isArray(raw) ? judged : { ...(raw as any), items: judged };
                                 }
                             }
                         }
@@ -6131,28 +6051,6 @@ export class RestServer {
                             }
                         }
 
-                        // ADR-0057 D10: gate dashboard widgets by `requiresService`
-                        // the same way app nav entries are gated above.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'dashboard') {
-                            const raw = visible as unknown;
-                            const list: any[] | null = Array.isArray(raw)
-                                ? (raw as any[])
-                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
-                                    ? ((raw as any).items as any[])
-                                    : null;
-                            if (list) {
-                                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                                const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, list);
-                                const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                if (serviceGate) {
-                                    const filtered = list.map((it: any) => this.filterDashboardForUser(it, serviceGate));
-                                    visible = Array.isArray(raw)
-                                        ? filtered
-                                        : { ...(raw as any), items: filtered };
-                                }
-                            }
-                        }
-
                         // View switcher query: GET /meta/view?object=<object>
                         // returns ONLY the independent ViewItems bound to that
                         // object (the `package` layer of "Object has-many
@@ -6175,51 +6073,6 @@ export class RestServer {
                                     .sort((a: any, b: any) =>
                                         ((a.order ?? 0) as number) - ((b.order ?? 0) as number) ||
                                         String(a.name).localeCompare(String(b.name)));
-                                visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
-                            }
-                        }
-
-                        // ADR-0046 §6.7 — book list is audience-filtered: anonymous
-                        // callers see only `public` books; `{ permissionSet }`-gated
-                        // books require the caller to hold the named set (resolved
-                        // through the security service; unresolvable → fail closed).
-                        if (RestServer.metaTypeSingular(req.params.type) === 'book') {
-                            const raw = visible as unknown;
-                            const list = RestServer.metaItemsArray(raw);
-                            if (list.length > 0) {
-                                const audience = await this.resolveDocsAudience(environmentId, req, list);
-                                const filtered = list.filter((b: any) =>
-                                    b && typeof b === 'object' && audience.admitsBook(b));
-                                visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
-                            }
-                        }
-
-                        // ADR-0046 §6.7 — doc list is audience-filtered by each
-                        // doc's EFFECTIVE audience (union over the books that
-                        // claim it; unclaimed docs default to `org`). Runs on the
-                        // raw items (before locale collapse) so `_packageId`
-                        // provenance is still present for membership scoping.
-                        if (RestServer.metaTypeSingular(req.params.type) === 'doc') {
-                            const raw = visible as unknown;
-                            const list = RestServer.metaItemsArray(raw);
-                            if (list.length > 0) {
-                                // [#20129] A book-read fault THROWS here and the
-                                // list is not served — never filtered against an
-                                // empty book list, which clears every doc for an
-                                // authenticated caller ({@link fetchAudienceBooks}).
-                                const books = await this.fetchAudienceBooks(p, environmentId);
-                                const audience = await this.resolveDocsAudience(environmentId, req, books);
-                                let filtered: any[];
-                                if (audience.allReadable) {
-                                    // Fast path: with no gated book anywhere, every
-                                    // effective audience admits an authenticated caller.
-                                    filtered = list;
-                                } else {
-                                    // The corpus is the listed docs themselves.
-                                    const canRead = audience.docReader(RestServer.docCorpusOf(list));
-                                    filtered = list.filter((d: any) =>
-                                        !!d && typeof d === 'object' && canRead(d.name));
-                                }
                                 visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
                             }
                         }
