@@ -66,11 +66,13 @@ The two halves reach different audiences, which is why they shipped together:
    nothing read — and then refuses, naming the `function` it does not have,
    instead of logging a line and reporting success as it used to.
 
-`decision` stays export-only, deliberately: it may carry no `conditions` at
-all when it branches purely on edge predicates (a plain BPMN exclusive
-gateway), and `conditions` is its only key — so a parse would have nothing
-left to check. Its enforcement remains the objectui reconciliation test,
-which is what #4278 was actually about (a form authoring keys nothing reads).
+`decision` stays export-only: nothing parses it at run time. It may carry no
+`conditions` at all when it branches purely on edge predicates, its executor
+reads `conditions` and nothing else, and its one other key — `mode` — is
+declared AHEAD of the engine change that reads it (#15429; see
+`DecisionConfigSchema`). Its enforcement remains the objectui
+reconciliation test, which is what #4278 was actually about (a form
+authoring keys nothing reads).
 
 Undeclared aliases are NOT part of these contracts: `subflow`'s historical
 `flow` spelling graduated into the ADR-0087 D2 conversion
@@ -135,6 +137,7 @@ const result = DecisionConditionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **conditions** | `{ label: string; expression: string }[]` | optional | Ordered decision branches (first true expression wins; omit to branch purely on edge conditions) |
+| **mode** | `Enum<'exclusive' \| 'inclusive'>` | optional | Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: 'exclusive' = only the first, in the order the edges are declared (what an omitted mode means); 'inclusive' = every one that holds. Declared ahead of the engine change that reads it: until that lands, an edge-branched decision takes every out-edge whose condition holds, whatever this says. A conditions list is first-match on its own. |
 
 ### Nested Shape: `DecisionConfig.conditions[number]`
 
