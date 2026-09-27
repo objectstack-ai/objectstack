@@ -2936,15 +2936,44 @@ export const CreateAiConversationRequestSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Conversation metadata'),
 }));
 
-/** `GET /api/v1/ai/conversations` query — scoped to the authenticated user. */
+/**
+ * `GET /api/v1/ai/conversations` query — scoped to the authenticated user.
+ *
+ * [#19543, door ③] The list is NEWEST FIRST (maintainer ruling on that card:
+ * 「Ruled: the list is newest first.」), and it pages by keyset: `cursor` is the
+ * `id` of the last conversation the caller already holds — no opaque token is
+ * minted, so a caller that has a page has its next cursor. The server half
+ * (descending order, the flipped keyset, `hasMore` and the unknown-cursor
+ * refusal) is objectstack-ai/cloud#2426; the ruling lets this declaration land
+ * first.
+ */
 export const ListAiConversationsRequestSchema = lazySchema(() => z.object({
   agentId: z.string().optional().describe('Filter by agent'),
   limit: z.number().int().positive().optional().describe('Maximum conversations to return'),
-  cursor: z.string().optional().describe('Pagination cursor'),
+  cursor: z.string().optional().describe(
+    'The `id` of the last conversation on the previous page. The next page starts with the '
+    + 'conversation created immediately before it, continuing newest first. Omit it to read '
+    + 'the first page. An id that names no conversation of the caller is refused rather than '
+    + 'read as the start of the list.',
+  ),
 }));
 
 export const ListAiConversationsResponseSchema = lazySchema(() => z.object({
-  conversations: z.array(AiConversationSchema).describe('Matching conversations'),
+  conversations: z.array(AiConversationSchema).describe(
+    'The caller\'s conversations, newest first — ordered by creation time, then `id`, both descending',
+  ),
+  // [#19543, door ③] REQUIRED, not optional: an optional flag lets a server
+  // that never computes it stay spec-valid forever, and a caller cannot tell
+  // "no further page" from "this server does not say". The ruling makes the
+  // server compute it (objectstack-ai/cloud#2426, over-read by one row).
+  // `nextCursor` is deliberately NOT declared: the ruling defines it as the
+  // id of the last conversation on the page, which every caller already
+  // holds in `conversations`, so a second field would only be a second place
+  // for the same value to disagree.
+  hasMore: z.boolean().describe(
+    'Whether at least one more conversation follows this page. When `true`, send the `id` of '
+    + 'the last conversation in `conversations` as `cursor` to read the next page.',
+  ),
 }));
 
 /**

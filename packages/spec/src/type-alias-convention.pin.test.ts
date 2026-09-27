@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 790 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 789 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -428,7 +428,6 @@ export type Iso_api_automationApi__AutomationApiErrorCode = Assert<Eq< z.input< 
 export type Iso_api_automationApi__AutomationFlowPathParamsSchema = Assert<Eq< z.input< typeof M14.AutomationFlowPathParamsSchema >, z.infer< typeof M14.AutomationFlowPathParamsSchema > >>;
 export type Iso_api_automationApi__AutomationRunPathParamsSchema = Assert<Eq< z.input< typeof M14.AutomationRunPathParamsSchema >, z.infer< typeof M14.AutomationRunPathParamsSchema > >>;
 export type Iso_api_automationApi__DeleteFlowRequestSchema = Assert<Eq< z.input< typeof M14.DeleteFlowRequestSchema >, z.infer< typeof M14.DeleteFlowRequestSchema > >>;
-export type Iso_api_automationApi__FlowSummarySchema = Assert<Eq< z.input< typeof M14.FlowSummarySchema >, z.infer< typeof M14.FlowSummarySchema > >>;
 export type Iso_api_automationApi__GetFlowRequestSchema = Assert<Eq< z.input< typeof M14.GetFlowRequestSchema >, z.infer< typeof M14.GetFlowRequestSchema > >>;
 export type Iso_api_automationApi__GetRunRequestSchema = Assert<Eq< z.input< typeof M14.GetRunRequestSchema >, z.infer< typeof M14.GetRunRequestSchema > >>;
 export type Iso_api_automationApi__ToggleFlowRequestSchema = Assert<Eq< z.input< typeof M14.ToggleFlowRequestSchema >, z.infer< typeof M14.ToggleFlowRequestSchema > >>;
@@ -1662,7 +1661,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 790 isomorphic pins', () => {
+  it('still declares all 789 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2285,7 +2284,17 @@ describe('ADR-0122 type-alias convention', () => {
     // release carried it: `KanbanConfigSchema` loses the `limit` whose applied
     // default had split its two shapes, `KanbanConfigParsed` is deleted and the
     // schema is re-pinned as Iso_ui_view__KanbanConfigSchema. +1 added.
-    expect(pins).toHaveLength(790);
+    //
+    // 790 -> 789 is #19543's retirement of the `GET /api/v1/automation` flow
+    // list (door ④, maintainer ruling 「退役，统一走 /meta/flow」):
+    // `FlowSummarySchema` left with its only reader, `ListFlowsResponseSchema`
+    // (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]` `api/FlowSummary`), so
+    // Iso_api_automationApi__FlowSummarySchema leaves with the schema. The two
+    // list schemas were never on this list — each was declared with an
+    // `XParsed` alias (`ListFlowsRequestParsed` / `ListFlowsResponseParsed`),
+    // and those leave with them. The M14 slot stays occupied by the module's
+    // surviving pins. -1 removed.
+    expect(pins).toHaveLength(789);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

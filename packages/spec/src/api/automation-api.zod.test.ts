@@ -2,9 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   AutomationFlowPathParamsSchema,
   AutomationRunPathParamsSchema,
-  ListFlowsRequestSchema,
-  FlowSummarySchema,
-  ListFlowsResponseSchema,
   GetFlowRequestSchema,
   GetFlowResponseSchema,
   CreateFlowRequestSchema,
@@ -25,6 +22,7 @@ import {
   AutomationApiContracts,
   ResumeFailureDetailsSchema,
 } from './automation-api.zod';
+import * as AutomationApiModule from './automation-api.zod';
 import type { TriggerFlowResponse, ResumeFailureDetails } from './automation-api.zod';
 import { ExecutionStatus } from '../automation/execution.zod';
 import type { AutomationResult } from '../contracts/automation-service';
@@ -88,82 +86,25 @@ describe('AutomationRunPathParamsSchema', () => {
 });
 
 // ==========================================
-// List Flows
+// List Flows — RETIRED (#19543, door ④)
 // ==========================================
 
-describe('ListFlowsRequestSchema', () => {
-  it('should accept minimal request with defaults', () => {
-    const result = ListFlowsRequestSchema.parse({});
-    expect(result.limit).toBe(50);
-    expect(result.status).toBeUndefined();
-    expect(result.type).toBeUndefined();
-  });
+describe('the GET /api/v1/automation flow-list door is retired (#19543)', () => {
+  // Flows are metadata (ADR-0106); the list is `GET /api/v1/meta/flow`. The
+  // three schemas left with the route and are registered as whole-def removals
+  // (`RETIRED_DEFS_BY_MAJOR[18]`), so an export that came back would be a
+  // declaration nothing serves — exactly what the retirement removed.
+  it.each(['ListFlowsRequestSchema', 'ListFlowsResponseSchema', 'FlowSummarySchema'])(
+    '%s is no longer exported',
+    (name) => {
+      expect(Object.keys(AutomationApiModule)).not.toContain(name);
+    },
+  );
 
-  it('should accept full request', () => {
-    const result = ListFlowsRequestSchema.parse({
-      status: 'active',
-      type: 'schedule',
-      limit: 10,
-      cursor: 'abc123',
-    });
-    expect(result.status).toBe('active');
-    expect(result.type).toBe('schedule');
-    expect(result.limit).toBe(10);
-  });
-
-  it('should reject invalid status', () => {
-    expect(() => ListFlowsRequestSchema.parse({ status: 'running' })).toThrow();
-  });
-});
-
-describe('FlowSummarySchema', () => {
-  it('should accept a valid flow summary', () => {
-    const result = FlowSummarySchema.parse({
-      name: 'approval_flow',
-      label: 'Approval Flow',
-      type: 'autolaunched',
-      status: 'active',
-      version: 1,
-      enabled: true,
-    });
-    expect(result.name).toBe('approval_flow');
-    expect(result.enabled).toBe(true);
-  });
-
-  it('should accept summary with optional fields', () => {
-    const result = FlowSummarySchema.parse({
-      name: 'daily_sync',
-      label: 'Daily Sync',
-      type: 'schedule',
-      status: 'active',
-      version: 3,
-      enabled: true,
-      nodeCount: 12,
-      lastRunAt: '2026-02-01T10:00:00Z',
-    });
-    expect(result.nodeCount).toBe(12);
-    expect(result.lastRunAt).toBe('2026-02-01T10:00:00Z');
-  });
-});
-
-describe('ListFlowsResponseSchema', () => {
-  it('should accept a valid response', () => {
-    const result = ListFlowsResponseSchema.parse({
-      success: true,
-      data: {
-        flows: [{
-          name: 'test_flow',
-          label: 'Test',
-          type: 'api',
-          status: 'draft',
-          version: 1,
-          enabled: false,
-        }],
-        hasMore: false,
-      },
-    });
-    expect(result.data.flows).toHaveLength(1);
-    expect(result.data.hasMore).toBe(false);
+  it('the module still exports its surviving request schemas (the absence above is not a dead import)', () => {
+    expect(Object.keys(AutomationApiModule)).toEqual(
+      expect.arrayContaining(['GetFlowRequestSchema', 'CreateFlowRequestSchema', 'ListRunsRequestSchema']),
+    );
   });
 });
 
@@ -783,12 +724,22 @@ describe('AutomationApiErrorCode', () => {
 // ==========================================
 
 describe('AutomationApiContracts', () => {
-  it('should define all 9 contract endpoints', () => {
-    expect(Object.keys(AutomationApiContracts)).toHaveLength(9);
+  it('should define all 8 contract endpoints', () => {
+    // 9 -> 8: `listFlows` (`GET /api/v1/automation`) retired with its route
+    // (#19543) — flows are listed through `GET /api/v1/meta/flow`.
+    expect(Object.keys(AutomationApiContracts)).toHaveLength(8);
+  });
+
+  it('declares no flow-list entry and no GET at the bare /api/v1/automation path (#19543)', () => {
+    expect(Object.keys(AutomationApiContracts)).not.toContain('listFlows');
+    const routes = Object.values(AutomationApiContracts).map((c) => `${c.method} ${c.path}`);
+    expect(routes).not.toContain('GET /api/v1/automation');
+    // …while the create door at the same path survives, so the absence is the
+    // one verb and not the whole path.
+    expect(routes).toContain('POST /api/v1/automation');
   });
 
   it('should define correct HTTP methods', () => {
-    expect(AutomationApiContracts.listFlows.method).toBe('GET');
     expect(AutomationApiContracts.getFlow.method).toBe('GET');
     expect(AutomationApiContracts.createFlow.method).toBe('POST');
     expect(AutomationApiContracts.updateFlow.method).toBe('PUT');
@@ -800,7 +751,6 @@ describe('AutomationApiContracts', () => {
   });
 
   it('should define correct paths', () => {
-    expect(AutomationApiContracts.listFlows.path).toBe('/api/v1/automation');
     expect(AutomationApiContracts.getFlow.path).toBe('/api/v1/automation/:name');
     expect(AutomationApiContracts.createFlow.path).toBe('/api/v1/automation');
     expect(AutomationApiContracts.updateFlow.path).toBe('/api/v1/automation/:name');
