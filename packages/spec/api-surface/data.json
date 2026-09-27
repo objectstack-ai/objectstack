@@ -801,6 +801,7 @@
     "isUniqueDeclared (function)",
     "isVirtualSearchField (function)",
     "likePatternToGlobPattern (function)",
+    "likePatternToRegExp (function)",
     "likePatternToRegexSource (function)",
     "lintAuthoredRecordKeys (function)",
     "markFilterSubtreeProvenance (function)",

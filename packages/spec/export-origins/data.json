@@ -788,6 +788,7 @@
     "isUniqueDeclared": "src/data/field.zod.ts#isUniqueDeclared (function)",
     "isVirtualSearchField": "src/data/search-fields.ts#isVirtualSearchField (function)",
     "likePatternToGlobPattern": "src/data/filter.zod.ts#likePatternToGlobPattern (function)",
+    "likePatternToRegExp": "src/data/filter.zod.ts#likePatternToRegExp (function)",
     "likePatternToRegexSource": "src/data/filter.zod.ts#likePatternToRegexSource (function)",
     "lintAuthoredRecordKeys": "src/data/authoring-key-lint.ts#lintAuthoredRecordKeys (function)",
     "markFilterSubtreeProvenance": "src/data/filter-subtree-provenance.ts#markFilterSubtreeProvenance (function)",
