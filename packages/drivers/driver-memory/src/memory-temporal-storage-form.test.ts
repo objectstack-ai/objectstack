@@ -22,6 +22,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { temporalStorageForm } from '@objectstack/core';
+import type { FilterCondition } from '@objectstack/spec/data';
 import { coerceTemporalValue } from './memory-temporal.js';
 import { InMemoryDriver } from './memory-driver.js';
 
@@ -73,7 +74,7 @@ const ROWS = [
 ];
 
 /** The #20176 card's rows, as a `where`, with the count this driver answers. */
-const CARD_WHERE_TWINS: ReadonlyArray<readonly [string, () => Record<string, unknown>, number]> = [
+const CARD_WHERE_TWINS: ReadonlyArray<readonly [string, () => FilterCondition, number]> = [
   ['row 1 — an ISO instant $gte on a date field', () => ({ placed_on: { $gte: '2026-02-01T00:00:00.000Z' } }), 3],
   ['row 2 — an ISO instant $eq on a date field', () => ({ placed_on: { $eq: '2026-02-01T00:00:00.000Z' } }), 2],
   ['row 3 — a bare day as the $lte of a datetime', () => ({ opened_at: { $lte: '2026-02-01' } }), 3],
@@ -101,7 +102,7 @@ describe('[#20176] the where twins of the card\'s rows, on this driver', () => {
 
   for (const [name, where, expected] of CARD_WHERE_TWINS) {
     it(`${name}: ${expected} of 6`, async () => {
-      const rows = await driver.find(OBJECT, { where: where() } as any);
+      const rows = await driver.find(OBJECT, { where: where() });
       expect(rows).toHaveLength(expected);
     });
   }
