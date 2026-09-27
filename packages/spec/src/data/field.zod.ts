@@ -29,8 +29,9 @@ import {
 } from './default-value-shape';
 import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from './field-value.zod';
 // #7918 — the ISO 4217 / CLDR fraction-digit contradiction check (maintainer
-// ruling 2026-08-12, Option A). One shared verdict for both anchors: the
-// field-level `precision` key and `CurrencyConfigSchema.precision`.
+// ruling 2026-08-12, Option A), read by `CurrencyConfigSchema.precision`'s
+// anchor. The FIELD-level `precision` key is total digits and is not compared
+// against the currency (#20011 — see the note in `FieldSchema`'s superRefine).
 import { currencyPrecisionContradiction } from './currency-fraction-digits';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
 
@@ -383,8 +384,15 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * access-control reasons the server MUST also reject writes of its value (the
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
+   *
+   * ⛔ No read THROUGH a reference field (`record.account.tier`): the predicate
+   * sees the reference's bare id, never the related record, so the read faults
+   * and the server — fail-open for an option — admits the value unchecked.
+   * `objectstack validate` refuses it (#20078); a `validations[]` `script` rule
+   * is the seam that reads one hop through a reference. `current_user` reads are
+   * not record traversals and are unaffected.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`").meta({ title: 'Visible When' }),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference.").meta({ title: 'Visible When' }),
 }));
 
 /**
@@ -1728,10 +1736,17 @@ export const FieldSchema = lazySchema(() => {
    * state live as the record changes (UX), and the server enforces
    * `requiredWhen` and ignores writes to a field whose `readonlyWhen` is TRUE
    * (so the rule can't be bypassed). e.g. `P\`record.status == 'paid'\``.
+   *
+   * ⛔ `requiredWhen` / `readonlyWhen` read the bound record's OWN columns: the
+   * field level is never hydrated, so a read THROUGH a reference field
+   * (`record.account.tier`) meets the bare id, faults on every row, and since
+   * ADR-0137 D2 refuses the write. `objectstack validate` refuses it (#20078);
+   * a `validations[]` `script` rule is the seam that reads one hop through a
+   * reference.
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
-  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
-  requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
+  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every update that writes the field — `objectstack validate` refuses it. Put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference."),
+  requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
@@ -2292,31 +2307,20 @@ export const FieldSchema = lazySchema(() => {
     });
   }
 
-  // #7918 (maintainer ruling 2026-08-12, Option A): the FIELD-level
-  // `precision` key doubles as the currency display width — objectui's
-  // CurrencyField reads it, and objectui#4361 pinned authored-precision-wins
-  // there — so an authored value contradicting the statically-known currency's
-  // ISO 4217 / CLDR fraction digits is rejected at this seam too. The currency
-  // is statically known only under `currencyConfig.currencyMode: 'fixed'`
-  // (`dynamic` is out of reach BY DESIGN; a field with no `currencyConfig` has
-  // only the runtime tenant default, which is not static). This key has NO
-  // schema default, so `undefined` here IS "not authored" — the
-  // authored-vs-defaulted trap lives entirely on the `currencyConfig` twin of
-  // this check, which runs pre-default inside `CurrencyConfigSchema` itself.
-  // Unknown currency codes fail OPEN (see currency-fraction-digits.ts).
-  if (
-    field.type === 'currency' &&
-    field.precision !== undefined &&
-    field.currencyConfig?.currencyMode === 'fixed'
-  ) {
-    const contradiction = currencyPrecisionContradiction(
-      field.currencyConfig.defaultCurrency,
-      field.precision,
-    );
-    if (contradiction !== undefined) {
-      ctx.addIssue({ code: 'custom', path: ['precision'], message: contradiction });
-    }
-  }
+  // #20011 — the FIELD-level `precision` on a `currency` field is NOT compared
+  // against the currency's ISO 4217 fraction digits, on purpose. The key is
+  // declared "Total digits" — the `p` of a DECIMAL(p, s) amount, so
+  // `precision: 18` on a fixed-USD field is DECIMAL(18,2) — and a currency's
+  // decimal places are the currency's, not a setting (ruling 5805782503,
+  // batch #218 item 2, letter 乙). The #7918 check that stood here (maintainer
+  // ruling 2026-08-12, Option A) rested on one premise: objectui's
+  // CurrencyField read this key as its display width. objectui#10276 retired
+  // that reading, and no face reads the key as decimal places, so the check
+  // refused the ruled contract and prescribed a total-digit count of 2.
+  // ⛔ Do not reinstate a comparison here, and do not add a total-digit
+  // coherence rule for currency alone: no numeric type has one. The
+  // `currencyConfig.precision` twin is a DIFFERENT key ("Decimal precision")
+  // and keeps its own check inside `CurrencyConfigSchema`.
 
   // #9689 (maintainer ruling 2026-08-19, Q1 = A): an AUTHORED
   // `deleteBehavior: 'set_null'` on a `master_detail` is a publish-time error.

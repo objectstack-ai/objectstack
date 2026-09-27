@@ -1434,20 +1434,23 @@ describe('SelectionConfigSchema', () => {
 });
 
 describe('PaginationConfigSchema', () => {
-  it('should default pageSize to 25', () => {
+  it('should default pageSize to 50', () => {
     const pagination = {};
 
     const result = PaginationConfigSchema.parse(pagination);
-    expect(result.pageSize).toBe(25);
+    expect(result.pageSize).toBe(50);
   });
 
   it('should accept custom page size', () => {
+    // 25 — the pre-#20050 default, which an author who wants it back now
+    // writes explicitly. A value OTHER than the default, so this pin still
+    // discriminates "the authored value survives" from "the default applied".
     const pagination = {
-      pageSize: 50,
+      pageSize: 25,
     };
 
     const result = PaginationConfigSchema.parse(pagination);
-    expect(result.pageSize).toBe(50);
+    expect(result.pageSize).toBe(25);
   });
 
   it('should accept page size options', () => {

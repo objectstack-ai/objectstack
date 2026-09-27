@@ -141,6 +141,15 @@ os init my-app --no-install       # Skip dependency installation
 | `plugin` | **Metadata package**: declarative objects, built by `objectstack compile`, `private` — *not* the kernel code plugin `os create plugin` emits |
 | `empty` | Minimal project with just `objectstack.config.ts` |
 
+The `app` and `plugin` templates declare their starter object with
+`ObjectSchema.create({ … })` — the one authorised shape for a `*.object.ts`, and the
+same one `os generate object` writes. The factory validates the declaration against
+the object protocol when the file is evaluated, so a mistake surfaces in the file
+where it was written. A project scaffolded by an earlier release carries a
+`Data.ServiceObject`-annotated object literal instead; converting it is one mechanical
+rewrite — wrap the literal in `ObjectSchema.create( … )`, drop the annotation, and
+import `ObjectSchema` from `@objectstack/spec/data`.
+
 #### `os dev`
 
 Starts development mode. Three usage shapes:
@@ -1438,7 +1447,7 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 - `--dry-run` — Preview without writing files
 
 **What it does:**
-1. Creates a typed TypeScript file using `Data.ServiceObject`, `UI.View`, `Automation.Flow`, etc.
+1. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 2. Creates or updates the barrel `index.ts` in the target directory
 3. Shows a hint to run `objectstack validate`
 

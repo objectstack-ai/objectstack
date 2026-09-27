@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 207,
-    "droppedRefinementSites": 585,
+    "droppedRefinementSites": 577,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -56,9 +56,7 @@
         "manifest.dashboards.element.globalFilters.element",
         "manifest.dashboards.element.widgets.element",
         "manifest.datasets.element",
-        "manifest.datasets.element.filter",
         "manifest.datasets.element.include.element",
-        "manifest.datasets.element.measures.element.filter",
         "manifest.datasources.element",
         "manifest.flows.element",
         "manifest.flows.element.errorHandling",
@@ -156,9 +154,7 @@
         "data.options[1].manifest.dashboards.element.globalFilters.element",
         "data.options[1].manifest.dashboards.element.widgets.element",
         "data.options[1].manifest.datasets.element",
-        "data.options[1].manifest.datasets.element.filter",
         "data.options[1].manifest.datasets.element.include.element",
-        "data.options[1].manifest.datasets.element.measures.element.filter",
         "data.options[1].manifest.datasources.element",
         "data.options[1].manifest.flows.element",
         "data.options[1].manifest.flows.element.errorHandling",
@@ -240,9 +236,7 @@
         "options[1].manifest.dashboards.element.globalFilters.element",
         "options[1].manifest.dashboards.element.widgets.element",
         "options[1].manifest.datasets.element",
-        "options[1].manifest.datasets.element.filter",
         "options[1].manifest.datasets.element.include.element",
-        "options[1].manifest.datasets.element.measures.element.filter",
         "options[1].manifest.datasources.element",
         "options[1].manifest.flows.element",
         "options[1].manifest.flows.element.errorHandling",
@@ -285,9 +279,7 @@
         "data.packages.element.options[1].manifest.dashboards.element.globalFilters.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element",
         "data.packages.element.options[1].manifest.datasets.element",
-        "data.packages.element.options[1].manifest.datasets.element.filter",
         "data.packages.element.options[1].manifest.datasets.element.include.element",
-        "data.packages.element.options[1].manifest.datasets.element.measures.element.filter",
         "data.packages.element.options[1].manifest.datasources.element",
         "data.packages.element.options[1].manifest.flows.element",
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
@@ -615,7 +607,8 @@
     },
     "data/EqualityOperator": {
       "sites": [
-        "$eq"
+        "$eq",
+        "$ne"
       ]
     },
     "data/Field": {
@@ -631,6 +624,7 @@
         "$between.items[1]",
         "$eq",
         "$in",
+        "$ne",
         "$nin"
       ]
     },
@@ -697,6 +691,7 @@
         "lazy.$not.options[0].valueType.$between.items[1]",
         "lazy.$not.options[0].valueType.$eq",
         "lazy.$not.options[0].valueType.$in",
+        "lazy.$not.options[0].valueType.$ne",
         "lazy.$not.options[0].valueType.$nin"
       ]
     },
@@ -1139,15 +1134,12 @@
     "ui/Dataset": {
       "sites": [
         "",
-        "filter",
         "filter.lazy",
-        "include.element",
-        "measures.element.filter"
+        "include.element"
       ]
     },
     "ui/DatasetMeasure": {
       "sites": [
-        "filter",
         "filter.lazy"
       ]
     },

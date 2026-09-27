@@ -505,61 +505,22 @@ export const ConcurrencyPolicySchema = lazySchema(() => z.object({
 export type ConcurrencyPolicy = z.input<typeof ConcurrencyPolicySchema>;
 
 // ==========================================
-// 6. Scheduled Execution Persistence
+// 6. Scheduled Execution Persistence — RETIRED (#17158)
 // ==========================================
 
-/**
- * Schedule State Schema
- * Tracks the runtime state of scheduled flow executions.
- *
- * Persists next-run times, pause/resume state, and execution history references.
+/*
+ * `ScheduleStateSchema` (and its `ScheduleState` / `ScheduleStateParsed`
+ * aliases) was DELETED here in @objectstack/spec 17 (ADR-0049
+ * enforce-or-remove; ruled with the export-job family on #17158, item 2:
+ * "retired with the family unless a live consumer is measured" — none was, in
+ * objectstack, objectui at the pinned sha or cloud). It described the runtime
+ * state of a scheduled flow — `timezone`, `status`, `nextRunAt` and run
+ * counters — that no scheduler ever wrote or read; after #16320 deleted its
+ * required cron it no longer even declared a cadence. Registered in
+ * `RETIRED_DEFS_BY_MAJOR[18]` as `automation/ScheduleState`. A scheduled flow
+ * declares its cadence on the flow's start node (`config.schedule`); run
+ * history is `ExecutionLog` / `FlowRunSummary` above.
  */
-export const ScheduleStateSchema = lazySchema(() => z.object({
-  /** Unique schedule ID */
-  id: z.string().describe('Schedule instance ID'),
-
-  /** Flow reference */
-  flowName: z.string().describe('Flow machine name'),
-
-  /*
-   * `cronExpression` was DELETED here in @objectstack/spec 17 (ADR-0049
-   * enforce-or-remove, #16320). It was this schema's REQUIRED cron and was read by
-   * nothing: `ScheduleStateSchema` has no consumer outside `packages/spec`, and the
-   * schedule trigger that does run reads a flow start node's `config.schedule`
-   * through `trigger-schedule/schedule-trigger.ts` `normalizeSchedule` — a different
-   * shape this key never reached. Deleted outright — no `retiredKey()` tombstone, no
-   * D2 conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the
-   * retirement PR). `timezone` / `status` / `nextRunAt` stay: the ruling retires the
-   * cron position, not the def. A scheduled flow declares its cadence on the flow's
-   * start node (`config.schedule`); the one cron slot the platform evaluates is
-   * `Job.schedule.expression` (`system/job.zod.ts`).
-   */
-  timezone: z.string().default('UTC').describe('IANA timezone for cron evaluation'),
-
-  /** Runtime state */
-  status: z.enum(['active', 'paused', 'disabled', 'expired'])
-    .default('active')
-    .describe('Current schedule status'),
-  nextRunAt: z.string().datetime().optional().describe('Next scheduled execution timestamp'),
-  lastRunAt: z.string().datetime().optional().describe('Last execution timestamp'),
-  lastExecutionId: z.string().optional().describe('Execution ID of the last run'),
-  lastRunStatus: ExecutionStatus.optional().describe('Status of the last run'),
-
-  /** Execution tracking */
-  totalRuns: z.number().int().min(0).default(0).describe('Total number of executions'),
-  consecutiveFailures: z.number().int().min(0).default(0).describe('Consecutive failed executions'),
-
-  /** Bounds */
-  startDate: z.string().datetime().optional().describe('Schedule effective start date'),
-  endDate: z.string().datetime().optional().describe('Schedule expiration date'),
-  maxRuns: z.number().int().min(1).optional().describe('Maximum total executions before auto-disable'),
-
-  /** Metadata */
-  createdAt: z.string().datetime().describe('Schedule creation timestamp'),
-  updatedAt: z.string().datetime().optional().describe('Last update timestamp'),
-  createdBy: z.string().optional().describe('User who created the schedule'),
-}));
-export type ScheduleState = z.input<typeof ScheduleStateSchema>;
 
 // ==========================================
 // Type Exports
@@ -571,4 +532,3 @@ export type FlowRunSummaryParsed = z.infer<typeof FlowRunSummarySchema>;
 export type ExecutionErrorParsed = z.infer<typeof ExecutionErrorSchema>;
 export type CheckpointParsed = z.infer<typeof CheckpointSchema>;
 export type ConcurrencyPolicyParsed = z.infer<typeof ConcurrencyPolicySchema>;
-export type ScheduleStateParsed = z.infer<typeof ScheduleStateSchema>;

@@ -42,7 +42,7 @@
  *
  * So the parse check is measured through `class`, added here for that purpose.
  * It is inside the charset (every character is a lowercase letter), the gate
- * admits it, and `const class:` is still not a declaration — so it is the name
+ * admits it, and `const class =` is still not a declaration — so it is the name
  * that proves this command consults the compiler before it writes, and that
  * the layer in front did not swallow the layer behind. ⛔ Nothing was deleted
  * to make room for it: every `foo.bar` assertion that is still about the
@@ -252,7 +252,7 @@ describe('[#16541] CONTROL — an ordinary name is untouched by this change', ()
   it('writes a scaffold that parses, still binding `orderLine`', () => {
     const scaffold = readFileSync(join(controlDir, 'src', 'objects', 'order_line.object.ts'), 'utf8');
     expect(parseErrors(scaffold)).toEqual([]);
-    expect(scaffold).toContain('const orderLine: Data.ServiceObject = {');
+    expect(scaffold).toContain('const orderLine = ObjectSchema.create({');
   });
 
   it('writes a barrel that parses, still re-exporting `orderLine`', () => {

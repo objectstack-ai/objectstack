@@ -47,6 +47,9 @@ const refusalOf = (run: () => unknown): Refusal => {
  * trips the door it is used to find. The EQUALITY spellings do refuse it, since
  * the 2026-09-23 arm (#19757) — and they answer `undefined` either way: before
  * that arm they lowered it to the implicit form, which carries no `$` key.
+ * [#19886] The `$ne` spellings refuse it too, since ruling A, so they answer
+ * `undefined` here now; the `$ne` pins below find their spellings with a
+ * SCALAR probe instead.
  */
 const loweredOperatorOf = (op: string): string | undefined => {
   let lowered: Record<string, unknown> | undefined;
@@ -594,17 +597,18 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
 
   it('LIT CONTROL — every array-valued operator the vocabulary declares keeps its array', () => {
     // Read off the enforced schema rather than listed: the operators whose
-    // declared comparand ACCEPTS an array. `$ne` is in that set only because
-    // it is `z.any()` there and is not judged at this door (see the todo
-    // below) — so the loop covers exactly the list operators, and a fourth
-    // array-valued operator added to the schema lands in it without an edit
-    // here. [#19889] `$eq` left the set when the schema door began refusing an
-    // array there too (ruling A, record 5805248669), in this face's words —
-    // `filter-equality-array-schema-door.test.ts` pins that door.
+    // declared comparand ACCEPTS an array — exactly the list operators, so a
+    // fourth array-valued operator added to the schema lands in the loop
+    // without an edit here. [#19889] `$eq` left the set when the schema door
+    // began refusing an array there too (ruling A, record 5805248669), in this
+    // face's words — `filter-equality-array-schema-door.test.ts` pins that
+    // door. [#19886] `$ne` left it the same way (ruling A, record 5805254639),
+    // and it is no longer skipped below: the set IS the list operators now, and
+    // `filter-ne-array-schema-door.test.ts` pins the `$ne` door.
     const arrayValued = Object.keys(FieldOperatorsSchema.shape).filter((op) =>
       FieldOperatorsSchema.safeParse({ [op]: ['a', 'b'] }).success);
-    expect(arrayValued.sort()).toEqual(['$between', '$in', '$ne', '$nin']);
-    for (const op of arrayValued.filter((o) => o !== '$ne')) {
+    expect(arrayValued.sort()).toEqual(['$between', '$in', '$nin']);
+    for (const op of arrayValued) {
       expect(parseFilterAST({ tags: { [op]: ['a', 'b'] } }), op).toEqual({ tags: { [op]: ['a', 'b'] } });
     }
     // The empty lists stay the declared predicates they are.
@@ -622,12 +626,116 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
     expect(parseFilterAST({ author: { tags: ['a'] } })).toEqual({ author: { tags: ['a'] } });
   });
 
-  it.todo(
-    '$ne carrying an ARRAY — equality\'s negation measured the same split (refused by the SQL family '
-    + 'and driver-memory, answered by driver-mongodb) but the 2026-09-23 ruling names implicit and '
-    + 'explicit equality only. Reported for its own ruling; ⛔ not pinned green here, because a green '
-    + 'pin would read as a ruling nobody made',
-  );
+  // ── the `$ne` arm, ruling A on #19886 (record 5805254639) ─────────────
+  //
+  // 「The shared comparand-shape face refuses an array under `$ne` for every
+  // driver … one remedy text, naming the declared list-negation operator by
+  // its spec spelling」 — ⛔ no alias, ⛔ no window. A `todo` stood here until
+  // that ruling, because a green pin would have read as a ruling nobody made.
+  // Before the arm, every row below RETURNED from this face (measured on
+  // `origin/main` `9e7824a4`, and again by this PR's ablation).
+
+  it.each([
+    ['the lowered array form, "ne"', [['tags', 'ne', ['a']]], 'where.tags.$ne'],
+    ['the lowered array form, "not_equals"', [['tags', 'not_equals', ['a', 'b']]], 'where.tags.$ne'],
+    ['the lowered array form, "!="', [['tags', '!=', ['a']]], 'where.tags.$ne'],
+    ['the object passthrough', { tags: { $ne: ['a'] } }, 'where.tags.$ne'],
+    ['an EMPTY array — still an array in a one-value slot', { tags: { $ne: [] } }, 'where.tags.$ne'],
+    ['nested under $and (lowered)', ['and', ['amount', '>', 5], ['tags', 'neq', ['a']]], 'where.$and[1].tags.$ne'],
+    ['nested under $or', { $or: [{ stage: 'won' }, { tags: { $ne: ['a'] } }] }, 'where.$or[1].tags.$ne'],
+    ['nested under $not', { $not: { tags: { $ne: ['a'] } } }, 'where.$not.tags.$ne'],
+    ['beside a legal $eq on the same field', { tags: { $eq: 'x', $ne: ['a'] } }, 'where.tags.$ne'],
+  ])('refuses an ARRAY under $ne — %s', (_label, where, path) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    // ADR-0112 class 1, both halves.
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain(`at ${path}.`);
+    // The `$ne` sentence, never the equality slot's.
+    expect(err.message).toMatch(/^Operator "\$ne" on field "tags" requires a single comparable value, but received an array/);
+  });
+
+  it('the $ne refusal names the operator and prescribes $nin, by its spec and authoring spellings, and nothing else', () => {
+    const err = refusalOf(() => parseFilterAST([['tags', 'not_equals', ['a', 'b']]]));
+    // The leading sentence is driver-memory's `arrayComparandError` for `$ne`,
+    // word for word (one condition, one wording across packages).
+    expect(err.message).toMatch(
+      /^Operator "\$ne" on field "tags" requires a single comparable value, but received an array \(\["a","b"\]\) at where\.tags\.\$ne\. /,
+    );
+    // The ruling's prescription: the declared list-negation operator.
+    expect(err.message).toContain('For "none of these values" use {"$nin": […]} (authoring: nin, not_in, notin).');
+    expect(err.message).toMatch(/The filter was NOT applied, .*UNFILTERED result set\.$/);
+    // ONE remedy: the equality slot's two operators are the wrong answer for
+    // a negation, and `$notContains` (a STRING operator) is not a list one.
+    expect(err.message).not.toContain('$in"');
+    expect(err.message).not.toContain('$contains');
+    expect(err.message).not.toContain('$notContains');
+    // A caller-supplied context keeps its prefix, as on every sibling arm.
+    expect(refusalOf(() => assertListComparandShapes({ tags: { $ne: ['a'] } }, "find('deal')")).message)
+      .toMatch(/^find\('deal'\): Operator "\$ne" on field "tags"/);
+  });
+
+  it('every AST spelling that lowers to $ne refuses an array — the vocabulary, read at source', () => {
+    // Found with a SCALAR probe: an array would now trip the very arm being
+    // looked for. (`in` / `between` refuse a scalar outright; a throw is a "no".)
+    const inequality = [...VALID_AST_OPERATORS].filter((op) => {
+      try {
+        const lowered = parseFilterAST([['probe', op, 'x']]) as Record<string, unknown> | undefined;
+        const spec = lowered?.probe as Record<string, unknown> | undefined;
+        return spec !== null && typeof spec === 'object' && Object.keys(spec).join() === '$ne';
+      } catch {
+        return false;
+      }
+    });
+    // Guards the loop from passing vacuously.
+    expect(inequality.sort()).toEqual(['!=', '<>', 'ne', 'neq', 'not_equals', 'notequals']);
+    for (const op of inequality) {
+      const err = refusalOf(() => parseFilterAST([['tags', op, ['a']]]));
+      expect(err.code, op).toBe(StandardErrorCode.enum.INVALID_FILTER);
+      expect(err.status, op).toBe(400);
+      expect(err.message, op).toMatch(/^Operator "\$ne" on field "tags"/);
+    }
+  });
+
+  it('the prescribed operator is DECLARED and its spellings are the vocabulary\'s — the refusal invents nothing', () => {
+    // `$nin` is spelled by hand in the shared text (`filter.zod.ts` imports
+    // the face, so deriving it would be a cycle). What keeps it the
+    // vocabulary's own: it is a key of the enforced operator schema, and the
+    // spellings the message lists are EXACTLY the ones that lower to it.
+    expect(Object.keys(FieldOperatorsSchema.shape)).toContain('$nin');
+    const ninSpellings = [...VALID_AST_OPERATORS].filter((op) => loweredOperatorOf(op) === '$nin').sort();
+    expect(ninSpellings).toEqual(['nin', 'not_in', 'notin']);
+    const message = refusalOf(() => parseFilterAST({ tags: { $ne: ['a'] } })).message;
+    expect(message).toContain(`(authoring: ${ninSpellings.join(', ')})`);
+    // …and the prescribed spelling actually lowers and passes this face.
+    expect(parseFilterAST([['tags', 'not_in', ['a', 'b']]])).toEqual({ tags: { $nin: ['a', 'b'] } });
+    expect(parseFilterAST({ tags: { $nin: ['a', 'b'] } })).toEqual({ tags: { $nin: ['a', 'b'] } });
+  });
+
+  it('LIT CONTROL — every non-array $ne comparand keeps passing, the has-a-value predicate first', () => {
+    // `$ne: null` IS the has-a-value predicate (#5332); the arm is array-shaped
+    // and nothing wider.
+    expect(parseFilterAST({ tags: { $ne: null } })).toEqual({ tags: { $ne: null } });
+    expect(parseFilterAST([['tags', 'ne', null]])).toEqual({ tags: { $ne: null } });
+    expect(parseFilterAST({ tags: { $ne: 'a' } })).toEqual({ tags: { $ne: 'a' } });
+    expect(parseFilterAST([['tags', '!=', 'a']])).toEqual({ tags: { $ne: 'a' } });
+    expect(parseFilterAST({ n: { $ne: 0 } })).toEqual({ n: { $ne: 0 } });
+    expect(parseFilterAST({ on: { $ne: false } })).toEqual({ on: { $ne: false } });
+    expect(parseFilterAST({ tags: { $ne: '' } })).toEqual({ tags: { $ne: '' } });
+    const day = new Date('2026-07-01T00:00:00.000Z');
+    expect(parseFilterAST({ at: { $ne: day } })).toEqual({ at: { $ne: day } });
+    // `$ne` is one of the six comparisons a `{ $field }` reference may be the
+    // whole comparand of — not an array, untouched.
+    expect(parseFilterAST([['amount', '!=', { $field: 'budget' }]]))
+      .toEqual({ amount: { $ne: { $field: 'budget' } } });
+  });
+
+  it('a $ne array INSIDE a no-$-key field spec is still not descended into', () => {
+    // The nested-relation / deep-equality boundary the equality arm keeps too:
+    // this face judges the field's own operator map, never the inside of a
+    // nested condition it does not walk.
+    expect(parseFilterAST({ author: { tags: { $ne: ['a'] } } })).toEqual({ author: { tags: { $ne: ['a'] } } });
+  });
 
   // ── the wording contract (#5346 / #5348), unchanged by the move ────────
 
@@ -695,6 +803,11 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       { close_date: { $eq: ['a'] } },
       { close_date: ['aaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbb', 'cccccccccccccccccccc'] },
       { $or: [{ close_date: [] }] },
+      // The `$ne` arm (#19886, ruling A): one prescription plus the received
+      // list, the long list cut at the same 60-char preview bound.
+      { close_date: { $ne: ['a'] } },
+      { close_date: { $ne: ['aaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbb', 'cccccccccccccccccccc'] } },
+      { $not: { $or: [{ close_date: { $ne: [] } }] } },
     ]) {
       const err = refusalOf(() => parseFilterAST(where, "find('deal')"));
       expect(err.message.length, JSON.stringify(where)).toBeLessThan(500);

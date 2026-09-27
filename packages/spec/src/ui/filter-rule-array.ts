@@ -60,6 +60,7 @@
 
 import { z } from 'zod';
 
+import { LOGICAL_OPERATORS } from '../data/filter.zod';
 import { ViewFilterRuleSchema, normalizeFilterOperator } from './view.zod';
 
 /** Per-door facts the message cannot derive. */
@@ -87,8 +88,15 @@ const REWRITE_KEY_BUDGET = 3;
  * a class instance at this key is a different mistake, and answering it with
  * the filter-orthography prescription would send that author to the wrong
  * migration entry.
+ *
+ * Exported for the ONE other reader of the question: the ADR-0087 D2
+ * conversion `page-component-filter-record-to-rule-array`
+ * (`conversions/registry.ts`), which rewrites the mappable record forms at
+ * rest. It recognises the record form by this predicate so the conversion and
+ * the refusal can never disagree about which values are the form they both
+ * answer. Not re-exported from any public entry.
  */
-function isRecordForm(input: unknown): input is Record<string, unknown> {
+export function isRecordForm(input: unknown): input is Record<string, unknown> {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return false;
   const proto = Object.getPrototypeOf(input);
   return proto === Object.prototype || proto === null;
@@ -144,23 +152,56 @@ export function ruleArrayFilterError(options: RuleArrayFilterErrorOptions): z.co
     const equals = normalizeFilterOperator('eq');
 
     const authored = Object.keys(input);
-    const shown = authored.slice(0, REWRITE_KEY_BUDGET);
+    // A combinator key (`$and` / `$or` / `$not`) is not a field, and the worked
+    // rewrite below used to render it as one — `{ field: '$or', … }`, a fix that
+    // is no fix. That matters most for exactly the rows the D2 conversion
+    // `page-component-filter-record-to-rule-array` leaves at rest: it rewrites
+    // every record it can map losslessly and leaves a combinator-carrying one
+    // byte-identical, so a combinator record is what still reaches this door on
+    // its next save. The vocabulary is the FilterCondition's own
+    // (`LOGICAL_OPERATORS`), not a list kept here.
+    const combinators = authored.filter((key) => (LOGICAL_OPERATORS as readonly string[]).includes(key));
+    const fields = authored.filter((key) => !combinators.includes(key));
+    const shown = fields.slice(0, REWRITE_KEY_BUDGET);
     const rules = shown.map((key) => {
       const rendered = renderValue(input[key]);
       return rendered === undefined
         ? `{ field: '${key}', operator: …, value: … }`
         : `{ field: '${key}', operator: '${equals}', value: ${rendered} }`;
     });
-    const ellipsis = authored.length > shown.length ? ', …' : '';
+    const ellipsis = fields.length > shown.length ? ', …' : '';
     const rewrite = rules.length > 0 ? `\`[${rules.join(', ')}${ellipsis}]\`` : `\`[]\``;
 
     const nested = shown.some((key) => renderValue(input[key]) === undefined);
 
+    // With no combinator this is the sentence the door has always given, byte
+    // for byte. With one, "this filter becomes …" would be false — the
+    // combinator has no place in the rewrite — so the rewrite is scoped to the
+    // field keys, and dropped when there are none.
+    let lead: string;
+    if (combinators.length === 0) {
+      lead = ` Write one rule per record key — they AND — so this filter becomes ${rewrite}.`;
+    } else if (fields.length > 0) {
+      lead = ` Write one rule per field key — they AND — so its field keys become ${rewrite}.`;
+    } else {
+      lead = '';
+    }
+    const named = combinators.map((key) => `\`${key}\``).join(' and ');
+    const combinatorSentence = combinators.length === 0
+      ? ''
+      : ` ${named} ${combinators.length === 1 ? 'is a combinator, not a field' : 'are combinators, not fields'}, `
+        + `and the rule array has no spelling for ${combinators.length === 1 ? 'it' : 'them'}: its rules `
+        + `only AND, so \`$or\` and \`$not\` cannot be written as rules at all, and \`$and\` only as the `
+        + `separate rules it joins. Nothing rewrites a combinator for you — flattening one changes which `
+        + `rows the filter selects — so decide which rows this filter should select, and write the rules `
+        + `that select exactly those.`;
+
     return (
       `\`filter\` on ${surface} takes the ViewFilterRule ARRAY form \`${ruleForm}\`, `
       + `and this value is the MongoDB-style record form this door took before the `
-      + `one-filter-orthography convergence. Write one rule per record key — they AND — `
-      + `so this filter becomes ${rewrite}.`
+      + `one-filter-orthography convergence.`
+      + lead
+      + combinatorSentence
       + (nested
         ? ` A key whose value is an operator object (\`{ amount: { $gt: 100 } }\`) lifts that `
           + `operator into \`operator\`: \`[{ field: 'amount', operator: 'greater_than', value: 100 }]\`.`

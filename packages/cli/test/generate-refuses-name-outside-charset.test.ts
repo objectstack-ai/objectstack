@@ -37,7 +37,7 @@
  *     ACCEPTED it (its emission parses clean, asserted here against the very
  *     instrument the command runs). Delete the gate and this name generates.
  *   - `class` — ADMITTED by the gate (every character is in the charset), and
- *     REFUSED by the parse check for `object`, because `const class:` is not a
+ *     REFUSED by the parse check for `object`, because `const class =` is not a
  *     declaration. Delete the parse check and this name generates.
  *
  * ## Why a child process
