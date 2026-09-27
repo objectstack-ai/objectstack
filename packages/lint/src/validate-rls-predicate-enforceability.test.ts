@@ -858,6 +858,7 @@ describe('validateRlsPredicateEnforceability — the refusals the SHAPE check ca
     ['record.assigned_to_id in current_user', '`record.assigned_to_id in current_user.org_user_ids`'],
     ['record.assigned_to_id.startsWith(current_user)', '`record.assigned_to_id.startsWith(current_user.id)`'],
     ['record.assigned_to_id.contains(current_user)', '`record.assigned_to_id.contains(current_user.email)`'],
+    ['record.assigned_to_id.endsWith(current_user)', '`record.assigned_to_id.endsWith(current_user.organization_id)`'],
     [
       'record.assigned_to_id.startsWith(current_user.org_user_ids)',
       'the membership test `record.assigned_to_id in current_user.org_user_ids`',
@@ -875,6 +876,8 @@ describe('validateRlsPredicateEnforceability — the refusals the SHAPE check ca
       'replace `record.status in ["open", null]` with `(record.status in ["open"] || record.status == null)`',
     ],
     ['record.status > null', 'replace `record.status > null` with `record.status != null`'],
+    ['record.status >= null', 'replace `record.status >= null` with `record.status != null`'],
+    ['record.status < null', 'replace `record.status < null` with `record.status != null`'],
     ['record.status <= null', 'replace `record.status <= null` with `record.status != null`'],
   ];
 
