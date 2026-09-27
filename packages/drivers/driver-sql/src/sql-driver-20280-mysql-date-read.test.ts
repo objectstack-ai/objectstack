@@ -33,6 +33,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { DriverQuery } from '@objectstack/spec/contracts';
+import type { FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -119,8 +121,9 @@ describe('[#20280] a MySQL connection asks mysql2 for a DATE as its wire text', 
 function measure(cell: DialectCell): void {
   describe(`[#20280] a date reads back the day it stores — ${cell.label}`, () => {
     let driver: SqlDriver;
-    const ids = async (where: Record<string, unknown>) =>
-      (await driver.find(TABLE, { where } as any, NO_AUDIT)).map((r: any) => r.id).sort();
+    const ids = async (where: FilterCondition) =>
+      (await driver.find(TABLE, { where }, NO_AUDIT)).map((r: any) => r.id).sort();
+    const findOne = async (id: string): Promise<any> => driver.findOne(TABLE, { where: { id } }, NO_AUDIT);
 
     beforeAll(async () => {
       driver = new SqlDriver(cell.config());
@@ -148,28 +151,29 @@ function measure(cell: DialectCell): void {
     });
 
     it('find() and findOne() present the stored day', async () => {
-      const rows = await driver.find(TABLE, {} as any, NO_AUDIT);
+      const rows = await driver.find(TABLE, {}, NO_AUDIT);
       expect(Object.fromEntries(rows.map((r: any) => [r.id, r.placed_on])))
         .toEqual(Object.fromEntries(ROWS.map((r) => [r.id, r.placed_on])));
       for (const row of ROWS) {
-        const one: any = await driver.findOne(TABLE, { where: { id: row.id } } as any, NO_AUDIT);
-        expect(one?.placed_on, row.id).toBe(row.placed_on);
+        expect((await findOne(row.id))?.placed_on, row.id).toBe(row.placed_on);
       }
     });
 
     it('a groupBy key, distinct() and min / max present the stored day', async () => {
-      const grouped = await driver.aggregate(TABLE, {
+      const byDay: DriverQuery = {
         groupBy: ['placed_on'],
         aggregations: [{ function: 'count', alias: 'n' }],
-      } as any);
+      };
+      const grouped = await driver.aggregate(TABLE, byDay);
       expect(grouped.map((r: any) => r.placed_on).sort()).toEqual([...DAYS].sort());
       expect((await driver.distinct(TABLE, 'placed_on', undefined, NO_AUDIT)).sort()).toEqual([...DAYS].sort());
-      const [range]: any[] = await driver.aggregate(TABLE, {
+      const firstAndLast: DriverQuery = {
         aggregations: [
           { function: 'min', field: 'placed_on', alias: 'first' },
           { function: 'max', field: 'placed_on', alias: 'last' },
         ],
-      } as any);
+      };
+      const [range]: any[] = await driver.aggregate(TABLE, firstAndLast);
       expect(range.first).toBe('0009-03-04');
       expect(range.last).toBe('2026-03-04');
     });
@@ -181,7 +185,7 @@ function measure(cell: DialectCell): void {
     });
 
     it('a datetime is presented as before: right on SQLite and PostgreSQL, a MySQL year below 100 still folded (observed)', async () => {
-      const rows = await driver.find(TABLE, {} as any, NO_AUDIT);
+      const rows = await driver.find(TABLE, {}, NO_AUDIT);
       expect(Object.fromEntries(rows.map((r: any) => [r.id, r.opened_at])))
         .toEqual(Object.fromEntries(ROWS.map((r) => [r.id, presentedInstant(cell, r)])));
     });
@@ -203,9 +207,9 @@ function measure(cell: DialectCell): void {
 
     it('a write then a read round-trips a year below 100 — create, update, findOne', async () => {
       await driver.create(TABLE, { id: 'rt', placed_on: '0042-01-31' }, NO_AUDIT);
-      expect((await driver.findOne(TABLE, { where: { id: 'rt' } } as any, NO_AUDIT) as any)?.placed_on).toBe('0042-01-31');
+      expect((await findOne('rt'))?.placed_on).toBe('0042-01-31');
       await driver.update(TABLE, 'rt', { placed_on: '0001-12-31' }, NO_AUDIT);
-      expect((await driver.findOne(TABLE, { where: { id: 'rt' } } as any, NO_AUDIT) as any)?.placed_on).toBe('0001-12-31');
+      expect((await findOne('rt'))?.placed_on).toBe('0001-12-31');
     });
   });
 }
