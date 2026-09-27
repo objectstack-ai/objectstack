@@ -9,7 +9,7 @@ import { GLOBAL_ACTION_OBJECT_KEY } from '@objectstack/objectql';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { computeI18nCoverage, type CoverageIssue } from '../utils/i18n-coverage.js';
 import { lintDataModel, runAuthoringRules } from '@objectstack/lint';
-import { resolveSduiManifest } from '../utils/sdui-manifest.js';
+import { resolveJsxGateManifest } from '../utils/sdui-manifest.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
@@ -748,16 +748,26 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // ⛔ ONE mapping for both halves. A second copy of this expression is how one
   // list comes to render `info` as `suggestion` and the other does not.
   for (const f of [...unionFindings, ...perPackageFindings]) {
-    issues.push({
-      severity: f.severity === 'info' ? 'suggestion' : f.severity,
-      rule: f.rule,
-      message: `${f.where}: ${f.message}`,
-      path: f.path,
-      fix: f.hint,
-    });
+    issues.push(authoringFindingToLintIssue(f));
   }
 
   return issues;
+}
+
+/**
+ * The ONE mapping from an author-time finding to an `os lint` issue — `info`
+ * grades as `suggestion`, the location leads the message, the hint is the
+ * fix. Read by both halves of `lintConfig`'s rule run and by the command's
+ * JSX-gate notice (#20113), so the three cannot render one severity two ways.
+ */
+function authoringFindingToLintIssue(f: ReturnType<typeof runAuthoringRules>[number]): LintIssue {
+  return {
+    severity: f.severity === 'info' ? 'suggestion' : f.severity,
+    rule: f.rule,
+    message: `${f.where}: ${f.message}`,
+    path: f.path,
+    fix: f.hint,
+  };
 }
 
 // ─── Command ────────────────────────────────────────────────────────
@@ -947,7 +957,19 @@ export default class Lint extends Command {
           printWarning(formatConversionNotice(n));
         }
       }
-      const issues = lintConfig(normalized, { sduiManifest: resolveSduiManifest() });
+      // [#20113] The SDUI manifest, resolved once over the stack `lintConfig`
+      // folds to — see `validate.ts` step 3 for the three outcomes. With
+      // `kind:'html'` pages to check and no manifest, the JSX gate runs at
+      // parse level and the run SAYS so: one `info` finding, graded
+      // `suggestion` by the one mapping, so it rides `issues` and the counts
+      // and never fails a run — `--strict` promotes warnings, not suggestions.
+      // Pushed HERE rather than inside `lintConfig`, because `scoreMetadata`
+      // reaches that function without a manifest and must not score a notice
+      // about the filesystem. A project manifest that exists but cannot be
+      // used is refused instead (already reported on stderr; exit 1).
+      const jsxGate = resolveJsxGateManifest(authoringRuleUnionStack(normalized as Record<string, unknown>));
+      const issues = lintConfig(normalized, { sduiManifest: jsxGate.sduiManifest });
+      issues.push(...jsxGate.notices.map(authoringFindingToLintIssue));
 
       // ── Package docs (ADR-0046) ── collected src/docs/*.md + inline docs:
       // flatness, namespace-prefixed names, MDX/image ban, link resolution.

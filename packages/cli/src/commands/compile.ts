@@ -19,7 +19,7 @@ import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
-import { resolveSduiManifest } from '../utils/sdui-manifest.js';
+import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { attachPackageDocs, collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
@@ -164,6 +164,14 @@ export default class Compile extends Command {
     // `severity: 'warning'` is declared at the producer — this reports, it
     // never refuses.
     let permissionSetCollisionWarnings: PermissionSetNameCollisionDiagnostic[] = [];
+    // [#20113] The JSX gate's parse-level notice — empty, or ONE `info` record
+    // saying `kind:'html'` pages were checked at parse level only because no
+    // SDUI component manifest resolved. A member of `warningsSoFar()`, ⛔ not a
+    // payload key, for the three reasons the two lists above record: the
+    // undeclared-key pins refuse a new top-level key by name, `os validate`
+    // computes the identical record so the residue pin holds, and it reports
+    // without ever refusing. Appended LAST, in `os validate`'s order.
+    let jsxGateNotices: ReturnType<typeof resolveJsxGateManifest>['notices'] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -171,6 +179,7 @@ export default class Compile extends Command {
       ...capProviderWarnings,
       ...navGroupWarnings,
       ...permissionSetCollisionWarnings,
+      ...jsxGateNotices,
     ];
     // [#18780] ONE rendering of the author-time advisory block, from the
     // COMPLETE list — hoisted here for the same reason the lists above are.
@@ -396,10 +405,21 @@ export default class Compile extends Command {
       //     `packages[]`. The union run is the only one of the two that can see
       //     a finding spanning packages, which is exactly what an empty input
       //     silently stops reporting.
+      //
+      //     [#20113] The SDUI manifest is resolved ONCE, over the stack the JSX
+      //     gate judges, and both rule runs are handed the same answer — see
+      //     `validate.ts` step 3 for the three outcomes. Printed here, at the
+      //     gate's step, so the parse-level notice shows on the failing paths
+      //     too; it never changes this command's exit status. A project
+      //     manifest that exists but cannot be used is refused instead
+      //     (already reported on stderr; the catch-all exits 1).
+      const jsxGate = resolveJsxGateManifest(authoringRuleUnionStack(result.data as Record<string, unknown>));
+      jsxGateNotices = [...jsxGate.notices];
+      if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const findings = runAuthoringRules('build', {
         normalized: authoringRuleUnionStack(normalized as Record<string, unknown>),
         parsed: authoringRuleUnionStack(result.data as Record<string, unknown>),
-        sduiManifest: resolveSduiManifest(),
+        sduiManifest: jsxGate.sduiManifest,
         // [#16546] Ref strings, not hook indices — survive the union fold and
         // the per-package re-slice below unchanged (see `LoweringResult.
         // loweredHookRefs`'s header for why an index would not).
@@ -497,7 +517,7 @@ export default class Compile extends Command {
           command: 'build',
           parsed: result.data as Record<string, unknown>,
           unionFindings: findings,
-          sduiManifest: resolveSduiManifest(),
+          sduiManifest: jsxGate.sduiManifest,
           loweredHookRefs: lowering.loweredHookRefs,
         });
         const perPackageErrors: Array<{ package: string } & typeof ruleErrors[number]> =
