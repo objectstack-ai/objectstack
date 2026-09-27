@@ -24,14 +24,17 @@ import {
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   AssignmentConfigSchema,
   AssignmentExpressionValueSchema,
+  AssignmentValueSchema,
   CreateRecordConfigSchema,
   DeleteRecordConfigSchema,
+  FlowValueSlotSchema,
   GetRecordConfigSchema,
   MapConfigSchema,
   SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED,
   ScreenConfigSchema,
   ScreenFieldConfigSchema,
   UpdateRecordConfigSchema,
+  VALUE_ENVELOPE_REFUSAL,
 } from './builtin-node-config.zod.js';
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionSchema } from '../shared/expression.zod.js';
 import {
@@ -547,7 +550,8 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
     // is carried there by `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` — NOT by
     // `SCHEMALESS_NODE_CONFIG_SCHEMAS`, whose meaning ("publishes no
     // descriptor") other readers depend on.
-    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment']);
+    // #19938 — the CRUD write map joined through the same channel.
+    expect(Object.keys(LEDGER_DECLARED_NODE_CONFIG_SCHEMAS)).toEqual(['assignment', 'create_record', 'update_record']);
     expect(Object.keys(SCHEMALESS_NODE_CONFIG_SCHEMAS).sort()).toEqual(['decision', 'script', 'subflow']);
     const projected = getSchemalessNodeConfigJsonSchemas().assignment as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
@@ -789,5 +793,93 @@ describe('AssignmentConfigSchema — top-level __proto__ refused at the catchall
     const projected = getSchemalessNodeConfigJsonSchemas().assignment as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
     expect(projected.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
+  });
+});
+
+// ─── CRUD `fields` — a value slot (#19938) ────────────────────────────
+
+/**
+ * #19938 (the contract half of #11182 ruling D) — the `create_record` /
+ * `update_record` `fields` map carries the value contract `assignments` has:
+ * a field value may be a CEL value envelope beside a `{token}` template or a
+ * literal. The widening is the valid envelope; the one newly refused shape is a
+ * malformed envelope (an object naming a string `dialect` that is not a valid
+ * CEL value envelope), the edge #14149 accepted on `assignments.*`. Everything
+ * else parses exactly as before.
+ */
+describe('CRUD `fields` value contract — the CEL value envelope beside `{token}` templates (#19938)', () => {
+  const PRICE_ENVELOPE = { dialect: 'cel', source: 'round(price * 100) / 100.0' };
+  const configs = [
+    ['create_record', CreateRecordConfigSchema, (fields: unknown) => ({ objectName: 'quote', fields })],
+    ['update_record', UpdateRecordConfigSchema, (fields: unknown) => ({ objectName: 'quote', filter: { id: '{quoteId}' }, fields })],
+  ] as const;
+
+  it.each(configs)('%s: accepts a valid CEL value envelope as a field value, stored verbatim', (_type, schema, wrap) => {
+    const result = schema.safeParse(wrap({ total: PRICE_ENVELOPE }));
+    expect(result.success).toBe(true);
+    // No transform: the stored shape IS the envelope the executor evaluates.
+    expect((result.data as { fields: Record<string, unknown> }).fields.total).toEqual(PRICE_ENVELOPE);
+  });
+
+  it.each(configs)('%s PRESERVATION: every field value that parsed before still parses, unchanged', (_type, schema, wrap) => {
+    const fields = {
+      subject: 'Follow up on {record.name}',   // text with holes
+      owner: '{record.owner}',                 // sole token
+      due_date: '{TODAY() + 7}',               // date macro
+      amount: '{round(total * 100) / 100}',    // template expression
+      cel_looking_text: 'a + b',               // a STRING is never CEL here
+      n: 3, ok: true, nothing: null, empty: '',
+      tags: ['{a}', 2, { dialect: 'cel' }],    // arrays are data, envelope-shaped members included
+      payload: { nested: { dialect: 'cel' }, source: 'not an envelope without a dialect' },
+      weird: { dialect: 1 },                   // a non-string `dialect` is a literal
+    };
+    const result = schema.safeParse(wrap(fields));
+    expect(result.success).toBe(true);
+    expect((result.data as { fields: Record<string, unknown> }).fields).toEqual(fields);
+  });
+
+  it.each(configs.flatMap(([type, schema, wrap]) => [
+    [type, schema, wrap, 'no `source`', { dialect: 'cel' }, 'fields.total.source'],
+    [type, schema, wrap, 'a whitespace-only `source`', { dialect: 'cel', source: '   ' }, 'fields.total.source'],
+    [type, schema, wrap, 'an `ast`-only envelope', { dialect: 'cel', ast: { kind: 'const', value: 1 } }, 'fields.total.source'],
+    [type, schema, wrap, 'a `template` dialect', { dialect: 'template', source: 'Hi {name}' }, 'fields.total.dialect'],
+    [type, schema, wrap, 'an unknown dialect', { dialect: 'javascript', source: '1 + 1' }, 'fields.total.dialect'],
+  ] as const))('%s REFUSES a malformed envelope with %s — code `custom`, at the field\'s path, led by the slot-neutral sentence', (_type, schema, wrap, _what, envelope, path) => {
+    const result = schema.safeParse(wrap({ subject: '{x}', total: envelope }));
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues.filter((i) => i.path[0] === 'fields');
+    expect(issues.map((i) => i.path.join('.'))).toEqual([path]);
+    expect(issues[0]!.code).toBe('custom');
+    expect(issues[0]!.message.startsWith(VALUE_ENVELOPE_REFUSAL)).toBe(true);
+    // Q2: a refused FIELD value is not told it is an assignment.
+    expect(issues[0]!.message).not.toMatch(/assignment/i);
+  });
+
+  it('the refusal sentence is slot-neutral, and the published assignment-era name IS it', () => {
+    expect(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL).toBe(VALUE_ENVELOPE_REFUSAL);
+    expect(VALUE_ENVELOPE_REFUSAL).not.toMatch(/assignment/i);
+    // One rule under two descriptions: the assignment map and the CRUD map
+    // refuse the same envelope with the same issues.
+    const bad = { dialect: 'template', source: 'x' };
+    const a = AssignmentValueSchema.safeParse(bad);
+    const f = FlowValueSlotSchema.safeParse(bad);
+    expect(a.success).toBe(false);
+    expect(f.success).toBe(false);
+    expect(f.error!.issues.map((i) => [i.code, i.path.join('.'), i.message]))
+      .toEqual(a.error!.issues.map((i) => [i.code, i.path.join('.'), i.message]));
+    expect(AssignmentExpressionValueSchema.safeParse(bad).error!.issues[0]!.message).not.toMatch(/assignment/i);
+  });
+
+  it.each(configs)('%s declares the slot to the expression ledger: `xExpression: \'value\'` rides onto `fields`\' map value', (type, schema) => {
+    const direct = z.toJSONSchema(schema, {
+      target: 'draft-2020-12', io: 'input', unrepresentable: 'any',
+    }) as { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
+    expect(direct.properties?.fields?.additionalProperties?.xExpression).toBe('value');
+    // …and through the JSON map the reconciliation ratchet walks.
+    const projected = getSchemalessNodeConfigJsonSchemas()[type] as
+      { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
+    expect(projected.properties?.fields?.additionalProperties?.xExpression).toBe('value');
+    // `update_record.filter` is a match map, not a value slot — no marker.
+    expect(projected.properties?.filter?.additionalProperties?.xExpression).toBeUndefined();
   });
 });
