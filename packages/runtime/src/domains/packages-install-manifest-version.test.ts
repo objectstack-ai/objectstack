@@ -107,8 +107,19 @@ function without<K extends string>(obj: Record<string, unknown>, key: K) {
     return copy;
 }
 
-/** A version string the DECLARATION refuses — asserted as such in §0, never assumed. */
-const OFF_SPEC_GRAMMAR = '2.0.0-beta.1';
+/**
+ * A version string the DECLARATION refuses — asserted as such in §0, never
+ * assumed.
+ *
+ * ⭐ Re-chosen once, exactly as §0 said it would have to be. This was
+ * `2.0.0-beta.1` while `ManifestSchema.version` demanded a bare three-segment
+ * core; the version-grammar canon then made the key SemVer 2.0.0, which accepts
+ * prereleases, and §0 went red naming the move. The successor keeps what made
+ * the old one a good fixture — version-SHAPED, plausible at a glance, refused
+ * on the grammar alone rather than for being obviously not a version. `01.1.1`
+ * is refused by SemVer 2.0.0 §2: a numeric identifier carries no leading zero.
+ */
+const OFF_SPEC_GRAMMAR = '01.1.1';
 
 interface Door {
     dispatcher: HttpDispatcher;

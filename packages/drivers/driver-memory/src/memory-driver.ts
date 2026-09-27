@@ -9,7 +9,7 @@ import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectst
 // [#7536] `$like`/`$ilike`'s pattern language, from the spec's one definition —
 // the same translation `formula` evaluates and the same pattern `driver-sql`
 // hands to LIKE/GLOB, so this face cannot answer a pattern differently.
-import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegexSource } from '@objectstack/spec/data';
+import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -1393,8 +1393,10 @@ export class InMemoryDriver implements IDataDriver {
         if (hasDanglingLikeEscape(value)) throw danglingLikeEscapeError(field, canonical, value);
         // [#20041] The same U+0000 refusal as the `$`-spelling's shape gate.
         if (hasNulInLikePattern(value)) throw nulLikePatternError(field, canonical, value);
+        // [#20143] The spec's compiled RegExp, never a local `new RegExp`: it
+        // carries the `u` flag that makes `_` one code point, as on SQL.
         return {
-          [field]: { $regex: new RegExp(likePatternToRegexSource(value, canonical === 'ilike')) },
+          [field]: { $regex: likePatternToRegExp(value, canonical === 'ilike') },
         };
       }
       case 'notcontains': case 'not_contains':
@@ -1618,16 +1620,18 @@ export class InMemoryDriver implements IDataDriver {
           regexConditions.push({ $regex: new RegExp(asciiCaseInsensitiveRegexSource(val)) });
           break;
         // [#7536] `$like` / `$ilike` — the caller's OWN pattern, anchored to the
-        // whole value. `likePatternToRegexSource` is the spec's one translation
-        // of that language, the same one `formula` evaluates and the same
+        // whole value. `likePatternToRegExp` is the spec's one compilation of
+        // that language, the same one `formula` evaluates and the same
         // pattern `driver-sql` hands to `LIKE` / `GLOB`.
         //
         // Two things this arm must NOT copy from its neighbours above. It does
         // not `escapeRegex` the comparand — a `%` here is the caller's wildcard,
         // and escaping it back into a literal IS the wire defect #7536 closed,
-        // reproduced one layer down. And it does not pass the `i` flag: the
-        // `$ilike` fold is ASCII-only and lives in the pattern source, for the
-        // reason the `$icontains` arm above spells out at length.
+        // reproduced one layer down. And it does not build its own `RegExp`:
+        // the spec's carries the `u` flag that makes `_` one code point
+        // (#20143) and never the `i` flag — the `$ilike` fold is ASCII-only and
+        // lives in the pattern source, for the reason the `$icontains` arm
+        // above spells out at length.
         case '$like':
         case '$ilike':
           // The comparand's shape was settled by `assertFieldConstraintShape`
@@ -1640,7 +1644,7 @@ export class InMemoryDriver implements IDataDriver {
           if (hasDanglingLikeEscape(val)) throw danglingLikeEscapeError(field, op, val, path);
           if (hasNulInLikePattern(val)) throw nulLikePatternError(field, op, val, path);
           regexConditions.push({
-            $regex: new RegExp(likePatternToRegexSource(val, op === '$ilike')),
+            $regex: likePatternToRegExp(val, op === '$ilike'),
           });
           break;
         case '$between': {

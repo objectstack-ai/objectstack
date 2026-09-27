@@ -10,7 +10,12 @@ import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
 import { pickDisplayField, type DimensionLabelDeps } from './dimension-labels.js';
-import { assertReadScopeCannotVacate } from './read-scope-sql.js';
+import {
+  assertReadScopeAdmittedByEngine,
+  assertReadScopeCannotVacate,
+  assertReadScopeComparandsRunnable,
+  assertReadScopePlaceholdersResolvable,
+} from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // [#16206] The narrowing from a driver's FOUR-name `dialectName` to the THREE
 // this package's config hook declares — see the bridge below.
@@ -48,11 +53,13 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * other half of that graceful-degradation contract. `getObject` is REQUIRED on
  * `IObjectQLEngine`, so the `Partial<>` around it is not decoration — it is
  * what keeps this seam usable against an engine that is not ObjectQL.
+ * `judgeFilter` (#20157) is optional on the contract itself, by ruling, and
+ * the auto-bridge probes it the same way.
  */
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
-  & Partial<Pick<IObjectQLEngine, 'getObject'>>;
+  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter'>>;
 
 /**
  * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
@@ -305,6 +312,12 @@ export class AnalyticsServicePlugin implements Plugin {
     // without re-implementing the bridge in every app.
     let executeAggregate = this.options.executeAggregate;
     let autoBridged = false;
+    // [#19995, ruling C] The engine's judge-only `where` admission, filled below
+    // ONLY when this plugin bridges `executeAggregate` itself, and then to the
+    // same engine. The judge must be the executor, or it would refuse scopes the
+    // executor serves; a host that supplied its own `executeAggregate` has not
+    // said which engine that is, so it is not guessed.
+    let judgeFilter: AnalyticsServiceConfig['judgeFilter'];
     if (!executeAggregate) {
       const tryGetDataEngine = (): DataEngineLike | undefined => {
         try {
@@ -399,6 +412,36 @@ export class AnalyticsServicePlugin implements Plugin {
         return rows as Record<string, unknown>[];
       };
       autoBridged = true;
+
+      // [#19995, ruling C] …and the judge, resolved per call through the same
+      // `tryGetDataEngine` the executor above uses, so the two are one engine by
+      // construction. Called as the engine's own method: it reads the engine's
+      // registry. Three answers:
+      //   - the engine carries `judgeFilter` (ObjectQL does): its verdict;
+      //   - no engine at all: `undefined`, silently, because the executor above
+      //     refuses the query itself, loudly;
+      //   - an engine without the member (a 'data' service that is not
+      //     ObjectQL): `undefined`, and the host is told ONCE that read scopes
+      //     reach that engine unjudged. `warn`: a functional degradation, the
+      //     answers are the ones this host gave before the hook existed.
+      let reportedEngineWithoutJudge = false;
+      judgeFilter = (objectName, where, options) => {
+        const engine = tryGetDataEngine();
+        if (!engine) return undefined;
+        if (typeof engine.judgeFilter === 'function') return engine.judgeFilter(objectName, where, options);
+        if (!reportedEngineWithoutJudge) {
+          reportedEngineWithoutJudge = true;
+          ctx.logger.warn(
+            `[Analytics] The "data" engine has no judgeFilter (IObjectQLEngine.judgeFilter), so row-level read ` +
+            `scopes composed into its aggregates (first: "${objectName}") are not judged by the engine before they ` +
+            `are composed. Scope shapes this package can judge itself are still refused with the policy withheld ` +
+            `(READ_SCOPE_COMPILE_FAILED / 500); a scope the engine refuses through a door that reads the object's ` +
+            `fields comes back as its 400, whose message names the policy. Register ObjectQLPlugin's engine as ` +
+            `"data" to have it judged. Reported once.`,
+          );
+        }
+        return undefined;
+      };
     }
 
     // Auto-bridge raw SQL when the data engine exposes `execute()` and the
@@ -838,6 +881,20 @@ export class AnalyticsServicePlugin implements Plugin {
         // ⛔ Zero compiler change: the #13571 lowering residue is ruled and
         // untouched. This guard is the walk, not the lowering.
         if (scope) assertReadScopeCannotVacate(scope, targetObject);
+        // [#19995] …and the rest of `resolveFkAttr`'s door, which #14329's
+        // placement argument extends to: the comparand faces, the placeholder
+        // resolver, and (ruling C) the engine's own admission, all on the scope
+        // alone, before the `$and` below. Without them the scope reached the
+        // engine unjudged here, and a scope the engine refuses came back as its
+        // 400 with the policy's field and comparand in the message. Measured on
+        // the dataset door, whose sort-key label pass (an `order` on a lookup
+        // dimension) propagates that refusal to the caller. The display pass
+        // catches it and renders raw ids, so there the refusal only reaches the
+        // log. Same envelope as the other engine-bound merges, withheld on the
+        // wire; the display pass's catch is untouched.
+        if (scope) assertReadScopeComparandsRunnable(scope, targetObject);
+        if (scope) assertReadScopePlaceholdersResolvable(scope, targetObject, context);
+        if (scope) assertReadScopeAdmittedByEngine(scope, targetObject, context, { judgeFilter });
         // #3680 — the sort-key pass hands over the PRE-window id set (every
         // grouped value, not just the displayed page), so a high-cardinality
         // lookup dimension can push thousands of ids through here. Chunk the
@@ -1121,6 +1178,9 @@ export class AnalyticsServicePlugin implements Plugin {
       getObjectDatasource: (objectName: string) => dataEngine()?.resolveEffectiveDatasource?.(objectName),
       // [#15684] The executing driver's own dialect — see `sqlDialect` above.
       sqlDialect,
+      // [#19995, ruling C] The executing engine's own `where` admission — see
+      // `judgeFilter` beside the `executeAggregate` auto-bridge above.
+      judgeFilter,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.
