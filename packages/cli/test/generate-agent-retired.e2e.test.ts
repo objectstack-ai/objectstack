@@ -147,6 +147,13 @@ describe('[#10359] the generators that were not retired still work', () => {
   it('`os g object … --dry-run` still previews a typed object file', () => {
     expect(survivor.code).toBe(0);
     expect(survivor.stdout).toContain('Dry run');
-    expect(survivor.stdout).toContain("import * as Data from '@objectstack/spec/data'");
+    // [#20270] The object template declares the object with
+    // `ObjectSchema.create` since #20195 (0bd11261e). Asserted as that SHAPE —
+    // `ObjectSchema` among the named imports from `@objectstack/spec/data`, and
+    // the factory call — never as one exact import line: the copied
+    // `import * as Data` line this replaced went stale when the template
+    // changed, and turned this nightly case red on main.
+    expect(survivor.stdout).toMatch(/import \{[^}]*\bObjectSchema\b[^}]*\} from '@objectstack\/spec\/data';/);
+    expect(survivor.stdout).toMatch(/const customer = ObjectSchema\.create\(\{/);
   });
 });
