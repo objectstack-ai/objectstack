@@ -192,17 +192,17 @@
         },
         "using": {
           "status": "live",
-          "verifiedAt": "2026-08-28",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`policy.using` is the predicate on the read pass, and the fallback when a `check` pass finds no `check`)",
+          "verifiedAt": "2026-09-27",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`policy.using` is the predicate on the read pass, and on a `check` pass for a policy that declares no `check`); packages/plugins/plugin-security/src/security-plugin.ts#writeCheckPolicies (hands USING-only policies to that `check` pass only when no applicable policy for the write declares `check`)",
           "proof": "packages/qa/dogfood/test/rls-fixture.dogfood.test.ts#rls-by-id-write",
-          "note": "compiled into find + analytics SQL. ADR-0054 high-risk class (RLS): the proof boots an owner-isolated fixture so a fresh member cannot read an admin-created row, then asserts the runner's verdict in both directions — `rls-consistent` when the owner predicate also gates the by-id write (#1994 pre-image check) and `rls-hole` when it doesn't. Guards read AND by-id-write enforcement, not just the read predicate. 2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to an anchor. Re-closed by hand against c459da6bc."
+          "note": "compiled into find + analytics SQL. ADR-0054 high-risk class (RLS): the proof boots an owner-isolated fixture so a fresh member cannot read an admin-created row, then asserts the runner's verdict in both directions — `rls-consistent` when the owner predicate also gates the by-id write (#1994 pre-image check) and `rls-hole` when it doesn't. Guards read AND by-id-write enforcement, not just the read predicate. 2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to an anchor. Re-closed by hand against c459da6bc. 2026-09-27: the evidence now also names `writeCheckPolicies`, which decides when a `using` stands in as the check (#19967); re-read against 0d3ec47137."
         },
         "check": {
           "status": "live",
-          "verifiedAt": "2026-08-28",
+          "verifiedAt": "2026-09-27",
           "proof": "packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts#showcase-d3-d4-capabilities",
-          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`(policy as { check?: string }).check ?? policy.using` — the post-image pass prefers `check` and falls back to `using`)",
-          "note": "2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to an anchor. Re-closed by hand against c459da6bc."
+          "evidence": "packages/plugins/plugin-security/src/security-plugin.ts#writeCheckPolicies (the policies that declare `check` when any applicable policy for the write does, otherwise each applicable policy's `using`); packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`policyDeclaresClause(policy, 'check') ? check : policy.using` on the `check` pass, OR-combined)",
+          "note": "2026-08-28: RE-ANCHORED (#13003) — path-only citation upgraded to an anchor. Re-closed by hand against c459da6bc. 2026-09-27: RE-ANCHORED (#19967) — the cited `check ?? policy.using` expression left compileFilter when the per-operation selector `writeCheckPolicies` took over the choice (#19952); both halves re-read against 0d3ec47137."
         },
         "positions": {
           "status": "live",

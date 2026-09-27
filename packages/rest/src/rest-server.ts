@@ -67,6 +67,7 @@ import {
     // organization. One predicate for every `/meta` item write door on both
     // transports — never a REST-local restatement.
     metaWriteCapabilityVerdict,
+    type MetaWriteCapabilityVerdict,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -166,6 +167,7 @@ import type {
     MetaItemReadGateSources,
     MetaItemReadRefusal,
     MetaReadGateAudienceSources,
+    MetaReadGateCaller,
     MetaReadGateListSource,
     MetaReadGatePolicy,
     NavDocAudienceGate,
@@ -3245,7 +3247,8 @@ export class RestServer {
         policy: MetaReadGatePolicy,
     ): (document: any) => Promise<MetaReadVerdict> {
         const judge = metaReadGate.createMetaItemReadGate(
-            this.metaItemReadGateSources(environmentId, req, p), metaType, name, documents, policy,
+            this.metaItemReadGateSources(environmentId, req, p, policy.app === 'author-exempt'),
+            metaType, name, documents, policy,
         );
         return async (document) => {
             const verdict = await judge(document);
@@ -3286,26 +3289,52 @@ export class RestServer {
      * caller from {@link resolveExecCtx} (an authz-store outage re-raised,
      * never read as anonymous), the protocol's list read, the security service
      * provider, the service probe, and this instance's prune-log dedupe.
+     *
+     * `withItemWriteVerdict` — [#20156] the door's policy honours the author
+     * exemption, so the caller carries its `mayWriteItem` (see
+     * {@link metaReadAudienceSources}).
      */
     private metaItemReadGateSources(
         environmentId: string | undefined,
         req: any,
         p: RestProtocol,
+        withItemWriteVerdict = false,
     ): MetaItemReadGateSources {
         return {
-            ...this.metaReadAudienceSources(environmentId, req),
+            ...this.metaReadAudienceSources(environmentId, req, withItemWriteVerdict),
             ...this.metaListSource(p, environmentId),
             serviceProbe: (caller) => this.serviceProbeFor((caller as any)?.__kernel),
             navPruneLogged: this.navPruneLogged,
         };
     }
 
-    /** [#20193] The caller half of {@link metaItemReadGateSources}. */
-    private metaReadAudienceSources(environmentId: string | undefined, req: any): MetaReadGateAudienceSources {
+    /**
+     * [#20193] The caller half of {@link metaItemReadGateSources}.
+     *
+     * [#20156] `withItemWriteVerdict`: the caller also carries
+     * `mayWriteItem`, THIS transport's save-door admission of `:type/:name`
+     * ({@link metaSaveVerdict}, the one spelling `PUT /meta/:type/:name`
+     * asks), for a door whose policy honours ruling 5856774816's author
+     * exemption. Only there: a pure verdict over the context this read has
+     * already resolved (memoised per request) and the static type registry, so
+     * it costs no read — but a door that does not honour it is not handed one.
+     * The context is COPIED, never written: the same memoised object serves
+     * every other consumer of this request.
+     */
+    private metaReadAudienceSources(
+        environmentId: string | undefined,
+        req: any,
+        withItemWriteVerdict = false,
+    ): MetaReadGateAudienceSources {
+        let withVerdict: MetaReadGateCaller | undefined;
         return {
             resolveCaller: async () => {
                 const caller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                return caller;
+                if (!withItemWriteVerdict || !caller) return caller;
+                return (withVerdict ??= {
+                    ...caller,
+                    mayWriteItem: RestServer.metaSaveVerdict(caller, req.params.type).allowed,
+                });
             },
             resolveSecurityService: async () => (
                 this.securityServiceProvider ? this.securityServiceProvider(environmentId) : undefined
@@ -3412,12 +3441,48 @@ export class RestServer {
     }
 
     /**
+     * [#20156] A `diffMetaItem` answer whose EMITTED values are read off the
+     * two sides as {@link metaItemReadGate} served them ({@link diffSides}
+     * rebuilt, then judged): `added` from `to`, `removed` from `from`,
+     * `changed` from both. For a side the gate serves as given this is the
+     * answer unchanged; for an app side it serves pruned (ruling 5856774816:
+     * a caller who may open the app but not write it), the entries the plain
+     * read withholds from that caller leave with neither value.
+     *
+     * The comparison stays the protocol's, over the stored bodies, and no
+     * entry is added or dropped — only values are substituted. That is the
+     * redaction precedent one frame down (`diffMetaItem`: diff raw, emit the
+     * projected values, ruling 5299845282 option B) and the ADR-0106 mask
+     * beside this call, so the three projections of one answer agree on its
+     * shape.
+     */
+    private static diffEmittedFrom(
+        diff: any,
+        from: Record<string, any>,
+        to: Record<string, any>,
+    ): any {
+        if (!diff || typeof diff !== 'object') return diff;
+        const emit = (bucket: unknown, project: (e: any) => any): unknown => (Array.isArray(bucket)
+            ? bucket.map((e) => (typeof e?.path === 'string' ? project(e) : e))
+            : bucket);
+        return {
+            ...diff,
+            ...('added' in diff ? { added: emit(diff.added, (e) => ({ ...e, value: to[e.path] })) } : {}),
+            ...('removed' in diff ? { removed: emit(diff.removed, (e) => ({ ...e, value: from[e.path] })) } : {}),
+            ...('changed' in diff
+                ? { changed: emit(diff.changed, (e) => ({ ...e, from: from[e.path], to: to[e.path] })) }
+                : {}),
+        };
+    }
+
+    /**
      * [#20156] Does {@link metaItemReadGate} judge this type per caller? The
      * question a door serving no document of its own asks before it fetches the
      * current one — a type the answer is no for costs that door no extra read
      * and no new failure mode. `dashboard` is never judged per caller (its gate
-     * answers per deployment). `app` always is: even its `pending-decision` arm
-     * answers the plain read's refusal of an app refused WHOLE.
+     * answers per deployment). `app` always is: an app the plain read refuses
+     * WHOLE is refused on every door, to an author as to anyone (ruling
+     * 5856774816), and a non-author is served it pruned.
      */
     private static gatesPerCaller(metaType: string): boolean {
         return metaType === 'book' || metaType === 'doc' || metaType === 'app';
@@ -3426,12 +3491,46 @@ export class RestServer {
     /**
      * [#20156] The policy of the doors that serve STORED versions for authoring
      * — the layered view (`/layers`, `?layers=`) and `/diff`. One constant, so
-     * the two cannot come to disagree about the pending `app` cells.
+     * the two cannot come to disagree about the `app` row.
+     *
+     * `app: 'author-exempt'` — ruling 5856774816 (letter B, confirmed
+     * 5856866273): a caller who may write the app ({@link metaSaveVerdict},
+     * carried on the caller as `mayWriteItem`) reads the full stored version,
+     * and every other caller who may open the app reads exactly what the plain
+     * read gives them, pruned. See `MetaReadGatePolicy.app`.
      */
     private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = Object.freeze({
         arms: 'per-caller',
-        app: 'pending-decision',
+        app: 'author-exempt',
     });
+
+    /**
+     * [#12702 · #20156] May this caller SAVE `:type/:name`? The admission of
+     * `PUT /meta/:type/:name`, spelled ONCE: that door asks it, and so does the
+     * stored-version read doors' author exemption (ruling 5856774816, item 1:
+     * 「whoever can save it must see it whole, or a save drops entries
+     * silently」). A second spelling of the question at the read doors could
+     * drift from the door it stands for — an exempt reader the save refuses, or
+     * a saver the exemption prunes, which is the silent drop itself.
+     *
+     * The whole admission is this verdict: the save door refuses on nothing
+     * else about the CALLER before `saveMetaItem` (whose own refusals judge the
+     * item and the scope, the same for every admitted caller). `rawType` is
+     * the URL segment, folded here at the boundary ([folded-type commit
+     * 26f3588fb] — see the PUT door's org-scope comment) so the verdict and
+     * the door's scope decision read one spelling; the organization is the
+     * context's `tenantId`, the very value `organizationIdForMetaWrite`
+     * threads.
+     */
+    private static metaSaveVerdict(ctx: any, rawType: string): MetaWriteCapabilityVerdict {
+        return metaWriteCapabilityVerdict({
+            isSystem: ctx?.isSystem === true,
+            systemPermissions: ctx?.systemPermissions,
+            canonicalType: canonicalMetaUrlType(rawType),
+            activeOrganizationId: ctx?.tenantId,
+            operation: 'save',
+        });
+    }
 
     /**
      * Probe which `requiresService` capability gates referenced anywhere in
@@ -3828,24 +3927,33 @@ export class RestServer {
         // the plain read's own), then `code` and `overlay`: a layer the caller
         // may not read is not served beside one they may. `per-caller` because
         // these are STORED versions, loaded by Studio's designer and saved
-        // back; an app the caller may see only in PART is `pending-decision`
-        // — see `MetaReadGatePolicy.app`.
+        // back.
+        //
+        // [#20156] Each layer is SERVED as the gate serves it, never as
+        // stored: ruling 5856774816 — a caller who may write an app reads
+        // every layer whole, and any other caller who may open it reads each
+        // layer pruned, exactly as the plain read prunes it (see
+        // `MetaReadGatePolicy.app`). Every layer is judged before any is
+        // replaced, so a refusal sends nothing of the others.
         {
             const metaType = RestServer.metaTypeSingular(req.params.type);
             const present = (['effective', 'code', 'overlay'] as const)
-                .map((layer) => (layered as any)?.[layer])
-                .filter((document) => document != null);
+                .filter((layer) => (layered as any)?.[layer] != null);
             const judge = this.metaItemReadGate(
-                environmentId, req, p, metaType, req.params.name, present,
+                environmentId, req, p, metaType, req.params.name,
+                present.map((layer) => (layered as any)[layer]),
                 RestServer.STORED_VERSION_DOOR_POLICY,
             );
-            for (const document of present) {
-                const verdict = await judge(document);
+            const served = new Map<(typeof present)[number], unknown>();
+            for (const layer of present) {
+                const verdict = await judge((layered as any)[layer]);
                 if (verdict.kind === 'refuse') {
                     verdict.send(res);
                     return;
                 }
+                served.set(layer, verdict.document);
             }
+            for (const [layer, document] of served) (layered as any)[layer] = document;
         }
         // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
         // `code`, `overlay` and `effective` are each a full object schema.
@@ -6947,10 +7055,12 @@ export class RestServer {
                             // {@link metaItemReadGate}, with their history, so a
                             // door cannot serve this document past a gate this
                             // read applies. This read runs every arm and serves a
-                            // partly-withheld app PRUNED — the answer the census
-                            // in `meta-alternate-door-read-gates.test.ts` holds
-                            // each door to, less the partly-withheld app cells it
-                            // declares pending a decision (see
+                            // partly-withheld app PRUNED, to every caller, its
+                            // authors included (read-to-display is per user) —
+                            // the answer the census in
+                            // `meta-alternate-door-read-gates.test.ts` holds each
+                            // door to, save the stored-version doors' author
+                            // exemption (ruling 5856774816, see
                             // `MetaReadGatePolicy.app`).
                             //
                             // [plural-spelling commit 83a3b1f2e] (the original
@@ -7122,17 +7232,16 @@ export class RestServer {
                     // very value `organizationIdForMetaWrite` threads below, so
                     // an admitted write can only land org-scoped in the caller's
                     // own partition: never env-wide, never another org's.
+                    //
+                    // [#20156] Asked through {@link metaSaveVerdict}, the ONE
+                    // spelling the stored-version read doors' author exemption
+                    // asks too (ruling 5856774816): whoever this door admits
+                    // reads the stored version whole there, whatever the plain
+                    // read withholds from them — so what they save back is
+                    // everything that was stored.
                     const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
                     {
-                        const verdict = metaWriteCapabilityVerdict({
-                            isSystem: ctx?.isSystem === true,
-                            systemPermissions: ctx?.systemPermissions,
-                            // [#10340] Folded at the boundary — the verdict and
-                            // the scope decision below read one spelling.
-                            canonicalType: canonicalMetaUrlType(req.params.type),
-                            activeOrganizationId: ctx?.tenantId,
-                            operation: 'save',
-                        });
+                        const verdict = RestServer.metaSaveVerdict(ctx, req.params.type);
                         if (!verdict.allowed) {
                             res.status(403).json({
                                 error: {
@@ -8209,19 +8318,29 @@ export class RestServer {
                     // side the caller may not read is not served beside one
                     // they may. `per-caller`, the stored-version doors' policy —
                     // see `MetaReadGatePolicy`.
+                    //
+                    // [#20156] And each side is EMITTED as the gate serves it:
+                    // ruling 5856774816 — a caller who may write an app reads
+                    // both sides whole, and any other caller who may open it
+                    // reads each side pruned, exactly as the plain read prunes
+                    // it ({@link diffEmittedFrom}).
+                    let served: any = result;
                     if (diffGated) {
                         const { from, to } = RestServer.diffSides(diffCurrent, result);
                         const judge = this.metaItemReadGate(
                             environmentId, req, p, diffMetaType, req.params.name, [diffCurrent, from, to],
                             RestServer.STORED_VERSION_DOOR_POLICY,
                         );
+                        const sides: any[] = [];
                         for (const side of [diffCurrent, from, to]) {
                             const verdict = await judge(side);
                             if (verdict.kind === 'refuse') {
                                 verdict.send(res);
                                 return;
                             }
+                            sides.push(verdict.document);
                         }
+                        served = RestServer.diffEmittedFrom(result, sides[1], sides[2]);
                     }
                     // [ADR-0106 D5(4)] The object mask on the one key it
                     // projects, `fields`, in every bucket and on both sides —
@@ -8229,8 +8348,7 @@ export class RestServer {
                     // are compared raw, the EMITTED values are the projected
                     // ones), so a field the caller may not read is not served
                     // as a diff value either.
-                    let served: any = result;
-                    if (diffMaskPosture.kind === 'project' && result && typeof result === 'object') {
+                    if (diffMaskPosture.kind === 'project' && served && typeof served === 'object') {
                         let faulted = false;
                         const maskFields = (value: unknown): unknown => {
                             if (faulted || !value || typeof value !== 'object' || Array.isArray(value)) return value;
@@ -8245,10 +8363,10 @@ export class RestServer {
                         const bucket = (list: unknown, keys: readonly string[]) =>
                             (Array.isArray(list) ? list.map((e) => onFields(e, keys)) : list);
                         served = {
-                            ...(result as Record<string, unknown>),
-                            added: bucket((result as any).added, ['value']),
-                            removed: bucket((result as any).removed, ['value']),
-                            changed: bucket((result as any).changed, ['from', 'to']),
+                            ...(served as Record<string, unknown>),
+                            added: bucket((served as any).added, ['value']),
+                            removed: bucket((served as any).removed, ['value']),
+                            changed: bucket((served as any).changed, ['from', 'to']),
                         };
                         // `maskObjectDocument` already answered the ADR-0106 D6
                         // 5xx: a side projected to NO fields is never served.
