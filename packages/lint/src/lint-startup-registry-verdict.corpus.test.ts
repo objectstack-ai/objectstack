@@ -19,9 +19,9 @@
 //     shrink the sweep while the file count stayed comfortably non-zero, and the
 //     test would report a clean audit over source it never opened — the exact
 //     shape the rule itself is about, turned on the rule (#4930). So the root is
-//     resolved up front, the corpus is git's tracked-file list (a git failure
-//     throws with git's stderr), and nothing on the way to the sweep carries a
-//     `catch`.
+//     resolved up front, the corpus is git's list of authored files (a git
+//     failure throws with git's stderr), and nothing on the way to the sweep
+//     carries a `catch`.
 //  2. **A rule that matches nothing.** A ratchet that has only ever been green
 //     cannot be told apart from a dead one (#4690), and this one has been green
 //     from its first commit. `the sweep can still fire` therefore pushes a
@@ -72,8 +72,10 @@ const LEDGER: Readonly<Record<string, string>> = {};
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'coverage', '.cache', '.next']);
 
 /**
- * Every auditable `.ts` under `packages/`, taken from git's TRACKED-file list
- * rather than from a filesystem walk.
+ * Every auditable `.ts` under `packages/`, taken from git's list of AUTHORED
+ * files (tracked plus untracked, ignored paths excluded) rather than from a
+ * filesystem walk. `operation-private-keys.pin.test.ts` in `@objectstack/core`
+ * asks git for the same surface with the same flags, for the same reason.
  *
  * Why git and not a walk. This suite runs in the same turbo run as package
  * builds and as other packages' tests, and both leave transient entries under
@@ -82,17 +84,15 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'c
  * and delete `.ts` fixtures under `packages/cli/tmp/`. A walk could list such an
  * entry and then find it gone at the stat, at the next `readdirSync` or at the
  * sweep's `readFileSync` (`ENOENT`, the whole corpus red), and a fixture that
- * lived long enough was audited as if it were source. Neither kind is ever in
- * the tracked list. `operation-private-keys.pin.test.ts` in `@objectstack/core`
- * moved its scan surface to git for the same nondeterminism.
+ * lived long enough was audited as if it were source. Both paths are ignored
+ * (`*.bundled_*.mjs` and `tmp/` in the root `.gitignore`), so git never lists
+ * them. A new in-tree scratch root must be ignored too, or its files are listed
+ * like any other untracked file, and one deleted before the read fails it.
  *
- * The population is otherwise the walk's: every tracked path under `packages/`
+ * The population is otherwise the walk's: every listed path under `packages/`
  * with no segment in `SKIP_DIRS`, whose name ends in `.ts` and is not a `.d.ts`,
- * `.test.`, `.spec.` or `.conformance.` file.
- *
- * What it gives up, on purpose: a file written but not yet `git add`ed is not
- * audited until it is added. CI checks out committed files, so nothing reaches
- * `main` unaudited.
+ * `.test.`, `.spec.` or `.conformance.` file. A file written but not yet
+ * `git add`ed is still audited, because it is untracked and not ignored.
  *
  * No `catch`, here or at the read. A git failure (no repository, no `git` on
  * PATH, a bad argument) throws from `execFileSync`, and its message carries the
@@ -102,11 +102,11 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'c
  * clean audit.
  */
 function collectSourceFiles(): string[] {
-  const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--', 'packages'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 1 << 28,
-  });
+  const listed = execFileSync(
+    'git',
+    ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'packages'],
+    { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 28 },
+  );
   return listed
     .split('\0')
     .filter((path) => {
