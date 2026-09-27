@@ -533,5 +533,26 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + '`required` that lists defaulted keys is this repo\'s existing output-mode convention, not '
         + 'a new one.',
     },
+    {
+      key: 'ui/PaginationConfig:pageSize',
+      from: '25',
+      to: '50',
+      reason:
+        'A RULED behaviour change, not a correction: the platform display page size is 50 '
+        + '(maintainer ruling on objectui#9853, verbatim 「9853 默认页大小改为50」), and the spec '
+        + 'declaration is where that number lives — the renderer is ruled to read the spec default '
+        + 'rather than keep a page size of its own (objectui#9853 ruling C′ item 1), so the change '
+        + 'lands here first. '
+        + 'What moves: a view whose `pagination` block omits `pageSize` now parses to `pageSize: 50` '
+        + 'where it parsed to `25` — 50 rows per page on a paged view, and a fetch ceiling of 50 on a '
+        + 'view with no pager (kanban, gallery, timeline). A view with NO `pagination` block parses '
+        + 'with none on either side, so the parse materialises nothing there; the number reaches it '
+        + 'only through a renderer that takes the spec default. The accept set does not move: '
+        + '`pageSize` is still a positive integer, and `0`, negatives and fractions are refused '
+        + 'exactly as before. A `pageSize` written into a document — by its author, or by a tool '
+        + 'that serialised an earlier parse — is an authored value and keeps its number. '
+        + 'To keep 25 rows per page, write it: `pagination: { pageSize: 25 }`. To take the platform '
+        + 'default, change nothing.',
+    },
   ],
 };
