@@ -156,7 +156,11 @@ function isAnalyticsNestedRelationSpec(spec: unknown): spec is Record<string, un
  * `path` carries it (`filter.account.region`,
  * `measures.0.filter.account.region.$eq`).
  *
- * ⛔ Not judged here: `$ne` carrying a list (no ruling decides it); the list
+ * ⛔ Not judged here: `$ne` carrying a list — refused at the shared comparand
+ * face and at `FieldOperatorsSchema.$ne` under ruling A on #19886 (record
+ * 5805254639), and on the analytics door's hand-over of a nested entry, but
+ * not yet at this save door or `FilterConditionSchema`'s: that stored-filter
+ * arm is #20116's (moved there by record 5854888976); the list
  * operators, which keep their lists (`$in: []` / `$nin: []` included); every
  * scalar, `null` included; and the face's OTHER arms inside a nested relation
  * (a malformed `$in`, a `null` ordering comparand, a `$between` endpoint),

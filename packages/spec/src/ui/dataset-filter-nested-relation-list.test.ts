@@ -206,7 +206,7 @@ describe('#20080 §4 — what a nested relation may still carry', () => {
     ['$in: [] stays the declared predicate', { account: { region: { $in: [] } } }],
     ['$nin keeps its list', { account: { region: { $nin: ['a'] } } }],
     ['$between keeps its pair', { account: { score: { $between: [1, 9] } } }],
-    ['$ne carrying a list — no ruling decides it', { account: { region: { $ne: ['a'] } } }],
+    ['$ne carrying a list — refused at the shared face (ruling A, #19886), not yet at this save door (#20116)', { account: { region: { $ne: ['a'] } } }],
     ['a scalar under $and', { $and: [{ account: { region: 'a' } }] }],
   ])('%s', (_label, filter) => {
     const scoped = DatasetSchema.safeParse(withScope(filter));
