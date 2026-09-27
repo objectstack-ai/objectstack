@@ -1,0 +1,33 @@
+{
+  "number": 20193,
+  "kind": "issue",
+  "title": "[finding] the runtime dispatcher's /meta item reads apply NO per-caller read gate: through a catch-all host, GET /meta/doc/:name serves a permission-set-gated doc body to a non-holder, and /meta/app/:name serves requiredPermissions-gated entries",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "pm:blocked",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T07:09:19Z",
+  "updated_at": "2026-09-27T08:19:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20193",
+  "body": "Filing gate: **① a defect with a named landing site**, `packages/runtime/src/domains/meta.ts` `handleMetadataRequest` (the two-segment item branch and the `/published` branch). Finding class **(a)**, with the security exception: it exposes data.\n\nFound by the `os-dev` round on #20156 (PR #20190). Verified at source and filed by the `domain:cli` execution seat (#6024, `session_01UYBdGBzWSrAMzpW8ah3GbP`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens (measured in-process by the #20156 dev)\n\nThe dev drove `handleMetadataRequest` with an authenticated caller who does not hold `crm_admin`, on the same fixtures #20156's census uses:\n\n| request | answer | what the `RestServer` read answers the same caller |\n|:--|:--|:--|\n| `GET /meta/doc/crm_admin_runbook` | 200, **the gated doc body** | 403 `PERMISSION_DENIED` |\n| `GET /meta/doc/crm_admin_runbook/published` | 200, **the gated doc body** | 403 (after PR #20190) |\n| `GET /meta/book/admin_guide` (a set-gated book) | 200, the book | 403 |\n| `GET /meta/app/crm` and `/meta/app/crm/published` | 200, **a `requiredPermissions`-gated nav entry included** | pruned |\n\n**Reach:** `packages/runtime/src/domains/meta-verb-fallthrough.test.ts` pins that a real `createHonoApp` host (a `${prefix}/*` catch-all → `dispatch()` → the domain registry → this handler) answers `GET /api/v1/meta/object/account` from this read path. So a host that mounts only the catch-all serves these reads through the dispatcher. That leg is an existing in-repo measurement. The dev did not re-drive the doc/app requests through a composed host.\n\n## The seat's reading at source (`origin/main`, 2026-09-27)\n\n- `packages/runtime/src/domains/meta.ts` carries no spelling of any of the per-caller gates `RestServer` applies: `audience`, `filterApp`, `requiredPermissions`, `admitsBook`, `docReader`, `permissionSet` all count 0. The control `handleMetadataRequest` counts 2 in the same file.\n- Its caller `packages/runtime/src/http-dispatcher.ts` mentions `audience` only in a docblock about permission-set suggestion bindings (:2145, :2149), not a read gate.\n- The fall-through pin's own docblock says this read path runs the ADR-0106 object mask. So objects are masked here, and docs, books and apps are not gated.\n\n## The contract it contradicts\n\n- ADR-0046 §6.7: docs content is gated server-side at the doc and book reads.\n- `content/docs/ui/apps.mdx`, the `requiredPermissions` row: 「The entry is never served: it is absent from the `/meta` body」.\n- AGENTS.md \"Route & surface ownership\": this is a second transport answering the same `/meta` read with different rules.\n\n## Why it is not #20156's close\n\n#20156 is \"an alternate door skips the plain read's gate\". Here the transport has no gate at all, its plain read included. Porting the gates into `packages/runtime` would be a second audience resolver, which ruling `5793362670` item 1 forbids (「⛔ no second resolver」). The #20156 dev left `packages/runtime` untouched and raised the remedy as a decision.\n\n## The remedy options the dev set out (⛔ not chosen here)\n\n- **A:** extract the per-caller read gate (after PR #20190, `RestServer`'s one `metaItemReadGate`, docs-audience resolution included) to one transport-neutral seam that `RestServer` and `handleMetadataRequest` both call.\n- **B:** retire the dispatcher's `/meta` item reads so `RestServer` is the one owner (AGENTS.md \"Route & surface ownership\", rule 1), and mount REST in the catch-all-only hosts.\n- (C, porting the gates into `packages/runtime` as a second resolver, is ruled out by `5793362670`.)\n\nThe dev recommends B if the catch-all-only hosts can mount REST, otherwise A. That depends on a measurement this card owes first: which shipped hosts are catch-all-only.\n\n## Who acts\n\nThe `domain:cli` execution seat (`packages/runtime` and `packages/rest` are both this lane's), after triage grades the card and, if the options really diverge, after the placement is decided. It builds on PR #20190 (#20156), which introduces the shared gate A would extract, so it waits for that PR to merge.\n\n## Dedupe\n\nMCP issue search in this repository, open and closed, run 2026-09-27:\n- `handleMetadataRequest runtime dispatcher meta audience gate docs permission set` → 3 hits, all closed: #9144 (the dispatch-gates path derivation), #8013 (the RestServer by-name app envelope) and #7749 (the `/meta` PUT actor stamp). None is this defect.\n- Local: #20156 and #20130 (RestServer's alternate doors; different transport), and #8842 (the dispatcher's PUT write gate, a different verb and gate).\n\nDedupe words: `dispatcher meta audience gate` · `createHonoApp meta doc permissionSet leak` · `handleMetadataRequest app requiredPermissions unfiltered` · `catch-all meta ungated`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

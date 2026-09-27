@@ -1,0 +1,33 @@
+{
+  "number": 20153,
+  "kind": "issue",
+  "title": "governed guard: an authorized APPROVED review lifts the >5000-line SIZE limb, as it already lifts Tier H paths",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T01:53:06Z",
+  "updated_at": "2026-09-27T04:17:41Z",
+  "closed_at": "2026-09-27T04:16:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20153",
+  "body": "Ruled: maintainer 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」 and 「应该立一个 skills 卡片」 · chat with session `session_013RWUA7bNq5bRhehLPqXwMg`, 2026-09-27\n\n## Provenance\n\n- **Who**: the maintainer.\n- **Where**: the maintainer's chat with session `session_013RWUA7bNq5bRhehLPqXwMg`, 2026-09-27.\n- **Why it came up**: the maintainer asked why objectstack#20125 did not merge. It was enqueued twice (01:00Z and 03:02Z) and dequeued twice with `CI_FAILURE`. The cause was `Governed Surface Queue Guard` exit 8, the SIZE leg: about 11.5k changed lines, over 5,000, although `os-zhuang` (in `GOVERNED_APPROVERS`) had approved it. The Tier H path leg was already satisfied by that approval.\n- **Verbatim**: 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」, then 「应该立一个 skills 卡片」.\n\n## The rule today\n\n`scripts/pm/check-governed-queue-guard.mjs`, header section \"NO APPROVAL LIFTS THIS LIMB\":\n\n> An authorized APPROVED review lifts a Tier H path because the 2026-08-27 ruling said so of PATHS; nothing has said it of the NUMBER […] Widening it is a one-line maintainer decision — in the sibling, where the predicate lives.\n\nSo a PR with more than 5,000 changed lines can only land through the maintainer's bypass-rules merge button, even after an authorized approval. That button skips the merge queue's speculative build on the latest `main`.\n\n## The ruling this card implements\n\n**An authorized APPROVED review lifts the SIZE limb exactly as it lifts a Tier H path.** \"Authorized\" means an account in `GOVERNED_APPROVERS`. After the approval, the owning seat lands the PR through the queue (\"席位落地\"), under the same predicate as the path leg:\n\n- latest-decisive review per account;\n- any commit (the 2026-09-04 unpinning);\n- dismissed, superseded and unauthorized approvals never count;\n- an unreadable review list fails closed.\n\nThe maintainer's direct merge stays the other landing, unchanged.\n\n## Scope\n\n- `scripts/pm/check-governed-merges.mjs`: the SIZE predicate, its header section \"The SIZE predicate\", `landsByHumanMerge` (or the verdict it reads), and the self-tests that pin \"no approval lifts size\". The threshold (5,000), the strict `>` and \"generated files included\" are **unchanged**.\n- `scripts/pm/check-governed-queue-guard.mjs`:\n  - the SIZE leg reads the same authorized-approval verdict the governed leg reads, **one derivation, imported, never restated** (the #11705 two-mechanisms rule);\n  - exit 8 stays the refusal for an oversized PR **without** an authorized approval;\n  - the \"NO APPROVAL LIFTS THIS LIMB\" section is rewritten to cite this ruling;\n  - the self-test pins are updated.\n- Protocol text that states the old rule:\n  - `AGENTS.md` (class (c), \"lands only by a human merge\");\n  - `.claude/skills/pm-dispatch/SKILL.md:187`;\n  - `.claude/skills/pm-dispatch/references/landing-operations.md:58`;\n  - any other place that still says the size limb needs a human merge (grep `5,000` / `5000` / `HUMAN_MERGE_LINE_THRESHOLD` / `size limb` across `scripts/pm/**`, `AGENTS.md`, `.claude/**`). Keep the skill line ratchet (`check-skill-line-ratchet.mjs`) green.\n\n## Out of scope\n\n- ⛔ The FORK limb: unchanged, no approval lifts it.\n- ⛔ The post-merge detection audit still **lists** oversized landings, as a report. It may note the approval that lifted each one.\n- ⛔ No change to `GOVERNED_APPROVERS`, to the Tier S rule, or to branch protection / rulesets (the maintainer's).\n\n## Acceptance\n\n- `merge_group` with one PR over 5,000 changed lines:\n  - an authorized APPROVED review, on any commit → **exit 0**, and the SIZE block prints the lift: approver, commit, and this card;\n  - no approval, an unauthorized one, or a dismissed one → **exit 8**, as today;\n  - an unreadable size is still **exit 9**.\n- The seat-side `check-governed-merges.mjs --pr N` agrees with the queue leg on the same PR.\n- `--self-test` of both scripts passes, with new pins for the lift and for each non-lift case above.\n- Once this lands, objectstack#20125 (already approved by `os-zhuang`) passes the guard through the queue with no new approval.\n\n## Landing\n\nThis card's own PR touches `AGENTS.md` and `.claude/**`, so it is **Tier H**. It waits for the maintainer's hand or an authorized APPROVED review, per the current rule.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

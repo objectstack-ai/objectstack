@@ -2,8 +2,8 @@
   "number": 20102,
   "kind": "issue",
   "title": "retire the saved-report stack — `sys_saved_report` / `sys_report_schedule`, `/api/v1/reports`, `client.reports`, `IReportService`, the `reports` capability and `@objectstack/plugin-reports` (zero consumers; not the `report` metadata kind)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T04:37:58Z",
-  "updated_at": "2026-09-25T12:47:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-27T02:04:34Z",
+  "closed_at": "2026-09-27T02:02:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

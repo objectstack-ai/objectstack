@@ -1,0 +1,33 @@
+{
+  "number": 9590,
+  "kind": "issue",
+  "title": "The docs-accuracy audit verifies that a documented type exists and matches, but not that it is the type the page's seam resolves to — it passed `audit-service.mdx` with \"None\"",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T12:29:05Z",
+  "updated_at": "2026-09-27T03:03:25Z",
+  "closed_at": "2026-08-18T16:15:06Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9590",
+  "body": "Observation found while implementing #9534. Not a defect in any shipped surface — a gap in the docs-accuracy audit method, filed so the class is on record rather than rediscovered.\n\n## The measurement\n\n`docs/audits/2026-06-handwritten-docs-accuracy-followups.md:226` records the verdict for the page #9534 later turned out to be wrong about:\n\n> ### `guides/runtime-services/audit-service.mdx`\n> - None. Independently re-verified every claim against live code: (1) canonical source `packages/services/service-settings/src/settings-service.types.ts` exists; (2) doc `record(entry)` signature lines 16-26 matches `SettingsAuditSink.record` EXACTLY [...] fixCount 0 was correct; no edits were made so no regression is possible.\n\nEvery one of those statements was **true**. The signature did match `SettingsAuditSink.record` field-for-field. The canonical source did exist. And the page was still wrong, because it is filed under `runtime-services/` and written as `services.audit` — and the kernel slot named `audit` resolves to a different type entirely (`recordAuthEvent` / `'login' | 'logout'`, from `plugin-audit`).\n\n## The gap\n\nThe audit answers *\"does the documented symbol exist, and does its shape match the type the page names?\"* It does not answer *\"is the type the page names the one this page's seam actually hands you?\"*\n\nThat second question is the one a reader's `getService('audit')` asks. Nothing in the pass connected the page's **location and accessor** (`runtime-services/`, `services.audit`) back to `registerService('audit', ...)`.\n\nThis defect class is specifically invisible to the checks that exist:\n\n- a grep for phantom identifiers finds nothing — every symbol on the page was real;\n- a signature diff against the named type passes — it was an exact match;\n- `check:docs-audit-scope` confirms the page is *in scope*, not that the verdict was right.\n\nThe audit also recorded, correctly, that `services.*` is a chapter-wide descriptive convention rather than a literal registry key (see the `versioning.mdx` entry: `services.storage` maps to the real key `file-storage`). That ruling is sound, and it is also what made the seam question look answered — the accessor was classified as *notation*, so nothing went looking for a slot behind it.\n\n## Possible directions (not a recommendation)\n\n- For pages under `runtime-services/`, resolve the accessor to a registration site and check the documented type against **that** registrant's type. This is mechanizable for the subset where `services.X` does correspond to a literal key.\n- Where the accessor is genuinely only notation (`services.storage` ⇢ `file-storage`), the mapping itself is worth declaring somewhere a check can read, instead of living in an audit note.\n- At minimum, record \"which seam does this page describe\" as an explicit question in the audit method, so a \"None\" verdict states that it was asked.\n\nNo claim here about which is worth building — filing the class, not the fix.\n\nRefs: #9534 · PR #9587 · `docs/audits/2026-06-handwritten-docs-accuracy-followups.md`"
+}

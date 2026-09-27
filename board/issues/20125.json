@@ -2,7 +2,7 @@
   "number": 20125,
   "kind": "pull_request",
   "title": "feat!: retire the saved-report stack — /api/v1/reports, client.reports, IReportService, the reports capability, sys_saved_report / sys_report_schedule, @objectstack/plugin-reports",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -24,10 +24,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T06:39:49Z",
-  "updated_at": "2026-09-26T00:59:27Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-27T02:02:35Z",
+  "closed_at": "2026-09-27T02:02:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-27T02:02:33Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20125",

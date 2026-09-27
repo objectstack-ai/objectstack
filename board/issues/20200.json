@@ -1,0 +1,32 @@
+{
+  "number": 20200,
+  "kind": "issue",
+  "title": "driver-turso: `new TursoDriver` accepts `syncUrl` / `sync` under `mode: 'remote'` and ignores them — `isSyncEnabled()` answers true, no sync runs, and `sync()` rejects `SYNC_NOT_SUPPORTED`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:engine",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T07:35:02Z",
+  "updated_at": "2026-09-27T08:21:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20200",
+  "body": "Filing gate: **① a product defect with a named landing site and a reproduction**, finding class **(c)**: a declared config the runtime ignores (ADR-0049, declared ⇒ enforced).\n- `reach:` the published `@objectstack/driver-turso` constructor. It was measured once, by a dist probe at objectstack `49144fcc`, by the #19977 dev (report `5853826399`, `out_of_scope_findings[0]`).\n- Named producer path: a stored datasource config reaches the constructor through `buildTursoDriverConfig` (`packages/services/service-datasource/src/turso-driver-config.ts:169` forwards `syncUrl`, `:205` forwards `mode`) without being parsed on load.\n\nFound by the `os-dev` round on #19977 (PR #20199). Filed by `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). Devs do not open issues. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n**Acting reader**: triage routes it. The landing site is `packages/drivers/driver-turso/src/turso-driver.ts`, which is `domain:engine` by the package table. Engine PR #20104 has merged there (`84880f92`), so the file is no longer fenced.\n\n## The defect\n\n- **Constructor on `origin/main` `d7c024133e`, read by this seat.** `turso-driver.ts:1375` onward refuses a non-durable local/replica engine (`localEngineDefect`, `:1383`), a WebSocket timeout window (`refuseWebSocketTimeout`, `:1391`) and a supplied-client timeout window. Nothing on the `mode === 'remote'` path refuses `syncUrl` or `sync`.\n- **The dev's dist probe at `49144fcc`**: `new TursoDriver({ url: <remote>, mode: 'remote', syncUrl, sync })` constructs and connects. `isSyncEnabled()` answers `true`, no sync interval starts, and `sync()` rejects `SYNC_NOT_SUPPORTED` (libsql) or `SyncNotSupported(\"File\")` (`file:`). `createRemoteClient` forwards no `syncUrl`.\n- ⇒ A config that declares sync gets a driver that reports sync on and never syncs.\n\n**What PR #20199 already does** (#19977, the schema half): both `TursoConfigSchema` copies refuse `syncUrl` under a forced `mode: 'remote'` at authoring. That closes the save door (`assertValidConfig` on create / test / config-edit). It does not cover rows stored before that PR, or configs built by a host.\n\n## Suggested shape (measurement wins)\n\nThe #19977 dev's answer: refuse in the constructor with `VALIDATION_ERROR` / 400, in remote mode, before `super()`, beside `refuseWebSocketTimeout`. Reuse PR #20199's `syncUrl` message byte for byte, so that the constructor and both schemas answer alike. PR #20199's `turso-config-constructor-parity.test.ts` holds a 54-row table with this row marked `inert`; flip that row to `refused` in the same PR.\n\n## Rider: same family, shape not decided\n\n`mode: 'replica'` on a `file:` url with no `syncUrl` constructs and runs as a plain local database: a declared replica that never syncs (the #19977 dev's second finding). There is no constructor refusal to mirror yet. Decide it in the same PR, or say in the PR body why it stays.\n\n## Dedupe (the MCP repo-scoped issue search, closed included)\n\n- `TursoDriver constructor syncUrl ignored in remote mode refuse` → 15 hits. #19977 is the schema half (open, PR #20199). #19893 and #19976 are closed replica / unrecognised-url durability defects. #20107, #20094, #20054, #20016, #19823, #19844 and #18116 are other remote-face defects. None is this one.\n- `turso mode remote syncUrl sync inert isSyncEnabled` → 2 hits (#19977, #19893). Neither is this one.\n\nDedupe words: `turso syncUrl remote mode constructor refuse` · `isSyncEnabled remote mode syncUrl` · `TursoDriver mode remote syncUrl ignored`"
+}

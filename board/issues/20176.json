@@ -1,0 +1,34 @@
+{
+  "number": 20176,
+  "kind": "issue",
+  "title": "objectql + REST: a per-aggregation `filter` (and `having`) compares a temporal comparand type-blind, not by the column's storage rule — an ISO instant on a `date` field counts 1 where the `where` twin counts 3",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T05:26:13Z",
+  "updated_at": "2026-09-27T06:48:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20176",
+  "body": "Filing gate: **① a defect with a named landing site**, the per-aggregation `filter` position and `having`:\n- `packages/objectql/src/engine.ts`: `ObjectQL.aggregate`'s per-aggregation loop;\n- `packages/objectql/src/having-filter.ts`: `checkCondition`, which is type-blind and shared by the per-aggregation `filter` and `having`.\n\nFinding class **(a)**. This is ONE class-closure card for a family: a temporal comparand at this position is compared type-blind, while `where` reads it by the declared column's storage rule (`driver-memory` `coerceTemporalValue`, `driver-sql` `temporalFilterValue`). `reach:` was measured at the public REST door (below).\n\nThe `domain:engine` execution seat 1 (`session_01Bvd69VPa6puiNzzPUroDBx`) filed this from its #20148 dev's report (`os-dev-report` 5852943342 on #20148, PR #20174): out-of-scope finding 1, plus open question 2's residual. The seat folded those two into this card (amendment 5852957006). ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The enumeration (each one a row of the pin)\n\nMeasured by the #20148 dev on a real `InMemoryDriver` and a real `SqlDriver` (schema-synced; 6 rows in 3 groups), through the engine and through REST `POST /api/v1/data/:object/query`. Readings are identical at base `49144fccc8` and at PR #20174's head `f22f0e875f`, except rows 6–7, which PR #20174's instant lift created.\n\n| # | Shape, in `aggregations[i].filter` (or `having`) | Count now | The same condition as a `where` | `reach:` |\n|:--|:--|:--|:--|:--|\n| 1 | `{ placed_on: { $gte: '2026-02-01T00:00:00.000Z' } }` on a `date` field | 1 | 3 | **public**: REST, both drivers |\n| 2 | `{ placed_on: { $eq: '2026-02-01T00:00:00.000Z' } }` on a `date` field | 0 | 2 | **public**: REST |\n| 3 | `{ opened_at: { $lte: '2026-02-01' } }`, a bare day as the upper bound on a `datetime` | 2 | 3 | **public**: REST |\n| 4 | `$between` with a bare day as the max, on a `datetime` | 2 | 3 | **public**: REST |\n| 5 | an epoch-ms bound on a `datetime` | 0 | 3 | **public**: REST |\n| 6 | a `Date` carrying a time of day on a `date` field (`$gte` / `$lt` / `$eq`) | 1 / 5 / 0 | 3 / 3 / 2 | in-process only (a `Date` is not JSON) |\n| 7 | a `Date` on a `time` field | 0 | 3 | in-process only |\n| 8 | `having` on `max(date)` with an ISO bound | keeps `c2` | the date rule keeps `c2`, `c3` | **public**: REST |\n\nControl: a zone-naive datetime string counts 4, and so does the `where` twin.\n\n## Suggested shape (⛔ not a ruling)\n\n- Normalise every temporal comparand of a per-aggregation `filter` in `ObjectQL.aggregate`'s loop by the object's declared field class. Use ONE storage-form function lifted out of the drivers into `spec` or `core`, so the drivers and this position read one rule, not a third copy.\n- For `having`, thread each aggregated column's temporal class into `checkCondition` (the #20127 class rule already derives it for `addDays` pairs).\n- Pin all eight rows on a populated and an empty object, through the engine and REST, on both drivers, with the `where` twin as the control.\n\n## Filing-gate answers\n\n- **Class**: ① (defect, named landing site); finding class (a), measured by the #20148 dev.\n- **Acting reader**: this lane's seat (`domain:engine`, the owner of `packages/objectql`). It is sequenced after PR #20174 (#20148), which edits the same loop and `checkCondition`. That is a region order, not a `Blocked-by:`.\n- **Dedupe**, MCP semantic issue search in this repo, `closed` included:\n  - `aggregation filter temporal string compared as text ISO instant date field having checkCondition storage rule` → 1 hit: #20127 (closed), the `addDays` class rule on `having`, a different row.\n  - `where filter ISO datetime string against date field wrong count temporal comparand normalise storage form aggregate` → 7 hits, all read.\n    - #20148 (the family's parent, in flight) and #20127.\n    - #20035: the analytics comparand-type face.\n    - #3912 / #3928 / #3994: SQLite storage-form writes and reads on `where`, fixed.\n    - #8690: an unparseable date on `where`.\n  - None covers these rows.\n\nDedupe words: `per-aggregation filter temporal string storage rule` · `aggregation filter ISO instant date field` · `aggregation filter bare day lte datetime` · `having-filter checkCondition temporal text comparison`"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 20169,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): a maintainer's dispatch posture ends with the session it was given to",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T04:37:50Z",
+  "updated_at": "2026-09-27T05:26:45Z",
+  "closed_at": "2026-09-27T05:26:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-27T05:26:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20169",
+  "body": "Fixes #20154\nClause-②: no\n\n## What\n\nOne rule, three clauses, placed in `.claude/skills/pm-dispatch/references/seat-lifecycle.md`. A maintainer's dispatch posture (serial, `batch` N, 「不开新卡」) given to a seat session ends when that session closes its shift. A new incumbent starts at SKILL.md's `batch` default (3) unless the maintainer restates the posture to the new session. A shift-close brief does not list such a posture as an inherited standing ruling. Net line change 0; no gate or checker added.\n\n## The maintainer's instruction (verbatim)\n\n> 「项目经理重开之后，并发应该回到3，不应该沿用之前的记录。这个也应该开 skills 卡。」\n\nIn the chat of `domain:spec` seat 2 session `session_01QcAS3qiYYZNezaxZxaUdMV`, 2026-09-27, per the card's Instruction block.\n\nThe instance the card describes: the handover brief comment 5791507651 on #18549 (2026-09-23) listed 「当前任务处理完，合并后就改为串行派发。」 under \"Standing rulings from today (the successor inherits them)\". That comment and that card are left untouched.\n\n## Where, and why there\n\n- File: `references/seat-lifecycle.md` (the seat's placement). `SKILL.md` is untouched: its `batch` row (:59) is the width-pinned widest table row and the file has 0 line headroom. `seat-post-protocol.md` is untouched: one rule, one file.\n- Split across two sections because of who reads which one. The file's own line 3 says the 〈开轮互斥〉 section is read at fire start and the other sections before closing a shift. Clause 2 (the successor starts at 3) goes in 〈开轮互斥〉, the section the new incumbent reads at seating. Clauses 1 and 3 (the posture expires; the brief does not carry it) go in 〈座位贴协议〉, the section the outgoing incumbent reads before writing the brief.\n\n## Before / after\n\n| line | before | after |\n|---|---|---|\n| L17 (〈开轮互斥〉) | `- 滞后标题是进场顺手修的半状态,⛔ 不是阻塞;简报点名的留守尾巴作围栏。` | `` - 坐席从 `batch` 默认 3 起步;前任口径(串行、N、「不开新卡」)维护者对本会话重述才生效。 `` |\n| L40 (〈座位贴协议〉) | `- 收班 = 状态 flush + 在飞显式安置,不是在飞归零;收班简报是最终一笔。` | `- 收班 = 状态 flush + 在飞显式安置,不是在飞归零;派发口径失效,简报 ⛔ 不列作继承裁决。` |\n\nWhat the deleted text was, and where it still lives (the ratchet is paid by deleting duplicates, not by re-wrapping):\n\n- Old L17, both halves, is carried by `seat-post-protocol.md` 〈活性、写侧刷新与收班〉: 「标题滞后是可修半状态,坐席时顺手修,⛔ 不是阻塞。」 (its L37) and 「末尾巴合并 ⇒ 贴上一条尾清注记;继任立即坐席,点名集作围栏。」 (its L39). That file is the one read at the takeover moment.\n- Old L40's second half 「收班简报是最终一笔」 is carried by the same file's L36: 「收班序列:贴正文与标题刷新在先,简报评论是最终一笔;继任的释放判据 = 简报在。」\n\n## Premise check at base 84880f92\n\n`grep -nE '口径|posture|串行派发'` over `SKILL.md`, `references/seat-lifecycle.md`, `references/seat-post-protocol.md`: **0 hits** (grep exit 1). The dispatch note said the only hit was `SKILL.md:59`. That line is the `batch` default row and it contains none of the three words. It is found by `grep -n batch`, not by this grep. Control on the same file: `grep -c 收班 references/seat-lifecycle.md` = 8. The gap the card names is real: no session-scope rule for a dispatch posture exists in any of the three files.\n\n## Line budget\n\n| file | lines before | lines after | ceiling | prose lines over 120 bytes |\n|---|---|---|---|---|\n| `references/seat-lifecycle.md` | 96 | 96 | 96 | 0 (new L17 is 120 B, new L40 is 118 B) |\n\n`pnpm check:pm-skill-ratchet` on head 165b46b6 prints `seat-lifecycle.md is 96 lines (ceiling 96; headroom 0)` and exits 0.\n\nDeviation from the dispatch's mechanism note, reported rather than hidden. The note said references prose lines could be lengthened because only table rows are width-pinned. That is false. The ratchet also enforces a 120-byte budget per prose line. My first commit (01d3d30c) extended the two lines to 199 B and 226 B, and the gate went red: `has 2 line(s) over the 120-byte budget: L16 (199B), L40 (226B)`. The second commit replaces two duplicated halves instead, as shown above.\n\n## Gates (head 165b46b6)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 17 commands. All 17 exit 0, as do three extras: `check:pm-settings-deny-roster` (its roster lives under `.claude`), `check-skills-token-ratchet.mjs` and `check:pm-governed-prose`. `--ran` reconciliation with exit codes recorded: `17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED (a DERIVED zero — all 17 recorded an exit code and none of them is 3)`. `check:doc-formula-expressions` first exited 3 (prerequisite: `@objectstack/lint` not built). After building formula and lint under the verify lock it exits 0. Control-byte self-scan of the edited file: no hits. Type-check lanes: NOT MEASURED, no TypeScript touched.\n\n## Changeset\n\nNone. `.claude/**` ships in no published package's `files[]`, so this PR takes `skip-changeset`.\n\n## Acceptance notes\n\n- The dispatch note's premise that references prose lines are width-free is wrong: `check-skill-line-ratchet.mjs` enforces a 120-byte prose-line budget on every covered file. Future dispatch notes that suggest \"extend an existing line\" should price that budget.\n- Rule-body wording choice: 「简报 ⛔ 不列作继承裁决」 forbids listing the posture as an inherited ruling. It does not forbid the brief from mentioning the posture as history. That matches the card's Ask.\n\n## 维护者速读(草稿)\n\n- **改了什么**:在 `seat-lifecycle.md` 里改写两行(行数不变):新席位坐席时按 `batch` 默认 3 派发;前任会话拿到的派发口径(串行、`batch` N、「不开新卡」)随它收班失效,收班简报不再把这种口径列成继承裁决。\n- **为什么改**:维护者原话「项目经理重开之后，并发应该回到3，不应该沿用之前的记录。」;此前继任会话把前任简报里的「改为串行派发」当成继承裁决,跑在 `batch` 1。\n- **风险与代价(含回滚)**:删掉的两段文字在 `seat-post-protocol.md` 里原样有同义行,不丢规则;回滚 = revert 本 PR。\n- **席位意见**:\n- **你要做的**:无需操作;席位契约复审 PASS 后由席位落地。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0148fenvVvyQV9HYxgVDQ33q)_\n"
+}

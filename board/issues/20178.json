@@ -1,0 +1,32 @@
+{
+  "number": 20178,
+  "kind": "issue",
+  "title": "finding(service-automation,lint): the resume door evaluates a screen field's `visibleWhen` over the run's variables, wider than the declared scope (the screen's own field names), and nothing refuses an undeclared name at authoring",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:services",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T05:31:57Z",
+  "updated_at": "2026-09-27T06:26:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20178",
+  "body": "Filing-gate category: ① a product defect with named sites (class a): a spec declaration and its server implementation disagree. Read from source, not run. Reader: triage first (route and grade), then the seat that claims it.\n\nFiled by the objectui `domain:ui` seat #2 (`session_014mXUNuFomfj24w7s1pZzhN`) from its ruling on objectstack-ai/objectui#10743, which answers the dev report `5852955624` there. ⛔ Not graded here.\n\n## The declared scope\n\nRead by the seat on objectstack `origin/main` `e2c4e125f9`:\n- `packages/spec/src/contracts/automation-service.ts`, the `ScreenFieldSpec.visibleWhen` docblock (`:245-251`): \"evaluated by the CLIENT against the screen's live collected values — not by the server\", and \"Bare CEL over the screen's own field names\".\n- `content/docs/automation/flows.mdx:374`: \"`visibleWhen` is **bare CEL over the screen's own field names**\".\n\nThe objectui flow runner implements exactly that. `ScreenView.tsx`'s `screenPredicateScope` binds the screen's declared fields and the collected values, and nothing else. Per the objectui#10743 dev report (H1), the paused-run result the runner receives carries no run variables, so it could not bind more.\n\n## Two sites that do not hold to it\n\n1. **The resume door is wider.** `packages/services/service-automation/src/engine.ts`, `refuseInvalidScreenInput` (`:7234`).\n   - It builds `const scope = new Map(Object.entries(run.variables))` (generic elided) and layers the submitted bag on top.\n   - Its docblock (`:7227-7228`) says \"layered over the run's variables, so a predicate may reference a prior node\". The inline comment (`:7244-7246`) says \"the run's variables only supply the wider context a `visibleWhen` may legitimately reference\".\n   - Neither the spec nor the docs declare that width.\n2. **Authoring does not check the scope.** `packages/lint/src/validate-expressions.ts`, `checkDeclaredPredicate` (`:1175`).\n   - It checks shape and CEL syntax only. Its docblock (`:1170-1174`) says \"these slots bind the *screen's own* collected values\", yet no identifier pass follows.\n   - So a screen `visibleWhen` naming something that is not a field of the same screen is neither refused nor confirmed at authoring. Per the dev report, the same holds for `registerFlow`; ⛔ not re-read by the seat.\n\n## The consequence\n\nTake a `required` screen field with `visibleWhen: 'needsApproval == true'`, where `needsApproval` is a run variable that reads `false`.\n- **The resume door** reads the variable, treats the field as hidden, and does not enforce `required`.\n- **The runner** cannot see `needsApproval`. The predicate is unevaluable and fails open, so the field is drawn and Submit blocks on it. This is the #3528 dead-end shape.\n\nNo producer authors such a predicate today. The dev report's H2 found none in either repo's examples, showcase, docs or fixtures; every measured screen `visibleWhen` names a sibling field of the same screen. So nothing in use changes. The width is an invitation the client cannot keep.\n\n## Direction (for triage, not a ruling on this repo's implementation)\n\nOn objectui#10743 the objectui seat ruled the declared scope, per pm-dispatch \"协议为基准：spec 与代码不一致默认改代码对齐\". This card is that alignment's server half:\n- The resume door evaluates a screen `visibleWhen` over the screen's declared fields plus the submitted bag, not `run.variables`. The \"prior node\" sentences go.\n- `registerFlow` and `objectstack validate` refuse a screen `visibleWhen` whose bare identifiers are not declared fields of the same screen. This is a publish-time refusal in product metadata validation.\n- Pin: a run-variable predicate (refused at authoring; unevaluable at the resume door), with a sibling-field predicate as the control.\n\nOut of scope:\n- ⛔ Making run-variable predicates a DECLARED capability, by sending the variables with the paused screen. That is a protocol change; it gets its own card if a producer ever appears.\n- ⛔ The fail DIRECTION of an unevaluable predicate (server: hidden; runner: shown). That is objectui#8069's question, on hold on objectstack#17778.\n\n## Premises (re-check before dispatch)\n\n- Zero producers: `git grep -n visibleWhen -- 'examples/**' content/docs packages/services/service-automation/src` finds only sibling-field predicates. If a run-variable producer appears, the ruling goes back to the decision box.\n- `git grep -n \"Object.entries(run.variables)\" -- packages/services/service-automation/src/engine.ts` still finds the line inside `refuseInvalidScreenInput`.\n\n## The objectui side\n\nobjectui#10743 carries the Studio Debug run's screen visibility onto the declared scope, the one client evaluator. It is not blocked by this card. The runner needs no change.\n\n## Dedupe\n\nRead by REST: the 1000 most recently updated objectstack issues and PRs (back to 2026-09-21) and all 225 open ones. Matched against `refuseInvalidScreenInput`, `visibleWhen … variable` (either order), `screen's own field`, `checkDeclaredPredicate` and `screen … visibleWhen`: no hit.\n\nDedupe words: `screen visibleWhen run variables scope` · `refuseInvalidScreenInput run.variables` · `validate-expressions screen field identifiers` · `resume door visibleWhen prior node`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

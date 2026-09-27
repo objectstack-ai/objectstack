@@ -1,0 +1,32 @@
+{
+  "number": 20161,
+  "kind": "issue",
+  "title": "[finding] a joined report's `chart` — container and `blocks[].chart` — parses and is never drawn, while the liveness ledger names the joined branch as its reader",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T03:29:44Z",
+  "updated_at": "2026-09-27T04:15:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20161",
+  "body": "Filing gate: **① a defect with a named landing site**, finding class **(b)**: a declared contract that is not enforced. `reach:` is the public door. `ReportSchema.safeParse` ACCEPTS a container `chart` on a `type: 'joined'` report and a `blocks[].chart`, measured by probe at objectstack `8d1f7ab7` by the #19856 dev (report `5852276378`, `out_of_scope_findings[0]`). The renderer leg below is the filing seat's own reading.\n\nFound by the `os-dev` round on #19856 (PR #20160). Filed by `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). Devs do not open issues. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n**Acting reader**: triage grades and routes it. The fix is either objectui's renderer (draw block charts) or the spec lane (retire the key under ADR-0049 enforce-or-remove), and choosing between them may be a decision.\n\n## Declared\n\nAt objectstack `origin/main` `9401b842`:\n- `packages/spec/src/ui/report.zod.ts:223-224`: `JoinedReportBlockSchema.chart`, 「Optional inline chart configuration.」\n- `:381`: `ReportSchema.chart`, 「Embedded chart configuration」. Nothing refuses it on a `joined` container. After PR #20160, the joined arm refuses `dataset` / `rows` / `columns` / `values` / `order`, and ⛔ not `chart`.\n- `packages/spec/liveness/report.json`, the `blocks` row note: 「objectui: joined-report sub-reports, each dataset-bound (dataset/rows/columns/values/runtimeFilter/chart) — DatasetReportRenderer joined branch.」 That names a reader for `chart` that does not read it (below).\n- `packages/lint` `validate-chart-bindings` still validates block charts against the block's dataset, per the dev's reading. So authoring is actively invited.\n\n## Not drawn\n\nAt objectui `f8a9d0fb` (the `.objectui-sha` pin), read by this seat:\n- `packages/plugin-report/src/DatasetReportRenderer.tsx:1462` enters the joined branch. Each block renders a `DatasetMatrixTable` or `DatasetReportTable` (`:1485-1506`), then the branch returns (`:1524`). No block chart is rendered.\n- `git grep -F \"block.chart\"` over objectui `packages/` at the pin exits 1. The control `block.runtimeFilter` hits `DatasetReportRenderer.tsx` (exit 0), so the instrument sees block reads. The radius is a content grep for the dotted spelling; a destructured read would sit outside it, and the branch read above covers that case.\n- The container `chart` read comes after the joined `return`, so a joined container's `chart` is never reached either.\n\n⇒ An author, human or AI, who writes a chart on a joined report or on any of its blocks gets a green parse and a lint that checks the chart's bindings, and then sees tables only.\n\n## Riders: carry these in the same PR, whichever route is taken\n\n- `ReportSchema.blocks` TSDoc (`report.zod.ts`, near `:384-392`) still describes the pre-cutover block shape: 「Each block declares its own object, columns, groupings and filter. The container-level `filter` is ANDed…」. The key is `runtimeFilter`. The `.zod.ts` ships, so this is published text.\n- `content/docs/ui/reports.mdx:108` names only `order` among a joined container's refused keys. After PR #20160 it should list all five (six if this card retires the container `chart`).\n\n## Dedupe (the MCP repo-scoped issue search, closed included)\n\n- objectstack: `joined report block chart never rendered JoinedReportBlockSchema chart ignored` → 4 hits (#19856, #15734, #3916, #3463); none is this defect. `report blocks chart liveness ledger joined block chart declared not enforced` → 5 hits (#18582, #16362, #13483, #7377, #7017), all closed liveness chores; none is this defect.\n- objectui: `joined report chart DatasetReportRenderer block chart not drawn` → 15 hits; the top 10 are other chart/dashboard defects, none a joined block chart.\n\nSeam: `spec:JoinedReportBlockSchema.chart` + `spec:ReportSchema.chart` (joined) → `renderer:DatasetReportRenderer` (joined branch).\n\nDedupe words: `joined report chart never rendered` · `JoinedReportBlockSchema chart ignored` · `joined block chart DatasetReportRenderer`"
+}
