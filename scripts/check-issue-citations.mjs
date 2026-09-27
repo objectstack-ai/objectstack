@@ -201,6 +201,8 @@ const PROXY_REARM_GUARD = 'OS_ISSUE_CITATIONS_PROXY_REARMED';
  */
 export const ROOT_DIR_WATCH_HINTS = ['content/docs/releases/**', 'packages/**'];
 
+// dispatch-gates: local-env GITHUB_TOKEN OS_GATE_MERGE_GROUP_BASE_SHA -- the BARE invocation, the diff-scoped verdict lint.yml runs on every pull request, answers that run's question on a dev container with neither value: GITHUB_TOKEN (or GH_TOKEN) is used when present and never required, because the diff mode reads the PUBLIC board with one probe per distinct number the change adds (it enumerates the whole board only past 400 of them) and re-arms the session proxy itself (rearmThroughProxy); OS_GATE_MERGE_GROUP_BASE_SHA renders EMPTY on a pull_request run, since only a merge_group build sets it, and with it unset baseSpellings takes merge-base(origin/main, HEAD), the base the pull_request run itself judges against. A board this run cannot read, or a base it cannot resolve, still exits PREREQUISITE NOT MET and never 0. Not declared for --census, which enumerates every page of the board and needs the token.
+
 /* ─────────────────────────── the scope contract ─────────────────────────── */
 
 /**
