@@ -19,7 +19,9 @@
 //     shrink the sweep while the file count stayed comfortably non-zero, and the
 //     test would report a clean audit over source it never opened — the exact
 //     shape the rule itself is about, turned on the rule (#4930). So the root is
-//     resolved up front and the walk carries no `catch`.
+//     resolved up front, and the walk's one `catch` (`statListedEntry`) skips
+//     only an entry that VANISHED between its listing and its stat and rethrows
+//     every other error.
 //  2. **A rule that matches nothing.** A ratchet that has only ever been green
 //     cannot be told apart from a dead one (#4690), and this one has been green
 //     from its first commit. `the sweep can still fire` therefore pushes a
@@ -37,7 +39,7 @@
 //     gets (2)'s treatment rather than a comment: it is a pure function, and
 //     `the staleness comparison can still fire` pushes a known pair through the
 //     SAME function the real case calls.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, statSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -69,16 +71,63 @@ const LEDGER: Readonly<Record<string, string>> = {};
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'coverage', '.cache', '.next']);
 
 /**
+ * `statSync(path)` for an entry the walk's own listing just named, or `null`
+ * when that entry VANISHED since. The rule is the one the error-status walker
+ * pins (`statListedEntry` in `check-error-status-conformance.mjs` under
+ * `scripts/`), spelled the same way so the two read as one rule.
+ *
+ * Why it exists: this suite runs inside the same turbo run as package builds,
+ * and tsup (through bundle-require) writes `tsup.config.bundled_<id>.mjs` beside
+ * a package's config, imports it and unlinks it. `readdirSync` can list that
+ * file and the bare `statSync` then threw `ENOENT` for a `.mjs` the `.ts` filter
+ * below would have dropped anyway, failing the whole corpus.
+ *
+ * Skipped: only an entry whose `stat` AND `lstat` both answer `ENOENT` — it is
+ * gone, and there is nothing left to audit. Everything else still throws:
+ *   - a dangling symlink (`stat` answers `ENOENT`, `lstat` finds the link), as
+ *     the entry exists and skipping it would shrink the corpus;
+ *   - `ENOTDIR`, `EACCES` and every other code;
+ *   - a missing root, which no listing named (the `describe` block stats it).
+ * A present entry is stat'ed exactly as before, and nothing is matched by name.
+ * Only this per-entry stat is covered: a listed directory that vanishes before
+ * its own `readdirSync`, and a collected file that vanishes before the sweep's
+ * `readFileSync`, still throw. ⛔ Never a retry.
+ */
+function statListedEntry(path: string): Stats | null {
+  try {
+    return statSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw err;
+    let entry: Stats;
+    try {
+      entry = lstatSync(path);
+    } catch (again) {
+      if ((again as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return null; // vanished
+      throw again;
+    }
+    // Present after all. A symlink here is dangling: throw the original error.
+    if (entry.isSymbolicLink()) throw err;
+    // Absent at the stat, back under the same name: for a non-symlink, `lstat`
+    // IS its `stat`, so it is audited as present.
+    return entry;
+  }
+}
+
+/**
  * Every auditable `.ts` under `dir`.
  *
- * No `catch`: an error during the walk means the corpus was only partly read,
- * which must not be reported as a clean audit.
+ * No `catch` of its own: an error during the walk means the corpus was only
+ * partly read, which must not be reported as a clean audit. The one tolerated
+ * error, an entry that vanished between listing and stat, lives in
+ * `statListedEntry` above and says what it does not cover.
  */
 function collectSourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     if (SKIP_DIRS.has(entry)) continue;
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) collectSourceFiles(full, out);
+    const stats = statListedEntry(full);
+    if (stats === null) continue;
+    if (stats.isDirectory()) collectSourceFiles(full, out);
     else if (
       entry.endsWith('.ts') &&
       !entry.endsWith('.d.ts') &&
