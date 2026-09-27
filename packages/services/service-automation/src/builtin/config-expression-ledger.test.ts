@@ -227,14 +227,24 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
    * contract does not back would refuse a legal omission (an absent
    * `visibleWhen` shows the field); a requirement the ledger misses is the
    * #19961 shape again — declared required, admitted absent at every door.
+   *
+   * Reconciled over the `predicate` role, the one role the flag acts on: the
+   * resolver emits an absent value only for a required PREDICATE slot. The
+   * channels require two `flow-template` slots too (`loop.collection`,
+   * `map.collection`), and no door refuses their absence — their executors
+   * parse their own config — so the flag stays off there, and the second
+   * assertion pins that it is never set on another role.
    */
-  it('the ledger marks `required` exactly the slots the declaring channel requires (#19961)', () => {
-    const declared = declaredEverywhere();
+  it('the ledger marks `required` exactly the predicate slots the declaring channel requires (#19961)', () => {
+    const declared = declaredEverywhere().filter((d) => d.role === 'predicate');
     const requiredByChannel = declared.filter((d) => d.required).map(key).sort();
-    const requiredByLedger = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.required).map(key).sort();
+    const requiredByLedger = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'predicate' && e.required).map(key).sort();
     expect(requiredByLedger, 'ledger `required` flags disagree with the declaring channel').toEqual(requiredByChannel);
-    // Non-vacuous: the one required slot there is today is derived, not assumed.
+    expect(FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role !== 'predicate' && e.required).map(key), '`required` acts on the predicate role only').toEqual([]);
+    // Non-vacuous: the one required predicate slot there is today is derived,
+    // not assumed — and the optional one (`visibleWhen`) is derived as optional.
     expect(requiredByChannel).toEqual(['decision.conditions[].expression (predicate)']);
+    expect(declared.filter((d) => !d.required).map(key)).toEqual(['screen.fields[].visibleWhen (predicate)']);
   });
 
   it('decision.conditions[].expression is covered — the #4439 hole', () => {

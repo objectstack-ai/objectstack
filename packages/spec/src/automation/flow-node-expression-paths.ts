@@ -165,8 +165,11 @@ export interface FlowNodeExpressionPath {
    *
    * Reconciled against the channel's own `required` list by the ratchet that
    * reconciles the markers (`config-expression-ledger.test.ts` in
-   * `service-automation`), in both directions, so this flag cannot claim a
-   * requirement the contract does not make, nor miss one it does.
+   * `service-automation`), in both directions over the `predicate` role, so
+   * this flag cannot claim a requirement the contract does not make, nor miss
+   * one it does. Never set on another role: the channels require
+   * `loop.collection` / `map.collection` too, but no door refuses their
+   * absence — their executors parse their own config.
    */
   readonly required?: true;
 }
