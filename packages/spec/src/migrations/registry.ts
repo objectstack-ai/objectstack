@@ -9628,7 +9628,8 @@ const step18: MigrationStep = {
         + 'and joined-report-block runtimeFilter, a field relatedListFilter and a rollup '
         + 'summaryOperations filter, a solution-blueprint summary filter, an analytics query where, '
         + 'a dataset selection runtimeFilter, a query where and having, the data-engine aggregate '
-        + 'call\'s having, an aggregation filter and a query-filter where',
+        + 'call\'s having, an aggregation filter and a query-filter where; and, on a dataset filter '
+        + 'and a dataset measure filter only, the same slots INSIDE a nested-relation condition',
       replacement:
         'the spelling the refusal prescribes, which is the one the query faces already prescribe. '
         + 'A flag is the boolean itself: $null true is "has no value", $null false is "has a value", '
@@ -9660,11 +9661,14 @@ const step18: MigrationStep = {
         + 'face\'s location clause, which the issue\'s path carries instead. The reach is the '
         + 'face\'s and no wider: the field entries of a condition and of every $and / $or / $not '
         + 'member, and NOT a field spec with no $ key (a nested-relation condition), which neither '
-        + 'the face nor the drivers\' flag checks descend. ⚠️ So one position still refuses only at '
-        + 'execution: a refused shape INSIDE a nested-relation condition on an analytics carrier '
-        + '(a dataset filter or measure filter, a dashboard widget filter, a report runtimeFilter). '
-        + 'The analytics where door flattens that relation to a dotted member and refuses it when '
-        + 'the carrier is charted. Metadata AT REST is not rewritten and this entry adds no D2 '
+        + 'the face nor the drivers\' flag checks descend. The analytics where door DOES descend '
+        + 'one (it flattens the relation to dotted members and judges each), so the two dataset '
+        + 'carriers, whose own nested-relation walk already refused an equality list there '
+        + '(dataset-filter-nested-relation-equality-array-refused-at-save), now ask the same '
+        + 'judge about every slot inside a relation. ⚠️ So one position still refuses only at '
+        + 'execution: a refused shape INSIDE a nested-relation condition on a dashboard widget '
+        + 'filter or a report runtimeFilter, which reach the analytics where door too but carry '
+        + 'the shared schema\'s reach only. Metadata AT REST is not rewritten and this entry adds no D2 '
         + 'conversion: none of these shapes has a single honest meaning (that is why each was '
         + 'refused), and a conversion would have to pick one. The read path does not re-validate '
         + 'stored rows, so a stored document keeps loading; re-saving it through the metadata '
@@ -9681,10 +9685,10 @@ const step18: MigrationStep = {
         + 'measured before the change: a filter builder that writes "is empty" / "is not empty" as '
         + 'an $in / $nin list holding null and the empty string (the Studio filter-condition widget, '
         + 'at the console pin of that date); what it wrote is refused on its next save. ⛔ A clean '
-        + 'save is NOT a complete sweep for the one position the reason names: search the analytics '
-        + 'carriers for a nested-relation condition whose inner field carries one of these shapes, '
-        + 'and chart it, where the analytics where door refuses with INVALID_FILTER / 400 naming '
-        + 'the field and the path.',
+        + 'save is NOT a complete sweep for the one position the reason names: search dashboard '
+        + 'widget filters and report runtimeFilters for a nested-relation condition whose inner '
+        + 'field carries one of these shapes, and chart it, where the analytics where door refuses '
+        + 'with INVALID_FILTER / 400 naming the field and the path.',
     },
     {
       id: 'filter-text-operator-declared-type-refused',
