@@ -947,8 +947,10 @@ export async function resolveNavServability(
         const key = `${appName}|${entryId}|${objectName}|${reason}`;
         if (!sources.navPruneLogged.has(key)) {
             sources.navPruneLogged.add(key);
+            // [#7912] The serving-side half of the prune diagnostic — the tracker
+            // id lives here, never in the logged text an operator reads.
             logWarn(
-                `[REST] [#7912] nav entry '${entryId}' pruned from app '${appName}': its destination ` +
+                `[REST] nav entry '${entryId}' pruned from app '${appName}': its destination ` +
                     `object '${objectName}' cannot serve a list — ` +
                     (reason === 'api-disabled'
                         ? `\`enable.apiEnabled: false\` (the list answers 404 OBJECT_API_DISABLED for every user).`
