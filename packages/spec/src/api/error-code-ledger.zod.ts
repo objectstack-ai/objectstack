@@ -916,7 +916,7 @@ export const ERROR_CODE_LEDGER = {
     'DELIVERY_NEVER_SENT',           // [#8069] terminal delivery row with 0 attempts — a PARKED record of a delivery that could never be prepared, not one that failed. Redelivering it would be a FIRST send, and the row carries no HMAC signature because the secret that would have produced one is exactly what went missing, so it would go out unsigned (#7799). Distinct from DELIVERY_NOT_ELIGIBLE: that one says "wrong state, try when it settles"; this one says "never, fix the configuration instead"
     // "this delivery row's state does not permit the requested operation" —
     // ONE concept on TWO delivery surfaces of this package, deliberately
-    // sharing one spelling (commit 1a47a5368's contract-review PASS ruled option B;
+    // sharing one spelling (the contract review that passed commit 1a47a5368 ruled option B;
     // a second near-synonym code was rejected for the vocabulary sprawl
     // ADR-0112 exists to prevent). Stated per-surface because the two refuse
     // OPPOSITE halves of the state space — no single status predicate glosses
