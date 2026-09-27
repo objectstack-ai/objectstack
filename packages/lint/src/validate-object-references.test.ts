@@ -6,6 +6,7 @@ import {
   OBJECT_REFERENCE_UNKNOWN,
   OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
 } from './validate-object-references.js';
+import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 
 /** Minimal stack with one own object, mirroring the HotCRM shape. */
 const baseStack = () => ({
@@ -762,4 +763,29 @@ describe('[#20216] validateObjectReferences — view container `object`', () => 
     const unbound = { list: { type: 'grid', data: { provider: 'object', object: 'order_line' }, columns: ['name'] } };
     expect(validateObjectReferences(appStack([unbound]))).toEqual([]);
   });
+});
+
+/**
+ * [#20216] The same finding through the ONE rule table all three commands run
+ * (`runAuthoringRules`), at the gating tier — so `os validate`, `os build` and
+ * `os lint` exit 1 on it exactly as they do on the sibling relationship-target
+ * leg, rather than the rule merely existing.
+ */
+describe('[#20216] a dangling view container `object` gates every CLI command', () => {
+  const stack = (object: string) => ({
+    manifest: { id: 'com.example.my_app', namespace: 'my_app' },
+    objects: [{ name: 'my_app_order_line', fields: { name: { type: 'text' } } }],
+    views: [{ name: 'order_line', object, list: { type: 'grid', columns: [{ field: 'name' }] } }],
+  });
+  const hits = (command: 'validate' | 'build' | 'lint', object: string) =>
+    splitBySeverity(runAuthoringRules(command, { normalized: stack(object) as never }))
+      .errors.filter((f) => f.rule === OBJECT_REFERENCE_UNKNOWN)
+      .map((f) => f.path);
+
+  for (const command of ['validate', 'build', 'lint'] as const) {
+    it(`\`${command}\` refuses the un-prefixed binding and passes the prefixed one`, () => {
+      expect(hits(command, 'order_line')).toEqual(['views[0].object']);
+      expect(hits(command, 'my_app_order_line')).toEqual([]);
+    });
+  }
 });
