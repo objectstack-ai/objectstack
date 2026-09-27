@@ -15,8 +15,10 @@
  * Three projects, all from one `os init my-app -t app --no-install`:
  *
  *   namespaced  as scaffolded (`namespace: 'my_app'`): `order_line` lands as
- *               `my_app_order_line`, and a name that already carries the prefix
- *               (`my_app_invoice`) lands as written, never doubled.
+ *               `my_app_order_line`, a name that already carries the prefix
+ *               (`my_app_invoice`) lands as written, never doubled, and the
+ *               legacy `NS__SHORT` form (`order__line`), which no prefix makes
+ *               compliant, is refused.
  *   control     the same project with `namespace` deleted from its manifest:
  *               no prefix is owed, so none is added.
  *   broken      a project whose config does not load (an unprefixed object, as
@@ -41,7 +43,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold starts, seven of them, sequential. */
+/** oclif + tsx cold starts, eight of them, sequential. */
 const RUN_TIMEOUT_MS = 300_000;
 
 interface Run {
@@ -107,6 +109,7 @@ beforeAll(async () => {
   // Sequential on purpose: cold tsx starts in a container several agents share.
   runs.generate = await runCli(['g', 'object', 'order_line'], dirs.namespaced);
   runs.prefixed = await runCli(['g', 'object', 'my_app_invoice'], dirs.namespaced);
+  runs.legacyForm = await runCli(['g', 'object', 'order__line'], dirs.namespaced);
   runs.validate = await runCli(['validate'], dirs.namespaced);
   runs.controlGenerate = await runCli(['g', 'object', 'order_line'], dirs.control);
   runs.controlValidate = await runCli(['validate'], dirs.control);
@@ -138,13 +141,28 @@ describe('[#20197] `os g object` in an `os init -t app` project', () => {
     expect(source).not.toContain('my_app_my_app');
   });
 
-  it('`os validate` then exits 0', () => {
+  it('a name the gate refuses even with the prefix is refused, and nothing is written', () => {
+    // `order__line` is the legacy `NS__SHORT` form: prefixing cannot make it
+    // compliant, so the command refuses in the gate's words instead of writing
+    // a file `os validate` would refuse.
+    expect(runs.legacyForm.code).toBe(1);
+    expect(runs.legacyForm.stdout).toContain('order__line');
+    expect(existsSync(join(dirs.namespaced, 'src', 'objects', 'order__line.object.ts'))).toBe(false);
+  });
+
+  it('`os validate` then exits 0, over a stack that holds both generated objects', () => {
+    // The files are asserted first so this green is about a stack that
+    // CONTAINS what was generated, not one a refusal left untouched.
+    expect(existsSync(join(dirs.namespaced, 'src', 'objects', 'order_line.object.ts'))).toBe(true);
+    expect(existsSync(join(dirs.namespaced, 'src', 'objects', 'my_app_invoice.object.ts'))).toBe(true);
+    expect(read(join(dirs.namespaced, 'src', 'objects', 'index.ts'))).toContain("from './order_line.object'");
     expect(runs.validate.code, runs.validate.stdout + runs.validate.stderr).toBe(0);
   });
 
   it('control: with no namespace in the manifest, no prefix is added and validate exits 0', () => {
     expect(runs.controlGenerate.code, runs.controlGenerate.stdout + runs.controlGenerate.stderr).toBe(0);
     expect(read(join(dirs.control, 'src', 'objects', 'order_line.object.ts'))).toContain("name: 'order_line',");
+    expect(read(join(dirs.control, 'src', 'objects', 'index.ts'))).toContain("from './order_line.object'");
     expect(runs.controlValidate.code, runs.controlValidate.stdout + runs.controlValidate.stderr).toBe(0);
   });
 
