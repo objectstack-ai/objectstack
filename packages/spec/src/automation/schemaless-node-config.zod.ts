@@ -105,7 +105,11 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
-import { AssignmentConfigSchema } from './builtin-node-config.zod';
+import {
+  AssignmentConfigSchema,
+  CreateRecordConfigSchema,
+  UpdateRecordConfigSchema,
+} from './builtin-node-config.zod';
 
 /**
  * What a rejected key on these contracts silently did before #4001 批 9 — and
@@ -527,22 +531,26 @@ export type SchemalessNodeType = keyof typeof SCHEMALESS_NODE_CONFIG_SCHEMAS;
 /**
  * Node types that DO publish a descriptor `configSchema` and still declare an
  * expression slot through a spec Zod, because the descriptor cannot carry the
- * marker (#14149).
+ * marker (#14149; the CRUD pair since #19938).
  *
- * `assignment`'s descriptor declares `assignments` as `additionalProperties:
- * true` — the openness IS its contract, pinned by the form↔Zod ledger — so
- * there is no descriptor property to mark. The value contract lives on
- * `AssignmentConfigSchema`'s map value (`.meta({ xExpression: 'value' })`,
+ * Each of these descriptors declares its map as `additionalProperties: true`
+ * — `assignment`'s `assignments`, `create_record` / `update_record`'s
+ * `fields` — and that openness IS the descriptor's contract, pinned by the
+ * form↔Zod ledger, so there is no descriptor property to mark. The value
+ * contract lives on the spec Zod's map value (`.meta({ xExpression: 'value' })`
+ * — `AssignmentValueSchema` and `FlowValueSlotSchema`,
  * `builtin-node-config.zod.ts`), and the expression ledger's reconciliation
  * ratchet reads it from the JSON projection below, walking the map's
- * `additionalProperties` as the `*` segment the ledger path `assignments.*`
- * spells. Kept apart from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS} on purpose:
- * that map means "publishes no descriptor", its other readers
+ * `additionalProperties` as the `*` segment the ledger paths `assignments.*`
+ * and `fields.*` spell. Kept apart from {@link SCHEMALESS_NODE_CONFIG_SCHEMAS}
+ * on purpose: that map means "publishes no descriptor", its other readers
  * (`metadata-protocol`'s reference-site attribution) walk it for that reason,
- * and `assignment` is not a member of that class.
+ * and none of these three is a member of that class.
  */
 export const LEDGER_DECLARED_NODE_CONFIG_SCHEMAS = {
   assignment: AssignmentConfigSchema,
+  create_record: CreateRecordConfigSchema,
+  update_record: UpdateRecordConfigSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 /** Node types whose expression slots reach the ledger through {@link LEDGER_DECLARED_NODE_CONFIG_SCHEMAS}. */
@@ -563,8 +571,8 @@ export type ReconciledNodeConfigType = SchemalessNodeType | LedgerDeclaredNodeTy
  * property, and (since #14149) on a map's `additionalProperties`.
  *
  * These are **not** published on a descriptor — that is the whole point of the
- * schemaless class (see this module's header), and `assignment`'s descriptor
- * publishes its map without the marker — so nothing here reaches the Studio
+ * schemaless class (see this module's header), and the ledger-declared types'
+ * descriptors publish their maps without the marker — so nothing here reaches the Studio
  * property form. It exists so validation ledgers and reconciliation ratchets
  * can see these contracts at all.
  */

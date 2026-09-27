@@ -42,6 +42,15 @@ import {
 // which is the whole reason `MetaDomainProtocol` below is `Pick`ed rather than
 // written out. Same move `domains/packages.ts` and `domains/mcp.ts` make.
 import type { MetadataProtocol } from '@objectstack/spec/api';
+// [#20193] THE per-caller read gate of a `/meta/:type/:name` document — the one
+// `RestServer` asks, published by `@objectstack/rest` so this transport asks it
+// too instead of a second audience resolver (ruling `5793362670` item 1).
+import {
+    createMetaItemReadGate,
+    type MetaItemReadGateSources,
+    type MetaReadGateCaller,
+    type MetaReadGatePolicy,
+} from '@objectstack/rest';
 import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -280,6 +289,107 @@ async function maskObjectSchemaList(
 }
 
 /**
+ * [#20193] The policy the plain item read and `/published` run the shared gate
+ * under — every arm, the per-deployment ones included, and the app PRUNED: the
+ * two doors that serve the document a client renders, exactly as `RestServer`
+ * runs them (`MetaReadGatePolicy` in `@objectstack/rest` says why).
+ */
+const RENDERED_DOCUMENT_POLICY: MetaReadGatePolicy = Object.freeze({ arms: 'all', app: 'gate' });
+
+/**
+ * [#20193] Where the shared gate's nav-servability prune log records what it
+ * has already said — one line per `app|entry|object|reason` per process, the
+ * dedupe `RestServer` keeps per instance.
+ */
+const NAV_PRUNE_LOGGED = new Set<string>();
+
+/**
+ * [#20193] This transport's I/O, as the shared per-caller read gate takes it.
+ *
+ * Only I/O — ⛔ no decision lives here; every verdict is
+ * `createMetaItemReadGate`'s, the one `RestServer` asks:
+ *
+ *  - the caller is the execution context `dispatch()` already resolved for
+ *    this request (the shared `resolveAuthzContext`, the same resolution the
+ *    REST transport runs);
+ *  - the security service holdings are read through is this request's;
+ *  - a metadata LIST read is the protocol's `getMetaItems`, whose environment
+ *    is the kernel `dispatch()` resolved — `undefined` when this host's
+ *    protocol has no list read, which the gate treats as an unreadable input
+ *    (fail closed, ADR-0049), never as an empty one;
+ *  - the ADR-0057 D10 service probe is `resolveService`, the capability probe
+ *    whose collapsed `undefined` is exactly "not registered here".
+ */
+function metaItemReadGateSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: MetaDomainProtocol | undefined,
+): MetaItemReadGateSources {
+    return {
+        resolveCaller: async () => context.executionContext as MetaReadGateCaller | undefined,
+        resolveSecurityService: () => deps.resolveService(context, 'security'),
+        listMetaItems: (type) => (typeof protocol?.getMetaItems === 'function' ? protocol.getMetaItems({ type }) : undefined),
+        serviceProbe: () => async (name: string) => {
+            try {
+                return (await deps.resolveService(context, name)) != null;
+            } catch {
+                return false;
+            }
+        },
+        navPruneLogged: NAV_PRUNE_LOGGED,
+    };
+}
+
+/**
+ * [#20193] Ask the shared per-caller read gate about ONE document this
+ * transport is about to serve, and write its refusal on this transport's wire.
+ *
+ * The item read and `/published` used to serve whatever the store answered:
+ * no ADR-0046 §6.7 docs audience, no app nav filter, no ADR-0057 D10 gate. On a
+ * host that mounts just the `${prefix}/*` catch-all this handler is the only
+ * answer to those reads, so a member `RestServer` refuses a
+ * `{ permissionSet }`-gated doc read its body here, and an app's
+ * `requiredPermissions` entries reached every member.
+ *
+ * The refusals, in this transport's envelope (`deps.error`, the ADR-0112 nested
+ * one every other refusal in this file speaks), with `RestServer`'s status and
+ * code:
+ *
+ *  - `absent` → the SAME `deps.error('Not found', 404)` this handler answers
+ *    for a name with nothing behind it, so an unpublished app stays externally
+ *    unobservable (ADR-0045 §3);
+ *  - `app-permission` / `docs-audience` → `403 PERMISSION_DENIED` /
+ *    `401 UNAUTHENTICATED` with the gate's message.
+ *
+ * A gate input that could not be read (the books or doc list read threw) is
+ * answered as that fault — its own status, `500` for a shapeless one — ⛔ never
+ * as the document, and never as a 403 that would tell a holder they hold
+ * nothing.
+ */
+async function gateMetaItemDocument(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: MetaDomainProtocol | undefined,
+    metaType: string,
+    name: string,
+    document: any,
+): Promise<{ ok: true; document: any } | { ok: false; response: { status: number; body: any } }> {
+    let verdict;
+    try {
+        const judge = createMetaItemReadGate(
+            metaItemReadGateSources(deps, context, protocol), metaType, name, [document], RENDERED_DOCUMENT_POLICY,
+        );
+        verdict = await judge(document);
+    } catch (e: any) {
+        return { ok: false, response: deps.errorFromThrown(e, 500) };
+    }
+    if (verdict.kind === 'serve') return { ok: true, document: verdict.document };
+    const { refusal } = verdict;
+    if (refusal.reason === 'absent') return { ok: false, response: deps.error('Not found', 404) };
+    return { ok: false, response: deps.error(refusal.message, refusal.status, { code: refusal.code }) };
+}
+
+/**
  * Percent-decode the `:name` path segment. [#12195]
  *
  * This dispatcher splits the RAW path (`path.split('/')`) and, unlike the
@@ -438,6 +548,33 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // broader `getMetaItem` would not do: it folds the code layer into its
         // own answer, so this route could no longer tell the two stores apart.
         const protocol = await resolveProtocol(deps, _context);
+
+        // [#20193] This door serves ONE document, the same representation the
+        // plain read below serves — so it answers exactly what `RestServer`'s
+        // `/published` answers this caller: the shared per-caller read gate
+        // (every arm, a partly-withheld app PRUNED) and the ADR-0106 object
+        // mask, the one the plain read below already runs. It ran neither, so a
+        // member refused `crm_admin_runbook` read its body here, and an object's
+        // unreadable fields were served whole. Every exit that serves a
+        // document goes through `servePublished`, OUTSIDE the `try`s below:
+        // those classify a failed store READ, and a gate fault raised while
+        // serving must be answered as itself — never fall through to the
+        // snapshot as though no overlay existed.
+        const publishedType = pluralToSingular(type);
+        const publishedMasker = publishedType === 'object' ? await resolveObjectMasker(deps, _context) : undefined;
+        const servePublished = async (document: any): Promise<HttpDispatcherResult> => {
+            const gated = await gateMetaItemDocument(deps, _context, protocol, publishedType, name, document);
+            if (!gated.ok) return { handled: true, response: gated.response };
+            let served = gated.document;
+            if (publishedMasker) {
+                const masked = await maskObjectSchema(publishedMasker, name, served);
+                if (!masked.ok) return fieldVisibilityFault(deps, name);
+                served = masked.document;
+            }
+            return { handled: true, response: deps.success(served) };
+        };
+
+        let publishedOverlay: unknown;
         if (protocol && typeof protocol.getMetaItemLayered === 'function') {
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -447,10 +584,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     ...(organizationId ? { organizationId } : {}),
                 });
                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                    return { handled: true, response: deps.success(layered.overlay) };
+                    publishedOverlay = layered.overlay;
                 }
             } catch { /* fall through to the code/package snapshot below */ }
         }
+        if (publishedOverlay !== undefined) return servePublished(publishedOverlay);
 
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).getPublished === 'function') {
@@ -463,16 +601,17 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // code-published item.
             const data = await (metadataService as any).getPublished(canonicalMetaUrlType(type), name);
             if (data === undefined) return { handled: true, response: deps.error('Not found', 404) };
-            return { handled: true, response: deps.success(data) };
+            return servePublished(data);
         }
         // Fallback — try MetadataService via resolveService
         const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
         if (metaSvc && typeof (metaSvc as any).getPublished === 'function') {
+            let fallbackData: unknown;
             try {
                 // [#10503] Same fold — this slot reads the same canonical store.
-                const fallbackData = await (metaSvc as any).getPublished(canonicalMetaUrlType(type), name);
-                if (fallbackData !== undefined) return { handled: true, response: deps.success(fallbackData) };
+                fallbackData = await (metaSvc as any).getPublished(canonicalMetaUrlType(type), name);
             } catch { /* fall through */ }
+            if (fallbackData !== undefined) return servePublished(fallbackData);
         }
         return { handled: true, response: deps.error('Not found', 404) };
     }
@@ -862,6 +1001,24 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
             // Try Protocol Service First (Preferred)
             const protocol = await resolveProtocol(deps, _context);
+
+            // [#20193] THE per-caller read gate, on whichever lookup below
+            // answers — the one `RestServer`'s plain read asks, so this read
+            // refuses what that read refuses (a `{ permissionSet }`-gated doc
+            // or book to a non-holder, an app to a caller missing its
+            // `requiredPermissions`) and prunes what it prunes (the nav entries
+            // a caller may not open, a widget whose service is off here). It
+            // runs OUTSIDE the lookups' own `try`s — those classify a miss, and
+            // a gate fault must be answered as itself, never as "not found".
+            // `object` is not judged here: its per-caller gate is the ADR-0106
+            // mask, which the branch above already runs.
+            const serveItem = async (envelope: any): Promise<HttpDispatcherResult> => {
+                const gated = await gateMetaItemDocument(deps, _context, protocol, singularType, name, envelope.item);
+                if (!gated.ok) return { handled: true, response: gated.response };
+                return { handled: true, response: deps.success({ ...envelope, item: gated.document }) };
+            };
+
+            let found: any;
             if (protocol && typeof protocol.getMetaItem === 'function') {
                  try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -897,26 +1054,28 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // about this route is untouched here, neither answered nor
                     // pre-empted.
                     if (data?.item != null) {
-                        return { handled: true, response: deps.success(data) };
+                        found = data;
                     }
                  } catch (e: any) {
                     // Protocol might throw if not found or not supported
                  }
             }
+            if (found) return serveItem(found);
 
             // Try MetadataService for runtime-registered types
             const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
             if (metaSvc && typeof (metaSvc as any).getItem === 'function') {
+                let data: any;
                 try {
                     // ADR-0048 — thread `?package=` so single-item resolution is
                     // package-scoped (prefer-local), matching list resolution.
-                    const data = await (metaSvc as any).getItem(singularType, name, packageId);
-                    // [#5563] Same convergence as the object branch above: the
-                    // MetadataService hands back the bare document, so wrap it in
-                    // the declared envelope rather than letting which service
-                    // answered decide the caller's parse.
-                    if (data) return { handled: true, response: deps.success({ type: singularType, name, item: data }) };
+                    data = await (metaSvc as any).getItem(singularType, name, packageId);
                 } catch { /* not found */ }
+                // [#5563] Same convergence as the object branch above: the
+                // MetadataService hands back the bare document, so wrap it in
+                // the declared envelope rather than letting which service
+                // answered decide the caller's parse.
+                if (data) return serveItem({ type: singularType, name, item: data });
             }
             return { handled: true, response: deps.error('Not found', 404) };
         } catch (e: any) {

@@ -29,12 +29,12 @@ const mapping = (fieldMapping: unknown[], extra: Record<string, unknown> = {}) =
 });
 
 describe('validateMappingTargetFields', () => {
-  it('reports a target that names no field of the object, located at the mapping (the card\'s shape)', () => {
+  it('reports a target that names no field of the object, located at the mapping', () => {
     const findings = validateMappingTargetFields({
       objects: [contact],
       mappings: [mapping([
         { source: 'Name', target: 'full_name' },
-        { source: 'Street', target: 'mailing_address.street' },
+        { source: 'Mail', target: 'emial' },
       ])],
     });
     expect(findings).toHaveLength(1);
@@ -44,10 +44,87 @@ describe('validateMappingTargetFields', () => {
       where: 'mapping "contact_import" · object "crm_contact"',
       path: 'mappings[0].fieldMapping[1].target',
     });
-    // Names the target and the object, and says why a dotted path is not one.
-    expect(findings[0].message).toContain('"mailing_address.street"');
+    // Names the target and the object, and the closest name the object has.
+    expect(findings[0].message).toContain('"emial"');
     expect(findings[0].message).toContain('"crm_contact"');
-    expect(findings[0].message).toContain('"mailing_address" is a field of "crm_contact"');
+    expect(findings[0].message).toContain('Did you mean "email"?');
+  });
+
+  // [#20149] The card's shape, which #20150 pinned red here, is now a target:
+  // a declared part of a compound field. The flip is load-bearing: the whole
+  // address template is green, every part the value schema declares.
+  it('is green on a mapping that writes an address by its declared parts (the card\'s five columns and more)', () => {
+    expect(validateMappingTargetFields({
+      objects: [contact],
+      mappings: [mapping([
+        { source: 'Name', target: 'full_name' },
+        { source: 'Street', target: 'mailing_address.street' },
+        { source: 'City', target: 'mailing_address.city' },
+        { source: 'State', target: 'mailing_address.state' },
+        { source: 'Zip', target: 'mailing_address.postalCode' },
+        { source: 'Country', target: 'mailing_address.country' },
+        { source: 'x', target: 'mailing_address.countryCode', transform: 'constant', params: { value: 'US' } },
+        { source: ['Line 1', 'Line 2'], target: 'mailing_address.formatted', transform: 'join' },
+      ])],
+    })).toEqual([]);
+  });
+
+  it('refuses a part the address value does not declare, naming every part it does', () => {
+    const findings = validateMappingTargetFields({
+      objects: [contact],
+      mappings: [mapping([{ source: 'Street', target: 'mailing_address.stret' }])],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['mappings[0].fieldMapping[0].target']);
+    expect(findings[0].rule).toBe(MAPPING_TARGET_FIELD_UNKNOWN);
+    expect(findings[0].message).toContain(
+      '"stret" is not a part of the address field "mailing_address": the parts a target may name on it are '
+      + 'street, city, state, postalCode, country, countryCode, formatted.',
+    );
+    expect(findings[0].message).toContain('Did you mean "street"?');
+    expect(findings[0].hint).toContain(
+      'or at a declared part of a compound field as field.part (mailing_address: street, city, state, postalCode, country, countryCode, formatted)',
+    );
+  });
+
+  it('refuses a dotted path on a field with no parts — and never reads it as a lookup traversal', () => {
+    const findings = validateMappingTargetFields({
+      objects: [{ ...contact, fields: { ...contact.fields, account: { type: 'lookup', reference: 'crm_account' } } }],
+      mappings: [mapping([
+        { source: 'First', target: 'full_name.first' },
+        { source: 'Account', target: 'account.name' },
+      ])],
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'mappings[0].fieldMapping[0].target',
+      'mappings[0].fieldMapping[1].target',
+    ]);
+    expect(findings[0].message).toContain('The text field "full_name" is a field of "crm_contact" with no parts');
+    expect(findings[1].message).toContain('The lookup field "account" is a field of "crm_contact" with no parts');
+    expect(findings[1].message).toContain('Map the column to "account" with transform "lookup"');
+    // The part list rides along either way, so the author sees what IS a part.
+    expect(findings[0].hint).toContain('mailing_address: street, city');
+  });
+
+  it('refuses a part of a field the same mapping also writes whole — the two collide', () => {
+    const findings = validateMappingTargetFields({
+      objects: [contact],
+      mappings: [mapping([
+        { source: 'Address JSON', target: 'mailing_address' },
+        { source: 'Street', target: 'mailing_address.street' },
+      ])],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: MAPPING_TARGET_FIELD_UNKNOWN,
+      path: 'mappings[0].fieldMapping[1].target',
+      // The collision names the field AND lists its legal parts, as every refusal does.
+      hint: 'Map the field whole or by its parts, not both. A declared part of a compound field is written '
+        + 'field.part (mailing_address: street, city, state, postalCode, country, countryCode, formatted).',
+    });
+    expect(findings[0].message).toContain(
+      'writes the compound field "mailing_address" of object "crm_contact" both whole (fieldMapping[0].target) '
+      + 'and by its part "street" (fieldMapping[1].target)',
+    );
   });
 
   it('is green on the control mapping — declared fields only', () => {

@@ -341,8 +341,10 @@ describe('appSecurityPluginOptions over `packages[]` (ADR-0130 D4, #15007)', () 
 
     // A `packages` that is present but is not an array is MALFORMED, not absent
     // (the rule beside `AssembledPackageBodySchema`). This reader keeps no
-    // `packages` guard of its own, so the refusal is the resolver's.
+    // `packages` guard of its own, so the refusal is the resolver's — `null`
+    // included, since #19926 took `null` out of the resolver's absent branch.
     it.each([
+      ['null', null],
       ['{}', {}],
       ['0', 0],
       ["'x'", 'x'],
@@ -359,9 +361,10 @@ describe('appSecurityPluginOptions over `packages[]` (ADR-0130 D4, #15007)', () 
       expect(refusalOf({ packages: [wellFormed] })).toEqual({});
       expect(appSecurityPluginOptions({ packages: [wellFormed] })).toEqual({ fallbackPermissionSet: CORE_PROFILE });
 
-      // Absent, explicitly `undefined`, and `null`: all three read the top level
-      // exactly as before the private guard was dropped.
-      for (const absent of [{}, { packages: undefined }, { packages: null }]) {
+      // Absent and explicitly `undefined`: both read the top level exactly as
+      // before the private guard was dropped. `null` is a row of the refusal
+      // table above, not an absent key.
+      for (const absent of [{}, { packages: undefined }]) {
         expect(refusalOf({ ...absent, permissions: [permissionSet('top')] })).toEqual({});
         expect(appSecurityPluginOptions({ ...absent, permissions: [permissionSet('top')] }))
           .toEqual({ fallbackPermissionSet: 'top' });

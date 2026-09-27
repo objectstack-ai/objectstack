@@ -18,6 +18,10 @@ import { retiredKey } from '../shared/retired-key';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
+// The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
+// `password` exemption rather than restating it. No runtime cycle: that module's
+// only imports are type-only.
+import { isMaskedOnReadFieldType } from './masked-field-types';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -2574,17 +2578,26 @@ const warnedPasswordObjects = new Set<string>();
  * A warning, not an error: `password` now has a defined generic-path contract,
  * and the field-zoo example intentionally exercises every field type — a hard
  * error would be self-inflicted breakage. Deduped per object name so a schema
- * imported many times warns once. `managedBy: 'better-auth'` objects are exempt,
- * as are fields that opt in with `ackPlaintextMasking: true` — the author's
- * explicit "this is intended" acknowledgment (#3420), which lets a deliberate
- * demo/design (e.g. the showcase field-zoo) start with zero warnings.
+ * imported many times warns once. Objects whose `managedBy` exempts `password`
+ * from the read mask are exempt (today `better-auth`), as are fields that opt in
+ * with `ackPlaintextMasking: true` — the author's explicit "this is intended"
+ * acknowledgment (#3420), which lets a deliberate demo/design (e.g. the showcase
+ * field-zoo) start with zero warnings.
+ *
+ * [#20141] The exemption is READ from the masked-on-read declaration
+ * (`MASKED_ON_READ_FIELD_TYPES`, via `isMaskedOnReadFieldType`), never restated:
+ * the warning describes a `password` that is masked on read yet plaintext at
+ * rest, so it fires exactly where the read mask applies to `password`. If that
+ * declaration's `exemptManagedBy` changes, this warning follows it. ⛔ Not
+ * widened to `secret` — a `secret` is encrypted at rest, which is the whole
+ * point of steering authors to it.
  */
 function warnGenericPasswordFields(
   objectName: unknown,
   fields: unknown,
   managedBy: unknown,
 ): void {
-  if (managedBy === 'better-auth') return;
+  if (!isMaskedOnReadFieldType('password', managedBy)) return;
   if (!fields || typeof fields !== 'object') return;
   const passwordFields = Object.entries(
     fields as Record<string, { type?: string; ackPlaintextMasking?: boolean }>,
