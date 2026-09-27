@@ -261,6 +261,27 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   // translates byte-identically now.
   if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
 
+  // [#19949] A `{ $field }` cross-field reference in ANY comparand position is
+  // refused: this driver has no lowering for a column-to-column comparison,
+  // and without this gate it emitted the reference as a LITERAL sub-document.
+  // Measured through mingo 7.2.4 (the query-semantics proxy; a live `mongod`
+  // is not measurable here) over the rows `{s:'a',t:'a'}` and `{s:'a',t:'b'}`:
+  // `{ s: { $ne: { $field: 't' } } }` selected BOTH rows and `$eq` selected
+  // none. `record.s != record.t` is exactly what `compileCelToFilter` lowers
+  // an RLS `using` clause to, and the policy is AND-composed into the read
+  // after the engine's comparand seams, so this translator is the only face
+  // between it and the server: the read restriction widened to every row.
+  // The negated positions widened the same way — `$nin: [ref]`,
+  // `$notContains: ref`, and `$eq: ref` under `$not` (lowered to `$nor`).
+  //
+  // On the WALK, for the reason the gates below give: `{ $or: [ {}, { s:
+  // { $ne: ref } } ] }` reduces to TRUE on its first disjunct, so an
+  // emitter-side gate would refuse or ignore the reference depending on its
+  // siblings. FIRST among the comparand gates, so every reference answers one
+  // refusal whichever operator carries it. ⛔ Not implemented as a `$expr`
+  // column comparison: the ruling on this driver is refuse, not lower.
+  if (carriesFieldReference(value)) throw fieldReferenceUnsupportedError();
+
   // [#5347] `$null`'s comparand is a boolean by declaration. Checked on THIS
   // walk rather than in the emitter's `$null` arm because the emitter is
   // skipped wholesale by a boolean identity: `{ $or: [ {}, { stage: { $null:
@@ -410,6 +431,65 @@ function arrayNotEqualComparandError(): Error {
       'MongoDB reads "$ne" against an array operand as "not equal to that array and not holding it ' +
       'as an element", which every scalar value satisfies. The field and the value are withheld ' +
       'from this message because the filter may be an access policy the caller did not write.',
+  );
+}
+
+/**
+ * [#19949] Is `value` shaped like a spec `FieldReferenceSchema` reference —
+ * a non-array object carrying a `$field` key?
+ *
+ * SHAPE only, spelled as `@objectstack/spec`'s schema door spells its own
+ * `isFieldReferenceShape` (not exported there): a `{ $field }` whose value is
+ * not a string is a MALFORMED reference, and it is refused with the rest
+ * rather than emitted as the literal document the well-formed one used to be.
+ */
+function isFieldReferenceShape(value: unknown): boolean {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && '$field' in value;
+}
+
+/**
+ * [#19949] Does this field constraint compare against a `{ $field }` reference
+ * in a position this translator would otherwise emit as a literal value?
+ *
+ * - the whole constraint — the bare `{ field: { $field: … } }` form;
+ * - any operator's comparand — `{ field: { $ne: { $field: … } } }`, an
+ *   `addDays` offset included;
+ * - any member of a list comparand — `$in` / `$nin` members, `$between`
+ *   endpoints, an array handed to `$ne` / `$eq`.
+ *
+ * Only `$`-prefixed keys are read as operators, exactly as the emitter reads
+ * them: `{ field: { nested: { $field: … } } }` has no operator and stays the
+ * nested-document exact match it always was.
+ */
+function carriesFieldReference(spec: unknown): boolean {
+  if (isFieldReferenceShape(spec)) return true;
+  if (!isFilterNode(spec)) return false;
+  for (const [op, comparand] of Object.entries(spec)) {
+    if (!op.startsWith('$')) continue;
+    if (isFieldReferenceShape(comparand)) return true;
+    if (Array.isArray(comparand) && comparand.some(isFieldReferenceShape)) return true;
+  }
+  return false;
+}
+
+/**
+ * [#19949] A `{ $field }` cross-field reference reached this translator.
+ *
+ * The field, the referenced field, the operator and the position are withheld
+ * from the message, as {@link arrayNotEqualComparandError} withholds them and
+ * for its reason: this translator receives the RLS `using` predicate
+ * AND-composed into the caller's `where`, and the caller who reads the 400 is
+ * not the author of that predicate. The message carries the refusal's identity
+ * — the unsupported feature, named — and the remedy.
+ */
+function fieldReferenceUnsupportedError(): Error {
+  return unsupportedFilterError(
+    'The MongoDB driver does not support field-to-field comparison ({ "$field": … }): this filter ' +
+      'compares a field against another field of the same record, and the driver has no lowering ' +
+      'for a column-to-column comparison. It is refused rather than translated because MongoDB ' +
+      'would read the reference as a literal sub-document, so "$ne" would match every row and ' +
+      '"$eq" none. Compare against a literal value instead. The fields and the operator are ' +
+      'withheld from this message because the filter may be an access policy the caller did not write.',
   );
 }
 
