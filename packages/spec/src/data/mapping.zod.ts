@@ -191,9 +191,11 @@ export type TransformType = z.input<typeof TransformType>;
  *    single `string`. A target may also name a declared PART of a compound
  *    field, `field.part` (`mailing_address.street`, #20149): the import path
  *    assembles every part one row maps into that field's one value. Which
- *    fields are compound, and which parts they declare, is read from the
- *    field's value schema by `judgeImportMappingTarget`
- *    (`import-mapping-target.ts`), the one verdict every door asks.
+ *    fields are compound, and which parts they declare, is read from each
+ *    field's value schema when `indexImportMappingTargets` indexes the object
+ *    (its module-private `importTargetPartsOf`, `import-mapping-target.ts`);
+ *    `judgeImportMappingTarget`, the one verdict every door asks, then judges
+ *    a `field.part` target against that set.
  * 3. This schema is a {@link strictObject} (#4001): an unknown key THROWS with
  *    an alias/typo prescription. The other two are plain `z.object` and strip
  *    silently. Opposite failure modes under one name is exactly how a snippet

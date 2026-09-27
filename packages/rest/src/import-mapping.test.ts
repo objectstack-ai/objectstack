@@ -250,5 +250,7 @@ describe('refuseUnknownMappingTargets — compound-field parts (#20149)', () => 
             + 'with the whole field at fieldMapping[0].target)',
         );
         expect(r?.error).toContain('refused before any row, on the dry run and the commit alike');
+        // A collision-only refusal lists the legal parts too (ruling item 3).
+        expect(r?.error).toContain(`or at a declared part of a compound field as field.part (mailing_address: ${PARTS})`);
     });
 });

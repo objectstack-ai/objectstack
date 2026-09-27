@@ -152,7 +152,11 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
     if (misses.length === 0) continue; // clean, or skip 2
     const index = indexImportMappingTargets(objectDef);
     const known = index?.names ?? new Set<string>();
-    const compound = index ? [...index.parts] : [];
+    // The object's compound fields and their legal parts, which EVERY finding's
+    // hint lists, a collision's included (ruling on #20149, item 3).
+    const compoundParts = index && index.parts.size > 0
+      ? [...index.parts].map(([field, parts]) => `${field}: ${parts.join(', ')}`).join('; ')
+      : '';
     const mappingName = strName(mapping.name) ?? `#${mi}`;
     const where = `mapping "${mappingName}" · object "${objectName}"`;
 
@@ -169,7 +173,9 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
             `"${objectName}" both whole (${miss.wholeAt}) and by its part "${miss.target.slice(dot + 1)}" ` +
             `(${miss.path}). One row carries one value for a field, so the two collide, and the import endpoint ` +
             `refuses this mapping before any row, on the dry run and the commit alike (INVALID_FIELD).`,
-          hint: 'Map the field whole or by its parts, not both.',
+          hint:
+            'Map the field whole or by its parts, not both. A declared part of a compound field is ' +
+            `written field.part (${compoundParts}).`,
         });
         continue;
       }
@@ -186,10 +192,7 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
         hint:
           `Point the target at a field "${objectName}" declares, or at a column the platform provisions ` +
           `on it` +
-          (compound.length > 0
-            ? `, or at a declared part of a compound field as field.part (` +
-              compound.map(([field, parts]) => `${field}: ${parts.join(', ')}`).join('; ') + ')'
-            : '') +
+          (compoundParts ? `, or at a declared part of a compound field as field.part (${compoundParts})` : '') +
           `. Addressable names: ${listNames(known)}.`,
       });
     }

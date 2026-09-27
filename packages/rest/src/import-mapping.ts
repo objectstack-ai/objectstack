@@ -171,7 +171,9 @@ export function refuseUnknownMappingTargets(
             + 'Map the field whole or by its parts, not both.',
         );
     }
-    if (unknown.length > 0) sentences.push(`Point each target at a field the object declares${partsHint(objectSchema)}.`);
+    // Every refusal, a collision included, ends by listing the legal parts
+    // (ruling on #20149, item 3: the refusal names the field and lists them).
+    sentences.push(`Point each target at a field the object declares${partsHint(objectSchema)}.`);
     return { ok: false, status: 400, code: 'INVALID_FIELD', error: sentences.join(' ') };
 }
 

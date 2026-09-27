@@ -855,6 +855,8 @@ describe('import route — a declared part of a compound field (#20149)', () => 
       expect(res._json.error).toContain(
         '(fieldMapping[2].target "mailing_address.street", with the whole field at fieldMapping[1].target)',
       );
+      // …and, like every refusal, it lists the legal parts.
+      expect(res._json.error).toContain(`or at a declared part of a compound field as field.part (mailing_address: ${PARTS})`);
     }
     expect(dry._json).toEqual(commit._json);
     expect(await engine.find('contact', { where: {} })).toHaveLength(0);

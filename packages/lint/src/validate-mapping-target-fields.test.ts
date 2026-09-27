@@ -117,7 +117,9 @@ describe('validateMappingTargetFields', () => {
     expect(findings[0]).toMatchObject({
       rule: MAPPING_TARGET_FIELD_UNKNOWN,
       path: 'mappings[0].fieldMapping[1].target',
-      hint: 'Map the field whole or by its parts, not both.',
+      // The collision names the field AND lists its legal parts, as every refusal does.
+      hint: 'Map the field whole or by its parts, not both. A declared part of a compound field is written '
+        + 'field.part (mailing_address: street, city, state, postalCode, country, countryCode, formatted).',
     });
     expect(findings[0].message).toContain(
       'writes the compound field "mailing_address" of object "crm_contact" both whole (fieldMapping[0].target) '
