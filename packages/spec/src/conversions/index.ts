@@ -12,12 +12,15 @@
 export {
   CONVERSION_CONFLICT_CODE,
   CONVERSION_NOTICE_CODE,
+  CONVERSION_TODO_CODE,
   type ConversionApplication,
   type ConversionConflictDetail,
   type ConversionConflictNotice,
   type ConversionContext,
   type ConversionFixture,
   type ConversionNotice,
+  type ConversionTodoDetail,
+  type ConversionTodoNotice,
   type MetadataConversion,
 } from './types.js';
 export { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
