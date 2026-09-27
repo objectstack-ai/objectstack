@@ -8,11 +8,13 @@
 // `cacheTtlSeconds`; the value is unchanged and the key stays GET-only.
 // Tombstoned with `retiredKey()` — the shape is not `.strict()`, so a bare
 // deletion would strip the old key in silence, and the unknown-key error could
-// not carry the rename. This is the ONE key of this card's twelve that gets a
-// D2 CONVERSION rather than a semantic entry: `apis:` is a stack collection
-// (`stack.zod.ts` — `apis: z.array(ApiEndpointSchema)`) and an `api` is a
-// registered metadata kind stored as a row, so the conversion chain has a seam
-// that sees it. `api-endpoint-cache-ttl-to-cache-ttl-seconds` rewrites it,
-// retired from the load path (no alias window). Registered under 18 for the
-// launch-window reason its neighbours state.
+// not carry the rename. This is the ONE key of this card's twelve that also
+// gets a D2 CONVERSION: `apis:` is a stack collection (`stack.zod.ts` —
+// `apis: z.array(ApiEndpointSchema)`) and an `api` is a registered metadata
+// kind stored as a row, so the conversion chain has a seam that sees it.
+// `api-endpoint-cache-ttl-to-cache-ttl-seconds` rewrites it, retired from the
+// load path (no alias window); the family's D3 entry is
+// `api-endpoint-cache-ttl-unit-in-key`, because a rename that keeps the value
+// cannot say whether the value was ever in seconds. Registered under 18 for
+// the launch-window reason its neighbours state.
 export const entry = 'api/ApiEndpoint:cacheTtl';

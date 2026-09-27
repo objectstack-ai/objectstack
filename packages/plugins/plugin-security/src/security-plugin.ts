@@ -844,9 +844,10 @@ function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any
  * compiles, out of the policies that apply to this principal, object and write
  * operation (`insert` / `update`, `all` included).
  *
- * The published contract is `RowLevelSecurityPolicySchema.check`: "defaults to
- * USING clause if not specified". That is also PostgreSQL's rule: a policy
- * without `WITH CHECK` holds new rows to its `USING`. Before this selector the
+ * The published contract is `RowLevelSecurityPolicySchema.check`, which states
+ * the per-operation composition below; read it there rather than from a quote
+ * here. Its starting point is PostgreSQL's rule: a policy without `WITH CHECK`
+ * holds new rows to its `USING`. Before this selector the
  * runtime compiled only policies that declared `check`, so a USING-only policy
  * never gated an INSERT or an UPDATE's new row. An author writing
  * `record.status != 'closed'` could store a closed row they could then not see.

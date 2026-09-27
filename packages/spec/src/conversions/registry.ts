@@ -31,6 +31,7 @@ import { RETIRED_SUB_DAY_INTERVALS } from '../data/analytics.zod.js';
 import {
   FILTER_ARRAY_LOGIC_KEYWORDS,
   FILTER_OPERATORS,
+  LOGICAL_OPERATORS,
   isFilterAST,
   parseFilterAST,
 } from '../data/filter.zod.js';
@@ -1919,9 +1920,11 @@ const appAreaFailOpenGatesRemoved: MetadataConversion = {
  * RLS-policy `priority` removed (protocol 17, #3896 security audit).
  *
  * A pure DELETE with no rename target, because the promised semantics never
- * existed: applicable policies OR-combine (any match allows access — most
- * permissive wins), so there is no conflict for a priority to resolve and
- * evaluation order cannot change an outcome. The 2026-07-30 security-subset
+ * existed: no outcome depends on an order. Applicable policies OR-combine on
+ * reads (any match allows access), and a write's check is chosen once per
+ * operation across the applicable policies, then OR-combined
+ * (`RowLevelSecurityPolicySchema.check`), so there is no conflict for a
+ * priority to resolve and evaluation order cannot change an outcome. The 2026-07-30 security-subset
  * liveness re-verification closed the call graph — collection site, projection
  * round-trip, compiler — and found NO reader, ever. Dropping the key is
  * therefore strictly lossless: outcomes are identical with or without it.
@@ -3457,7 +3460,7 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  * rows. So the stored value converges here rather than each reader learning to
  * accept both.
  *
- * ## Why D2 and not D3
+ * ## Why the data repair is D2
  *
  * There is a concrete stored value with a lossless, behaviour-preserving
  * rewrite, which is the D2 test exactly. `mongo` and `mongodb` resolve to the
@@ -3465,6 +3468,12 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  * cannot change where any data lives — contrast
  * {@link datasourceConfigDriverKeyAliases}, whose scope guard exists because
  * rewriting a sqlite `path:` WOULD have moved a database.
+ *
+ * Losslessness decides only that the data repair is D2. It does not decide
+ * whether the family ALSO owes a D3 entry — every retirement family does
+ * (`SemanticMigration`, `migrations/types.ts`). This one converts into
+ * protocol 17, whose step shipped before that rule and was not back-filled,
+ * so it has none.
  *
  * ## Why it stays on the LIVE load path
  *
@@ -9303,10 +9312,13 @@ const jobTimeoutToTimeoutMs: MetadataConversion = {
  * `apis[].cacheTtl` → `apis[].cacheTtlSeconds` (protocol 18, #15677 for #14478)
  * — the `api` half of the same rename `hookTimeoutToTimeoutMs` and
  * `jobTimeoutToTimeoutMs` document, and the ONE key of that card's twelve that
- * gets a conversion rather than a semantic entry: `apis:` is a stack collection
+ * also gets a conversion: `apis:` is a stack collection
  * (`apis: z.array(ApiEndpointSchema)`) and `api` is a registered metadata kind
  * stored as a row, so the chain has a seam that sees it. The other eleven are
- * wire payloads and construction arguments the chain never touches.
+ * wire payloads and construction arguments the chain never touches, so their
+ * D3 entries are their only channel. This key's family carries a D3 entry too,
+ * `api-endpoint-cache-ttl-unit-in-key`: the rename keeps the value, and only
+ * the author can say whether the value was ever in seconds.
  *
  * Same posture as its two siblings: retired from the load path, tombstoned at
  * the schema, replayable here. The fixture keeps `rateLimit` out of the
@@ -9792,12 +9804,14 @@ const viewPageMountRemoved: MetadataConversion = {
  * upstream and failed downstream, and the author was told off by the wrong
  * layer.
  *
- * The rewrite is lossless and wholly mechanical, which is why this is a D2
- * conversion rather than a semantic TODO: `'created_at desc'` carries exactly
- * the tuple `{ field: 'created_at', order: 'desc' }`; a bare field name meant
- * ASCENDING, so it is written out as `order: 'asc'` rather than omitted
- * (`order` is required on the entry); and the comma-separated multi-key form
- * the wire normalizer splits on becomes one entry per key, in the same order.
+ * The rewrite is lossless and wholly mechanical, which is why the data repair
+ * is a D2 conversion (the family's D3 entry,
+ * `list-view-sort-string-clause-retired`, carries the clauses this rewrite
+ * leaves alone): `'created_at desc'` carries exactly the tuple
+ * `{ field: 'created_at', order: 'desc' }`; a bare field name meant ASCENDING,
+ * so it is written out as `order: 'asc'` rather than omitted (`order` is
+ * required on the entry); and the comma-separated multi-key form the wire
+ * normalizer splits on becomes one entry per key, in the same order.
  *
  * ⚠️ A string that does NOT parse as that grammar is left ALONE and emits
  * nothing — the `'-field'` OData-ish dialect above all. That dialect belongs to
@@ -10070,13 +10084,14 @@ const chartConfigAriaRemoved: MetadataConversion = {
           chartConfig: { description: 'Orders by month', aria: { ariaLabel: 'Orders by month' } },
         }],
       }],
+      // ⚠️ No `blocks[].chart` here since #20161: `report-joined-chart-removed`
+      // strips a block's WHOLE `chart`, so a fixture carrying one could no
+      // longer equal its own `after` under the full-table replay (the fixture
+      // disjointness contract). The block leg of `apply` above still runs on a
+      // stored row, ahead of that entry, and the compound result is the same.
       reports: [{
         name: 'revenue_by_region',
         chart: { type: 'bar', aria: { ariaLabel: 'Revenue by region' } },
-        blocks: [{
-          name: 'by_quarter',
-          chart: { type: 'line', aria: { ariaDescribedBy: 'legend_1' } },
-        }],
       }],
     },
     after: {
@@ -10093,15 +10108,11 @@ const chartConfigAriaRemoved: MetadataConversion = {
       reports: [{
         name: 'revenue_by_region',
         chart: { type: 'bar' },
-        blocks: [{
-          name: 'by_quarter',
-          chart: { type: 'line' },
-        }],
       }],
     },
-    // One notice per stripped SITE — the widget's chart config, the report's own
-    // chart and the block's chart — not one per key name.
-    expectedNotices: 3,
+    // One notice per stripped SITE — the widget's chart config and the report's
+    // own chart — not one per key name.
+    expectedNotices: 2,
   },
 };
 
@@ -10483,8 +10494,55 @@ function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefin
 }
 
 /**
- * The record form `{ field: value | { $op: value, … }, … }` → rules, or
- * `undefined` when any part of it has no lossless rule spelling.
+ * A legacy filter's verdict: the rule array it maps to losslessly, or — when
+ * some part of it has no lossless rule spelling — why not.
+ *
+ * `declined` completes the sentence "this filter …" and names the part that
+ * blocks the rewrite. It is what the entry's structured TODO carries
+ * (`context.reportTodo`, ADR-0087 D3: a TODO where the conversion is not
+ * lossless, never silence), so an operator reading `os migrate meta --stored`
+ * learns which site was left as stored and what the hand rewrite must decide.
+ * The verdict itself is unchanged by it: a declined filter is left exactly as
+ * stored, as it always was.
+ */
+type FilterMapping = { rules: MappedFilterRule[] } | { declined: string };
+
+/** A refusal's first sentence, without its full stop — a TODO reason quotes only that much. */
+function firstSentence(message: string): string {
+  const end = message.search(/\.(\s|$)/);
+  return (end === -1 ? message : message.slice(0, end)).trim();
+}
+
+/** `` `a` `` / `` `a` and `b` `` — key names as a TODO reason quotes them. */
+function quoteKeys(keys: readonly string[]): string {
+  return keys.map((key) => `\`${key}\``).join(' and ');
+}
+
+/**
+ * Why a record with top-level `$` keys is left as stored — the combinators
+ * named first, because naming them is what the ruling asks of the TODO.
+ */
+function dollarKeysReason(keys: readonly string[]): string {
+  const combinators = keys.filter((key) => (LOGICAL_OPERATORS as readonly string[]).includes(key));
+  const others = keys.filter((key) => !combinators.includes(key));
+  if (combinators.length > 0) {
+    const alsoNotFields = others.length === 0
+      ? ''
+      : ` (its top-level ${quoteKeys(others)} ${others.length === 1 ? 'is' : 'are'} not a field either)`;
+    return `carries the combinator${combinators.length === 1 ? '' : 's'} ${quoteKeys(combinators)}`
+      + `${alsoNotFields}: a rule array's rules only AND, so \`$or\` and \`$not\` have no rule `
+      + 'spelling and `$and` only the separate rules it joins, and a combinator is never flattened — '
+      + 'that would change which rows the filter selects. Decide which rows it should select, and '
+      + 'write the rules that select exactly those';
+  }
+  return `carries the top-level key${others.length === 1 ? '' : 's'} ${quoteKeys(others)}, which `
+    + `${others.length === 1 ? 'is' : 'are'} not a field — a rule names a field, so there is no rule `
+    + `spelling for ${others.length === 1 ? 'it' : 'them'}`;
+}
+
+/**
+ * The record form `{ field: value | { $op: value, … }, … }` → rules, or why
+ * some part of it has no lossless rule spelling.
  *
  * All-or-nothing on purpose: the rules AND, so converting the keys that map and
  * leaving the rest out would WIDEN what the filter selects. A top-level `$` key
@@ -10496,30 +10554,62 @@ function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefin
  * null, so that key constrains nothing today, while an `equals null` rule would
  * test IS NULL. An empty operator object is declined for the same reason — it
  * constrains nothing, and no rule says "nothing".
+ *
+ * Every top-level `$` key is judged before any field key, so the reason names
+ * the combinator even when a field key beside it would decline as well. The
+ * order moves only the reason, never the verdict: any declined part leaves the
+ * whole record as stored.
  */
-function recordFilterToRules(record: Record<string, unknown>): MappedFilterRule[] | undefined {
+function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
+  const dollarKeys = Object.keys(record).filter((key) => key.startsWith('$'));
+  if (dollarKeys.length > 0) return { declined: dollarKeysReason(dollarKeys) };
+  const equals = normalizeFilterOperator('eq') as ViewFilterOperator;
   const rules: MappedFilterRule[] = [];
   for (const [field, value] of Object.entries(record)) {
-    if (field.startsWith('$')) return undefined;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      rules.push({ field, operator: normalizeFilterOperator('eq') as ViewFilterOperator, value });
+      rules.push({ field, operator: equals, value });
       continue;
     }
-    if (!isRecordForm(value)) return undefined;
+    if (value === null) {
+      return {
+        declined: `has the key \`${field}\` set to null: the renderer skips a null-valued key, so `
+          + `today it constrains nothing, while an \`${equals}\` rule would test for null. Drop the `
+          + 'key, or write a rule that tests for null if that is what it should select',
+      };
+    }
+    if (!isRecordForm(value)) {
+      return {
+        declined: `has the key \`${field}\` set to `
+          + `${Array.isArray(value) ? 'an array' : 'a value that is neither a scalar nor an operator object'}, `
+          + `which has no lossless \`${equals}\` rule`,
+      };
+    }
     const operators = Object.entries(value);
-    if (operators.length === 0) return undefined;
+    if (operators.length === 0) {
+      return {
+        declined: `has the key \`${field}\` set to an empty operator object, which constrains `
+          + 'nothing — and no rule says "nothing". Drop the key',
+      };
+    }
     for (const [op, comparand] of operators) {
       const operator = ruleOperatorForFilterOperator(op);
-      if (!operator) return undefined;
+      if (!operator) {
+        return {
+          declined: op.startsWith('$')
+            ? `compares \`${field}\` with \`${op}\`, which has no rule operator that lowers back to it`
+            : `has the key \`${field}\` set to a nested object whose key \`${op}\` is not a filter operator`,
+        };
+      }
       rules.push({ field, operator, value: comparand });
     }
   }
-  return rules;
+  return { rules };
 }
 
 /**
  * A single-level ObjectQL AST — one comparison `[field, op, value]`, or a flat
- * list of them (implicit AND) — → rules, or `undefined`.
+ * list of them (implicit AND) — → rules, or why not; `undefined` when the
+ * value is not an AST at all, so it is not this conversion's form.
  *
  * `isFilterAST` is the recogniser (the spec's own, so an array of rule objects
  * is never mistaken for one). An `and` / `or` group, or a list nesting one, is
@@ -10530,7 +10620,7 @@ function recordFilterToRules(record: Record<string, unknown>): MappedFilterRule[
  * rule reaches too — and read back from the `$` operator it produced, so
  * neither table is copied here.
  */
-function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefined {
+function astFilterToRules(ast: readonly unknown[]): FilterMapping | undefined {
   if (!isFilterAST(ast)) return undefined;
   const isLogicKeyword = (token: unknown): boolean =>
     typeof token === 'string'
@@ -10545,11 +10635,40 @@ function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefin
   let comparisons: ReadonlyArray<readonly [string, string, ...unknown[]]>;
   if (isComparison(ast)) comparisons = [ast];
   else if (ast.every(isComparison)) comparisons = ast as ReadonlyArray<readonly [string, string, ...unknown[]]>;
-  else return undefined;
+  else {
+    // Name the groups by walking only the AST's structural positions — a logic
+    // node's children and a list's members — so a comparison's own value array
+    // is never read as a group.
+    const groups = new Set<string>();
+    const visit = (node: unknown): void => {
+      if (!Array.isArray(node) || node.length === 0) return;
+      if (isLogicKeyword(node[0])) {
+        groups.add(String(node[0]).toLowerCase());
+        node.slice(1).forEach(visit);
+      } else if (Array.isArray(node[0])) {
+        node.forEach(visit);
+      }
+    };
+    visit(ast);
+    return {
+      declined: groups.size > 0
+        ? `is a nested ObjectQL AST holding ${groups.size === 1 ? 'an ' : ''}${quoteKeys([...groups])} `
+          + `group${groups.size === 1 ? '' : 's'}, `
+          + 'and only a single-level AST (one comparison, or a flat list of them) has a lossless rule '
+          + 'spelling: a combinator is never flattened — that would change which rows the filter '
+          + 'selects. Decide which rows it should select, and write the rules that select exactly those'
+        : 'is an ObjectQL AST that is neither one comparison `[field, operator, value]` nor a flat '
+          + 'list of them, so it has no lossless rule spelling',
+    };
+  }
 
   const rules: MappedFilterRule[] = [];
   for (const node of comparisons) {
     const [field, op] = node;
+    const unspellable: FilterMapping = {
+      declined: `compares \`${field}\` with the AST operator \`${op}\`, which has no rule operator `
+        + 'that lowers back to it',
+    };
     let operator: ViewFilterOperator | undefined;
     const folded = normalizeFilterOperator(op);
     if ((VIEW_FILTER_OPERATORS as readonly string[]).includes(folded)) {
@@ -10558,10 +10677,13 @@ function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefin
       let lowered: Record<string, unknown> | undefined;
       try {
         lowered = parseFilterAST([...node]) as Record<string, unknown> | undefined;
-      } catch {
-        return undefined;
+      } catch (error) {
+        return {
+          declined: `holds the AST comparison \`${JSON.stringify(node)}\`, which the AST itself does not `
+            + `lower (${firstSentence(error instanceof Error ? error.message : String(error))})`,
+        };
       }
-      if (!lowered || Object.keys(lowered).length !== 1 || !(field in lowered)) return undefined;
+      if (!lowered || Object.keys(lowered).length !== 1 || !(field in lowered)) return unspellable;
       const condition = lowered[field];
       if (isRecordForm(condition)) {
         const ops = Object.keys(condition);
@@ -10570,29 +10692,39 @@ function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefin
         // A bare comparand is the implicit-equality lowering of `=` / `==`.
         operator = normalizeFilterOperator('eq') as ViewFilterOperator;
       }
-      if (!operator) return undefined;
+      if (!operator) return unspellable;
     }
     rules.push(node.length === 3 ? { field, operator, value: node[2] } : { field, operator });
   }
-  return rules;
+  return { rules };
 }
 
 /**
- * The rule array a legacy `filter` value maps to losslessly, or `undefined`
- * when it is not a legacy form (already a rule array, or some other value the
- * door judges on its own) or has a part with no lossless rule spelling.
+ * The rule array a legacy `filter` value maps to losslessly, or why a legacy
+ * value has none; `undefined` when the value is not a legacy form at all
+ * (already a rule array, or some other value the door judges on its own) — the
+ * one case that is neither converted nor reported.
  *
  * The last gate is the DOOR's own: every produced rule must parse against
  * `ViewFilterRuleSchema`, so the conversion never writes a value the next save
  * refuses — a comparand shape the operator cannot take, an empty `icontains`,
  * a field-reference object. Such a filter is left exactly as stored.
  */
-function legacyFilterToRuleArray(value: unknown): MappedFilterRule[] | undefined {
-  let rules: MappedFilterRule[] | undefined;
-  if (isRecordForm(value)) rules = recordFilterToRules(value);
-  else if (Array.isArray(value)) rules = astFilterToRules(value);
-  if (!rules) return undefined;
-  return rules.every((rule) => ViewFilterRuleSchema.safeParse(rule).success) ? rules : undefined;
+function legacyFilterToRuleArray(value: unknown): FilterMapping | undefined {
+  let mapping: FilterMapping | undefined;
+  if (isRecordForm(value)) mapping = recordFilterToRules(value);
+  else if (Array.isArray(value)) mapping = astFilterToRules(value);
+  if (!mapping || 'declined' in mapping) return mapping;
+  for (const rule of mapping.rules) {
+    const parsed = ViewFilterRuleSchema.safeParse(rule);
+    if (parsed.success) continue;
+    const first = parsed.error.issues[0]?.message;
+    return {
+      declined: `would become the rule \`${JSON.stringify(rule)}\`, which this door refuses itself`
+        + (first ? ` (${first.trim().replace(/\.$/, '')})` : ''),
+    };
+  }
+  return mapping;
 }
 
 /**
@@ -10621,13 +10753,29 @@ function legacyFilterToRuleArray(value: unknown): MappedFilterRule[] | undefined
  * (`record-source.ts`, `resolveRecordSourceConfig`) plus the bare-array
  * `data` the spec declares on the kanban, calendar and timeline blocks:
  * `data: { provider: 'value', … }`, `data: [ … ]`, and a truthy `staticData`.
+ *
+ * Answers with the shape it found, spelled for the TODO that names why the
+ * node's filters were left as stored, or `undefined` for an object-bound node.
+ *
+ * ⚠️ A fact about the RENDERER AT THE PIN, not about the protocol — and the TODO
+ * says so in those terms. objectui#10767 taught the inline-row matcher the rule
+ * array upstream, but the `.objectui-sha` pin this decline was measured at does
+ * not carry it, so the decline stands. Retiring it is owed once the pin moves
+ * past that fix, as its own change — never assumed from the upstream merge.
  */
-function rendersInlineRows(properties: unknown): boolean {
-  if (!isDict(properties)) return false;
+function rendersInlineRows(properties: unknown): string | undefined {
+  if (!isDict(properties)) return undefined;
   const { data, staticData } = properties;
-  if (Array.isArray(data)) return true;
-  if (isDict(data) && data.provider === 'value') return true;
-  return Boolean(staticData);
+  if (Array.isArray(data)) return 'a `data` array';
+  if (isDict(data) && data.provider === 'value') return "`data: { provider: 'value' }`";
+  return staticData ? '`staticData`' : undefined;
+}
+
+/** How a TODO names the page component a filter sits on: its type, and its `id` when it has one. */
+function describeBlock(component: Dict): string {
+  const type = typeof component.type === 'string' ? `the \`${component.type}\` block` : 'this component';
+  const id = typeof component.id === 'string' && component.id.length > 0 ? ` \`${component.id}\`` : '';
+  return `${type}${id}`;
 }
 
 /**
@@ -10652,7 +10800,7 @@ function rendersInlineRows(properties: unknown): boolean {
  *
  * Values are carried verbatim, value placeholders and date macros included.
  *
- * ## What is left exactly as stored — `legacyFilterToRuleArray` answers `undefined`
+ * ## What is left exactly as stored — `legacyFilterToRuleArray` answers `declined`
  *
  * A record carrying `$and` / `$or` / `$not` (or any top-level `$` key), an AST
  * `and` / `or` group, an operator the rule vocabulary does not spell (`$null`,
@@ -10665,14 +10813,26 @@ function rendersInlineRows(properties: unknown): boolean {
  * rewrite is not lossless. ⛔ A combinator is never flattened into the AND list — for `$or`
  * and `$not` that changes which rows the page selects, which is the option the
  * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
- * does not validate) and is refused at its door on its next save, with the
- * prescription that door gives for it. ⚠️ The ruled report of these rows — a
- * structured TODO `os migrate meta --stored` prints — is NOT delivered here:
- * the conversion layer has no TODO channel, and adding one reaches past
- * `packages/spec` (the dispatcher error-vocabulary ledger in
- * `packages/runtime`, and the stored pass in `packages/metadata-protocol`,
- * whose change signal is a conversion notice and which counts a row that
- * emitted none as canonical).
+ * does not validate), and its door's schema refuses the form — but WHERE that
+ * refusal lands differs by door, measured through `saveMetaItem`
+ * (`protocol.stored-migration.test.ts`): `dataSource.filter` is a declared key
+ * of the strict page-component schema, so the row's next save is refused
+ * there; `properties.filter` / `properties.defaultFilters` sit in the open
+ * `properties` bag the runtime save does not refuse by component type, so there
+ * the refusal is the component-props gate's (`@objectstack/lint`, advisory),
+ * and a re-save goes through.
+ *
+ * ## Every site left as stored is reported — `context.reportTodo`
+ *
+ * Ruling item 2's other half: each legacy filter this entry leaves as stored
+ * is reported as a structured TODO (ADR-0087 D3's model — conversion where
+ * lossless, a TODO otherwise), naming its path, the block it sits on, and what
+ * blocks the rewrite — the combinator by name, for a combinator.
+ * `os migrate meta --stored` lists them under their row, so an operator can
+ * answer "did it convert my row" from that output. The one value at a door
+ * that is neither converted nor reported is one that is not a legacy form at
+ * all — already a rule array, or a value the door judges on its own. Reporting
+ * changes nothing that is written: every declined site stays byte-identical.
  *
  * ## Reach
  *
@@ -10706,22 +10866,45 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     + '`equals` rules, `{ $op: v }` → the mapped operator, AST comparisons → one rule each); a '
     + 'filter carrying `$and` / `$or` / `$not`, any part with no lossless rule spelling, or any '
     + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
-    + 'array, `staticData`) is left exactly as stored and is refused at its door on its next save (one filter '
+    + 'array, `staticData`) is left exactly as stored — reported as a TODO, which `os migrate meta '
+    + '--stored` lists — and is not the form its door declares (one filter '
     + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
-  apply(stack, emit) {
-    const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
-      if (!(key in holder)) return holder;
-      const value = holder[key];
-      const rules = legacyFilterToRuleArray(value);
-      if (!rules) return holder;
-      emit({ from: JSON.stringify(value), to: JSON.stringify(rules), path: `${basePath}.${key}` });
-      return { ...holder, [key]: rules };
-    };
-
+  apply(stack, emit, context) {
     return mapPageComponents(stack, (component, path) => {
       // Inline rows: every filter of this node stays as stored, the binding's
       // included. Its children are separate nodes and are judged on their own.
-      if (rendersInlineRows(component.properties)) return component;
+      const inline = rendersInlineRows(component.properties);
+      const block = describeBlock(component);
+
+      const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
+        if (!(key in holder)) return holder;
+        const value = holder[key];
+        const mapping = legacyFilterToRuleArray(value);
+        // Not a legacy form (already the rule array, or a value the door judges
+        // on its own): neither converted nor reported.
+        if (!mapping) return holder;
+        const at = `${basePath}.${key}`;
+        // The filter's own blocker first — it would decline on an object-bound
+        // block too, and it is what names the combinator — then the node's.
+        let declined: string;
+        if ('declined' in mapping) {
+          declined = mapping.declined;
+        } else if (inline) {
+          declined = `sits on a block whose rows are inline (${inline}), and the objectui renderer `
+            + 'this release pins cannot match a rule array against inline rows — it would exclude '
+            + 'every row — so no rewrite here is lossless yet';
+        } else {
+          emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
+          return { ...holder, [key]: mapping.rules };
+        }
+        context?.reportTodo?.({
+          path: at,
+          from: JSON.stringify(value),
+          reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged, `
+            + 'but it is not the rule-array form its door declares — rewrite it by hand.',
+        });
+        return holder;
+      };
 
       let next = component;
 
@@ -10899,6 +11082,129 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
   },
 };
 
+/**
+ * A `joined` report's `chart` leaves, at both of its coordinates (protocol 18,
+ * #20161 — ADR-0049 enforce-or-remove; triage direction "retire, premise
+ * first", the premise measured clean: zero joined reports with a `chart` in
+ * this repo's examples, in the showcase, or in hotcrm).
+ *
+ * Nothing ever drew either one. At this repo's `.objectui-sha` pin
+ * `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`, `DatasetReportRenderer`'s joined
+ * branch draws each block as a table and returns before the one `report.chart`
+ * read below it, and there is no read of a block's `chart` anywhere
+ * (`block.chart`: zero hits over objectui `packages/`, against a lit
+ * `block.runtimeFilter` control). So both were pure no-ops, and deleting them
+ * is lossless: the document changes, not a pixel of the rendered report.
+ *
+ * Two coordinates, one entry, because they are one retirement — an author
+ * upgrading a joined report carries both together:
+ *
+ *   - `reports[].blocks[].chart` — REMOVED from `JoinedReportBlockSchema`'s
+ *     closed shape (its `guidance` table carries the prescription). Stripped
+ *     on every report, not only a `joined` one: the block shape is the same
+ *     schema whatever the container's type, so a block chart is refused under
+ *     any container.
+ *   - `reports[].chart` on a `type: 'joined'` report — still DECLARED (it is
+ *     the live embedded chart of every non-joined report) and refused by the
+ *     joined arm of `ReportSchema`'s refinement. Stripped only there.
+ *
+ * `retiredFromLoadPath`: a live author is refused at parse with the
+ * prescription rather than silently rewritten. The entry exists so stored
+ * `sys_metadata` report rows written through the Studio form (which offered a
+ * block `chart` input until this change) replay clean through
+ * `applyConversionsToStoredItem`, and so `os migrate meta --from 17` lists the
+ * mechanical edits for author sources. `stripKeys`-shaped deletion is
+ * idempotent by construction.
+ *
+ * ⚠️ Overlap with `chart-config-aria-removed`, which strips `aria` INSIDE a
+ * block chart and runs earlier in this chain: on a stored block chart carrying
+ * `aria`, that entry strips `aria` and this one then strips the whole `chart` —
+ * the compound result is the same document this entry alone produces. Its
+ * fixture therefore no longer carries a block chart (the fixture-disjointness
+ * contract), and its apply is left as it shipped.
+ */
+const reportJoinedChartRemoved: MetadataConversion = {
+  id: 'report-joined-chart-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'report.blocks[].chart / report.chart on a joined report',
+  summary:
+    "a joined report's 'chart' removed from its blocks and refused on the container (#20161 — "
+    + 'ADR-0049 enforce-or-remove: the joined renderer draws each block as a table and never read '
+    + 'either, so the chart parsed and nothing was plotted; a non-joined report keeps its live '
+    + "'chart')",
+  apply(stack, emit) {
+    return mapCollection(stack, 'reports', (r, path) => {
+      const own = r.type === 'joined' ? stripKeys(r, ['chart'], emit, path) : r;
+      const blocks = own.blocks;
+      if (!Array.isArray(blocks)) return own;
+      let touched = false;
+      const rebuilt = blocks.map((b, i) => {
+        if (!b || typeof b !== 'object' || Array.isArray(b)) return b;
+        const next = stripKeys(b as Record<string, unknown>, ['chart'], emit, `${path}.blocks[${i}]`);
+        if (next !== b) touched = true;
+        return next;
+      });
+      if (!touched) return own;
+      return { ...own, blocks: rebuilt };
+    });
+  },
+  fixture: {
+    before: {
+      reports: [
+        {
+          name: 'task_overview',
+          type: 'joined',
+          chart: { type: 'bar', xAxis: 'status', yAxis: 'task_count' },
+          blocks: [
+            {
+              name: 'open_block',
+              dataset: 'task_metrics',
+              rows: ['status'],
+              values: ['task_count'],
+              chart: { type: 'pie', xAxis: 'status', yAxis: 'task_count' },
+            },
+            // A block with nothing to strip keeps its identity (copy-on-write).
+            { name: 'done_block', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] },
+          ],
+        },
+        // A NON-joined report keeps its container `chart`: it is the live
+        // embedded chart there.
+        {
+          name: 'hours_by_status',
+          type: 'summary',
+          dataset: 'task_metrics',
+          rows: ['status'],
+          values: ['est_hours'],
+          chart: { type: 'bar', xAxis: 'status', yAxis: 'est_hours' },
+        },
+      ],
+    },
+    after: {
+      reports: [
+        {
+          name: 'task_overview',
+          type: 'joined',
+          blocks: [
+            { name: 'open_block', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] },
+            { name: 'done_block', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] },
+          ],
+        },
+        {
+          name: 'hours_by_status',
+          type: 'summary',
+          dataset: 'task_metrics',
+          rows: ['status'],
+          values: ['est_hours'],
+          chart: { type: 'bar', xAxis: 'status', yAxis: 'est_hours' },
+        },
+      ],
+    },
+    // One per stripped SITE — the joined container's chart and one block's.
+    expectedNotices: 2,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -11007,6 +11313,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     objectTenancyOrganizationFieldRemoved,
     pageComponentFilterRecordToRuleArray,
     viewItemOwnerHiddenRemoved,
+    reportJoinedChartRemoved,
   ],
 };
 

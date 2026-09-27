@@ -2158,7 +2158,22 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
   }),
 ));
 
-export type InlineAction = z.input<typeof InlineActionSchema>;
+/**
+ * An inline action as an author writes it: the INPUT type of the object {@link InlineActionSchema}
+ * hands its body to, read off the pipe's `out` member.
+ *
+ * [#19920] Deliberately NOT `z.input<typeof InlineActionSchema>`. That schema is a `z.preprocess`,
+ * whose input type is the preprocess function's parameter — `unknown` for
+ * {@link normalizeInlineAction} — so this name used to type-check any value at all. The pipe's
+ * `out` member is the `.pick()`ed object itself, so the type now carries the shape its fields
+ * declare. `inline-action-type.test.ts` pins both halves.
+ *
+ * A static type, not the door's verdict, in both directions: the door accepts bodies this type
+ * refuses (the legacy `type: 'navigation'` and `to` spellings, which the preprocess folds onto
+ * `url` / `target`, are canonical-only here on purpose), and refuses bodies it admits (the
+ * `target`-required refinement is not a type). `InlineActionSchema` remains the only judge.
+ */
+export type InlineAction = z.input<(typeof InlineActionSchema)['out']>;
 /** Post-parse shape of {@link InlineAction} — defaults applied, transforms run (ADR-0122). */
 export type InlineActionParsed = z.infer<typeof InlineActionSchema>;
 

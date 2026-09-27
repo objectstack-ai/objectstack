@@ -613,6 +613,19 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'thrown error and not a response body.',
     },
     {
+        code: 'OS_METADATA_CONVERSION_TODO',
+        file: 'packages/spec/src/conversions/apply.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The TODO twin of the OS_METADATA_CONVERTED row: handed to `onTodo` when a conversion ' +
+            'recognises a pre-protocol shape it has no lossless rewrite for and leaves the site as ' +
+            "stored (ADR-0087 D3's structured TODO, never silence). The stored-metadata migration " +
+            'pass flattens it onto its report rows, where `os migrate meta --stored` prints it; it ' +
+            'carries no `code` there. A callback payload, not a thrown error and not a response body.',
+    },
+    {
         code: 'ERR_BULK_PER_ROW_HOOK_LIMIT',
         file: 'packages/spec/src/data/bulk-write-hook-conformance.ts',
         shape: 'objlitconst',

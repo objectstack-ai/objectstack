@@ -46,6 +46,11 @@
  *     typed. Dead → the record picker asks the REST layer for an object that
  *     is not registered (404 `OBJECT_NOT_FOUND`), `$expand` on the field
  *     fails, and the form renders a control that can never resolve a value.
+ *   - a view container's own `object` (#20216) — `ViewSchema.object`, the
+ *     binding a stack-level `views: [...]` entry uses to say which object its
+ *     views belong to. `getViewsByObject()` indexes views by exactly this key,
+ *     so a container bound to a name nothing registers is dead at runtime —
+ *     none of its views is ever found — while authoring stayed green.
  *
  * ── Severity ladder (the point of the rule) ──────────────────────────────
  *
@@ -81,7 +86,7 @@ import {
 } from '@objectstack/spec/system';
 import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
-import { recordsOf, suggestName } from './object-graph.js';
+import { packagesOf, recordsOf, suggestName } from './object-graph.js';
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
@@ -162,7 +167,7 @@ function isInterpolated(target: string): boolean {
  */
 function artifactProvidedObjectNames(stack: AnyRec): string[] {
   const names: string[] = [];
-  for (const entry of recordsOf(stack.packages)) {
+  for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
     for (const obj of recordsOf((body as AnyRec).objects)) {
@@ -326,6 +331,61 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
           'form renders a relationship control that can never resolve a value.',
       );
     }
+  }
+
+  // ── View containers → the container's own `object` (#20216) ──
+  // `ViewSchema.object` is `z.string()`, and nothing resolved it: `defineStack`'s
+  // `validateCrossReferences` reads a container's `list.data` / `form.data`
+  // bindings, never the container's own key. Yet that key is the one the
+  // runtime indexes by — `getViewsByObject()` / `GET /meta/view?object=` match a
+  // view's `object` against the object asked for — so a container bound to a
+  // name no object carries is never found for ANY object. Measured at the
+  // public door with this leg disabled: `os validate` printed "Validation
+  // passed" and exited 0, saying nothing about the view, on
+  // `object: 'order_line'` in a project whose object is
+  // `my_app_order_line`. That is exactly the shape `os generate view` wrote in
+  // every namespaced project until its template learned the prefix, and any
+  // hand or AI author can still write it.
+  //
+  // The same ladder and the same `resolvable` set as the relationship leg above:
+  // this stack's objects plus what its `packages[]` provide (rung ①), a known
+  // platform object (rung ③), a platform-shaped miss advises (rung ④), and an
+  // unprefixed miss is the typo class and gates (rung ②).
+  //
+  // The one thing this leg adds is the namespace prescription. The dominant
+  // miss is not a typo but a MISSING PREFIX — ADR-0028 names every object
+  // `${manifest.namespace}_${shortName}`, and the short name is what an author
+  // naturally types — so when exactly that prefixed spelling is declared, the
+  // hint says so by name rather than leaving the author to infer it from the
+  // edit-distance suggestion.
+  //
+  // ⛔ A container with no `object` is not judged here: its binding then falls
+  // back to `list.data.object` / `form.data.object` / its `name`
+  // (`deriveViewContainerObject`), which is a different reference with its own
+  // owner. ⛔ Nor is a runtime-authored container — that is the runtime's door,
+  // and this member does not run on a `view` write (`REFERENCE_INTEGRITY_RULES`).
+  const namespace = strName((stack.manifest as AnyRec | undefined)?.namespace);
+  const views = recordsOf(stack.views);
+  for (let vi = 0; vi < views.length; vi++) {
+    const view = views[vi];
+    const bound = strName(view.object);
+    if (!bound) continue;
+    const prefixed = namespace ? `${namespace}_${bound}` : undefined;
+    const namespaceHint =
+      prefixed && !bound.startsWith(`${namespace}_`) && resolvable.has(prefixed)
+        ? ` Object names carry the package namespace prefix (manifest.namespace "${namespace}"): ` +
+          `write "${prefixed}", not "${bound}".`
+        : '';
+    check(
+      bound,
+      `view ${strName(view.name) ? `"${strName(view.name)}"` : `#${vi}`}`,
+      `views[${vi}].object`,
+      'view container object',
+      'The runtime indexes a container\'s views by this key (`getViewsByObject()` / ' +
+        '`GET /meta/view?object=`), so a container bound to an object nothing registers is ' +
+        'never found: none of its views appears for any object.' +
+        namespaceHint,
+    );
   }
 
   // ── Actions (global + object-embedded) → param object targets ──

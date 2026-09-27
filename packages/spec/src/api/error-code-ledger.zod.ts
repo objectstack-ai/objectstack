@@ -1357,6 +1357,24 @@ export const ERROR_CODE_LEDGER = {
     'STACK_COMPOSE_KEY_CONFLICT',                // a single-valued top-level key is declared with different values by two stacks
     'STACK_COMPOSE_OBJECT_CONFLICT',             // the same object name is defined by more than one stack under the default `objectConflict: 'error'`
   ],
+  '@objectstack/lint': [
+    // [#20206] `packagesOf` (`object-graph.ts`) refuses a present non-array
+    // `stack.packages` ({}, 0, 'x', a keyed object, `null`) — for every shape
+    // OTHER than `null`, with the SAME registered code `@objectstack/core`'s
+    // `resolveArtifactPackageOrder` already raises for the identical defect
+    // on an assembled artifact (ruling A on #15293 `5634034754`). For `null`
+    // (ruling A on #19926 `5805260775`), core raises this code for `null`
+    // too (#19926) — deliberately reused either way, never minted, so an
+    // author sees one code regardless of which reader catches the malformed
+    // shape first. `door: 'none'`, the #16449 reading: `packages/lint`'s
+    // rules are pure `(stack) => Finding[]` functions, reachable only from
+    // `os lint` (`packages/cli`) — `os validate` / `os build` refuse a
+    // malformed `packages` earlier, at `ObjectStackDefinitionSchema.safeParse`,
+    // before these rules ever run — never through an HTTP boundary either
+    // way, the same posture `@objectstack/spec`'s own `STACK_*` rows above
+    // record.
+    'INVALID_ARTIFACT_PACKAGES',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 /** A code registered by at least one package (deduped union of the ledger). */

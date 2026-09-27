@@ -1000,14 +1000,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // declaration's own docblock forbids it («a caller that needs an
             // option sends the wrapped form»).
             //
-            // ⚠️ What the union does NOT refuse, deliberately: an unknown key at
-            // the TOP LEVEL of the wrapped form. `PackageInstallRequestSchema`
-            // is a plain `z.object` (strip mode) and its docblock forbids
-            // closing it, so `{ manifest, bogus }` parses green with `bogus`
-            // dropped — and this door, reading only parsed keys, now does
-            // exactly what the declaration says. Refusing it here without the
-            // declaration would make the published contract admit a body the
-            // door refuses; that is the declaration's decision to make.
+            // ⭐ The TOP LEVEL of the wrapped form is closed too — by the
+            // declaration, not by this door. `PackageInstallRequestSchema` is a
+            // `strictObject` (ruling record `5856869656`, decision batch #227
+            // item 3, letter A), so an unknown top-level key such as
+            // `{ manifest, enabledOnInstall: false }` fails the union by name,
+            // and this door answers `400` / `VALIDATION_ERROR` and installs
+            // nothing — with no line of its own for it: reading only parsed
+            // keys, it does exactly what the declaration says. ⛔ Never refuse or
+            // admit a key here that the declaration decides the other way: the
+            // published contract and this door would then answer differently,
+            // and which keys the body may carry is the declaration's decision.
             //
             // The verdict is answered after the `id` and `version` legs below,
             // which keep their own published sentences; every later read (the
