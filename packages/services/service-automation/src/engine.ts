@@ -19,7 +19,7 @@ import {
     type ScreenFieldVisibility,
 } from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
-import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
+import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor, DecisionConfigSchema } from '@objectstack/spec/automation';
 // [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
 // shared with `defineStack`'s trigger-capability refusal and `@objectstack/lint`'s
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
@@ -228,6 +228,18 @@ import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // `../guard-refusal.js` and package-external contracts, so nothing it pulls in
 // reaches back here.
 import { interpolateText } from './builtin/template.js';
+
+/**
+ * Does this `decision` take EVERY out-edge whose condition holds (#15429)?
+ * Only an explicit `config.mode: 'inclusive'` says so; an omitted `mode` and
+ * `'exclusive'` both mean the first true edge in declaration order wins. Any
+ * other value never reaches here — {@link AutomationEngine.registerFlow}
+ * refuses it with the spec's prescription.
+ */
+function decisionTakesEveryBranch(node: FlowNodeParsed): boolean {
+    const config = node.config as { mode?: unknown } | undefined;
+    return config?.mode === 'inclusive';
+}
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -2111,6 +2123,33 @@ export interface FlowActivationStore {
  * while keeping the fallback map bounded.
  */
 export const IN_PROCESS_DISPATCH_CLAIM_TTL_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * ADR-0087 conversions the flow rehydration seam refuses to replay, by id —
+ * the DEFAULT-FLIP class, on the artifact door's precedent
+ * (`DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `@objectstack/metadata-core`). The
+ * registry stays the single authority on what converts; this is only this
+ * seam saying which entries its own evidence cannot carry, and each id owes
+ * its reason beside it.
+ *
+ * - `flow-decision-mode-inclusive-explicit` (#15429) writes `mode: 'inclusive'`
+ *   onto an edge-branched `decision` with two or more conditioned out-edges,
+ *   so a flow written while every true branch ran keeps that behaviour under
+ *   the exclusive traversal. The rewrite is sound only where "this body
+ *   predates the flip" is a FACT, and here it never is: `canonicalizeStoredFlow`
+ *   sees every body alike — a code-shipped flow at the boot pull, a REST
+ *   `POST /automation` definition, a Studio save and a package duplication
+ *   (both resolve this same method) — and a decision written yesterday against
+ *   the contract that says an omitted `mode` is exclusive is byte-identical to
+ *   a row written before the contract said so. Replaying it would rewrite every
+ *   new exclusive decision into an inclusive one at registration and persist
+ *   that at save, and the ruled default would be unobservable. The entry
+ *   replays where the age IS asserted: `os migrate meta --from 17`, by the
+ *   operator, over authored sources — never at a load seam.
+ */
+const CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION: readonly string[] = [
+    'flow-decision-mode-inclusive-explicit',
+];
 
 /**
  * Lift the `{ dialect, source }` envelopes the flow schema derives for edge
@@ -4062,6 +4101,13 @@ export class AutomationEngine implements IAutomationService {
         // exact hazard this seam exists to prevent. Authored sources keep
         // window semantics at their own seam (`normalizeStackInput` applies
         // live-window entries only; the schema tombstones the retired shape).
+        //
+        // `excludeConversionIds`: the retired window is opened for a CLASS of
+        // caller, and one kind of entry inside it is not a rescue but a
+        // reinterpretation — a DEFAULT FLIP, whose old shape still parses and
+        // now means something else. This seam cannot say a body predates such
+        // a flip, so it refuses those entries by id, each with its reason on
+        // `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION`.
         const reservedNodeTypes = new Set<string>([
             ...FLOW_STRUCTURAL_NODE_TYPES,
             ...this.nodeExecutors.keys(),
@@ -4072,6 +4118,7 @@ export class AutomationEngine implements IAutomationService {
         const converted = applyConversionsToFlow(definition, {
             reservedNodeTypes,
             includeRetired: true,
+            excludeConversionIds: CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION,
             onNotice: (n) => {
                 notices.push(n);
                 this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`);
@@ -4128,6 +4175,11 @@ export class AutomationEngine implements IAutomationService {
         // safe, and for the deliberate exemptions (`assignment`, schemaless
         // types, keyValue maps).
         this.validateNodeConfigKeys(name, parsed);
+
+        // #15429 — parse every `decision` node's config against the spec's
+        // `DecisionConfigSchema` and refuse the flow on an invalid `mode`, with
+        // the schema's own sentence — the same answer `os validate` gives.
+        this.validateDecisionModes(name, parsed);
 
         // ADR-0032 §Decision 1a — parse-validate every predicate at registration,
         // so a malformed condition (e.g. the #1491 `{record.x}` template-brace-in-
@@ -9241,6 +9293,60 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#15429] The registration-time reader of a `decision` node's `mode`.
+     *
+     * `decision` publishes no descriptor `configSchema` (its Target column is
+     * derived from the out-edges), so {@link validateNodeConfigKeys}'
+     * schemaless exemption skips it and, until this pass, nothing at run time
+     * parsed its config at all — `mode` was export-only, enforced by `tsc`, the
+     * published JSON Schema and the objectui reconciliation, and a stored
+     * `mode: 'bogus'` registered clean and ran as whatever the traversal made
+     * of it. Now every decision's config goes through the spec's
+     * `DecisionConfigSchema` here and the flow is refused on any issue rooted
+     * at `mode`: a value outside `'exclusive' | 'inclusive'`, or a legal `mode`
+     * beside a non-empty `conditions` list (a list is first-match on its own,
+     * so a `mode` beside it would be accepted and never read — ruling A on
+     * #20168). The refusal is the schema's own sentence, shared with
+     * `os validate`'s `flow-decision-mode-invalid`, so build time and
+     * registration cannot disagree about the key.
+     *
+     * Judged on `mode` alone, deliberately. The same parse also refuses an
+     * undeclared key on a decision (the shape is `strictObject`), but that
+     * strictness binds at authoring by a standing decision (the module header
+     * of `schemaless-node-config.zod.ts`): a flow carrying an inert extra key
+     * registered and ran before this pass, and refusing it at boot would be a
+     * second behaviour change riding a ruling that ordered one. `os validate`
+     * keeps reporting that shape through its own advisory rule.
+     *
+     * Hard-fail, like {@link validateNodeConfigKeys}: a flow whose gateway
+     * declares a mode the engine does not have is wrong metadata, and the
+     * caller's per-flow try/catch skips it loudly at boot rather than arming a
+     * gateway that would run as something the author did not write.
+     */
+    private validateDecisionModes(flowName: string, flow: FlowParsed): void {
+        const failures: string[] = [];
+        for (const graph of collectFlowGraphs(flow)) {
+            const at = graph.scope ? `${graph.scope}: ` : '';
+            for (const node of graph.nodes) {
+                if (node.type !== 'decision') continue;
+                const verdict = DecisionConfigSchema.safeParse(node.config ?? {});
+                if (verdict.success) continue;
+                for (const issue of verdict.error.issues) {
+                    if (issue.path[0] !== 'mode') continue;
+                    failures.push(`  • ${at}node '${node.id}' (decision) at config.mode: ${issue.message}`);
+                }
+            }
+        }
+        if (failures.length > 0) {
+            throw new Error(
+                `Flow '${flowName}' rejected: ${failures.length} invalid decision \`mode\` ` +
+                `declaration${failures.length > 1 ? 's' : ''}. The config is metadata, so re-registering ` +
+                `changes nothing; fix the node in the flow definition:\n${failures.join('\n')}`,
+            );
+        }
+    }
+
+    /**
      * Walk `value` against `schema` in lockstep, collecting keys the schema does
      * not declare into `violations`.
      *
@@ -10119,7 +10225,12 @@ export class AutomationEngine implements IAutomationService {
      *     computed a branch and nothing routed it, which is how app-crm's
      *     convert-lead guard ran its abort screen AND its wizard.
      *  2. **`edge.condition`** — evaluated per edge; a closed gate records a
-     *     `skipped` step (#4354).
+     *     `skipped` step (#4354). On a `decision` node the conditioned
+     *     out-edges are EXCLUSIVE (#15429): evaluated in declaration order,
+     *     the first one that holds is the branch and its later siblings are
+     *     passed over unevaluated, recording the same `skipped` step. A
+     *     decision declaring `config.mode: 'inclusive'` takes every one that
+     *     holds instead.
      *  3. **`edge.isDefault`** — BPMN default flow. Traversed **only** when no
      *     conditional sibling in the selected set matched. Before #4414 this key
      *     had zero readers: it parsed, it was documented as "the default path
@@ -10203,42 +10314,80 @@ export class AutomationEngine implements IAutomationService {
             }
         }
 
-        // Conditional edges: evaluate sequentially (mutually exclusive)
+        // #4354 — a gate that did not open leaves a trace. Record it: this is
+        // THE event that had no trace anywhere, and the reason #4347 shipped
+        // three inert production flows. A closed gate inside a loop body is
+        // logged once per iteration (region tagging in `runRegion` attaches the
+        // container + iteration), so the run summary can say "selected 30,
+        // acted 0, skipped 30 by <gate>" instead of reporting a green run that
+        // did nothing.
+        //
+        // The step is `skipped`, never a run: the re-entrancy guard, per-node
+        // `runs` counts and node status all exclude it, so recording a
+        // non-event stays a non-event to execution.
+        const recordSkipped = (nextNode: FlowNodeParsed, edge: FlowEdgeParsed): void => {
+            const at = new Date().toISOString();
+            steps.push({
+                nodeId: nextNode.id,
+                nodeType: nextNode.type,
+                ...(nextNode.label ? { nodeLabel: nextNode.label } : {}),
+                status: 'skipped',
+                startedAt: at,
+                completedAt: at,
+                durationMs: 0,
+                skippedBy: {
+                    nodeId: node.id,
+                    ...(edge.id ? { edgeId: edge.id } : {}),
+                    ...(edge.label ? { label: edge.label } : {}),
+                },
+            });
+        };
+
+        // Conditional edges: evaluated sequentially, in the order the flow's
+        // `edges` array declares them — `FlowSchema.parse` and every conversion
+        // are copy-on-write maps that never reorder, so declaration order here
+        // IS the author's.
+        //
+        // On a `decision` node they are the gateway's branches, and the gateway
+        // is EXCLUSIVE unless it declares `config.mode: 'inclusive'` (#15429,
+        // maintainer ruling 「跟主流对齐」): the FIRST edge whose condition holds
+        // is the branch — the BPMN exclusive gateway, Salesforce Flow's
+        // Decision, n8n's Switch default — and its later siblings are not
+        // evaluated at all; they record the same `skipped` step a closed gate
+        // does, so the run log says which branch won and which were passed
+        // over. Until this change every true edge ran, one after another, under
+        // a comment calling that "mutually exclusive": hotcrm#1555 rendered a
+        // refusal screen AND ran the conversion in one execution. Flows written
+        // against that behaviour are carried across by the ADR-0087 conversion
+        // `flow-decision-mode-inclusive-explicit` (`os migrate meta --from 17`),
+        // which writes the inclusive declaration onto them — see
+        // `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` for why this seam does not.
+        //
+        // `mode: 'inclusive'` is the BPMN inclusive gateway: every edge whose
+        // condition holds runs, one successor at a time (never `Promise.all` —
+        // that fan-out belongs to the UNCONDITIONAL bucket below alone).
+        //
+        // Scoped to `decision` on purpose: `mode` is a decision-config key, and
+        // conditioned out-edges of any other node type keep the traversal they
+        // had — every one whose condition holds, sequentially. The ruling and
+        // its migration cover the gateway, and nothing else was measured to
+        // carry two conditioned out-edges (the corpus census on #15429).
+        const exclusive = node.type === 'decision' && !decisionTakesEveryBranch(node);
         let anyConditionMet = false;
         for (const edge of conditionalEdges) {
             const nextNode = flow.nodes.find(n => n.id === edge.target);
+            if (exclusive && anyConditionMet) {
+                // A sibling already won: passed over, not evaluated.
+                if (nextNode) recordSkipped(nextNode, edge);
+                continue;
+            }
             if (this.evaluateCondition(edge.condition!, variables)) {
                 anyConditionMet = true;
                 if (nextNode) {
                     await this.executeNode(nextNode, flow, variables, context, steps);
                 }
             } else if (nextNode) {
-                // #4354 — the gate closed. Record it: this is THE event that had
-                // no trace anywhere, and the reason #4347 shipped three inert
-                // production flows. A closed gate inside a loop body is logged
-                // once per iteration (region tagging in `runRegion` attaches the
-                // container + iteration), so the run summary can say
-                // "selected 30, acted 0, skipped 30 by <gate>" instead of
-                // reporting a green run that did nothing.
-                //
-                // The step is `skipped`, never a run: the re-entrancy guard,
-                // per-node `runs` counts and node status all exclude it, so
-                // recording a non-event stays a non-event to execution.
-                const at = new Date().toISOString();
-                steps.push({
-                    nodeId: nextNode.id,
-                    nodeType: nextNode.type,
-                    ...(nextNode.label ? { nodeLabel: nextNode.label } : {}),
-                    status: 'skipped',
-                    startedAt: at,
-                    completedAt: at,
-                    durationMs: 0,
-                    skippedBy: {
-                        nodeId: node.id,
-                        ...(edge.id ? { edgeId: edge.id } : {}),
-                        ...(edge.label ? { label: edge.label } : {}),
-                    },
-                });
+                recordSkipped(nextNode, edge);
             }
         }
 

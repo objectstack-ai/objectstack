@@ -31,6 +31,8 @@ import {
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
+  FLOW_DECISION_MODE_INVALID,
+  FLOW_DECISION_INCLUSIVE_OVERLAP,
 } from './lint-flow-patterns.js';
 // [#17495] Cross-site pin only — the re-judged `flow-inert-node-condition`
 // case below. This family's own coverage is unaffected by it;
@@ -2603,5 +2605,149 @@ describe('a non-record member of a flow `edges` list (#16910)', () => {
       expect(() => rule.run(topLevel([junk, VALID_EDGE]) as Record<string, unknown>, {}), rule.name).not.toThrow();
       expect(() => rule.run(nestedRegion([junk, VALID_EDGE]) as Record<string, unknown>, {}), rule.name).not.toThrow();
     }
+  });
+});
+
+/**
+ * #15429 — the decision's `mode`, at the `os validate` door.
+ *
+ * Two rules, two severities. `flow-decision-mode-invalid` GATES: the finding is
+ * the spec's own `DecisionConfigSchema` issue message, and `registerFlow`
+ * refuses the same declaration with the same sentence, so the flow can never
+ * arm. `flow-decision-inclusive-overlap` (ruling item 4) is advisory: an
+ * inclusive gateway with two or more conditioned out-edges is legal, and the
+ * rule says what it does rather than proving the conditions overlap.
+ */
+describe('decision `mode` (#15429)', () => {
+  /** One edge-branched decision with two conditioned out-edges, plus whatever config the case declares. */
+  const modeFlow = (config: Record<string, unknown> | undefined, edges?: Record<string, unknown>[]) => ({
+    flows: [{
+      name: 'verdict',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        { id: 'check', type: 'decision', ...(config ? { config } : {}) },
+        { id: 'refuse', type: 'screen', config: {} },
+        { id: 'convert', type: 'screen', config: {} },
+      ],
+      edges: edges ?? [
+        { id: 'e1', source: 'start', target: 'check' },
+        { id: 'e2', source: 'check', target: 'refuse', condition: "lead.status != 'suspected'" },
+        { id: 'e3', source: 'check', target: 'convert', condition: "lead.status == 'confirmed'" },
+      ],
+    }],
+  });
+  const ofRule = (stack: unknown, rule: string) => lintFlowPatterns(stack as AnyRec).filter((f) => f.rule === rule);
+  type AnyRec = Record<string, unknown>;
+
+  /** The same decision inside a loop body — the region walk must reach it. */
+  const nestedModeFlow = (config: Record<string, unknown>) => ({
+    flows: [{
+      name: 'sweep',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+        {
+          id: 'each', type: 'loop', label: 'Each',
+          config: {
+            collection: '{vars.rows}',
+            iteratorVariable: 'row',
+            body: {
+              nodes: [
+                { id: 'check', type: 'decision', config },
+                { id: 'refuse', type: 'screen', config: {} },
+                { id: 'convert', type: 'screen', config: {} },
+              ],
+              edges: [
+                { id: 'e2', source: 'check', target: 'refuse', condition: "row.status != 'suspected'" },
+                { id: 'e3', source: 'check', target: 'convert', condition: "row.status == 'confirmed'" },
+              ],
+            },
+          },
+        },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'each' }],
+    }],
+  });
+
+  describe('flow-decision-mode-invalid — gating, with the schema sentence', () => {
+    it('gates `mode` beside a non-empty `conditions` list, either member, at config.mode', () => {
+      for (const mode of ['inclusive', 'exclusive']) {
+        const fnds = ofRule(modeFlow({ mode, conditions: [{ label: 'Refuse', expression: "lead.status != 'suspected'" }] }), FLOW_DECISION_MODE_INVALID);
+        expect(fnds).toHaveLength(1);
+        expect(fnds[0].severity).toBe('error');
+        expect(fnds[0].where).toBe("flow 'verdict' · decision 'check' · config.mode");
+        expect(fnds[0].message).toContain(`\`mode: '${mode}'\` is not valid on a decision that declares a \`conditions\` list`);
+        expect(fnds[0].message).toContain('Either delete `mode` and keep the list');
+        expect(fnds[0].hint).toContain('`registerFlow` refuses this flow with the same sentence');
+      }
+    });
+
+    it('gates a `mode` outside the closed pair with the value prescription', () => {
+      const fnds = ofRule(modeFlow({ mode: 'all' }), FLOW_DECISION_MODE_INVALID);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].severity).toBe('error');
+      expect(fnds[0].message).toContain("`mode: 'all'` is not a decision mode");
+      expect(fnds[0].message).toContain("'exclusive' declares that only the FIRST out-edge");
+    });
+
+    it('CONTROLS — an omitted `mode`, `mode` alone, `mode` on an empty list, and a list without `mode` are clean', () => {
+      for (const config of [undefined, { mode: 'inclusive' }, { mode: 'exclusive' }, { mode: 'inclusive', conditions: [] }]) {
+        expect(ofRule(modeFlow(config), FLOW_DECISION_MODE_INVALID)).toHaveLength(0);
+      }
+      expect(ofRule(modeFlow(
+        { conditions: [{ label: 'Refuse', expression: "lead.status != 'suspected'" }] },
+        [
+          { id: 'e1', source: 'start', target: 'check' },
+          { id: 'e2', source: 'check', target: 'refuse', label: 'Refuse' },
+          { id: 'e3', source: 'check', target: 'convert', isDefault: true },
+        ],
+      ), FLOW_DECISION_MODE_INVALID)).toHaveLength(0);
+    });
+
+    it('reaches a decision inside a loop body and names the region', () => {
+      const fnds = ofRule(nestedModeFlow({ mode: 'parallel' }), FLOW_DECISION_MODE_INVALID);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toContain("loop 'each'");
+      expect(fnds[0].where).toContain("decision 'check' · config.mode");
+    });
+  });
+
+  describe('flow-decision-inclusive-overlap — advisory (ruling item 4)', () => {
+    it("advises an inclusive decision with two conditioned out-edges, naming them and what the mode does", () => {
+      const fnds = ofRule(modeFlow({ mode: 'inclusive' }), FLOW_DECISION_INCLUSIVE_OVERLAP);
+      expect(fnds).toHaveLength(1);
+      // Advisory: the declaration is legal and the rule cannot prove overlap.
+      expect(fnds[0].severity).toBeUndefined();
+      expect(fnds[0].where).toBe("flow 'verdict' · decision 'check'");
+      expect(fnds[0].message).toContain('2 conditioned out-edge(s)');
+      expect(fnds[0].message).toContain("'refuse', 'convert'");
+      expect(fnds[0].message).toContain('EVERY one whose condition holds runs');
+      expect(fnds[0].hint).toContain('delete `mode`');
+      expect(fnds[0].hint).toContain('os migrate meta --from 17');
+    });
+
+    it('does NOT advise an exclusive decision — omitted or written — with the same two edges', () => {
+      expect(ofRule(modeFlow(undefined), FLOW_DECISION_INCLUSIVE_OVERLAP)).toHaveLength(0);
+      expect(ofRule(modeFlow({ mode: 'exclusive' }), FLOW_DECISION_INCLUSIVE_OVERLAP)).toHaveLength(0);
+    });
+
+    it('does NOT advise one conditioned out-edge plus a default: inclusive and exclusive cannot differ there', () => {
+      const stack = modeFlow({ mode: 'inclusive' }, [
+        { id: 'e1', source: 'start', target: 'check' },
+        { id: 'e2', source: 'check', target: 'refuse', condition: "lead.status == 'suspected'" },
+        { id: 'e3', source: 'check', target: 'convert', isDefault: true },
+      ]);
+      expect(ofRule(stack, FLOW_DECISION_INCLUSIVE_OVERLAP)).toHaveLength(0);
+    });
+
+    it('does not double-report through flow-decision-unconditional-branch — both edges are gated', () => {
+      expect(ofRule(modeFlow({ mode: 'inclusive' }), FLOW_DECISION_UNCONDITIONAL_BRANCH)).toHaveLength(0);
+    });
+
+    it('reaches a decision inside a loop body', () => {
+      const fnds = ofRule(nestedModeFlow({ mode: 'inclusive' }), FLOW_DECISION_INCLUSIVE_OVERLAP);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toContain("loop 'each'");
+    });
   });
 });

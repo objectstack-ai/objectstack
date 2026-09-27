@@ -5336,7 +5336,15 @@ const step18: MigrationStep = {
     + '`report-joined-chart-removed` strips both as a pure lossless delete — neither ever had '
     + 'an effect to lose — because a stored report row CAN carry them (the Studio report form '
     + 'offered a block `chart` input until this change); it is retired from the load path, so '
-    + 'authors are refused at parse rather than rewritten.',
+    + 'authors are refused at parse rather than rewritten. '
+    + 'Finally it makes edge-branched `decision` nodes EXCLUSIVE (#15429, maintainer ruling '
+    + '「跟主流对齐」): the first conditioned out-edge that holds, in declaration order, is the '
+    + 'branch, and taking every true branch is the declared `mode: \'inclusive\'`. The D2 '
+    + 'conversion `flow-decision-mode-inclusive-explicit` writes that key onto every decision '
+    + 'with two or more conditioned out-edges and no `conditions` list, so a flow written while '
+    + 'every true branch ran keeps its behaviour; it is a default flip, so it is retired from '
+    + 'the load path AND refused by the flow rehydration seam, and replays only here — the '
+    + 'paired semantic entry carries the judgment the diff then asks for.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5375,6 +5383,7 @@ const step18: MigrationStep = {
     'page-component-filter-record-to-rule-array',
     'view-item-owner-hidden-removed',
     'report-joined-chart-removed',
+    'flow-decision-mode-inclusive-explicit',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -10210,6 +10219,63 @@ const step18: MigrationStep = {
         + 'the locator for a row that exists only in `sys_metadata`. A branch carrying a non-blank '
         + 'predicate parses and registers byte-identically to before, a decision with no `conditions` '
         + 'still routes by its out-edges, and an absent screen field `visibleWhen` is still legal.',
+    },
+    {
+      id: 'flow-decision-edge-branching-first-match',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'flow.nodes[].config.mode (decision) — an OMITTED mode on a decision that branches '
+        + 'on its out-edges and carries two or more conditioned ones',
+      replacement:
+        'nothing, where the out-edge conditions partition (exactly one can hold for any '
+        + 'record): an omitted `mode` now means exclusive, the first true edge in declaration '
+        + 'order wins, and the run is what it always was. `mode: \'inclusive\'` where the flow '
+        + 'RELIES on more than one branch running for one record — the value the D2 conversion '
+        + '`flow-decision-mode-inclusive-explicit` writes onto every such decision so nothing '
+        + 'changes silently. Where the conditions overlap by accident (a `!=` guard beside a '
+        + 'later `==` branch), neither: narrow them into a partition, or mark the fallback '
+        + '`isDefault: true`, and delete the written key.',
+      reason:
+        'A DEFAULT FLIP of a shipped node type, ruled rather than patched: the schema, the docs '
+        + 'and the engine\'s own comment all called an edge-branched decision an exclusive gateway '
+        + 'while the traversal took EVERY out-edge whose condition held, one after another, and '
+        + 'reported nothing — hotcrm#1555 rendered a refusal screen AND ran the conversion in one '
+        + 'execution. The traversal now matches the declaration (BPMN exclusive gateway, '
+        + 'Salesforce Flow Decision, n8n Switch default), and the every-true-edge behaviour is the '
+        + 'BPMN inclusive gateway an author must write down. The KEY converts mechanically and '
+        + 'does: `flow-decision-mode-inclusive-explicit` writes `mode: \'inclusive\'` wherever two '
+        + 'or more conditioned out-edges leave a decision that declares no `conditions` list, so '
+        + 'the migrated source runs exactly as before. What does NOT convert is the INTENT: the '
+        + 'count cannot tell a partition (where the key is redundant) from a reliance on '
+        + 'multi-branch runs (where it is load-bearing) from an accidental overlap (where the '
+        + 'old behaviour was the bug), so the diff `os migrate meta --from 17` prints is where '
+        + 'that judgment is made, node by node. And the conversion replays ONLY there: it is a '
+        + 'default flip, so the authoring funnel never rewrites a source written against the '
+        + 'new contract, the automation engine\'s flow rehydration seam refuses it by id (a '
+        + 'code-shipped flow, a REST body and a Studio save all arrive there undated), and the '
+        + 'stored-row pass (`os migrate meta --stored`) canonicalizes through that same seam — so '
+        + 'a decision saved from the Studio BEFORE this release, with two or more conditioned '
+        + 'out-edges and no `mode`, now runs first-match and is rewritten by nothing.',
+      acceptanceCriteria:
+        'Run `os migrate meta --from 17` over each authored stack and review every '
+        + '`flow-decision-mode-inclusive-explicit` line in its diff: (1) where the two (or more) '
+        + 'out-edge conditions partition — a predicate and its negation, `>` beside `<=`, or a '
+        + 'guard beside `isDefault: true` — delete the written `mode`; the run is unchanged either '
+        + 'way and the exclusive default is the honest declaration; (2) where the flow relies on '
+        + 'more than one branch running for one record, keep `mode: \'inclusive\'`; (3) where the '
+        + 'conditions overlap by accident, narrow them into a partition and delete the key, then '
+        + 're-run the flow on a record that satisfied both and confirm exactly one successor '
+        + 'ran — the passed-over branch now leaves a `skipped` step in the run log. `os validate` '
+        + 'reports `flow-decision-inclusive-overlap` on every decision that keeps the key with '
+        + 'two or more conditioned out-edges, so the review list is the lint output. Then the '
+        + 'half no command reaches: list the `sys_metadata` flow rows of each deployment whose '
+        + 'decision nodes carry two or more conditioned out-edges and no `mode` — the stored '
+        + 'pass reports these rows canonical and rewrites nothing — and declare `mode` on each in '
+        + 'the Studio designer by the same three-way judgment. A decision registering with '
+        + '`mode` beside a non-empty `conditions` list, or with a `mode` outside '
+        + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
+        + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes.',
     },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.

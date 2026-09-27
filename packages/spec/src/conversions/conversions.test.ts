@@ -14,6 +14,7 @@ import {
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
+import { applyMetaMigrations } from '../migrations/chain.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
@@ -342,6 +343,131 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(component.visibility).toBeUndefined();
       expect(notices).toHaveLength(1);
       expect(notices[0]!.conversionId).toBe('page-component-visibility-to-visibleWhen');
+    });
+  });
+
+  /**
+   * `flow-decision-mode-inclusive-explicit` (#15429) — the DEFAULT FLIP that
+   * carries an edge-branched decision across the exclusive-gateway ruling.
+   *
+   * The fixture pair above pins the rewrite; what needs its own cover is the
+   * PREDICATE's edges (the count, the two shapes it must leave alone, regions)
+   * and its JURISDICTION: the chain replays it, the authoring funnel does not,
+   * and a second replay is a no-op. The flow rehydration seam's refusal by id
+   * is pinned where that seam lives (`service-automation`).
+   */
+  describe('flow-decision-mode-inclusive-explicit (#15429)', () => {
+    const ID = 'flow-decision-mode-inclusive-explicit';
+    const entry = () => ALL_CONVERSIONS.find((c) => c.id === ID)!;
+    const decisionFlow = (edges: Record<string, unknown>[], config?: Record<string, unknown>) => ({
+      flows: [{
+        name: 'gateway',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'check', type: 'decision', label: 'Check', ...(config ? { config } : {}) },
+          { id: 'a', type: 'end', label: 'A' },
+          { id: 'b', type: 'end', label: 'B' },
+          { id: 'c', type: 'end', label: 'C' },
+        ],
+        edges: [{ id: 'e0', source: 'start', target: 'check' }, ...edges],
+      }],
+    });
+    const chain = (stack: Record<string, unknown>) => applyMetaMigrations(structuredClone(stack), 17, 18);
+    const checkConfigAfter = (result: ReturnType<typeof applyMetaMigrations>) =>
+      ((result.stack.flows as any[])[0].nodes as any[]).find((n) => n.id === 'check').config;
+    const two = [
+      { id: 'e1', source: 'check', target: 'a', condition: "x != 'a'" },
+      { id: 'e2', source: 'check', target: 'b', condition: "x == 'b'" },
+    ];
+
+    it('is registered at protocol 18, retired from the load path, and wired into the step-18 chain', () => {
+      expect(entry().toMajor).toBe(18);
+      expect(entry().retiredFromLoadPath).toBe(true);
+      const result = chain(decisionFlow(two));
+      expect(result.applied.map((a) => a.conversionId)).toContain(ID);
+    });
+
+    it('writes `mode: inclusive` on two conditioned out-edges, and says what the site relied on', () => {
+      const result = chain(decisionFlow(two));
+      expect(checkConfigAfter(result)).toEqual({ mode: 'inclusive' });
+      const mine = result.applied.filter((a) => a.conversionId === ID);
+      expect(mine).toHaveLength(1);
+      expect(mine[0]!.path).toBe('flows[0].nodes[1].config.mode');
+      expect(mine[0]!.from).toContain('2 conditioned out-edges');
+      expect(mine[0]!.to).toBe('inclusive');
+    });
+
+    it('counts an envelope condition, and a third conditioned edge, but never a fault edge or a blank one', () => {
+      const three = [
+        ...two,
+        { id: 'e3', source: 'check', target: 'c', condition: { dialect: 'cel', source: "x == 'c'" } },
+      ];
+      expect(checkConfigAfter(chain(decisionFlow(three)))).toEqual({ mode: 'inclusive' });
+      // A `fault` edge is error routing; a blank condition is no condition.
+      const notBranches = [
+        { id: 'e1', source: 'check', target: 'a', condition: "x != 'a'" },
+        { id: 'e2', source: 'check', target: 'b', condition: "x == 'b'", type: 'fault' },
+        { id: 'e3', source: 'check', target: 'c', condition: '   ' },
+      ];
+      expect(checkConfigAfter(chain(decisionFlow(notBranches)))).toBeUndefined();
+    });
+
+    it('leaves ONE conditioned out-edge plus a default alone — first-match and every-true-edge cannot differ', () => {
+      const guarded = [
+        { id: 'e1', source: 'check', target: 'a', condition: "x == 'a'" },
+        { id: 'e2', source: 'check', target: 'b', isDefault: true },
+      ];
+      const result = chain(decisionFlow(guarded));
+      expect(checkConfigAfter(result)).toBeUndefined();
+      expect(result.applied.filter((a) => a.conversionId === ID)).toEqual([]);
+    });
+
+    it('leaves a decision that already declares `mode` alone — either member — and a `conditions` list alone', () => {
+      expect(checkConfigAfter(chain(decisionFlow(two, { mode: 'exclusive' })))).toEqual({ mode: 'exclusive' });
+      expect(checkConfigAfter(chain(decisionFlow(two, { mode: 'inclusive' })))).toEqual({ mode: 'inclusive' });
+      const listed = { conditions: [{ label: 'A', expression: "x == 'a'" }] };
+      expect(checkConfigAfter(chain(decisionFlow(two, listed)))).toEqual(listed);
+      // An EMPTY list declares no branch: the node routes on its edges, so it is rewritten.
+      expect(checkConfigAfter(chain(decisionFlow(two, { conditions: [] })))).toEqual({ conditions: [], mode: 'inclusive' });
+    });
+
+    it('never touches a non-decision node with the same two conditioned out-edges', () => {
+      const stack = decisionFlow(two);
+      (stack.flows[0]!.nodes[1] as Record<string, unknown>).type = 'screen';
+      const result = chain(stack);
+      expect(checkConfigAfter(result)).toBeUndefined();
+      expect(result.applied.filter((a) => a.conversionId === ID)).toEqual([]);
+    });
+
+    it('is idempotent: the migrated stack replays to itself with nothing applied', () => {
+      const first = chain(decisionFlow(two));
+      const again = applyMetaMigrations(structuredClone(first.stack), 17, 18);
+      expect(again.stack).toEqual(first.stack);
+      expect(again.applied.filter((a) => a.conversionId === ID)).toEqual([]);
+    });
+
+    it('⛔ never replays on the authoring funnel — a decision written against the new contract stays exclusive', () => {
+      const authored = decisionFlow(two);
+      const notices: ConversionNotice[] = [];
+      const out = normalizeStackInput(structuredClone(authored), { onConversionNotice: (n) => notices.push(n) });
+      expect(out).toEqual(authored);
+      expect(notices.map((n) => n.conversionId)).not.toContain(ID);
+    });
+
+    it('a seam that opens the retired window can still refuse it by id — the flow rehydration seam does', () => {
+      // The primitive behind `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in the
+      // automation engine: same bytes, window open, entry refused by name.
+      const notices: ConversionNotice[] = [];
+      const out = applyConversions(decisionFlow(two), {
+        includeRetired: true,
+        excludeConversionIds: [ID],
+        onNotice: (n) => notices.push(n),
+      });
+      expect(((out.flows as any[])[0].nodes as any[])[1].config).toBeUndefined();
+      expect(notices.map((n) => n.conversionId)).not.toContain(ID);
+      // FIRING CONTROL: with the window open and no refusal, it does fire.
+      const fired = applyConversions(decisionFlow(two), { includeRetired: true });
+      expect(((fired.flows as any[])[0].nodes as any[])[1].config).toEqual({ mode: 'inclusive' });
     });
   });
 
