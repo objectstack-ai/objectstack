@@ -181,11 +181,12 @@ describe('validateMappingTargetFields', () => {
   });
 
   it('CONTROL — `packages: undefined` (absent) stays silent — the only value this reader treats as absent', () => {
-    // `full_name`, not `sla_tier`: `sla_tier` only resolves via the
-    // `objectExtensions` a package supplies (the test above) — with
-    // `packages` genuinely absent this control needs a field `contact`
-    // declares on its own, so a real finding can't masquerade as the
-    // reader silently accepting the shape.
+    // `full_name`, not `sla_tier`: `sla_tier` resolves via the STACK's own
+    // top-level `objectExtensions` (the test above, :173) — `region` is the
+    // one that needs a package (:174). Either way, with `packages` genuinely
+    // absent this control needs a field `contact` declares on its own, so a
+    // real finding can't masquerade as the reader silently accepting the
+    // shape.
     expect(validateMappingTargetFields({
       objects: [contact],
       packages: undefined,
