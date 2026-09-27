@@ -107,8 +107,19 @@ export const POSITION_FIELD = 'position';
 /** Existence is a fact about the database, so the catalog is read elevated and unscoped. */
 const SYSTEM_CTX = { isSystem: true } as const;
 
-/** The field-level code the sibling lookup columns already answer with. */
-const REFERENCE_NOT_FOUND: FieldErrorCode = 'reference_not_found';
+/**
+ * One `fields[]` entry of the refusal. `code` is typed to the closed ADR-0114
+ * field-level catalog, so the literal written below is a member of it by
+ * construction — the field-addressed vocabulary, one level below `error.code`.
+ */
+interface PositionFieldError {
+  field: string;
+  code: FieldErrorCode;
+  message: string;
+  label: string;
+  value: string;
+  constraint: { target: string; targetField: string };
+}
 
 const positionDef = (SysUserPosition as any).fields?.[POSITION_FIELD] ?? {};
 /** The column's declared label — what the message names it by. */
@@ -280,9 +291,9 @@ export function positionNotInCatalogError(
   values: readonly string[],
   hints: ReadonlyMap<string, string> = new Map(),
 ): Error {
-  const fields = values.map((value) => ({
+  const fields = values.map((value): PositionFieldError => ({
     field: POSITION_FIELD,
-    code: REFERENCE_NOT_FOUND,
+    code: 'reference_not_found',
     message: positionNotInCatalogMessage(value, hints.get(value)),
     label: POSITION_LABEL,
     value,

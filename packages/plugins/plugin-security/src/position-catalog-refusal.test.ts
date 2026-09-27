@@ -191,7 +191,7 @@ async function rowsReadBy(h: Harness, userId: string): Promise<number> {
   try {
     const rows = await h.engine.find('qa_inquiry', {
       context: { userId, positions: g.positions, permissions: g.permissions },
-    } as any);
+    });
     return Array.isArray(rows) ? rows.length : 0;
   } catch (e: any) {
     // An account holding nothing on the object is refused the read outright;
@@ -217,7 +217,7 @@ function envelopeOf(e: unknown) {
 }
 
 async function assignmentsOf(h: Harness, userId: string): Promise<any[]> {
-  const rows = await h.engine.find('sys_user_position', { where: { user_id: userId }, context: SYS } as any);
+  const rows = await h.engine.find('sys_user_position', { where: { user_id: userId }, context: SYS });
   return Array.isArray(rows) ? rows : [];
 }
 
