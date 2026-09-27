@@ -310,7 +310,20 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('69 invocation sites, 92 mentions — the thread\'s two control numbers hold', () => {
+    it('70 invocation sites, 93 mentions — the thread\'s two control numbers hold', () => {
+        // [#20156] 69 → 70 sites / 92 → 93 mentions — one net site, and it is
+        // a MOVE plus one. The plain read's app and dashboard gates each
+        // resolved the context inline (two same-line CAUGHT sites); both moved
+        // into `metaItemReadGate`, the one per-caller read gate the plain read
+        // and every door beside it now ask, where they stay same-line CAUGHT.
+        // The one new site is `fetchCurrentMetaDocument`, which the event doors
+        // and `/diff` use to judge the item the plain read would judge — the
+        // plain read's org partition, so it resolves the context too. Same-line
+        // CAUGHT, like the two it sits beside: none of these doors is behind the
+        // shared anonymous floor's `enforceAuth` line, and they already carried
+        // `rethrowAuthzStoreUnavailable`. No prose mention was added, so the two
+        // numbers move together (+1 / +1).
+        //
         // [#20102] 77 → 69 sites / 100 → 92 mentions. The saved-report
         // `/reports` family was retired whole with the saved-report stack, and
         // its eight routes each carried ONE bare site (`resolveExecCtx` then
@@ -410,26 +423,26 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // naming the seam is the point of the sentence — and the sentence
         // moving only the mention count is this control working: a site was not
         // added, and the number that tracks sites did not move.
-        expect(SITES.length).toBe(69);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(92);
+        expect(SITES.length).toBe(70);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(93);
     });
 
-    it('the split is 24 locally caught / 45 bare — NOT 16 / 45, which does not add to 69', () => {
-        // 16 sites spell the catch on the invocation line; 4 more spell it on
-        // the continuation line. A single-line grep sees 16 and the arithmetic
-        // silently loses four sites.
+    it('the split is 25 locally caught / 45 bare — NOT 17 / 45, which does not add to 70', () => {
+        // 17 sites spell the catch on the invocation line; 8 more spell it on
+        // the continuation line. A single-line grep sees 17 and the arithmetic
+        // silently loses eight sites.
         //
         // [#13214] The new site is BARE, and that is a decision the next case
         // enforces: a locally-caught site sitting behind the shared floor would
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
-        expect(sameLine.length).toBe(16);
-        expect(CAUGHT.length).toBe(24);
+        expect(sameLine.length).toBe(17);
+        expect(CAUGHT.length).toBe(25);
         expect(BARE.length).toBe(45);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 24 caught ones is', () => {
+    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 25 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the

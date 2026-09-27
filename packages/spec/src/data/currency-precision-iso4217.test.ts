@@ -2,9 +2,14 @@
 
 /**
  * #7918 (maintainer ruling 2026-08-12, Option A) — publish-time rejection of a
- * declared currency `precision` that contradicts the currency's ISO 4217 /
- * CLDR fraction digits, when the currency is statically known
+ * declared `currencyConfig.precision` that contradicts the currency's ISO 4217
+ * / CLDR fraction digits, when the currency is statically known
  * (`currencyConfig.currencyMode: 'fixed'`).
+ *
+ * #20011 — the FIELD-level `precision` key is NOT judged by this rule. It is
+ * "Total digits" (the `p` of a DECIMAL(p, s) amount), and a currency's decimal
+ * places are the currency's, not a setting (ruling 5805782503, letter 乙). The
+ * field-level block below pins that it parses whatever the currency.
  *
  * The rule is deliberately partial: `dynamic` currencyMode has no single
  * currency to check against and is out of reach BY DESIGN; codes outside CLDR
@@ -222,44 +227,65 @@ describe('#11423 — the materialized precision default is never one the schema 
   });
 });
 
-describe('#7918 — field-level anchor (FieldSchema.superRefine; the key has no default)', () => {
+describe('#20011 — field-level `precision` is total digits, never judged against the currency (FieldSchema)', () => {
+  // Ruling 5805782503 (letter 乙): a currency's decimal places are the
+  // currency's, not a setting — and the key's own describe is "Total digits".
+  // The #7918 check that compared this key with the fixed currency's fraction
+  // digits refused `precision: 18` on a USD amount (a DECIMAL(18,2)) and
+  // prescribed `precision: 2`; it is gone, and these pins hold it gone.
   const base = { name: 'amount', label: 'Amount', type: 'currency' as const };
+  const fixed = (defaultCurrency: string) => ({ currencyMode: 'fixed' as const, defaultCurrency });
 
-  it('rejects an authored field-level precision contradicting the fixed currency (JPY + 2)', () => {
-    const result = FieldSchema.safeParse({
-      ...base, precision: 2,
-      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' },
-    });
-    expect(result.success).toBe(false);
-    const issue = firstIssue(result)!;
-    expect(issue.code).toBe('custom');
-    expect(issue.path).toEqual(['precision']);
-    expect(issue.message).toContain('currency JPY has 0 fraction digits');
-    expect(issue.message).toContain('`precision: 2` contradicts it');
+  it('accepts `precision: 18` on a fixed-USD field — a DECIMAL(18,2) amount — and keeps the authored 18', () => {
+    const result = FieldSchema.safeParse({ ...base, precision: 18, currencyConfig: fixed('USD') });
+    expect(result.success).toBe(true);
+    // Carried through as authored: nothing rewrites the total-digit count to
+    // the currency's fraction digits.
+    expect(result.data!.precision).toBe(18);
   });
 
-  it('accepts a field-level precision agreeing with the fixed currency (JPY + 0, KWD + 3)', () => {
+  it('still accepts `precision: 2` on a fixed-USD field', () => {
+    const result = FieldSchema.safeParse({ ...base, precision: 2, currencyConfig: fixed('USD') });
+    expect(result.success).toBe(true);
+    expect(result.data!.precision).toBe(2);
+  });
+
+  it('flipped: `precision: 2` on a fixed-JPY field parses — a DECIMAL(2,0) amount — where #7918 refused it', () => {
+    const result = FieldSchema.safeParse({ ...base, precision: 2, currencyConfig: fixed('JPY') });
+    expect(result.success).toBe(true);
+    expect(result.data!.precision).toBe(2);
+  });
+
+  it('accepts a total-digit count on every fraction-digit class (0: JPY, 2: USD, 3: KWD)', () => {
+    const cases: Array<[string, number]> = [
+      ['JPY', 0], ['JPY', 12], ['USD', 2], ['USD', 18], ['KWD', 3], ['KWD', 2], ['KWD', 15],
+    ];
+    for (const [code, precision] of cases) {
+      const result = FieldSchema.safeParse({ ...base, precision, currencyConfig: fixed(code) });
+      expect(result.success, `${code} + precision ${precision}`).toBe(true);
+      expect(result.data!.precision).toBe(precision);
+    }
+  });
+
+  it('adds no currency-only total-digit coherence rule — a count below the fraction digits parses, as `precision` below `scale` does on a number', () => {
+    // Measured parity, not an endorsement of the value: no numeric type
+    // relates `precision` to its decimal places at parse, so a currency-only
+    // rule would be the one such rule, on a key no face reads.
+    expect(FieldSchema.safeParse({ ...base, precision: 1, currencyConfig: fixed('USD') }).success).toBe(true);
     expect(FieldSchema.safeParse({
-      ...base, precision: 0,
-      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' },
-    }).success).toBe(true);
-    expect(FieldSchema.safeParse({
-      ...base, precision: 3,
-      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'KWD' },
+      name: 'qty', label: 'Qty', type: 'number' as const, precision: 1, scale: 2,
     }).success).toBe(true);
   });
 
-  it('no currencyConfig ⇒ no statically-known currency ⇒ no verdict', () => {
+  it('unchanged outside fixed mode: no currencyConfig, and dynamic (authored or defaulted)', () => {
     expect(FieldSchema.safeParse({ ...base, precision: 2 }).success).toBe(true);
-  });
-
-  it('dynamic (authored or defaulted) currencyMode ⇒ no verdict', () => {
+    expect(FieldSchema.safeParse({ ...base, precision: 18 }).success).toBe(true);
     expect(FieldSchema.safeParse({
       ...base, precision: 2,
       currencyConfig: { currencyMode: 'dynamic', defaultCurrency: 'JPY' },
     }).success).toBe(true);
     expect(FieldSchema.safeParse({
-      ...base, precision: 2,
+      ...base, precision: 18,
       currencyConfig: { defaultCurrency: 'JPY' },
     }).success).toBe(true);
   });
@@ -270,7 +296,17 @@ describe('#7918 — field-level anchor (FieldSchema.superRefine; the key has no 
     }).success).toBe(true);
   });
 
-  it('the currencyConfig-level check reaches through the FieldSchema door (path is prefixed)', () => {
+  it('crosses the object door (ObjectSchema.create) and re-parses stably with the authored 18', () => {
+    const obj = ObjectSchema.create({
+      name: 'invoice', label: 'Invoice',
+      fields: { amount: { label: 'Amount', type: 'currency', precision: 18, currencyConfig: fixed('USD') } },
+    });
+    const reparsed = ObjectSchema.safeParse(JSON.parse(JSON.stringify(obj)));
+    expect(reparsed.success).toBe(true);
+    expect(reparsed.data!.fields.amount.precision).toBe(18);
+  });
+
+  it('the currencyConfig-level check still reaches through the FieldSchema door (a different key; unchanged)', () => {
     const result = FieldSchema.safeParse({
       ...base,
       currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY' },
@@ -280,17 +316,21 @@ describe('#7918 — field-level anchor (FieldSchema.superRefine; the key has no 
     expect(issue.code).toBe('custom');
     expect(issue.path).toEqual(['currencyConfig', 'precision']);
     expect(issue.message).toContain('currency JPY has 0 fraction digits');
+    expect(issue.message).toContain('Declare `precision: 0`');
   });
 
-  it('both anchors fire independently when both keys contradict', () => {
+  it('with both keys authored, only the currencyConfig anchor fires — the field-level key raises nothing', () => {
     const result = FieldSchema.safeParse({
       ...base, precision: 2,
       currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'JPY' },
     });
     expect(result.success).toBe(false);
-    const paths = result.error!.issues.map((i) => i.path.join('.'));
-    expect(paths).toContain('precision');
-    expect(paths).toContain('currencyConfig.precision');
+    const issues = result.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual(['currencyConfig', 'precision']);
+    expect(issues[0].message).toContain('currency JPY has 0 fraction digits');
+    expect(issues[0].message).toContain('Declare `precision: 0`');
   });
 });
 

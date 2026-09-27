@@ -6,7 +6,10 @@ import { assertListComparandShapes } from './filter-comparand-shape';
 // [#19889] The equality-slot refusal's words, shared with the comparand-shape
 // face so the save door and the query door print one sentence (ruling A,
 // record 5805248669: "one constant, two doors").
-import { arrayEqualityComparandMessage } from './filter-comparand-refusal-text';
+import {
+  arrayEqualityComparandMessage,
+  arrayInequalityComparandMessage,
+} from './filter-comparand-refusal-text';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
 import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
 // [#19514] The text-comparand door this package publishes for the
@@ -276,7 +279,9 @@ const NE_DESCRIPTION =
  * named here because this slot cannot see it — the key belongs to the record
  * enclosing the operator map — and the issue's own `path` says where it is.
  * `null`, every scalar, a `Date` and a `{ $field }` reference are not arrays and
- * pass exactly as before; `$ne` is not judged (the ruling names equality).
+ * pass exactly as before. `$ne` is not this factory's (the ruling names
+ * equality); it has its own, {@link inequalityComparandSchema}, with its own
+ * remedy.
  *
  * ⚠️ `z.toJSONSchema()` has no arm for a custom check, so the published JSON
  * Schema still reads `{}` here. The site is declared in
@@ -289,6 +294,38 @@ const equalityComparandSchema = () =>
   }).optional().describe(EQ_DESCRIPTION);
 
 /**
+ * [#19886] The `$ne` slot, shared by the documentation copy
+ * ({@link EqualityOperatorSchema}) and the enforced copy
+ * (`FieldOperatorsSchema`), exactly as {@link equalityComparandSchema} is for
+ * `$eq`: the two copies share the CODE, so the published reference cannot
+ * describe a slot the enforced copy narrows.
+ *
+ * Open (`z.any()`) EXCEPT for an ARRAY, refused by ruling A on #19886 (record
+ * 5805254639): "`FieldOperatorsSchema.$ne` refuses it at parse — one remedy
+ * text, naming the declared list-negation operator by its spec spelling". Its
+ * own describe already said so: the comparand is "a literal, or a { $field }
+ * reference" ({@link NE_DESCRIPTION}), and an array is neither. The words are
+ * `arrayInequalityComparandMessage`, which the comparand-shape face prints too;
+ * the field is not named because this slot cannot see it, and the issue's own
+ * `path` says where it is. `null` (the has-a-value predicate), every scalar, a
+ * `Date` and a `{ $field }` reference are not arrays and pass exactly as before.
+ *
+ * ⚠️ Scope: this is the OPERATOR slot. `FilterConditionSchema` (every stored
+ * filter carrier) does not parse a field's operator map through
+ * `FieldOperatorsSchema`; its own walk, `checkFilterConditionComparands`, does
+ * not judge `$ne`, and the ruling names this slot, not that walk.
+ *
+ * ⚠️ `z.toJSONSchema()` has no arm for a custom check, so the published JSON
+ * Schema still reads `{}` here. The site is declared in
+ * `dropped-refinements.baseline.json`.
+ */
+const inequalityComparandSchema = () =>
+  z.any().superRefine((value, ctx) => {
+    if (!Array.isArray(value)) return;
+    ctx.addIssue({ code: 'custom', message: arrayInequalityComparandMessage(value, {}) });
+  }).optional().describe(NE_DESCRIPTION);
+
+/**
  * Comparison operators for equality and inequality checks.
  * Supported data types: Any
  */
@@ -297,7 +334,7 @@ export const EqualityOperatorSchema = lazySchema(() => z.object({
   $eq: equalityComparandSchema(),
 
   /** Not equal to - SQL: <> or != | MongoDB: $ne */
-  $ne: z.any().optional().describe(NE_DESCRIPTION),
+  $ne: inequalityComparandSchema(),
 }));
 
 /**
@@ -1524,8 +1561,10 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // operator can be described in one copy and blank in the other. [#19889]
   // `$eq` is built from the same `equalityComparandSchema` factory the
   // documentation copy uses: it refuses an ARRAY comparand, in the face's words.
+  // [#19886] `$ne` likewise, from `inequalityComparandSchema`, with the `$nin`
+  // remedy the face prints for the same shape.
   $eq: equalityComparandSchema(),
-  $ne: z.any().optional().describe(NE_DESCRIPTION),
+  $ne: inequalityComparandSchema(),
 
   // Ordering. `string` is in the union for the reason {@link ComparisonOperatorSchema}
   // gives at length (#5685): the date-macro resolver and all three first-party
@@ -1689,8 +1728,12 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  *   door accepts, which is the split this arm exists to close.
  * - **Not dropped.** The refusal fails the parse; nothing is stripped from the
  *   document. A dropped filter would show MORE rows than the author asked for.
- * - ⛔ `$ne` is not judged (the ruling names equality), and the list operators
- *   keep their lists, `$in: []` / `$nin: []` included.
+ * - ⛔ `$ne` is not judged by this walk (the ruling names equality), and the
+ *   list operators keep their lists, `$in: []` / `$nin: []` included. [#19886]
+ *   Ruling A refuses an array under `$ne` at the face and at the OPERATOR slot
+ *   `FieldOperatorsSchema.$ne` (`inequalityComparandSchema`); it names neither
+ *   this walk nor `FilterConditionSchema`, so a stored carrier still saves a
+ *   `$ne` list and the face refuses it at query time.
  *
  * Descends non-`$` keys only (operator specs and nested relations): the
  * `$and` / `$or` / `$not` members are re-parsed by {@link FilterConditionSchema}

@@ -1030,7 +1030,7 @@ describe('validateReactPageProps — <ObjectChart drillDown> (#5022)', () => {
   it('rejects a key that belongs to another widget, with the reason rather than a rename', () => {
     const f = validateReactPageProps(drill(`{ mode: 'record' }`));
     const hit = f.find((x) => x.rule === REACT_CHART_DRILLDOWN_INVALID);
-    expect(hit!.message).toContain('TABLE / PIVOT / METRIC');
+    expect(hit!.message).toContain('object-data-table');
   });
 
   it('rejects the report near-key spelling and names the type difference', () => {
