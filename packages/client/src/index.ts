@@ -2149,7 +2149,7 @@ export class ObjectStackClient {
     /**
      * ADR-0033: promote a single item's pending draft overlay to live —
      * the per-item flow beside `packages.publishDrafts`' package-scoped one.
-     * 404 [no_draft] when there is nothing to publish. [#12195] The name is
+     * 404 `NO_DRAFT` when there is nothing to publish. [#12195] The name is
      * percent-encoded, like `getItem` — this line used to promise unencoded
      * pass-through for compound names, whose arity is now retired.
      *
