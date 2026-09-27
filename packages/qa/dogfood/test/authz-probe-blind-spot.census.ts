@@ -106,7 +106,7 @@
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 82 rows over 21 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 81 rows over 21 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all

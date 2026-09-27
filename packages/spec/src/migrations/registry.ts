@@ -18213,7 +18213,9 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // objectstack, objectui (pinned sha and main) and cloud. No carrier key and no
     // authored document, so no tombstone and no D2 conversion — this table plus
     // the D3 semantic entry `automation-flow-list-route-retired` ARE the
-    // declaration (the #8715 route-3 shape).
+    // declaration — the whole-def route-3 shape, as the precedent entry
+    // `package-rollback-response-retired` (and its `api/PackageRollbackResponse`
+    // row) recorded it.
     'api/ListFlowsRequest',
     // #19543 (door ④) — `api/ListFlowsResponse`, the answer of the retired
     // `GET /api/v1/automation` flow list. It declared `FlowSummary[]`, `total`,
