@@ -50,6 +50,18 @@ This also changes the `$ne` note of the equality-slot change earlier in this rel
 | `{ amount: { $between: 5 } }`, `{ amount: { $between: [1] } }` | `{ amount: { $between: [1, 5] } }` |
 | `{ stage: { $ne: ["won", "lost"] } }` | `{ stage: { $nin: ["won", "lost"] } }` |
 
+### FROM → TO at the HTTP doors
+
+Same status, different code: the refusal now comes from the route's schema door, located on the member, instead of from the analytics filter normalizer.
+
+| request | before | after |
+|:--|:--|:--|
+| `POST /analytics/dataset/query` with `selection.runtimeFilter: { amount: { $between: [10] } }` | `400 INVALID_FILTER` from the analytics normalizer, in the comparand-shape face's sentence | `400 VALIDATION_FAILED`, `details.fields[]` entry `selection.runtimeFilter.amount.$between` with the sentence `Operator "$between" on field "amount" requires a [min, max] value array. Received array ([10]). …` |
+| the same route, any other slot above in `selection.runtimeFilter` (top level or in `$and` / `$or` / `$not`) | `400 INVALID_FILTER` | `400 VALIDATION_FAILED`, located on the slot, with that slot's sentence |
+| `POST /analytics/query` (`AnalyticsQueryRequestSchema`) with the same shape in `where` | `400 INVALID_FILTER` | refused by the request schema at `where.amount.$between`, answered `400 VALIDATION_FAILED` |
+
+A client that branches on `INVALID_FILTER` for these shapes reads `VALIDATION_FAILED` instead. Both are 400 and both name the field.
+
 ## Who is affected, measured
 
 A literal-comparand scan of every member shape, with a lit control per shape, over `examples/**` and the non-test `packages/**` of this repository at `af32cf9a`, the console repository at its pinned commit `f8a9d0fb05`, and the cloud repository's `main` at `48d70663ab`, found authored filters carrying one in one place. The console's filter-condition widget writes "is empty" as `{ field: { $in: [null, ""] } }` and "is not empty" as `{ field: { $nin: [null, ""] } }`. That widget edits a field's `relatedListFilter` and a rollup's `summaryOperations.filter` in the Studio field designer, and a sharing rule's criteria. Both shapes carry a `null` list member, which the face has refused on every query since the 2026-08-31 ruling, so a filter saved that way has been failing its related list or rollup since then. After this change, the Studio save is refused instead, with the `$or` / `$null` prescription. Every other hit is prose, a type table or a test fixture. Deployed datasets, dashboards and reports were NOT measured. Validating each stack, or re-saving each document, finds every instance the surface above lists.
