@@ -22,6 +22,11 @@
  * opposite, because `'false'` matched neither `=== true` nor `=== false` and
  * fell through to 「缺省」.
  *
+ * The four rows are what the card measured, not the whole change. The door
+ * parses the WHOLE body, so everything else `ManifestSchema` declares is
+ * enforced too: `name`, the `namespace` grammar, the closed value sets, the
+ * retired-key tombstones and the nested blocks it closes. §8 pins that.
+ *
  * ## What is deliberately NOT refused — the declaration decides
  *
  * An unknown key at the TOP LEVEL of the wrapped form. The wrapped branch is a
@@ -436,4 +441,48 @@ describe('§7 controls — well-formed bodies in both forms still install as int
         expect(r.response?.status).toBe(201);
         expect(registry.getPackage(m.id)?.manifest?.name).toBe('Upgraded');
     });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// §8 — the REST of the declaration: the door enforces all of it, not four rows
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * The four rows above are what the card measured. The door parses the WHOLE
+ * body, so it enforces everything `ManifestSchema` declares: its other required
+ * key (`name`), its grammars and value sets, its retired-key tombstones, and
+ * the nested blocks it closes. Before this change the door parsed only the
+ * `id` and `version` legs, so each case below answered `201`. The changeset
+ * names every one. Each case is first asserted off-declaration by the
+ * declaration itself, beside a control that differs from it by the defect
+ * alone, so a refusal here is a statement about the door and not about the
+ * fixture.
+ */
+describe('§8 every other declared constraint is refused, naming the path', () => {
+    const m = manifest('rest.of.declaration');
+    const cases: ReadonlyArray<readonly [string, unknown, unknown, ReadonlyArray<string>]> = [
+        ['no `name`, WRAPPED form', { manifest: without(m, 'name') }, { manifest: m }, ['manifest.name']],
+        ['no `name`, BARE form', without(m, 'name'), m, ['name']],
+        ['a `namespace` outside the declared grammar', { manifest: { ...m, namespace: 'Acme-CRM' } }, { manifest: m }, ['manifest.namespace']],
+        ['a `scope` outside its closed set', { manifest: { ...m, scope: 'tenant' } }, { manifest: { ...m, scope: 'project' } }, ['manifest.scope']],
+        ['a declared key of the wrong type', { manifest: { ...m, description: 5 } }, { manifest: { ...m, description: 'x' } }, ['manifest.description']],
+        ['a retired manifest key', { manifest: { ...m, capabilities: {} } }, { manifest: m }, ['manifest.capabilities']],
+        ['an unknown key inside `contributes`', { manifest: { ...m, contributes: { bogus: 1 } } }, { manifest: { ...m, contributes: {} } }, ['manifest.contributes', 'bogus']],
+        ['an unknown key inside a `data[]` seed', { manifest: { ...m, data: [{ object: 'acme_account', records: [], bogus: 1 }] } }, { manifest: { ...m, data: [{ object: 'acme_account', records: [] }] } }, ['manifest.data.0', 'bogus']],
+        ['an unknown key inside `engines`', { manifest: { ...m, engines: { bogus: 1 } } }, { manifest: { ...m, engines: {} } }, ['manifest.engines', 'bogus']],
+    ];
+
+    for (const [label, body, control, named] of cases) {
+        it(`${label} → 400 VALIDATION_ERROR, nothing installed, the path named`, async () => {
+            expect(PackageInstallBodySchema.safeParse(body).success, 'off-declaration by the declaration itself').toBe(false);
+            expect(PackageInstallBodySchema.safeParse(control).success, 'the control differs by the defect alone').toBe(true);
+
+            const { registry, install } = door();
+            const r = await install(body);
+
+            expectRefused(r);
+            expect(registry.getPackage(m.id)).toBeUndefined();
+            for (const subject of named) expect(messageOf(r)).toContain(subject);
+        });
+    }
 });
