@@ -166,7 +166,7 @@ describe('[#20051] a legal `options.KIND` still parses and round-trips', () => {
   it('CONTROL: an overlay with no `options` parses exactly as before, with no `options` key', () => {
     const parsed = ViewMetadataSchema.safeParse(overlay({ type: 'grid' }));
     expect(parsed.success).toBe(true);
-    expect(parsed.success && 'options' in parsed.data).toBe(false);
+    expect('options' in (parsed as { data: Record<string, unknown> }).data).toBe(false);
   });
 });
 
