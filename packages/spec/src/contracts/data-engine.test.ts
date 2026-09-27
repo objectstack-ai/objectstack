@@ -501,7 +501,7 @@ describe('Data Engine Contract', () => {
   // Five members ObjectQL has implemented for releases, all consumed
   // cross-package, all recoverable until commit 8425c17cc only through consumer-local
   // structural re-declarations (`service-analytics`'s `DataEngineLike`,
-  // `service-datasource`'s `ConnectionEngineLike` — the type the #11833 sweep inventoried).
+  // `service-datasource`'s `ConnectionEngineLike` — the third type that ruling's sweep inventoried).
   // Declared per the 2026-08-25 maintainer ruling on #11833 (fork 1 option A;
   // item 4 for the `ConnectionEngineLike` trio), under the [#4251]/[#11493]
   // evidence bar.
