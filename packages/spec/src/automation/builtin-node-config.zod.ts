@@ -67,6 +67,11 @@
  * descriptor's free-form `assignments` map as the openness it is; that pin and
  * this contract describe the same surface from the two sides.
  *
+ * The `create_record` / `update_record` `fields` map carries the same value
+ * contract since #19938 (`FlowValueSlotSchema`, the "value slots" section):
+ * a field value may be a CEL value envelope beside a `{token}` template or a
+ * literal, and the three maps are the expression ledger's `value`-role slots.
+ *
  * Deliberately absent:
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
  *    descriptor-schemaless class (config-schemas.test.ts). `wait` and
@@ -223,6 +228,162 @@ const CRUD_BULK_INTENT_GUIDANCE = {
   options: BULK_INTENT_OPTIONS_PRESCRIPTION,
 } as const;
 
+// ─── value slots — one contract for every CEL value envelope ─────────
+
+/**
+ * The one sentence a refused value envelope leads with — the same words for
+ * every way an envelope can be malformed AND for every `value`-role slot the
+ * expression ledger declares (`assignment.assignments.*`,
+ * `create_record.fields.*`, `update_record.fields.*`), so an author (or an
+ * agent reading the issue) learns the rule before the detail.
+ *
+ * Slot-neutral on purpose (#19938): the refusal's LOCATION names the slot
+ * (`config.fields.<field>`, `config.assignments.<variable>`). A sentence that
+ * named one slot would tell an author refused in another that they had
+ * written something they had not.
+ */
+export const VALUE_ENVELOPE_REFUSAL =
+  'A value carrying a `dialect` key is read as an expression envelope, and this one is not a valid CEL value '
+  + 'envelope.';
+
+/**
+ * The name the sentence first shipped under (#14149), kept as a published
+ * export. It IS {@link VALUE_ENVELOPE_REFUSAL} — the same string — so a
+ * consumer matching on it goes on matching every value slot's refusal. Its
+ * text used to open "An assignment value…"; it became slot-neutral when the
+ * CRUD `fields` map joined the `value` role (#19938).
+ */
+export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL = VALUE_ENVELOPE_REFUSAL;
+
+/**
+ * The expression form of a value in a `value`-role slot — `ExpressionSchema`'s
+ * `{ dialect: 'cel', source }` envelope, narrowed to the one dialect the
+ * expression engine evaluates to a value (#14149, maintainer ruling
+ * 2026-09-02: option A, the rendering half). Named for the slot it was first
+ * declared on; the CRUD `fields` map's values are judged by this same schema
+ * (#19938) — one envelope contract, never one per slot.
+ *
+ * The envelope is the spelling `shared/expression.zod.ts` already defines and
+ * `validateExpression` already reads — not a second one: `ExpressionSchema`
+ * in its EVALUATED form (`EvaluatedExpressionSchema` — this slot's value is
+ * run by the expression engine, so `source` is required and non-blank, the
+ * one rule both spellings of that seam are refused by), `safeExtend`ed (the
+ * form Zod reserves for a refined object, keeping its rules) with the one
+ * further key narrowed, at the type level too (`dialect: 'cel'`, so a
+ * `template` envelope is a compile error before it is a parse error).
+ * `validateExpression('value', …)` refuses a `template` or `cron` envelope in
+ * a value slot ("expected a CEL expression but got a … dialect"), so the
+ * contract refuses it here, at authoring, with the same verdict — and refuses
+ * the shapes that validator lets through: an envelope with no `source`
+ * (`{ dialect: 'cel' }` and the `ast`-only envelope alike) reads as "not
+ * authored" there (`ok: true`), and a whitespace-only `source` trims to the
+ * same answer while the engine parses it untrimmed and faults. This parse is
+ * the gate that catches every one of them before it is stored.
+ *
+ * A bare string is deliberately NOT accepted as CEL shorthand the way
+ * `ExpressionInputSchema` accepts it elsewhere: in a value slot a plain
+ * string has always meant `{token}` flow interpolation, and that meaning is
+ * kept. The envelope is the only CEL spelling in this slot — which is exactly
+ * what lets the two forms coexist without a mode switch.
+ */
+export const AssignmentExpressionValueSchema = EvaluatedExpressionSchema
+  .safeExtend({
+    dialect: z.literal('cel', {
+      error: () =>
+        'A value envelope is evaluated by the expression engine to a value, which only the `cel` dialect does — '
+        + '`template` and `cron` envelopes have no meaning here. For text with holes write a plain string '
+        + '(`{token}` flow interpolation); for a computed value write `{ dialect: \'cel\', source: \'…\' }`.',
+    }),
+  })
+  .meta({
+    description:
+      'CEL value envelope `{ dialect: \'cel\', source }` — evaluated by the expression engine to the value the '
+      + 'slot takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable',
+  });
+
+export type AssignmentExpressionValue = z.input<typeof AssignmentExpressionValueSchema>;
+export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressionValueSchema>;
+
+/**
+ * Build a `value`-role slot's value contract: the SHAPE rule below, the
+ * `.meta({ xExpression: 'value' })` marker the expression ledger's
+ * reconciliation ratchet reads, and the slot's own description. Every value
+ * slot is built here, so the rule is stated once however many slots declare
+ * it (#19938); only the description differs.
+ *
+ * The rule: an object that names a `dialect` ({@link isExpressionEnvelopeShaped})
+ * is an envelope and must be a valid one ({@link AssignmentExpressionValueSchema});
+ * every other value passes untouched. Each issue leads with
+ * {@link VALUE_ENVELOPE_REFUSAL}.
+ *
+ * Built eagerly, not through `lazySchema`: `.meta()` registers by schema
+ * IDENTITY, and the lazy Proxy is not the identity the registry holds, so a
+ * lazily wrapped marker never reaches the JSON Schema (measured — the sibling
+ * markers all sit on eager inner schemas). The schema is two nodes; nothing
+ * is saved by deferring it. And it is declared ABOVE the CRUD contracts that
+ * read it: `OS_EAGER_SCHEMAS=1` runs every `lazySchema` factory at module
+ * load, where a schema declared further down is still in its temporal dead
+ * zone.
+ */
+function celValueSlotSchema(description: string) {
+  return z.unknown()
+    .superRefine((value, ctx) => {
+      if (!isExpressionEnvelopeShaped(value)) return;
+      const result = AssignmentExpressionValueSchema.safeParse(value);
+      if (result.success) return;
+      for (const issue of result.error.issues) {
+        const where = issue.path.length > 0 ? `\`${issue.path.map(String).join('.')}\`: ` : '';
+        ctx.addIssue({
+          code: 'custom',
+          path: issue.path,
+          message: `${VALUE_ENVELOPE_REFUSAL} ${where}${issue.message}`,
+        });
+      }
+    })
+    .meta({ description, xExpression: 'value' });
+}
+
+/**
+ * What a value in a `value`-role slot may be (#14149, generalised in #19938) —
+ * the two authoring forms, plus literals:
+ *
+ *  - a **string** — `{token}` flow interpolation, resolved by `interpolate()`
+ *    against the live variables (a sole token keeps the token's type:
+ *    `'{rows}'` yields the array); text with no tokens is the literal text;
+ *  - a **CEL value envelope** — {@link AssignmentExpressionValueSchema},
+ *    evaluated by the expression engine to a value, so the declared stdlib is
+ *    authorable from metadata: `joinNonEmpty(rows.map(r, r.subject), "\n")`
+ *    builds a digest body from a list, `round(price * 100) / 100.0` a money
+ *    value (`100.0`: CEL divides two integers as integers);
+ *  - any other JSON value — a number, boolean, `null`, array or plain object
+ *    — used as a literal (strings inside it still interpolate).
+ *
+ * The forms are told apart by SHAPE, never by a mode key: an object that names
+ * a `dialect` is an envelope ({@link isExpressionEnvelopeShaped}) and must be a
+ * valid one, everything else is what it always was. That is the preservation
+ * half of the contract — every value that parsed before a slot joined the
+ * `value` role still parses, and the only newly refused shape is a malformed
+ * envelope (no `source` — `{ dialect: 'cel' }` and an `ast`-only envelope
+ * alike — a blank `source`, a non-`cel` dialect), which used to be stored
+ * verbatim as a literal object. Only the TOP-LEVEL value of a slot is judged:
+ * an envelope-shaped object nested inside an array or a plain object is data.
+ *
+ * The slot-neutral contract. The CRUD `fields` map's values take it
+ * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, #19938), and it is
+ * what a consumer judging ANY value-role slot applies (`AutomationEngine`'s
+ * `valueEnvelopeRefusals`, the lint's `checkDeclaredValue`). The `assignment`
+ * map's {@link AssignmentValueSchema} is the same rule under a
+ * variable-worded description.
+ */
+export const FlowValueSlotSchema = celValueSlotSchema(
+  'A value: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value envelope '
+  + '`{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is '
+  + 'reachable), or any other literal',
+);
+
+export type FlowValueSlot = z.input<typeof FlowValueSlotSchema>;
+export type FlowValueSlotParsed = z.infer<typeof FlowValueSlotSchema>;
+
 // ─── CRUD quartet ────────────────────────────────────────────────────
 
 /**
@@ -268,9 +429,14 @@ export const CreateRecordConfigSchema = lazySchema(() => strictObject({
 }, {
   /** Object to insert into (execute-time required). */
   objectName: z.string().describe('Object to insert into'),
-  /** Field values to write on the new record; values interpolate `{token}` templates. */
-  fields: z.record(z.string(), z.unknown()).optional()
-    .describe('Field values to write on the new record'),
+  /**
+   * Field values to write on the new record — a `value`-role slot of the
+   * expression ledger (`create_record.fields.*`, #19938): each value is a
+   * `{token}` template, a CEL value envelope, or a literal
+   * ({@link FlowValueSlotSchema}).
+   */
+  fields: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe('Field values to write on the new record: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal'),
   /** Flow variable bound to the created record (`{var.id}` works even when the driver returns a bare id). */
   outputVariable: z.string().optional()
     .describe('Flow variable bound to the created record'),
@@ -299,8 +465,13 @@ export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
   /** Field/value pairs identifying the record(s) to update; an erased template condition refuses the node (#3810). */
   filter: z.record(z.string(), z.unknown()).optional()
     .describe('Field/value pairs identifying the record(s) to update'),
-  /** Field values to write; values interpolate `{token}` templates. */
-  fields: z.record(z.string(), z.unknown()).optional().describe('Field values to write'),
+  /**
+   * Field values to write — a `value`-role slot of the expression ledger
+   * (`update_record.fields.*`, #19938): each value is a `{token}` template, a
+   * CEL value envelope, or a literal ({@link FlowValueSlotSchema}).
+   */
+  fields: z.record(z.string(), FlowValueSlotSchema).optional()
+    .describe('Field values to write: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal'),
   /**
    * Declare BULK intent — this node may update EVERY row `filter` matches.
    *
@@ -769,83 +940,9 @@ export type MapConfigParsed = z.infer<typeof MapConfigSchema>;
 // ─── assignment ──────────────────────────────────────────────────────
 
 /**
- * The one sentence a refused envelope leads with — the same words for every
- * way an envelope can be malformed, so an author (or an agent reading the
- * issue) learns the rule before the detail.
- */
-export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
-  'An assignment value carrying a `dialect` key is read as an expression envelope, and this one is not a valid '
-  + 'CEL value envelope.';
-
-/**
- * The expression form of an assignment value — `ExpressionSchema`'s
- * `{ dialect: 'cel', source }` envelope, narrowed to the one dialect the
- * expression engine evaluates to a value (#14149, maintainer ruling
- * 2026-09-02: option A, the rendering half).
- *
- * The envelope is the spelling `shared/expression.zod.ts` already defines and
- * `validateExpression` already reads — not a second one: `ExpressionSchema`
- * in its EVALUATED form (`EvaluatedExpressionSchema` — this slot's value is
- * run by the expression engine, so `source` is required and non-blank, the
- * one rule both spellings of that seam are refused by), `safeExtend`ed (the
- * form Zod reserves for a refined object, keeping its rules) with the one
- * further key narrowed, at the type level too (`dialect: 'cel'`, so a
- * `template` envelope is a compile error before it is a parse error).
- * `validateExpression('value', …)` refuses a `template` or `cron` envelope in
- * a value slot ("expected a CEL expression but got a … dialect"), so the
- * contract refuses it here, at authoring, with the same verdict — and refuses
- * the shapes that validator lets through: an envelope with no `source`
- * (`{ dialect: 'cel' }` and the `ast`-only envelope alike) reads as "not
- * authored" there (`ok: true`), and a whitespace-only `source` trims to the
- * same answer while the engine parses it untrimmed and faults. This parse is
- * the gate that catches every one of them before it is stored.
- *
- * A bare string is deliberately NOT accepted as CEL shorthand the way
- * `ExpressionInputSchema` accepts it elsewhere: in an assignment value a plain
- * string has always meant `{token}` flow interpolation, and that meaning is
- * kept. The envelope is the only CEL spelling in this slot — which is exactly
- * what lets the two forms coexist without a mode switch.
- */
-export const AssignmentExpressionValueSchema = EvaluatedExpressionSchema
-  .safeExtend({
-    dialect: z.literal('cel', {
-      error: () =>
-        'An assignment value envelope is evaluated by the expression engine to a value, which only the `cel` dialect '
-        + 'does — `template` and `cron` envelopes have no meaning here. For text with holes write a plain string '
-        + '(`{token}` flow interpolation); for a computed value write `{ dialect: \'cel\', source: \'…\' }`.',
-    }),
-  })
-  .meta({
-    description:
-      'CEL value envelope `{ dialect: \'cel\', source }` — evaluated by the expression engine to the value the '
-      + 'variable takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable',
-  });
-
-export type AssignmentExpressionValue = z.input<typeof AssignmentExpressionValueSchema>;
-export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressionValueSchema>;
-
-/**
- * What an assignment value may be (#14149) — the two authoring forms, plus
- * literals:
- *
- *  - a **string** — `{token}` flow interpolation, resolved by `interpolate()`
- *    against the live variables (a sole token keeps the token's type: `'{rows}'`
- *    assigns the array); text with no tokens is the literal text;
- *  - a **CEL value envelope** — {@link AssignmentExpressionValueSchema},
- *    evaluated by the expression engine to a value, so the declared stdlib is
- *    authorable from metadata: `joinNonEmpty(rows.map(r, r.subject), "\n")`
- *    builds a digest body from a list;
- *  - any other JSON value — a number, boolean, `null`, array or plain object
- *    — assigned as a literal (strings inside it still interpolate).
- *
- * The forms are told apart by SHAPE, never by a mode key: an object that names
- * a `dialect` is an envelope ({@link isExpressionEnvelopeShaped}) and must be a
- * valid one, everything else is what it always was. That is the preservation
- * half of the contract — every value that parsed before #14149 still parses,
- * and the only newly refused shape is a malformed envelope (no `source` —
- * `{ dialect: 'cel' }` and an `ast`-only envelope alike — a blank `source`, a
- * non-`cel` dialect), which used to be stored verbatim as a literal object and
- * then rendered by `notify` as JSON.
+ * What an assignment value may be (#14149) — {@link FlowValueSlotSchema}'s rule
+ * (built by the same factory), under the variable-worded description the
+ * `assignments` map publishes.
  *
  * `.meta({ xExpression: 'value' })` is the declaration channel the expression
  * ledger reads for this slot (`FLOW_NODE_EXPRESSION_PATHS`'s `assignment`
@@ -857,34 +954,12 @@ export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressio
  * inspector reads `xExpression` on string properties only, so the marker
  * changes no editor — the keyValue widget stores an envelope typed as JSON in
  * the value cell.
- *
- * Built eagerly, not through `lazySchema`: `.meta()` registers by schema
- * IDENTITY, and the lazy Proxy is not the identity the registry holds, so a
- * lazily wrapped marker never reaches the JSON Schema (measured — the sibling
- * markers all sit on eager inner schemas). The schema is two nodes; nothing
- * is saved by deferring it.
  */
-export const AssignmentValueSchema = z.unknown()
-  .superRefine((value, ctx) => {
-    if (!isExpressionEnvelopeShaped(value)) return;
-    const result = AssignmentExpressionValueSchema.safeParse(value);
-    if (result.success) return;
-    for (const issue of result.error.issues) {
-      const where = issue.path.length > 0 ? `\`${issue.path.map(String).join('.')}\`: ` : '';
-      ctx.addIssue({
-        code: 'custom',
-        path: issue.path,
-        message: `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} ${where}${issue.message}`,
-      });
-    }
-  })
-  .meta({
-    description:
-      'Value the variable takes: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value '
-      + 'envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib such as '
-      + '`joinNonEmpty` is reachable), or any other literal',
-    xExpression: 'value',
-  });
+export const AssignmentValueSchema = celValueSlotSchema(
+  'Value the variable takes: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value '
+  + 'envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib such as '
+  + '`joinNonEmpty` is reachable), or any other literal',
+);
 
 export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
 export type AssignmentValueParsed = z.infer<typeof AssignmentValueSchema>;

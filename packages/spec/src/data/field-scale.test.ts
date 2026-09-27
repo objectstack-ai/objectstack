@@ -44,13 +44,20 @@ describe('resolveFieldScale', () => {
     expect(resolveFieldScale({ type: 'percent', scale: 0 })).toBe(0);
   });
 
-  it('declares NO width for number and currency — the census came back inconsistent', () => {
-    // ⛔ Not a hole to fill with a fallback: `number`'s faces disagree by
-    // design (no-fixed-width on the cell, 0 in the summary footer) and the
-    // grouping policy keys on absent-vs-declared-0; `currency` resolves its
-    // cell's fraction digits from ISO 4217 minor units and can no longer
-    // declare this key at all (retired from the type, refused at parse).
+  it('declares NO width for number — ruled (5791809146, letter A′): natural precision, and it stays so', () => {
+    // ⛔ Not a hole to fill with a fallback, and not an open question: an
+    // absent `scale` on a `number` field means NO fixed width — the value's
+    // natural precision — as the platform's declared answer (maintainer ruling
+    // 5791809146, batch 215 item 2, letter A′). A face that prints `0` for it
+    // is the consumer defect, not this answer; grouping is `useGrouping`'s to
+    // decide, and its interim heuristic reads the DECLARED `scale`, never this.
     expect(resolveFieldScale({ type: 'number' })).toBeUndefined();
+  });
+
+  it('declares NO width for currency — the key is retired from the type', () => {
+    // `currency` resolves its cell's fraction digits from ISO 4217 minor units
+    // and can no longer declare this key at all (retired from the type,
+    // refused at parse).
     expect(resolveFieldScale({ type: 'currency' })).toBeUndefined();
   });
 

@@ -20,6 +20,7 @@ import {
   FLOW_NODE_EXPRESSION_PATHS,
   isExpressionEnvelopeShaped,
   resolveFlowNodeExpressions,
+  resolveFlowNodeValueSlots,
   predicateSlotRefusal,
   PREDICATE_SLOT_STRING_REFUSAL,
   structuralConditionRefusal,
@@ -122,6 +123,100 @@ describe('FLOW_NODE_EXPRESSION_PATHS — the assignment value entry (#14149)', (
   });
 });
 
+/**
+ * #19938 (the contract half of #11182 ruling D) — `create_record` /
+ * `update_record` `fields.*` is a `value` slot, the same shape and dialect
+ * rules as `assignments.*`: only an envelope-shaped TOP-LEVEL field value is
+ * an expression, a `{token}` string keeps its 17.x meaning and is not
+ * resolved, and every other literal is data.
+ */
+describe('FLOW_NODE_EXPRESSION_PATHS — the CRUD `fields.*` value entries (#19938)', () => {
+  const PRICE_ENVELOPE = { dialect: 'cel', source: 'round(price * 100) / 100.0' };
+
+  it.each(['create_record', 'update_record'] as const)('declares exactly one slot for `%s`: `fields.*`, role `value`', (nodeType) => {
+    const entries = FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.nodeType === nodeType);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.path).toBe('fields.*');
+    expect(entries[0]!.role).toBe('value');
+    expect(entries[0]!.label).toBe(`${nodeType} field value`);
+  });
+
+  it.each(['create_record', 'update_record'] as const)('%s: resolves the envelope field value, and only it, at the author\'s field name', (nodeType) => {
+    const found = resolveFlowNodeExpressions(nodeType, {
+      objectName: 'quote',
+      filter: { id: '{quoteId}' },
+      fields: {
+        subject: 'Quote for {account.name}',   // `{token}` text — interpolation, not resolved
+        owner: '{$User.Id}',
+        discount: 10,
+        total: PRICE_ENVELOPE,
+        broken: { dialect: 'cel' },             // malformed — resolved so a validator refuses it
+      },
+    });
+    expect(found.map((f) => f.path)).toEqual(['fields.total', 'fields.broken']);
+    expect(found[0]!.value).toBe(PRICE_ENVELOPE);
+    expect(found.every((f) => f.entry.role === 'value' && f.entry.nodeType === nodeType)).toBe(true);
+  });
+
+  it('only the TOP-LEVEL field value is judged — an envelope nested in a JSON value, or in an array, is data', () => {
+    expect(resolveFlowNodeExpressions('create_record', {
+      fields: {
+        payload: { nested: { dialect: 'cel', source: 'x' } },
+        tags: [{ dialect: 'cel', source: 'x' }],
+        decoy: { dialect: 7, source: 'x' },
+      },
+    })).toEqual([]);
+  });
+
+  it('`update_record.filter` is NOT a value slot — an envelope-shaped filter value resolves nothing', () => {
+    expect(resolveFlowNodeExpressions('update_record', { filter: { total: PRICE_ENVELOPE } })).toEqual([]);
+  });
+
+  it('`get_record` / `delete_record` declare no value slot — their `fields` / `filter` resolve nothing', () => {
+    expect(resolveFlowNodeExpressions('get_record', { fields: ['id'], filter: { total: PRICE_ENVELOPE } })).toEqual([]);
+    expect(resolveFlowNodeExpressions('delete_record', { filter: { total: PRICE_ENVELOPE } })).toEqual([]);
+  });
+
+  it('a `fields` that is not a plain object resolves nothing rather than throwing', () => {
+    expect(resolveFlowNodeExpressions('create_record', { fields: [PRICE_ENVELOPE] })).toEqual([]);
+    expect(resolveFlowNodeExpressions('create_record', { fields: 'nope' })).toEqual([]);
+    expect(resolveFlowNodeExpressions('create_record', { fields: null })).toEqual([]);
+    expect(resolveFlowNodeExpressions('create_record', {})).toEqual([]);
+  });
+});
+
+describe('resolveFlowNodeValueSlots — every authored value of a `value` slot, strings included (#19938)', () => {
+  it('hands over every non-absent value of the CRUD `fields` map and the assignment map, by the ledger\'s own walk', () => {
+    const envelope = { dialect: 'cel', source: 'price * 2' };
+    expect(resolveFlowNodeValueSlots('create_record', {
+      objectName: 'quote',
+      fields: { subject: 'Hi {name}', total: envelope, n: 3, nothing: null, gone: undefined },
+    }).map((f) => [f.path, f.value, f.entry.path])).toEqual([
+      ['fields.subject', 'Hi {name}', 'fields.*'],
+      ['fields.total', envelope, 'fields.*'],
+      ['fields.n', 3, 'fields.*'],
+      ['fields.nothing', null, 'fields.*'],
+    ]);
+    expect(resolveFlowNodeValueSlots('assignment', { assignments: { total: '{round(x)}' } }).map((f) => f.path))
+      .toEqual(['assignments.total']);
+  });
+
+  it('reaches ONLY `value` slots — a predicate or flow-template slot, an undeclared map, a legacy shape: nothing', () => {
+    expect(resolveFlowNodeValueSlots('screen', { fields: [{ visibleWhen: 'a == 1' }] })).toEqual([]);
+    expect(resolveFlowNodeValueSlots('loop', { collection: '{rows}' })).toEqual([]);
+    expect(resolveFlowNodeValueSlots('update_record', { filter: { id: '{x}' } })).toEqual([]);
+    expect(resolveFlowNodeValueSlots('assignment', { digest: '{x}' })).toEqual([]);
+    expect(resolveFlowNodeValueSlots('assignment', { assignments: [{ variable: 'd', value: '{x}' }] })).toEqual([]);
+    expect(resolveFlowNodeValueSlots('create_record', null)).toEqual([]);
+  });
+
+  it('agrees with `resolveFlowNodeExpressions` on the envelope subset — one walk, two views', () => {
+    const config = { fields: { a: '{x}', b: { dialect: 'cel', source: '1' }, c: { dialect: 'cel' }, d: 4 } };
+    const envelopes = resolveFlowNodeValueSlots('update_record', config).filter((f) => isExpressionEnvelopeShaped(f.value));
+    expect(envelopes).toEqual(resolveFlowNodeExpressions('update_record', config));
+  });
+});
+
 describe('isExpressionEnvelopeShaped — the recognizer a value slot discriminates on', () => {
   it('is a plain object with a string `dialect`, and nothing else', () => {
     expect(isExpressionEnvelopeShaped({ dialect: 'cel', source: '1' })).toBe(true);
@@ -139,13 +234,18 @@ describe('isExpressionEnvelopeShaped — the recognizer a value slot discriminat
 describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtures, restated)', () => {
   const byKey = (e: FlowNodeExpressionPath) => `${e.nodeType}.${e.path} (${e.role})`;
 
-  it('the four entries that existed before are still declared exactly as they were', () => {
+  it('the entries that existed before are still declared exactly as they were — #19938 added exactly two rows', () => {
+    // The census: five rows before #19938, seven after. The two new rows are
+    // the CRUD write map's `value` slots and sit at the end; every row above
+    // them is byte-identical to what it was.
     expect(FLOW_NODE_EXPRESSION_PATHS.map(byKey)).toEqual([
       'screen.fields[].visibleWhen (predicate)',
       'decision.conditions[].expression (predicate)',
       'loop.collection (flow-template)',
       'map.collection (flow-template)',
       'assignment.assignments.* (value)',
+      'create_record.fields.* (value)',
+      'update_record.fields.* (value)',
     ]);
   });
 

@@ -69,6 +69,11 @@ the contract on what a value may be. The form↔Zod ledger test still pins the
 descriptor's free-form `assignments` map as the openness it is; that pin and
 this contract describe the same surface from the two sides.
 
+The `create_record` / `update_record` `fields` map carries the same value
+contract since #19938 (`FlowValueSlotSchema`, the "value slots" section):
+a field value may be a CEL value envelope beside a `{token}` template or a
+literal, and the three maps are the expression ledger's `value`-role slots.
+
 Deliberately absent:
  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
    descriptor-schemaless class (config-schemas.test.ts). `wait` and
@@ -86,8 +91,8 @@ Deliberately absent:
 ## TypeScript Usage
 
 ```typescript
-import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
-import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, FlowValueSlotSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
+import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, FlowValueSlot, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
 
 // Validate data
 const result = AssignmentConfigSchema.parse(data);
@@ -108,7 +113,7 @@ const result = AssignmentConfigSchema.parse(data);
 
 ## AssignmentExpressionValue
 
-CEL value envelope `{ dialect: 'cel', source }` — evaluated by the expression engine to the value the variable takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable
+CEL value envelope `{ dialect: 'cel', source }` — evaluated by the expression engine to the value the slot takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable
 
 ### Properties
 
@@ -136,7 +141,7 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to insert into |
-| **fields** | `Record<string, any>` | optional | Field values to write on the new record |
+| **fields** | `Record<string, any>` | optional | Field values to write on the new record: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal |
 | **outputVariable** | `string` | optional | Flow variable bound to the created record |
 
 
@@ -163,6 +168,13 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | :--- | :--- | :--- | :--- |
 | **outcome** | `Enum<'completed' \| 'refused'>` | optional (default: `"completed"`) | How the run ends when it reaches this node. `completed` (the default) is the ordinary terminal. `refused` is a first-class refusal: the run records `refused` — distinct from `failed`, a refusal is a successful evaluation that says no — carries the rendered `message`, is never resumed, and a runner shows the message with Close only: no Submit, no completion toast. |
 | **message** | `string` | optional | Why the run was refused, as a `{token}` template interpolated at run time exactly like a screen `description` (`{record.name}` etc.), so the text names the record. Required when `outcome` is `refused`; refused when it is `completed` — a completion renders nothing, so the key would be a silent no-op. |
+
+
+---
+
+## FlowValueSlot
+
+A value: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expression engine (the CEL stdlib such as `joinNonEmpty` is reachable), or any other literal
 
 
 ---
@@ -272,7 +284,7 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to update |
 | **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to update |
-| **fields** | `Record<string, any>` | optional | Field values to write |
+| **fields** | `Record<string, any>` | optional | Field values to write: each key is a field name, each value a `{token}` template, a CEL value envelope, or a literal |
 | **multi** | `boolean` | optional | Declare bulk intent: update every row the filter matches (default false — a predicate update without it is refused by the engine) |
 
 
