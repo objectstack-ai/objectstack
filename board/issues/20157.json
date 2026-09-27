@@ -2,8 +2,8 @@
   "number": 20157,
   "kind": "issue",
   "title": "Seam: `IObjectQLEngine` gains an optional judge-only filter-admission method, run by the engine's own admission pipeline without executing (objectstack#19995 ruling C)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,22 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T03:01:40Z",
-  "updated_at": "2026-09-27T07:25:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-27T11:02:28Z",
+  "closed_at": "2026-09-27T10:57:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20157",
   "body": "Seam: spec `IObjectQLEngine` (one optional judge-only member) → runtime `packages/objectql` admission pipeline; consumers `service-analytics` `ObjectQLStrategy.withReadScope` / `resolveFkAttr` (#19995) and `plugin-security` policy admission (the second consumer card filed with this ruling)\n\nFiled by the director seat from the maintainer's ruling on #19995 (batch #225 item 3, letter C, 「同意」). Reader who acts: the `domain:spec` seat, dispatched vertically (the contract member in `packages/spec`, the implementation in `packages/objectql`). `area:*` is left for triage. Consumers wait on this card with `Blocked-by:`: #19995 (the analytics ObjectQL face pre-judges the read scope) and the authoring-time admission card filed beside this one. Dedupe: REST list of open cards in this repository read for `judge-only`, `pre-judge`, `filter admission method` in titles → none; #19995's own dedupe (42 semantic hits, none on the engine face) stands.\n\n## What the ruling settles\n\nThe engine becomes the single judge of 「can this filter run against this object」 for callers that must know before composing a policy scope into a query. Today the engine's admission doors (`text-operator-declared-type-door.ts`, `temporal-comparand-door.ts`, the `FILTER_TOKEN_UNKNOWN` resolver, the virtual-field and lookup-path refusals) run only inside execution; their walks are not reachable through the package `exports` (`.` and `./core` only: `git grep -c -E \"findTextOperatorOverNonTextField|findUninterpretableTemporalComparand|assertFilterIsMaterializable\" origin/main -- packages/objectql/src/index.ts packages/objectql/src/core.ts` → 0, control `export .*ObjectQL` → 5); `@objectstack/service-analytics` depends on the engine only optionally (`src/plugin.ts:278` `optionalDependencies`) and only at dev time (`package.json`).\n\n## Work\n\n1. `packages/spec/src/contracts/objectql-engine.ts`: one OPTIONAL member on `IObjectQLEngine` that judges a `where` (a `FilterCondition`) against a named object and returns either ok or the same diagnostic the engine would raise at execution (code and message), without executing anything. Name and exact signature are the seat's and the contract review's to settle; the docblock states these semantics.\n2. `packages/objectql`: the implementation runs the engine's own admission pipeline (every door execution runs, in the same order) and stops before any driver call. ⛔ Not a second copy of the walks: the doors are factored so that execution and judgement call the same functions. Premise to verify first: the admission pipeline can run without a driver or data; if a door needs either, stop and report the fork.\n3. Pins: for each class #19995 lists (a text operator over a non-text field, an uninterpretable temporal comparand, an unknown filter token, a filter on a virtual field, a dotted path through a lookup) the judge returns the door's diagnostic and execution raises the same one; a runnable filter returns ok; nothing is executed (a driver spy sees no call).\n4. Changeset `minor` for `@objectstack/spec` (a new optional contract member) and `@objectstack/objectql`. `Clause-②: yes` — a contract review before enqueue.\n\nGoverning text: the #5367 ruling as recorded in `packages/services/service-analytics/src/read-scope-sql.ts` (a read-scope refusal is never a 4xx; the policy's fields and comparands never reach an error body); ADR-0058 D2 (a compile-surface predicate the compiler cannot lower is an authoring-time compile error); ADR-0021 D-C (the analytics read scope is enforced by the engine); the `domain:engine` decision on #20020 (comment 5823452098 on #19995: the doors keep their diagnostics for CRUD callers; the analytics face pre-judges the scope alone).\n\nMainstream shape this follows: PostgreSQL validates a policy at `CREATE POLICY` and evaluates security quals before non-leakproof user quals; SQL Server binds security predicates at policy creation; Oracle VPD answers a broken predicate with a generic error and writes the detail to the trace; Hasura validates row permissions when metadata is applied. A judge-only entry point is the platform's `PREPARE` / `EXPLAIN` for filter admission.\n\nDedupe words: `engine judge-only filter admission method` · `IObjectQLEngine optional member pre-judge where` · `read scope pre-judge withReadScope 19995`\n\n<sub>Director seat · `session_01AsCNgFBs8HCjwhyHQsFbx3` · filed from the ruling on #19995</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

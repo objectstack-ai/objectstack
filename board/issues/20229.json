@@ -1,0 +1,33 @@
+{
+  "number": 20229,
+  "kind": "pull_request",
+  "title": "fix(lint): refuse a present non-array `packages` at all five stack.packages readers",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T12:32:54Z",
+  "updated_at": "2026-09-27T12:33:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20229",
+  "body": "Fixes #20206\n\nClause-②: no (narrowing) — `packages/lint` is published, and `os validate` / `os lint` / `os build` now refuse a shape they used to accept silently. The spec contract itself does not move (`packages` was already declared array-only on `ObjectStackDefinitionSchema`); only these runtime readers now honour it. See `.changeset/20206-lint-packages-non-array-refused.md` for the same line and the ADR-0087 disposition (`not-required (no-migration-prescription)`).\n\n## What changed\n\nRuling A on #15293 (comment 5634034754): a present `packages` that is not an array (`{}`, `0`, `'x'`, a keyed object) is malformed, not absent, and every reader must refuse it. Four `packages/lint` readers fell through `recordsOf(stack.packages)` to `[]` instead:\n\n- `validate-object-references.ts:165` (`artifactProvidedObjectNames`)\n- `validate-translation-references.ts:753, 848, 921` (`contributedNavItemsByApp`, `objectExtensionsByTarget`, `artifactProvidedRecords`)\n\nThey now share one small reader, `packagesOf(stack)` (`object-graph.ts`), which:\n\n- returns `[]` for an absent `packages` (`undefined`/`null` — `null` stays #19926's surface, not this one);\n- reads a well-formed array exactly as `recordsOf` did (junk entries dropped, unchanged);\n- throws `INVALID_ARTIFACT_PACKAGES` (ADR-0112, `status: 422`) for anything else present.\n\n`recordsOf` itself is untouched: it stays the shared map-or-array reader `objects`/`sections`/`tabs` need, where a keyed map is legitimate. `packages` never has a map form, so this is a second, narrower reader rather than a branch on the first one.\n\n## A fifth site, found on re-reading `origin/main`\n\nThe card's site census was taken at `origin/main` `1c8b320`. This worktree forked from a later `origin/main` that already carries #20208 (merged), which added a fifth copy of the identical `recordsOf(stack.packages)` pattern: `validate-mapping-target-fields.ts:95` (`extensionFieldsByTarget`). Fixed here under the in-place-fix exemption — same defect class as this card, a mechanical fix with the form already pinned by the other four, the file held by no other claim (#20208 is merged), same gate family, no new verification surface. This report amends the claim's declared file surface to include `validate-mapping-target-fields.ts` and its test.\n\n## Pins\n\n`packagesOf` is pinned exhaustively in `object-graph.test.ts`: an array is the control (junk-dropping behaviour unchanged), an absent or `null` `packages` stays silent, and `{}` / `0` / `'x'` / a keyed object are each refused with `code: 'INVALID_ARTIFACT_PACKAGES'`, `status: 422`. Each of the three public functions these readers sit behind (`validateObjectReferences`, `validateTranslationReferences`, `validateMappingTargetFields`) gets its own throw-pin proving the wiring reaches the shared reader, since all three now call the identical function.\n\nOne existing pin asserted the OLD fall-through semantics and is flipped: `validate-object-references.test.ts`'s `'ignores a packages value that is not a list of entries'` (`null`, `42`, `'core'` all silently ignored) is now two tests — `null` stays a silence control, `42`/`'core'` now assert the refusal (code + status).\n\n## Census (H2)\n\nGrepped the whole tree for a non-array `packages` fixture reaching any of the five readers: none besides the one flipped test above. `packages/spec/src/stack-artifact-packages.test.ts` tests the spec schema's own refusal at a different layer and is untouched.\n\n## Gates\n\nLocal, targeted (container under heavy multi-agent contention — several runs queued 10-20 min on the shared `os-verify-lock`; retried with a stable slot rather than enumerating the whole farm, per contract):\n\n- `pnpm --filter '@objectstack/lint^...' build` (dependency closure incl. `@objectstack/spec` DTS + `@objectstack/formula`) — green.\n- `pnpm --filter @objectstack/lint typecheck` (`tsc --noEmit` + `check:test-typecheck`) — green, no new debt.\n- `pnpm --filter @objectstack/lint exec vitest run --maxWorkers=2 src/object-graph.test.ts src/validate-object-references.test.ts src/validate-translation-references.test.ts src/validate-mapping-target-fields.test.ts` — **4 files / 232 tests passed**.\n- `node scripts/check-adr-0087-registration.mjs --base origin/main` — green; `[clause-②-narrowing] not-required (no-migration-prescription)` correctly read from the changeset. Also re-verified with a synthetic `pull_request` event carrying this PR's own `Clause-②: no (narrowing)` line: `check-changeset-no-major.mjs`'s LEVEL AXIS reads clean against `@objectstack/lint: minor`.\n- `node scripts/check-issue-citations.mjs`, `pnpm check:nul-bytes`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:doc-authoring`, `check:type-check-coverage`, `check:published-files`, `check:watch-hint-literal` — all green.\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran (the commands above)` reconciliation: 9 of 60 derived families run locally (the ones above); the other 51 (mostly repo-wide `--self-test` invocations and generic census/changeset-stock gates the derivation matches broadly off touching `.changeset/*.md`) are NOT MEASURED locally and left to CI, per the \"don't enumerate the whole farm locally\" instruction.\n\n## Acceptance notes\n\nNone. This PR's scope is exactly the five `recordsOf(stack.packages)` readers described above — the fifth (`validate-mapping-target-fields.ts`) is documented in its own section rather than filed as a separate card, under the in-place-fix exemption.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QcAS3qiYYZNezaxZxaUdMV)_\n"
+}

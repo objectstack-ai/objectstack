@@ -2,9 +2,9 @@
   "number": 20181,
   "kind": "pull_request",
   "title": "fix(spec): D3 gets one semantic entry per retirement family, even when D2 is lossless (#17152)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
     "size/s",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T06:04:57Z",
-  "updated_at": "2026-09-27T08:09:18Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 3,
+  "updated_at": "2026-09-27T09:31:39Z",
+  "closed_at": "2026-09-27T09:31:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-27T09:31:38Z",
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20181",
   "body": "Fixes #17152\n\nClause-②: no\n\n## What\n\nRewrites the ADR-0087 D2/D3 house-rule prose in `packages/spec/src/migrations/types.ts`'s module docblock — the two spots that defined a \"semantic\" (D3) entry as existing only for \"breaks with no lossless mapping\" — to state ruling B instead: **one D3 entry per retirement family, even when a lossless D2 conversion also exists for it; D2 carries the mechanical data repair only.**\n\nPer the ruling (comment `5615360777`, restated `5634031140` on #17152, authority: maintainer ruling on #15954 comment `5559778263`).\n\n## Where the text actually was\n\nThe claim's premise measurement (H1) said the header at `packages/spec/src/conversions/registry.ts:9` no longer carries the conflicting rule — confirmed: that file's module docblock (lines 3–16) is now about conversion expiry, unrelated. Searching the corpus named in the dispatch order surfaced the same house rule in **three** places, not one:\n\n1. **`packages/spec/src/migrations/types.ts`** (hand-written, in scope) — module docblock, two spots (the intro clause and the \"semantic changes\" bullet under \"Two feeders compose each major's step\"). **Fixed here**, both spots, since they're two halves of one explanatory paragraph and fixing only one would leave the docblock self-contradictory.\n2. **`packages/spec/src/migrations/registry.ts:9`** — the *exact* sentence quoted in the issue (\"the semantic list is the non-lossless residue D2 could not express\") lives here, verbatim, and always has (traced via `git log -S` to the original ADR-0087 commit `16b4bf69d3`). **Fixed here in round 2**, after the seat's REWORK verdict (comment `5853260202` on #17152). `scripts/build-migration-registry.ts` splices only the marked regions, and the module docblock (lines 1–14) sits outside every region. That makes it hand-written prose, and the file says so at `:46`. `gen:migration-registry` round-trips it byte for byte: the sha256 of `registry.ts` is identical before and after a regeneration.\n3. **`docs/adr/0087-metadata-protocol-upgrade-contract.md`** lines 152–153 and 175–176 — the ADR itself still states the pre-ruling rule: *\"Semantic changes are excluded. A change whose old shape has no lossless mapping cannot be converted; it goes to D3.\"* This is a governed path (`docs/adr/**`); the claim does not cover it. **Not touched**, reported per the dispatch order's governed-path instruction.\n\nBoth (2) and (3) are recorded in `out_of_scope_findings` / the dev report for the PM/spec-lane triage to pick up as follow-on work; neither blocks landing this PR, since the ruling's intent (removing the conflicting *hand-written, non-generated* house-rule text this claim covers) is fully executed.\n\n## Why\n\nMaintainer ruling on #15954 (`5559778263`), applied to this card by the director seat's class-one self-adjudication (`5615360777`, reaffirmed `5634031140`): every retirement family gets one D3 semantic entry regardless of whether a lossless D2 conversion also exists for it, so the upgrade-notes generation pipeline (which projects off the `semantic` list) never silently drops a retirement whose D2 fix happened to be lossless.\n\n## Scope\n\nNo entry added or changed, no gate added, nothing inside a generated region touched, no runtime behavior changed — comment-only. **Changeset, not `skip-changeset`** (round 2, measured by building `@objectstack/spec` and grepping `dist/**` with the `MigrationStep` / `MIGRATION_SUPPORT_FLOOR` positive controls). The `types.ts` sentence ships verbatim in `dist/index.d.ts` and `dist/index.d.mts`; the `registry.ts` sentence ships nowhere. So `skip-changeset` was removed, and `.changeset/17152-d3-per-family-house-rule.md` (`@objectstack/spec` patch) covers both edits.\n\n## Tests\n\n- `pnpm --filter @objectstack/spec build` — PASS (see dev report `tests`).\n- `pnpm --filter @objectstack/spec test` — see dev report `tests`.\n- `pnpm --filter @objectstack/spec typecheck` — see dev report `tests`.\n- `node scripts/check-comment-mask-adoption.mjs`, `check-comment-mask-corpus.mjs`, `check-spec-docblock-symbol-anchors.mjs` — all PASS (comment/docblock-shape gates directly relevant to this diff).\n- Full derived gate list: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`, reconciled with `--ran`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QcAS3qiYYZNezaxZxaUdMV)_\n\n<sub>Two sentences corrected by the `domain:spec` seat 2 (`session_01QcAS3qiYYZNezaxZxaUdMV`) after round 2, as the dev's report named them: the `registry.ts:9` item and the changeset sentence.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

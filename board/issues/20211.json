@@ -1,0 +1,38 @@
+{
+  "number": 20211,
+  "kind": "pull_request",
+  "title": "fix(spec): chart drillDown mode guidance names object-data-table, not TABLE/PIVOT/METRIC",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T09:18:56Z",
+  "updated_at": "2026-09-27T10:26:10Z",
+  "closed_at": "2026-09-27T10:26:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-27T10:26:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20211",
+  "body": "Fixes #20152\nClause-②: no\n\n## What changed\n\n`ChartDrillDownSchema`'s `guidance` entry for `mode` (`packages/spec/src/ui/chart.zod.ts`) told an author who wrote `drillDown.mode` on a chart that the key belonged on a \"TABLE / PIVOT / METRIC\" widget. Two of those three blocks now refuse the same key on arrival:\n\n- `object-metric` refuses `drillDown.mode` at its TypeScript door since objectui#9002 (PR objectui#10681, merged) — the ruling this card follows (objectui#9002 comment `5643445104`, B).\n- `object-pivot` refuses it at its TypeScript door since objectui#10685 (PR objectui#10710, merged).\n\nMeasured on objectui `origin/main` (`0896838`): neither `object-metric`'s nor `object-pivot`'s renderer ever read `mode`; only `object-data-table` does (`ObjectDataTableSchema.drillDown` / `plugin-dashboard/src/ObjectDataTable.tsx`). So the old sentence sent an author straight into a second refusal on two of the three blocks it named, and a stored config that lands on `object-pivot` (no zod mirror there) is silently ignored with no diagnostic.\n\nThe guidance now names the one block that actually reads `mode`:\n\n> `mode` (`'filter'` | `'record'`) is objectui's `object-data-table` drill key, not a chart one: …\n\nThe reasoning clause and \"Delete the key\" are unchanged. Its pin at `packages/spec/src/ui/chart.test.ts:707` and the mirror pin at `packages/lint/src/validate-react-page-props.test.ts:1033` moved with the wording.\n\nOut of scope on this card's own evidence (triage note 3, comment `5851546523`): the neighbouring `report` guidance entry (\"a METRIC / PIVOT widget capability\") is left untouched — its blocks were not remeasured here.\n\n## Premise check (H1)\n\nRe-verified on objectui `origin/main` (`0896838`, PR objectui#10710 merged): `ObjectMetricDrillDownConfig` and the new `ObjectPivotDrillDownConfig` both carry `mode?: never` tombstones; `object-data-table` is the sole reader (`isDrillEnabled` guards it, `'record'` opens the row, `'filter'` turns the drill off). Premise holds in both the pre- and post-#10710 state, so `premise_still_valid: true`.\n\n## Ships, so this carries a changeset\n\n`@objectstack/spec`'s published `files[]` includes both `dist` and `src/**/*.zod.ts`; `chart.zod.ts` ships as source verbatim, and the sentence is also a runtime string in `dist/ui/index.js` / `dist/ui/index.mjs` (measured after a rebuild: 1 occurrence of the new wording in each, 0 of the old \"TABLE / PIVOT / METRIC\" spelling). `.changeset/20152-chart-drilldown-mode-guidance.md` — `patch`, no accept/reject behaviour changes.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec build` — clean; new wording present in `dist/ui/index.{js,mjs}`, old wording absent.\n- `pnpm --filter @objectstack/spec check:generated` — all 15 generated artifacts up to date (no regeneration needed for a guidance-text-only change).\n- `pnpm --filter @objectstack/spec test` — 541 test files / 15896 tests passed.\n- `pnpm --filter @objectstack/spec typecheck` — clean.\n- `pnpm --filter @objectstack/lint test` — 108 test files / 4169 tests passed, after building lint's workspace dependency closure (`@objectstack/formula`, `@objectstack/spec`, `@objectstack/sdui-parser` — none were built in the fresh worktree).\n- `pnpm --filter @objectstack/lint typecheck` — clean.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands`, re-derived after adding the changeset → 83 derived families; ran all 83 and reconciled with `--ran`: **78 run (all green), 5 NOT MEASURED, 0 UNRUN**. The 5 NOT MEASURED (`check:doc-formula-expressions`, `check:docs-transcript-drift`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:type-check-debt`) each exit 3 `PREREQUISITE NOT MET` — they read a whole-tree `pnpm build` this local verification's scope does not owe (CI's `Build Core` job covers it).\n- Six silent-verdict rosters whose scan directory this diff sits in were read directly rather than trusted on silence: `check-changeset-fixed`, `check:meta-url-spelling`, `check:spec-changes`, `check:authz-resolver`, `check:error-code-casing`, `check:filter-alias-parity` — all green.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QcAS3qiYYZNezaxZxaUdMV)_\n"
+}

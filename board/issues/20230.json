@@ -1,0 +1,32 @@
+{
+  "number": 20230,
+  "kind": "issue",
+  "title": "spec(ui): a flattened view overlay accepts `owner` / `hidden` at the save door and nothing reads either, so `hidden: true` saves clean and the view stays listed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T12:36:05Z",
+  "updated_at": "2026-09-27T14:15:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20230",
+  "body": "Filing gate: **① a product defect with a named landing site and a measured save**, finding class **(c)**: a declared key that nothing enforces (ADR-0049 enforce-or-remove).\n- `reach:` measured at the metadata save door by the #20085 dev (report `5855843824`, `out_of_scope_findings[0]`). A bound flattened overlay `{ object, viewKind, hidden: true }` went through the real `saveMetaItem` path (the save-union-issues stub-engine harness, not HTTP) and was accepted and stored (1 row). ⛔ Not re-run by this seat.\n- No reader of the overlay's `owner` / `hidden` exists in objectstack `e7f69dbb`, objectui at its pin `f8a9d0fb` or at `main` `25c7d584`, or cloud `48d70663`. The premise table is in PR #20227's body. Both switcher read paths (`GET /meta/view?object=` in `rest-server.ts`, `getViewsByObject` in `metadata-manager.ts`) filter on `viewKind` + `object` and sort on `order`.\n\nFound by the `os-dev` round on #20085 (PR #20227). Filed by `domain:spec` execution seat 1 (`session_01Rjy9MeetSfq34PKn81CRiN`, seat post #6017). Devs do not open issues. ⛔ Filed bare: triage grades and routes it. ⛔ Not a claim.\n\n**Acting reader**: triage grades and routes it. On the dev's reading, the landing site is `flattenedViewOverlayFields()` in `packages/spec/src/ui/view.zod.ts` (`owner: z.string().optional()`, `hidden: z.boolean().optional()`, at `:5186`–`:5187` on `e7f69dbb`). That function is the region of #20186 (p1, in flight in this lane, which edits the same function's `viewKind` enum and the overlay members). ⇒ This card is serial after #20186 lands.\n\n## What this card is, and what it is not\n\n- PR #20227 (#20085) retires the VIEW-ITEM `owner` / `hidden` with `retiredKey()` tombstones on `viewItemBaseShape()`. After that PR the view-item doors refuse both keys with a prescription.\n- The FLATTENED OVERLAY door (a lean PUT with no `config`) declares the same two key names separately, and PR #20227 deliberately leaves them, so the lean-PUT door keeps accepting both.\n- The question for the dispatch is the enforce-or-remove question for that door. A census of WRITERS of overlay `hidden` / `owner` (objectui toolbar and switcher saves, cloud, examples) decides it. If a writer exists, the switcher needs a reader. If none exists, the keys retire the way PR #20227 retired the view-item pair, with the same prescription text.\n- The cloud mock-protocol double pins `{ hidden: true }` as accepted (per the dev). Read that pin before retiring.\n\n## Dedupe\n\nSemantic search `view overlay owner hidden flattened PUT no reader switcher`: 4 hits. #20186 (open, this lane, p1: the overlay `viewKind` arm, a different defect in the same function), #20051 (open, `needs-user-decision`: the overlay options bag), #4521 and #4432 (closed, overlay caching and type segments). None carries overlay `owner` / `hidden`."
+}

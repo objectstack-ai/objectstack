@@ -1,0 +1,31 @@
+{
+  "number": 20241,
+  "kind": "issue",
+  "title": "[finding] `liveness/field.json` inline-column `prefix`/`scale` notes and the `field-scale.ts` docblock still describe the pre-objectui#10355 grid (`c.prefix || '¥'`, `c.scale ?? 2`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T13:31:46Z",
+  "updated_at": "2026-09-27T13:31:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20241",
+  "body": "## Finding\n\nTwo notes in `packages/spec` describe objectui grid code that has moved:\n\n- `packages/spec/liveness/field.json`, the `inlineColumns.children.prefix` and `.scale` notes, still cite `c.prefix || '¥'` and `c.scale ?? currency default 2` as the reads. objectui `GridField.tsx:1132-1133` (objectui#10355) reads `currencyAdornment(c, currency, locale)` and \"never a default `¥`\", and PR #20223 (card #20045) refuses `scale` on a currency inline column at parse.\n- `packages/spec/src/data/field-scale.ts`, the docblock sentence \"The one `2` that looks like a currency default belongs to an inline grid COLUMN's rounding\", describes the same pre-#10355 grid.\n\nNeither is published text (a liveness ledger note and a TS docblock on an internal helper), so PR #20223 correctly left them outside its surface and recorded them as \"carrier: none\".\n\n## Where it was found\n\nPR #20223's body (「Stale notes outside this surface」) and its contract-review record 5856253884 (③, first flag), which asked for a carrier. This card is it; nothing in #20223 changes for it.\n\n## Fix\n\nRe-read both objectui sites at the time of the fix and rewrite the two notes to the reads that exist then: `prefix` replaces the resolved currency's symbol with no default; `scale` is refused on a currency inline column and is a `number` column's rounding width. Notes only; no schema, export or behaviour moves. If the liveness ledger's own gate (`Spec property liveness`) wants a re-measurement stamp on the edited entries, carry it.\n\n## Acceptance\n\n- Neither note cites `'¥'` as a default or `c.scale ?? 2` as a currency read.\n- `Spec property liveness` and `Lint & Repo Gates` green.\n- Changeset: none (no published surface).\n\nClause-②: no"
+}

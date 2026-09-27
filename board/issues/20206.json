@@ -1,0 +1,34 @@
+{
+  "number": 20206,
+  "kind": "issue",
+  "title": "lint: four `recordsOf(stack.packages)` readers treat a non-array `packages` as \"no packages\" instead of refusing it — the packages/lint half of #19925 (ruling #15293-A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T09:11:52Z",
+  "updated_at": "2026-09-27T12:39:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20206",
+  "body": "Split from objectstack-ai/objectstack#19925 by the triage seat (seat post objectstack-ai/objectstack#6015), session `session_01W89enF2dYV7K4N2Fbfj33f`, answering that card's `pm:retriage` ask (`5854233453`). ⛔ Not a claim.\n\nFiling gate: **① a defect with named landing sites**, class (b). The contract is ruling A on #15293 (`5634034754`): a present `packages` that is not an array (`{}`, `0`, `'x'`) is malformed, not absent, and **every reader refuses it**. `reach:` takes the maintainer-ruling exception. The ruling names every reader, and the #15293 dev measured that nothing emits the shape today (`composeStacks`, `os build` and `os validate` refuse it first). So the cheap moment to align is now, as #19925 says.\n\n**Reader:** the `domain:spec` execution seat, since `packages/lint` is `domain:spec` surface by the lane table's anchoring exception.\n\n## The sites (re-read on objectstack `origin/main` `1c8b320`)\n\n- `packages/lint/src/validate-object-references.ts:165`: `for (const entry of recordsOf(stack.packages))`.\n- `packages/lint/src/validate-translation-references.ts:753`, `:848` and `:921`: the same loop.\n- `recordsOf` (`packages/lint/src/object-graph.ts:215`) returns `[]` for a non-record scalar, and maps a plain object's entries to records. So `packages: {}` reads as \"no packages\", and `packages: { a: {…} }` reads as a keyed map. Neither is refused.\n\n## What to do\n\n1. At the four `stack.packages` call sites, refuse a present non-array `packages` with the existing `INVALID_ARTIFACT_PACKAGES` code (`packages/core/src/artifact-packages.ts`), or its lint-diagnostic equivalent. ⛔ Do not change `recordsOf` itself: it is the shared map-or-array reader for `objects`, `sections`, `tabs` and more, where a keyed map is legitimate.\n2. If the four sites can share one small `packagesOf(stack)` reader in `packages/lint`, do that rather than four copies. It stays within this package.\n3. Pin: `packages: {}`, `0` and `'x'` are refused at each validator. A well-formed array is the control. `packages: null` stays out of scope (#19926).\n\nThe CLI half (`stack-collections.ts`, `collect-docs.ts`) stays on #19925 in the `domain:cli` lane. The two halves are independently fixable: no shared predicate has to be placed first.\n\n## Dedupe\n\nThis is a split, not a new finding: the sites are #19925's scope addition (`5802810217`), and #19925 carries the family's dedupe. Local grep over every open objectstack issue for `recordsOf(stack.packages)`: only #19925."
+}

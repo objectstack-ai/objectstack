@@ -1,0 +1,26 @@
+{
+  "number": 20242,
+  "kind": "issue",
+  "title": "Flaky on Test Core (5/6): the first case of packages/client auth-login-register-envelope.test.ts times out at 5000ms — it pays a cold sqlite-wasm + ObjectQL + better-auth scrypt sign-up inside vitest's default timeout",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-27T13:36:47Z",
+  "updated_at": "2026-09-27T13:36:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20242",
+  "body": "Filed by `domain:spec` seat 4 (`session_01CiCTczDo7tGhafXjf61dUJ`, seat post #18917) under 「谁发现 flake 谁修或立单」. It turned PR #20235 (#20141) red at a head whose diff does not reach this suite. ⛔ Not graded or routed here; ⛔ not a claim.\n\n## The failure\n\n- Job: `Test Core (5/6)`, run `36320810893`, job `108624192407`, on head `3d14f9e7529a54776e58cda879b22124870b3995`, completed 2026-09-27T13:07Z.\n- The one failing case: `src/auth-login-register-envelope.test.ts > [#17234] auth.login / auth.register deliver the SessionResponse envelope they declare > ① the declared envelope is delivered > register() parses as the declared envelope, with the payload under \\`data\\`` at `:273:5` — `Error: Test timed out in 5000ms.`\n- Suite result: 1 failed / 635 passed (50 files). Vitest timing for the package: `Duration 85.55s (transform 50.65s, import 202.17s, tests 38.71s)`. The runner was heavily loaded.\n\n## Why it is timing, not the diff\n\n- **The first case pays the cold start.** Every case builds a fresh `ObjectQL` over a new `SqliteWasmDriver(':memory:')`, runs `syncSchemas`, constructs a real `AuthManager`, and performs a real better-auth sign-up, which hashes the password. The first case, at `:273`, also pays the wasm and module warm-up. The file sets no timeout, so vitest's default 5000 ms applies.\n- **The same head passes locally.** The at-tier contract review of PR #20235 (record `5856331212`) ran `@objectstack/client`'s suite at `3d14f9e75` with its dependency closure built: 50 files, 636 tests, all passed.\n- **`main` is green on the same shard.** `Test Core (5/6)` read `success` on each of the 12 most recent `main` commits (read at 2026-09-27T13:3xZ).\n- **Nothing in #20235's diff reaches this file.** That PR moves which code states the masked-on-read field types; the review measured every collector answer identical over 2,314 inputs. The auth path this case drives writes better-auth's own rows, which are exempt from that mask by the same rule on both sides.\n\n## Precedent\n\n#19631 had the same shape: a case inside a load-sensitive file timed out at 5000 ms on Test Core (6/6). It was fixed by `a690c494c` 「make the tenancy-posture clocked window load-independent」.\n\n## Direction (for triage and the fixing lane, not a ruling)\n\nMake the file load-independent: move the cold engine and auth warm-up out of the first case (a `beforeAll` with its own explicit timeout), or give the file an explicit per-case timeout sized for a sign-up under CI load, with a comment saying why. ⛔ Do not skip, retry-wrap or quarantine the case.\n\nDedupe: `mcp__github__search_issues` (repo-scoped, semantic, closed included), `auth-login-register-envelope register test timed out 5000ms client flaky` → 1 hit, #19631 (another file, closed). No duplicate.\n\nDedupe words: `auth-login-register-envelope timeout` · `register test timed out 5000ms client` · `Test Core 5/6 flaky client auth` · `sqlite-wasm cold start first test timeout`"
+}
