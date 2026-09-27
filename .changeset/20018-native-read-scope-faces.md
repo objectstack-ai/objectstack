@@ -40,8 +40,8 @@ each is refused by a standing ruling the shared faces carry. Measured on SQLite:
 analytics face already refused all of them. No in-repo read-scope producer emits
 them for a policy in this repository. An RLS `using` predicate can still be
 written so that it lowers into the null shapes (a literal `null` inside an `in`
-list, or an ordering comparison against `null`), and such a policy now gets the
-withheld 500 on every analytics face.
+list, or an ordering comparison against `null`), but the RLS compiler drops such a
+policy (#20212), so the analytics faces receive the deny sentinel and answer zero rows.
 
 **Fix.** State absence with the null predicate. "One of these values, or no
 value" is `{ "$or": [{ "f": { "$in": ["a"] } }, { "f": { "$null": true } }] }`,
