@@ -335,3 +335,9 @@ export function defineMapping(config: z.input<typeof MappingSchema>): MappingPar
 export type ImportFieldMapping = z.input<typeof ImportFieldMappingSchema>;
 /** Post-parse shape of {@link ImportFieldMapping} — defaults applied, transforms run (ADR-0122). */
 export type ImportFieldMappingParsed = z.infer<typeof ImportFieldMappingSchema>;
+
+// [#20150] The ONE verdict on what `target` above may name — shared by the
+// import door (`@objectstack/rest`) and the author-time check
+// (`@objectstack/lint`), which both depend on this package and not on each
+// other. See the module for what a target may name and where it has no opinion.
+export * from './import-mapping-target';

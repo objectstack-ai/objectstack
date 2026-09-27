@@ -110,6 +110,7 @@ import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateDatasetReferences } from './validate-dataset-references.js';
+import { validateMappingTargetFields } from './validate-mapping-target-fields.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateNavTargetRefs } from './validate-nav-target-refs.js';
 import { validateNavObjectServability } from './validate-nav-object-servability.js';
@@ -420,6 +421,19 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // manufacturing a refusal. Crossed TOGETHER with its base-object sibling
   // `validateObjectReferences` on #7220's reading, never one without the other.
   { name: 'validateDatasetReferences', runtimeTypes: ['flow', 'dataset'], run: validateDatasetReferences },
+  // [#20150] An import mapping's `fieldMapping[].target`, resolved against its
+  // `targetObject`'s fields — the charter's question on the one field-naming
+  // surface a mapping carries. The verdict is the spec's
+  // `unknownImportMappingTargets`, the same function the import door refuses
+  // with, so this member and that door cannot disagree about a name. It gates:
+  // the door refuses such a mapping before any row, so it imports nothing.
+  //
+  // NO `runtimeTypes`, i.e. the frozen `flow` default: it reads
+  // `stack.mappings`, which no per-write snapshot carries, so on a flow
+  // snapshot it finds no mapping and contributes nothing. Judging a `mapping`
+  // write at the runtime publish gate would be its own crossing, with its own
+  // measurement; at runtime the import door already refuses the mapping.
+  { name: 'validateMappingTargetFields', run: validateMappingTargetFields },
   { name: 'validateNavAccess', run: validateNavAccess },
   // Nav targets that are NOT object names — page/report/dashboard. Restores the
   // coverage `defineStack`'s own cross-reference block switches off whenever the

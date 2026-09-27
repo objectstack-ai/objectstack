@@ -594,6 +594,15 @@ export {
 } from './validate-dataset-references.js';
 export type { DatasetRefFinding, DatasetRefSeverity } from './validate-dataset-references.js';
 
+// [#20150] An import mapping's `fieldMapping[].target` must name a field of its
+// `targetObject` — judged by the spec's `unknownImportMappingTargets`, the same
+// verdict the import door refuses with.
+export {
+  validateMappingTargetFields,
+  MAPPING_TARGET_FIELD_UNKNOWN,
+} from './validate-mapping-target-fields.js';
+export type { MappingTargetFieldFinding } from './validate-mapping-target-fields.js';
+
 // The two reusable seams the rule above is written on, exported because the
 // queued siblings (#14148 widget filter keys + sortBy, #14107 list-view field
 // positions) must reuse ONE mechanism rather than growing a second hop-walker
