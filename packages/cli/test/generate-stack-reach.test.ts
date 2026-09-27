@@ -54,7 +54,7 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold starts, eight of them, sequential. */
+/** oclif + tsx cold starts, nine of them, sequential. */
 const RUN_TIMEOUT_MS = 300_000;
 
 const PROJECT = 'my-app';
@@ -170,6 +170,10 @@ beforeAll(async () => {
   runs.objectControl = await runCli(['g', 'object', 'approve'], dirs.wired);
   runs.actionControl = await runCli(['g', 'action', 'approve'], dirs.wired);
 
+  // `port` is inside the `export {};` of the empty barrel `os init` writes:
+  // the substring test this replaced read it as already exported.
+  runs.dashboardPort = await runCli(['g', 'dashboard', 'port'], dirs.wired);
+
   runs.flowTriggersOnly = await runCli(['g', 'flow', 'order_line'], dirs.triggersOnly);
   runs.viewPreFix = await runCli(['g', 'view', 'order_line'], dirs.preFix);
   runs.viewBare = await runCli(['g', 'view', 'order_line'], dirs.bare);
@@ -205,6 +209,15 @@ describe('[#20215] refused: the write would stop a loading config from loading',
     expect(runs.actionControl.stdout).toContain("'approve'");
     // Reached: no wiring lines to add.
     expect(runs.actionControl.stdout).not.toContain('import * as actions');
+  });
+});
+
+describe('[#20215] the barrel step asks which names the barrel exports, not what its text contains', () => {
+  it('`os g dashboard port` into the empty `export {};` barrel exports `port`, and reaches', () => {
+    expect(runs.dashboardPort.code, out(runs.dashboardPort)).toBe(0);
+    expect(readFileSync(join(dirs.wired, 'src', 'dashboards', 'index.ts'), 'utf-8'))
+      .toContain("export { default as port } from './port.dashboard';");
+    expect(runs.dashboardPort.stdout).not.toContain('import * as dashboards');
   });
 });
 
