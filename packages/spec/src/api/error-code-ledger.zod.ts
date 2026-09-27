@@ -1363,9 +1363,8 @@ export const ERROR_CODE_LEDGER = {
     // OTHER than `null`, with the SAME registered code `@objectstack/core`'s
     // `resolveArtifactPackageOrder` already raises for the identical defect
     // on an assembled artifact (ruling A on #15293 `5634034754`). For `null`
-    // (ruling A on #19926 `5805260775`), core still reads it as absent on
-    // `main`; core raises this code for `null` too only once #19926 (PR
-    // #20228) lands — deliberately reused either way, never minted, so an
+    // (ruling A on #19926 `5805260775`), core raises this code for `null`
+    // too (#19926) — deliberately reused either way, never minted, so an
     // author sees one code regardless of which reader catches the malformed
     // shape first. `door: 'none'`, the #16449 reading: `packages/lint`'s
     // rules are pure `(stack) => Finding[]` functions, reachable only from

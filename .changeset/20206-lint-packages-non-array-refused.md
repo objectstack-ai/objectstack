@@ -2,7 +2,7 @@
 "@objectstack/lint": minor
 ---
 
-`packages/lint`'s five `stack.packages` readers (four named by #20206, plus one added by #20208 after that card's site census) now refuse a PRESENT non-array `packages` — `{}`, `0`, `'x'`, a keyed object, and (as of this round) `null` too — instead of silently reading it as "no packages" (#20206, ruling A on #15293 comment 5634034754; the `null` leg is ruling A on #19926, comment 5805260775: `null` is malformed, everywhere). For every shape other than `null`, this is the same way `@objectstack/core`'s `resolveArtifactPackageOrder` already refuses it, with the same registered code; for `null`, `resolveArtifactPackageOrder` still reads it as absent on `main`, and the two readers align only once #19926 (PR #20228) lands.
+`packages/lint`'s five `stack.packages` readers (four named by #20206, plus one added by #20208 after that card's site census) now refuse a PRESENT non-array `packages` — `{}`, `0`, `'x'`, a keyed object, and (as of this round) `null` too — instead of silently reading it as "no packages" (#20206, ruling A on #15293 comment 5634034754; the `null` leg is ruling A on #19926, comment 5805260775: `null` is malformed, everywhere). For every shape other than `null`, this is the same way `@objectstack/core`'s `resolveArtifactPackageOrder` already refuses it, with the same registered code; `@objectstack/core`'s `resolveArtifactPackageOrder` refuses `null` the same way (#19926).
 
 Clause-②: no (narrowing)
 
