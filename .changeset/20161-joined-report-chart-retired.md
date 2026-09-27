@@ -54,7 +54,9 @@ untouched: it is that report's live embedded chart. A joined report with no
   load path) strips a block's `chart` and a joined container's `chart` from old
   sources and stored `sys_metadata` rows as a lossless delete. Stored rows can
   carry them: the Studio report form offered a block `chart` input until this
-  change.
+  change. The family's D3 semantic entry, `ui-report-joined-chart-retired`, states
+  what the strip cannot decide: whether the chart was wanted. If it was, it moves
+  to a non-joined report of its own, because a joined report has no chart channel.
 - **Form.** `reportForm` drops the block `chart` input and shows the container
   `chart` only when `type` is not `joined`; the `platform-objects` metadata-form
   translation bundles drop the `blocks.chart` label in all four locales.
@@ -66,4 +68,4 @@ untouched: it is that report's live embedded chart. A joined report with no
   non-joined reports and drops `chart` from the `blocks` row;
   `content/docs/ui/reports.mdx` lists what a joined container refuses.
 
-<!-- adr-0087: registered report-joined-chart-removed -->
+<!-- adr-0087: registered report-joined-chart-removed, ui-report-joined-chart-retired -->
