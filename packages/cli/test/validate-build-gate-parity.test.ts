@@ -184,6 +184,14 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // to a gap: both commands read it to COUNT the packages for the step line.
   'Reads the artifact\'s `packages[]` for a count both commands print; the pass that judges them is a gate above':
     ['artifactPackages'],
+  // [#20158] Builds the engine judge BOTH commands hand the registry
+  // (`AuthoringRuleContext.judgeFilter`): an INPUT to `runAuthoringRules` /
+  // `runPerPackageAuthoringRules`, the way the SDUI manifest is. It refuses
+  // nothing itself — the verdict is the rule's, over the engine's admission.
+  // What it answers, at both doors, is held by
+  // `test/rls-policy-authoring-admission.test.ts`.
+  'The engine judge handed to the authoring-rule registry as an input — the rule that reads it is the gate':
+    ['stackFilterJudge'],
   // [#18431] Artifact ASSEMBLY, and deliberately not a `BUILD_ONLY_GATES` row.
   // That ledger's entries are gates that cannot run read-only (they rewrite a
   // committed snapshot, or emit a sibling module); filing this one there would

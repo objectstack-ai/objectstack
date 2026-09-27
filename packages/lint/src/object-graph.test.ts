@@ -14,6 +14,7 @@ import {
   isUnjudgeable,
   nearestName,
   listNames,
+  packagesOf,
   RELATIONSHIP_FIELD_TYPES,
 } from './object-graph.js';
 import { walkFilterFieldKeys, type FilterFieldKey } from './filter-walk.js';
@@ -289,6 +290,55 @@ describe('object-graph — a non-record entry in `stack.objects` (#15494)', () =
     const g = indexObjectGraph({ objects: { a: 'junk', b: { fields: { n: { type: 'text' } } } } });
     expect(resolveFieldPath(g, 'a', 'n')).toMatchObject({ kind: 'unknowable', reason: 'no-field-map' });
     expect(resolveFieldPath(g, 'b', 'n')).toMatchObject({ kind: 'ok' });
+  });
+});
+
+describe('object-graph — packagesOf (#20206, ruling A on #15293 `5634034754`)', () => {
+  // `packages` is declared `z.array(ArtifactPackageSchema).optional()` — array
+  // or absent, never map-or-array like `objects`/`sections`/`tabs`. A PRESENT
+  // non-array `packages` ({}, 0, 'x', a keyed object) is malformed, not
+  // absent, and every reader refuses it. This is the ONE reader the five
+  // `packages/lint` call sites now share, replacing five private copies of
+  // `recordsOf(stack.packages)`.
+
+  it('CONTROL — an array is read exactly as `recordsOf` read it: iterated, junk dropped', () => {
+    const valid = { manifest: { id: 'com.example.a' } };
+    expect(packagesOf({ packages: [valid] })).toEqual([valid]);
+    expect(packagesOf({ packages: [null, valid, undefined, 'junk', 42, []] })).toEqual([valid]);
+  });
+
+  it('CONTROL — only an absent (`undefined`) `packages` stays silent — `[]`, not a refusal', () => {
+    expect(packagesOf({})).toEqual([]);
+    expect(packagesOf({ packages: undefined })).toEqual([]);
+  });
+
+  it.each([
+    ['an empty object', {}],
+    ['a keyed object (the shape `recordsOf` would have read as a map)', { a: { manifest: {} } }],
+    ['a number', 0],
+    ['a string', 'x'],
+  ])('refuses a PRESENT non-array `packages` — %s', (_label, shape) => {
+    expect(() => packagesOf({ packages: shape })).toThrow(
+      expect.objectContaining({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 }),
+    );
+    // The message names the actual runtime type, so an author sees what they
+    // wrote rather than a generic "malformed" sentence.
+    expect(() => packagesOf({ packages: shape })).toThrow(
+      new RegExp(`\`packages\` of type ${typeof shape}`),
+    );
+  });
+
+  // [ruling A on #19926, `5805260775`] `null` is malformed, everywhere — it is
+  // PRESENT, not absent, so it takes the same refusal as `{}`/`0`/`'x'`, not
+  // the silent branch above. `typeof null` is `'object'`, which would name a
+  // `{}` the author never wrote, so the message names `null` as itself
+  // (matching `resolveArtifactPackageOrder` in `@objectstack/core`, PR #20228).
+  it('refuses `packages: null` too — malformed, not absent (ruling `5805260775` on #19926)', () => {
+    expect(() => packagesOf({ packages: null })).toThrow(
+      expect.objectContaining({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 }),
+    );
+    expect(() => packagesOf({ packages: null })).toThrow(/`packages` of type null/);
+    expect(() => packagesOf({ packages: null })).not.toThrow(/of type object/);
   });
 });
 

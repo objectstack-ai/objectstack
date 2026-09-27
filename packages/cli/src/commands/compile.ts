@@ -17,6 +17,7 @@ import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
+import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
@@ -417,10 +418,16 @@ export default class Compile extends Command {
       const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
+      const parsedUnion = authoringRuleUnionStack(result.data as Record<string, unknown>);
+      // [#20158] The engine's own filter admission over this stack's objects —
+      // see `validate.ts` step 3 and `utils/authoring-filter-judge.ts`. One
+      // judge for the union run and the per-package pass.
+      const judgeFilter = stackFilterJudge(parsedUnion);
       const findings = runAuthoringRules('build', {
         normalized: authoringRuleUnionStack(normalized as Record<string, unknown>),
-        parsed: authoringRuleUnionStack(result.data as Record<string, unknown>),
+        parsed: parsedUnion,
         sduiManifest: jsxGate.sduiManifest,
+        judgeFilter,
         // [#16546] Ref strings, not hook indices — survive the union fold and
         // the per-package re-slice below unchanged (see `LoweringResult.
         // loweredHookRefs`'s header for why an index would not).
@@ -520,6 +527,7 @@ export default class Compile extends Command {
           unionFindings: findings,
           sduiManifest: jsxGate.sduiManifest,
           loweredHookRefs: lowering.loweredHookRefs,
+          judgeFilter,
         });
         const perPackageErrors: Array<{ package: string } & typeof ruleErrors[number]> =
           perPackage.errors;

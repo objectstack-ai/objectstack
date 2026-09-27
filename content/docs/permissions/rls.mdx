@@ -61,7 +61,7 @@ export const ContributorAccess = definePermissionSet({
 | `object` | `string` | Target object — or `'*'` to apply to every object |
 | `operation` | `'select' \| 'insert' \| 'update' \| 'delete' \| 'all'` | Which operation the policy guards. A `select` policy also bounds writes when no write-class policy applies — see below |
 | `using` | `string` | Predicate for rows the user may **see / act on** (compiled into the query filter) |
-| `check` | `string` | Predicate the new row must satisfy **after a single-record insert or a by-id update**; an array insert and a `multi: true` update are not checked. Omit it and `using` stands in, unless another applicable policy for the same operation declares a `check` — see [the fail-closed contract](#the-fail-closed-contract) |
+| `check` | `string` | Predicate **every row an insert or an update writes** must satisfy: each row of an insert (an array insert included) as its `beforeInsert` hooks leave it, and each row an update changes (by id or `multi: true`) after its `beforeUpdate` hooks. One failing row refuses the whole write. Omit it and `using` stands in, unless another applicable policy for the same operation declares a `check` — see [the fail-closed contract](#the-fail-closed-contract) |
 | `positions` | `string[]` | Which positions the policy applies to. Omit = everyone |
 | `enabled` | `boolean` | Default `true`. `false` switches the policy off — a disabled policy is not evaluated |
 
