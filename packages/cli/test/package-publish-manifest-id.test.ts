@@ -439,7 +439,7 @@ describe('publish.ts keeps no local copy of the manifest-id rule', () => {
     expect(manifestIdShapedLiterals(RETIRED_LOCAL_RULE)).toHaveLength(1);
     // …and on a transcription of the schema's own pattern, the shape a
     // "fix" that re-types the regex would take.
-    expect(manifestIdShapedLiterals('const X = /^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$/;')).toHaveLength(1);
+    expect(manifestIdShapedLiterals('const X = /^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$/;')).toHaveLength(1);
   });
 
   it('finds none in the command source', () => {
