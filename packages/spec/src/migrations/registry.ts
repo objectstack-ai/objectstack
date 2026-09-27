@@ -8087,10 +8087,14 @@ const step18: MigrationStep = {
         + 'their own rows in an in-memory data source that reads the record form and excludes '
         + 'EVERY row for a rule array, so a rewrite there would empty the block. Such a row keeps loading unchanged '
         + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
-        + 'contract) and is refused at the `filter` door on its next save — for a combinator '
-        + 'record, a refusal that names the combinator and says why no rule spells it. '
-        + '`os migrate meta --stored` does not list these rows yet: a row the conversion leaves '
-        + 'as stored reports there as already on protocol.',
+        + 'contract), and its `filter` door refuses the form: at `dataSource.filter` on the page\'s '
+        + 'next save; at a block\'s `properties.filter` — like `properties.defaultFilters`, a key of '
+        + 'the open `properties` bag — only as the component-props gate\'s advisory finding '
+        + '(`os validate`), since a re-save through the metadata API is not refused there. For a '
+        + 'combinator record that refusal names the combinator and says why no rule spells it. '
+        + '`os migrate meta --stored` lists each filter left as stored as a TODO under its row, '
+        + 'naming the block and what blocks the rewrite; a row whose only finding is such a TODO is '
+        + 'reported `skipped`, and the run\'s exit code does not change for it.',
       acceptanceCriteria:
         '`ElementDataSourceSchema.safeParse({ object, filter: [{ field: \'status\', operator: '
         + '\'equals\', value: \'active\' }] })` succeeds and the parsed `filter` is the same rule '
