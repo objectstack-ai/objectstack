@@ -36,7 +36,7 @@ import { retiredKey } from '../shared/retired-key';
  * // registered by plugin-hono-server; `examples/app-showcase`'s
  * // recalc-endpoint is a real consumer of this exact shape). The worked
  * // manifest example that used to sit here declared `contributes.routes`,
- * // which was removed in @objectstack/spec 17 (#10726): nothing ever read
+ * // which was removed in @objectstack/spec 17 (commit bc56e1881): nothing ever read
  * // it, so every route it showed parsed cleanly and served nothing.
  * class RestApiPlugin {
  *   name = 'rest_api';
@@ -1166,7 +1166,7 @@ export const DEFAULT_NOTIFICATION_ROUTES: RestApiRouteRegistration = {
       category: 'notification',
       public: false,
       summary: 'List notifications',
-      // NOT "paginated" (#6361). The route answers the newest `limit` rows and
+      // NOT "paginated" (commit 90bbf2510). The route answers the newest `limit` rows and
       // stops; there is no continuation token on either half of the contract
       // since `cursor` was removed in protocol 17. The catalog is a
       // machine-readable surface (Route & surface ownership rule 4), so a

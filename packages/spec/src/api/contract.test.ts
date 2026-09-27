@@ -46,7 +46,7 @@ describe('ApiErrorSchema', () => {
     expect(error.details).toBeDefined();
   });
 
-  // [#9934] The producer-side user-facing marking (objectui#5210 ruling):
+  // [commit 79c46da90] The producer-side user-facing marking (objectui#5210 ruling):
   // presence is the producer's opt-in, absence keeps the consumer's generic
   // substitution (#3821 preserved by construction).
   it('carries a producer-marked `userMessage` verbatim', () => {

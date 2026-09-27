@@ -255,7 +255,7 @@ describe('ErrorCode (standard ∪ registered)', () => {
       // Domain-prefixed, none re-spells a standard member — registered plainly, no waiver.
       expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
     }
-    // The card's ninth, `NAMESPACE_CONFLICT`, was already a row (#14748) — the
+    // The card's ninth, `NAMESPACE_CONFLICT`, was already a row (commit 92b5d7f00) — the
     // one doored code of the batch, whose wire already carries it.
     expect(ERROR_CODE_LEDGER['@objectstack/objectql']).toContain('NAMESPACE_CONFLICT');
   });
