@@ -203,6 +203,13 @@ function setup(callerName: CallerName) {
             const found = find(type, name);
             return { type: singular(type), name, item: found ? clone(found) : undefined, lock: 'none', editable: true, deletable: true, resettable: false };
         }),
+        // The shared cache's read, present on purpose: it serves the UNGATED
+        // document, so a gated type the plain read's cache exclusion missed
+        // would take this arm and redden its plain-read row below.
+        getMetaItemCached: vi.fn(async ({ type, name }: any) => ({
+            data: clone(find(type, name)),
+            etag: { value: `etag-${singular(type)}-${name}`, weak: false },
+        })),
         getMetaItemLayered: vi.fn(async ({ type, name }: any) => {
             const found = find(type, name);
             const layer = () => (found ? clone(found) : null);
