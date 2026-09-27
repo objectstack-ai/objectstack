@@ -302,7 +302,7 @@ describe('decision edge branching — exclusive by default, inclusive by declara
     // ── 4. `mode` is judged at registration, with the spec's own sentence ──
 
     describe('registration parses `DecisionConfigSchema` and refuses an invalid `mode`', () => {
-        it('refuses `mode` beside a non-empty `conditions` list — either member — at config.mode, with the refinement sentence', () => {
+        it('refuses `mode` beside a non-empty `conditions` list — either member — at config.mode, with the refinement sentence', async () => {
             for (const mode of ['inclusive', 'exclusive']) {
                 const definition = gatewayFlow({
                     a: '', b: '',
@@ -320,12 +320,12 @@ describe('decision edge branching — exclusive by default, inclusive by declara
                     expect(message).toContain('Either delete `mode` and keep the list');
                     expect(message).toContain('move the branches onto the out-edges');
                 }
-                // Refused means never armed.
-                expect(engine.getFlow('gateway')).toBeUndefined();
+                // Refused means never armed (`getFlow` answers `null` for a name it does not hold).
+                expect(await engine.getFlow('gateway')).toBeNull();
             }
         });
 
-        it('refuses a `mode` outside the closed pair with the value prescription', () => {
+        it('refuses a `mode` outside the closed pair with the value prescription', async () => {
             const definition = gatewayFlow({ ...OVERLAP, config: { mode: 'all' } });
             expect(() => engine.registerFlow('gateway', definition)).toThrow(MODE_NOT_A_MODE);
             try {
@@ -335,7 +335,7 @@ describe('decision edge branching — exclusive by default, inclusive by declara
                 expect(message).toContain("`mode: 'all'` is not a decision mode");
                 expect(message).toContain("at config.mode");
             }
-            expect(engine.getFlow('gateway')).toBeUndefined();
+            expect(await engine.getFlow('gateway')).toBeNull();
         });
 
         it('refuses the same shape inside a loop body, naming the region', () => {
