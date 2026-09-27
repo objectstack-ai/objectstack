@@ -23,20 +23,39 @@
  *
  * ## The predicate — exactly "no catalog row carries this name"
  *
- * Ruled on the card that filed the hole (maintainer-confirmed), verbatim:
- * «⛔ The predicate is exactly "no catalog row carries this name" — never "this
- * assignment cannot take effect": ADR-0049 keeps a deactivated position's
- * assignment while it stops granting». So:
+ * Ruled on the card that filed the hole (#16712, maintainer-confirmed),
+ * verbatim: «⛔ The predicate is exactly "no catalog row carries this name" —
+ * never "this assignment cannot take effect": ADR-0049 keeps a deactivated
+ * position's assignment while it stops granting». So a DEACTIVATED position
+ * (`active: false`) is still a catalog row, and an assignment naming it is
+ * accepted — it stops granting, it is not refused.
  *
- * - a DEACTIVATED position (`active: false`) is still a catalog row, and an
- *   assignment naming it is accepted — it stops granting, it is not refused;
- * - the catalog is read WITHOUT a tenant scope ({@link SYSTEM_CTX}): a name
- *   that some `sys_position` row carries, in any organization, is accepted.
- *   Under a `single` posture every catalog row is organization-less and the
- *   two readings are the same set. Under a walled posture they differ for a
- *   name only ANOTHER organization's catalog carries — accepted here, and it
- *   resolves nothing in the writer's organization. That narrower reading is a
- *   question for the ruling, not a choice this module makes on its own.
+ * ## Whose catalog — the writer's organization plus organization-less rows
+ *
+ * The ruling fixes the predicate; #20297 fixes the catalog it reads, by the
+ * platform's standing tenancy rule rather than by a new one. Every catalog read
+ * here runs under {@link catalogReadContext} — `{ ...context, isSystem: true }`,
+ * the `sudo()`-shaped elevation of the engine's own lookup probe
+ * (`assertReferencesResolve` in `@objectstack/objectql`, #19808), never a bare
+ * `{ isSystem: true }`:
+ *
+ * - the elevation is about VISIBILITY: existence is a fact about the database,
+ *   not about the writer's row-level reach, so RBAC, RLS and FLS are bypassed;
+ * - it is never about TENANCY: the writer's context is spread first, so the
+ *   engine forwards its `tenantId` to the driver, which reads the writer's
+ *   organization plus organization-less rows (`organization_id IS NULL`).
+ *
+ * So a name only ANOTHER organization's catalog carries is refused exactly like
+ * a name no organization carries — the same envelope and the same message —
+ * and the accept-or-refuse answer tells an organization admin nothing about any
+ * other organization's catalog. The bare spelling read every organization,
+ * which accepted such a name (it resolves nothing in the writer's organization)
+ * and answered "some other organization has this position" apart from "no one
+ * has it": the cross-tenant existence oracle the engine probe (#19808) and the
+ * delegated-admin gate's position-name reads (#19819, #19860) were closed
+ * against. Under a `single` posture every catalog row is organization-less and
+ * every writer reads the whole catalog. A writer whose context names no
+ * organization reads every organization's rows, as the engine probe does.
  *
  * ## Which writes it judges
  *
@@ -65,9 +84,16 @@
  * Registered by `SecurityPlugin` AFTER its security middleware, so it runs
  * INSIDE it: the delegated-admin gate and the object CRUD check have both
  * passed before the catalog is consulted. A caller who may not write this
- * table is refused on authority and never sees the catalog verdict, so the
- * verdict is not an existence probe for them — which matters because the
- * catalog read above is not tenant-scoped.
+ * table is refused `403` on authority, identically whatever the value names,
+ * and never sees the catalog verdict. The tenant boundary is the catalog
+ * read's own (above), not this placement's.
+ *
+ * The placement is also what lets the by-id PRE-IMAGE read ({@link SYSTEM_CTX})
+ * stay bare: that read happens only after the security middleware has admitted
+ * the writer's update of that id. An update naming another organization's row
+ * id and one naming an id that exists nowhere are both refused there, `403
+ * PERMISSION_DENIED` with one identical answer, before this refusal runs —
+ * measured on a two-organization walled posture and pinned beside it.
  *
  * ## The envelope
  *
@@ -80,7 +106,8 @@
  * the field-level code is a member of the closed ADR-0114 catalog. The message
  * names the value, says the column takes the catalog NAME, and names the fix —
  * the name itself when the value is the record id of a position the writer's
- * own organization can see.
+ * catalog holds (read the same way as the check, so never another
+ * organization's).
  *
  * ## Fails open
  *
@@ -95,7 +122,6 @@ import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@obj
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { validationFailure } from '@objectstack/types';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { rowOrganizationId } from './per-organization-catalog.js';
 
 /** The assignment object this refusal is registered on. */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
@@ -104,8 +130,27 @@ export const POSITION_CATALOG_OBJECT = 'sys_position';
 /** The column judged, on {@link POSITION_ASSIGNMENT_OBJECT}. */
 export const POSITION_FIELD = 'position';
 
-/** Existence is a fact about the database, so the catalog is read elevated and unscoped. */
+/**
+ * The by-id PRE-IMAGE read only (is the stored `position` being changed?) —
+ * never a catalog read. Bare, because the security middleware has already
+ * refused, identically, every row id the writer cannot update (see "Where it
+ * runs"); every catalog read goes through {@link catalogReadContext}.
+ */
 const SYSTEM_CTX = { isSystem: true } as const;
+
+/**
+ * The context every `sys_position` read runs under: the writer's own context
+ * with `isSystem` set — the engine lookup probe's `sudo()`-shaped spelling. The
+ * spread carries the writer's `tenantId`, so the read sees the writer's
+ * organization plus organization-less rows; a context naming no organization
+ * reads every organization. ⛔ Never a bare `{ isSystem: true }` here: that
+ * spans every organization and makes the refusal a cross-tenant existence
+ * oracle (module note, "Whose catalog").
+ */
+function catalogReadContext(context: unknown): Record<string, unknown> {
+  const own = context && typeof context === 'object' ? (context as Record<string, unknown>) : {};
+  return { ...own, isSystem: true };
+}
 
 /**
  * One `fields[]` entry of the refusal. `code` is typed to the closed ADR-0114
@@ -128,15 +173,9 @@ const POSITION_LABEL: string = typeof positionDef.label === 'string' ? positionD
 const POSITION_MAX_LENGTH: number = typeof positionDef.maxLength === 'number' ? positionDef.maxLength : 100;
 
 export interface PositionCatalogRefusalDeps {
-  /** ObjectQL engine handle (system-context catalog and pre-image reads). */
+  /** ObjectQL engine handle (elevated catalog and pre-image reads). */
   ql: any;
   logger?: { warn?: (msg: string, meta?: any) => void };
-}
-
-/** The organization the WRITER acts in — the one whose catalog an id hint may name. */
-function callerOrganizationId(context: any): string | undefined {
-  const id = context?.organizationId ?? context?.tenantId;
-  return typeof id === 'string' && id !== '' ? id : undefined;
 }
 
 function rowsOf(data: unknown): any[] {
@@ -200,16 +239,22 @@ export async function writtenPositionNames(ql: any, opCtx: any): Promise<string[
 }
 
 /**
- * The names among `names` that NO `sys_position` row carries — or `null` when
- * the catalog could not be read and nothing may be concluded.
+ * The names among `names` that no `sys_position` row the WRITER's catalog
+ * holds carries — the writer's organization plus organization-less rows, or
+ * every organization for a context naming none ({@link catalogReadContext}) —
+ * or `null` when the catalog could not be read and nothing may be concluded.
+ * `context` is the writer's execution context, required so no caller can
+ * silently fall back to an unscoped read.
  *
  * One bounded read per distinct name, never one `$in` read under a row limit:
- * a walled posture seeds the same name once per organization, so a limited
- * `$in` page can fill with copies of one name and report the others missing.
+ * a context naming no organization sees every organization's copy of a name,
+ * so a limited `$in` page can fill with copies of one name and report the
+ * others missing.
  */
 export async function namesWithoutCatalogRow(
   deps: PositionCatalogRefusalDeps,
   names: readonly string[],
+  context: unknown,
 ): Promise<string[] | null> {
   const { ql, logger } = deps;
   if (names.length === 0) return [];
@@ -218,11 +263,12 @@ export async function namesWithoutCatalogRow(
   // against, the same silent stand-down the engine's own lookup probe takes.
   if (typeof ql.getSchema === 'function' && !ql.getSchema(POSITION_CATALOG_OBJECT)) return null;
 
+  const readCtx = catalogReadContext(context);
   const missing: string[] = [];
   for (const name of names) {
     let rows: unknown;
     try {
-      rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { name }, limit: 1, context: SYSTEM_CTX });
+      rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { name }, limit: 1, context: readCtx });
     } catch (e) {
       logger?.warn?.(
         `[security] the ${POSITION_CATALOG_OBJECT} catalog could not be read, so a ` +
@@ -238,27 +284,27 @@ export async function namesWithoutCatalogRow(
 }
 
 /**
- * For each missing value that is the record ID of a position the writer's own
- * organization can see, that position's NAME — the exact fix. Scoped to the
- * writer's organization (plus organization-less rows) so the hint never names
- * another organization's position. A read that fails yields no hint.
+ * For each missing value that is the record ID of a position the writer's
+ * catalog holds, that position's NAME — the exact fix. Read under the same
+ * {@link catalogReadContext} as the check itself, so the hint can name only a
+ * position the check could have accepted, never another organization's. A read
+ * that fails yields no hint.
  */
 export async function idSpellingHints(
   deps: PositionCatalogRefusalDeps,
   values: readonly string[],
-  organizationId?: string,
+  context: unknown,
 ): Promise<Map<string, string>> {
   const hints = new Map<string, string>();
   const { ql } = deps;
   if (!ql || typeof ql.find !== 'function') return hints;
+  const readCtx = catalogReadContext(context);
   for (const value of values) {
     try {
-      const rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { id: value }, limit: 1, context: SYSTEM_CTX });
+      const rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { id: value }, limit: 1, context: readCtx });
       const row = Array.isArray(rows) ? rows[0] : null;
       const name = row && typeof row.name === 'string' && row.name !== '' ? row.name : null;
       if (!name) continue;
-      const owner = rowOrganizationId(row);
-      if (organizationId && owner && owner !== organizationId) continue;
       hints.set(value, name);
     } catch {
       // No hint — the refusal still stands and still names the column's contract.
@@ -314,9 +360,9 @@ export async function assertPositionNamesCatalogRow(
   if (opCtx?.context?.isSystem) return;
   const names = await writtenPositionNames(deps.ql, opCtx);
   if (names.length === 0) return;
-  const missing = await namesWithoutCatalogRow(deps, names);
+  const missing = await namesWithoutCatalogRow(deps, names, opCtx.context);
   if (!missing || missing.length === 0) return;
-  const hints = await idSpellingHints(deps, missing, callerOrganizationId(opCtx.context));
+  const hints = await idSpellingHints(deps, missing, opCtx.context);
   throw positionNotInCatalogError(missing, hints);
 }
 

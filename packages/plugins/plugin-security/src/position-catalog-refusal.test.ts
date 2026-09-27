@@ -36,7 +36,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
-import { positionNotInCatalogMessage } from './position-catalog-refusal.js';
+import { namesWithoutCatalogRow, positionNotInCatalogMessage } from './position-catalog-refusal.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -294,6 +294,23 @@ describe('the accepted half — a catalog NAME, active or deactivated', () => {
     // It stops granting (the resolver drops the deactivated name) — it is not refused.
     expect(await rowsReadBy(h, 'u_retired')).toBe(0);
   });
+
+  it('single posture: an organization-bound writer still reads the organization-less catalog', async () => {
+    // Every `single`-posture catalog row carries no organization. The scoped
+    // read (`{ ...context, isSystem: true }`) forwards the writer's tenant, and
+    // the driver's `organization_id IS NULL` term keeps those rows visible.
+    const h = await boot();
+    const orgBound = { ...ADMIN, tenantId: 'org_a' };
+    const created = await h.engine.insert(
+      'sys_user_position', { user_id: 'u_ob', position: 'qa_auditor' }, { context: orgBound } as any,
+    );
+    expect(created).toMatchObject({ position: 'qa_auditor' });
+    const env = envelopeOf(await refusalOf(() => h.engine.insert(
+      'sys_user_position', { user_id: 'u_ob2', position: 'nope_position' }, { context: orgBound } as any,
+    )));
+    expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(env.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found', value: 'nope_position' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -394,7 +411,7 @@ describe('scope — the stand-downs are declared, not accidental', () => {
 // A walled, two-organization posture
 // ---------------------------------------------------------------------------
 
-describe('walled posture, two organizations — the literal predicate, measured', () => {
+describe("walled posture, two organizations — the predicate reads the WRITER's catalog", () => {
   async function bootTwoOrgs() {
     const h = await boot({ walled: true });
     await h.engine.insert('sys_position',
@@ -416,16 +433,89 @@ describe('walled posture, two organizations — the literal predicate, measured'
     expect(env.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found', value: 'nope_position' });
   });
 
-  it("a name only ANOTHER organization's catalog carries is ACCEPTED — the ruled predicate is 'no row at all'", async () => {
-    // The two readings differ exactly here. An organization-scoped predicate
-    // would refuse this write (it resolves nothing in org_a); the ruled
-    // literal one accepts it. Pinned so a change of reading is a visible,
-    // deliberate edit — the question is recorded on the card.
+  it("a name only ANOTHER organization's catalog carries is REFUSED, answered exactly like a name no organization carries", async () => {
+    // REVERSED pin (#20297). The catalog is read the engine lookup probe's way,
+    // `{ ...context, isSystem: true }`: the writer's organization plus
+    // organization-less rows. org_b's `qa_b_only` is invisible from org_a, so
+    // the write is refused — and with the answer a name that exists nowhere
+    // gets, so the refusal is no oracle for "some other organization has it".
+    const h = await bootTwoOrgs();
+    const foreign = envelopeOf(await refusalOf(() => h.engine.insert(
+      'sys_user_position', { user_id: 'u_wb', position: 'qa_b_only' }, { context: ORG_A_ADMIN } as any,
+    )));
+    expect([foreign.code, foreign.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(foreign.fields).toHaveLength(1);
+    expect(foreign.fields[0]).toMatchObject({
+      field: 'position',
+      code: 'reference_not_found',
+      value: 'qa_b_only',
+      constraint: { target: 'sys_position', targetField: 'name' },
+    });
+    // Byte-identical to the "exists nowhere" message for that value …
+    expect(foreign.fields[0].message).toBe(positionNotInCatalogMessage('qa_b_only'));
+    // … and the same envelope, key for key, as a name nobody carries.
+    const nowhere = envelopeOf(await refusalOf(() => h.engine.insert(
+      'sys_user_position', { user_id: 'u_wb', position: 'nope_position' }, { context: ORG_A_ADMIN } as any,
+    )));
+    const shape = (e: typeof foreign) => [e.code, e.status, e.fields.map((f) => [f.field, f.code, Object.keys(f).sort(), f.constraint])];
+    expect(shape(foreign)).toEqual(shape(nowhere));
+    expect(await assignmentsOf(h, 'u_wb')).toHaveLength(0);
+
+    // A predicate update that sets it reads the same catalog, and is refused the same way.
+    await h.engine.insert('sys_user_position', { id: 'upw', user_id: 'u_wm', position: 'qa_a_own' }, { context: ORG_A_ADMIN } as any);
+    const multi = envelopeOf(await refusalOf(() => h.engine.update(
+      'sys_user_position', { position: 'qa_b_only' }, { where: { user_id: 'u_wm' }, multi: true, context: ORG_A_ADMIN } as any,
+    )));
+    expect([multi.code, multi.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(multi.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found', value: 'qa_b_only' });
+    expect(multi.fields[0].message).toBe(positionNotInCatalogMessage('qa_b_only'));
+    expect((await assignmentsOf(h, 'u_wm'))[0]?.position).toBe('qa_a_own');
+  });
+
+  it("the writer's own organization's name is accepted (control for the scoped read)", async () => {
     const h = await bootTwoOrgs();
     const created = await h.engine.insert(
-      'sys_user_position', { user_id: 'u_wb', position: 'qa_b_only' }, { context: ORG_A_ADMIN } as any,
+      'sys_user_position', { user_id: 'u_wo', position: 'qa_a_own' }, { context: ORG_A_ADMIN } as any,
     );
-    expect(created).toMatchObject({ position: 'qa_b_only' });
+    expect(created).toMatchObject({ position: 'qa_a_own', organization_id: 'org_a' });
+  });
+
+  it('the catalog read is scoped by the writer context — a context naming no organization reads every organization', async () => {
+    // A platform-level writer (no tenant in context) reads every organization,
+    // as the engine probe does. The full chain cannot carry one here: on the
+    // isolated posture the security middleware refuses a write with no active
+    // organization (403) before this refusal runs, so the read is pinned at
+    // the function, beside the org-bound reading of the same names.
+    const h = await bootTwoOrgs();
+    const names = ['qa_b_only', 'qa_a_own', 'nope_position'];
+    expect(await namesWithoutCatalogRow({ ql: h.engine }, names, ADMIN)).toEqual(['nope_position']);
+    expect(await namesWithoutCatalogRow({ ql: h.engine }, names, ORG_A_ADMIN)).toEqual(['qa_b_only', 'nope_position']);
+  });
+
+  it("an update by id of ANOTHER organization's row answers exactly like an id that exists nowhere", async () => {
+    // The by-id pre-image read stays a bare system read; this is why that is
+    // safe: the security middleware refuses both ids, identically, before the
+    // catalog refusal runs, so neither the pre-image nor the catalog verdict
+    // is reachable for a row outside the writer's organization.
+    const h = await bootTwoOrgs();
+    await h.engine.insert('sys_user_position',
+      { id: 'upb_foreign', user_id: 'u_bx', position: 'qa_b_only' },
+      { context: { isSystem: true, tenantId: 'org_b' } } as any);
+    for (const position of ['nope_position', 'qa_a_own']) {
+      const foreignErr = await refusalOf(() => h.engine.update(
+        'sys_user_position', { id: 'upb_foreign', position }, { context: ORG_A_ADMIN } as any,
+      ));
+      const nowhereErr = await refusalOf(() => h.engine.update(
+        'sys_user_position', { id: 'up_nowhere', position }, { context: ORG_A_ADMIN } as any,
+      ));
+      const foreign = envelopeOf(foreignErr);
+      const nowhere = envelopeOf(nowhereErr);
+      expect([foreign.code, foreign.status], position).toEqual(['PERMISSION_DENIED', 403]);
+      expect([nowhere.code, nowhere.status], position).toEqual(['PERMISSION_DENIED', 403]);
+      expect(resolveThrownHttpError(foreignErr).message, position).toBe(resolveThrownHttpError(nowhereErr).message);
+    }
+    const [row] = await h.engine.find('sys_user_position', { where: { id: 'upb_foreign' }, context: SYS } as any);
+    expect(row?.position).toBe('qa_b_only');
   });
 
   it('the org boundary holds for a VALID foreign organization — 403 at the wall, whatever the name', async () => {
