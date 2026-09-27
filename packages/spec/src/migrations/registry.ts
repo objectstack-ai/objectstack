@@ -5320,7 +5320,19 @@ const step18: MigrationStep = {
     + 'and stored rows) and the assembled-manifest `viewItems` channel (package export, '
     + 'environment artifacts), whose registration parse would otherwise refuse an artifact '
     + 'assembled before this release. '
-    + 'It then retires the same pair on the flattened overlay door (#20230, ADR-0049; triage '
+    + 'It also retires a `joined` report\'s `chart` at both coordinates (#20161, ADR-0049 '
+    + 'enforce-or-remove): the joined renderer draws each block as a table and returns before '
+    + 'the one container `chart` read, and no renderer reads a block\'s `chart` at all, so a '
+    + 'chart on a joined report parsed, passed the chart-bindings lint, and plotted nothing. '
+    + 'The key leaves `JoinedReportBlockSchema`\'s closed shape (its `guidance` table carries '
+    + 'the prescription) and the joined arm of `ReportSchema`\'s refinement refuses a '
+    + 'container `chart`; `chart` stays live on every non-joined report. The D2 conversion '
+    + '`report-joined-chart-removed` strips both as a pure lossless delete — neither ever had '
+    + 'an effect to lose — because a stored report row CAN carry them (the Studio report form '
+    + 'offered a block `chart` input until this change); it is retired from the load path, so '
+    + 'authors are refused at parse rather than rewritten. '
+    + 'It retires the view item\'s `owner` / `hidden` pair on the flattened overlay door too '
+    + '(#20230, ADR-0049; triage '
     + 'direction 「follow #20085\'s disposition for the same key pair」): the lean personalization '
     + 'PUT with no `config` declared its own `owner` / `hidden`, accepted and stored them, and '
     + 'nothing read either. Both are `retiredKey()` tombstones on the two overlay members with '
@@ -5370,6 +5382,7 @@ const step18: MigrationStep = {
     'object-tenancy-organization-field-removed',
     'page-component-filter-record-to-rule-array',
     'view-item-owner-hidden-removed',
+    'report-joined-chart-removed',
     'view-overlay-owner-hidden-removed',
   ],
   semantic: [
@@ -11704,6 +11717,56 @@ const step18: MigrationStep = {
         + 'or built a route from the entries, so every request answers exactly as before — the removal '
         + 'retracts a false claim, not a capability.',
     },
+    // Registered as a structured TODO (ADR-0087 D3) rather than a conversion (D2),
+    // for the reason every strictness entry gives: an arbitrary unknown key has no
+    // mapping target, and deleting it automatically is the silent data loss
+    // ADR-0078 bans. Nothing is retired either — no key leaves the declaration —
+    // so there is no RETIRED_KEYS entry: the refusal is the shape's own strict
+    // close naming the key. HTTP-only, like the list-pagination entry beside it:
+    // nobody authors a PackageInstallRequest into a metadata source and nothing
+    // persists one, so `objectstack migrate meta` has no file to rewrite and the
+    // TODO lands with whoever builds the request body.
+    {
+      id: 'package-install-request-unknown-keys-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'api.installPackage request body, WRAPPED form — an undeclared TOP-LEVEL key beside '
+        + 'manifest on POST /api/v1/packages (PackageInstallRequestSchema, the wrapped branch of '
+        + 'PackageInstallBodySchema)',
+      replacement:
+        'the declared wrapped body: `manifest`, plus any of the declared install options '
+        + '(`settings`, `enableOnInstall`, `overwrite`, `platformVersion`, `artifactRef`). A '
+        + 'misspelled option is respelled as the option it meant — `enabledOnInstall` → '
+        + '`enableOnInstall`, which the refusal itself offers — and any other undeclared key is '
+        + 'removed. The bare form (a manifest as the whole body) is unchanged: it was already '
+        + 'closed, and it still carries no install options.',
+      reason:
+        'One rule for the whole install contract (decision batch #227 item 3, letter A; ruling '
+        + 'record 5856869656). The manifest and the bare form already refused an unknown key by '
+        + 'name; the wrapped top level was the one position still declared strip mode, so '
+        + '`{ manifest, enabledOnInstall: false }` — a misspelled `enableOnInstall` — parsed green '
+        + 'with the key DROPPED, and the install door, which answers exactly what this declaration '
+        + 'says since it parses the whole body (c02fa1276), installed the package ENABLED: the '
+        + 'caller\'s explicit `false` inverted, with no word said. The sentence that had forbidden '
+        + 'this close rested on «the declaration must not refuse a body the door answers 201 to», '
+        + 'which held only while the door did not parse its body; with the door answering per '
+        + 'declaration the premise became circular and constrains nothing. No alias and no grace '
+        + 'window. Not losslessly convertible: an unknown key has no mapping target, and '
+        + 'auto-deleting it would repeat the silent drop this closes, so each occurrence needs the '
+        + 'caller\'s decision — respell or remove. First-party reach measured before the close: '
+        + 'the SDK install call sends only `manifest`, `settings`, `enableOnInstall` and '
+        + '`overwrite`, and the objectui package dialog sends only `{ manifest }`, so no in-repo '
+        + 'caller breaks. Out-of-repo callers are NOT MEASURED — a caller that sends a private '
+        + 'top-level key now gets a 400 naming it.',
+      acceptanceCriteria:
+        'Every wrapped install body carries only `manifest` and declared install options. A body '
+        + 'with any other top-level key is refused `400` / `VALIDATION_ERROR` at POST '
+        + '/api/v1/packages with the key named and nothing installed, and PackageInstallRequestSchema '
+        + 'answers the same body with one `unrecognized_keys` issue at the top level naming the '
+        + 'key. `{ manifest }` alone, and `manifest` with every declared option, parse and install '
+        + 'exactly as before.',
+    },
     // The carrier nobody had named: a bare `z.string()` on a published schema,
     // constraining nothing while its own siblings enforced a grammar. Its narrowing
     // is the widest of the four by accept-set area and the least likely to be felt,
@@ -14867,6 +14930,69 @@ const step18: MigrationStep = {
         + '`displayField`. Declared keys parse byte-identically to before; `objectstack validate` '
         + 'reports no `component-props-unknown-key` / `component-props-invalid` finding for the '
         + 'rail.',
+    },
+    // #20161 — the judgement half of `report-joined-chart-removed`, owed under
+    // #17152 ruling B (one D3 entry per retirement family, even when a lossless D2
+    // exists). The D2 conversion strips a joined report's `chart` mechanically, at
+    // both coordinates, and that strip changes nothing that renders. What it cannot
+    // do is decide whether the author MEANT a chart: that intent has no place to go
+    // on a joined report, so moving it to a report that draws one is the author's
+    // call. Its own family, not an extension of
+    // `ui-report-joined-container-selection-refused`: that entry is the enforce arm
+    // for four selection keys that stay declared and has no D2 at all, while this one
+    // retires a declared block key, refuses a container key, and pairs with a D2.
+    {
+      id: 'ui-report-joined-chart-retired',
+      surface:
+        '`report.blocks[].chart` (REMOVED from the joined report block shape) and `report.chart` on '
+        + 'a report whose `type` is `joined` (REFUSED by `ReportSchema`\'s refinement) — a chart '
+        + 'anywhere on a joined report',
+      replacement:
+        'nothing on the joined report: a joined report draws each block as a table and has no chart '
+        + 'channel at either level. Delete the `chart`. If the chart was wanted, give the slice it '
+        + 'was meant to plot a report of its own — `type` `tabular`, `summary` or `matrix`, binding '
+        + 'the same `dataset` the block bound, selecting the dimension and measure the chart names '
+        + 'in its `rows` and `values` — carry the `chart` over to that report\'s top level, where '
+        + '`xAxis` names a dataset dimension and `yAxis` a measure exactly as before, and reach it '
+        + 'from the app navigation beside the joined report.',
+      reason:
+        'ADR-0049 enforce-or-remove. Nothing ever drew a chart on a joined report: the renderer\'s '
+        + 'joined branch draws each block as a table and returns before its one read of the '
+        + 'report\'s `chart`, and no renderer reads a block\'s `chart` at all — measured at this '
+        + 'repo\'s `.objectui-sha` pin `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` '
+        + '(`DatasetReportRenderer.tsx`, joined branch at lines 1462-1524, the only chart read at '
+        + '1557). So both coordinates parsed, passed the `validate-chart-bindings` lint (which '
+        + 'resolved their axes as if they would plot), and showed tables only. The D2 conversion '
+        + '`report-joined-chart-removed` already REPAIRS THE DATA: it strips both from authored '
+        + 'sources on a chain replay and from stored `sys_metadata` rows at rehydration, a lossless '
+        + 'delete because neither value ever rendered. What it cannot repair is intent. Deleting '
+        + 'the key leaves the report looking exactly as it always did — which is the problem when '
+        + 'the author believed a chart was there: they were reading a chart that never existed, '
+        + 'and only they know whether they wanted one. A walker cannot move it anywhere either: a '
+        + 'joined report has no chart channel, and creating a new report, choosing its type and '
+        + 'placing it in navigation are authoring decisions, not rewrites. The Studio report form '
+        + 'offered a block chart input until this change, so a stored row carrying one is a real '
+        + 'shape, not a hypothetical. Ships at once, no deprecation window: there is no window in '
+        + 'which a key the renderer never reads does anything. `chart` on every non-joined report '
+        + 'is unchanged — it is that report\'s live embedded chart.',
+      acceptanceCriteria:
+        'WHICH DOOR: the refusal is the spec schema\'s, so it lands wherever a report is parsed '
+        + 'through `@objectstack/spec` — `defineReport`, `os validate` / `os build`, and the metadata '
+        + 'save door (the `report` entry of the metadata type registry, answered as '
+        + '`INVALID_METADATA` with status 422). A block `chart` is refused as an unrecognized key '
+        + 'on that block with the upgrade prescription; a container `chart` on a joined report is '
+        + 'one `custom` issue at `chart`. (1) No joined report carries a `chart` at either level: the '
+        + 'D2 strip covers existing sources on a chain replay, and the stored-row seams replay it for '
+        + 'rows already at rest. (2) For every joined report '
+        + 'that carried one, decide whether the chart was wanted; if it was, a non-joined report '
+        + 'now binds that slice\'s dataset and carries the chart, and its `xAxis` / `yAxis` resolve '
+        + '(`validate-chart-bindings` checks them there). (3) Check the rendered joined report: it '
+        + 'renders exactly as before, because the chart was never drawn. A joined report with no '
+        + '`chart` parses byte-identically to before, and every non-joined report is untouched. '
+        + 'Census at the time of the change: zero joined reports with a chart in this repo\'s '
+        + 'example apps and in the hotcrm reference app, against a lit control (non-joined reports '
+        + 'carrying a chart: one and five). '
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
     },
     {
       id: 'ui-report-joined-container-selection-refused',
@@ -18832,6 +18958,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #20161 (ADR-0049 enforce-or-remove). `JoinedReportBlock.chart` declared an
+    // inline chart on one block of a `joined` report, and no renderer ever drew it:
+    // at the `.objectui-sha` pin `f8a9d0fb0596`, `DatasetReportRenderer`'s joined
+    // branch draws each block as a table and has no read of a block's `chart` at
+    // all, so the chart parsed, passed `validate-chart-bindings`, and plotted
+    // nothing. The block shape is `.strict()`, so the key is removed from it and
+    // its prescription is served from the block schema's `guidance` table. A
+    // joined report's container `chart` is refused by `ReportSchema`'s refinement
+    // in the same change; `chart` stays live on every non-joined report. D2:
+    // `report-joined-chart-removed`.
+    'ui/JoinedReportBlock:chart',
     // #17063 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09, decision
     // batch #107 item 1, verbatim 「撤」). `ListView.pageName` named the published
     // page a `type: 'page'` view was to mount. Only the spec half of #13216 ever

@@ -1461,6 +1461,24 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 `os g skill <name>`, which writes exactly that path.
 </Callout>
 
+<Callout type="warn" title="`os generate schema` is retired">
+There is no `schema` type. Running `os generate schema` (or `os g schema`) fails
+and writes nothing, not even `objectstack.schema.json`. The message says it was
+retired by maintainer ruling and points at [`os validate`](#os-validate) and the
+per-type schemas `@objectstack/spec` publishes, rather than the generic "unknown
+type" listing. No replacement file is generated.
+
+The file it wrote described only the shape of a stack. Every rule the platform
+enforces beyond that shape (a non-blank string, a required one-of, a banned key)
+was missing from it, so an editor showed a config as valid that the platform then
+refused. `objectstack.config.ts` needs no JSON Schema: `defineStack` types it in
+your editor. Check a project against the rules that actually run with
+`os validate`. For JSON metadata, point your editor at
+`node_modules/@objectstack/spec/json-schema/<category>/<Type>.json`, which states
+the rules a JSON Schema can express and names the rest under
+`x-dropped-refinements`.
+</Callout>
+
 **Options:**
 - `-d, --dir <directory>` — Override target directory
 - `--dry-run` — Preview without writing files
