@@ -31,8 +31,9 @@
  */
 
 /**
- * A non-lossless change that cannot be auto-applied — surfaced as a structured
- * TODO the consumer agent must resolve by hand (ADR-0087 D3: "never silence").
+ * One retirement family's D3 entry — owed even when a lossless D2 conversion
+ * carries the data repair — surfaced as a structured TODO the consumer agent
+ * must resolve by hand (ADR-0087 D3: "never silence").
  */
 export interface SemanticMigration {
   /** Stable, kebab-case id. */
@@ -41,7 +42,10 @@ export interface SemanticMigration {
   surface: string;
   /** The canonical replacement the author should move to. */
   replacement: string;
-  /** Why this is not losslessly convertible (the one load-bearing prose field). */
+  /**
+   * Why the consumer still owes a judgment here, even when D2 already
+   * repaired the data (the one load-bearing prose field).
+   */
   reason: string;
   /** How the consumer proves the hand-migration correct (their own verify loop). */
   acceptanceCriteria: string;
@@ -62,7 +66,10 @@ export interface MigrationStep {
    * transforms are replayed against the consumer's source (not just at load).
    */
   conversionIds: readonly string[];
-  /** Non-lossless changes authored for this major, as structured TODOs. */
+  /**
+   * One entry per retirement family authored for this major, as structured
+   * TODOs — owed even when a lossless D2 conversion also exists for it.
+   */
   semantic: readonly SemanticMigration[];
 }
 

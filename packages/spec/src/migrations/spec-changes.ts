@@ -106,14 +106,18 @@ export const SpecConvertedSchema = z
   })
   .describe('A lossless conversion applied at load (D2).');
 
-/** A semantic (non-lossless) migration (from the D3 migration chain). */
+/** A semantic migration, one per retirement family (from the D3 migration chain). */
 export const SpecMigratedSchema = z
   .object({
     surface: z.string(),
     replacement: z.string(),
     migrationId: z.string().describe('The D3 semantic-migration id.'),
     toMajor: z.number().int(),
-    rationale: z.string().describe('Why it is not losslessly convertible (the load-bearing prose).'),
+    rationale: z
+      .string()
+      .describe(
+        'Why the consumer still owes a judgment here, even when D2 already repaired the data (the load-bearing prose).',
+      ),
   })
   .describe('A semantic migration requiring consumer judgment (D3).');
 
