@@ -229,11 +229,10 @@ export const PackageInstallRequestSchema = lazySchema(() => strictObject({
   surface: 'this package install request',
   history:
     'Until this shape was closed, an unknown top-level key on the wrapped install body parsed '
-    + 'green and was silently dropped — `{ manifest, enabledOnInstall: false }`, a misspelled '
-    + '`enableOnInstall`, installed the package ENABLED. Remove the key, or spell it as the '
-    + 'declared install option it meant; the declared keys are enumerated by '
-    + '`PackageInstallRequestSchema` (@objectstack/spec, api/package-api.zod.ts). An install '
-    + 'option on a BARE manifest body is refused by the manifest instead — send the wrapped form.',
+    + 'green and was silently dropped, so a misspelled install option was ignored without a '
+    + 'word — a caller who asked for the package DISABLED got it installed ENABLED. Remove the '
+    + 'key, or spell it as the declared install option it meant; the declared keys are '
+    + 'enumerated by `PackageInstallRequestSchema` (@objectstack/spec, api/package-api.zod.ts).',
 }, {
   /** Package manifest to install — the AUTHORING stage */
   manifest: ManifestSchema.describe('Package manifest to install (AUTHORING stage: `objects` are glob patterns)'),
