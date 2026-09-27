@@ -37,8 +37,8 @@
  *   3. **Enforcement runs on the FULL envelope.** Every method on both
  *      interfaces below adjudicates access, so each takes a complete
  *      {@link ExecutionContext} — the whole `resolveAuthzContext` result,
- *      threaded through unchanged — rather than a per-site subset (#6523,
- *      applying the #6206 ruling). The six-field shape those parameters used
+ *      threaded through unchanged — rather than a per-site subset (commit aa4b90d9a,
+ *      applying the full-envelope ruling of d7e0b4212). The six-field shape those parameters used
  *      to name (`SharingExecutionContext`, exported from here until #7218
  *      retired it) omitted `accessible_org_ids` (under the `group` tenancy
  *      posture this IS the Layer 0 wall, ADR-0105 D2), `org_user_ids`,
@@ -72,7 +72,7 @@
 import type { TenancyPosture } from '../security/tenancy-posture';
 // Type-only: the full `resolveAuthzContext` envelope. Every enforcement method
 // on {@link ISharingService} and {@link ISharingRuleService} declares its
-// context parameter as this type (#6523, applying the #6206 ruling default —
+// context parameter as this type (commit aa4b90d9a, applying the full-envelope ruling default —
 // no per-site subset contracts). See item 3 of the module doc above for the
 // boundary that draws and why.
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
@@ -188,7 +188,7 @@ export type SharingWriteVerdict = 'allow' | 'abstain' | 'deny';
  * that platform-internal writers (audit, migrations, the sharing plugin
  * itself) cannot deadlock on their own enforcement.
  *
- * ## The context every method takes (#6523, #6206 ruling)
+ * ## The context every method takes (commit aa4b90d9a, full-envelope ruling)
  *
  * `context` is the complete {@link ExecutionContext} — the caller's whole
  * `resolveAuthzContext` envelope, passed through unchanged. Callers MUST NOT
@@ -559,7 +559,7 @@ export interface SharingRuleEvaluationResult {
  * Rule management is capability-gated and rule EVALUATION writes grants that
  * decide other principals' visibility, so every method here takes the full
  * {@link ExecutionContext} on the same terms as {@link ISharingService}
- * (#6523).
+ * (commit aa4b90d9a).
  */
 export interface ISharingRuleService {
   defineRule(input: DefineSharingRuleInput, context: ExecutionContext): Promise<SharingRuleRow>;

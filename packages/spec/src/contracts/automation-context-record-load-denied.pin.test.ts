@@ -4,7 +4,7 @@
  * [#14244] `AutomationContext.recordLoadDenied` is exactly the producer's
  * shape — `{ recordLoadDenied?: true }`, the return type of
  * `actionRecordLoadSignal` (`@objectstack/runtime`, `action-execution.ts`) —
- * the flow face of #14143's handler-face signal, MIRRORED rather than
+ * the flow face of the handler-face signal (commit f19475c0a), MIRRORED rather than
  * respelled (triage ruling on #14244, 2026-09-02: the key must mirror the
  * producer's spelling rather than invent a second one).
  *

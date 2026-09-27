@@ -20,8 +20,8 @@ export const entry: SemanticMigration = {
   replacement:
     'the list operator the comparison was standing in for. "One of these values" is in: '
     + 'record.status in ["open", "pending"]. "None of these values" is the negated in: '
-    + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands and '
-    + '{ $field } references evaluate exactly as before',
+    + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands, and '
+    + '{ $field } references between single-valued columns evaluate exactly as before',
   reason:
     'Ruling A on #19886 refuses an array comparand under $ne, and the equality slot is ruling '
     + '乙 on #19757; stage 2a of #19886 lands both on the formula face, the evaluator '

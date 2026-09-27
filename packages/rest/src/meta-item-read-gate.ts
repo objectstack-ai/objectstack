@@ -34,8 +34,14 @@
  *
  * `RestServer` keeps its private helper names (`filterAppForUser`,
  * `resolveDocsAudience`, `resolveNavServability`, …) as one-line delegates to
- * the functions below, so its other docs and app reads — the lists, the book
- * tree — ask this same implementation.
+ * the functions below, so its other docs and app reads — the book tree, the
+ * alternate doors — ask this same implementation.
+ *
+ * [#20237] The LIST read had the same two transports and the same split:
+ * `RestServer`'s `GET /meta/:type` pruned inline, and the dispatcher's list
+ * branch pruned nothing. Its gate lives here too
+ * ({@link createMetaListReadGate}), built from the same functions over the
+ * same ports.
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
@@ -1359,4 +1365,125 @@ export function createMetaItemReadGate(
     }
 
     return async (document) => serve(document);
+}
+
+// ── THE list gate ─────────────────────────────────────────────────────────────
+
+/**
+ * [#20237] THE per-caller gate of one `/meta/:type` LIST answer — the list
+ * twin of {@link createMetaItemReadGate}, called by both transports that serve
+ * that read.
+ *
+ * ## Why one spelling
+ *
+ * `RestServer`'s `GET /meta/:type` ran these filters inline, and the runtime
+ * dispatcher's `/meta` list branch — the only answer on a host that mounts
+ * just the `${prefix}/*` catch-all — ran none of them. So a member `RestServer`
+ * prunes listed a `{ permissionSet }`-gated doc there WITH its body
+ * (`?include=content`), a set-gated book, an app whose `requiredPermissions`
+ * they lack, and an ungated app with its gated nav entries — the item gate's
+ * defect, one door over: the by-name reads refused what the list served.
+ * Each transport now hands its list to THIS function, so a list gate added
+ * here reaches both, and `meta-list-read-gate-parity.test.ts` in
+ * `@objectstack/runtime` drives the same fixtures through both and holds the
+ * answers equal.
+ *
+ * ## The gates, per type (unchanged from `RestServer`'s list route)
+ *
+ *  - `app` — for an authenticated caller, {@link filterAppForUser} over every
+ *    app, all of them judged with ONE set of per-request inputs: the ADR-0057
+ *    D10 service probe, [#7912] the nav-servability gate and [#19790] the
+ *    docs-audience entry arm. An app withheld for ANY reason is left out — on
+ *    a list, unpublished, `requiredPermissions` and an absent service all
+ *    mean "not in your list" (the by-name read is where they differ, #8013).
+ *    An anonymous caller's list is returned untouched, as it always was: the
+ *    anonymous-deny floor answers it before this gate, on both transports.
+ *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser} over every
+ *    dashboard, when the deployment can be probed (fail OPEN otherwise). A
+ *    per-DEPLOYMENT gate, not a per-caller one; it rides here because the
+ *    list answers what the by-name read answers.
+ *  - `book` — ADR-0046 §6.7, each book's OWN audience, resolved over the
+ *    listed books ({@link DocsAudience.admitsBook}).
+ *  - `doc` — ADR-0046 §6.7, each doc's EFFECTIVE audience: the env's books
+ *    ({@link fetchAudienceBooks} — a book-read fault THROWS, [#20129], so the
+ *    list is not served rather than filtered against no books), with the
+ *    listed docs as the corpus. The fast path (no set-gated book anywhere)
+ *    serves an authenticated caller every doc.
+ *
+ * Every other type is returned as given. One audience resolution, the docs
+ * reads' own ({@link resolveDocsAudience}) — ⛔ no second resolver.
+ *
+ * NOT here, for the item gate's reasons: the ADR-0106 object mask, which each
+ * transport threads through its own `fetch → mask → send` exit; and the list
+ * route's PROJECTIONS, which withhold nothing from anyone — `?id=`,
+ * `?object=`, the doc locale collapse and content slim, translation.
+ *
+ * ## Shape
+ *
+ * `metaType` is the SINGULAR type (the caller folds `/meta/docs` once, at its
+ * boundary). The judge takes the list's ITEMS — each transport unwraps and
+ * rewraps its own list envelope — and answers the SAME array when nothing
+ * applies (an ungated type, an empty book or doc list, an anonymous caller's
+ * app list, a deployment that cannot be probed), a new one otherwise; the
+ * input is never mutated. A gate input that cannot be read REJECTS the judge:
+ * the transport answers that fault, ⛔ never the unfiltered list.
+ */
+export function createMetaListReadGate(
+    sources: MetaItemReadGateSources,
+    metaType: string,
+): (items: any[]) => Promise<any[]> {
+    if (metaType === 'app') {
+        return async (items) => {
+            const ctx = await sources.resolveCaller();
+            if (!ctx?.userId) return items;
+            const sysPerms = new Set<string>(
+                Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
+            );
+            const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), items);
+            const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
+            // [#7912] Resolved ONCE for the whole list — object metadata is a
+            // per-request fact, not a per-app one.
+            const servabilityGate = await resolveNavServability(sources) ?? undefined;
+            // [#19790] Likewise once for the whole list: books, holdings and
+            // the doc corpus are per-request facts about this caller.
+            const docAudienceGate = await resolveNavDocAudience(sources, items);
+            return items
+                .map((it: any) => filterAppForUser(it, sysPerms, serviceGate, servabilityGate, docAudienceGate))
+                .filter((it: any) => it != null);
+        };
+    }
+
+    if (metaType === 'dashboard') {
+        return async (items) => {
+            const ctx = await sources.resolveCaller();
+            const registered = await resolveRegisteredServices(sources.serviceProbe(ctx), items);
+            if (!registered) return items;
+            const serviceGate = (n: string) => registered.has(n);
+            return items.map((it: any) => filterDashboardForUser(it, serviceGate));
+        };
+    }
+
+    if (metaType === 'book') {
+        return async (items) => {
+            if (items.length === 0) return items;
+            const audience = await resolveDocsAudience(sources, items);
+            return items.filter((b: any) => b && typeof b === 'object' && audience.admitsBook(b));
+        };
+    }
+
+    if (metaType === 'doc') {
+        return async (items) => {
+            if (items.length === 0) return items;
+            const books = await fetchAudienceBooks(sources);
+            const audience = await resolveDocsAudience(sources, books);
+            // Fast path: with no gated book anywhere, every effective audience
+            // admits an authenticated caller.
+            if (audience.allReadable) return items;
+            // The corpus is the listed docs themselves.
+            const canRead = audience.docReader(docCorpusOf(items));
+            return items.filter((d: any) => !!d && typeof d === 'object' && canRead(d.name));
+        };
+    }
+
+    return async (items) => items;
 }

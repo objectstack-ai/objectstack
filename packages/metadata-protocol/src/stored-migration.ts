@@ -91,6 +91,29 @@ export interface StoredMigrationNotice {
   message: string;
 }
 
+/**
+ * One site the chain recognised as a pre-protocol shape and LEFT AS STORED,
+ * because no conversion can rewrite it without changing what it means —
+ * flattened from the spec's `ConversionTodoNotice` to the fields an operator
+ * acts on. ADR-0087 D3's model: conversion where lossless, a structured TODO
+ * otherwise — never silence. A TODO emits no conversion notice, so without
+ * this list the row would read as already on protocol.
+ */
+export interface StoredMigrationTodo {
+  /** The `MetadataConversion.id` whose surface the site is on. */
+  conversionId: string;
+  /** Dotted surface that conversion governs. */
+  surface: string;
+  /** The pre-protocol shape left in the stored body. */
+  from: string;
+  /** Where in the item the site is, e.g. `pages[0].regions[0].components[1].properties.filter`. */
+  path: string;
+  /** Why no lossless rewrite exists — the block and the part that blocks it — and what the hand rewrite must decide. */
+  reason: string;
+  /** The chain's own human-facing line. */
+  message: string;
+}
+
 /** Per-row result. Rows the chain left alone (`canonical`) are counted, not listed. */
 export interface StoredMigrationRow {
   /** `sys_metadata.id` — the row this is about, so an operator can go look at it. */
@@ -106,6 +129,14 @@ export interface StoredMigrationRow {
   outcome: StoredMigrationOutcome;
   /** The conversions this row carries. Empty unless the chain rewrote something. */
   notices: StoredMigrationNotice[];
+  /**
+   * The sites the chain left as stored for a hand rewrite. Empty unless a
+   * conversion reported one. Orthogonal to `outcome`: a row can convert one
+   * site and leave another (`pending` / `rewritten` / `failed` with TODOs), or
+   * carry nothing but TODOs — then there is nothing to persist, and the row is
+   * `skipped`, never `canonical` (see {@link storedMigrationClean}).
+   */
+  todos: StoredMigrationTodo[];
   /** Why a `skipped` / `failed` row was not rewritten. Absent otherwise. */
   reason?: string;
 }
@@ -150,12 +181,28 @@ export interface StoredMigrationReport {
  * that no run of that command could ever clear — a gate failing on a condition
  * its own tool has no lever for. So it reports, loudly and per row, and leaves
  * the verdict to mean what it has always meant: nothing left to CONVERT.
+ *
+ * A fourth skip class follows the same rule for the same reason: a row whose
+ * only finding is a conversion TODO ({@link StoredMigrationRow.todos}) — a site
+ * the chain recognised as a pre-protocol shape and left as stored because no
+ * lossless rewrite exists (a filter carrying `$or`, say, which a flat rule list
+ * cannot spell). This pass has no lever for it BY RULING — the conversion must
+ * not flatten it — so it is `skipped`, printed with every site and why, and
+ * does not flip this verdict. TODOs never move it in either direction: a row
+ * that also converts something stays `pending` / `rewritten` / `failed` exactly
+ * as it would without them.
  */
 export function storedMigrationClean(report: StoredMigrationReport): boolean {
   return report.pending === 0 && report.failed === 0;
 }
 
-/** Render a run for a terminal. One line per non-canonical row, notices nested. */
+/**
+ * Render a run for a terminal. One line per non-canonical row, its notices and
+ * its TODOs nested under it — wherever the row is listed, since a TODO rides on
+ * a converting, skipped or failed row alike — and one closing line counting
+ * the TODOs, so "did it convert my row" is answered by the output itself.
+ * A run with no TODO renders exactly as it did before TODOs existed.
+ */
 export function formatStoredMigrationReport(report: StoredMigrationReport): string[] {
   const lines: string[] = [];
   lines.push(
@@ -175,6 +222,7 @@ export function formatStoredMigrationReport(report: StoredMigrationReport): stri
       for (const n of row.notices) {
         lines.push(`      ${n.conversionId}: ${n.from} → ${n.to} at ${n.path}`);
       }
+      pushTodos(lines, row);
     }
   }
 
@@ -188,6 +236,7 @@ export function formatStoredMigrationReport(report: StoredMigrationReport): stri
     lines.push(`⚠ ${skipped.length} row(s) are outside this pass — each row's reason says why:`);
     for (const row of skipped) {
       lines.push(`  • ${row.type}/${row.name} ${describeScope(row)} — ${row.reason ?? 'skipped'}`);
+      pushTodos(lines, row);
     }
   }
 
@@ -196,7 +245,18 @@ export function formatStoredMigrationReport(report: StoredMigrationReport): stri
     lines.push(`✗ ${failed.length} row(s) could not be rewritten:`);
     for (const row of failed) {
       lines.push(`  • ${row.type}/${row.name} ${describeScope(row)} — ${row.reason ?? 'failed'}`);
+      pushTodos(lines, row);
     }
+  }
+
+  const withTodos = report.rows.filter((r) => r.todos.length > 0);
+  if (withTodos.length > 0) {
+    const sites = withTodos.reduce((sum, r) => sum + r.todos.length, 0);
+    lines.push(
+      `☐ TODO: ${sites} site(s) in ${withTodos.length} row(s) are left as stored — no conversion ` +
+        'can rewrite them without changing what they mean, so no run of this pass will. Each TODO ' +
+        'line above names the site and why; rewrite it by hand.',
+    );
   }
 
   if (report.scanned === 0) {
@@ -208,13 +268,22 @@ export function formatStoredMigrationReport(report: StoredMigrationReport): stri
         'a deployment that has never authored metadata looks like, and also what running ' +
         'from the wrong project root looks like — check the database named above.',
     );
-  } else if (converting.length === 0 && failed.length === 0) {
+  } else if (converting.length === 0 && failed.length === 0 && withTodos.length === 0) {
+    // Not printed beside a TODO: a site left as stored is exactly a row that is
+    // NOT on protocol, and the line would contradict the list above it.
     lines.push(
       `✓ Every row examined is already on protocol ${report.protocol} — ` +
         'the read-path conversion pass is a no-op here.',
     );
   }
   return lines;
+}
+
+/** A row's TODOs, nested under its line the way its notices are. */
+function pushTodos(lines: string[], row: StoredMigrationRow): void {
+  for (const t of row.todos) {
+    lines.push(`      TODO ${t.conversionId}: ${t.from} left as stored at ${t.path} — ${t.reason}`);
+  }
 }
 
 /** `[org=… package=… draft]` — only the parts that are not the default. */

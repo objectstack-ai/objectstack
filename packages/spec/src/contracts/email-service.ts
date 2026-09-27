@@ -69,7 +69,7 @@ export interface SendEmailInput {
   sentBy?: string;
   /**
    * Organization (tenant) id stamped verbatim onto the persisted
-   * `sys_email.organization_id` (#11741, Decision 2 of #11303).
+   * `sys_email.organization_id` (commit b706af987, Decision 2 of #11303).
    *
    * Pass-through only: the email service's writer runs under a constant
    * system context and MUST NOT resolve or fabricate an organization — a
@@ -188,7 +188,7 @@ export interface SendTemplateInput {
   // silently inert from the day it was declared; the "(when supported)" hedge
   // was the declaration admitting it. `organizationId` below is NOT a
   // replacement: it is the delivery row's tenant stamp (pass-through to
-  // `sys_email.organization_id`, #11741) and does not opt into any overlay
+  // `sys_email.organization_id`, commit b706af987) and does not opt into any overlay
   // resolution. If org-overlay template rows ever become a measured business
   // need, that is a new capability with its own ruling — not this key revived.
   /** Envelope sender override (otherwise template.fromOverride → service default). */
@@ -211,7 +211,7 @@ export interface SendTemplateInput {
   /**
    * Organization (tenant) id forwarded into the {@link SendEmailInput} this
    * template send performs, and stamped from there onto
-   * `sys_email.organization_id` (#11741). Same contract as
+   * `sys_email.organization_id` (commit b706af987). Same contract as
    * {@link SendEmailInput.organizationId}: pass-through only, optional,
    * absent stays legal. Distinct from the retired `org` member (removed
    * 2026-08-25, #11832), which declared template org-overlay *resolution*

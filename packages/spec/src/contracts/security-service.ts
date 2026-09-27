@@ -270,7 +270,7 @@ export interface ISecurityService {
    *    filter cached across requests keeps the FIRST request's vouch, and no
    *    later boundary can correct it. The invariant this rests on is that no
    *    filter object which can be vouched `'author'` outlives the request that
-   *    vouched it (#8794 / #8836).
+   *    vouched it (measured and pinned by commit 1850ebbb0).
    *
    * A host that must scope repeated queries re-calls this method; it does not
    * hold the returned object.

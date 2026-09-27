@@ -6,7 +6,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { EpochMs } from '../shared/epoch.zod';
 
-// Retirement prescriptions (#11846, ADR-0049 enforce-or-remove; maintainer
+// Retirement prescriptions (commit 0c2334f6c, ADR-0049 enforce-or-remove; maintainer
 // ruling 2026-08-27). Declared with `//` (never `/** */`) and ABOVE the enum's
 // JSDoc on purpose — build-docs takes the file's FIRST JSDoc as the reference
 // page's module blurb (the hook-body.zod.ts placement precedent).
@@ -58,7 +58,7 @@ export const RuntimeMode = z.enum([
   'production',  // Optimized, strict security
   'test',        // Mocked interfaces
   'provisioning', // Setup/Migration mode
-  // 'preview' was RETIRED in #11846 — see RUNTIME_MODE_PREVIEW_RETIRED above.
+  // 'preview' was RETIRED in commit 0c2334f6c — see RUNTIME_MODE_PREVIEW_RETIRED above.
 ], {
   // Only the value that USED to be legal gets the retirement prescription —
   // telling the author of a typo that their mode "was removed" would
@@ -70,7 +70,7 @@ export const RuntimeMode = z.enum([
 
 export type RuntimeMode = z.input<typeof RuntimeMode>;
 
-// ── `PreviewModeConfigSchema` was RETIRED here (#11846, ADR-0049) ────────────
+// ── `PreviewModeConfigSchema` was RETIRED here (commit 0c2334f6c, ADR-0049) ──
 //
 // The whole def — six authorable keys (`autoLogin` default true,
 // `simulatedRole` default 'admin', `simulatedUserName`, `readOnly`,
@@ -123,7 +123,7 @@ export const KernelContextSchema = lazySchema(() => z.object({
   features: z.record(z.string(), z.boolean()).default({}).describe('Global feature toggles'),
 
   /**
-   * RETIRED (#11846, ADR-0049 enforce-or-remove): the `previewMode` block —
+   * RETIRED (commit 0c2334f6c, ADR-0049 enforce-or-remove): the `previewMode` block —
    * declared as an auth bypass, enforced by nothing — is unwritable. The
    * schema is not `.strict()`, so a bare deletion would have Zod silently
    * STRIP the key (#3733, ADR-0104); the tombstone keeps the removal audible

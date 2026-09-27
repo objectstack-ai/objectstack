@@ -66,6 +66,10 @@ const STORED_ONLY_COLLECTIONS: Readonly<Record<string, string>> = {
  * Options for {@link applyConversionsToStoredItem} — everything
  * {@link ApplyConversionsOptions} offers except `includeRetired`, which this
  * seam pins to `true` (the whole point of the stored pass; see module doc).
+ *
+ * `onTodo` rides along unchanged: the stored-metadata migration pass passes it
+ * to list the sites a conversion left as stored for want of a lossless rewrite
+ * (ADR-0087 D3), which emit no notice and would otherwise read as canonical.
  */
 export type StoredConversionOptions = Omit<ApplyConversionsOptions, 'includeRetired'>;
 

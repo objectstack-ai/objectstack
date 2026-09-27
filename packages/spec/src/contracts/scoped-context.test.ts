@@ -291,7 +291,7 @@ describe('[#5945] the evidence bar is enforced, not just documented', () => {
 
 describe('[#16786] `updateById` DECLARES its answer, and the declaration is enforced', () => {
   /**
-   * The remainder of #16786, after PR #17255 landed the `objectql` half.
+   * The spec remainder (commit 6059b29c0), after PR #17255 landed the `objectql` half.
    *
    * ## Why a probe and not an `@ts-expect-error`
    *

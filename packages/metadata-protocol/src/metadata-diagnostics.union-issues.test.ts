@@ -193,7 +193,18 @@ describe('#5599 a stored `view` that is not a view is no longer badged valid', (
         // inherits `object`/`viewKind` from the shadowed entry (#2555), so a
         // stored lean overlay of a REAL view looks exactly like this.
         expect(computeMetadataDiagnostics('view', { isPinned: true, object: 'task', viewKind: 'list' })).toEqual({ valid: true });
-        expect(computeMetadataDiagnostics('view', { hidden: true, object: 'task', viewKind: 'list' })).toEqual({ valid: true });
+        expect(computeMetadataDiagnostics('view', { order: 2, object: 'task', viewKind: 'list' })).toEqual({ valid: true });
+        // [#20230] `hidden` used to stand in the line above. The overlay's
+        // `owner` / `hidden` are retired (ADR-0049): a body that still carries
+        // one is badged invalid with the retirement prescription at the key.
+        // A STORED row never reaches this badge with the key — the read path
+        // replays the chain first (`convertStoredItem`), and
+        // `view-overlay-owner-hidden-removed` strips it.
+        const bound = { object: 'task', viewKind: 'list' } as const;
+        const retired = computeMetadataDiagnostics('view', { ...bound, hidden: true });
+        expect(retired?.valid).toBe(false);
+        const atKey = retired?.errors?.find((e) => e.path === 'hidden');
+        expect(atKey?.message).toMatch(/^`view\.hidden` was removed in @objectstack\/spec/);
         // …while a stored row with NO binding is a row no object-bound read
         // path can serve — the #7741 dead row — and is badged invalid now.
         expect(computeMetadataDiagnostics('view', { isPinned: true })?.valid).toBe(false);
