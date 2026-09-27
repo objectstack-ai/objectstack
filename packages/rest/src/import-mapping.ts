@@ -23,6 +23,8 @@
  *     data. Tracked on framework#2611.
  */
 
+import { unknownImportMappingTargets } from '@objectstack/spec/data';
+
 export interface MappingArtifactLike {
     name: string;
     targetObject: string;
@@ -101,6 +103,49 @@ export async function resolveNamedMapping(
         }
     }
     return { ok: true, artifact };
+}
+
+/**
+ * [#20150] Refuse a mapping whose `fieldMapping` names a target that is no
+ * field of the object — BEFORE any row, so the dry run and the commit give the
+ * same answer.
+ *
+ * Without this the two paths disagreed: the dry run asked the engine's
+ * `validateData` for each row's verdict, which never judges the row's KEYS, so
+ * it answered `ok`; the commit reached the engine's write door, which does,
+ * and failed every row with `INVALID_FIELD`. A preview that promises the write
+ * breaks the #4633 contract (the dry run predicts the write).
+ *
+ * The verdict is `unknownImportMappingTargets` from `@objectstack/spec/data`,
+ * the ONE place that decides what a target may name; `os validate` asks the
+ * same function at author time, so the two cannot drift. It has no opinion on
+ * an object whose field map is unreadable or empty, and returns nothing there,
+ * so this refuses nothing the write would have accepted.
+ *
+ * The refusal carries the code the commit's per-row refusal already carries
+ * (`INVALID_FIELD`, 400) and opens with the same sentence, so a caller reading
+ * either path reads one answer.
+ *
+ * @param objectSchema The target object's definition as the import door
+ *   resolved it (`undefined` when it could not; then nothing is judged).
+ */
+export function refuseUnknownMappingTargets(
+    artifact: MappingArtifactLike,
+    objectName: string,
+    objectSchema: unknown,
+): MappingFailure | undefined {
+    const misses = unknownImportMappingTargets(artifact.fieldMapping, objectSchema);
+    if (misses.length === 0) return undefined;
+    const listed = misses.map((m) => `${m.path} "${m.target}"`).join(', ');
+    return {
+        ok: false, status: 400, code: 'INVALID_FIELD',
+        error:
+            `Unknown field '${misses[0].target}' on object '${objectName}': mapping "${artifact.name}" `
+            + `names ${misses.length === 1 ? 'a target' : `${misses.length} targets`} that ${misses.length === 1 ? 'is' : 'are'} `
+            + `no field of the object (${listed}). Every row would be refused on write, so the import is `
+            + 'refused before any row, on the dry run and the commit alike. Point each target at a field '
+            + `the object declares.`,
+    };
 }
 
 const first = (v: string | string[]): string => (Array.isArray(v) ? v[0] : v);

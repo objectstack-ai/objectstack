@@ -78,7 +78,7 @@ import {
   declareTargetedTable,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import { nextUtcCalendarDay } from '@objectstack/core';
+import { nextUtcCalendarDay, temporalStorageForm } from '@objectstack/core';
 import {
   applyIndexKeyParts,
   buildIndexName,
@@ -512,36 +512,10 @@ function normalizeSqliteDatetimeOutput(value: unknown): unknown {
  * interpret is never silently rewritten.
  */
 function canonicalUtcDatetime(value: unknown): unknown {
-  if (value == null) return value;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? value : value.toISOString();
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return value;
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? value : d.toISOString();
-  }
-  if (typeof value !== 'string') return value;
-  const s = value.trim();
-  if (s === '') return value;
-  // A bare integer (in either JS or string form) is epoch milliseconds — the
-  // shape better-sqlite3 wrote for every `Date` bound before this convention.
-  if (/^-?\d+$/.test(s)) {
-    const d = new Date(Number(s));
-    return Number.isNaN(d.getTime()) ? value : d.toISOString();
-  }
-  // A bare calendar day means midnight UTC. Stated explicitly so it cannot be
-  // re-read as midnight in the server's local zone — the Postgres divergence
-  // where the same query lands a row on a different calendar day.
-  const iso = /^\d{4}-\d{2}-\d{2}$/.test(s)
-    ? `${s}T00:00:00.000Z`
-    // Zone-naive `YYYY-MM-DD[ T]HH:MM[:SS[.fff]]` → its wall-clock IS UTC, the
-    // same rule `CURRENT_TIMESTAMP`-written rows take on read (ADR-0074).
-    : /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)
-      ? `${s.replace(' ', 'T')}Z`
-      : s;
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
+  // [#20176] The rule is `@objectstack/core`'s — the same function
+  // `driver-memory` and the engine's per-aggregation `filter` / `having` read.
+  // This body was a word-for-word copy of it until the rule was lifted there.
+  return temporalStorageForm(value, 'datetime');
 }
 
 /**
@@ -618,27 +592,10 @@ function mysqlDatetimeLiteral(canonical: unknown): unknown {
  * interpret is never silently rewritten.
  */
 function canonicalTimeOfDay(value: unknown): unknown {
-  if (value == null) return value;
-  if (typeof value === 'string') {
-    const s = value.trim();
-    if (s === '') return value;
-    const m = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/.exec(s);
-    if (m) {
-      const [, hh, mm, ss = '00', frac] = m;
-      if (Number(hh) > 23 || Number(mm) > 59 || Number(ss) > 59) return value;
-      const ms = frac ? `${frac}000`.slice(0, 3) : '000';
-      return ms === '000' ? `${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}.${ms}`;
-    }
-  }
-  // Everything that is not a bare time-of-day — `Date`, epoch ms, full ISO or
-  // zone-naive timestamp strings — is an instant: delegate its interpretation
-  // to the ONE function that owns instants, then keep the UTC time-of-day.
-  const instant = canonicalUtcDatetime(value);
-  if (typeof instant === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(instant)) {
-    const time = instant.slice(11, 23);
-    return time.endsWith('.000') ? time.slice(0, 8) : time;
-  }
-  return value;
+  // [#20176] The rule is `@objectstack/core`'s — see {@link canonicalUtcDatetime}.
+  // A value that is not a bare time-of-day is read as an instant by the
+  // `datetime` rule there and keeps its UTC time-of-day, as it did here.
+  return temporalStorageForm(value, 'time');
 }
 
 /**
@@ -14704,23 +14661,14 @@ export class SqlDriver implements IDataDriver {
    * {@link withPostgresCalendarDayAsText} — so on every dialect a `date`
    * column now arrives here as TEXT and no driver-materialised `Date` reaches
    * this helper at all. ⛔ Do not "repair" a residual date skew by switching
-   * the getters below to their local twins; that reintroduces #11389 in the
+   * the rule's UTC getters to their local twins; that reintroduces #11389 in the
    * mirror direction, and `sql-driver-11389-date-tz-skew.test.ts` pins it.
    */
   protected toDateOnly(value: any): any {
-    if (value == null) return value;
-    if (value instanceof Date) {
-      if (Number.isNaN(value.getTime())) return value;
-      const y = value.getUTCFullYear();
-      const m = String(value.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(value.getUTCDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    }
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
-    }
-    return value;
+    // [#20176] The rule — UTC getters included — is `@objectstack/core`'s
+    // `temporalStorageForm`, the function `driver-memory` and the engine's
+    // per-aggregation `filter` / `having` read too; this body was a copy of it.
+    return temporalStorageForm(value, 'date');
   }
 
   /**

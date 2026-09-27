@@ -191,7 +191,10 @@ describe('#19889 §4 — what stays accepted, at BOTH doors', () => {
     ['$in: [] stays the declared predicate', { stage: { $in: [] } }],
     ['$nin keeps its list', { stage: { $nin: ['lost'] } }],
     ['$between keeps its pair', { amount: { $between: [1, 9] } }],
-    ['$ne carrying an array — not this ruling', { stage: { $ne: ['won'] } }],
+    // [#19886] A row `$ne carrying an array — not this ruling` stood here. Its
+    // face half is FALSE since ruling A on #19886 (record 5805254639): the face
+    // refuses that shape now, in its own `$ne` sentence. It is re-judged, not
+    // dropped, in the dedicated test after this table.
     ['an array inside a nested-relation spec — the face never descends one', { owner: { region: ['NA'] } }],
     ['$eq array inside a nested-relation spec — likewise', { owner: { region: { $eq: ['NA'] } } }],
   ])('%s', (_label, where) => {
@@ -200,6 +203,27 @@ describe('#19889 §4 — what stays accepted, at BOTH doors', () => {
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
     // Accepted means KEPT: the door returns the document it was given.
     expect(result.data).toEqual(where);
+  });
+
+  it('$ne carrying an array is not the EQUALITY arm\'s at either door', () => {
+    // What the old §4 row guarded, kept: the equality arm does not claim `$ne`.
+    // What it can no longer say: that the face PASSES the shape. Since ruling A
+    // on #19886 the face refuses it — in the `$ne` sentence with the `$nin`
+    // remedy, never the equality sentence with `$in` / `$contains`.
+    const where = { stage: { $ne: ['won'] } };
+    const face = faceRefusal(where);
+    expect(face.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(face.status).toBe(400);
+    expect(face.message).toMatch(/^Operator "\$ne" on field "stage" requires a single comparable value/);
+    expect(face.message).toContain('{"$nin": […]}');
+    expect(face.message).not.toContain('{"$in": […]}');
+    // The carrier walk's EQUALITY arm raises nothing for it. Asserted on the
+    // equality sentences, not on `success`: whether this walk should judge
+    // `$ne` is outside ruling A's letter (it names the face and the operator
+    // slot), and a `success: true` pin here would read as a ruling nobody made.
+    const result = FilterConditionSchema.safeParse(where);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues.filter((i) => /implicit-equality comparand|Operator "\$eq"/.test(i.message))).toEqual([]);
   });
 
   it('the { $field } reference an equality spelling lowers to passes both doors', () => {

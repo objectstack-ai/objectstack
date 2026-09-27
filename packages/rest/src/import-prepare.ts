@@ -12,7 +12,9 @@ import {
     buildFieldMetaMap,
     type ExportFieldMeta,
 } from './export-format.js';
-import { resolveNamedMapping, applyMappingToRows, type MappingArtifactLike } from './import-mapping.js';
+import {
+    resolveNamedMapping, applyMappingToRows, refuseUnknownMappingTargets, type MappingArtifactLike,
+} from './import-mapping.js';
 import { asXlsxLoadInput, loadExcelJs } from './xlsx-module.js';
 
 /**
@@ -392,22 +394,15 @@ export async function prepareImportRequest(
         return { ok: false, status: 413, code: 'PAYLOAD_TOO_LARGE', error: `Import limit is ${maxRows} rows per request (got ${rows.length}).` };
     }
 
-    // Apply the named mapping's fieldMapping pipeline (rename + transforms;
-    // strict projection — only mapped targets reach the write path). Inline
-    // `mapping` was empty in this branch, so rows still carry raw headers.
-    if (mappingArtifact) {
-        const applied = applyMappingToRows(rows, mappingArtifact);
-        if (!applied.ok) return applied;
-        rows = applied.rows;
-    }
-
     // Resolve the object's field metadata so cells coerce to storage values
     // (booleans, numbers, dates→ISO, select label→code) and lookup names resolve
     // to record ids. Best-effort: a failed lookup leaves `metaMap` empty and
     // every value passes through untouched.
     let metaMap = new Map<string, ExportFieldMeta>();
+    // Hoisted out of the block below so the named mapping's targets can be
+    // judged against the same definition (#20150).
+    let schema: any = undefined;
     try {
-        let schema: any = undefined;
         if (typeof p.getMetaItem === 'function') {
             // `getMetaItem` answers the `{ type, name, item, lock, … }`
             // envelope — one shape, on every read path, since #5563. The
@@ -436,6 +431,22 @@ export async function prepareImportRequest(
             } catch { /* authored-only option matching */ }
         }
     } catch { /* pass-through coercion */ }
+
+    if (mappingArtifact) {
+        // [#20150] A target that names no field of the object is refused HERE,
+        // before any row — on the dry run and the commit alike, because both
+        // arrive through this function. Judged against the definition resolved
+        // above; an unresolved or field-less one is judged by nobody.
+        const refused = refuseUnknownMappingTargets(mappingArtifact, objectName, schema);
+        if (refused) return refused;
+
+        // Apply the named mapping's fieldMapping pipeline (rename + transforms;
+        // strict projection — only mapped targets reach the write path). Inline
+        // `mapping` was empty in this branch, so rows still carry raw headers.
+        const applied = applyMappingToRows(rows, mappingArtifact);
+        if (!applied.ok) return applied;
+        rows = applied.rows;
+    }
 
     return {
         ok: true,

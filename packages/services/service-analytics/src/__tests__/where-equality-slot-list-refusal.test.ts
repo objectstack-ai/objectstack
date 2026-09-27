@@ -201,8 +201,23 @@ describe('[#19888] the neighbouring shapes compile exactly as before', () => {
     });
   });
 
-  it('$ne with a list is not judged by this gate (not ruling 乙’s)', () => {
-    expect(() => tree({ stage: { $ne: ['won'] } })).not.toThrow(/requires a single comparable value/);
+  it('$ne with a list is not judged by this gate (not ruling 乙’s) — the shared face refuses it in the $ne sentence', () => {
+    // [#19886] RE-JUDGED. This pinned `.not.toThrow(/requires a single
+    // comparable value/)`, which was true while no face judged `$ne`. Ruling A
+    // on #19886 (record 5805254639) put the refusal on the shared face, and
+    // this door runs that face, so the shape is refused here with the face's
+    // own `$ne` sentence. What the row protects is unchanged: THIS door's
+    // equality-slot gate does not claim `$ne`, so the words are the `$ne`
+    // arm's (`$nin` remedy), never the equality slot's (`$in` remedy).
+    const where = { stage: { $ne: ['won'] } };
+    const err = refusalOf(() => tree(where));
+    expectEnvelope(err);
+    expect(err.message).toBe(refusalOf(() => assertListComparandShapes(where)).message);
+    expect(err.message.startsWith('Operator "$ne" on field "stage" requires a single comparable value')).toBe(true);
+    expect(err.message).toContain('For "none of these values" use {"$nin": […]}');
+    expect(err.message).not.toContain(REMEDY);
+    expect(err.message.startsWith(EQ('stage'))).toBe(false);
+    expect(err.message.startsWith(IMPLICIT('stage'))).toBe(false);
   });
 });
 

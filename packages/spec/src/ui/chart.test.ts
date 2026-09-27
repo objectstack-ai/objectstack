@@ -704,7 +704,7 @@ describe('#5022 — ChartDrillDownSchema', () => {
   });
 
   it.each([
-    ['mode', 'TABLE / PIVOT / METRIC'],
+    ['mode', 'object-data-table'],
     ['report', 'METRIC / PIVOT'],
     ['view', 'read by no renderer at all'],
     ['sort', 'read by no renderer'],

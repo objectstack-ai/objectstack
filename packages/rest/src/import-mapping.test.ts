@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { applyMappingToRows, type MappingArtifactLike } from './import-mapping';
+import { applyMappingToRows, refuseUnknownMappingTargets, type MappingArtifactLike } from './import-mapping';
 
 const artifact = (fieldMapping: MappingArtifactLike['fieldMapping']): MappingArtifactLike => ({
     name: 'm', targetObject: 'o', fieldMapping,
@@ -62,5 +62,44 @@ describe('applyMappingToRows — transform semantics', () => {
             artifact([{ source: 'A', target: 'a', transform: 'zip' as never }]),
         );
         expect(r).toMatchObject({ ok: false, status: 400, code: 'UNSUPPORTED_TRANSFORM' });
+    });
+});
+
+describe('refuseUnknownMappingTargets — the door verdict (#20150)', () => {
+    const object = { name: 'o', fields: { a: { type: 'text' }, first: { type: 'text' } } };
+
+    it('refuses a target that names no field with the commit\'s own code and status', () => {
+        const r = refuseUnknownMappingTargets(
+            artifact([{ source: 'A', target: 'a' }, { source: 'B', target: 'b' }]),
+            'o',
+            object,
+        );
+        expect(r).toMatchObject({ ok: false, status: 400, code: 'INVALID_FIELD' });
+        expect(r?.error).toContain("Unknown field 'b' on object 'o'");
+        expect(r?.error).toContain('fieldMapping[1].target "b"');
+    });
+
+    it('names every target that misses, split elements included', () => {
+        const r = refuseUnknownMappingTargets(
+            artifact([{ source: 'N', target: ['first', 'last'], transform: 'split' }, { source: 'Z', target: 'zz' }]),
+            'o',
+            object,
+        );
+        expect(r?.error).toContain('fieldMapping[0].target[1] "last"');
+        expect(r?.error).toContain('fieldMapping[1].target "zz"');
+    });
+
+    it('passes a mapping whose targets resolve, provisioned columns included', () => {
+        expect(refuseUnknownMappingTargets(
+            artifact([{ source: 'A', target: 'a' }, { source: 'O', target: 'owner_id' }, { source: 'I', target: 'id' }]),
+            'o',
+            object,
+        )).toBeUndefined();
+    });
+
+    it('has no opinion when the object definition did not resolve or declares no fields', () => {
+        const bad = artifact([{ source: 'B', target: 'b' }]);
+        expect(refuseUnknownMappingTargets(bad, 'o', undefined)).toBeUndefined();
+        expect(refuseUnknownMappingTargets(bad, 'o', { name: 'o', fields: {} })).toBeUndefined();
     });
 });

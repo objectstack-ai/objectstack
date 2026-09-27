@@ -1219,18 +1219,24 @@ describe('FilterBuilder enhancements', () => {
 // ==========================================
 
 describe('ObjectStackClient.automation', () => {
-    it('should list flows', async () => {
-        const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { flows: ['flow_a', 'flow_b'], total: 2, hasMore: false },
-        });
+    // [#19543, door ④] `automation.list` is retired with `GET /api/v1/automation`;
+    // the flow list is `meta.getItems('flow')` (`GET /api/v1/meta/flow`).
+    it('declares no `list` — the retired flow-list door has no SDK method', () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: {} });
+        expect('list' in client.automation).toBe(false);
+        // @ts-expect-error `automation.list` was removed; calling it is a compile error.
+        void client.automation.list;
+        // Anti-vacuity: the namespace itself is live and its sibling reads survive.
+        expect(typeof client.automation.get).toBe('function');
+        expect(typeof client.automation.getRuntimeStatus).toBe('function');
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 
-        const result = await client.automation.list();
-        expect(fetchMock).toHaveBeenCalledWith(
-            'http://localhost:3000/api/v1/automation',
-            expect.any(Object),
-        );
-        expect(result.flows).toEqual(['flow_a', 'flow_b']);
+    it('the replacement read — meta.getItems(\'flow\') — targets GET /api/v1/meta/flow', async () => {
+        const { client, fetchMock } = createMockClient({ success: true, data: { type: 'flow', items: [] } });
+        await client.meta.getItems('flow');
+        expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/meta/flow');
+        expect(fetchMock.mock.calls[0][1]?.method ?? 'GET').toBe('GET');
     });
 
     it('should get a flow by name', async () => {
