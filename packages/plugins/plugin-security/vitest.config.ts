@@ -84,6 +84,15 @@ export default defineConfig({
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
       },
+      // [#20212] `rls-null-comparand-fails-closed.test.ts` imports `InMemoryDriver`
+      // as a VALUE: one policy must answer the same on the SQL family and on
+      // driver-memory, whose matcher answers the refused null shapes its own way.
+      // Same reason as `driver-sql` above: read the source in this checkout, not
+      // a `dist/` that may be behind it.
+      {
+        find: /^@objectstack\/driver-memory$/,
+        replacement: path.resolve(__dirname, '../../drivers/driver-memory/src/index.ts'),
+      },
     ],
   },
 });
