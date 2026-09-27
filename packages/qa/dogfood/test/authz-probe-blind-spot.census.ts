@@ -358,11 +358,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // Both carry `domain: '/automation'`, an EXISTING key, so `reachable` moves
     // with `population`, `blindSpot` stays 0 and `keys` stays 21 — a population
     // that grows inside an already-classified domain mints nothing new.
-    population: 82,
-    reachable: 82,
+    // [#19543] 82 -> 81: the `GET /automation` flow-list row left with its
+    // route (door ④ — the list is `GET /meta/flow`). It carried
+    // `domain: '/automation'`, a key other rows still carry, so `reachable`
+    // moves with `population`, `blindSpot` stays 0 and `keys` stays 21.
+    population: 81,
+    reachable: 81,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 82, "domain: '": 82, RouteLedgerEntry: 2 },
+    controls: { "route: '": 81, "domain: '": 81, RouteLedgerEntry: 2 },
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +

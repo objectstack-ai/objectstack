@@ -351,10 +351,21 @@ describe('HttpDispatcher', () => {
             ]);
         });
 
-        it('should list flows via GET /', async () => {
+        // [#19543, door ④] The flow list is RETIRED — flows are listed through
+        // `GET /meta/flow`. The domain keeps no `GET /` branch, so it answers
+        // `handled: false` (the dispatcher's ROUTE_NOT_FOUND, pinned through
+        // the real `dispatch()` in `domain-handler-registry.test.ts`), and the
+        // engine's name enumeration is never reached from HTTP even though the
+        // contract still declares it.
+        it('GET / is retired — unhandled, and listFlows is never called', async () => {
             const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
-            expect(result.handled).toBe(true);
-            expect(result.response?.body?.data?.flows).toEqual(['flow_a', 'flow_b']);
+            expect(result.handled).toBe(false);
+            expect(result.response).toBeUndefined();
+            expect(mockAutomationService.listFlows).not.toHaveBeenCalled();
+            // …while POST at the same path (createFlow) is untouched.
+            const created = await dispatcher.handleAutomation('', 'POST', { name: 'flow_a' }, FLOW_AUTHOR());
+            expect(created.handled).toBe(true);
+            expect(mockAutomationService.registerFlow).toHaveBeenCalledTimes(1);
         });
 
         it('should return per-flow runtime enable/bound state via GET /_status', async () => {
@@ -1324,18 +1335,21 @@ describe('HttpDispatcher', () => {
         });
 
         describe('handleAutomation with async service', () => {
+            // [#19543] Probed through `GET /_status` — the flow-list route this
+            // case used to read is retired, and the subject is service
+            // RESOLUTION, which any served route of the domain exercises.
             it('should resolve automation service from Promise (async factory)', async () => {
                 const mockAuto = {
-                    listFlows: vi.fn().mockResolvedValue(['f1']),
+                    getFlowRuntimeStates: vi.fn().mockReturnValue([{ name: 'f1', enabled: true, bound: true }]),
                 };
                 (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
                     if (name === 'automation') return Promise.resolve(mockAuto);
                     return null;
                 });
 
-                const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
+                const result = await dispatcher.handleAutomation('_status', 'GET', {}, AUTHED_CALLER());
                 expect(result.handled).toBe(true);
-                expect(result.response?.body?.data?.flows).toEqual(['f1']);
+                expect(result.response?.body?.data?.flows).toEqual([{ name: 'f1', enabled: true, bound: true }]);
             });
 
             // [#4093 follow-up] Was `handled: false` → 404; now 501 with the
@@ -1345,7 +1359,7 @@ describe('HttpDispatcher', () => {
                 (kernel as any).getService = vi.fn().mockResolvedValue(null);
                 (kernel as any).services = new Map();
 
-                const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
+                const result = await dispatcher.handleAutomation('_status', 'GET', {}, AUTHED_CALLER());
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(501);
                 expect(result.response?.body?.error?.message ?? '').toContain('service-automation');
@@ -1400,13 +1414,13 @@ describe('HttpDispatcher', () => {
 
         it('should work with synchronous getService returning service directly', async () => {
             const syncAuto = {
-                listFlows: vi.fn().mockResolvedValue(['flow_x']),
+                getFlowRuntimeStates: vi.fn().mockReturnValue([{ name: 'flow_x', enabled: true, bound: true }]),
             };
             (kernel as any).getService = vi.fn().mockReturnValue(syncAuto);
 
-            const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
+            const result = await dispatcher.handleAutomation('_status', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
-            expect(result.response?.body?.data?.flows).toEqual(['flow_x']);
+            expect(result.response?.body?.data?.flows).toEqual([{ name: 'flow_x', enabled: true, bound: true }]);
         });
     });
 
@@ -1453,13 +1467,13 @@ describe('HttpDispatcher', () => {
 
         it('should prefer getServiceAsync over getService for automation', async () => {
             const asyncAuto = {
-                listFlows: vi.fn().mockResolvedValue(['flow_async']),
+                getFlowRuntimeStates: vi.fn().mockReturnValue([{ name: 'flow_async', enabled: true, bound: true }]),
             };
             (kernel as any).getServiceAsync = vi.fn().mockResolvedValue(asyncAuto);
 
-            const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
+            const result = await dispatcher.handleAutomation('_status', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
-            expect(result.response?.body?.data?.flows).toEqual(['flow_async']);
+            expect(result.response?.body?.data?.flows).toEqual([{ name: 'flow_async', enabled: true, bound: true }]);
             expect((kernel as any).getServiceAsync).toHaveBeenCalledWith('automation');
         });
 
@@ -3342,7 +3356,7 @@ describe('HttpDispatcher', () => {
             const stub = stubbed({
                 execute: vi.fn().mockResolvedValue({ success: true, output: undefined, durationMs: 0 }),
                 trigger: vi.fn().mockResolvedValue({ success: true }),
-                listFlows: vi.fn().mockResolvedValue([]),
+                getFlowRuntimeStates: vi.fn().mockReturnValue([]),
                 registerFlow: vi.fn(),
             });
             serveOnly('automation', stub);
@@ -3358,8 +3372,10 @@ describe('HttpDispatcher', () => {
             // one row the capability keeps the row measuring what it is named
             // after; the execution rows keep the ordinary caller, which is
             // exactly the scope line #10145 drew.
+            // [#19543] The GET row reads `/_status`: the flow list at `GET /`
+            // is retired, and a row naming it would pin a route nobody serves.
             const rows = [
-                ['', 'GET', AUTHED_CALLER],
+                ['_status', 'GET', AUTHED_CALLER],
                 ['', 'POST', FLOW_AUTHOR],
                 ['trigger/x', 'POST', AUTHED_CALLER],
                 ['x/trigger', 'POST', AUTHED_CALLER],
@@ -3370,17 +3386,17 @@ describe('HttpDispatcher', () => {
             }
             expect(stub.execute).not.toHaveBeenCalled();
             expect(stub.trigger).not.toHaveBeenCalled();
-            expect(stub.listFlows).not.toHaveBeenCalled();
+            expect(stub.getFlowRuntimeStates).not.toHaveBeenCalled();
             expect(stub.registerFlow).not.toHaveBeenCalled();
         });
 
         it('/automation — a degraded engine keeps serving', async () => {
-            const svc = degraded({ listFlows: vi.fn().mockResolvedValue(['flow_a']) });
+            const svc = degraded({ getFlowRuntimeStates: vi.fn().mockReturnValue([{ name: 'flow_a', enabled: true, bound: true }]) });
             serveOnly('automation', svc);
 
-            const result = await dispatcher.handleAutomation('', 'GET', {}, AUTHED_CALLER());
+            const result = await dispatcher.handleAutomation('_status', 'GET', {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
-            expect(result.response?.body?.data?.flows).toEqual(['flow_a']);
+            expect(result.response?.body?.data?.flows).toEqual([{ name: 'flow_a', enabled: true, bound: true }]);
         });
 
         // [#4087] The two `/storage` cases this block carried are gone with the

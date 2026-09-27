@@ -109,6 +109,9 @@ function makeDispatcher() {
     const registerFlow = vi.fn();
     const unregisterFlow = vi.fn();
     const listFlows = vi.fn(async () => ['crm_escalation_flow']);
+    // [#19543] The flow inventory's surviving HTTP read — `GET /_status` — now
+    // that the `GET /` flow list is retired.
+    const getFlowRuntimeStates = vi.fn(() => [{ name: 'crm_escalation_flow', enabled: true, bound: true }]);
 
     const ql: any = {
         executeAction,
@@ -126,7 +129,7 @@ function makeDispatcher() {
         listObjects: vi.fn(async () => [objectDef]),
         getObject: vi.fn(async () => objectDef),
     };
-    const automation: any = { execute, registerFlow, unregisterFlow, listFlows, handlerReady: true };
+    const automation: any = { execute, registerFlow, unregisterFlow, listFlows, getFlowRuntimeStates, handlerReady: true };
     const kernel: any = {
         context: {
             getService: (n: string) =>
@@ -136,7 +139,7 @@ function makeDispatcher() {
                             : null,
         },
     };
-    return { dispatcher: new HttpDispatcher(kernel), executeAction, execute, registerFlow, unregisterFlow, listFlows };
+    return { dispatcher: new HttpDispatcher(kernel), executeAction, execute, registerFlow, unregisterFlow, listFlows, getFlowRuntimeStates };
 }
 
 const DENY_MESSAGE = 'Authentication is required to access this endpoint.';
@@ -295,7 +298,19 @@ describe('/automation — anonymous baseline covers the WHOLE domain (#5519)', (
         expect(execute).not.toHaveBeenCalled();
     }, 60_000);
 
-    it('401s an anonymous `GET /` — the flow inventory is not public', async () => {
+    it('401s an anonymous `GET /_status` — the flow inventory is not public', async () => {
+        const { dispatcher, getFlowRuntimeStates } = makeDispatcher();
+        const r: any = await dispatcher.handleAutomation('/_status', 'GET', undefined, anonUnresolved());
+
+        expectAnonymousDenial(r.response);
+        expect(getFlowRuntimeStates).not.toHaveBeenCalled();
+    }, 60_000);
+
+    it('[#19543] 401s an anonymous `GET /` too — the floor precedes routing, even for the retired flow list', async () => {
+        // Door ④ retired the `GET /` flow list; a transport that forwards every
+        // automation path still delivers it here, and the domain-wide floor
+        // answers before any route is resolved — an anonymous caller learns
+        // neither that the route is gone nor anything else about the domain.
         const { dispatcher, listFlows } = makeDispatcher();
         const r: any = await dispatcher.handleAutomation('/', 'GET', undefined, anonUnresolved());
 
@@ -345,12 +360,21 @@ describe('/automation — anonymous baseline covers the WHOLE domain (#5519)', (
         expect(execute).toHaveBeenCalled();
     }, 60_000);
 
-    it('lets an authenticated caller list flows', async () => {
+    it('lets an authenticated caller read the flow inventory (`GET /_status`)', async () => {
+        const { dispatcher, getFlowRuntimeStates } = makeDispatcher();
+        const r: any = await dispatcher.handleAutomation('/_status', 'GET', undefined, authed());
+
+        expect(r.response.status).toBe(200);
+        expect(getFlowRuntimeStates).toHaveBeenCalled();
+    }, 60_000);
+
+    it('[#19543] an authenticated `GET /` is unhandled — the flow list is retired, and listFlows is never called', async () => {
         const { dispatcher, listFlows } = makeDispatcher();
         const r: any = await dispatcher.handleAutomation('/', 'GET', undefined, authed());
 
-        expect(r.response.status).toBe(200);
-        expect(listFlows).toHaveBeenCalled();
+        expect(r.handled).toBe(false);
+        expect(r.response).toBeUndefined();
+        expect(listFlows).not.toHaveBeenCalled();
     }, 60_000);
 });
 

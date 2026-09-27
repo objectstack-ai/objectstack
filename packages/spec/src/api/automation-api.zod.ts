@@ -22,8 +22,8 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * The flow LIST is not on this door. Flows are metadata (ADR-0106), and the
  * governed read of them is `GET /api/v1/meta/flow` (`client.meta.getItems`);
  * the former `GET /api/v1/automation` list route, its request/response schemas
- * and `client.automation.list` were retired under #19543 (ADR-0087 semantic
- * entry `automation-flow-list-route-retired`).
+ * and `client.automation.list` are retired (ADR-0087 semantic entry
+ * `automation-flow-list-route-retired`).
  *
  * @example Endpoints
  * ```

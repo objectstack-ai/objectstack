@@ -5414,14 +5414,12 @@ export class ObjectStackClient {
           return this.unwrapResponse<AutomationResult>(res);
       },
 
-      /**
-       * List all registered automation flows
-       */
-      list: async (): Promise<{ flows: string[]; total: number; hasMore: boolean }> => {
-          const route = this.getRoute('automation');
-          const res = await this.fetch(`${this.baseUrl}${route}`);
-          return this.unwrapResponse(res);
-      },
+      // [#19543, door ④] No `list` here: `GET /api/v1/automation` is
+      // retired. Flows are metadata (ADR-0106) — list them with
+      // `client.meta.getItems('flow')`, which answers the definitions rather
+      // than bare names; per-flow enablement is `getRuntimeStatus`. The method
+      // was removed rather than re-pointed so a caller learns at compile time,
+      // not from a 404.
 
       /**
        * Get a flow definition by name
