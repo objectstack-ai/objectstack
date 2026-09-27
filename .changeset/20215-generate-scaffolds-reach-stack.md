@@ -20,6 +20,4 @@ fix(cli): what `os generate` writes now reaches the stack, or the command says i
 - The barrel step asks the compiler whether the barrel already exports the name, instead of searching the file's text. `os g view order` after `os g view order_line` had found `order` inside `orderLine` and exported nothing.
 - The `flow` scaffold's header states the `requires` it needs.
 
-These two statements in this release's namespace-prefix entry no longer hold: "`dashboard` and `skill` scaffolds name no object and never read the config", and a view's own `name` being "written as before".
-
 **Projects scaffolded by an earlier release** keep their config. `os g` now tells you when a file it wrote is not wired, and prints the lines to add.
