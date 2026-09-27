@@ -17,7 +17,7 @@ Clause-②: no (narrowing)
 
 - `!(record.status in [['closed', 'archived']])` (a list nested in an `in` list) admitted and stored every write the `check` was written to refuse, and a `using` read returned every row on driver-memory.
 - `current_user.org_user_ids != 'x'` and `current_user.org_user_ids > 'a'` (a membership set on a comparison with no field) folded to "no restriction": every write admitted, every row read, on every driver.
-- `record.status > ['m']` compared the list as the string `'m'`, and `record.reviewer_id > current_user` compared the whole caller object as a string; the latter admitted and stored every write.
+- `record.status > ['m']` compared the list as the string `'m'` on the write check, while the analytics read scope bound the whole list as one SQL parameter. `record.reviewer_id > current_user` compared the whole caller object as a string and admitted and stored every write; in this release the RLS compiler's comparand faces (#20212) already drop that policy, and this change refuses it at the lowering for every caller of the compiler.
 - `record.status != record.tags`, its negation `!(record.status == record.tags)`, and the mirror `record.tags != record.status`, with `tags` a `json` field or a `multiple` lookup, admitted and stored every write.
 
 What changes:
