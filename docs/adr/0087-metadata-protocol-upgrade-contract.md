@@ -382,7 +382,8 @@ does both halves:
 - **The policy, stated:** until GA, a metadata-facing break MAY ship one-step
   without a load window. The exemption covers the *window* only — never the
   *chain*: every such break must land as a chain step (a `retiredFromLoadPath`
-  conversion when lossless, a semantic TODO when not) in the same release.
+  conversion when lossless, and one D3 semantic entry per retirement family in
+  every case; D2 carries the mechanical data repair only) in the same release.
   After GA the full D2 ladder applies: lossless breaks ship a live conversion
   entry or they do not ship.
 

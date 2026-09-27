@@ -248,7 +248,7 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       窄全盲(#3883 从 `defineAction` 的输入删了三个键,快照没动)。它的门还住在另
       一个 workflow(`TypeScript Type Check`,不是 `Check Generated Artifacts`),读
       的是构建出的 `dist/*.d.ts`。
-- [ ] **Conversion + 链步 + 精确键 `RETIRED_KEYS_BY_MAJOR` 条目**(§3)。
+- [ ] **Conversion + 链步 + 精确键 `RETIRED_KEYS_BY_MAJOR` 条目 + 每家族一条 D3 `semantic` 条目**(§3)。
 - [ ] **Liveness 台账** —— 按 §2 的路线表,带 `verifiedAt`。更新 README 的按类型行
       **连同计数**(那张表狠狠漂过一次;用 README 里的 python 片段重新生成计数,不
       要手改)。
