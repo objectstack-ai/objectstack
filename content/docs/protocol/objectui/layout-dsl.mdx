@@ -550,10 +550,10 @@ is a **parse failure** — a loud rejection, not a silent no-op.
 </Callout>
 
 Looking for tabs that carry their own `name`, `icon`, `filter`, `order`,
-`pinned` and `isDefault`? That surface exists, but it belongs to **list** views,
-not forms: `ui/ViewTab` declares exactly nine keys (`filter`, `icon`,
-`isDefault`, `label`, `name`, `order`, `pinned`, `view`, `visible`), and each
-tab points at a named list view. See
+`pinned` and `isDefault`? That surface belongs to a **page list's** preset bar
+(`userFilters.tabs`), not to forms: `ui/ViewTab` declares exactly nine keys (`filter`,
+`icon`, `isDefault`, `label`, `name`, `order`, `pinned`, `view`, `visible`). A list
+view has no `tabs` key — an object's tab strip lists its named `listViews`. See
 [View Reference → ViewTab](/docs/references/ui/view#viewtab).
 
 ## Responsive Layout Modifiers

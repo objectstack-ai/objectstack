@@ -2769,8 +2769,39 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Appearance (Airtable Interface parity) */
   appearance: AppearanceConfigSchema.optional().describe('Appearance and visualization configuration'),
 
-  /** Tabs (Airtable Interface parity) */
-  tabs: z.array(ViewTabSchema).optional().describe('Tab definitions for multi-tab view interface'),
+  /**
+   * [#20301] REMOVED — ADR-0049 enforce-or-remove, triage verdict RETIRE by
+   * the maintainer's #18900 criterion (mainstream named-view switching is
+   * already delivered here, by `listViews`). The key parsed, was stored, and
+   * drew nothing: objectui's `TabBar` — the one component that reads a
+   * `ViewTab[]` — has zero production mounts, and the tab strip above an
+   * object's records is the saved-view switcher (`ViewTabBar`), which renders
+   * one tab per named list view and reads no `tabs` key. Measured with lit
+   * controls and recorded on the ledger row (`liveness/view.json`,
+   * `/props/list/children/tabs`).
+   *
+   * Tombstoned rather than deleted so the removal is audible in both channels
+   * an upgrading author hits — `tsc` (the input type is `never`) and the parse
+   * (the prescription, not a bare unrecognized-key report) — the `pageName`
+   * precedent above on this same strict shape. The tombstone reaches every
+   * list-view door built from this shape: `ListViewSchema`,
+   * `ObjectListViewSchema` (a container's `list` / `listViews`, an object's
+   * `listViews`) and the flattened overlay arm.
+   *
+   * ⛔ `ViewTabSchema` itself is NOT retired: `UserFiltersSchema.tabs` — the
+   * page-only preset bar — reuses it and renders. D2: `view-list-tabs-removed`.
+   */
+  tabs: retiredKey(
+    '`view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no '
+    + 'renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an '
+    + "object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list "
+    + 'view and never read this key. Delete the key, and move each tab you want to a named list view '
+    + "under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` "
+    + "the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the "
+    + "view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every "
+    + '`listViews` entry renders as a tab in the switcher. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   /** Add Record (Airtable Interface parity) */
   addRecord: AddRecordConfigSchema.optional().describe('Add record entry point configuration'),
