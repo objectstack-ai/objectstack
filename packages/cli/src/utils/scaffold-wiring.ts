@@ -45,9 +45,16 @@ export type StackReach =
   /**
    * The config loaded. `reached` says whether its stack carries the item;
    * `missingRequires` lists the capability tokens the item needs to RUN that
-   * the stack's top-level `requires` does not declare.
+   * the stack's top-level `requires` does not declare, and `declaredRequires`
+   * is that list as declared (`null`: the stack declares no `requires`).
    */
-  | { kind: 'loaded'; configPath: string; reached: boolean; missingRequires: string[] };
+  | {
+    kind: 'loaded';
+    configPath: string;
+    reached: boolean;
+    missingRequires: string[];
+    declaredRequires: string[] | null;
+  };
 
 /** The item one scaffold writes, and where in a stack it has to land. */
 export interface ScaffoldStackTarget {
@@ -87,9 +94,14 @@ export function stackCarries(config: unknown, stackKey: string, itemName: string
  * capability rule reads and the list `os serve` mounts capabilities from.
  */
 export function missingCapabilities(config: unknown, requires: readonly string[]): string[] {
-  const declared = (config as { requires?: unknown } | null)?.requires;
-  const tokens = Array.isArray(declared) ? declared : [];
+  const tokens = declaredCapabilities(config) ?? [];
   return requires.filter((token) => !tokens.includes(token));
+}
+
+/** The config's top-level `requires` tokens, or `null` when it declares none. */
+export function declaredCapabilities(config: unknown): string[] | null {
+  const declared = (config as { requires?: unknown } | null)?.requires;
+  return Array.isArray(declared) ? declared.filter((t): t is string => typeof t === 'string') : null;
 }
 
 /** Load the project's config and ask it about `target`. Never throws. */
@@ -106,6 +118,7 @@ export async function measureStackReach(
       configPath,
       reached: stackCarries(config, target.stackKey, target.itemName),
       missingRequires: missingCapabilities(config, target.requires),
+      declaredRequires: declaredCapabilities(config),
     };
   } catch (error) {
     return {
@@ -133,16 +146,23 @@ export function barrelSpecifier(configPath: string, barrelDir: string): string {
  * key, and — when the item needs capabilities the stack does not declare — the
  * `requires` entry. The binding is named after the stack key, the name
  * `os init`'s own config gives it.
+ *
+ * A `requires` line is the WHOLE list: what the stack already declares, then
+ * the missing tokens. Printing the missing tokens alone would read as a second
+ * `requires` key to add beside the first, which replaces it.
  */
 export function wiringLines(args: {
   specifier: string;
   stackKey: string;
   missingRequires: readonly string[];
+  declaredRequires: readonly string[] | null;
 }): { importLine: string; stackLines: string[] } {
-  const { specifier, stackKey, missingRequires } = args;
+  const { specifier, stackKey, missingRequires, declaredRequires } = args;
   const stackLines = [`${stackKey}: Object.values(${stackKey}),`];
   if (missingRequires.length > 0) {
-    stackLines.push(`requires: [${missingRequires.map((t) => `'${t}'`).join(', ')}],`);
+    const all = [...(declaredRequires ?? []), ...missingRequires];
+    const replaces = declaredRequires !== null ? '  // replaces the requires already there' : '';
+    stackLines.push(`requires: [${all.map((t) => `'${t}'`).join(', ')}],${replaces}`);
   }
   return { importLine: `import * as ${stackKey} from '${specifier}';`, stackLines };
 }

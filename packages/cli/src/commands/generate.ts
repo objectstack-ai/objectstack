@@ -1566,8 +1566,12 @@ function reportStackReach(
 ): void {
   const { type, dir, scaffoldLabel, stackKey, itemName, requires, barrelDir } = info;
   const quoted = (tokens: readonly string[]) => tokens.map((t) => `'${t}'`).join(', ');
-  const printWiring = (specifier: string, missingRequires: readonly string[]) => {
-    const { importLine, stackLines } = wiringLines({ specifier, stackKey, missingRequires });
+  const printWiring = (
+    specifier: string,
+    missingRequires: readonly string[],
+    declaredRequires: readonly string[] | null,
+  ) => {
+    const { importLine, stackLines } = wiringLines({ specifier, stackKey, missingRequires, declaredRequires });
     console.log(chalk.white(`      ${importLine}`));
     console.log(chalk.dim('    and inside defineStack({ … }):'));
     for (const line of stackLines) console.log(chalk.white(`      ${line}`));
@@ -1583,8 +1587,10 @@ function reportStackReach(
         `    A ${type} needs requires: [${quoted(requires)}] to run. The stack carries it, and the`,
       ));
       console.log(chalk.dim(
-        `    server loads it and never runs it until ${configName} also declares ${quoted(reach.missingRequires)}.`,
+        `    server loads it and never runs it until ${configName} also declares ${quoted(reach.missingRequires)}:`,
       ));
+      const all = [...(reach.declaredRequires ?? []), ...reach.missingRequires];
+      console.log(chalk.white(`      requires: [${quoted(all)}],`));
     }
     console.log('');
     console.log(chalk.dim(`  Tip: Run \`objectstack validate\` to check your config`));
@@ -1602,7 +1608,7 @@ function reportStackReach(
       '    and `objectstack validate` neither counts it nor checks it.',
     ));
     console.log(chalk.dim(`    To wire every ${type} in ${dir}, add to ${configName}:`));
-    printWiring(barrelSpecifier(reach.configPath, barrelDir), reach.missingRequires);
+    printWiring(barrelSpecifier(reach.configPath, barrelDir), reach.missingRequires, reach.declaredRequires);
     console.log('');
     return;
   }
@@ -1613,7 +1619,7 @@ function reportStackReach(
       `    Run \`${CLI_ALIAS} g\` where the project's config is, or wire ${dir}/index.ts into the config`,
     ));
     console.log(chalk.dim('    of the stack that should carry it, next to this directory:'));
-    printWiring(barrelSpecifier(path.join(process.cwd(), 'objectstack.config.ts'), barrelDir), requires);
+    printWiring(barrelSpecifier(path.join(process.cwd(), 'objectstack.config.ts'), barrelDir), requires, null);
     console.log('');
     return;
   }
