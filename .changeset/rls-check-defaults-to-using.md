@@ -10,7 +10,7 @@ Clause-②: no (narrowing)
 
 **BREAKING**: this narrows the set of writes the write gate accepts. A write that is admitted today can be refused after this change. It ships as `minor` under the launch-window convention, the same way the insert-side `check` reorder did (#16805).
 
-The published contract has always said this. `RowLevelSecurityPolicySchema.check` reads "defaults to USING clause if not specified", and PostgreSQL treats a policy without `WITH CHECK` the same way. The write gate did not do it. It compiled only the policies that declared `check`, so a policy with only a `using` never checked a write. With `using: "record.status != 'closed'"`, a caller could INSERT a closed row. The row was stored even though the same caller could not read it afterwards.
+The published contract has always said this. `RowLevelSecurityPolicySchema.check` read "defaults to USING clause if not specified" (it now states the default per operation across the applicable policies, #19953), and PostgreSQL treats a policy without `WITH CHECK` the same way. The write gate did not do it. It compiled only the policies that declared `check`, so a policy with only a `using` never checked a write. With `using: "record.status != 'closed'"`, a caller could INSERT a closed row. The row was stored even though the same caller could not read it afterwards.
 
 **Writes that are now refused.** Each refusal is the existing row-level CHECK denial, `403 PERMISSION_DENIED`, and nothing is stored. There is no transition switch.
 

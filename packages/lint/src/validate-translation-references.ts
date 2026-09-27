@@ -167,7 +167,7 @@
 import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkFlowNodes } from './flow-walk.js';
-import { recordsOf, suggestName } from './object-graph.js';
+import { packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';
@@ -750,7 +750,7 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
     }
   };
   add(isRec(stack.manifest) ? stack.manifest.navigationContributions : undefined);
-  for (const entry of recordsOf(stack.packages)) {
+  for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!isRec(body)) continue;
     add(body.navigationContributions);
@@ -845,7 +845,7 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
     }
   };
   add(stack.objectExtensions);
-  for (const entry of recordsOf(stack.packages)) {
+  for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!isRec(body)) continue;
     add(body.objectExtensions);
@@ -918,7 +918,7 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
  */
 function artifactProvidedRecords(stack: AnyRec, collection: string): AnyRec[] {
   const provided: AnyRec[] = [];
-  for (const entry of recordsOf(stack.packages)) {
+  for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!isRec(body)) continue;
     provided.push(...recordsOf(body[collection]));
