@@ -2,9 +2,11 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #10926 — the D3 entry of the `translation-component-submit-label-removed`
-// family (ruling B on #17152: one D3 entry per retirement family, even when D2
-// is lossless). The strip deletes a string nothing has read since its carrier
+// The D3 entry of the `translation-component-submit-label-removed` family,
+// which landed in commit d173125fb: the component-copy key left with its only
+// declarer, `element:form`, rather than being re-anchored on `object-form`.
+// One D3 entry per retirement family, even when D2 is lossless (ruling B on
+// #17152). The strip deletes a string nothing has read since its carrier
 // retired; where the translator's work should go instead is not something the
 // conversion can decide.
 export const entry: SemanticMigration = {

@@ -6950,10 +6950,12 @@ const step18: MigrationStep = {
         + 'fail tsc on upgrade; the fix is choosing a shipped driver, never '
         + 'widening a local mirror of the enum.',
     },
-    // #14676 (ADR-0049 enforce-or-remove) — the D3 entry of the
-    // `connector-error-mapping-removed` family (ruling B on #17152: one D3 entry
-    // per retirement family, even when D2 is lossless). The family is the key on
-    // both carriers (`integration/Connector:errorMapping`,
+    // ADR-0049 enforce-or-remove — the D3 entry of the
+    // `connector-error-mapping-removed` family, which landed in commit 13c48c2a5:
+    // eleven inert authorable keys, one of them spelled like the live
+    // `userMessage` channel. One D3 entry per retirement family, even when D2 is
+    // lossless (ruling B on #17152). The family is the key on both carriers
+    // (`integration/Connector:errorMapping`,
     // `integration/DeclarativeConnectorEntry:errorMapping`) and the shape that
     // leaves with it — `integration/ErrorMappingConfig`,
     // `integration/ErrorMappingRule` and `integration/ConnectorErrorCategory` in
@@ -10119,11 +10121,13 @@ const step18: MigrationStep = {
         + 'predicate parses and registers byte-identically to before, and a non-string in these '
         + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
     },
-    // #12868 (maintainer-ruled narrowing on the objectui#6263 analysis) — the D3
-    // entry of the `form-view-option-default-removed` family (ruling B on #17152:
-    // one D3 entry per retirement family, even when D2 is lossless). The strip
-    // changes no form; the prescribed replacement changes MORE than one form, and
-    // that difference is the author's call.
+    // The D3 entry of the `form-view-option-default-removed` family, which landed
+    // in commit c459da6bc: a maintainer-ruled narrowing on the objectui#6263
+    // analysis that took per-option `default` out of the form-view vocabulary and
+    // left the object-field face enforcing it. One D3 entry per retirement family,
+    // even when D2 is lossless (ruling B on #17152). The strip changes no form;
+    // the prescribed replacement changes MORE than one form, and that difference
+    // is the author's call.
     {
       id: 'form-view-option-default-retired',
       surface: 'view.form.sections[].fields[].options[].default — the per-option pre-selection on a '
@@ -11285,9 +11289,11 @@ const step18: MigrationStep = {
         + 'Prove the widening separately and cheaply: a prerelease version that used to be '
         + 'refused at build time now builds.',
     },
-    // #10329 (ADR-0049 enforce-or-remove) — the D3 entry of the
-    // `mapping-lookup-params-removed` family (ruling B on #17152: one D3 entry per
-    // retirement family, even when D2 is lossless). The strip preserves observed
+    // ADR-0049 enforce-or-remove — the D3 entry of the
+    // `mapping-lookup-params-removed` family, which landed in commit 15d58dbf1:
+    // the import path never read the four lookup steering params, so they were
+    // retired and the conversion strips them. One D3 entry per retirement family,
+    // even when D2 is lossless (ruling B on #17152). The strip preserves observed
     // import behaviour exactly; the judgment it leaves is whether the author's
     // import was ever doing what the four keys said.
     {
@@ -14668,9 +14674,11 @@ const step18: MigrationStep = {
         + 'and must be verified as such: nothing ever parsed or read these shapes, so removing '
         + 'them removes no behaviour.',
     },
-    // #10926 — the D3 entry of the `translation-component-submit-label-removed`
-    // family (ruling B on #17152: one D3 entry per retirement family, even when D2
-    // is lossless). The strip deletes a string nothing has read since its carrier
+    // The D3 entry of the `translation-component-submit-label-removed` family,
+    // which landed in commit d173125fb: the component-copy key left with its only
+    // declarer, `element:form`, rather than being re-anchored on `object-form`.
+    // One D3 entry per retirement family, even when D2 is lossless (ruling B on
+    // #17152). The strip deletes a string nothing has read since its carrier
     // retired; where the translator's work should go instead is not something the
     // conversion can decide.
     {

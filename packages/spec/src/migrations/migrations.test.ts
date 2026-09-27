@@ -114,7 +114,14 @@ describe('migration chain (ADR-0087 D3)', () => {
           else pairs++;
         }
       }
-      expect(unnamed).toEqual([]);
+      expect(
+        unnamed,
+        `graduated D2 conversion(s) named by no D3 entry of their own step: ${unnamed.join(', ')}. `
+          + 'Remedy: add a D3 `semantic` entry of that step — a file under `entries/semantic/` '
+          + 'prefixed with its protocol major, then `gen:migration-registry` — whose text names the '
+          + 'conversion id as a whole word and says what judgment the consumer still owes after D2 '
+          + 'repaired the data (one D3 entry per retirement family, even when D2 is lossless).',
+      ).toEqual([]);
       expect(pairs).toBeGreaterThan(0);
     });
 

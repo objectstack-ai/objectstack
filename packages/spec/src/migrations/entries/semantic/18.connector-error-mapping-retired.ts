@@ -2,10 +2,12 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #14676 (ADR-0049 enforce-or-remove) — the D3 entry of the
-// `connector-error-mapping-removed` family (ruling B on #17152: one D3 entry
-// per retirement family, even when D2 is lossless). The family is the key on
-// both carriers (`integration/Connector:errorMapping`,
+// ADR-0049 enforce-or-remove — the D3 entry of the
+// `connector-error-mapping-removed` family, which landed in commit 13c48c2a5:
+// eleven inert authorable keys, one of them spelled like the live
+// `userMessage` channel. One D3 entry per retirement family, even when D2 is
+// lossless (ruling B on #17152). The family is the key on both carriers
+// (`integration/Connector:errorMapping`,
 // `integration/DeclarativeConnectorEntry:errorMapping`) and the shape that
 // leaves with it — `integration/ErrorMappingConfig`,
 // `integration/ErrorMappingRule` and `integration/ConnectorErrorCategory` in

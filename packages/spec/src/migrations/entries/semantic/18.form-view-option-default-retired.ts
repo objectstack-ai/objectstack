@@ -2,11 +2,13 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #12868 (maintainer-ruled narrowing on the objectui#6263 analysis) — the D3
-// entry of the `form-view-option-default-removed` family (ruling B on #17152:
-// one D3 entry per retirement family, even when D2 is lossless). The strip
-// changes no form; the prescribed replacement changes MORE than one form, and
-// that difference is the author's call.
+// The D3 entry of the `form-view-option-default-removed` family, which landed
+// in commit c459da6bc: a maintainer-ruled narrowing on the objectui#6263
+// analysis that took per-option `default` out of the form-view vocabulary and
+// left the object-field face enforcing it. One D3 entry per retirement family,
+// even when D2 is lossless (ruling B on #17152). The strip changes no form;
+// the prescribed replacement changes MORE than one form, and that difference
+// is the author's call.
 export const entry: SemanticMigration = {
   id: 'form-view-option-default-retired',
   surface: 'view.form.sections[].fields[].options[].default — the per-option pre-selection on a '

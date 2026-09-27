@@ -2,9 +2,11 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #10329 (ADR-0049 enforce-or-remove) — the D3 entry of the
-// `mapping-lookup-params-removed` family (ruling B on #17152: one D3 entry per
-// retirement family, even when D2 is lossless). The strip preserves observed
+// ADR-0049 enforce-or-remove — the D3 entry of the
+// `mapping-lookup-params-removed` family, which landed in commit 15d58dbf1:
+// the import path never read the four lookup steering params, so they were
+// retired and the conversion strips them. One D3 entry per retirement family,
+// even when D2 is lossless (ruling B on #17152). The strip preserves observed
 // import behaviour exactly; the judgment it leaves is whether the author's
 // import was ever doing what the four keys said.
 export const entry: SemanticMigration = {
