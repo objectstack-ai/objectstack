@@ -50,9 +50,12 @@
  * `null` / `undefined`, the empty string, an out-of-range wall clock
  * (`'25:00'`), an Invalid Date and unparseable junk come back UNCHANGED rather
  * than as an invented value — a value the rule cannot interpret is never
- * silently rewritten, so junk keeps failing its comparison. Which strings are
- * uninterpretable is the question `isUninterpretableTemporalComparand`
- * (`temporal-comparand.ts`) answers for the doors that refuse them.
+ * silently rewritten, so junk keeps failing its comparison. Which comparands
+ * are uninterpretable — a string this rule hands back unchanged, and [#20240] a
+ * number or `Date` on a `date` column whose UTC year falls outside 0..9999, the
+ * four-digit years a `YYYY-MM-DD` day can spell — is the question
+ * `isUninterpretableTemporalComparand` (`temporal-comparand.ts`) answers for
+ * the doors that refuse them.
  */
 
 import type { TemporalComparandKind } from './temporal-comparand.js';
@@ -72,7 +75,12 @@ import type { TemporalComparandKind } from './temporal-comparand.js';
  * - `date`: a `Date` → its UTC calendar day (the UTC clock, never the host's —
  *   `SqlDriver.toDateOnly` records why); a finite number → epoch milliseconds,
  *   read as the `Date` of that value and so its UTC calendar day (a time of
- *   day is dropped, never rounded); a string → its leading `YYYY-MM-DD`.
+ *   day is dropped, never rounded); a string → its leading `YYYY-MM-DD`. The
+ *   year of a `Date` or a number is padded to four digits (`0999-06-15`); a
+ *   year below 0 or above 9999 has no `YYYY-MM-DD` form, keeps its unpadded
+ *   spelling (`10000-01-01`, `-1-01-01`) for the write and read paths that
+ *   call this rule, and is refused as a comparand by the temporal-comparand
+ *   door.
  * - `time`: a bare `HH:MM[:SS[.f…]]` in range → `HH:MM:SS`, `.fff` kept only
  *   when non-zero (fractions beyond milliseconds truncated); anything else is
  *   read as an INSTANT by the `datetime` rule and keeps its UTC time of day.
@@ -124,10 +132,18 @@ function canonicalCalendarDay(value: unknown): unknown {
   const instant = typeof value === 'number' && Number.isFinite(value) ? new Date(value) : value;
   if (instant instanceof Date) {
     if (Number.isNaN(instant.getTime())) return value;
+    // [#20240] The year is padded to four digits, the width `YYYY-MM-DD`
+    // declares and the ISO-string and bare-day arms below already produce:
+    // `0999-06-15`, never `999-06-15`, which sorted above every padded day as
+    // text (`'9' > '0'`). A year below 0 or above 9999 has no `YYYY-MM-DD`
+    // form at all; it keeps the spelling it always had, and the
+    // temporal-comparand door refuses it as a comparand before it reaches a
+    // comparison (`isUninterpretableTemporalComparand`, `temporal-comparand.ts`).
     const y = instant.getUTCFullYear();
+    const yyyy = y >= 0 ? String(y).padStart(4, '0') : String(y);
     const m = String(instant.getUTCMonth() + 1).padStart(2, '0');
     const d = String(instant.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return `${yyyy}-${m}-${d}`;
   }
   if (typeof value === 'string') {
     const trimmed = value.trim();

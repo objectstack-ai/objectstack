@@ -44,9 +44,19 @@
  * if the door let it through — `temporalStorageForm` (`temporal-storage-form.ts`,
  * the one rule both drivers read since #20176; before it, a copy in each).
  * That function is total on purpose: an input it cannot interpret is returned
- * UNCHANGED rather than becoming an invented instant. So "the driver would
- * return it unchanged" IS the definition of uninterpretable, and defining it
- * any other way would refuse comparands that work today.
+ * UNCHANGED rather than becoming an invented instant. So, for a STRING, "the
+ * driver would return it unchanged" IS the definition of uninterpretable, and
+ * defining it any other way would refuse comparands that work today.
+ *
+ * [#20240] One non-string class is uninterpretable by the same test's other
+ * half — the rule cannot put it in the column's form. On a `date` column a
+ * finite number or a `Date` becomes its UTC calendar day, and a year below 0 or
+ * above 9999 has no `YYYY-MM-DD` spelling: the rule keeps writing
+ * `10000-01-01` / `-1-01-01` for the write and read paths, but as a comparand
+ * that text orders as no day does (`10000-01-01` sorts below `2026-…`), and
+ * PostgreSQL refuses `-1-01-01` outright. So such a comparand is judged
+ * uninterpretable here, exactly as an unparseable string is, and refused by
+ * the same doors.
  *
  * That is why this is not `utcInstantMs` (`@objectstack/spec/data`), which is
  * the stricter canonical reader: it rejects a bare epoch-millisecond string and
@@ -56,8 +66,18 @@
  *
  * ## Two things it deliberately does NOT judge
  *
- * - **Non-string comparands.** A number is epoch milliseconds, a `Date` is an
- *   instant, `null` is a null test. The refusal scopes to strings by ruling.
+ * - **Non-string comparands, save the one `date` class above.** A number is
+ *   epoch milliseconds, a `Date` is an instant, `null` is a null test, and the
+ *   `datetime` and `time` rules read every finite one; so does the `date` rule
+ *   for a year from 0 to 9999. The #8690 refusal was scoped to strings by that
+ *   card's own ruling — its triage queued "a non-interpretable bare string", and
+ *   the maintainer ruling scoped its two options "to non-empty strings" so the
+ *   empty-string cell stayed its own card. That scoped that change; it is not a
+ *   standing rule that a non-string is never refused. [#20240] extends the
+ *   refusal to the `date` class above by the triage direction on that card.
+ *   `NaN`, ±Infinity and an Invalid Date name no instant and no year, so they
+ *   are not that class and stay unjudged, as before; no JSON body can carry
+ *   one (JSON spells them `null`).
  * - **The EMPTY string.** Measured, `$gte ""` binds as `''` and every canonical
  *   UTC text sorts at or above it, so it returns every non-null row — a third
  *   behaviour again, and one the maintainer ruled stays its own card: "B and C
@@ -131,12 +151,34 @@ function readsAsWallClock(s: string): boolean {
 }
 
 /**
+ * [#20240] `temporalStorageForm`'s `date` reading of a NUMBER or a `Date` lands
+ * outside the four-digit years `YYYY-MM-DD` can spell.
+ *
+ * Both name an instant, and the rule takes that instant's UTC calendar day.
+ * Its year must fall from 0 to 9999: `0999-06-15` is a day, `10000-01-01` and
+ * `-1-01-01` are not. A finite number past ±8.64e15 names an instant the
+ * `Date` type cannot hold at all — a year past ±271821 — so it is outside the
+ * range too, and the rule hands it back unchanged. `NaN`, ±Infinity and an
+ * Invalid Date name no instant and no year, and are not judged here.
+ */
+function isOutsideCalendarDayYears(value: number | Date): boolean {
+  if (typeof value === 'number' && !Number.isFinite(value)) return false;
+  const instant = typeof value === 'number' ? new Date(value) : value;
+  if (Number.isNaN(instant.getTime())) return typeof value === 'number';
+  const year = instant.getUTCFullYear();
+  return year < 0 || year > 9999;
+}
+
+/**
  * Is `value` a comparand that a `kind` column's storage rule cannot read?
  *
- * `true` ONLY for a non-empty, non-placeholder STRING that the kind's rule
- * would hand back unchanged. Everything else — a number, a `Date`, `null`, a
- * `{ $field }` reference, filter structure, the empty string, a `{token}` —
- * answers `false`, each for a reason recorded in the module note or below.
+ * `true` for a non-empty, non-placeholder STRING that the kind's rule would
+ * hand back unchanged, and — on a `date` column only — for a finite number or
+ * a `Date` whose UTC calendar day falls in a year below 0 or above 9999
+ * ({@link isOutsideCalendarDayYears}). Everything else — any other number or
+ * `Date`, `null`, a `{ $field }` reference, filter structure, the empty
+ * string, a `{token}` — answers `false`, each for a reason recorded in the
+ * module note or below.
  *
  * A `{placeholder}` is stepped around rather than judged because it is another
  * layer's vocabulary and that layer already refuses the unknown ones loudly
@@ -149,6 +191,9 @@ export function isUninterpretableTemporalComparand(
   kind: TemporalComparandKind,
   value: unknown,
 ): boolean {
+  if (kind === 'date' && (typeof value === 'number' || value instanceof Date)) {
+    return isOutsideCalendarDayYears(value);
+  }
   if (typeof value !== 'string') return false;
   const s = value.trim();
   // The empty-string cell is its own card — see the module note.
