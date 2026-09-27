@@ -48,7 +48,7 @@
  * | `label`            | `measure.label` / `dimension.label` + `ctx.locale` (#6761) |
  * | `format`           | `measure.format`                                 |
  * | `builtinAggregate` | `measure.aggregate` + `measure.label == null` (#14492) |
- * | `currency`         | ADR-0053 chain: `measure.currency` → `sourceFieldMeta().defaultCurrency` → `ctx.currency` |
+ * | `currency`         | `measure.currency` → the source field's FIXED currency (`sourceFieldMeta().defaultCurrency`, relayed only under `currencyMode: 'fixed'`) → `ctx.currency` |
  * | `percentScale`     | `measure.derived.op === 'ratio'`, else `percentScaleOf(sourceFieldMeta())` (objectui#3136) |
  * | `type`             | `measureResultType(measure.aggregate, sourceFieldMeta().type)` (#16101) |
  *
@@ -279,15 +279,15 @@ describe('#16097 — a preview response describes its measure columns like the l
     expect(preview.total_amount.builtinAggregate).toBeUndefined();
   });
 
-  it('currency (ADR-0053) — the sourceFieldMeta limb resolves on the preview path', async () => {
+  it('currency — the fixed-field limb (sourceFieldMeta().defaultCurrency) resolves on the preview path', async () => {
     const { live, preview } = await bothPaths();
     expect(live.total_amount.currency).toBe('EUR');
     expect(preview.total_amount.currency).toBe('EUR');
   });
 
-  it('currency (ADR-0053) — the ExecutionContext limb reaches the preview path too', async () => {
+  it('currency — the ExecutionContext (tenant default) limb reaches the preview path too', async () => {
     const { live, preview } = await bothPaths();
-    // No measure currency, no field default ⇒ the tenant default on `ctx`.
+    // No measure currency, no fixed field currency ⇒ the tenant default on `ctx`.
     expect(live.total_fee.currency).toBe('USD');
     expect(preview.total_fee.currency).toBe('USD');
     // A non-monetary measure never acquires one, on either path.
