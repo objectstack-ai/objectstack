@@ -109,7 +109,10 @@ describe('#9227 inlineColumns — strict name-keyed element', () => {
         prefix: '$',
         step: 0.01,
         defaultHidden: false,
-        scale: 2,
+        // No `scale` here since #20045: it is refused on a column declaring
+        // `type: 'currency'` (pinned in
+        // `inline-grid-column-currency-scale-refused.test.ts`). The key stays
+        // covered by the identity-only computed `amount` column below.
       }, {
         name: 'product',
         type: 'lookup',

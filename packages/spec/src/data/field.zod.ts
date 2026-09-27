@@ -44,15 +44,17 @@ export const FieldType = z.enum([
   // rest but masked to SECRET_MASK on read — the auth subsystem's one-way
   // hashing applies only to its own identity tables, never to an authored
   // 'password' field. Prefer 'secret' for reversible machine credentials. See
-  // ADR-0100.
+  // ADR-0100. Which types are masked on read, and the `managedBy: 'better-auth'`
+  // exemption for 'password', is DECLARED in `MASKED_ON_READ_FIELD_TYPES`
+  // (`./masked-field-types`) — this prose describes it, the table decides it.
   'text', 'textarea', 'email', 'url', 'phone', 'password',
   // Secret — reversible, encrypted-at-rest value (DB password, API key, token).
   // UNLIKE 'password' (masked-on-read but plaintext at rest, or one-way hashed
   // inside the auth subsystem), a 'secret' is round-tripped: the engine encrypts
   // it on write via the registered ICryptoProvider, stores the ciphertext handle
   // in `sys_secret`, persists only an opaque ref on the row, and masks it on
-  // read. Fail-closed: no provider ⇒ writes throw rather than persist cleartext.
-  // See ADR-0100.
+  // read (always — `MASKED_ON_READ_FIELD_TYPES`). Fail-closed: no provider ⇒
+  // writes throw rather than persist cleartext. See ADR-0100.
   'secret',
   // Rich Content
   'markdown', 'html', 'richtext',
@@ -875,6 +877,24 @@ const INLINE_GRID_COLUMN_HISTORY =
   + 'clean and rendered as blank cells, with nothing naming the wrong key.';
 
 /**
+ * #20045 — the refusal of `scale` on a `currency` inline grid column: ruling
+ * 5791803339 (#19629, batch #215 item 1, letter B — `scale` retired from the
+ * currency FIELD type) carried to this mirror in its own shape, with the
+ * remedy ruling 5805782503 words (#19910, batch #218 item 2, letter 乙 — 「a
+ * currency's ISO 4217 minor unit decides its display」). Same first sentence
+ * as `FieldSchema`'s currency refusal with the subject swapped, same remedy:
+ * delete the key, nothing replaces it.
+ * `inline-grid-column-currency-scale-refused.test.ts` holds the two refusals
+ * to the same first sentence and the same minor-unit clause, so a rewording of
+ * one that leaves the other behind goes red.
+ */
+const INLINE_GRID_CURRENCY_SCALE_REFUSAL =
+  '`scale` is not valid on a `currency` inline grid column — delete the key. A currency '
+  + 'amount\'s decimal places are its currency\'s, not a column setting: the currency\'s ISO 4217 '
+  + 'minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how the cell displays the amount and the '
+  + 'width a computed amount is rounded to. `scale` stays valid on a `number` column.';
+
+/**
  * One explicit column of the inline master-detail grid (`inlineColumns`).
  *
  * STRICT mirror of the objectui inline-grid renderer's `GridColumn`
@@ -922,7 +942,11 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
   })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`."),
-  prefix: z.string().optional().describe("Currency symbol rendered inside a `currency` cell (default '¥')."),
+  // #20045 — no default symbol: the grid shows the resolved currency's own
+  // symbol when this is omitted (objectui GridField `currencyAdornment`,
+  // objectui#10355), so the former 「(default '¥')」 described a fallback the
+  // renderer no longer has.
+  prefix: z.string().optional().describe("Symbol shown in a `currency` cell in place of the resolved currency's own symbol. No default: when omitted, the cell shows the symbol of the currency it resolves. It replaces the symbol only — the amount's decimal places stay the currency's."),
   step: z.number().positive().optional().describe('Input step for numeric cells.'),
   reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`."),
   displayField: z.string().optional().describe('Label field shown for a picked lookup record.'),
@@ -935,12 +959,30 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // #18972 — the upper bound is the SAME platform ceiling as `FieldSchema.scale`
   // below, reached by a different primitive: this key is the one objectui's
   // `computeRow` hands to `Number(v.toFixed(scale))`, which throws above 100.
-  // See {@link MAX_RENDERABLE_SCALE}.
+  // See {@link MAX_RENDERABLE_SCALE}. #20045 — refused on a column declaring
+  // `type: 'currency'` by the `.superRefine` below (ruling B carried to this
+  // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places to round a computed numeric/currency result to (integer 0-100). The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.'),
+    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s ISO 4217 minor unit decides. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.'),
   autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
+}).superRefine((column, ctx) => {
+  // #20045 — ruling B (5791803339) on #19629 retired `scale` from the currency
+  // FIELD type; triage read this card as inherited from that ruling and from
+  // ruling 乙 (5805782503) on #19910, so the mirror follows the field: an
+  // authored `scale` on a column that DECLARES `type: 'currency'` is refused,
+  // with the remedy 「delete it; the currency's minor unit decides」. `scale`
+  // has no schema default, so `undefined` here always means "not authored" and
+  // `parse(parse(x))` stays stable. ⛔ No alias and no grace window (ruling B's
+  // own words). Reach, deliberately: only the DECLARED `type` is visible here.
+  // An identity-only column takes its type from the child field at render time
+  // (objectui `hydrateColumns`), which this schema cannot see. Stored metadata
+  // carrying the key is covered by the ADR-0087 semantic entry
+  // `inline-grid-column-currency-scale-refused`.
+  if (column.type === 'currency' && column.scale !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['scale'], message: INLINE_GRID_CURRENCY_SCALE_REFUSAL });
+  }
 }));
 
 /**
