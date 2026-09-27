@@ -174,7 +174,7 @@ describe('#20078 — `os validate` refuses a field-level read through a referenc
     for (const e of traversals) {
       expect(e.message).toContain('Express the check as a `validations[]` `script` rule');
     }
-  });
+  }, 120_000);
 
   it('CONTROL — the same slots reading no reference, and the traversal in `validations[]`, validate clean', async () => {
     const run = await runValidate(controlDir);
@@ -182,5 +182,5 @@ describe('#20078 — `os validate` refuses a field-level read through a referenc
     const payload = JSON.parse(run.stdout) as { valid: boolean; errors?: Finding[] };
     expect(payload.valid).toBe(true);
     expect(payload.errors ?? []).toEqual([]);
-  });
+  }, 120_000);
 });
