@@ -5279,7 +5279,18 @@ const step18: MigrationStep = {
     + 'door persists the authored value and the stored-row rehydration seam is live for '
     + 'this type, both measured); and the withdrawn `ConnectorProviderContext` member, '
     + 'which is code and has no authored source to rewrite, leaves via the paired semantic '
-    + 'entry instead.',
+    + 'entry instead. '
+    + 'Finally it gives the one-filter-orthography convergence (objectui#6206) its '
+    + 'mechanical half at rest (#17321, ruling B): the D2 conversion '
+    + '`page-component-filter-record-to-rule-array` rewrites a record-form or single-level '
+    + 'AST `filter` at the converged rule-array doors — `dataSource.filter`, the '
+    + '`object-*` / `element:number` / `element:record_picker` `filter` props and '
+    + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
+    + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
+    + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
+    + 'a page selects — as it does every filter of a component whose rows are inline, which '
+    + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
+    + 'the door and taught the array; the stored-row seams and this chain replay it.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5315,6 +5326,7 @@ const step18: MigrationStep = {
     'dashboard-widget-chart-config-structure-removed',
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
+    'page-component-filter-record-to-rule-array',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -6246,6 +6258,100 @@ const step18: MigrationStep = {
         + '`ObjectSchema.create(...): field ... declares required: false on a master_detail '
         + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
+    },
+    // The CEL-lowering face of the list-comparand refusal: the pushdown compiler
+    // every row-level policy and declared sharing rule compiles through, plus the
+    // driver-mongodb face that answered the lowered shape. Recorded as its own entry
+    // because the surface an author rewrites is a CEL predicate string, and on
+    // MongoDB a stored query filter.
+    {
+      id: 'cel-predicate-list-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
+        + 'CEL predicate comparing a field with != or == against a list, either a list literal or a '
+        + 'current_user membership set the runtime resolves to an array (org_user_ids, positions, '
+        + 'accessible_org_ids, or a key staged into rlsMembership), and the negation of such a '
+        + 'comparison. On driver-mongodb, also a query filter carrying $ne with an array comparand, at '
+        + 'any depth under $and / $or / $not',
+      replacement:
+        'the list operator the comparison was standing in for. "One of these values" is in: '
+        + 'record.status in ["open", "pending"], or record.reviewer_id in current_user.org_user_ids. '
+        + '"None of these values" is the negated in: !(record.status in ["closed", "archived"]). In a '
+        + 'query filter, $in and $nin. Scalar != and ==, null, in, and field-to-field comparisons lower '
+        + 'exactly as before',
+      reason:
+        'The @objectstack/formula pushdown compiler lowered such a comparison to a $ne carrying the '
+        + 'array, to a bare-array equality, or to a $not around one. A row-level using clause is '
+        + 'composed into the query after the engine\'s comparand-shape check, and driver-mongodb passed '
+        + 'the shape to the server: measured through mingo, the named proxy for MongoDB query '
+        + 'semantics, $ne against an array and the $nor that a negated equality becomes selected every '
+        + 'row storing a scalar, so the read returned the rows the policy was written to hide. A check '
+        + 'written != against a membership set admitted and stored every write, on driver-sql as on '
+        + 'driver-mongodb. The compiler now refuses the comparison with reason unsupported, so the RLS '
+        + 'compiler drops the policy and fails closed when no other policy applies: reads under it '
+        + 'return no rows and check writes '
+        + 'are refused 403. A declared sharing rule with such a condition is skipped at bootstrap and '
+        + 'never seeded. The authoring lint reports a list literal as rls-predicate-unenforceable; a '
+        + 'membership set holds its value only per request, so that form is refused at request time. '
+        + 'driver-mongodb refuses $ne with an array comparand with INVALID_FILTER / 400, as driver-sql '
+        + 'and driver-memory already do. Metadata AT REST is not rewritten and this entry adds no D2 '
+        + 'conversion: the platform cannot tell which list operator a list comparison was standing in '
+        + 'for, and a policy rewritten on the author\'s behalf would change which rows it admits, which '
+        + 'is the policy author\'s decision. ADR-0058 D4 / ADR-0087.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity using and check predicates of your permission sets, and the '
+        + 'condition of your sharing rules, for != or == whose other side is a list literal or a '
+        + 'current_user membership set, and for the negation of such an ==, then rewrite each with in '
+        + 'or its negation. On driver-mongodb, '
+        + 'grep stored query filters for $ne with an array value and rewrite each with $nin.',
+    },
+    // The variable-ROOT sibling of cel-predicate-list-comparand-refused, one
+    // comparand kind over: the same pushdown compiler, the same consumers, the same
+    // fail-closed path. Recorded as its own entry because the surface an author
+    // rewrites is a different comparand, with a different replacement.
+    {
+      id: 'cel-predicate-variable-root-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
+        + 'CEL predicate comparing with != or == against the bare current_user root, the variable with '
+        + 'no key named after it, whether the other side is a field or a literal, and the negation of '
+        + 'such a comparison. For a caller of the published compiler that binds its own variables, also '
+        + 'a variable that resolves to an object',
+      replacement:
+        'the key of current_user the comparison means: record.owner_id == current_user.id, or '
+        + 'current_user.organization_id, or current_user.email. A membership test is in: '
+        + 'record.owner_id in current_user.org_user_ids. Scalar keys, membership sets under in, '
+        + 'literals, null and field-to-field comparisons lower exactly as before',
+      reason:
+        'The @objectstack/formula pushdown compiler resolved the bare root to the whole caller context '
+        + 'object, every kernel-resolved key at once with the membership arrays included, and lowered '
+        + 'the comparison to a $ne carrying that object, to a bare-object equality, or to a $not around '
+        + 'one; a constant comparison such as current_user != "guest" folded to no restriction. A '
+        + 'strict compare never equals an object, so through the real SecurityPlugin on driver-sql a '
+        + 'check written != against the root, or its negated ==, admitted and stored every insert and '
+        + 'by-id update it was written to refuse, a USING-only such policy admitted every insert on '
+        + 'the write pass, and explain reported the read as narrowed with the caller membership sets '
+        + 'echoed in its readFilter. ADR-0058 D2 declares the operand opposite a field as a literal, a '
+        + 'current_user scalar or a pre-resolved current_user set, and the published $eq / $ne '
+        + 'contract declares a literal or a { $field } reference; the root is none of them. The '
+        + 'compiler now refuses it with reason unsupported in both of its modes, so the authoring lint '
+        + 'reports it (rls-predicate-unenforceable on either clause, sharing-rule-unlowerable-condition '
+        + 'on a sharing condition), and the RLS compiler drops the policy and fails closed when no '
+        + 'other policy applies: reads under it return no rows, check writes are refused 403, and '
+        + 'explain answers denies. A declared sharing rule with such a condition is skipped at '
+        + 'bootstrap as it already was, now with reason unsupported instead of unresolved-variable. '
+        + 'Metadata AT REST is not rewritten and this entry adds no D2 conversion: the platform cannot '
+        + 'tell which key the author meant, and a policy rewritten on the author\'s behalf would change '
+        + 'which rows it admits. ADR-0058 D2 / ADR-0087.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity using and check predicates of your permission sets, and the '
+        + 'condition of your sharing rules, for != or == whose other side is current_user with no key '
+        + 'after it, then rewrite each against the key it means (current_user.id, '
+        + 'current_user.organization_id or current_user.email), or with in against a membership set.',
     },
     {
       id: 'change-management-duration-keys-retired',
@@ -7815,15 +7921,29 @@ const step18: MigrationStep = {
         + 'array on `object-grid`) and three lint fixtures — every one rewritten to the rule array '
         + 'in the same change, and zero outside those files; this entry carries the prescription '
         + 'for authors outside the repo. '
-        + '⚠️ Metadata AT REST is deliberately NOT rewritten, and this disposition adds no D2 '
-        + 'conversion — a SemanticMigration converts nothing by its own type, and '
-        + '`os migrate meta --stored` (the pass over a deployment\'s `sys_metadata` rows) replays '
-        + 'D2 conversions only, so it has nothing to rewrite for this shape. The read path '
-        + 'does not re-validate stored rows '
-        + '(`applyConversionsToStoredItem` replays the full chain without validating, by its own '
-        + 'contract), so a stored page or block carrying the record form keeps loading unchanged '
-        + 'and is still rendered by objectui at the pinned `.objectui-sha`; what changes is that '
-        + 'RE-SAVING it is refused at the `filter` door, on its next save and not before.',
+        + 'Metadata AT REST: the mappable part of the table above is a D2 conversion, '
+        + '`page-component-filter-record-to-rule-array` (#17321, ruling B), so '
+        + '`os migrate meta --stored` (the pass over a deployment\'s `sys_metadata` rows) rewrites '
+        + 'a stored page whose `filter` is a flat record, an operator object whose operators the '
+        + 'rule vocabulary spells, several such keys, or a single-level AST tuple array, and every '
+        + 'stored-row read replays the same rewrite until it does. It is retired from the load '
+        + 'path: an author writing the record form is still refused at the `filter` door. ⚠️ A '
+        + 'filter carrying `$and` / `$or` / `$not` is left exactly as stored — the rule array '
+        + 'only ANDs, and flattening a combinator changes which rows the page selects — and so is '
+        + 'any filter with a part that has no lossless rule spelling: a `null` value (the renderer '
+        + 'skips that key, so it constrains nothing today, where a rule would test IS NULL), an '
+        + 'operator such as `$null` / `$exists` or an AST `like`, an array or object comparand in '
+        + 'equality position, or an AST `and` / `or` group. So is every filter — the binding\'s '
+        + 'included — of a component whose rows are INLINE (`data: { provider: \'value\' }`, a '
+        + '`data` array, or `staticData`): at the pinned `.objectui-sha` the `object-map`, '
+        + '`object-tree`, `object-calendar` and `object-gantt` blocks match that filter against '
+        + 'their own rows in an in-memory data source that reads the record form and excludes '
+        + 'EVERY row for a rule array, so a rewrite there would empty the block. Such a row keeps loading unchanged '
+        + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
+        + 'contract) and is refused at the `filter` door on its next save — for a combinator '
+        + 'record, a refusal that names the combinator and says why no rule spells it. '
+        + '`os migrate meta --stored` does not list these rows yet: a row the conversion leaves '
+        + 'as stored reports there as already on protocol.',
       acceptanceCriteria:
         '`ElementDataSourceSchema.safeParse({ object, filter: [{ field: \'status\', operator: '
         + '\'equals\', value: \'active\' }] })` succeeds and the parsed `filter` is the same rule '
@@ -8588,6 +8708,64 @@ const step18: MigrationStep = {
         + '`$contains` against it answers by member rather than the declared no-match. Fields '
         + 'already multi-valued by `isMultiValueField` need no change and must read back '
         + 'byte-identically.',
+    },
+    // The authoring half of ADR-0137 D2 for one shape: a field-level predicate that
+    // reads THROUGH a reference field. The runtime already refuses the writes such a
+    // predicate reaches (or, for an option, never enforces it); what moved is that
+    // `objectstack validate` now says so before deploy. No D2 conversion — see
+    // `reason`.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'field-predicate-reference-traversal-refused',
+      surface:
+        'the field-level predicates objects[].fields[].requiredWhen and objects[].fields[].readonlyWhen, '
+        + 'and a select option\'s objects[].fields[].options[].visibleWhen, whose CEL reads THROUGH a '
+        + 'reference field (a lookup, master_detail, user or tree field): record.account.tier where '
+        + 'account is such a field; likewise previous.account.tier, and parent.account.tier on a '
+        + 'master-detail line item whose master declares account. Refused wherever objects are '
+        + 'validated as authored: objectstack validate, build and lint over defineStack({ objects }) '
+        + 'sources and exported stacks',
+      replacement:
+        'the check as a `validations[]` rule of `type: \'script\'` — the one predicate the server reads one '
+        + 'hop through a reference (the related record is loaded before it runs) — whose `condition` states '
+        + 'the FAILURE. For `requiredWhen: P` on field F: P and F empty, e.g. '
+        + '`record.account.tier == \'enterprise\' && (record.po_number == null || record.po_number == \'\')`. '
+        + 'For `readonlyWhen: P` on F: P and F changed, on updates only (`events: [\'update\']`), e.g. '
+        + '`record.account.tier == \'gold\' && record.discount != previous.discount`. For an option gated by '
+        + 'P: that option picked while P does not hold — the option is then offered to everyone and refused '
+        + 'on save. Or read a column the object itself declares (denormalise the related value onto it). '
+        + 'A read through `previous` or `parent` has no hydrated seam at all, a validation rule included: '
+        + 'read a column the bound record declares instead',
+      reason:
+        'Card #20078, triage remedy A (5825661201). The field level is never hydrated: '
+        + '`rule-validator.ts` evaluates `requiredWhen` / `readonlyWhen` / an option\'s `visibleWhen` '
+        + 'against the record alone, so a reference there holds the related record\'s bare id and every '
+        + 'read through it faults, on every row. Measured on the engine before this change: a traversing '
+        + '`requiredWhen` refused every insert and every update that reached it, a traversing '
+        + '`readonlyWhen` refused every update that wrote its field (an insert is exempt), and an option '
+        + 'gated through a reference was admitted whatever the related record said (option visibility is '
+        + 'fail-open) — while `objectstack validate` passed a stack carrying all three, exit 0. ADR-0137 D2 '
+        + 'made the runtime fail closed; the defect was that authoring did not say so first (NORTH-STAR '
+        + 'priority rule 4). The same traversal inside a `validations[]` `script` rule is served (#18682) '
+        + 'and stays accepted. ⚠️ No D2 conversion, and the reason is the judgment this entry delegates: '
+        + 'moving a field predicate into a validation rule turns a condition into a FAILURE condition, '
+        + 'moves an option from hidden to offered-then-refused, and the right `events` scope depends on '
+        + 'what the author meant — none of it mechanical. Hydrating the field level instead is a '
+        + 'capability of its own and is not done here. ADR-0087, ADR-0137.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over the stack. Each such predicate is refused as '
+        + '`expression-invalid`, located at `object \'O\' · field \'F\' requiredWhen` (or `readonlyWhen`, '
+        + 'or `option \'V\' visibleWhen`), and the message names the reference path read through '
+        + '(`through record.account`) and the repair — that is the TODO\'s locator. Rewrite each per the '
+        + '`replacement` note until validate is clean. Then prove the behaviour on a running stack: a '
+        + 'write meeting the condition is refused by the new rule (`rule_violation` carrying its '
+        + '`message`), and one that does not is accepted — where before, every write reaching the field '
+        + 'predicate was refused with `could not be evaluated … write rejected`, or the option was '
+        + 'admitted unchecked. ⚠️ An object already stored in `sys_metadata` is not re-validated by this '
+        + 'change: its writes keep being refused at run time exactly as before, and that refusal names '
+        + 'the reference for a `record` read — its own locator.',
     },
     {
       id: 'field-scale-precision-integer-refused',
@@ -10283,9 +10461,9 @@ const step18: MigrationStep = {
         + 'and the `id:` key of a package manifest — and its registry face '
         + '`PackageSchema.manifestId` (`marketplace/package.zod.ts`)',
       replacement: 'a reverse-domain identifier matching `MANIFEST_ID_PATTERN` '
-        + '(`kernel/manifest.zod.ts`): dot-separated lowercase segments, each opening with a '
-        + 'letter, digits and hyphens allowed inside a segment — `com.acme.crm`, '
-        + '`org.apache.superset`. ⛔ Underscores are not admitted, so `manifest.namespace` is '
+        + '(`kernel/manifest.zod.ts`): two or more lowercase dot-separated segments of letters, '
+        + 'digits and inner hyphens, each opening with a letter or a digit, never a hyphen — '
+        + '`com.acme.crm`, `org.apache.superset`. ⛔ Underscores are not admitted, so `manifest.namespace` is '
         + 'never a legal id and never a legal last segment of one: `com.acme.my_app` becomes '
         + '`com.acme.my-app`. A bare word gains a prefix: `blank` becomes `com.example.blank`. '
         + 'The refusal carries the repaired value it has already checked against the pattern, so '
@@ -10794,13 +10972,17 @@ const step18: MigrationStep = {
         + 'outright — the other arm the finding offered — removes an accepted shape and needs its '
         + 'own ruling; the deprecation already stated in the description is unchanged and still '
         + 'says to prefer filter. '
-        + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion, '
-        + 'for the reason its sibling gives at length: a SemanticMigration converts nothing by '
-        + 'its own type, the stored-row pass replays D2 conversions only, and the read path does '
-        + 'not re-validate stored rows — so a stored page carrying the record form keeps loading '
-        + 'and keeps rendering as it does today. What changes is that RE-SAVING it is refused at '
-        + 'the defaultFilters path, with the same conversion table the filter door gives, '
-        + 'computed from the author\'s own keys. ADR-0049 / ADR-0087.',
+        + 'Metadata AT REST: the record form and the AST tuple array at this key are rewritten to '
+        + 'the rule array by the same D2 conversion as its sibling filter, '
+        + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
+        + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
+        + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
+        + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
+        + 'string or number this key also took, and any filter on a grid whose rows are inline '
+        + '(data with provider value, or staticData), for the reason its sibling gives — and '
+        + 'RE-SAVING such a node is refused at the '
+        + 'defaultFilters path, with the same conversion table the filter door gives, computed '
+        + 'from the author\'s own keys. ADR-0049 / ADR-0087.',
       acceptanceCriteria:
         'Every object-grid node in your pages either omits defaultFilters or carries a '
         + 'ViewFilterRule array on it. The parse of an object-grid node whose defaultFilters is '
@@ -11824,6 +12006,59 @@ const step18: MigrationStep = {
         + 'of the ten keys ever reached it. No code imports `CrudEndpointPattern(Schema)` from '
         + '`@objectstack/spec/api` (TS2305 after upgrade).',
     },
+    // A row-level policy's `check` is refused where it can never run: on a policy
+    // whose `operation` is `select` or `delete`. Recorded as a semantic TODO, not a
+    // D2 conversion, because which rewrite is right depends on what the author meant
+    // the predicate to guard, and a rewrite made on their behalf would change which
+    // rows the policy admits.
+    {
+      id: 'rls-check-on-select-or-delete-policy-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].check (RowLevelSecurityPolicySchema) on a policy whose '
+        + 'operation is select or delete. A blank check (empty or whitespace only) declares nothing and is '
+        + 'not refused',
+      replacement:
+        'what the predicate was meant to guard, written where it runs. To limit which rows a select policy '
+        + 'lets a caller read, or which rows a delete policy lets a caller delete, write the predicate as '
+        + '`using` on that policy (remove `check`; if the policy already has a `using`, AND the two with &&). '
+        + 'To validate rows as they are written, declare the `check` on a policy whose `operation` is '
+        + '`insert`, `update` or `all` instead. The refusal lands at rowLevelSecurity[N].check, names the '
+        + 'operation, and states both rewrites',
+      reason:
+        'ADR-0049 enforce-or-remove and ADR-0058 D4. A `check` judges the post-image of a write: the new '
+        + 'row of an insert, the changed row of an update. A select or delete writes no row, and the '
+        + 'plugin-security write gate collects only the policies whose operation is the write\'s own or '
+        + '`all`, so a `check` on a select or delete policy was accepted, stored and never evaluated. '
+        + 'Measured on main before this change: a policy carrying only check record.status != '
+        + '\'archived\' on select or delete admitted every insert and update of an archived row, and beside '
+        + 'a USING-only `all` sibling it did not replace that sibling\'s `using` default the way a `check` '
+        + 'on an insert, update or all policy does. An author (an AI author above all) who wrote a check '
+        + 'on a delete policy believed deletes were guarded by it. The refusal is a non-transforming '
+        + 'refinement on the policy schema, so it reaches every door that parses a permission set: '
+        + 'defineStack, os validate, and the metadata save path, whose permission type validates '
+        + 'against PermissionSetSchema. Metadata AT REST is not '
+        + 'rewritten and this entry adds no D2 conversion: dropping the key would silently discard the '
+        + 'predicate the author wrote, and moving it to `using` would start filtering reads or deletes '
+        + 'the policy never filtered before — both change which rows the policy admits, which is the '
+        + 'policy author\'s decision. Ships at once, no transition window and no advisory lint phase.',
+      acceptanceCriteria:
+        'Search every authored and stored permission set for a rowLevelSecurity policy whose operation '
+        + 'is select or delete and whose check is non-blank — metadata files, sys_metadata permission '
+        + 'rows, and the row_level_security column of sys_permission_set. For authored metadata the sweep '
+        + 'is mechanical: PermissionSetSchema.safeParse answers one custom issue at '
+        + 'rowLevelSecurity[N].check whose message begins "`check` is never evaluated on a `select` '
+        + 'policy" (or `delete`). For each, decide what the predicate was meant to guard: reads or '
+        + 'deletes ⇒ express it in that policy\'s `using`; writes ⇒ move it to an insert, update or all '
+        + 'policy. Then re-check the policy set\'s behaviour rather than assuming it is unchanged: the '
+        + 'removed check never ran, so dropping it changes nothing, but a predicate moved into `using` '
+        + 'now filters rows it never filtered, and a `check` moved onto an insert, update or all policy '
+        + 'now replaces the `using` default of its USING-only siblings for that write. A policy with '
+        + '`using` only, and a `check` on an insert, update or all policy, parse exactly as before. The '
+        + 'repo, its example apps and the pinned console carried no such policy at the time of the '
+        + 'change; two test fixtures that used select incidentally were moved to all and insert.',
+    },
     // The row-level-security face of ruling A on #19886 (stage 2a): the formula
     // evaluator plugin-security runs a policy's check against. Recorded as its own
     // entry because the surface an author rewrites is the RLS predicate, a CEL
@@ -11833,10 +12068,10 @@ const step18: MigrationStep = {
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
       // span already, and a nested backtick would close it.
       surface:
-        'security.PermissionSet rowLevelSecurity[].check (and .using, where the explain engine '
-        + 'attributes a record) — a CEL predicate comparing a field with != or == against a list, '
+        'security.PermissionSet rowLevelSecurity[].check — a CEL predicate comparing a field with != '
+        + 'or == against a list, '
         + 'a list literal or a current_user membership array, and the negation of such an ==. They '
-        + 'lower to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
+        + 'lowered to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
         + 'the @objectstack/formula evaluator matchesFilterCondition now refuses, together with '
         + '{ field: { $eq: [...] } }, at any depth under $and / $or / $not, the empty array included',
       replacement:
@@ -11853,12 +12088,9 @@ const step18: MigrationStep = {
         + 'membership array, matched EVERY post-image, and a check written '
         + '!(record.status == ["closed", "archived"]) did the same: every write such a policy was '
         + 'written to refuse was admitted and stored. The positive record.status == ["open", '
-        + '"pending"] refused every write (403). All of these shapes now fail the write with '
-        + 'INVALID_FILTER / 400 before any record is judged, the envelope driver-sql and '
-        + 'driver-memory already give the same shape on the read side, and the explain engine\'s '
-        + 'record attribution refuses too. The message withholds the field, the operator and the '
-        + 'value, because the filter is usually an access policy the caller did not write and the '
-        + 'comparand may be a resolved membership set. Metadata AT REST is not rewritten and this '
+        + '"pending"] refused every write (403). The evaluator now refuses all of these shapes '
+        + 'before any record is judged. The message withholds the field, the operator and the '
+        + 'value. Metadata AT REST is not rewritten and this '
         + 'entry adds no D2 conversion: the platform cannot tell which list operator a list '
         + 'comparison was standing in for, and a policy rewritten on the author\'s behalf would '
         + 'change which writes it admits (the negated forms would start refusing writes they '
@@ -11867,9 +12099,7 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Grep the rowLevelSecurity check and using predicates of your permission sets for != or == '
         + 'whose right-hand side is a list literal or a current_user membership array, and for the '
-        + 'negation of such an ==, then rewrite each with in or !(... in ...). A check that still '
-        + 'carries the shape refuses every write it governs with INVALID_FILTER / 400, allowed '
-        + 'values included, so one allowed write under each policy finds every such check left. '
+        + 'negation of such an ==, then rewrite each with in or !(... in ...). '
         + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
@@ -13876,6 +14106,54 @@ const step18: MigrationStep = {
         + 'reports no `component-props-unknown-key` / `component-props-invalid` finding for the '
         + 'rail.',
     },
+    {
+      id: 'ui-report-joined-container-selection-refused',
+      surface: 'report selection keys on a `joined` container — a top-level `dataset`, or a '
+        + 'NON-EMPTY top-level `rows` / `columns` / `values` list, on a report whose `type` is '
+        + '`joined` (`ReportSchema`\'s refinement)',
+      replacement: 'the same key on the `blocks[]` entries that need it — each block binds its own '
+        + '`dataset` and selects its own `rows` / `columns` / `values` — or DELETE it. Deleting '
+        + 'changes nothing that renders: the container value was never read. The refusal lands at '
+        + 'the key\'s own path and says both, the way the container `order` refusal beside it '
+        + 'always has, and that `order` refusal is unchanged.',
+      reason:
+        'ADR-0049 enforce-or-remove, the enforce arm: the four keys stay declared (they are the '
+        + 'selection of every non-joined report), and the one report type that never reads them '
+        + 'now refuses them. A `joined` report selects nothing itself, and the refinement already '
+        + 'said so for `order` alone — it refused a container `order` with a pointer onto '
+        + '`blocks[]` while the four selection keys beside it parsed green. Measured at this '
+        + 'repo\'s `.objectui-sha` pin `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`: '
+        + '`DatasetReportRenderer`\'s joined branch (`DatasetReportRenderer.tsx:1462`) reads '
+        + '`blocks`, plus the container `runtimeFilter` and `drilldown` resolved above it, and '
+        + 'returns before the top-level reads of `columns` / `dataset` / `rows` / `values` begin '
+        + '(line 1529 onward) — so each was accepted by the metadata layer and dropped by the '
+        + 'renderer without a word. The alias tables made it reachable: `fields` / `measures` / '
+        + '`metrics` route to `values`, `groupings` / `groupBy` / `dimensions` to `rows`, and '
+        + '`objectName` / `object` / `dataSet` / `source` to `dataset`, on a joined report as on '
+        + 'any other. Studio\'s report inspector hides the top-level binding for a joined report '
+        + '(`ReportDefaultInspector.tsx:328`) but its type picker patches only `type`, so a '
+        + 'report bound first and switched to `joined` second carries the keys invisibly. An '
+        + 'empty list is NOT refused: it selects nothing, which is what a joined container '
+        + 'selects — the container `order` refusal\'s own threshold. Ships at once, no '
+        + 'deprecation window: there is no window in which a key the renderer never reads does '
+        + 'anything.',
+      acceptanceCriteria:
+        'WHICH DOOR: this is the spec schema\'s refusal, so it lands wherever a report is parsed '
+        + 'through `@objectstack/spec` — `defineReport`, `os validate` / `os build`, and the '
+        + 'metadata save door (the `report` entry of the metadata type registry) — as one '
+        + '`custom` issue per key at `dataset` / `rows` / `columns` / `values`. A stored '
+        + '`sys_metadata` report row is not rewritten: it carries the same issue in its read-side '
+        + '`_diagnostics` and is refused on its next save. Fix each by moving the key onto the '
+        + 'blocks that need it or deleting it, then check the rendered report: it renders exactly '
+        + 'as before, because the container value was never read. A joined report that carries '
+        + 'only `blocks`, `runtimeFilter`, `drilldown` and the identity / protection keys parses '
+        + 'byte-identically to before, and every non-joined report is untouched. Census at the '
+        + 'time of the change: zero joined reports carry any of the four at the container — in '
+        + 'this repo one example-app report, one docs example and five test fixtures across '
+        + '`packages/lint` and `packages/platform-objects`; in objectui every joined-report '
+        + 'fixture and docs example at the pin above (13 occurrences); in the cloud repo none '
+        + 'exist.',
+    },
     // The absent-value half of the coupling #6227 declared, recorded beside its
     // array half (`view-filter-rule-scalar-operator-array-refused`) rather than
     // amended onto it: that entry's own replacement prose told an upgrading author
@@ -14005,46 +14283,38 @@ const step18: MigrationStep = {
         + 'equals, and operator: "in" with value: ["won"] — select the same rows, so the result '
         + 'set cannot tell you which the metadata meant, and only the author knows.',
     },
-    // The door half of ruling A on objectui#10380 (#20051). A write-time narrowing
-    // of the flattened view overlays: the stored rows it newly refuses are read and
-    // served exactly as before and fail only on their next save, which is why this
-    // is a semantic entry and not a conversion — which key a row meant is a fact
-    // only its author holds.
+    // The display page size a view gets when it declares none moved from 25 to 50
+    // (maintainer ruling on objectui#9853). A default move reaches every silent
+    // document with no parse error and nothing in the author's diff, so the
+    // upgrade path carries it as a TODO: only the deployment can say whether a
+    // view that never declared a page size was relying on 25.
     {
-      id: 'view-overlay-options-bag-judged',
-      surface:
-        'The legacy `options` bag on a flattened `view` overlay saved through the metadata write door '
-        + '(`PUT /api/v1/meta/view/:name`, the Studio / MCP save): `options.kanban`, `options.calendar`, '
-        + '`options.gantt`, `options.gallery`, `options.timeline`, `options.chart`, `options.map` and '
-        + '`options.tree` on a list overlay, any other key in the bag, and the bag on a form overlay.',
-      replacement:
-        'Each `options.KIND` block carrying only keys the top-level `KIND` block declares, with values that '
-        + 'block accepts — or, preferred, the same keys moved to the top-level `KIND` block, which wins per key '
-        + 'where both set one. A key the block does not declare is deleted or re-spelled to the declared key the '
-        + 'refusal names (`options.kanban.groupField` becomes `groupByField`, `options.calendar.dateField` '
-        + 'becomes `startDateField`); `options.timeline.metaFields` has no declared successor and is deleted. '
-        + 'Any other key in the bag is deleted, and a form overlay carries no bag at all.',
+      id: 'view-pagination-page-size-default-50',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'ui.PaginationConfig.pageSize — an OMITTED page size on a view',
+      replacement: 'nothing, to take the platform display page size of 50. To keep the old 25 rows '
+        + 'per page on a view, write it: `pagination: { pageSize: 25 }`',
       reason:
-        'The list overlay member re-opens its top level with a strip so the console\'s round-trip keys '
-        + 'survive, and that strip dropped the `options` bag from the parse without looking inside it. The save '
-        + 'stores the request body, not the parse output, and objectui\'s interface page forwards a stored '
-        + 'view\'s `options` into the list renderer, which merges `options.KIND` under the top-level block — so a '
-        + 'key the strict block refuses by name (`timeline.metaFields`) was saved and rendered when spelled '
-        + '`options.timeline.metaFields`. Measured on `origin/main` @ `8d1f7ab` through the real save. Ruled '
-        + 'direction A (maintainer 「其他同意」): judge each `options.KIND` with the kind\'s strict schema and '
-        + 'refuse an out-of-contract key by name, as the direct spelling is; refusing the bag whole was ruled '
-        + 'out because the legacy `options.map` path is live and pinned. Judged key by key, because the '
-        + 'renderer reads the bag as a per-key underlay of the top-level block: a bag that carries only the '
-        + 'keys the top-level block leaves to it is legal and stays accepted. Not convertible: whether a '
-        + 'refused key was a typo of a declared one or a retired capability is the author\'s call.',
+        'A RULED behaviour change on a default, so there is nothing to rewrite and nothing to '
+        + 'refuse: the maintainer set the platform display page size to 50 (「9853 默认页大小改为50」, '
+        + 'objectui#9853), and the declared default of `PaginationConfigSchema.pageSize` moved '
+        + 'from 25 to 50. A `pagination` block that omits `pageSize` now parses to 50 — 50 rows '
+        + 'per page on a paged view, and a fetch ceiling of 50 on a view with no pager (kanban, '
+        + 'gallery, timeline). A view with no `pagination` block at all parses with none on either '
+        + 'side; its page size reaches it through the renderer, which is ruled to read the spec '
+        + 'default rather than keep its own number (objectui#9853 ruling C′ item 1). Not losslessly '
+        + 'convertible because the question is intent, not text: a mechanical pass that wrote '
+        + '`pageSize: 25` into every silent view would preserve the old number and defeat the '
+        + 'ruling, and one that wrote 50 would add nothing the default does not already do. Only '
+        + 'the deployment knows which silent views were relying on 25. The accept set is unchanged '
+        + '— a positive integer — and every authored `pageSize` parses exactly as before.',
       acceptanceCriteria:
-        'Every stored `view` overlay carrying a top-level `options` saves again unchanged. A row that does not '
-        + 'is refused `422 INVALID_METADATA` on its next save, with an `unrecognized_keys` issue at '
-        + '`options.KIND` naming the key and carrying the same message the direct spelling gets at `KIND` — '
-        + 'or at `options` for a key that is not a kind, or a form overlay\'s bag. Nothing is rewritten on '
-        + 'read and nothing is refused on read: a row that fails is served exactly as stored until it is '
-        + 'saved. Verify by re-saving each stored overlay that carries `options` (a GET then a PUT of the '
-        + 'same body) and reading a `200`.',
+        'An empty pagination configuration parses to a page size of 50, and a list view carrying '
+        + '`pagination: {}` parses to `pagination.pageSize` 50; an authored '
+        + '`pagination: { pageSize: 25 }` still parses to 25; `pageSize: 0`, a negative and a '
+        + 'fraction are still refused. A view that must keep 25 rows per page declares '
+        + '`pagination: { pageSize: 25 }` and shows 25 rows on its first page.',
     },
     {
       id: 'wait-node-event-config-required',

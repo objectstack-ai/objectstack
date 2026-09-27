@@ -35,6 +35,7 @@
 import {
   resolveEffectiveApiMethods,
   effectiveOperationsArray,
+  canServeApiOperation,
   type EnableLike,
 } from '@objectstack/spec/data';
 import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
@@ -42,8 +43,9 @@ import { objectPermissionGrants, type EffectiveObjectPermission } from '@objects
 /**
  * Does the `'*'` entry carry the super-user READ bypass?
  *
- * ONE reading of that question for this whole file — {@link foldWildcardSuperUser}
- * asks it to decide whose `allowRead` it pulls true, and
+ * ONE reading of that question for this whole file — {@link foldSuperUserWildcardGrants}
+ * asks it of each set to decide which wildcards it folds (and the standalone
+ * {@link foldWildcardSuperUser} of the merged map), and
  * {@link seedSuperUserRestrictedObjects} asks it to decide whom it seeds for, so
  * the seed can never materialise an entry for a principal the fold leaves false.
  * It is the same bypass the server itself applies: `PermissionEvaluator`'s
@@ -79,21 +81,23 @@ function wildcardGrantsSuperRead(objects: Record<string, any>): boolean {
  * The super-user grant covers private/managed objects on the server, so the
  * read and write bypass reach every entry here.
  *
- * [#20134] This reads the MERGED wildcard, so it knows only the two bypass
- * bits, and only four entry bits. The per-set half,
- * {@link foldSuperUserWildcardGrants}, carries what that reading cannot: the
- * `transfer` the write bypass grants, and a super-user wildcard's own plain
- * bits (`'*': { viewAllRecords, allowEdit }` edits). Two cells here are known
- * to be BROADER than enforcement, and are left exactly as they are for the
- * over-grant card of this family (#20136):
- *  - the merged bypass is folded into an entry the super-user set itself names
- *    narrower — `resolveObjectPermission` answers that set with its explicit
- *    entry, so the walled `organization_admin` is granted edit on
- *    `sys_position` here and refused it by the server;
- *  - `allowCreate` is pulled on the write bypass, which the spec's
- *    `objectPermissionGrants` deliberately gives no create cell: a
- *    `'*': { modifyAllRecords: true }` without `allowCreate` is granted create
- *    here and refused it by the server.
+ * [#20136] ⛔ NOT a step of {@link buildEffectiveObjectPermissions}, and not
+ * what the effective map is built from. It reads the MERGED wildcard, and a
+ * merged map no longer says which set names which object, so no fold over it
+ * alone can match the server. The map's super-user fold is
+ * {@link foldSuperUserWildcardGrants}, which reads each set on its own. This
+ * helper stays exported, body unchanged, for the callers of the released
+ * `@objectstack/plugin-hono-server` export of the same name. Against
+ * `PermissionEvaluator.checkObjectPermission` its answer is:
+ *  - BROADER where the super-user set itself names the object narrower:
+ *    `resolveObjectPermission` answers that set with its explicit entry, so
+ *    the walled `organization_admin` would be granted edit on `sys_position`
+ *    here and is refused it by the server;
+ *  - BROADER on create: `allowCreate` is pulled on the write bypass, which the
+ *    spec's `objectPermissionGrants` gives no create cell;
+ *  - NARROWER on `transfer` and on a super-user wildcard's own plain bits,
+ *    which it never sets.
+ * Build a map with {@link buildEffectiveObjectPermissions}, never with this.
  */
 export function foldWildcardSuperUser(objects: Record<string, any>): void {
   const wild = objects?.['*'];
@@ -113,10 +117,10 @@ export function foldWildcardSuperUser(objects: Record<string, any>): void {
 }
 
 /**
- * [#20134] The per-set half of the super-user fold: each set's SUPER-USER
- * `'*'` puts every bit it grants on each entry that set does not name, mutating
- * the map in place. Runs after the seed (so every registered object has an
- * entry) and BEFORE the managed-write clamp.
+ * [#20134] The super-user fold: each set's SUPER-USER `'*'` puts every bit it
+ * grants on each entry that set does not name, mutating the map in place.
+ * Runs after the seed (so every registered object has an entry) and BEFORE the
+ * managed-write clamp.
  *
  * Without it the map held only the four bits {@link foldWildcardSuperUser}
  * pulls, so `current_user.can(object, 'transfer')` answered `false` for
@@ -124,6 +128,15 @@ export function foldWildcardSuperUser(objects: Record<string, any>): void {
  * where `PermissionEvaluator.checkObjectPermission('transfer', …)` answers
  * `true` through `modifyAllRecords`, and a super-read wildcard lost its own
  * plain bits (`'*': { viewAllRecords, allowEdit }` read only).
+ *
+ * [#20136] And it is the WHOLE super-user fold: the merged
+ * {@link foldWildcardSuperUser} no longer runs before it. That pass put the
+ * merged bypass on every entry, the ones a super-user set names itself
+ * included, and pulled `allowCreate` on `modifyAllRecords` alone, so the map
+ * granted cells the server refuses — edit on `sys_position` for the walled
+ * `organization_admin`, create for a `'*': { modifyAllRecords: true }`, read on
+ * an entry a super-user set names as `{}`. Every bit that pass set that the
+ * server grants, this one sets too, per set.
  *
  * The bits are DERIVED, not listed: for each grant bit, the spec's
  * `objectPermissionGrants` — the one fold `checkObjectPermission` itself asks
@@ -215,7 +228,8 @@ const GUARDED_WRITE_BUCKETS: ReadonlySet<string> = new Set(['better-auth', 'engi
  * object opted the write affordance in via `userActions.{create,edit,delete}`
  * (e.g. sys_user opens `edit` for its profile fields).
  *
- * Without this clamp, {@link foldWildcardSuperUser} would report `allowEdit:true`
+ * Without this clamp, the super-user fold ({@link foldSuperUserWildcardGrants})
+ * would report `allowEdit:true`
  * for a platform admin on tables the guard actually blocks (sys_member,
  * sys_automation_run, …) — a false-POSITIVE that mirrors, inverted, the
  * false-negative the fold fixes. The real effective answer for a user-context
@@ -316,7 +330,7 @@ function grantsAnyVerb(entry: Record<string, unknown>): boolean {
  *    left out: an absent entry and an all-`false` one read the same.
  *
  * A super-user wildcard is NOT materialised here: {@link seedSuperUserRestrictedObjects}
- * and {@link foldWildcardSuperUser} carry it, and this pass leaves their answer
+ * and {@link foldSuperUserWildcardGrants} carry it, and this pass leaves their answer
  * byte-for-byte as it was for every subject holding no plain wildcard.
  */
 function materializePlainWildcardCoverage(
@@ -364,10 +378,10 @@ function materializePlainWildcardCoverage(
  *
  * A super-user's grant is usually the `'*'` wildcard, not explicit per-object
  * entries — so the objects it reaches never appear in the merged `objects` map.
- * Seeding a `{allow*: false}` entry lets {@link foldWildcardSuperUser} and
- * {@link foldSuperUserWildcardGrants} pull its grants true and lets
+ * Seeding a `{allow*: false}` entry lets {@link foldSuperUserWildcardGrants}
+ * pull its grants true and lets
  * {@link annotateEffectiveApiOperations} attach the effective operation set
- * where the object narrows it. Runs BEFORE both folds.
+ * where the object narrows it. Runs BEFORE the fold.
  *
  * [#18990] Admitted by {@link wildcardGrantsSuperRead} — the READ bypass, so
  * BOTH super-user classes are seeded, and a plain wildcard grant carrying
@@ -435,38 +449,63 @@ export function seedSuperUserRestrictedObjects(
  * fold + clamp so the annotation sits alongside the final CRUD affordances, and
  * {@link seedSuperUserRestrictedObjects} applies the same predicate so a
  * wildcard-only principal has an entry here to annotate ([#18931]).
+ *
+ * [#20135] The set is what the REST door SERVES this subject, read through the
+ * door's own two questions rather than a second spelling of either:
+ *
+ *  - the OBJECT half is `canServeApiOperation` — the boolean face of the
+ *    spec's `apiExposureDenialReason`, the one function
+ *    `@objectstack/rest`'s `enforceApiAccess` turns into its 404 / 405. It
+ *    judges `enable.apiEnabled === false` FIRST and for every operation, so an
+ *    API-disabled object is annotated `[]`: the door answers
+ *    `404 OBJECT_API_DISABLED` for every verb, whatever `apiMethods` says, and
+ *    an entry left without an annotation would send the client down its
+ *    default-allow path — every operation offered, every one refused. The
+ *    entry itself stays: `apiEnabled` closes the API, not data access, and the
+ *    map's CRUD bits are what `current_user.can()` reads on the server;
+ *  - the USER half is the export door's own conjunction on this entry,
+ *    `objectPermissionGrants(entry, 'allowExport')` — read ∧ an opt-in export
+ *    grant. By the time this pass runs every set's `'*'` has been put on the
+ *    entries it covers for THAT set and posture (plain coverage, then the
+ *    per-set super-user fold), so the entry already is
+ *    `PermissionEvaluator.checkObjectPermission('export', …, { isPrivate })`'s
+ *    answer. It used to fall back to the MERGED `'*'` export bit, which covers
+ *    what no single set covers: a private object reached only through a plain
+ *    `'*': { allowExport: true }` (a plain wildcard never covers a private
+ *    object), and an object the exporting set itself names without the grant.
+ *    Both were annotated `export` and answered `403 EXPORT_NOT_PERMITTED`.
+ *
+ * Which entries carry the annotation is unchanged in rule: only an
+ * unrestricted object that keeps its whole closure — every operation served,
+ * `export` included — gets none.
  */
 export function annotateEffectiveApiOperations(
   objects: Record<string, any>,
   schemaOf: (objectName: string) => ApiExposureSchemaLike | undefined,
 ): void {
-  // [#3544] The `'*'` entry's export grant is the FALLBACK for objects that do
-  // not carry one of their own. The merge keeps `'*'` and named objects as
-  // independent keys, but the server evaluator does not: its
-  // `resolveObjectPermission` falls back to the wildcard whenever a set has no
-  // explicit entry for the object, so an admin set granting export wholesale
-  // via `'*': { allowExport: true }` really does grant it per-object. Reading
-  // the wildcard here keeps the button the client shows and the request the
-  // server accepts in agreement — the same class of client/server divergence
-  // `foldWildcardSuperUser` exists to close, on the export axis.
-  const wildExport = objects?.['*']?.allowExport;
   for (const [obj, acc] of Object.entries(objects) as Array<[string, any]>) {
     if (obj === '*' || !acc) continue;
     const schema = schemaOf(obj);
     if (!schema) continue; // schema missing → no annotation (client falls back)
+    const enable = schema.enable ?? undefined;
     // [#3544] User-level export axis: `export` derives from `list ∧ this
-    // grant`. OPT-IN — only an explicit `true` (on the object entry, else
-    // inherited from `'*'`) allows export; unset and `false` both withhold
-    // it, and the super-user bits do NOT imply it.
-    const exportBit = acc.allowExport ?? wildExport;
-    const userExportAllowed = exportBit === true;
-    const eff = resolveEffectiveApiMethods(schema.enable ?? undefined, { userExportAllowed });
-    // Annotate when the object tightens via `apiMethods`, OR when the export
+    // grant`. OPT-IN — only an explicit `true` allows export; unset and
+    // `false` both withhold it, and the super-user bits do NOT imply it.
+    // [#20135] Read off THIS entry, as the export door reads it (see above).
+    const userExportAllowed = objectPermissionGrants(acc as EffectiveObjectPermission, 'allowExport');
+    const eff = resolveEffectiveApiMethods(enable, { userExportAllowed });
+    const closure = effectiveOperationsArray(eff);
+    // [#20135] Only what the door itself admits: `apiEnabled: false` empties
+    // the set; any other `enable` leaves the closure as it is.
+    const served = closure.filter((operation) => canServeApiOperation(enable, operation));
+    // Annotate when the object tightens via `apiMethods`, when the export
     // axis removes `export` from an otherwise-open object (so the client
-    // hides the Export button). An unrestricted object with export still
-    // allowed needs no annotation — the client keeps its default-allow path.
-    if (eff.mode === 'unrestricted' && userExportAllowed) continue;
-    acc.apiOperations = effectiveOperationsArray(eff);
+    // hides the Export button), OR when the door serves less than the closure
+    // (an API-disabled object). An unrestricted object with every operation
+    // still served needs no annotation — the client keeps its default-allow
+    // path.
+    if (eff.mode === 'unrestricted' && userExportAllowed && served.length === closure.length) continue;
+    acc.apiOperations = served;
   }
 }
 
@@ -511,9 +550,11 @@ export interface EffectiveObjectPermissionsInputSet {
  *  3. {@link materializePlainWildcardCoverage} — [#20083] each set's plain
  *     `'*'` onto the registered objects it covers for that set, so the map is
  *     as broad as `checkObjectPermission` there; guarded like (2);
- *  4. {@link foldWildcardSuperUser}, then {@link foldSuperUserWildcardGrants} —
- *     [#20134] each set's super-user `'*'` onto the entries it covers for that
- *     set, every bit it grants;
+ *  4. {@link foldSuperUserWildcardGrants} — [#20134] each set's super-user
+ *     `'*'` onto the entries it covers for that set, every bit it grants;
+ *     [#20136] and nothing more: the merged {@link foldWildcardSuperUser} is
+ *     not a step, so an entry a super-user set names itself keeps that set's
+ *     explicit answer, and `modifyAllRecords` alone grants no create;
  *  5. {@link clampManagedObjectWrites};
  *  6. {@link annotateEffectiveApiOperations} — guarded like (2).
  *
@@ -567,12 +608,12 @@ export function buildEffectiveObjectPermissions(
   }
   // Make the per-object map reflect the server's ACTUAL effective enforcement
   // = permission-set grant ∩ identity write guard (ADR-0057 D10, cited as an
-  // attribution, #9628): (1) fold the `'*'` super-user grant into every object
-  // so an admin's wildcard is not shadowed by another set's explicit deny —
-  // the merged bypass bits, then [#20134] every bit each set's super-user
-  // wildcard grants, `transfer` and its own plain bits included;
+  // attribution, #9628): (1) fold each set's `'*'` super-user grant into every
+  // entry that set does not name, so an admin's wildcard is not shadowed by
+  // another set's explicit deny — [#20134] every bit it grants, `transfer` and
+  // its own plain bits included; [#20136] per set only, never the merged
+  // bypass, which would also override the super-user set's OWN narrower entry;
   // (2) re-clamp guarded managed objects by their write affordance.
-  foldWildcardSuperUser(objects);
   foldSuperUserWildcardGrants(objects, sets);
   clampManagedObjectWrites(objects, schemaOf);
   // [#3391] Annotate the per-object effective API operation set. Guarded: on

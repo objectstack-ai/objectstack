@@ -202,9 +202,12 @@ describe('the refusal describes this face: the JSON encoding, and no column-move
       const stub = makeLibsqlSqliteStub();
       const driver = new TursoDriver({ url: 'libsql://media.turso.io', client: stub as never });
       // The engine's supply seam (`ObjectQL.registerDriver`), with a resolver
-      // that would answer "moved" if it were ever asked.
+      // that would answer "moved" if it were ever asked. [#20055] The remote
+      // face now declines it (`false`, the member's "not taken" answer); it
+      // used to take it (`true`) and then never ask it, which this case
+      // measured.
       let asked = 0;
-      expect(driver.setFileColumnsMovedResolver(() => { asked += 1; return true; })).toBe(true);
+      expect(driver.setFileColumnsMovedResolver(() => { asked += 1; return true; })).toBe(false);
       await driver.connect();
       await DOORS[door](driver);
 

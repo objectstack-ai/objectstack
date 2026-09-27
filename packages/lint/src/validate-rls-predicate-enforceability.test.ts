@@ -736,6 +736,84 @@ describe('validateRlsPredicateEnforceability — the `current_user` set is DERIV
   });
 });
 
+describe('validateRlsPredicateEnforceability — each kernel key is probed with its RUNTIME type (#19886)', () => {
+  /**
+   * The CEL lowering refuses `==` / `!=` against a list (#19886), so a probe of
+   * the wrong type silences the reference half: an array bound to `id` made
+   * every `field == current_user.id` policy compile to nothing here, and its
+   * field and variable checks never ran. Each key is therefore probed with the
+   * type `RLSCompiler.compileFilter` hands the compiler at runtime.
+   *
+   * Read off the resolver, not off any list: `compileFilter` builds its
+   * `current_user` context in `plugin-security/src/rls-compiler.ts` from
+   * `ExecutionContext` (`id` ← `userId`, `organization_id` ← `tenantId`, the
+   * rest by name), and `ExecutionContextSchema` declares `userId`, `tenantId`
+   * and `email` as strings and `positions`, `org_user_ids` and
+   * `accessible_org_ids` as string arrays; `resolveAuthzContext` produces the
+   * same types.
+   */
+  const RUNTIME_TYPE: Record<string, 'scalar' | 'array'> = {
+    id: 'scalar',
+    organization_id: 'scalar',
+    email: 'scalar',
+    positions: 'array',
+    org_user_ids: 'array',
+    accessible_org_ids: 'array',
+  };
+
+  it('covers exactly the kernel-resolved keys the contract names', () => {
+    expect(Object.keys(RUNTIME_TYPE).sort()).toEqual([...RESERVED_RLS_MEMBERSHIP_KEYS].sort());
+  });
+
+  it.each(Object.entries(RUNTIME_TYPE).filter(([, type]) => type === 'scalar'))(
+    'a SCALAR key (%s) lowers under `==`, so the field check still runs',
+    (key) => {
+      expect(ids(siteWith('using', `owner_id_nope == current_user.${key}`))).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+      expect(ids(siteWith('check', `owner_id_nope != current_user.${key}`))).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+    },
+  );
+
+  it.each(Object.entries(RUNTIME_TYPE).filter(([, type]) => type === 'array'))(
+    'a MEMBERSHIP key (%s) lowers under `in`, so the field check still runs',
+    (key) => {
+      expect(ids(siteWith('using', `owner_id_nope in current_user.${key}`))).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+      expect(ids(siteWith('check', `!(owner_id_nope in current_user.${key})`))).toEqual([
+        RLS_PREDICATE_UNKNOWN_FIELD,
+      ]);
+    },
+  );
+});
+
+describe('validateRlsPredicateEnforceability — the bare `current_user` root is reported on both clauses (#19959)', () => {
+  /**
+   * The CEL lowering refuses `==` / `!=` against the variable ROOT — the whole
+   * caller context object, not one value — in both compile modes, so the shape
+   * verdict this rule reads (`isSupportedRlsExpression`) reports it before any
+   * request. Until then the reference pass bound the root to its probe object,
+   * the predicate lowered, and a `check` so written admitted every write at
+   * runtime while this rule said nothing.
+   */
+  it.each([
+    'owner_id != current_user',
+    'owner_id == current_user',
+    '!(owner_id == current_user)',
+    'current_user != owner_id',
+    "current_user != 'guest'",
+  ])('%s', (source) => {
+    for (const clause of ['using', 'check'] as const) {
+      const findings = validateRlsPredicateEnforceability(siteWith(clause, source));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([
+        [RLS_PREDICATE_UNENFORCEABLE, `permissions[0].rowLevelSecurity[0].${clause}`],
+      ]);
+    }
+  });
+
+  it('CONTROL — a key of the root stays clean on both clauses', () => {
+    expect(ids(siteWith('using', 'owner_id != current_user.id'))).toEqual([]);
+    expect(ids(siteWith('check', 'owner_id == current_user.id'))).toEqual([]);
+  });
+});
+
 describe('validateRlsPredicateEnforceability — §7.3.1 membership keys stay UNKNOWABLE', () => {
   /**
    * The false-positive this rule exists on the edge of. An app stages arbitrary

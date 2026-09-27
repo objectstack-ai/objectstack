@@ -43,11 +43,15 @@ const REFUSED = [
     ['a bare word — no reverse-domain prefix at all', 'pkg-a'],
     ['an underscore inside a segment', 'com.example.my_erp'],
     ['the empty string', ''],
-    ['a segment opening with a digit', 'com.4example.crm'],
+    ['a segment opening with a hyphen', 'com.-example.crm'],
 ] as const;
 
-/** Ids the declaration admits — the lit controls. */
-const ADMITTED = ['com.example.crm', 'com.example.my-erp', 'org.apache.superset'] as const;
+/**
+ * Ids the declaration admits — the lit controls. `com.4example.crm` was a
+ * REFUSED row until the declaration let a segment open with a digit; it is
+ * here so this door is held to the widened rule, not only the spec schema.
+ */
+const ADMITTED = ['com.example.crm', 'com.example.my-erp', 'org.apache.superset', 'com.4example.crm'] as const;
 
 function makeImpl() {
     const registryCalls: Array<{ manifest: any }> = [];

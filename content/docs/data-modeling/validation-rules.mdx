@@ -152,10 +152,10 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `min` | `number` | — | Minimum monetary value |
 | `max` | `number` | — | Maximum monetary value |
 | `currencyConfig.precision` | `number` | `2` | Decimal places (0–10) |
-| `currencyConfig.currencyMode` | `enum` | `dynamic` | `dynamic` (user-selectable) or `fixed` (single currency) |
-| `currencyConfig.defaultCurrency` | `string` | `CNY` | 3-character currency code (ISO 4217 or crypto) |
+| `currencyConfig.currencyMode` | `enum` | `dynamic` | `fixed` pins the field to `defaultCurrency`, and an authored `precision` must agree with that currency's ISO 4217 fraction digits; `dynamic` displays the tenant default currency (the `localization.currency` setting). Not a per-record choice |
+| `currencyConfig.defaultCurrency` | `string` | `CNY` | 3-character currency code (ISO 4217 or crypto): the field's currency under `fixed`; not the displayed currency under `dynamic` |
 
-**Default constraints:** Stored as a **bare number** (a finite numeric scalar — `valueSchemaFor` routes `currency` to `z.number().finite()`); there is no `{ value, currency }` envelope on the value path. The per-record currency **code** is a separate concern, carried by `currencyConfig` above. Precision defaults to 2 decimal places.
+**Default constraints:** Stored as a **bare number** (a finite numeric scalar — `valueSchemaFor` routes `currency` to `z.number().finite()`); there is no `{ value, currency }` envelope on the value path. The currency **code** is never stored per record: it is field configuration, carried by `currencyConfig` above. Precision defaults to 2 decimal places.
 
 ### `percent`
 
