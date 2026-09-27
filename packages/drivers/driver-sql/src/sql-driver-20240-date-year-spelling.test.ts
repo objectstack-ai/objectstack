@@ -21,7 +21,16 @@
  * `DateStyle` (`ISO, MDY`) the server reads `9-03-04` as 2004-09-03 — a
  * different day, stored or compared silently — and refuses `99-03-04`
  * (`22008`). The unpadded spelling was restored by ablation to measure those
- * two, since this file's 0999 fixture reads right there. Each row below asserts
+ * two, since this file's 0999 fixture reads right there. MySQL 8.0 read
+ * `9-03-04` as year 9 but stored `99-03-04` as 1999-03-04.
+ *
+ * The write path is asserted on the STORED text, read by a raw cast
+ * (`storedText`), never through the driver's read path. On MySQL that path
+ * hands a year below 100 back a century late: mysql2 rebuilds a `DATE` as
+ * `new Date(Date.UTC(y, m - 1, d))` (`parseDate`, with the driver's
+ * `timezone: 'Z'`), and `Date.UTC` maps years 0..99 to 1900..1999, so a stored
+ * `0009-03-04` is presented as `1909-03-04`. That is a read-path defect of its
+ * own, unchanged by this card and reported beside it. Each row below asserts
  * one answer for the number, its `Date` and its ISO string, plus a 2026
  * control. A year below 0 or above 9999 is refused
  * as a comparand one layer up, at the engine's temporal-comparand door
@@ -74,6 +83,26 @@ const CELLS: ReadonlyArray<readonly [string, number, string, string[]]> = [
 
 const NO_AUDIT = { bypassTenantAudit: true };
 
+/** knex's raw result shape differs per client; this is the only place that knows. */
+function rowsOf(cell: DialectCell, res: any): any[] {
+  if (cell.id === 'pg') return res?.rows ?? [];
+  if (cell.id === 'mysql') return Array.isArray(res) ? (res[0] ?? []) : [];
+  return Array.isArray(res) ? res : (res?.rows ?? []);
+}
+
+/** The text the server STORED for one row's `date` — a raw cast, not the driver's read path. */
+async function storedText(driver: SqlDriver, cell: DialectCell, id: string): Promise<string | null> {
+  const sql =
+    cell.id === 'pg'
+      ? `select "placed_on"::text as t from "${WRITES}" where "id" = ?`
+      : cell.id === 'mysql'
+        ? `select cast(\`placed_on\` as char) as t from \`${WRITES}\` where \`id\` = ?`
+        : `select cast("placed_on" as text) as t from "${WRITES}" where "id" = ?`;
+  const rows = rowsOf(cell, await driver.execute(sql, [id]));
+  expect(rows, `no stored row for ${id}`).toHaveLength(1);
+  return rows[0].t ?? null;
+}
+
 function measure(cell: DialectCell): void {
   describe(`[#20240] a date field's year is four digits — ${cell.label}`, () => {
     let driver: SqlDriver;
@@ -107,15 +136,20 @@ function measure(cell: DialectCell): void {
     });
 
     it('the write path stores the four-digit year — create and update, a number and a Date', async () => {
-      const read = async (id: string) => (await driver.findOne(WRITES, { where: { id } }, NO_AUDIT))?.placed_on;
+      const stored = (id: string) => storedText(driver, cell, id);
       await driver.create(WRITES, { id: 'w1', placed_on: Y0999 }, NO_AUDIT);
       await driver.create(WRITES, { id: 'w2', placed_on: new Date(Y0999) }, NO_AUDIT);
-      expect(await read('w1')).toBe('0999-06-15');
-      expect(await read('w2')).toBe('0999-06-15');
-      await driver.update(WRITES, 'w1', { placed_on: Date.parse('0009-03-04T00:00:00.000Z') }, NO_AUDIT);
-      expect(await read('w1')).toBe('0009-03-04');
-      // …so the stored day and a comparand for it are one text.
-      expect(await ids(WRITES, { placed_on: { $eq: '0999-06-15' } })).toEqual(['w2']);
+      expect(await stored('w1')).toBe('0999-06-15');
+      expect(await stored('w2')).toBe('0999-06-15');
+      // A year from 100 up also reads back as written through the driver.
+      expect((await driver.findOne(WRITES, { where: { id: 'w1' } }, NO_AUDIT))?.placed_on).toBe('0999-06-15');
+      await driver.update(WRITES, 'w1', { placed_on: Y0009 }, NO_AUDIT);
+      await driver.update(WRITES, 'w2', { placed_on: new Date(Y0099) }, NO_AUDIT);
+      expect(await stored('w1')).toBe('0009-03-04');
+      expect(await stored('w2')).toBe('0099-03-04');
+      // …so the stored day and a comparand for it are one day.
+      expect(await ids(WRITES, { placed_on: { $eq: '0009-03-04' } })).toEqual(['w1']);
+      expect(await ids(WRITES, { placed_on: { $eq: new Date(Y0099) } })).toEqual(['w2']);
     });
   });
 }
