@@ -5326,8 +5326,12 @@ const step18: MigrationStep = {
     + 'nothing read either. Both are `retiredKey()` tombstones on the two overlay members with '
     + 'the view item\'s own prescription texts, and the D2 conversion '
     + '`view-overlay-owner-hidden-removed` strips them from the flattened spelling (no `config`, '
-    + 'no container slot) in `views` and `viewItems`, so a stored overlay row is served clean '
-    + 'and survives the console\'s next read-merge-write. Its D3 record is the semantic entry '
+    + 'no container slot) in `views` and `viewItems`, so a stored overlay row is served without '
+    + 'them. A row that held other view keys is then valid again and re-saves; a row that held '
+    + 'nothing but its identity and the two keys is left identity-only, which the door refuses, '
+    + 'so it is badged invalid, refused on a whole-row re-save and reported `failed` by '
+    + '`os migrate meta --stored --apply` until it is deleted or given the setting its author '
+    + 'meant. Its D3 record is the semantic entry '
     + '`view-overlay-owner-hidden-retired`.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
@@ -15152,6 +15156,9 @@ const step18: MigrationStep = {
         + '`hidden: true` hid nothing and no scope ever read `owner`. The judgment is about exposure, '
         + 'the same one the view item record\'s retirement leaves. A view someone hid or marked as one '
         + 'user\'s through its overlay has always been listed to every user who can read the object. '
+        + 'The delete is lossless but does not always close the row: an overlay row that held nothing '
+        + 'but its identity and these keys is left identity-only, a body the view door refuses, so '
+        + 'that row needs its author (see the acceptance criteria). '
         + 'Measured writers in this repository and its sibling UI: zero (no source, example or skill, '
         + 'and objectui at its pinned commit and at main writes neither key on an overlay; the HotCRM '
         + 'app writes neither). NOT MEASURED: clients outside this repository, and production stored '
@@ -15160,11 +15167,21 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'No flattened view overlay you save carries `owner` or `hidden`: the write door refuses either '
         + 'with 422 INVALID_METADATA, the issue located at the key and the retirement prescription as '
-        + 'its message. A stored overlay row that held either is served, badged and re-saved without '
-        + 'it, so a GET then a PUT of that row answers 200; `os migrate meta --stored --apply` persists '
-        + 'the stripped shape. For every view whose overlay had carried either key, its author has '
-        + 'confirmed that the view may be listed to all readers of its object, or has deleted it. The '
-        + 'view switcher lists the same views as before the upgrade.',
+        + 'its message. A stored overlay row that held either is stripped of it on every read, and what '
+        + 'follows depends on what else the row holds. (1) A row with any other view key (a column '
+        + 'state, a sort, a default flag, an order) is served and badged valid without the keys, a GET '
+        + 'then a PUT of the whole row answers 200 (if it was otherwise valid), and '
+        + '`os migrate meta --stored --apply` rewrites it. (2) A hide-only row — nothing but its '
+        + 'identity (name, object, viewKind, label) and `owner` / `hidden`, such as '
+        + '`{ object, viewKind, hidden: true }` — is left with identity only, which the view door '
+        + 'refuses ("only identity fields"): it is served badged invalid (it was badged valid before '
+        + 'this release), a whole-row re-save or one that adds only identity answers 422 '
+        + 'INVALID_METADATA, and `--apply` reports it `failed` and leaves it as stored. A write that '
+        + 'adds a real view key, such as a toolbar toggle, saves. Resolve each such row: delete it (it '
+        + 'never changed what anyone saw), or add the personalization setting its author meant and '
+        + 'save that. For every view whose overlay had carried either key, its author has confirmed '
+        + 'that the view may be listed to all readers of its object, or has deleted it. No switcher '
+        + 'read path ever read either key, so which views the switcher lists does not change.',
     },
     // The display page size a view gets when it declares none moved from 25 to 50
     // (maintainer ruling on objectui#9853). A default move reaches every silent

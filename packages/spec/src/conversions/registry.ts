@@ -10447,10 +10447,28 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
  * the write door accepted and persisted both until this release, and every
  * read of a stored `view` row replays the chain through
  * `applyConversionsToStoredItem` as `{ views: [row] }` before it is served or
- * badged. Without the strip, such a row would be served with the retired key,
- * badged invalid, and refused on the console's next read-merge-write of it
- * (a toolbar toggle re-sends the row it read) over a key that never had an
- * effect. It also lets `os migrate meta --from 17` list the edits for sources.
+ * badged. It also lets `os migrate meta --from 17` list the edits for sources.
+ * What the strip leaves depends on what else the row holds — two classes, both
+ * pinned (`ui/view-overlay-owner-hidden-retirement.test.ts`, and the save door
+ * in `@objectstack/metadata-protocol`'s `protocol.save-union-issues.test.ts`):
+ *
+ * - **Content-bearing** — any view key besides the identity the write path
+ *   stamps (`name` / `object` / `viewKind` / `label`): served and badged valid
+ *   without the two keys, a GET then a PUT of the whole row saves (if it was
+ *   otherwise valid), and `os migrate meta --stored --apply` rewrites it.
+ *   Without the strip it would be served with the retired key, badged
+ *   invalid, and refused on the console's next read-merge-write of it.
+ * - **Hide-only** — identity plus `owner` / `hidden` and nothing else, the
+ *   shape the card measured (`{ object, viewKind, hidden: true }`): the strip
+ *   leaves IDENTITY ONLY, which the `view` door's identity precondition
+ *   refuses (#7741, "only identity fields"). The row is served without the
+ *   keys but badged invalid (it was badged valid before this release); a
+ *   whole-row re-save, or one that adds only identity (a rename is `label`),
+ *   answers `422 INVALID_METADATA`; `--apply` reports it `failed` and leaves it
+ *   as stored, and every read strips it again. A write that adds a real view
+ *   key (a toolbar toggle) saves. Remedy: delete the row — it never changed
+ *   what anyone saw — or add the personalization setting its author meant.
+ *   Not convertible: which setting, if any, the author wanted is theirs to say.
  *
  * **Two collections, like the view item's entry.** `views` is the stack
  * collection and the stored-row seam's wrapping; `viewItems`

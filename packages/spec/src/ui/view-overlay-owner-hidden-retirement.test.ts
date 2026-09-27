@@ -200,8 +200,9 @@ describe('overlay owner/hidden retirement — the D2 conversion', () => {
     // CONTROL: the live round-trip keys on the same row survive.
     expect(rehydrated.isDefault).toBe(true);
     expect(rehydrated.label).toBe('Edit lead');
-    // …and the rehydrated row is exactly what the write door accepts now, so the
-    // console's next read-merge-write of it saves.
+    // …and, because this row carries content (`isDefault`), the rehydrated row
+    // is what the write door accepts now, so a whole-row re-save of it saves.
+    // The row that carries NO content is the residue pinned below.
     expect(ViewMetadataSchema.safeParse(rehydrated).success).toBe(true);
     // CONTROL: the stored row itself, unconverted, is what the door now refuses.
     expect(ViewMetadataSchema.safeParse(stored).success).toBe(false);
@@ -256,6 +257,70 @@ describe('overlay owner/hidden retirement — the D2 conversion', () => {
     const { stack, notices } = collectConversionNotices({ views: [{ ...LIST_OVERLAY, hidden: true }] });
     expect(notices).toHaveLength(0);
     expect(stack).toEqual({ views: [{ ...LIST_OVERLAY, hidden: true }] });
+  });
+});
+
+/**
+ * The hide-only residue — the one stored class the strip cannot bring back
+ * into the accept set, stated in the D2 docblock, the D3 acceptance criteria
+ * and the changeset, and pinned here so those sentences stay true.
+ *
+ * The card's own measured shape, `{ object, viewKind, hidden: true }` (plus the
+ * `name` the write path stamps), holds nothing but identity and a retired key.
+ * The strip leaves IDENTITY ONLY, and the `view` door's identity precondition
+ * (#5599 / #7741 — `assertViewIdentity`) refuses a body that says which view it
+ * attaches to and nothing about what the view is. So the row is served badged
+ * invalid, a whole-row re-save is refused (the save-door half of this pin is
+ * in `@objectstack/metadata-protocol`'s `protocol.save-union-issues.test.ts`),
+ * and `os migrate meta --stored --apply` reports it `failed`. Remedy: delete
+ * the row, or add the personalization setting its author meant.
+ */
+describe('overlay owner/hidden retirement — the hide-only residue', () => {
+  const IDENTITY = { name: 'crm_lead.all', object: 'crm_lead', viewKind: 'list' } as const;
+
+  for (const [label, retired] of [
+    ['hidden', { hidden: true }],
+    ['owner', { owner: 'usr_7' }],
+    ['both', { hidden: true, owner: 'usr_7' }],
+  ] as const) {
+    it(`a stored hide-only row (${label}) strips to identity only, which the door refuses as "only identity fields"`, () => {
+      const stored = { ...IDENTITY, ...retired };
+      const notices: { conversionId?: string }[] = [];
+      const rehydrated = applyConversionsToStoredItem('view', stored, {
+        onNotice: (n) => notices.push(n as { conversionId?: string }),
+      });
+      // The strip itself is exact: identity, and nothing else.
+      expect(rehydrated).toEqual(IDENTITY);
+      expect(notices.length).toBe(Object.keys(retired).length);
+      expect(notices.every((n) => n.conversionId === 'view-overlay-owner-hidden-removed')).toBe(true);
+
+      // …and identity alone is not a `view` body: the precondition's own words,
+      // one `custom` issue at the root — NOT the retirement prescription, which
+      // has nothing left to locate.
+      const r = ViewMetadataSchema.safeParse(rehydrated);
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues).toHaveLength(1);
+      expect(r.error.issues[0]!.code).toBe('custom');
+      expect(r.error.issues[0]!.path).toEqual([]);
+      expect(r.error.issues[0]!.message).toContain('Not a `view` body');
+      expect(r.error.issues[0]!.message).toContain('only identity fields');
+      expect(r.error.issues[0]!.message).toContain('the write path stamps them itself');
+      expect(r.error.issues[0]!.message).not.toMatch(/was removed in @objectstack\/spec/);
+    });
+  }
+
+  it('a rename adds only identity (`label`), so it is refused too', () => {
+    const r = ViewMetadataSchema.safeParse({ ...IDENTITY, label: 'All leads' });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues[0]!.message).toContain('only identity fields');
+  });
+
+  it('CONTROL: a write that adds a real view key (a toolbar toggle) saves — the residue is the identity-only body, not the row', () => {
+    for (const toggle of [{ isDefault: true }, { order: 2 }, { columnState: { widths: { name: 120 } } }]) {
+      expect(ViewMetadataSchema.safeParse({ ...IDENTITY, ...toggle }).success, JSON.stringify(toggle)).toBe(true);
+    }
   });
 });
 

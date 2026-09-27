@@ -51,12 +51,24 @@ the view item's own texts, so the family answers with one voice on both doors.
 
 ### Stored rows
 
-A stored overlay row that already holds either key keeps working. Every read of
-a stored `view` row replays the conversion chain before the row is served or
-badged, and the D2 conversion strips both keys there. So the row is served
-without them, badged valid, and the console's next read-merge-write of it (a
-toolbar toggle re-sends the row it read) saves.
-`os migrate meta --stored --apply` persists the stripped shape.
+Every read of a stored `view` row replays the conversion chain before the row is
+served or badged, and the D2 conversion strips both keys there. What that leaves
+depends on what else the row holds:
+
+- **A row with any other view key** (a column state, a sort, a default flag, an
+  order): served and badged valid without the keys. A GET then a PUT of the whole
+  row saves (if it was otherwise valid), so the console's next read-merge-write of
+  it saves, and `os migrate meta --stored --apply` rewrites it.
+- **A hide-only row**, holding nothing but its identity (`name`, `object`,
+  `viewKind`, `label`) and `owner` / `hidden`, such as
+  `{ object, viewKind, hidden: true }`: the strip leaves identity only, which the
+  `view` door refuses ("only identity fields"). The row is served badged invalid
+  (it was badged valid before this release). A whole-row re-save, or one that adds
+  only identity (a rename sets `label`), answers `422 INVALID_METADATA`.
+  `--apply` reports it `failed` and leaves it as stored; every read strips it
+  again. A write that adds a real view key, such as a toolbar toggle, saves.
+  **Fix: delete the row** (it never changed what anyone saw), or add the
+  personalization setting its author meant and save that.
 
 ### The retirement kit
 
@@ -82,7 +94,8 @@ toolbar toggle re-sends the row it read) saves.
 
 ⚠️ **The out-of-repo population is NOT MEASURED.** `@objectstack/spec` is published,
 and production `sys_metadata` rows are not reachable from the repository. Stored
-rows are covered by the conversion above; a client that still sends either key is
-refused at its next save.
+rows are stripped on read by the conversion above, and a hide-only row among them
+needs the fix above. A client that still sends either key is refused at its next
+save.
 
 <!-- adr-0087: registered view-overlay-owner-hidden-removed, view-overlay-owner-hidden-retired -->
