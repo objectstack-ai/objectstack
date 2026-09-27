@@ -205,13 +205,25 @@ function refuseNestedRelationEqualityLists(
 }
 
 /**
- * The filter both analytics carriers declare — `DatasetSchema.filter` and
- * `DatasetMeasureSchema.filter` — which is `FilterConditionSchema` plus
+ * The optional filter both analytics carriers declare — `DatasetSchema.filter`
+ * and `DatasetMeasureSchema.filter` — which is `FilterConditionSchema` plus
  * {@link refuseNestedRelationEqualityLists}. Every other schema that carries a
  * `FilterCondition` keeps the shared schema's reach.
+ *
+ * The check sits on the OPTIONAL wrapper, not on `FilterConditionSchema`
+ * itself: refining the recursive schema would clone it, and the published JSON
+ * Schema would then inline a second copy of the condition beside the `$ref` it
+ * carries today. On the wrapper the condition keeps its identity, so the
+ * published body of `ui/Dataset` and `ui/DatasetMeasure` is unchanged, and the
+ * new rule is recorded as a dropped refinement at each carrier's `filter` in
+ * `dropped-refinements.baseline.json` (`z.toJSONSchema()` has no projection for
+ * it). An absent filter reaches the check as `undefined`, which the walk
+ * passes.
  */
-const AnalyticsCarrierFilterSchema = lazySchema(() =>
-  FilterConditionSchema.superRefine((filter, ctx) => refuseNestedRelationEqualityLists(filter, ctx)));
+function analyticsCarrierFilter() {
+  return FilterConditionSchema.optional().superRefine((filter, ctx) =>
+    refuseNestedRelationEqualityLists(filter, ctx));
+}
 
 /**
  * Dimension — a groupable axis (e.g. "region", "close_date by quarter").
@@ -327,7 +339,7 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * the analytics door refuses it on chart — see
    * {@link refuseNestedRelationEqualityLists}.
    */
-  filter: AnalyticsCarrierFilterSchema.optional().meta({ title: 'Filter' }),
+  filter: analyticsCarrierFilter().meta({ title: 'Filter' }),
   /**
    * Display format — a NUMERAL pattern controlling grouping, decimals and
    * percent: `"0,0.00"`, `"0.0%"`. A `$` in the pattern is still honoured as a
@@ -490,7 +502,7 @@ export const DatasetSchema = lazySchema(() => strictObject({
    * on save, as the analytics door refuses it on chart — see
    * {@link refuseNestedRelationEqualityLists}.
    */
-  filter: AnalyticsCarrierFilterSchema.optional().describe('Intrinsic dataset scope filter'),
+  filter: analyticsCarrierFilter().describe('Intrinsic dataset scope filter'),
 
   /** The semantic contract presentations bind to. */
   dimensions: z.array(DatasetDimensionSchema).describe('Groupable axes'),
