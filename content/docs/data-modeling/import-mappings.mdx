@@ -1,5 +1,6 @@
 ---
-title: Import Mappings
+title: Import mappings — load external data files
+navTitle: Import Mappings
 description: Named, reusable source-column to field projections for CSV/JSON/xlsx import, and the mappingName request that applies one.
 ---
 
@@ -103,7 +104,7 @@ Each `fieldMapping` entry:
 | Key | Type | What it does |
 |:---|:---|:---|
 | `source` | `string \| string[]` | Source column header(s). An array is only meaningful for `join`. |
-| `target` | `string \| string[]` | Target field name(s). An array is only meaningful for `split`. |
+| `target` | `string \| string[]` | Target field name(s), or `field.part` for a declared part of an address field (`mailing_address.street`; the parts are `street`, `city`, `state`, `postalCode`, `country`, `countryCode`, `formatted`). The parts one row maps are assembled into the field's one value: a blank part cell is left out, a row whose parts are all blank leaves the field unset, and on an update the assembled value replaces the stored one. A mapping writes a field whole or by its parts, never both. An array is only meaningful for `split`. |
 | `transform` | `TransformType` | Defaults to `'none'`. |
 | `params` | object | Configuration for the transform — `value`, `valueMap`, `separator`. |
 

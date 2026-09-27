@@ -44,15 +44,17 @@ export const FieldType = z.enum([
   // rest but masked to SECRET_MASK on read — the auth subsystem's one-way
   // hashing applies only to its own identity tables, never to an authored
   // 'password' field. Prefer 'secret' for reversible machine credentials. See
-  // ADR-0100.
+  // ADR-0100. Which types are masked on read, and the `managedBy: 'better-auth'`
+  // exemption for 'password', is DECLARED in `MASKED_ON_READ_FIELD_TYPES`
+  // (`./masked-field-types`) — this prose describes it, the table decides it.
   'text', 'textarea', 'email', 'url', 'phone', 'password',
   // Secret — reversible, encrypted-at-rest value (DB password, API key, token).
   // UNLIKE 'password' (masked-on-read but plaintext at rest, or one-way hashed
   // inside the auth subsystem), a 'secret' is round-tripped: the engine encrypts
   // it on write via the registered ICryptoProvider, stores the ciphertext handle
   // in `sys_secret`, persists only an opaque ref on the row, and masks it on
-  // read. Fail-closed: no provider ⇒ writes throw rather than persist cleartext.
-  // See ADR-0100.
+  // read (always — `MASKED_ON_READ_FIELD_TYPES`). Fail-closed: no provider ⇒
+  // writes throw rather than persist cleartext. See ADR-0100.
   'secret',
   // Rich Content
   'markdown', 'html', 'richtext',

@@ -4,8 +4,8 @@
   "props": {
     "name": {
       "status": "live",
-      "verifiedAt": "2026-08-28",
-      "evidence": "packages/rest/src/rest-server.ts#deriveImplicitPackageBook (the tree route matches `b.name === req.params.name` and, failing that, synthesizes the implicit per-package book from the same segment — §6.4); packages/spec/src/system/book.zod.ts#resolveBookTree (`return { name: book.name, … }` — the resolved tree carries it back out)",
+      "verifiedAt": "2026-09-27",
+      "evidence": "packages/rest/src/meta-item-read-gate.ts#deriveImplicitPackageBook (`bookNamed`: `books.find((b: any) => b && b.name === name) ?? deriveImplicitPackageBook(name, name)` — the tree route's `audience.bookNamed(req.params.name)` matches the book by name and, failing that, synthesizes the implicit per-package book from the same segment — §6.4); packages/spec/src/system/book.zod.ts#resolveBookTree (`return { name: book.name, … }` — the resolved tree carries it back out)",
       "note": "tree-route identity; an unknown name is treated as a package id and resolved as the implicit per-package book (§6.4). 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `rest-server.ts:3098` had rotted onto `patterns: crud.patterns` in the CRUD-endpoint config, ~1,800 lines from the book route. The `_note`'s file-level range (`:3078-3169`) had rotted with it and is replaced by a symbol too. Re-closed by hand against 93ea19bca."
     },
     "label": {
@@ -40,8 +40,8 @@
     },
     "audience": {
       "status": "live",
-      "verifiedAt": "2026-08-28",
-      "evidence": "packages/spec/src/system/book.zod.ts#audienceAllows (the gate itself: `public` always, `org`/unset any authenticated principal, `{ permissionSet }` only a holder, unknown shape → false); packages/spec/src/system/book.zod.ts#resolveDocAudiences (`const audience = book.audience ?? 'org'` — every doc's effective audience is the UNION over the books that claim it, unclaimed docs falling back to `org`); packages/rest/src/rest-server.ts#audienceAllows (the tree gate: `if (!audienceAllows(book.audience, caller))` → 401 anonymous / 403 non-holder, before any tree is built)",
+      "verifiedAt": "2026-09-27",
+      "evidence": "packages/spec/src/system/book.zod.ts#audienceAllows (the gate itself: `public` always, `org`/unset any authenticated principal, `{ permissionSet }` only a holder, unknown shape → false); packages/spec/src/system/book.zod.ts#resolveDocAudiences (`const audience = book.audience ?? 'org'` — every doc's effective audience is the UNION over the books that claim it, unclaimed docs falling back to `org`); packages/rest/src/meta-item-read-gate.ts#audienceAllows (`admitsBook: (book: Book) => audienceAllows(book?.audience, caller)` — the gate the tree route asks as `if (!audience.admitsBook(book))` → 401 anonymous / 403 non-holder, before any tree is built, and the book item read asks on both transports)",
       "note": "ENFORCED access gate (§6.7), fail-closed: gates the whole tree (401 anonymous / 403 non-holder), and every doc's effective audience is the union over the books that claim it (resolveDocAudiences) — applied to both doc lists and tree entries. The one security-shaped property on this type, and it is real. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — ALL THREE legs were wrong. `rest-server.ts:3113` lands on the comment `// config to read).` and `:2969` on a docblock sentence about `'v1/beta'` splicing a path segment; `book.zod.ts:351` lands on `entries.push(entryFromDoc(d))` inside `resolveBookTree`'s `...` rest-expansion — tree ASSEMBLY, not the gate, ~83 lines from `audienceAllows`. A security-shaped property whose every pointer had drifted, one of them onto a comment, is the case this whole worklist is justified by: the verdict was right, and nothing cited could have shown it. Re-closed by hand against 93ea19bca."
     },
     "groups": {

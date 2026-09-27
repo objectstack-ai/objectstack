@@ -90,21 +90,20 @@ describe('resolveArtifactCollections', () => {
         expect(resolveArtifactCollections(null)).toBe(null);
         expect(resolveArtifactCollections(undefined)).toBe(undefined);
         expect(resolveArtifactCollections('not an object')).toBe('not an object');
-        // An explicit `undefined`, and `null`, read as absent too. `null` is read
-        // this way by every reader today; the schema's `.optional()` refuses it,
-        // and that disagreement is recorded beside `AssembledPackageBodySchema`
-        // rather than decided here.
+        // An explicit `undefined` reads as absent too. `null` does NOT: the
+        // schema's `.optional()` admits `undefined` only, so `null` is a present
+        // non-array `packages` and is refused below (#19926, ruling A).
         const explicitUndefined = { packages: undefined, objects: [obj('o')] };
         expect(resolveArtifactCollections(explicitUndefined)).toBe(explicitUndefined);
-        const nullPackages = { packages: null, objects: [obj('o')] };
-        expect(resolveArtifactCollections(nullPackages)).toBe(nullPackages);
     });
 
     // A `packages` that is present but is not an array is MALFORMED, not absent
     // (the rule beside `AssembledPackageBodySchema`). This reader used to hand
     // such an artifact back by identity, answering about its top level while
-    // the loader refused the same bytes.
+    // the loader refused the same bytes. `null` is one of these rows: it was
+    // handed back by identity until #19926 aligned this guard to the schema.
     it.each([
+        ['null', null],
         ['{}', {}],
         ['0', 0],
         ["'x'", 'x'],
