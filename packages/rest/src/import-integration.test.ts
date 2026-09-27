@@ -608,6 +608,126 @@ describe('import route — named mapping artifact (#2611)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// [#20150] A mapping target that names no field of the object is refused
+// BEFORE any row — and the dry run and the commit give the same answer.
+//
+// Before: the dry run answered `ok` for every row (its engine preview judges
+// values, never the row's keys), while the commit failed every row with
+// `INVALID_FIELD` at the engine's write door. The dry run promised what the
+// commit refused. The verdict now comes from the spec's
+// `unknownImportMappingTargets`, which `os validate` asks too.
+// ---------------------------------------------------------------------------
+describe('import route — a mapping target that names no field (#20150)', () => {
+  let route: any;
+  let engine: any;
+
+  // A default object: the registry injects the tenant, audit and ownership
+  // columns, none of which the author declares.
+  const NOTE = {
+    name: 'note', label: 'Note',
+    fields: { title: { name: 'title', type: 'text' as const, label: 'Title' } },
+  };
+
+  const register = (name: string, targetObject: string, fieldMapping: unknown[]) =>
+    engine.registry.registerItem('mapping', { name, targetObject, sourceFormat: 'csv', fieldMapping } as any, 'name');
+
+  beforeEach(async () => {
+    ({ route, engine } = await boot());
+    engine.registry.registerObject(NOTE as any);
+    await engine.syncSchemas();
+    // The card's shape: a dotted path into a structured value is not a field.
+    register('task_bad_target', 'task', [
+      { source: 'ID', target: 'id' },
+      { source: 'Task Title', target: 'title' },
+      { source: 'Street', target: 'mailing_address.street' },
+    ]);
+    // Every element of an array target is a target.
+    register('task_bad_split', 'task', [
+      { source: 'ID', target: 'id' },
+      { source: 'Both', target: ['title', 'subtitle'], transform: 'split', params: { separator: '|' } },
+    ]);
+    // The control: every target names a declared field.
+    register('task_good_target', 'task', [
+      { source: 'ID', target: 'id' },
+      { source: 'Task Title', target: 'title' },
+    ]);
+    // Platform columns the write door admits. `task` opts out of injection
+    // (`systemFields: false`), and the engine still admits `created_at` /
+    // `updated_at` on every object; `note` carries the injected `owner_id`.
+    register('task_stamp_target', 'task', [
+      { source: 'ID', target: 'id' },
+      { source: 'Task Title', target: 'title' },
+      { source: 'Created', target: 'created_at' },
+      { source: 'Updated', target: 'updated_at' },
+    ]);
+    register('note_owner_target', 'note', [
+      { source: 'Title', target: 'title' },
+      { source: 'Owner', target: 'owner_id', transform: 'lookup' },
+    ]);
+  });
+
+  const csv = ['ID,Task Title,Street', 't1,one,Main St', 't2,two,Side St'].join('\n');
+  const importTask = (body: any) => call(route, { format: 'csv', csv, ...body });
+  const importNote = (body: any) => {
+    const res = makeRes();
+    return route.handler({ params: { object: 'note' }, body: { format: 'csv', ...body } } as any, res).then(() => res);
+  };
+
+  it('refuses the dry run and the commit alike — same status, same code, nothing written', async () => {
+    const dry = await importTask({ mappingName: 'task_bad_target', dryRun: true });
+    const commit = await importTask({ mappingName: 'task_bad_target' });
+    for (const res of [dry, commit]) {
+      expect(res._status).toBe(400);
+      expect(res._json.code).toBe('INVALID_FIELD');
+      // Names the target, the object and where in the mapping it sits.
+      expect(res._json.error).toContain("'mailing_address.street'");
+      expect(res._json.error).toContain("object 'task'");
+      expect(res._json.error).toContain('fieldMapping[2].target');
+      // A whole-request refusal: no per-row report exists to misread.
+      expect(res._json.results).toBeUndefined();
+    }
+    expect(dry._json).toEqual(commit._json);
+    expect(await engine.find('task', { where: {} })).toHaveLength(0);
+  });
+
+  it('judges each element of an array target', async () => {
+    const res = await call(route, { format: 'csv', csv: 'ID,Both\nt1,a|b', mappingName: 'task_bad_split', dryRun: true });
+    expect(res._status).toBe(400);
+    expect(res._json.code).toBe('INVALID_FIELD');
+    expect(res._json.error).toContain('fieldMapping[1].target[1] "subtitle"');
+  });
+
+  it('control: a mapping whose targets all resolve — the dry run and the commit agree on ok', async () => {
+    const dry = await importTask({ mappingName: 'task_good_target', dryRun: true });
+    expect(dry._status ?? 200).toBe(200);
+    expect(dry._json).toMatchObject({ dryRun: true, total: 2, ok: 2, errors: 0, created: 2 });
+    expect(await engine.find('task', { where: {} })).toHaveLength(0);
+
+    const commit = await importTask({ mappingName: 'task_good_target' });
+    expect(commit._status ?? 200).toBe(200);
+    expect(commit._json).toMatchObject({ dryRun: false, total: 2, ok: 2, errors: 0, created: 2 });
+    expect((await engine.find('task', { where: {} })).map((r: any) => r.title).sort()).toEqual(['one', 'two']);
+  });
+
+  it('a platform column the write door admits stays green at both ends', async () => {
+    const stampCsv = ['ID,Task Title,Created,Updated', 's1,stamped,2026-01-01 00:00:00,2026-01-02 00:00:00'].join('\n');
+    const dry = await call(route, { format: 'csv', csv: stampCsv, mappingName: 'task_stamp_target', dryRun: true });
+    expect(dry._json).toMatchObject({ total: 1, ok: 1, errors: 0 });
+    const commit = await call(route, { format: 'csv', csv: stampCsv, mappingName: 'task_stamp_target' });
+    expect(commit._json).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
+    expect(await engine.findOne('task', { where: { id: 's1' } })).toMatchObject({ title: 'stamped' });
+
+    // An injected column on a default object: `owner_id` is not in `note`'s
+    // authored fields, and it is a field of `note` all the same.
+    const noteCsv = ['Title,Owner', 'hello,'].join('\n');
+    const noteDry = await importNote({ csv: noteCsv, mappingName: 'note_owner_target', dryRun: true });
+    expect(noteDry._json).toMatchObject({ total: 1, ok: 1, errors: 0 });
+    const noteCommit = await importNote({ csv: noteCsv, mappingName: 'note_owner_target' });
+    expect(noteCommit._json).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // framework#7501 — declared `scale` is enforced by REJECTION on both write
 // legs the issue measured: the direct data create route and the CSV import
 // route. Ruling 2026-08-11: refuse (`max_scale`), never round — the import
