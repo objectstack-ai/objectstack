@@ -507,8 +507,9 @@ Even inside your own worktree, operate defensively:
    (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
    so re-read it rather than recalling it); (b) the **Version Packages** PR, or any PR whose merge performs a
    release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 5,000** (`additions + deletions`,
-   generated files included) — it lands only by a human merge, which is its review record. Read the PR's file
-   list (`get_files`), **its author and its size** before you arm anything.
+   generated files included) — it lands the way a Tier H surface does: an authorized APPROVED review and then
+   the owning seat, or a human merge. Read the PR's file list (`get_files`), **its author and its size** before
+   you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
