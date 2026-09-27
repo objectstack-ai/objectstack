@@ -511,12 +511,12 @@ describe('ValidationRuleSchema (Discriminated Union)', () => {
         type: 'conditional' as const,
         name: 'enterprise_validation',
         message: 'Enterprise accounts require approval',
-        when: 'account_type = "enterprise"',
+        when: "record.account_type == 'enterprise'",
         then: {
           type: 'script' as const,
           name: 'require_approval',
           message: 'Approval required for enterprise accounts',
-          condition: 'approval_status = null',
+          condition: 'record.approval_status == null',
         },
       };
 
@@ -592,12 +592,12 @@ describe('ValidationRuleSchema (Discriminated Union)', () => {
         type: 'conditional' as const,
         name: 'shipping_validation',
         message: 'Shipping validation',
-        when: 'requires_shipping = true',
+        when: 'record.requires_shipping == true',
         then: {
           type: 'script' as const,
           name: 'shipping_address_required',
           message: 'Shipping address is required',
-          condition: 'shipping_address = null OR shipping_address = ""',
+          condition: "record.shipping_address == null || record.shipping_address == ''",
         },
       };
 
@@ -609,18 +609,18 @@ describe('ValidationRuleSchema (Discriminated Union)', () => {
         type: 'conditional' as const,
         name: 'order_value_validation',
         message: 'Order value validation',
-        when: 'order_total > 10000',
+        when: 'record.order_total > 10000',
         then: {
           type: 'script' as const,
           name: 'high_value_approval',
           message: 'Orders over $10,000 require manager approval',
-          condition: 'manager_approval = null',
+          condition: 'record.manager_approval == null',
         },
         otherwise: {
           type: 'script' as const,
           name: 'standard_validation',
           message: 'Payment method required',
-          condition: 'payment_method = null',
+          condition: 'record.payment_method == null',
         },
       };
 
