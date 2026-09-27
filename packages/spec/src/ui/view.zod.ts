@@ -6231,7 +6231,16 @@ export function diagnoseViewMetadata(body: unknown): ViewMetadataDiagnosis {
     );
     // The union accepted, so some member did; `selectViewMetadataBranch` is the
     // fallback only for the impossible case, never the primary answer.
-    return { success: true, branch: accepting ?? selectViewMetadataBranch(stripped) ?? 'viewItem', data: parsed.data };
+    //
+    // [#19920] `parsed.data` is typed `unknown` only because the union's members
+    // are cast to `z.ZodTypeAny` where `ViewMetadataSchema` builds it; at runtime
+    // it IS one member's output, which is what `ViewMetadataParsed` names. The
+    // assertion restores the type that cast erased and changes no value.
+    return {
+      success: true,
+      branch: accepting ?? selectViewMetadataBranch(stripped) ?? 'viewItem',
+      data: parsed.data as ViewMetadataParsed,
+    };
   }
 
   // (2) The identity precondition short-circuited the pipe with `z.NEVER`, so
@@ -6679,8 +6688,20 @@ export type ViewItemWire = z.input<typeof ViewItemWireSchema>;
  * optional. `ViewMetadataSchema` remains the only judge.
  */
 export type ViewMetadata = z.input<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
-/** Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122). */
-export type ViewMetadataParsed = z.infer<typeof ViewMetadataSchema>;
+/**
+ * Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122): the union
+ * of the OUTPUT types of the members {@link ViewMetadataSchema}'s union runs, read off
+ * {@link VIEW_METADATA_MEMBERS} exactly as {@link ViewMetadata} reads their input types.
+ *
+ * [#19920] Deliberately NOT `z.infer<typeof ViewMetadataSchema>`, for the reason
+ * {@link ViewMetadata} gives: the union's members are cast to `z.ZodTypeAny` where the union is
+ * built, so the schema's own output type is `unknown` and this name used to type-check any value.
+ * A successful parse returns the output of the one member that accepted the stripped body (the
+ * union's `.check()` transforms nothing), so every parse result is a value of this type.
+ * `view-metadata-type.test.ts` pins that `unknown` is refused here and that a parsed body of each
+ * member type-checks.
+ */
+export type ViewMetadataParsed = z.infer<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
 export type ViewScope = z.input<typeof ViewScopeSchema>;
 export type ViewKind = z.input<typeof ViewKindSchema>;
 export type ListView = z.input<typeof ListViewSchema>;

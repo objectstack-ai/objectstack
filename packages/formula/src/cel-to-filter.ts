@@ -43,8 +43,18 @@
  *   null/undefined MEMBER of a resolved membership array, which is the same
  *   unresolved value one level in. See {@link lowerMembership} for why the member
  *   is refused rather than dropped. The ROOT alone (`current_user`) is the whole
- *   context object, never a value: `==` / `!=` refuse it (see
+ *   context object, never a value: every comparison refuses it (see
  *   {@link variableObjectComparandRefusal}).
+ *
+ * ## One value per comparison (#19886)
+ *   Each of the six comparisons (`==` `!=` `>` `>=` `<` `<=`) compares ONE value.
+ *   A list operand — a list literal, or a variable that resolves to an array —
+ *   is refused whichever side it is on, opposite a field or in a constant
+ *   comparison ({@link arrayComparandRefusal}); so are the variable root and a
+ *   variable resolving to an object ({@link variableObjectComparandRefusal}).
+ *   An `in` list whose member is itself a list is refused too
+ *   ({@link listMemberRefusal}). "One of these" is `in`, "none of these" is
+ *   `!(… in …)`, and an ordering comparison takes one bound.
  */
 
 import type { ASTNode } from '@marcbachmann/cel-js';
@@ -347,11 +357,11 @@ function lowerComparison(op: string, lNode: ASTNode, rNode: ASTNode, ctx: Ctx): 
     // field-to-field comparison → `{ $field: otherPath }` reference.
     return emit((L as { path: string }).path, op, { $field: (R as { path: string }).path }, true);
   }
-  // [#19886] `==` / `!=` against a comparand that IS a list — a list literal, or
-  // a `current_user` variable that resolves to an array — is refused before it
-  // is emitted. See {@link arrayComparandRefusal}. [#19959] So is the variable
-  // root alone, and a variable that resolves to an object: see
-  // {@link variableObjectComparandRefusal}.
+  // [#19886] A comparison against a comparand that IS a list — a list literal,
+  // or a `current_user` variable that resolves to an array — is refused before
+  // it is emitted ([stage 2d] under the ordering operators too). See
+  // {@link arrayComparandRefusal}. [#19959] So is the variable root alone, and a
+  // variable that resolves to an object: see {@link variableObjectComparandRefusal}.
   if (lField) return emit((L as { path: string }).path, op, comparandOf(op, R, ctx), false);
   if (rField) return emit((R as { path: string }).path, FLIP[op] ?? op, comparandOf(op, L, ctx), false);
 
@@ -361,8 +371,15 @@ function lowerComparison(op: string, lNode: ASTNode, rNode: ASTNode, ctx: Ctx): 
   // variable root or object operand is refused first: `current_user != 'guest'`
   // folded to "no restriction" because an object is never strictly equal to a
   // literal, which is the same whole-object comparison one branch over.
+  // [#19886 stage 2d] …and so is a LIST operand, the same fault one step over:
+  // `current_user.org_user_ids != 'x'` folded to "no restriction" because an
+  // array is never strictly equal to a literal, and
+  // `current_user.org_user_ids > 'a'` folded on JavaScript's coercion of the
+  // array to a string. A list literal is refused in shape mode too.
   const lv = variableOperandOf(op, L, ctx);
   const rv = variableOperandOf(op, R, ctx);
+  if (Array.isArray(lv)) throw arrayComparandRefusal(op, L);
+  if (Array.isArray(rv)) throw arrayComparandRefusal(op, R);
   if (ctx.mode === 'shape') return {}; // shape check: structurally fine
   const truth = constFold(op, lv, rv);
   if (truth === true) return {};
@@ -407,6 +424,12 @@ function lowerMembership(elemNode: ASTNode, containerNode: ASTNode, ctx: Ctx): F
           `(${String(value[idx])}); a membership array must resolve every member`,
       );
     }
+  }
+  // [#19886 stage 2d] A member that is itself a LIST is refused, written or
+  // resolved: see {@link listMemberRefusal}.
+  if (Array.isArray(value)) {
+    const nested = value.findIndex((member) => Array.isArray(member));
+    if (nested !== -1) throw listMemberRefusal(container, nested);
   }
   return { [(elem as { path: string }).path]: { $in: value } } as FilterCondition;
 }
@@ -477,16 +500,72 @@ function lowerStringMethod(args: [string, ASTNode, ASTNode[]], ctx: Ctx): Filter
  * "One of these values" is `in`; "none of these values" is `!(… in …)`. The
  * refusal message names the variable PATH the author wrote and never a value:
  * a resolved array is a membership set.
+ *
+ * ## The ordering operators, and the constant branch (stage 2d)
+ *
+ * The ruling's letter was `==` / `!=`, so the ordering operators kept lowering
+ * a list: `record.status > ['m']` became `{ status: { $gt: ['m'] } }`, which
+ * the write-check evaluator compared as the string `'m'` (JavaScript coerces
+ * the array), admitting whatever that string comparison admitted. An ordering
+ * takes one bound, so a list is refused under it too, with its own remedy (one
+ * bound, a range, or `in`).
+ *
+ * A comparison with no field at all folds to a constant, and the fold met the
+ * same list: `current_user.org_user_ids != 'x'` folded to "no restriction"
+ * (an array is never strictly equal to a literal), and
+ * `current_user.org_user_ids > 'a'` folded on the coerced string. A list
+ * operand is refused on that branch first, whichever side it is on.
  */
 function arrayComparandRefusal(op: string, leaf: Leaf): CompileError {
   const list = leaf.kind === 'var' ? leaf.path.join('.') : '[...]';
   const comparand =
     leaf.kind === 'var' ? `its comparand \`${list}\` resolves to a list` : 'its comparand is a list literal';
+  if (op !== '==' && op !== '!=') {
+    // [#19886 stage 2d] An ORDERING operator: "one of these" is not what it
+    // meant, so the remedy is one bound (or a range, or membership).
+    return new CompileError(
+      'unsupported',
+      `\`${op}\` orders against one value, but ${comparand} — compare against one bound ` +
+        `(\`record.f ${op} 'm'\`), write a range as two comparisons joined by \`&&\`, and test ` +
+        `membership with \`record.f in ${list}\``,
+    );
+  }
   return new CompileError(
     'unsupported',
     `\`${op}\` compares one value, but ${comparand} — spell "one of these" ` +
       `as \`record.f in ${list}\` and ` +
       `"none of these" as \`!(record.f in ${list})\``,
+  );
+}
+
+/**
+ * [#19886 stage 2d] `in` compares the field with each MEMBER of its list, one
+ * value at a time, and a member that is itself a list is not one value.
+ *
+ * `!(record.status in [['closed', 'archived']])` used to lower to
+ * `{ $not: { status: { $in: [['closed', 'archived']] } } }`. The write-check
+ * evaluator compares strictly, so the nested member matched no record, `$in`
+ * was false for every post-image, and the negation admitted every write the
+ * policy was written to refuse — the `!=`-against-a-list bypass
+ * ({@link arrayComparandRefusal}) one level down. Refused here, it fails closed
+ * on every consumer's existing `unsupported` path, as that refusal does.
+ *
+ * Both kinds of list, as there: a LIST LITERAL is refused by the shape check
+ * too, so the authoring gate reports it; a `current_user` membership set that
+ * RESOLVES with a list member (the `ExecutionContext` contract declares its
+ * members as strings, so only a host violating it can supply one) is refused
+ * per request. The message names the member's index and the variable PATH,
+ * never a value.
+ */
+function listMemberRefusal(container: Leaf, index: number): CompileError {
+  const where =
+    container.kind === 'var'
+      ? `member ${index} of \`${container.path.join('.')}\` resolves to a list`
+      : `member ${index} of the list literal is itself a list`;
+  return new CompileError(
+    'unsupported',
+    `\`in\` compares the field with each member of its list, one value at a time, but ${where} — ` +
+      `flatten it: \`record.f in ['a', 'b']\`, not \`record.f in [['a', 'b']]\``,
   );
 }
 
@@ -522,15 +601,23 @@ function arrayComparandRefusal(op: string, leaf: Leaf): CompileError {
  *    of this published compiler. A `Date` is a literal comparand in the
  *    `$eq` / `$ne` contract and passes.
  *
- * Both guards apply wherever `==` / `!=` resolves an operand: opposite a field,
+ * Both guards apply wherever a comparison resolves an operand: opposite a field,
  * and on either side of a constant comparison, where `current_user != 'guest'`
  * folded to "no restriction" because an object is never strictly equal to a
  * literal. `{ $field }` references never reach here (the field-to-field branch
  * emits them with `isRef`), and a CEL map literal is refused by
  * {@link classify}, so a resolved variable is the only way an object ever became
- * a comparand. Ordering operators keep their existing lowering: they are outside
- * the `==` / `!=` letter this refusal carries. The message names the variable
- * PATH the author wrote and never a value.
+ * a comparand. The message names the variable PATH the author wrote and never a
+ * value.
+ *
+ * [#19886 stage 2d] The ordering operators (`>` `>=` `<` `<=`) are judged too.
+ * They were left out when this refusal landed, because its letter was `==` /
+ * `!=`; left out, `record.reviewer_id > current_user` lowered to a `$gt`
+ * against the whole context object, which the write-check evaluator compared
+ * as the string `[object Object]` — measured admitting and storing the writes
+ * such a `check` was written to refuse. An ordering takes one bound, so the
+ * root and an object are refused under it for the same reason a list is
+ * ({@link arrayComparandRefusal}).
  */
 function variableObjectComparandRefusal(op: string, path: string[]): CompileError {
   const written = path.join('.');
@@ -551,28 +638,27 @@ function isObjectComparand(value: unknown): boolean {
 }
 
 /**
- * Resolve a comparison operand, refusing under `==` / `!=` a variable root
+ * Resolve a comparison operand, refusing under every comparison a variable root
  * before resolution and a variable resolving to an object after it
  * ({@link variableObjectComparandRefusal}). In shape mode a variable resolves to
  * the placeholder, so only the root is refused there.
  */
 function variableOperandOf(op: string, leaf: Leaf, ctx: Ctx): unknown {
-  const equality = op === '==' || op === '!=';
-  if (equality && leaf.kind === 'var' && leaf.path.length === 1) throw variableObjectComparandRefusal(op, leaf.path);
+  if (leaf.kind === 'var' && leaf.path.length === 1) throw variableObjectComparandRefusal(op, leaf.path);
   const value = resolveValue(leaf, ctx);
-  if (equality && leaf.kind === 'var' && isObjectComparand(value)) throw variableObjectComparandRefusal(op, leaf.path);
+  if (leaf.kind === 'var' && isObjectComparand(value)) throw variableObjectComparandRefusal(op, leaf.path);
   return value;
 }
 
 /**
- * Resolve the non-field side of a comparison, refusing under `==` / `!=` a list
- * ({@link arrayComparandRefusal}) and a variable root or object
+ * Resolve the non-field side of a comparison, refusing under every comparison a
+ * list ({@link arrayComparandRefusal}) and a variable root or object
  * ({@link variableOperandOf}). In shape mode a variable resolves to the
  * placeholder, so only a literal list and a bare root are refused there.
  */
 function comparandOf(op: string, leaf: Leaf, ctx: Ctx): unknown {
   const value = variableOperandOf(op, leaf, ctx);
-  if ((op === '==' || op === '!=') && Array.isArray(value)) throw arrayComparandRefusal(op, leaf);
+  if (Array.isArray(value)) throw arrayComparandRefusal(op, leaf);
   return value;
 }
 
