@@ -203,7 +203,7 @@ describe('Data Engine Contract', () => {
    *
    * ## How a revert is caught
    *
-   * The mechanism is the one the `#12248` block below already records: every
+   * The mechanism is the one the commit-8425c17cc block below already records: every
    * directive here is RESOLVED by tsc today, so widening a member back to
    * `Promise[any]` does not make a case fail an assertion — it makes the
    * directive UNUSED, and an unused `@ts-expect-error` is itself an error
@@ -495,13 +495,13 @@ describe('Data Engine Contract', () => {
   });
 
   // ===========================================================================
-  // Datasource resolution + lifecycle members (#12248 — the #11833 ruling)
+  // Datasource resolution + lifecycle members (commit 8425c17cc — the #11833 ruling)
   // ===========================================================================
   //
   // Five members ObjectQL has implemented for releases, all consumed
-  // cross-package, all recoverable until #12248 only through consumer-local
+  // cross-package, all recoverable until commit 8425c17cc only through consumer-local
   // structural re-declarations (`service-analytics`'s `DataEngineLike`,
-  // `service-datasource`'s `ConnectionEngineLike` — the #12010 inventory).
+  // `service-datasource`'s `ConnectionEngineLike` — the type the #11833 sweep inventoried).
   // Declared per the 2026-08-25 maintainer ruling on #11833 (fork 1 option A;
   // item 4 for the `ConnectionEngineLike` trio), under the [#4251]/[#11493]
   // evidence bar.
