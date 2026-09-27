@@ -844,15 +844,14 @@ function declaredReferenceNames(fields: Record<string, unknown>): ReadonlySet<st
  * them derived from what the filter names.
  */
 function withheldAggregationReferenceError(root: string): Error {
+  // Under the REST envelope's 500-character bound (`truncateClientMessage`), so
+  // the sentence saying where the withheld half went is never the part cut off.
   return invalidFilterError(
-    `A { "$field" } reference in \`${root}\` cannot be evaluated here. In a per-aggregation filter a `
-    + `reference compares one field of the object against another: it must name a field the object `
-    + `declares, and an addDays offset applies only between two date fields or two datetime fields, `
-    + `read from an integer or a numeric field. Evaluated anyway, the comparison would have been `
-    + `answered silently — no row counted, or every row under a negation — a count indistinguishable `
-    + `from a real one. The fields, the operator this filter used and the specific reason are `
-    + `withheld from the message, as they are for the same comparison in a \`where\`; the full `
-    + `diagnostic is in the server log.`,
+    `A { "$field" } reference in \`${root}\` cannot be evaluated. It must name a field the object `
+    + `declares, and an addDays offset applies only between two date or two datetime fields, read from `
+    + `an integer or a numeric field; evaluated anyway, its count would be silently wrong. The fields, the `
+    + `operator and the reason are withheld from the message, as for the same comparison in a `
+    + `\`where\`; the full diagnostic is in the server log.`,
   );
 }
 
