@@ -5580,8 +5580,8 @@ const LIST_OVERLAY_DEFAULT_TYPE = 'grid';
  */
 const LIST_OVERLAY_TYPE_NEEDS_COLUMNS =
   'This list view overlay sets `type` but lists no `columns`. A body that sets `type` is a full inline list '
-  + 'config, and a full config lists its columns: add `columns: ["field_a", "field_b"]`. A personalization '
-  + 'patch (`sort`, `hiddenFields`, `columnState`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
+  + 'config, and a full config lists its columns: add `columns: ["field_a", "field_b"]`. A patch on the view '
+  + 'it shadows (`sort`, `hiddenFields`, `columnState`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
   + 'remove `type` to save this body as a patch on the view it shadows.';
 
 /**
