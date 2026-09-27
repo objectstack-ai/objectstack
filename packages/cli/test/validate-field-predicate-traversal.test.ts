@@ -42,6 +42,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -123,7 +124,9 @@ function runValidate(cwd: string): Promise<Run> {
     execFile(
       TSX,
       [CLI, 'validate', '--json'],
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1' } },
+      // `childEnv()`, never a bulk `process.env` copy: the vitest worker's
+      // `TEST` / `VITEST*` family must not reach the child (check:cli-test-child-env).
+      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
