@@ -20,6 +20,7 @@
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { FilterCondition } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 
 const OBJECT = 'ledger_order';
@@ -62,8 +63,8 @@ const OPERATORS: ReadonlyArray<readonly [string, (v: As) => unknown, string[], s
 
 describe('[#20203] an epoch-ms number on a date field reads as the UTC calendar day of its instant', () => {
   let driver: InMemoryDriver;
-  const ids = async (object: string, where: Record<string, unknown>) =>
-    ((await driver.find(object, { where } as any)) as any[]).map((r) => r.id).sort();
+  const ids = async (object: string, where: FilterCondition) =>
+    (await driver.find(object, { where })).map((r) => r.id).sort();
 
   beforeAll(async () => {
     driver = new InMemoryDriver({});
@@ -87,7 +88,7 @@ describe('[#20203] an epoch-ms number on a date field reads as the UTC calendar 
   it('the write path stores the same UTC calendar day — create and update', async () => {
     await driver.create(WRITES, { id: 'w1', placed_on: N });
     await driver.create(WRITES, { id: 'w2', placed_on: -1 }); // one ms before the epoch
-    const read = async (id: string) => ((await driver.findOne(WRITES, { where: { id } } as any)) as any)?.placed_on;
+    const read = async (id: string) => (await driver.findOne(WRITES, { where: { id } }))?.placed_on;
     expect(await read('w1')).toBe('2026-02-01');
     expect(await read('w2')).toBe('1969-12-31');
     await driver.update(WRITES, 'w1', { placed_on: N_JAN10 });

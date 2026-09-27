@@ -27,6 +27,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -72,13 +73,13 @@ const OPERATORS: ReadonlyArray<readonly [string, (v: As) => unknown, string[], s
   ['$eq on a UTC midnight', (v) => ({ $eq: v(N_MIDNIGHT) }), ['o4', 'o6'], []],
 ];
 
-const NO_AUDIT = { bypassTenantAudit: true } as any;
+const NO_AUDIT = { bypassTenantAudit: true };
 
 function measure(cell: DialectCell): void {
   describe(`[#20203] an epoch-ms number on a date field — ${cell.label}`, () => {
     let driver: SqlDriver;
-    const ids = async (table: string, where: Record<string, unknown>) =>
-      ((await driver.find(table, { where }, NO_AUDIT)) as any[]).map((r) => r.id).sort();
+    const ids = async (table: string, where: FilterCondition) =>
+      (await driver.find(table, { where }, NO_AUDIT)).map((r) => r.id).sort();
 
     beforeAll(async () => {
       driver = new SqlDriver(cell.config());
@@ -107,7 +108,7 @@ function measure(cell: DialectCell): void {
     it('the write path stores the same UTC calendar day — create and update', async () => {
       await driver.create(WRITES, { id: 'w1', placed_on: N }, NO_AUDIT);
       await driver.create(WRITES, { id: 'w2', placed_on: -1 }, NO_AUDIT); // one ms before the epoch
-      const read = async (id: string) => ((await driver.findOne(WRITES, { where: { id } }, NO_AUDIT)) as any)?.placed_on;
+      const read = async (id: string) => (await driver.findOne(WRITES, { where: { id } }, NO_AUDIT))?.placed_on;
       expect(await read('w1')).toBe('2026-02-01');
       expect(await read('w2')).toBe('1969-12-31');
       await driver.update(WRITES, 'w1', { placed_on: N_JAN10 }, NO_AUDIT);

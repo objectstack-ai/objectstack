@@ -25,6 +25,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { EngineAggregateOptions, FilterCondition } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -129,7 +130,7 @@ describe('[#20203] where — an epoch-ms number on a date field, engine and REST
     it(`${op}: ${onDate.join(', ')} on both doors; nothing on an empty table; the datetime control reads the instant`, async () => {
       for (const [state, expectDate, expectDatetime] of [['populated', onDate, onDatetime], ['empty', [], []]] as const) {
         const { engine, post } = doors[state];
-        expect(sortedIds(await engine.find(OBJECT, { where: { placed_on: comparand } } as any)), `engine, ${state}`).toEqual(expectDate);
+        expect(sortedIds(await engine.find(OBJECT, { where: { placed_on: comparand } })), `engine, ${state}`).toEqual(expectDate);
         expect(sortedIds(await post({ where: { placed_on: comparand } })), `REST, ${state}`).toEqual(expectDate);
         expect(sortedIds(await post({ where: { opened_at: comparand } })), `datetime control, ${state}`).toEqual(expectDatetime);
       }
@@ -138,7 +139,7 @@ describe('[#20203] where — an epoch-ms number on a date field, engine and REST
 });
 
 describe('[#20203] a per-aggregation filter counts what its where twin counts', () => {
-  const perAggregation = (filter: unknown) => ({
+  const perAggregation = (filter: FilterCondition): EngineAggregateOptions => ({
     aggregations: [{ function: 'count', alias: 'n' }, { function: 'count', alias: 'm', filter }],
   });
   for (const [op, comparand, onDate] of OPERATORS) {
@@ -147,7 +148,7 @@ describe('[#20203] a per-aggregation filter counts what its where twin counts', 
         const { engine, post } = doors[state];
         const expected = state === 'populated' ? onDate.length : 0;
         const query = perAggregation({ placed_on: comparand });
-        expect((await engine.aggregate(OBJECT, query as any))[0]?.m, `engine, ${state}`).toBe(expected);
+        expect((await engine.aggregate(OBJECT, query))[0]?.m, `engine, ${state}`).toBe(expected);
         expect((await post(query))[0]?.m, `REST, ${state}`).toBe(expected);
       }
     });
@@ -155,7 +156,7 @@ describe('[#20203] a per-aggregation filter counts what its where twin counts', 
 });
 
 describe('[#20203] having on max(date) reads the number as a calendar day', () => {
-  const grouped = (having: unknown) => ({
+  const grouped = (having: FilterCondition): EngineAggregateOptions => ({
     groupBy: ['customer_id'],
     aggregations: [
       { function: 'max', field: 'placed_on', alias: 'last_placed' },
@@ -164,7 +165,7 @@ describe('[#20203] having on max(date) reads the number as a calendar day', () =
     having,
   });
   // c1: last_placed 2026-01-10 · c2: 2026-03-01 · c3: 2026-02-01
-  const HAVING: ReadonlyArray<readonly [string, Record<string, unknown>, string[]]> = [
+  const HAVING: ReadonlyArray<readonly [string, FilterCondition, string[]]> = [
     ['$gt on max(date)', { last_placed: { $gt: N } }, ['c2']],
     ['$eq on max(date)', { last_placed: { $eq: N } }, ['c3']],
     ['$in on max(date)', { last_placed: { $in: [N, N_JAN10] } }, ['c1', 'c3']],
@@ -176,7 +177,7 @@ describe('[#20203] having on max(date) reads the number as a calendar day', () =
         const { engine, post } = doors[state];
         const expected = state === 'populated' ? kept : [];
         const q = grouped(having);
-        expect((await engine.aggregate(OBJECT, q as any)).map((r: any) => r.customer_id).sort(), `engine, ${state}`).toEqual(expected);
+        expect((await engine.aggregate(OBJECT, q)).map((r: any) => r.customer_id).sort(), `engine, ${state}`).toEqual(expected);
         expect((await post(q)).map((r) => r.customer_id).sort(), `REST, ${state}`).toEqual(expected);
       }
     });
