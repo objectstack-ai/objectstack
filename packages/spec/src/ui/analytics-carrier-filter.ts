@@ -4,11 +4,12 @@
  * The filter slot of every ANALYTICS carrier — a stored filter that is charted
  * through the analytics `where` door — declared once: `FilterConditionSchema`
  * plus the nested-relation walk that door's reach needs (see
- * {@link analyticsCarrierFilter}). Three carriers declare it: `DatasetSchema`'s
+ * {@link analyticsCarrierFilter}). Five carriers declare it: `DatasetSchema`'s
  * `filter` and `DatasetMeasureSchema`'s `filter` (`./dataset.zod.ts`, #20080),
- * and a dashboard widget's `filter` (`./dashboard.zod.ts`, #20116), which the
- * dataset executor ANDs into the same query as the selection's
- * `runtimeFilter`.
+ * a dashboard widget's `filter` (`./dashboard.zod.ts`), and a report's and a
+ * joined report block's `runtimeFilter` (`./report.zod.ts`) (#20116) — the
+ * presentation filters the dataset executor ANDs into the same query as the
+ * selection's `runtimeFilter`.
  *
  * A module of its own, and outside the `ui` barrel, so the carriers share one
  * declaration without it becoming published API. It moved here verbatim from
@@ -186,19 +187,19 @@ function refuseNestedRelationComparands(
 
 /**
  * The optional filter every analytics carrier declares — `DatasetSchema.filter`,
- * `DatasetMeasureSchema.filter` and `DashboardWidgetSchema.filter` — which is
- * `FilterConditionSchema` plus {@link refuseNestedRelationComparands}. Every
- * other schema that carries a `FilterCondition` keeps the shared schema's
- * reach. A report's `runtimeFilter` (`ReportSchema`, `JoinedReportBlockSchema`)
- * is charted through the same door and is not a carrier yet; adopting this is
- * one line per slot.
+ * `DatasetMeasureSchema.filter`, `DashboardWidgetSchema.filter`,
+ * `ReportSchema.runtimeFilter` and `JoinedReportBlockSchema.runtimeFilter` —
+ * which is `FilterConditionSchema` plus {@link refuseNestedRelationComparands}.
+ * Every other schema that carries a `FilterCondition` keeps the shared schema's
+ * reach.
  *
  * The check sits on the OPTIONAL wrapper, not on `FilterConditionSchema`
  * itself: refining the recursive schema would clone it, and the published JSON
  * Schema would then inline a second copy of the condition beside the `$ref` it
  * carries today. On the wrapper the condition keeps its identity, so the
- * published body of `ui/Dataset`, `ui/DatasetMeasure` and `ui/DashboardWidget`
- * is unchanged, and the rule is recorded as a dropped refinement at each
+ * published body of each carrier (`ui/Dataset`, `ui/DatasetMeasure`,
+ * `ui/DashboardWidget`, `ui/Report`, `ui/JoinedReportBlock`) is unchanged, and
+ * the rule is recorded as a dropped refinement at each
  * carrier's `filter` in `dropped-refinements.baseline.json`
  * (`z.toJSONSchema()` has no projection for it). An absent filter reaches the
  * check as `undefined`, which the walk passes.

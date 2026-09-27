@@ -13,8 +13,9 @@
  *   (`refuseNestedRelationComparands`, `../ui/analytics-carrier-filter.ts`),
  *   over the entries INSIDE a nested-relation condition, which the analytics
  *   `where` door flattens to dotted members and judges like any other entry.
- *   Every filter charted through that door declares it: a dataset `filter`, a
- *   measure `filter` and a dashboard widget `filter`.
+ *   Every stored filter charted through that door declares it: a dataset
+ *   `filter`, a measure `filter`, a dashboard widget `filter`, and a report's
+ *   and a joined report block's `runtimeFilter`.
  *
  * So a slot is judged one way whichever reach finds it, and a rule added here
  * reaches both.

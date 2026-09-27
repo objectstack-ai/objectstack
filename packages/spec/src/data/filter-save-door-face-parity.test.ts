@@ -5,17 +5,19 @@
  * slots the QUERY faces refuse — at the top level and in every `$and` / `$or` /
  * `$not` member, and not inside a nested-relation condition, which the face
  * never descends. The analytics carriers (a dataset `filter`, a measure
- * `filter` and, since stage 2, a dashboard widget `filter`), charted through
- * the analytics `where` door that DOES descend a relation, refuse the same
- * slots inside one (§5), asking the same function.
+ * `filter` and, since stage 2, a dashboard widget `filter` and a report's and a
+ * joined report block's `runtimeFilter`), charted through the analytics
+ * `where` door that DOES descend a relation, refuse the same slots inside one
+ * (§5), asking the same function.
  *
  * Stage 2 adds the comparand-TYPE face (`normalizeFilterComparandTypes`) to
  * "the query faces": measured on `origin/main` `17bd3187`, every save door
  * accepted `{ stage: { $eq: { a: 1 } } }`, `{ stage: { $in: [{ a: 1 }] } }` and a
  * `Map` comparand, top level and nested, while that face and the analytics
  * door refused each with `INVALID_FILTER` / 400; and a dashboard widget
- * `filter` accepted `{ acct: { stage: { $in: ['won', null] } } }` and #20080's
- * nested equality lists, which the analytics door refuses on chart. §1 and §5
+ * `filter`, a report `runtimeFilter` and a joined block `runtimeFilter`
+ * accepted `{ acct: { stage: { $in: ['won', null] } } }` and #20080's nested
+ * equality lists, which the analytics door refuses on chart. §1 and §5
  * ask all three rules; §6 pins the type face's words and table; §7 the
  * carriers.
  *
@@ -537,7 +539,8 @@ describe('#20116 §5 — inside a nested relation, the analytics carriers refuse
   // analytics carriers' own walk (`refuseNestedRelationComparands`, #20207's,
   // `ui/analytics-carrier-filter.ts` since stage 2) reaches those entries and
   // asks the same function the shared walk asks, so the table is §1's, one
-  // relation down, on every carrier.
+  // relation down, on every carrier — the two dataset carriers, the dashboard
+  // widget's `filter`, and a report's and a joined block's `runtimeFilter`.
   const dataset = (filter: unknown) => ({
     name: 'deals_ds',
     label: 'Deals',
@@ -552,22 +555,16 @@ describe('#20116 §5 — inside a nested relation, the analytics carriers refuse
     widgets: [{ id: 'won_deals', type: 'metric', dataset: 'deals', values: ['total'], filter }],
   });
 
-  /** Every analytics carrier: its parse, and where its filter sits in the document. */
+  /**
+   * Every analytics carrier — every stored filter the analytics door charts:
+   * its parse, and where its filter sits in the document. The two report rows
+   * were EXPECTED-OPEN until the report half of the collector folded in (the
+   * carrier on `ReportSchema.runtimeFilter` and `JoinedReportBlockSchema.runtimeFilter`).
+   */
   const CARRIERS: ReadonlyArray<readonly [carrier: string, parse: (filter: unknown) => Parsed, at: string]> = [
     ['dataset filter', (filter) => DatasetSchema.safeParse(dataset(filter)), 'filter'],
     ['measure filter', (filter) => DatasetMeasureSchema.safeParse({ name: 'deal_count', aggregate: 'count', filter }), 'filter'],
     ['dashboard widget filter', (filter) => DashboardSchema.safeParse(dashboard(filter)), 'widgets.0.filter'],
-  ];
-
-  /**
-   * EXPECTED-OPEN — charted through the same analytics door, and NOT carriers
-   * yet: a report's `runtimeFilter` and a joined report block's. That half of
-   * the collector stays on #20116 (its regions are held by #20161's PR). The
-   * flip is one line per slot in `ui/report.zod.ts` —
-   * `runtimeFilter: analyticsCarrierFilter()…` — after which these rows go red
-   * and move into `CARRIERS` above.
-   */
-  const EXPECTED_OPEN: ReadonlyArray<readonly [carrier: string, parse: (filter: unknown) => Parsed, at: string]> = [
     ['report runtimeFilter', (runtimeFilter) => ReportSchema.safeParse({
       name: 'pipeline', label: 'Pipeline', type: 'summary', dataset: 'sales', rows: ['stage'], values: ['revenue'], runtimeFilter,
     }), 'runtimeFilter'],
@@ -636,13 +633,14 @@ describe('#20116 §5 — inside a nested relation, the analytics carriers refuse
     expect(refused).toBeGreaterThanOrEqual(15);
   });
 
-  it('EXPECTED-OPEN (#20116 remainder, #20161\'s regions) — the report carriers still save what the analytics door refuses inside a relation', () => {
-    for (const [filter] of NESTED_MEMBERS) {
-      for (const [carrier, parse] of EXPECTED_OPEN) {
-        const parsed = parse(filter);
-        expect(parsed.success, `${carrier} ${show(filter)} — flip this row: see EXPECTED_OPEN`).toBe(true);
-      }
-    }
+  it('every carrier the analytics door charts is on the list — no stored presentation filter keeps the shared reach alone', () => {
+    // The five stored filters `dataset-executor.ts` hands to the analytics
+    // `where` door: the dataset's own and its measures', and the presentation
+    // scopes it ANDs in as `runtimeFilter` (a widget's `filter`, a report's and
+    // a joined block's `runtimeFilter`).
+    expect(CARRIERS.map(([carrier]) => carrier)).toEqual([
+      'dataset filter', 'measure filter', 'dashboard widget filter', 'report runtimeFilter', 'joined report block runtimeFilter',
+    ]);
   });
 
   it.each(NESTED_MEMBERS.map(([filter, slot]) => [show(filter), filter, slot] as const))(
@@ -800,5 +798,10 @@ describe('#20116 §7 — the analytics carrier filter publishes exactly the bare
     const filter = widget.properties?.widgets?.items?.properties?.filter;
     expect(filter?.description).toBe('Presentation-scope filter (runtimeFilter)');
     expect(filter?.title).toBe('Filter');
+  });
+
+  it('the report runtimeFilter keeps its published description', () => {
+    const report = z.toJSONSchema(ReportSchema) as { properties?: { runtimeFilter?: { description?: string } } };
+    expect(report.properties?.runtimeFilter?.description).toBe('Render-time scope filter');
   });
 });
