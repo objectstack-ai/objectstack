@@ -4,7 +4,9 @@
  * [#20116] The SAVE door (`FilterConditionSchema`) refuses exactly the comparand
  * slots the QUERY faces refuse — at the top level and in every `$and` / `$or` /
  * `$not` member, and not inside a nested-relation condition, which the face
- * never descends.
+ * never descends. The two dataset carriers, charted through the analytics
+ * `where` door that DOES descend a relation, refuse the same slots inside one
+ * (§5), asking the same function.
  *
  * Measured on `origin/main` `af32cf9a` before the change: `DatasetSchema`
  * (filter and measure filter), a dashboard widget `filter` and a report
@@ -35,7 +37,7 @@ import { describe, expect, it } from 'vitest';
 
 import { StandardErrorCode } from '../api/errors.zod';
 import { DashboardSchema } from '../ui/dashboard.zod';
-import { DatasetSchema } from '../ui/dataset.zod';
+import { DatasetMeasureSchema, DatasetSchema } from '../ui/dataset.zod';
 import { ReportSchema } from '../ui/report.zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 import { isRefusedTextComparand } from './filter-text-comparand';
@@ -415,5 +417,86 @@ describe('#20116 §4 — what stays accepted, at both doors', () => {
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
     // Accepted means KEPT: the door returns the document it was given.
     expect(result.data).toEqual(where);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 Inside a nested relation, the ANALYTICS carriers answer as the analytics door
+// ---------------------------------------------------------------------------
+
+describe('#20116 §5 — inside a nested relation, the dataset carriers refuse what the analytics door refuses', () => {
+  // The analytics `where` door flattens a nested relation to dotted members and
+  // hands each entry to the same query faces it hands a top-level entry. The
+  // dataset carriers' own walk (`refuseNestedRelationComparands`, #20207's)
+  // reaches those entries and asks the same function the shared walk asks, so
+  // the table is §1's, one relation down, on both carriers.
+  const dataset = (filter: unknown) => ({
+    name: 'deals_ds',
+    label: 'Deals',
+    object: 'deal',
+    dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+    measures: [{ name: 'deal_count', aggregate: 'count' }],
+    filter,
+  });
+
+  it.each([
+    ['one hop', (e: Record<string, unknown>) => ({ acct: e }), 'acct.f'],
+    ['two hops, under $or', (e: Record<string, unknown>) => ({ $or: [{ acct: { owner: e } }] }), '$or.0.acct.owner.f'],
+  ] as const)('every operator × comparand cell, %s', (_label, wrap, prefix) => {
+    const mismatches: string[] = [];
+    let refused = 0;
+    for (const op of OPERATORS) {
+      for (const [label, comparand] of BATTERY) {
+        const expected = queryFacesRefuse(op, comparand) || textArmRefuses(op, comparand);
+        const filter = wrap({ f: { [op]: comparand } });
+        const scoped = issuesUnder(DatasetSchema.safeParse(dataset(filter)), `filter.${prefix}.${op}`);
+        const measure = issuesUnder(
+          DatasetMeasureSchema.safeParse({ name: 'deal_count', aggregate: 'count', filter }),
+          `filter.${prefix}.${op}`,
+        );
+        if (expected) refused += 1;
+        if ((scoped.length > 0) !== expected || (measure.length > 0) !== expected) {
+          mismatches.push(`${op} ← ${label}: faces ${expected ? 'REFUSE' : 'ACCEPT'}, dataset ${scoped.length > 0 ? 'REFUSE' : 'ACCEPT'}, measure ${measure.length > 0 ? 'REFUSE' : 'ACCEPT'}`);
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+    expect(refused).toBeGreaterThan(40);
+  });
+
+  it.each([
+    [{ acct: { stage: { $null: 'x' } } }, 'acct.stage.$null'],
+    [{ acct: { stage: { $exists: 'false' } } }, 'acct.stage.$exists'],
+    [{ acct: { stage: { $null: null } } }, 'acct.stage.$null'],
+    [{ acct: { amount: { $gt: null } } }, 'acct.amount.$gt'],
+    [{ acct: { stage: { $in: 'won' } } }, 'acct.stage.$in'],
+    [{ acct: { stage: { $in: ['won', null] } } }, 'acct.stage.$in.1'],
+    [{ acct: { amount: { $between: [null, 5] } } }, 'acct.amount.$between.0'],
+    [{ acct: { stage: { $ne: ['won', 'lost'] } } }, 'acct.stage.$ne'],
+  ] as const)('the collector\'s nested member %j — one issue per carrier, in the top-level sentence', (filter, slot) => {
+    // The same words as the top-level form: the field named is the leaf, as
+    // the analytics door names it, and the issue path carries the relation.
+    const leaf = slot.split('.').slice(1).join('.');
+    const topLevel = { [leaf.split('.')[0]!]: (filter.acct as Record<string, unknown>)[leaf.split('.')[0]!] };
+    const expected = issueAt(FilterConditionSchema.safeParse(topLevel), leaf).message;
+    const scoped = issueAt(DatasetSchema.safeParse(dataset(filter)), `filter.${slot}`);
+    expect(scoped.code).toBe('custom');
+    expect(scoped.message).toBe(expected);
+    const measure = issueAt(DatasetMeasureSchema.safeParse({ name: 'deal_count', aggregate: 'count', filter }), `filter.${slot}`);
+    expect(measure.message).toBe(expected);
+  });
+
+  it('CONTROL — the null predicate, references, empty lists and flags pass inside a relation, and are kept', () => {
+    const filter = {
+      acct: {
+        stage: { $ne: null, $in: [] },
+        owner: { region: { $eq: null } },
+        amount: { $gt: { $field: 'floor' }, $between: [1, 9] },
+        active: { $null: false, $exists: true },
+      },
+    };
+    const parsed = DatasetSchema.safeParse(dataset(filter));
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(parsed.data!.filter).toEqual(filter);
   });
 });
