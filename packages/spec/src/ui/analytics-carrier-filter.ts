@@ -45,16 +45,16 @@ function isAnalyticsNestedRelationSpec(spec: unknown): spec is Record<string, un
 }
 
 /**
- * [#20116] A field value the analytics door hands to the query faces as the
- * COMPARAND of an implicit equality: anything but a PLAIN object (prototype
- * `Object.prototype` or `null`), the comparand-type face's own structure test.
- * A plain object that reaches this question carries a `$` key — one with none
- * is a nested relation, taken first — and is an operator map; a `Map`, a class
- * instance, a `Date`, an array or a scalar is a comparand.
+ * [#20116] An object that is DATA, not filter structure, as the comparand-type
+ * face classifies it: its prototype is not `Object.prototype` or `null`. A
+ * field value the analytics door hands to the query faces as the COMPARAND of
+ * an implicit equality is anything but a PLAIN object — a `Map`, a class
+ * instance, a `Date`, an array or a scalar. A plain object that reaches that
+ * question carries a `$` key (one with none is a nested relation, taken first)
+ * and is an operator map.
  */
-function isAnalyticsComparand(spec: unknown): boolean {
-  if (!isAnalyticsFilterObject(spec)) return true;
-  const proto = Object.getPrototypeOf(spec);
+function isAnalyticsDataObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
   return proto !== Object.prototype && proto !== null;
 }
 
@@ -140,7 +140,7 @@ function isAnalyticsComparand(spec: unknown): boolean {
  * `Map` or a class instance, `undefined`, a function, a Symbol or a bigint
  * beyond ±2^53 inside a relation is refused here as on chart. Which values
  * are comparands is that face's classification — anything but a PLAIN object
- * ({@link isAnalyticsComparand}) — so a `Map` in a field's value position is
+ * ({@link isAnalyticsDataObject}) — so a `Map` in a field's value position is
  * judged as the implicit comparand it is, never walked as an operator map with
  * no operators.
  */
@@ -173,7 +173,7 @@ function refuseNestedRelationComparands(
     // the one function `FilterConditionSchema`'s own walk asks: an implicit
     // comparand, or each operator of an operator map (with the whole map, which
     // the type face classifies before it judges an operator).
-    if (isAnalyticsComparand(spec)) {
+    if (!isAnalyticsFilterObject(spec) || isAnalyticsDataObject(spec)) {
       reportQueryFaceRefusals(ctx, [...path, key], key, undefined, spec, FieldOperatorsSchema);
       continue;
     }

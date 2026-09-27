@@ -1703,16 +1703,15 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * [#20116] Is this field value a COMPARAND, as the comparand-type face
- * classifies it? Everything but filter structure is — and structure is a PLAIN
- * object only, prototype `Object.prototype` or `null` (the face's `isFilterNode`,
- * the convention `driver-sql` shares since #5134, and the analytics door's
- * nested-relation test). A `Map`, a class instance or a `Date` answers
+ * [#20116] Is this object DATA rather than filter structure, as the
+ * comparand-type face classifies it? Structure is a PLAIN object only,
+ * prototype `Object.prototype` or `null` (the face's `isFilterNode`, the
+ * convention `driver-sql` shares since #5134, and the analytics door's
+ * nested-relation test). A `Map` or a class instance answers
  * `typeof x === 'object'` while being data: `{ stage: new Map() }` is a
  * comparand the type face refuses, never an empty nested relation.
  */
-function isFieldValueComparand(value: unknown): boolean {
-  if (!isPlainFilterNode(value)) return true;
+function isDataObject(value: object): boolean {
   const proto = Object.getPrototypeOf(value);
   return proto !== Object.prototype && proto !== null;
 }
@@ -1759,8 +1758,8 @@ function isFieldValueComparand(value: unknown): boolean {
  *   a `{ $field }` reference, a `{placeholder}` string resolved at request time
  *   and a bigint within ±2^53 keep passing, because the face passes them. So
  *   that a `Map` or a class instance reaches the face at all, a field value is
- *   a comparand unless it is a PLAIN object ({@link isFieldValueComparand},
- *   the face's own structure test).
+ *   a comparand unless it is a PLAIN object ({@link isDataObject}, the face's
+ *   own structure test).
  * - **The words** are chosen in that module: the face's own sentence where
  *   the two doors already share a builder, the enforced
  *   operator slot's sentence where `FieldOperatorsSchema` already prints one for
@@ -1863,7 +1862,7 @@ function checkFilterConditionComparands(
     // the face's exact reach: its walk never descends a field spec that has no
     // `$` key, so nothing inside a nested-relation condition is refused there,
     // and nothing is refused here. See the docblock.
-    if (isFieldValueComparand(value)) {
+    if (!isPlainFilterNode(value) || isDataObject(value)) {
       if (depth === 0) reportQueryFaceRefusals(ctx, [...path, key], key, undefined, value, FieldOperatorsSchema);
       continue;
     }
