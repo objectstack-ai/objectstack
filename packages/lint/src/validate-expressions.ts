@@ -1056,9 +1056,8 @@ function fieldTraversalMessage(
         `(denormalise the value you need onto '${owner}').`;
   return (
     `\`${slot}\` reads ${named} through ${path}, a \`${fieldType}\` field — but a field-level predicate ` +
-    `never reads the related record: it is evaluated against the ${root === 'parent' ? 'header' : 'record'} ` +
-    `alone, where \`${field}\` holds the related record's bare id, so the read faults on every row. ` +
-    `${FIELD_TRAVERSAL_CONSEQUENCE[slot]}. ${prescription}`
+    `never reads the related record: there ${path} holds the related record's bare id, so the read ` +
+    `faults on every row. ${FIELD_TRAVERSAL_CONSEQUENCE[slot]}. ${prescription}`
   );
 }
 
