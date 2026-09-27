@@ -6,9 +6,10 @@
  *
  * `normalizeBlankTypedValues` rewrites `''` / whitespace on a non-string-typed
  * column to `null` and leaves everything else alone. Both populations are read
- * from the spec's own sets, so a type joining `NON_TEXT_STORED_VALUE_TYPES` or
- * `NUMERIC_VALUE_TYPES` tomorrow is covered here without an edit — and a type
- * leaving the string side would turn the control half red.
+ * from the spec's own sets, so a type joining `NON_TEXT_STORED_VALUE_TYPES`,
+ * `NUMERIC_VALUE_TYPES` or `COMPUTED_VALUE_TYPES` tomorrow is covered here
+ * without an edit — and a type leaving the string side would turn the control
+ * half red.
  *
  * The engine-level half (what reaches the driver on every door) is
  * `../engine-blank-typed-value-door.test.ts`; the physical-column half, through
@@ -17,6 +18,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  COMPUTED_VALUE_TYPES,
   NON_TEXT_STORED_VALUE_TYPES,
   NUMERIC_VALUE_TYPES,
   STRING_VALUE_TYPES,
@@ -109,7 +111,12 @@ describe('normalizeBlankTypedValues (#20308)', () => {
   });
 });
 
-describe('the numeric type door is NUMERIC_VALUE_TYPES (#20308)', () => {
+// The door the number branch reads: the numeric class minus the server-computed
+// class (seat ruling on #20308 — `summary` is producer-owned).
+const typeChecked = [...NUMERIC_VALUE_TYPES].filter((t) => !COMPUTED_VALUE_TYPES.has(t));
+const computedNumeric = [...NUMERIC_VALUE_TYPES].filter((t) => COMPUTED_VALUE_TYPES.has(t));
+
+describe('the numeric type door is NUMERIC_VALUE_TYPES minus COMPUTED_VALUE_TYPES (#20308)', () => {
   function refusal(type: string, value: unknown) {
     try {
       validateRecord(schemaOf([type]), { [`f_${type}`]: value }, 'insert');
@@ -120,7 +127,14 @@ describe('the numeric type door is NUMERIC_VALUE_TYPES (#20308)', () => {
     }
   }
 
-  it.each([...NUMERIC_VALUE_TYPES])('%s refuses a non-numeric string with invalid_number', (type) => {
+  it('the two populations are the ones the ruling names — progress judged, summary exempt', () => {
+    // A control on the sets themselves: if either emptied, the cases below
+    // would pass over nothing.
+    expect(typeChecked.sort()).toEqual(['currency', 'number', 'percent', 'progress', 'rating', 'slider']);
+    expect(computedNumeric).toEqual(['summary']);
+  });
+
+  it.each(typeChecked)('%s refuses a non-numeric string with invalid_number', (type) => {
     const e = refusal(type, 'abc');
     expect(e?.code).toBe('VALIDATION_FAILED');
     expect(e?.fields.map((f) => [f.field, f.code])).toEqual([[`f_${type}`, 'invalid_number']]);
@@ -130,7 +144,15 @@ describe('the numeric type door is NUMERIC_VALUE_TYPES (#20308)', () => {
     expect(refusal(type, 7)).toBeNull();
   });
 
-  it('progress and summary take the type check only — no bound or scale is newly enforced', () => {
+  it.each(computedNumeric)('%s is exempt: its shape is the producer\'s (COMPUTED_VALUE_TYPES), not this check\'s', (type) => {
+    // What the roll-up recompute writes — a date string for a `max` over a
+    // temporal child field — is not refused here. (A blank still becomes null
+    // at the door; that is `normalizeBlankTypedValues`, above.)
+    expect(refusal(type, '2026-01-05')).toBeNull();
+    expect(refusal(type, 'abc')).toBeNull();
+  });
+
+  it('progress takes the type check only, and summary none — no bound or scale is newly enforced', () => {
     // The boundary the branch states: a declared `max` / `scale` on these two
     // was never enforced, and this change does not start (a separate decision).
     for (const type of ['progress', 'summary']) {

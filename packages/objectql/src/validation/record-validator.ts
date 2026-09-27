@@ -66,6 +66,7 @@ import {
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
   NUMERIC_VALUE_TYPES,
+  COMPUTED_VALUE_TYPES,
   NON_TEXT_STORED_VALUE_TYPES,
   percentScaleOf,
 } from '@objectstack/spec/data';
@@ -838,30 +839,36 @@ function validateOne(
     return null;
   }
 
-  // ── number types (NUMERIC_VALUE_TYPES) ──────────────────────────
-  // The door is the SPEC'S numeric class, read as a constant for the reason the
-  // string branch above reads `BOUNDED_STRING_FIELD_TYPES` (#11875): a type
-  // joining the class there joins the type check here, with no second list to
-  // forget. It was a hand-list of five until #20308 — `progress` and `summary`,
-  // both members of the class, had no type check at all, so `'abc'` was stored
-  // verbatim in a numeric column on memory and SQLite (and failed at the
-  // driver, as a 500, on PostgreSQL).
-  if (NUMERIC_VALUE_TYPES.has(t)) {
+  // ── number types (NUMERIC_VALUE_TYPES ∖ COMPUTED_VALUE_TYPES) ────
+  // The door is the SPEC'S numeric class minus the spec's server-computed
+  // class, both read as constants for the reason the string branch above reads
+  // `BOUNDED_STRING_FIELD_TYPES` (#11875): a type joining either set there moves
+  // this door with no second list to forget. It was a hand-list of five until
+  // #20308 — `progress`, a member of the numeric class, had no type check at
+  // all, so `'abc'` was stored verbatim in a numeric column on memory and SQLite
+  // (and failed at the driver, as a 500, on PostgreSQL).
+  //
+  // ⛔ `summary` is subtracted, by the seat ruling on #20308: it is also in
+  // `COMPUTED_VALUE_TYPES` — 「Server-computed types: never client-written;
+  // shape is producer-owned」 — so its value's shape is the roll-up producer's
+  // to decide, not this caller-value check's. Judging it here refused the
+  // producer's own write: a `max` / `min` roll-up over a temporal child field
+  // recomputes to a date string, and the child write that triggered it then
+  // failed with `ERR_SUMMARY_RECOMPUTE` on memory and SQLite. A blank on a
+  // `summary` is still `null` at the door (`normalizeBlankTypedValues` reads the
+  // whole numeric class).
+  if (NUMERIC_VALUE_TYPES.has(t) && !COMPUTED_VALUE_TYPES.has(t)) {
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) {
       return fail('invalid_number');
     }
-    // [#20308] `progress` and `summary` joined the TYPE check above, and only
-    // that. The bounds and `scale` below keep the five types they always read:
-    //  - `summary` is also PLATFORM-written — the roll-up recompute stores its
-    //    aggregate through `update()` — and a platform-computed value has
-    //    nobody to refuse (the `scale` note below says so for `formula`).
-    //  - `scale`'s own contract names the types it is enforced on (`number`,
-    //    `percent`, `rating`, `slider`), and `min` / `max` on these two were
-    //    never enforced; starting to enforce either would narrow what a caller
-    //    may write, which is a separate decision from "a numeric column holds a
-    //    number".
-    if (t === 'progress' || t === 'summary') return null;
+    // [#20308] `progress` joined the TYPE check above, and only that. The
+    // bounds and `scale` below keep the five types they always read: `scale`'s
+    // own contract names the types it is enforced on (`number`, `percent`,
+    // `rating`, `slider`), and `min` / `max` on `progress` were never enforced;
+    // starting to enforce either would narrow what a caller may write, which is
+    // a separate decision from "a numeric column holds a number".
+    if (t === 'progress') return null;
     if (def.min !== undefined && n < def.min) {
       return fail('min_value', { min: def.min });
     }
@@ -879,9 +886,9 @@ function validateOne(
     // refuse — so its `scale` is applied by rounding at the producer, in
     // `applyFormulaPlan`. Rounding here instead would convert #7501's rejection
     // into the silent alteration the ruling forbids. Nothing was carved out of
-    // #7501 to make that work: formula / autonumber outputs never reach this
-    // branch, and a `summary` returns above, after the type check alone
-    // (#20308), so the formula rounding fills a hole #7501 never covered.
+    // #7501 to make that work: the type door below already excludes formula /
+    // summary / autonumber outputs from this function's reach, so the formula
+    // rounding fills a hole #7501 never covered.
     // Only a well-formed declaration (integer ≥ 0) is enforced: `scale: 2.5`
     // has no defined meaning, and inventing one here (floor? round?) would be
     // the consumer-side guessing PD #12 forbids — a malformed declaration
@@ -1090,9 +1097,8 @@ function validateOne(
     return null;
   }
 
-  // Remaining types (formula/autonumber outputs, json/code payloads) are
-  // explicitly open per the spec contract — see field-value.zod.ts. (`summary`
-  // is judged by the numeric branch above since #20308.)
+  // Remaining types (formula/summary/autonumber outputs, json/code payloads)
+  // are explicitly open per the spec contract — see field-value.zod.ts.
   return null;
 }
 

@@ -17,7 +17,14 @@
  * `str_empty` — an empty string must not become null); a valid value on every
  * typed column is stored unchanged; a required field's blank is refused as
  * `400 VALIDATION_FAILED` / `required`; and a non-numeric string on `progress`
- * or `summary` is refused as `invalid_number`.
+ * is refused as `invalid_number`.
+ *
+ * `summary` is exempt from that type check (seat ruling on #20308: it is in the
+ * spec's `COMPUTED_VALUE_TYPES`, "never client-written; shape is
+ * producer-owned"), so a roll-up `max` over a temporal child field recomputes
+ * as it did at base: the child write succeeds and the recompute lands. Measured
+ * on this change before the exemption, that child write failed with
+ * `ERR_SUMMARY_RECOMPUTE` on memory and SQLite.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -49,6 +56,26 @@ const REQ = {
   fields: {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     amount: { name: 'amount', type: 'number' as const, required: true },
+  },
+};
+
+// A roll-up whose value is not a number: `max` over a temporal child field.
+const PARENT = {
+  name: 'blank_rollup_parent', label: 'Parent', systemFields: false,
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    latest_due: {
+      name: 'latest_due', type: 'summary' as const,
+      summaryOperations: { object: 'blank_rollup_child', field: 'due', function: 'max' as const, relationshipField: 'parent' },
+    },
+  },
+};
+const CHILD = {
+  name: 'blank_rollup_child', label: 'Child', systemFields: false,
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    parent: { name: 'parent', type: 'lookup' as const, reference: 'blank_rollup_parent' },
+    due: { name: 'due', type: 'date' as const },
   },
 };
 
@@ -90,6 +117,8 @@ async function boot() {
   engine.registry.registerObject(REF as any);
   engine.registry.registerObject(OBJ as any);
   engine.registry.registerObject(REQ as any);
+  engine.registry.registerObject(PARENT as any);
+  engine.registry.registerObject(CHILD as any);
   await engine.syncSchemas();
   await engine.insert('blank_ref', { id: 'ref1' });
 
@@ -181,11 +210,23 @@ describe('REST write doors on SQLite: a cleared typed column stores null (#20308
     expect(await ctx.stored('blank_rest_req', 'q1')).toBeUndefined();
   });
 
-  it('progress and summary refuse a non-numeric string: 400 VALIDATION_FAILED / invalid_number', async () => {
-    const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rest' }, { id: 'g1', f_progress: 'abc', f_summary: 'abc' });
+  it('progress refuses a non-numeric string: 400 VALIDATION_FAILED / invalid_number', async () => {
+    const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rest' }, { id: 'g1', f_progress: 'abc' });
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({ code: 'VALIDATION_FAILED' });
-    expect(res.body.fields.map((x: any) => [x.field, x.code]).sort()).toEqual([['f_progress', 'invalid_number'], ['f_summary', 'invalid_number']]);
+    expect(res.body.fields.map((x: any) => [x.field, x.code])).toEqual([['f_progress', 'invalid_number']]);
     expect(await ctx.stored('blank_rest', 'g1')).toBeUndefined();
+  });
+
+  it('a roll-up max over a temporal child field still recomputes: the child write succeeds, as at base', async () => {
+    await ctx.engine.insert('blank_rollup_parent', { id: 'p1' });
+    const first = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rollup_child' }, { id: 'k1', parent: 'p1', due: '2026-01-05' });
+    expect(first.status).toBe(201);
+    const second = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rollup_child' }, { id: 'k2', parent: 'p1', due: '2026-02-07' });
+    expect(second.status).toBe(201);
+    expect(await ctx.stored('blank_rollup_child', 'k2')).toBeTruthy();
+    // The recompute landed — the base answer. What a date string in a summary
+    // column should be is a separate authoring question, not pinned here.
+    expect((await ctx.stored('blank_rollup_parent', 'p1'))?.latest_due).toBe('2026-02-07');
   });
 });
