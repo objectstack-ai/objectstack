@@ -900,7 +900,7 @@ describe('#18058 — install contract bound to the live door', () => {
     });
   });
 
-  describe('the two declared body forms — disjoint, and only ONE of them closed', () => {
+  describe('the two declared body forms — disjoint, and BOTH closed', () => {
     it('parses the WRAPPED form the client SDK sends', () => {
       const body = { manifest: SDK_MANIFEST, settings: undefined, enableOnInstall: true };
       expect(PackageInstallBodySchema.safeParse(body).success).toBe(true);
@@ -933,23 +933,91 @@ describe('#18058 — install contract bound to the live door', () => {
     });
 
     /**
-     * ⭐ The WRAPPED branch is `z.object`, i.e. STRIP mode — it is NOT closed.
+     * ⭐ The WRAPPED branch is CLOSED — an unknown top-level key is refused by
+     * name, as the manifest's and the bare form's unknown keys are (decision
+     * batch #227 item 3, letter A; ruling record `5856869656`).
      *
-     * An earlier revision of the docblock claimed both branches were closed.
-     * They are not, and the asymmetry is the DOOR's behaviour: the handler
-     * reads `manifest`, `settings`, `enableOnInstall` and `overwrite` and
-     * ignores every other key, so dropping an unknown one is exactly what it
-     * does with it. ⛔ Closing this branch with `.strict()` would refuse bodies
-     * the door answers `201` to — the direction ruling A forbids — so what is
-     * pinned here is the drop, not a refusal.
+     * What this pinned before was the opposite: the wrapped branch was strip
+     * mode, so `{ manifest, enabledOnInstall: false }` parsed green with the
+     * misspelled key DROPPED, and the door installed the package ENABLED — the
+     * caller's explicit `false` inverted. Each refusal is read at BOTH doors of
+     * this declaration: the union the install route is bound to, and the
+     * wrapped branch alone, whose issue is the one the install door locates
+     * and surfaces.
      */
-    it('the WRAPPED branch DROPS an unknown key rather than refusing it', () => {
-      const verdict = PackageInstallBodySchema.safeParse({ manifest: SDK_MANIFEST, bogus: 1 });
-      expect(verdict.success).toBe(true);
-      expect(verdict.data && 'bogus' in verdict.data).toBe(false);
+    describe('the WRAPPED branch refuses an unknown top-level key by name', () => {
+      /** The wrapped branch's own verdict: one `unrecognized_keys` issue, at the top level, naming the key. */
+      function expectRefusedByName(body: Record<string, unknown>, key: string) {
+        expect(PackageInstallBodySchema.safeParse(body).success, 'the bound union refuses it').toBe(false);
+        const verdict = PackageInstallRequestSchema.safeParse(body);
+        expect(verdict.success).toBe(false);
+        const issues = verdict.error?.issues ?? [];
+        expect(issues).toHaveLength(1);
+        expect(issues[0]?.code).toBe('unrecognized_keys');
+        expect(issues[0]?.path).toEqual([]);
+        expect((issues[0] as { keys?: string[] }).keys).toEqual([key]);
+        expect(issues[0]?.message).toContain(`\`${key}\``);
+        return issues[0]!.message;
+      }
+
+      it('a MISSPELLED option — `enabledOnInstall` — is refused, and the declared key is offered', () => {
+        const message = expectRefusedByName({ manifest: SDK_MANIFEST, enabledOnInstall: false }, 'enabledOnInstall');
+        // The remedy's named subject: the option the caller meant.
+        expect(message).toContain('`enableOnInstall`');
+      });
+
+      it('a PRIVATE key — `_source` — is refused by name, not carried and not dropped', () => {
+        expectRefusedByName({ manifest: SDK_MANIFEST, _source: 'studio' }, '_source');
+      });
+
+      it('an unknown key BESIDE declared options is refused too — the options do not buy it a pass', () => {
+        expectRefusedByName(
+          { manifest: SDK_MANIFEST, enableOnInstall: false, overwrite: true, bogus: 1 },
+          'bogus',
+        );
+      });
     });
 
-    it('lit control: the BARE branch IS closed — the same unknown key is refused there', () => {
+    describe('controls — every declared wrapped body still round-trips', () => {
+      /** A value for EVERY declared install option, each one the schema accepts. */
+      const DECLARED_OPTIONS = {
+        settings: { apiKey: 'abc123' },
+        enableOnInstall: false,
+        overwrite: true,
+        platformVersion: '3.2.0',
+        artifactRef: {
+          url: 'https://marketplace.objectstack.io/artifacts/com.acme.crm/1.0.0.tgz',
+          sha256: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+          size: 1024000,
+          uploadedAt: '2026-02-01T10:00:00Z',
+        },
+      };
+
+      it('the fixture names every declared option — read off the shape, never listed by hand', () => {
+        const declared = Object.keys(PackageInstallRequestSchema.shape).filter((k) => k !== 'manifest');
+        expect(Object.keys(DECLARED_OPTIONS).sort()).toEqual(declared.sort());
+      });
+
+      it('`manifest` alone parses green at both doors', () => {
+        expect(PackageInstallRequestSchema.safeParse({ manifest: SDK_MANIFEST }).success).toBe(true);
+        expect(PackageInstallBodySchema.safeParse({ manifest: SDK_MANIFEST }).success).toBe(true);
+      });
+
+      it('`manifest` plus every declared option parses green, each option value carried through', () => {
+        const body = { manifest: SDK_MANIFEST, ...DECLARED_OPTIONS };
+        const request = PackageInstallRequestSchema.safeParse(body);
+        expect(request.error?.issues ?? []).toEqual([]);
+        const union = PackageInstallBodySchema.safeParse(body);
+        expect(union.error?.issues ?? []).toEqual([]);
+        for (const parsed of [request.data, union.data] as Array<Record<string, unknown> | undefined>) {
+          for (const [key, value] of Object.entries(DECLARED_OPTIONS)) {
+            expect(parsed?.[key], key).toEqual(value);
+          }
+        }
+      });
+    });
+
+    it('the BARE branch is closed too — the same unknown key is refused there', () => {
       // `ManifestSchema` is a `strictObject`, so this is a refusal, not a drop.
       expect(PackageInstallBodySchema.safeParse({ ...SDK_MANIFEST, bogus: 1 }).success).toBe(false);
     });

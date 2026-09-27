@@ -9,6 +9,7 @@ import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
 import { retiredKey } from '../shared/retired-key';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * # Package API Protocol
@@ -214,10 +215,26 @@ export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageReque
  * reached at two, or two on a surface reached at one, is the same defect in
  * opposite directions.
  *
+ * ## CLOSED — an unknown top-level key is refused by name
+ *
+ * A `strictObject`, like the manifest it carries and the bare form beside it
+ * in {@link PackageInstallBodySchema}: one rule for the whole install
+ * contract. Why this branch is closed, and what it retired, is recorded on
+ * that union's docblock below.
+ *
  * @example POST /api/v1/packages
  * { manifest: {...}, platformVersion: '3.2.0', enableOnInstall: true, overwrite: true }
  */
-export const PackageInstallRequestSchema = lazySchema(() => z.object({
+export const PackageInstallRequestSchema = lazySchema(() => strictObject({
+  surface: 'this package install request',
+  history:
+    'Until this shape was closed, an unknown top-level key on the wrapped install body parsed '
+    + 'green and was silently dropped — `{ manifest, enabledOnInstall: false }`, a misspelled '
+    + '`enableOnInstall`, installed the package ENABLED. Remove the key, or spell it as the '
+    + 'declared install option it meant; the declared keys are enumerated by '
+    + '`PackageInstallRequestSchema` (@objectstack/spec, api/package-api.zod.ts). An install '
+    + 'option on a BARE manifest body is refused by the manifest instead — send the wrapped form.',
+}, {
   /** Package manifest to install — the AUTHORING stage */
   manifest: ManifestSchema.describe('Package manifest to install (AUTHORING stage: `objects` are glob patterns)'),
 
@@ -357,7 +374,7 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  * content is part of the residual below, and they are pinned as REFUSED in
  * `package-api.test.ts` rather than dressed up as green fixtures.
  *
- * ## The two branches are disjoint — but only ONE of them is closed
+ * ## The two branches are disjoint — and BOTH are closed
  *
  * Every parse is a FULL parse of ONE coherent form, the discipline
  * `InstalledPackageAtEitherStageSchema` (`./package-api-assembled.zod.ts`)
@@ -367,18 +384,28 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  * branch, and a bare manifest has no `manifest` key, so it can never satisfy
  * the wrapped branch.
  *
- * ⛔ Closedness, however, is NOT symmetric, and an earlier revision of this
- * docblock claimed it was. {@link PackageInstallRequestSchema} is a plain
- * `z.object`, i.e. STRIP mode: `{ manifest, bogus: 1 }` parses green and comes
- * out with `bogus` GONE. Only the bare branch is closed, because
- * `ManifestSchema` is a `strictObject` and refuses an unknown key by name.
+ * Both branches refuse an unknown key by name. The bare branch is
+ * `ManifestSchema`, a `strictObject`; the wrapped branch,
+ * {@link PackageInstallRequestSchema}, is a `strictObject` too. So
+ * `{ manifest, enabledOnInstall: false }` — a misspelled `enableOnInstall` —
+ * is refused naming `enabledOnInstall` and offering the declared key, where the
+ * wrapped branch used to parse it green with the key DROPPED and the package
+ * installed ENABLED: the caller's explicit `false` inverted, with no word said.
+ * One rule for the whole install contract — the manifest, the bare form and
+ * the wrapped top level. ⛔ No alias and no grace window: the remedy for an
+ * unknown top-level key is to remove it, or to spell the declared option it
+ * meant.
  *
- * That asymmetry is the door's own behaviour, not a gap: the handler reads
- * `body.manifest`, `body.settings`, `body.enableOnInstall` and `body.overwrite`
- * and ignores every other key, so dropping them is what it does with them.
- * ⛔ Do NOT close the wrapped branch with `.strict()` — that would refuse
- * bodies this door answers `201` to, which is the one direction this binding
- * may never move (ruling A). The pin lives in `package-api.test.ts`.
+ * Ruled in decision batch #227 item 3, letter A (ruling record `5856869656`,
+ * on #19328). It retires the sentence that stood here forbidding this close,
+ * and the reason is mechanical: that sentence rested on «the declaration must
+ * not refuse a body the door answers `201` to», which held only while the door
+ * did not parse its body. Since `c02fa1276` `POST /api/v1/packages` parses the
+ * whole body through this union and answers what it declares, so the door's
+ * answer IS this declaration's answer and the premise constrains nothing. The
+ * pins live in `package-api.test.ts` (the spec door) and
+ * `packages/runtime/src/domains/packages-install-body-contract.test.ts` (the
+ * install door).
  *
  * ## What this declaration does NOT describe — the measured residual
  *
@@ -396,8 +423,8 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *      `packages/runtime/src/domains/packages-install-manifest-version.test.ts`);
  *    - 1b. missing `type` — still OPEN, answered `201` (both door drives
  *      above);
- * 2. unknown keys on either form — refused by name on the bare branch,
- *    silently dropped on the wrapped one, `201` either way;
+ * 2. unknown keys on either form — refused by name on the bare branch and,
+ *    since decision batch #227 item 3, on the wrapped one too, `201` either way;
  * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
  *    against `true`/`false` and `'true'`, so `'false'` installs ENABLED and a
  *    body-side `'true'` overwrite is treated as ABSENT;
