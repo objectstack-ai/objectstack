@@ -5291,7 +5291,20 @@ const step18: MigrationStep = {
     + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
     + 'a page selects — as it does every filter of a component whose rows are inline, which '
     + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
-    + 'the door and taught the array; the stored-row seams and this chain replay it.',
+    + 'the door and taught the array; the stored-row seams and this chain replay it. '
+    + 'It also retires the view item\'s `owner` and `hidden` (#20085, ADR-0049 '
+    + 'enforce-or-remove). Both sat on the view-item identity layer, were accepted by the '
+    + 'strict authoring door and by the wire member the `view` write door validates, and were '
+    + 'stored verbatim — and nothing read either: both switcher read paths filter on '
+    + '`viewKind` + `object` and sort on `order`, so `hidden: true` hid nothing, and no '
+    + 'per-user scope ever read `owner`, so a view marked as one user\'s was listed for '
+    + 'everyone who can read the object. Per-user view scoping is a parked direction '
+    + '(ADR-0017, amended 2026-09-04), not a shipped mechanism. Both keys are `retiredKey()` '
+    + 'tombstones on the SHARED shape, because that shape also feeds the `.strip()` wire '
+    + 'member, where a bare deletion would be a silent strip. The D2 conversion '
+    + '`view-item-owner-hidden-removed` strips them from the view item RECORD spelling only, '
+    + 'as a lossless delete; a flattened overlay keeps its own `owner` / `hidden`, which are '
+    + 'declared on a different door this retirement does not touch.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5328,6 +5341,7 @@ const step18: MigrationStep = {
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
     'page-component-filter-record-to-rule-array',
+    'view-item-owner-hidden-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
