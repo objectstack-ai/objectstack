@@ -772,6 +772,15 @@ export default defineConfig({
         find: /^@objectstack\/metadata-core$/,
         replacement: path.resolve(__dirname, '../metadata-core/src/index.ts'),
       },
+      // `test/rls-policy-authoring-admission.test.ts` (#20158) runs the metadata
+      // save door over a REAL engine, and the in-memory driver is its storage.
+      // Resolved to source for the reason the entry above gives: a verdict about
+      // the checkout, not about the last build. Anchored like its neighbours
+      // (driver-memory publishes only `"."`).
+      {
+        find: /^@objectstack\/driver-memory$/,
+        replacement: path.resolve(__dirname, '../drivers/driver-memory/src/index.ts'),
+      },
     ],
   },
   test: {
