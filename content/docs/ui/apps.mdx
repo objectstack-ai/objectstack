@@ -356,16 +356,18 @@ collapses; an area *authored* empty is passed through untouched, because
 filtering reports what the caller may not see rather than tidying the metadata.
 
 The single-app reads — `GET /api/v1/meta/app/<name>` and its `/published`
-twin — serve that filtered body, and `/history` and `/audit` refuse an app the
-caller may not open. The doors that serve an app's *stored* versions for
-authoring — the layered view (`/layers`, and the deprecated `?layers=true`) and
-`/diff` — do **not** apply this filter yet: they serve the stored app, every
-entry included, to any signed-in caller. What they should answer is pending a
+twin — serve that filtered body, and every door refuses an app the caller may
+not open: one whose app-level `requiredPermissions` they lack (`403`), or an
+unpublished app to a non-builder (`404`). The doors that serve an app's
+*stored* versions for authoring — the layered view (`/layers`, and the
+deprecated `?layers=true`) and `/diff` — do **not** yet prune the entries of an
+app the caller may open: a caller from whom `requiredPermissions` or the docs
+audience withholds some entries still receives the stored app there, those
+entries included. What these doors should answer that caller is pending a
 decision. Pruning a stored app the designer saves back would delete the
 withheld entries, and refusing it would lock out any author who lacks one
-entry's permission, platform admins included. Until that is decided, an entry
-gated by `requiredPermissions` is absent from the app's served body but not
-from these authoring views.
+entry's permission, platform admins included. Until that is decided, such an
+entry is absent from the app's served body but not from these authoring views.
 
 `visible` did **not** move server-side with them, and that asymmetry is
 deliberate: CEL is evaluated in the browser because server-side evaluation needs

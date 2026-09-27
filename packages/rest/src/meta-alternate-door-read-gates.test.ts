@@ -25,15 +25,20 @@
  *    caller who may write a schema, so a masked version never reaches a
  *    writer).
  *
- *    ⚠️ **Their `app` row is a DECLARED PENDING-DECISION EXEMPTION** (decision
- *    anchor #20156, `PENDING_DECISION` below). Both ways of pulling it to the
- *    plain read's answer draw a new permission boundary, which is the
- *    maintainer's to rule: a PRUNED stored app is deleted entries once Studio's
- *    designer saves back what it loaded, and a REFUSED one locks out an author
- *    — a platform admin included — who lacks one entry's permission. So those
- *    cells answer what they answered before this card (the stored app, to every
- *    signed-in caller), and this file pins exactly that, under the anchor, so
- *    the exemption stays loud and cannot widen until it is ruled.
+ *    For `app` they refuse, like every other door, an app the plain read
+ *    refuses WHOLE (an app-level `requiredPermissions` the caller lacks; an
+ *    unpublished app to a non-builder, ADR-0045 §3).
+ *
+ *    ⚠️ **Their PARTIAL `app` cells are a DECLARED PENDING-DECISION
+ *    EXEMPTION** (decision anchor #20156, `PENDING_DECISION` below): a caller
+ *    the plain read would serve only PART of an app. Both ways of pulling those
+ *    cells to the plain read's answer draw a new permission boundary, which is
+ *    the maintainer's to rule: a PRUNED stored app is deleted entries once
+ *    Studio's designer saves back what it loaded, and a REFUSED one locks out
+ *    an author — a platform admin included — who lacks one entry's permission.
+ *    So exactly those cells answer what they answered before this card (the
+ *    stored app, unpruned), and this file pins that, under the anchor, so the
+ *    exemption stays loud and cannot widen until it is ruled.
  *  - **`/history` and `/audit` serve events, never a body**: they refuse where
  *    the plain read refuses the item whole, and otherwise serve the events.
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
@@ -296,24 +301,32 @@ const DOORS: Record<string, Door> = {
 /**
  * ⚠️ THE DECLARED PENDING-DECISION EXEMPTION — decision anchor #20156.
  *
- * The `app` row of the stored-version doors. Pulling it to the plain read's
- * answer draws a NEW permission boundary either way (a pruned stored app is
- * deleted entries once the designer saves back; a refused one locks out an
- * author, a platform admin included, who lacks one entry's permission), and a
- * new boundary is the maintainer's to rule. Until it is, these cells answer
- * exactly what they answered before the gate existed — the stored app, to
- * every signed-in caller — and the census pins THAT, under this anchor: when
- * the ruling lands, these cells go red and are rewritten deliberately, never
- * drifted into. The row may not widen: a test below holds it to exactly the
- * `app` type on exactly the three stored-version doors.
+ * The PARTIAL `app` cells of the stored-version doors: a caller the plain read
+ * would serve only part of an app (`plain` answer `pruned`). Pulling those
+ * cells to the plain read's answer draws a NEW permission boundary either way
+ * (a pruned stored app is deleted entries once the designer saves back; a
+ * refused one locks out an author, a platform admin included, who lacks one
+ * entry's permission), and a new boundary is the maintainer's to rule. Until
+ * it is, these cells answer exactly what they answered before the gate
+ * existed — the stored app, unpruned — and the census pins THAT, under this
+ * anchor: when the ruling lands, they go red and are rewritten deliberately,
+ * never drifted into.
+ *
+ * ⛔ An app the plain read refuses WHOLE is NOT in the exemption: that refusal
+ * is the plain read's own answer, and every door gives it. A test below holds
+ * the exemption to exactly the `pruned` answer, on exactly these three doors,
+ * and to the exact cells that yields — so widening it to a whole-refusal cell,
+ * or to a fourth door, fails that test rather than passing silently.
  */
 const PENDING_DECISION = Object.freeze({
     anchor: '#20156',
     type: 'app',
     doors: Object.freeze(['?layers=true', '/layers', '/diff']),
+    answer: 'pruned' as PlainAnswer['kind'],
 });
-const isPendingDecision = (type: string, doorName: string): boolean =>
-    type === PENDING_DECISION.type && PENDING_DECISION.doors.includes(doorName);
+const isPendingDecision = (type: string, doorName: string, want: { kind: string }): boolean =>
+    type === PENDING_DECISION.type && PENDING_DECISION.doors.includes(doorName)
+    && want.kind === PENDING_DECISION.answer;
 
 // ── The subjects, and what the plain read answers each caller ────────────────
 
@@ -434,25 +447,51 @@ describe('[#20156] the plain read answers what the census declares', () => {
     }
 });
 
-describe('[#20156] the pending-decision exemption is declared, anchored, and no wider than the app row of the stored-version doors', () => {
-    it(`exactly the \`app\` type on exactly the stored-version doors, anchored to ${PENDING_DECISION.anchor}`, () => {
-        const storedDoors = Object.entries(DOORS).filter(([, d]) => d.kind === 'stored').map(([n]) => n).sort();
-        expect([...PENDING_DECISION.doors].sort()).toEqual(storedDoors);
-        expect(PENDING_DECISION.type).toBe('app');
+describe('[#20156] the pending-decision exemption is declared, anchored, and no wider than the partial app cells of three doors', () => {
+    it(`exactly the \`pruned\` app answer, on exactly /layers, ?layers=true and /diff, anchored to ${PENDING_DECISION.anchor}`, () => {
         expect(PENDING_DECISION.anchor).toBe('#20156');
+        expect(PENDING_DECISION.type).toBe('app');
+        // The PARTIAL answer only — never `refused`, the plain read's own.
+        expect(PENDING_DECISION.answer).toBe('pruned');
+        // Literal, not derived from `DOORS`: a new stored-version door is gated
+        // by default and must be exempted by a deliberate edit here, never by
+        // inheriting a kind.
+        expect([...PENDING_DECISION.doors].sort()).toEqual(['/diff', '/layers', '?layers=true']);
+        for (const doorName of PENDING_DECISION.doors) expect(DOORS[doorName]?.kind, doorName).toBe('stored');
+    });
+
+    it('the cells it yields are exactly the partial app cells — no whole-refusal cell, no reader, no anonymous caller', () => {
+        const cells: string[] = [];
+        const wholeRefusals: string[] = [];
+        for (const doorName of Object.keys(DOORS)) {
+            for (const subject of SUBJECTS) {
+                for (const callerName of Object.keys(CALLERS) as CallerName[]) {
+                    const want = subject.plain[callerName];
+                    if (!isPendingDecision(subject.type, doorName, want)) continue;
+                    cells.push(`${doorName} ${subject.type}/${subject.name} × ${callerName}`);
+                    if (want.kind === 'refused') wholeRefusals.push(`${doorName} ${subject.name} × ${callerName}`);
+                }
+            }
+        }
+        expect(wholeRefusals).toEqual([]);
+        expect(cells.sort()).toEqual([
+            '/diff app/crm × non-reader',
+            '/layers app/crm × non-reader',
+            '?layers=true app/crm × non-reader',
+        ]);
     });
 });
 
-describe('[#20156] every alternate door answers what the plain read answers, or refuses — save the declared pending-decision row', () => {
+describe('[#20156] every alternate door answers what the plain read answers, or refuses — save the declared partial app cells', () => {
     for (const [doorName, door] of Object.entries(DOORS)) {
         if (door.kind === 'exempt') continue;
         describe(doorName, () => {
             for (const subject of SUBJECTS) {
                 for (const callerName of Object.keys(CALLERS) as CallerName[]) {
                     const want = subject.plain[callerName];
-                    const pending = isPendingDecision(subject.type, doorName) && CALLERS[callerName].ctx !== undefined;
+                    const pending = isPendingDecision(subject.type, doorName, want);
                     const title = `${subject.type}/${subject.name} × ${callerName}`
-                        + (pending ? ` — PENDING-DECISION ${PENDING_DECISION.anchor}: the stored app, as before the gate` : '');
+                        + (pending ? ` — PENDING-DECISION ${PENDING_DECISION.anchor}: the stored app, unpruned, as before the gate` : '');
                     it(title, async () => {
                         const { rest, protocol } = setup(callerName);
                         const plain = await drive(rest, '', subject.type, subject.name);
@@ -463,13 +502,15 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
                         if (pending) {
                             // The pre-gate answer, pinned under the anchor. LOUD by
                             // construction: the entries the plain read withholds from
-                            // a non-reader ARE in this body — the exposure the
-                            // decision waits on — and no gate input is read.
+                            // this caller ARE in this body — the exposure the
+                            // decision waits on. The whole-app gate DID run (on
+                            // `/diff` against the current document) and did not
+                            // refuse: only the pruning is withheld.
                             expect(res.statusCode).toBe(200);
                             for (const s of subject.secrets) expect(text(res)).toContain(s);
                             if (door.suffix === '/diff') {
                                 expect(res.body).toEqual(await protocol.diffMetaItem.mock.results.at(-1)?.value);
-                                expect(protocol.getMetaItem).not.toHaveBeenCalled();
+                                expect(protocol.getMetaItem).toHaveBeenCalled();
                             } else {
                                 for (const layer of ['code', 'overlay', 'effective']) {
                                     expect(res.body?.[layer]).toEqual(stored);
@@ -505,7 +546,7 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
                         }
 
                         // door.kind === 'stored' — the `pruned` answer belongs to
-                        // the `app` row alone, which is pending above.
+                        // the partial app cells alone, which are pending above.
                         expect(want.kind).not.toBe('pruned');
                         expect(res.statusCode).toBe(200);
                         if (want.kind === 'masked') {
