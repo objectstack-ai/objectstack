@@ -393,7 +393,9 @@ await client.ai.models();                // plan-filtered picker list (ADR-0028)
 
 // Conversations — all six routes, scoped to the authenticated user server-side.
 const conv = await client.ai.conversations.create({ title: 'Q3 pipeline' });
-await client.ai.conversations.list({ limit: 20 });
+const page = await client.ai.conversations.list({ limit: 20 });        // newest first
+// The next page: the cursor is the id of the last conversation you hold.
+await client.ai.conversations.list({ limit: 20, cursor: page.at(-1)?.id });
 await client.ai.conversations.get(conv.id);
 await client.ai.conversations.addMessage(conv.id, { role: 'user', content: 'hi' });
 await client.ai.conversations.update(conv.id, { title: 'Renamed' });

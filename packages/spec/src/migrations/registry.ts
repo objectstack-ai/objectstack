@@ -5985,6 +5985,69 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
+      id: 'automation-flow-list-route-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'GET /api/v1/automation — the flow-list route of the automation door, together with '
+        + 'its request and response schemas ListFlowsRequestSchema and ListFlowsResponseSchema '
+        + '(and their ListFlowsRequest, ListFlowsRequestParsed, ListFlowsResponse and '
+        + 'ListFlowsResponseParsed types), FlowSummarySchema and its FlowSummary type, the '
+        + 'listFlows entry of AutomationApiContracts, and the automation.list method of '
+        + '@objectstack/client. Every other automation route is unchanged, including '
+        + 'POST /api/v1/automation (create a flow) at the same path',
+      replacement:
+        'GET /api/v1/meta/flow — flows are metadata (ADR-0106), and this is the governed read of '
+        + 'them; from the SDK it is `client.meta.getItems` with the type `flow`. It answers the '
+        + 'full flow definitions rather than bare names, so a caller that only needs the names '
+        + 'maps each item to its `name`. The runtime enablement and trigger binding of every flow '
+        + '— the one piece of engine state a definition does not carry — is '
+        + '`GET /api/v1/automation/_status` (`client.automation.getRuntimeStatus`), which is '
+        + 'unchanged',
+      reason:
+        'Maintainer ruling on #19543 (door ④, verbatim 「退役，统一走 /meta/flow」, recorded in '
+        + 'that card\'s re-derivation comment of 2026-09-25), under ADR-0049 enforce-or-remove. The '
+        + 'route\'s contract described a capability nobody built: ListFlowsRequestSchema declared '
+        + '`status`, `type`, `limit` (default 50) and `cursor`, and the handler read none of them — '
+        + 'it asked the automation service for its flow names with no arguments at all. '
+        + 'ListFlowsResponseSchema declared a page of FlowSummary rows with `total`, `nextCursor` '
+        + 'and `hasMore`, and the handler answered a bare array of names beside a literal '
+        + '`hasMore: false`. So a caller filtering by status received every flow, a caller paging '
+        + 'with a cursor re-read the only page forever, and a caller reading FlowSummary fields read '
+        + 'undefined — each with a 200 and no error. '
+        + 'Measured before removal, on the main branch of this repository and cloud and on objectui at '
+        + 'both its pinned commit and main: zero callers of the route or of the SDK method outside '
+        + 'their own tests, while both real flow lists in the product — the Console flow-runs page '
+        + 'and the Setup packaged-automation page — already read GET /api/v1/meta/flow. '
+        + 'Implementing the declared contract instead would have built a second, weaker metadata list '
+        + 'beside the governed one; retiring it leaves one read. '
+        + 'There is no alias and no transition window: GET simply stops being mounted there. There is '
+        + 'no D2 conversion and no tombstone, because the shape is HTTP-only — nobody authors a '
+        + 'ListFlowsRequest and nothing persists one — so the three schemas are whole-def removals in '
+        + 'RETIRED_DEFS_BY_MAJOR and this entry carries the record. ADR-0049 / ADR-0087 / ADR-0106, '
+        + '#19543.',
+      acceptanceCriteria:
+        'On the composition `objectstack serve` builds, GET is no longer mounted at '
+        + '/api/v1/automation (nor at its environment-scoped twin), so the host gives its standard '
+        + 'unmatched answer with no residual refusal text of its own. Because POST still lives at '
+        + 'that path, on the Hono host that answer is 405 METHOD_NOT_ALLOWED with an Allow header '
+        + 'naming POST — the same answer any path where only another verb is registered gets, for '
+        + 'anonymous and signed-in callers alike. A transport that forwards every automation path '
+        + 'to the dispatcher is told the domain does not handle it and answers its own not-found '
+        + '404 (the @objectstack/hono catch-all does), and there the domain\'s anonymous floor still '
+        + 'answers an unidentified caller 401 first, as it does for every automation path. The '
+        + 'automation '
+        + 'service\'s flow-name enumeration is never called by any HTTP request. The route-ledger row '
+        + 'for the route is gone, AutomationApiContracts has eight entries and none of them is a GET '
+        + 'at the bare path, and a TypeScript import of any of the removed schemas or types is a '
+        + 'compile error (TS2305). @objectstack/client no longer declares automation.list, so a call '
+        + 'to it is a compile error rather than a request to a path that no longer answers. '
+        + 'POST /api/v1/automation still creates a flow, and every other automation route — the '
+        + 'single-flow reads and writes, trigger, toggle, clone, runs, resume, cancel, '
+        + 'restore-suspension, screen, _status and the actions and connectors catalogs — answers '
+        + 'exactly as before.',
+    },
+    {
       id: 'automation-runs-cursor-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -9322,6 +9385,74 @@ const step18: MigrationStep = {
         + 'NOT measured, so re-check '
         + 'what the view is supposed to show rather than assuming the old result set was correct. '
         + 'Both refusals now arrive at the authoring path.',
+    },
+    // Ruling A on #19886, item 1: the $ne slot's half of the question
+    // filter-equality-array-comparand-refused answered for equality. One entry for
+    // both named positions — the shared comparand-shape face every query crosses,
+    // and the $ne operator slot of FieldOperatorsSchema — because the ruling gives
+    // them one remedy text and the two land together. The formula evaluator and
+    // driver-mongodb faces landed earlier under their own entries
+    // (rls-predicate-array-comparand-refused, cel-predicate-list-comparand-refused).
+    {
+      id: 'filter-ne-array-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.FilterCondition and the $ne slot of data.FieldOperators — an ARRAY as the comparand of '
+        + '$ne. At the runtime filter doors (the shared comparand-shape face that parseFilterAST and '
+        + 'the engine lowering seam both run): { field: { $ne: [...] } }, which the FilterArray sugar '
+        + '["field", "ne", [...]] lowers to, and likewise "!=", "<>", "neq", "not_equals" and '
+        + '"notequals", at any depth under $and / $or / $not, the empty array included. At parse: '
+        + 'FieldOperatorsSchema.$ne, its documentation copy EqualityOperatorSchema.$ne, and the '
+        + 'NormalizedFilter AST that validates against it',
+      replacement:
+        'the declared list-negation operator. "None of these values" is $nin: '
+        + '{ field: { $nin: ["a", "b"] } } (authoring spellings "nin", "not_in", "notin"). A filter '
+        + 'that meant a single value writes that value: { field: { $ne: "a" } }. $ne: null (the '
+        + 'has-a-value predicate), every scalar, a Date and a { $field } reference are untouched, and '
+        + 'the list operators ($in / $nin / $between) keep their arrays, empty lists included',
+      reason:
+        'Ruling A on #19886 (record 5805254639, the director seat, class 1): the shared '
+        + 'comparand-shape face refuses an array under $ne for every driver, and FieldOperatorsSchema.$ne '
+        + 'refuses it at parse, with one remedy text naming the declared list-negation operator by its '
+        + 'spec spelling — no alias, no window. The governing text is $ne\'s own published describe: '
+        + 'the comparand is a literal, or a { $field } reference to another column of the same table. '
+        + 'An array is neither, so the refusal pulls the doors back to what $ne already declared. '
+        + 'Measured on the card before any stage landed, on the lowered { tags: { $ne: ["a"] } }: '
+        + 'driver-sql and driver-memory REFUSED it with 400; driver-mongodb ANSWERED it as MongoDB '
+        + 'reads $ne against an array operand, not equal to that array and not holding it as an '
+        + 'element, which is every scalar row (mingo, the named proxy; a live mongod was NOT '
+        + 'measured); and the formula evaluator matched EVERY row, which on the row-level write check '
+        + 'admitted every write a != policy against a list was written to refuse. Those two answering '
+        + 'faces were closed first, each at its own face, under rls-predicate-array-comparand-refused '
+        + 'and cel-predicate-list-comparand-refused. Measured on origin/main 9e7824a4, after both and '
+        + 'before this change: the shared face passed the shape at every depth (so did its '
+        + 'FilterArray lowering, and the engine\'s delegating wrapper), and FieldOperatorsSchema, '
+        + 'EqualityOperatorSchema and the NormalizedFilter AST all parsed it GREEN. Now the face '
+        + 'refuses it with INVALID_FILTER / 400 before any driver runs, and the operator slot refuses '
+        + 'it on parse, with one sentence from one builder: the face names the field and appends the '
+        + 'location (at where.tags.$ne); the slot cannot see either, and its issue carries the '
+        + 'location as its path. On the SQL family and driver-memory the verdict does not move (400 '
+        + 'before, 400 after); the text and the moment move, to the face, before any driver. ⚠️ Not '
+        + 'moved by this entry: FilterConditionSchema, the schema every stored filter carrier parses '
+        + 'through (dataset, dashboard widget, report, rollup and the rest), does not parse a field\'s '
+        + 'operator map through FieldOperatorsSchema and its own walk does not judge $ne, so such a '
+        + 'carrier still SAVES a $ne list and the face refuses it at query time; the ruling names the '
+        + 'face and the operator slot, not that walk. Metadata AT REST is not rewritten and this entry '
+        + 'adds no D2 conversion: a list under $ne has no single honest value, and whether it meant '
+        + 'none of these values or one value is the author\'s call. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep stored filters, dataset and widget filters, flow node filters and code that builds a '
+        + 'where for $ne whose comparand is an array — { field: { $ne: [...] } }, or a FilterArray '
+        + 'triple on ne, !=, <>, neq, not_equals or notequals carrying an array — then decide per '
+        + 'filter what it meant: none of these values ($nin), or one value ($ne with that value). Each '
+        + 'is refused at query time with INVALID_FILTER / 400 naming the field, the path and $nin, so '
+        + 'a test suite that exercises the query finds every one; code that parses a filter with '
+        + 'FieldOperatorsSchema or the NormalizedFilter AST is refused on parse at the $ne path. ⛔ A '
+        + 'clean re-save of a stored carrier is NOT a sweep: the carrier schema does not refuse the '
+        + 'shape, so exercise each stored filter or grep it. On driver-mongodb re-check what the query '
+        + 'is supposed to return rather than assuming the old rows were right: the old answer was '
+        + 'MongoDB array inequality, which $nin does not reproduce.',
     },
     {
       id: 'filter-preset-ordering-comparand-refused',
@@ -18560,6 +18691,16 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ExportJobSummary',
+    // #19543 (door ④) — `api/FlowSummary` left with its only reader,
+    // `api/ListFlowsResponse` (above). No producer ever built one: the retired
+    // list route answered bare names, so the summary's `label` / `type` /
+    // `status` / `version` / `enabled` / `nodeCount` / `lastRunAt` were a shape
+    // with no emitter, and an exported schema with no consumer reads as a
+    // capability (#3950, the `ui/ThemeMode` rule). Measured before removal: zero
+    // readers in objectstack, objectui (pinned sha and main) or cloud. A flow's
+    // runtime enablement is served by `GET /api/v1/automation/_status`; its
+    // definition by `GET /api/v1/meta/flow`.
+    'api/FlowSummary',
     // #17158 — `api/GetExportJobDownloadRequest`, retired whole with the export-job API family
     // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
     // retired its side first in objectui#10247). It declared
@@ -18611,6 +18752,28 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ListExportJobsResponse',
+    // #19543 (door ④) — `api/ListFlowsRequest`, the query of the retired
+    // `GET /api/v1/automation` flow list (maintainer ruling on #19543:
+    // 「退役，统一走 /meta/flow」). It declared `status` / `type` / `limit`
+    // (default 50) / `cursor`, and the route read none of them: it called
+    // `listFlows()` with no arguments. Retired whole with the route and its
+    // `AutomationApiContracts.listFlows` entry; flows are metadata (ADR-0106) and
+    // the list is `GET /api/v1/meta/flow`. Zero readers measured before removal in
+    // objectstack, objectui (pinned sha and main) and cloud. No carrier key and no
+    // authored document, so no tombstone and no D2 conversion — this table plus
+    // the D3 semantic entry `automation-flow-list-route-retired` ARE the
+    // declaration — the whole-def route-3 shape, as the precedent entry
+    // `package-rollback-response-retired` (and its `api/PackageRollbackResponse`
+    // row) recorded it.
+    'api/ListFlowsRequest',
+    // #19543 (door ④) — `api/ListFlowsResponse`, the answer of the retired
+    // `GET /api/v1/automation` flow list. It declared `FlowSummary[]`, `total`,
+    // `nextCursor` and `hasMore`, while the route answered bare flow NAMES with a
+    // literal `hasMore: false` and never a `nextCursor` — a declaration no build
+    // ever served. Retired whole with the route; the list is `GET /api/v1/meta/flow`.
+    // See `18.api__ListFlowsRequest.ts` and the D3 semantic entry
+    // `automation-flow-list-route-retired` for the record.
+    'api/ListFlowsResponse',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of
