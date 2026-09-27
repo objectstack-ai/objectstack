@@ -44,7 +44,7 @@ Create a new draft package version
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **packageId** | `string` | ✅ | Parent package UUID |
-| **version** | `string` | ✅ | Semantic version string |
+| **version** | `string` | ✅ | Semantic version string (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1) |
 | **manifestJson** | `string` | ✅ | Initial manifest JSON (can be updated while draft) |
 | **releaseNotes** | `string` | optional |  |
 | **isPreRelease** | `boolean` | optional |  |
@@ -77,7 +77,7 @@ Package manifest snapshot embedded in a package version
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Package manifest ID (reverse-domain) |
-| **version** | `string` | ✅ | Semver version string (e.g. 1.2.3) |
+| **version** | `string` | ✅ | Version of this release (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1) |
 | **name** | `string` | ✅ | Display name |
 | **description** | `string` | optional | Short description |
 | **scope** | `Enum<'platform' \| 'environment'>` | optional (default: `"environment"`) | Package scope |
@@ -109,7 +109,7 @@ Package dependency declaration
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | UUID of the package version (stable, never reused) |
 | **packageId** | `string` | ✅ | UUID of the parent sys_package row |
-| **version** | `string` | ✅ | Semantic version string |
+| **version** | `string` | ✅ | Semantic version string (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1) |
 | **status** | `Enum<'draft' \| 'published' \| 'deprecated'>` | optional (default: `"draft"`) | Package version lifecycle status |
 | **manifestJson** | `string` | ✅ | JSON-serialized package manifest (frozen on publish) |
 | **checksum** | `string` | optional | SHA-256 hex digest of manifestJson |
