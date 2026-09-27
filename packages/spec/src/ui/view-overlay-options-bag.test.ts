@@ -104,7 +104,7 @@ describe('[#20051] a direct and an `options`-wrapped out-of-contract key get the
   });
 
   it.each(['calendar', 'chart', 'gallery', 'gantt', 'kanban', 'map', 'timeline', 'tree'])(
-    '`options.%s` refuses an out-of-contract key with `%s`\'s own refusal — same code, keys and message',
+    '`options.%s` refuses an out-of-contract key with its own block\'s refusal — same code, keys and message',
     (kind) => {
       const block = { zz_not_a_key: 1 };
       const unknownKey = (issues: ReturnType<typeof under>) => issues.filter((i) => i.code === 'unrecognized_keys');
