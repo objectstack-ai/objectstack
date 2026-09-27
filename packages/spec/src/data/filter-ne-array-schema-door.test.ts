@@ -36,9 +36,11 @@ import { describe, expect, it } from 'vitest';
 
 import { StandardErrorCode } from '../api/errors.zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
+import { DatasetSchema } from '../ui/dataset.zod';
 import {
   EqualityOperatorSchema,
   FieldOperatorsSchema,
+  FilterConditionSchema,
   NormalizedFilterSchema,
   parseFilterAST,
 } from './filter.zod';
@@ -235,21 +237,49 @@ describe('#19886 §4 — what stays accepted, at BOTH doors', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §5 The boundary this change does NOT move
+// §5 The stored-filter carrier walk — refused on save since #20116
 // ---------------------------------------------------------------------------
 
-describe('#19886 §5 — the stored-filter carrier walk', () => {
-  // Why the operator slot's refusal does not reach a stored carrier:
-  // `FilterConditionSchema` parses a field entry as `unknown` and judges it
-  // with its own walk (`checkFilterConditionComparands`), which judges `$eq`
-  // and not `$ne`. The `$eq` side of that walk is pinned in
-  // `filter-equality-array-schema-door.test.ts`, including that its equality
-  // arm raises nothing for `$ne`.
-  it.todo(
-    'FilterConditionSchema (every stored filter carrier: dataset, widget, report, rollup …) refusing '
-    + '$ne: [...] on SAVE. Ruling A names the face and FieldOperatorsSchema.$ne, not the carrier walk, '
-    + 'so the carrier still saves the shape and the face refuses it at query time. Reported to the '
-    + 'seat for its own decision; ⛔ not pinned green here, because a green pin would read as a '
-    + 'ruling nobody made',
-  );
+describe('#19886 §5 — the stored-filter carrier walk refuses $ne: [...] too (#20116)', () => {
+  // This section held an `it.todo`: ruling A named the face and
+  // `FieldOperatorsSchema.$ne`, not `FilterConditionSchema`'s carrier walk, so
+  // every stored carrier still saved the shape and the face refused it at query
+  // time. #20116's `$ne` member (route A: the equality arm's reach, the one
+  // sentence) routes every slot that walk reaches through the face itself, so
+  // the todo is fulfilled here. The full operator × comparand table, carriers
+  // and nested relations included, is `filter-save-door-face-parity.test.ts`.
+  it('FilterConditionSchema refuses it at the slot, in the face\'s sentence less its location', () => {
+    const where = { stage: { $ne: ['won', 'lost'] } };
+    const face = faceRefusal(where);
+    expect(face.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(face.status).toBe(400);
+    const location = ' at where.stage.$ne.';
+    expect(face.message.split(location)).toHaveLength(2);
+    const issue = issueAt(FilterConditionSchema.safeParse(where), 'stage.$ne');
+    expect(issue.code).toBe('custom');
+    expect(issue.message).toBe(face.message.replace(location, '.'));
+    expect(issue.message).toMatch(/^Operator "\$ne" on field "stage" requires a single comparable value/);
+    expect(issue.message).toContain(REMEDY);
+    expect(issue.message).toMatch(NOT_APPLIED);
+  });
+
+  it('a stored carrier refuses it at its own path — a dataset filter', () => {
+    const parsed = DatasetSchema.safeParse({
+      name: 'deals_ds',
+      label: 'Deals',
+      object: 'deal',
+      dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+      measures: [{ name: 'deal_count', aggregate: 'count' }],
+      filter: { $or: [{ stage: { $ne: [] } }] },
+    });
+    expect(issueAt(parsed, 'filter.$or.0.stage.$ne').message).toContain(REMEDY);
+  });
+
+  it('CONTROL — the null predicate and a scalar still save', () => {
+    for (const where of [{ stage: { $ne: null } }, { stage: { $ne: 'lost' } }]) {
+      const result = FilterConditionSchema.safeParse(where);
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect(result.data).toEqual(where);
+    }
+  });
 });

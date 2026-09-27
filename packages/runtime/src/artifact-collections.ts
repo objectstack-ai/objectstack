@@ -428,12 +428,13 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
  * branch is an identity function on purpose: it is the only way to say "this
  * change cannot have moved the shape that ships today" rather than to hope so.
  * A `packages` that is present but is not an array is not absent, so it does
- * NOT take that branch. It is malformed, and it reaches the refusal below. The
- * rule is stated once, beside `AssembledPackageBodySchema`
- * (`packages/spec/src/stack.zod.ts`).
+ * NOT take that branch. It is malformed, and it reaches the refusal below.
+ * `null` is such a value: ABSENT means `undefined` only, because the key's
+ * `.optional()` admits `undefined` and not `null`. The rule is stated once,
+ * beside `AssembledPackageBodySchema` (`packages/spec/src/stack.zod.ts`).
  *
  * @throws The ADR-0112 refusal `resolveArtifactPackageOrder` raises for a
- *   `packages` that is not an array (`INVALID_ARTIFACT_PACKAGES`), a malformed
+ *   `packages` that is not an array, `null` included (`INVALID_ARTIFACT_PACKAGES`), a malformed
  *   `packages[]` entry, a package with no usable id, or a duplicate package.
  *   It is the same refusal `ObjectQLPlugin`'s `manifest` service already
  *   raises on the same artifact during boot. Resolving collections out of an
@@ -455,11 +456,13 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
  */
 export function resolveArtifactCollections<T>(artifact: T): T {
     if (artifact === null || typeof artifact !== 'object') return artifact;
-    // ABSENT only. A present non-array `packages` falls to the refusal in
+    // ABSENT only, and absent is `undefined` only. A present non-array
+    // `packages` — `null` included — falls to the refusal in
     // `resolveArtifactPackageOrder` below; see the docblock for where the rule
-    // lives. `null` is read as absent, as the other readers read it.
+    // lives. This guard is spelled exactly as the resolver's own absent branch,
+    // so the two cannot disagree about which artifacts they answer for.
     const declared = (artifact as { packages?: unknown }).packages;
-    if (declared === undefined || declared === null) return artifact;
+    if (declared === undefined) return artifact;
 
     const bodies = resolveArtifactPackageOrder(artifact) as Array<Record<string, unknown> | null | undefined>;
     // `resolveArtifactPackageOrder` has already refused any entry whose manifest

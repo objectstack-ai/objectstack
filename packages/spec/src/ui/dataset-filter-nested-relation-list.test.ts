@@ -206,7 +206,6 @@ describe('#20080 §4 — what a nested relation may still carry', () => {
     ['$in: [] stays the declared predicate', { account: { region: { $in: [] } } }],
     ['$nin keeps its list', { account: { region: { $nin: ['a'] } } }],
     ['$between keeps its pair', { account: { score: { $between: [1, 9] } } }],
-    ['$ne carrying a list — refused at the shared face (ruling A, #19886), not yet at this save door (#20116)', { account: { region: { $ne: ['a'] } } }],
     ['a scalar under $and', { $and: [{ account: { region: 'a' } }] }],
   ])('%s', (_label, filter) => {
     const scoped = DatasetSchema.safeParse(withScope(filter));
@@ -216,6 +215,23 @@ describe('#20080 §4 — what a nested relation may still carry', () => {
     const measure = DatasetMeasureSchema.safeParse({ name: 'deal_count', aggregate: 'count', filter });
     expect(measure.success, JSON.stringify(measure.error?.issues)).toBe(true);
     expect(measure.data!.filter).toEqual(filter);
+  });
+
+  it('[#20116] $ne carrying a list inside a relation is refused on both carriers, in the door\'s $ne sentence', () => {
+    // This row sat in the table above as "not yet at this save door (#20116)".
+    // #20116 routes every slot this walk reaches through the query faces'
+    // verdict, so the shape the analytics door refuses on chart is refused here.
+    const filter = { account: { region: { $ne: ['a'] } } };
+    const door = analyticsDoorRefusal('region', { $ne: ['a'] }, 'where.account');
+    expect(door.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(door.status).toBe(400);
+    const location = ' at where.account.region.$ne.';
+    expect(door.message.split(location)).toHaveLength(2);
+    const scoped = issueAt(DatasetSchema.safeParse(withScope(filter)), 'filter.account.region.$ne');
+    expect(scoped.message).toBe(door.message.replace(location, '.'));
+    expect(scoped.message).toContain('{"$nin": […]}');
+    const measure = issueAt(DatasetMeasureSchema.safeParse({ name: 'deal_count', aggregate: 'count', filter }), 'filter.account.region.$ne');
+    expect(measure.message).toBe(scoped.message);
   });
 
   it('the shared FilterConditionSchema keeps its own reach — ruling A is untouched', () => {

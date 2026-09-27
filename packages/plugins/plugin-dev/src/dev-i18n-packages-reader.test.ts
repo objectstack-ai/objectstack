@@ -44,7 +44,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { composeStacks, defineStack, type ObjectStackDefinition } from '@objectstack/spec';
 
-import { devI18nPluginOptions } from './dev-i18n';
+import { resolveArtifactPackageOrder } from '@objectstack/core';
+import { devI18nPluginOptions, stackDeclaresTranslations } from './dev-i18n';
 import { DevPlugin } from './dev-plugin';
 
 const absent = (name: string): Error =>
@@ -342,7 +343,9 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
 
   // A `packages` that is present but is not an array is MALFORMED, not absent
   // (the rule beside `AssembledPackageBodySchema`). This reader's private guard
-  // may decide only the absent branch, so these three reach the resolver.
+  // may decide only the absent branch, so these four reach the resolver.
+  // `null` is one of them since #19926 moved the guard and the resolver's
+  // absent branch together.
   const refusalOf = (stack: unknown): (Error & { code?: string; status?: number }) | undefined => {
     try {
       devI18nPluginOptions(stack);
@@ -353,6 +356,7 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
   };
 
   it.each([
+    ['null', null],
     ['{}', {}],
     ['0', 0],
     ["'x'", 'x'],
@@ -370,13 +374,46 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     expect(refusalOf(optionBProject())).toBeUndefined();
     expect(devI18nPluginOptions(optionBProject())).toEqual({ defaultLocale: undefined, fallbackLocale: 'en' });
 
-    // Absent, explicitly `undefined`, and `null`: the guard's one decision.
+    // Absent and explicitly `undefined`: the guard's one decision. `null` is
+    // not here — it is a row of the refusal table above.
     const manifest = { id: CORE_ID, name: 'x', version: '1.0.0', type: 'app' };
-    for (const absent of [{}, { packages: undefined }, { packages: null }]) {
+    for (const absent of [{}, { packages: undefined }]) {
       expect(refusalOf({ manifest, ...absent })).toBeUndefined();
       expect(devI18nPluginOptions({ manifest, ...absent })).toBeUndefined();
       expect(devI18nPluginOptions({ manifest, ...absent, translations: [{ en: {} }] }))
         .toEqual({ defaultLocale: undefined, fallbackLocale: 'en' });
+    }
+  });
+
+  it('LOCKSTEP — the private guard and `resolveArtifactPackageOrder` agree on `packages: null` and on an absent key', () => {
+    // The guard is bound to the resolver's absent branch: it may answer
+    // "absent" for exactly the values the resolver answers `[stack]` for, and
+    // must hand every other value to it. Asked of both directly, so a guard
+    // that drifted back to `undefined || null` goes red here even while the
+    // resolver refuses — the pair measured nothing before #19926.
+    const envelopeOf = (fn: () => unknown): { code?: unknown; status?: unknown } | undefined => {
+      try {
+        fn();
+        return undefined;
+      } catch (err) {
+        const { code, status } = err as { code?: unknown; status?: unknown };
+        return { code, status };
+      }
+    };
+    const manifest = { id: CORE_ID, name: 'x', version: '1.0.0', type: 'app' };
+
+    const nullStack = { manifest, packages: null };
+    const fromResolver = envelopeOf(() => resolveArtifactPackageOrder(nullStack));
+    const fromGuard = envelopeOf(() => stackDeclaresTranslations(nullStack));
+    expect(fromResolver).toEqual({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 });
+    expect(fromGuard).toEqual(fromResolver);
+
+    // Control: an absent key is absent to both, and neither throws.
+    for (const absent of [{ manifest }, { manifest, packages: undefined }]) {
+      expect(envelopeOf(() => resolveArtifactPackageOrder(absent))).toBeUndefined();
+      expect(resolveArtifactPackageOrder(absent)).toEqual([absent]);
+      expect(envelopeOf(() => stackDeclaresTranslations(absent))).toBeUndefined();
+      expect(stackDeclaresTranslations(absent)).toBe(false);
     }
   });
 

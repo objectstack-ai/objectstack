@@ -5,8 +5,8 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { FilterConditionSchema } from '../data/filter.zod';
-import { arrayEqualityComparandMessage } from '../data/filter-comparand-refusal-text';
+import { FieldOperatorsSchema, FilterConditionSchema } from '../data/filter.zod';
+import { reportQueryFaceRefusals } from '../data/filter-save-door-refusals';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
@@ -109,6 +109,10 @@ function isAnalyticsNestedRelationSpec(spec: unknown): spec is Record<string, un
  * analytics `where` door refuses when that filter is CHARTED: an ARRAY in the
  * EQUALITY slot of a field inside a NESTED-RELATION condition —
  * `{ account: { region: ['a'] } }` and `{ account: { region: { $eq: ['a'] } } }`.
+ * [#20116] And, since #20116, every other comparand slot that door refuses
+ * there: the whole of the query faces' verdict, asked of the one function
+ * `FilterConditionSchema`'s own walk asks (`reportQueryFaceRefusals`,
+ * `../data/filter-save-door-refusals.ts`). See the last section.
  *
  * ## Why this is a carrier refinement and not the shared schema's
  *
@@ -137,9 +141,9 @@ function isAnalyticsNestedRelationSpec(spec: unknown): spec is Record<string, un
  * The walk is `mapWhereFieldEntries`' traversal: `$and` / `$or` arrays and
  * `$not` are descended; every other `$` key at node level is skipped; a
  * nested-relation spec is descended, at any depth; every other field entry is
- * judged exactly as `assertNoListInEqualitySlot` judges it — the implicit form
- * when the spec is an array, the explicit form when the spec is an object whose
- * `$eq` is an array. No depth bound: that door has none.
+ * judged as that door judges it — each slot handed to the query faces (see the
+ * last section), of which the equality-slot list is one arm. No depth bound:
+ * that door has none.
  *
  * Only an entry INSIDE a nested relation is reported. Every other entry the
  * walk visits is a field entry of the condition or of a combinator member,
@@ -156,18 +160,28 @@ function isAnalyticsNestedRelationSpec(spec: unknown): spec is Record<string, un
  * `path` carries it (`filter.account.region`,
  * `measures.0.filter.account.region.$eq`).
  *
- * ⛔ Not judged here: `$ne` carrying a list — refused at the shared comparand
- * face and at `FieldOperatorsSchema.$ne` under ruling A on #19886 (record
- * 5805254639), and on the analytics door's hand-over of a nested entry, but
- * not yet at this save door or `FilterConditionSchema`'s: that stored-filter
- * arm is #20116's (moved there by record 5854888976); the list
- * operators, which keep their lists (`$in: []` / `$nin: []` included); every
- * scalar, `null` included; and the face's OTHER arms inside a nested relation
- * (a malformed `$in`, a `null` ordering comparand, a `$between` endpoint),
- * which this card does not move. Nothing is stripped: the parse fails, and a
- * filter that is refused is never a filter that is dropped.
+ * Nothing is stripped: the parse fails, and a filter that is refused is never
+ * a filter that is dropped.
+ *
+ * ## Every slot the door refuses inside a relation (#20116)
+ *
+ * The analytics door hands each entry inside a nested relation to the whole
+ * comparand-shape face and to its `$null` / `$exists` flag check, not only to
+ * the equality arm — so a `null` ordering comparand, a non-list `$in` / `$nin`,
+ * a `null` list member, a malformed `$between` or a `null`, blank or
+ * `{ $field }` endpoint, an array under `$ne` and a non-boolean flag inside a
+ * relation all failed on chart while this walk saved them. Each such entry is
+ * now asked of `reportQueryFaceRefusals`, the function `FilterConditionSchema`'s
+ * walk asks about the entries IT reaches, so one slot is judged one way
+ * whichever walk finds it, and a rule added there reaches this reach too. This
+ * walk still decides only WHERE (the analytics door's traversal); the verdict
+ * and the words are that function's. The equality lists above are two of its
+ * arms and keep their sentence and their path. The list operators keep their
+ * lists (`$in: []` / `$nin: []` included), and the null predicate, a
+ * `{ $field }` reference as the whole comparand and every scalar pass, because
+ * the face passes them.
  */
-function refuseNestedRelationEqualityLists(
+function refuseNestedRelationComparands(
   node: unknown,
   ctx: z.RefinementCtx,
   path: (string | number)[] = [],
@@ -178,32 +192,30 @@ function refuseNestedRelationEqualityLists(
     if (key === '$and' || key === '$or') {
       if (Array.isArray(spec)) {
         spec.forEach((member, index) =>
-          refuseNestedRelationEqualityLists(member, ctx, [...path, key, index], insideRelation));
+          refuseNestedRelationComparands(member, ctx, [...path, key, index], insideRelation));
       }
       continue;
     }
     if (key === '$not') {
-      refuseNestedRelationEqualityLists(spec, ctx, [...path, key], insideRelation);
+      refuseNestedRelationComparands(spec, ctx, [...path, key], insideRelation);
       continue;
     }
     if (key.startsWith('$')) continue;
     if (isAnalyticsNestedRelationSpec(spec)) {
-      refuseNestedRelationEqualityLists(spec, ctx, [...path, key], true);
+      refuseNestedRelationComparands(spec, ctx, [...path, key], true);
       continue;
     }
     if (!insideRelation) continue; // `FilterConditionSchema` judges this entry itself
-    if (Array.isArray(spec)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: [...path, key],
-        message: arrayEqualityComparandMessage(spec, { field: key }),
-      });
-    } else if (isAnalyticsFilterObject(spec) && Array.isArray(spec.$eq)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: [...path, key, '$eq'],
-        message: arrayEqualityComparandMessage(spec.$eq, { op: '$eq', field: key }),
-      });
+    // [#20116] Every slot the analytics door hands to the query faces, asked of
+    // the one function `FilterConditionSchema`'s own walk asks: an implicit
+    // comparand, or each operator of an operator map.
+    if (!isAnalyticsFilterObject(spec)) {
+      reportQueryFaceRefusals(ctx, [...path, key], key, undefined, spec, FieldOperatorsSchema);
+      continue;
+    }
+    for (const [op, comparand] of Object.entries(spec)) {
+      if (!op.startsWith('$')) continue;
+      reportQueryFaceRefusals(ctx, [...path, key, op], key, op, comparand, FieldOperatorsSchema);
     }
   }
 }
@@ -211,7 +223,7 @@ function refuseNestedRelationEqualityLists(
 /**
  * The optional filter both analytics carriers declare — `DatasetSchema.filter`
  * and `DatasetMeasureSchema.filter` — which is `FilterConditionSchema` plus
- * {@link refuseNestedRelationEqualityLists}. Every other schema that carries a
+ * {@link refuseNestedRelationComparands}. Every other schema that carries a
  * `FilterCondition` keeps the shared schema's reach.
  *
  * The check sits on the OPTIONAL wrapper, not on `FilterConditionSchema`
@@ -226,7 +238,7 @@ function refuseNestedRelationEqualityLists(
  */
 function analyticsCarrierFilter() {
   return FilterConditionSchema.optional().superRefine((filter, ctx) =>
-    refuseNestedRelationEqualityLists(filter, ctx));
+    refuseNestedRelationComparands(filter, ctx));
 }
 
 /**
@@ -341,7 +353,7 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * Measure-scoped filter (e.g. only won deals for "won_amount"). [#20080] A
    * list in the equality slot inside a nested relation is refused on save, as
    * the analytics door refuses it on chart — see
-   * {@link refuseNestedRelationEqualityLists}.
+   * {@link refuseNestedRelationComparands}.
    */
   filter: analyticsCarrierFilter().meta({ title: 'Filter' }),
   /**
@@ -504,7 +516,7 @@ export const DatasetSchema = lazySchema(() => strictObject({
    * Definition-level filter (the dataset's intrinsic scope, e.g. non-deleted).
    * [#20080] A list in the equality slot inside a nested relation is refused
    * on save, as the analytics door refuses it on chart — see
-   * {@link refuseNestedRelationEqualityLists}.
+   * {@link refuseNestedRelationComparands}.
    */
   filter: analyticsCarrierFilter().describe('Intrinsic dataset scope filter'),
 
