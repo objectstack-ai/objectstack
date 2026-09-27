@@ -5631,7 +5631,13 @@ function checkListOverlayTypeNeedsColumns(
   ctx: z.RefinementCtx,
 ): void {
   if (view.type !== undefined && view.columns === undefined) {
-    ctx.addIssue({ code: 'custom', path: ['columns'], message: LIST_OVERLAY_TYPE_NEEDS_COLUMNS });
+    // `continue: false` — an ABORTING issue, like the field-level refusal
+    // (`columns` required) it replaces on this body. A non-aborting one would
+    // leave this member the union's only non-aborted branch, and zod then
+    // returns that branch's issues UNWRAPPED (`handleUnionResults`): the
+    // envelope's top-level code would move from `invalid_union` to `custom`
+    // on a body whose verdict did not move.
+    ctx.addIssue({ code: 'custom', path: ['columns'], message: LIST_OVERLAY_TYPE_NEEDS_COLUMNS, continue: false });
   }
 }
 
