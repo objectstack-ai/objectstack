@@ -17,7 +17,7 @@ What changes:
 
 Not changed: a field compared with a single-valued field (`record.status != record.owner`, `record.amount > record.budget`), a `json` or `multiple` field compared with a literal or tested against `null`, and any column the stack does not declare (an object from another package, an external object with no field map), which the rule does not judge. The runtime refusals of stages 2d and 2e stay as the backstop. The stage 2d changeset's sentence that a field compared with a `json` or `multiple` field "is not reported at authoring time" no longer holds: it is now reported at both doors.
 
-No shipped predicate moves: 0 of the 187 `using` / `check` / `condition` strings in this repository's packages and examples, and 0 of the 3 in the cloud repository, compare a field with a `json` or `multiple` field, and `os validate` over `app-crm`, `app-multi-package` and `app-todo` reports no new finding.
+No shipped predicate moves: 0 of the 187 `using` / `check` / `condition` strings in this repository's packages and examples, and 0 of the 3 in the cloud repository, compare a field with a `json` or `multiple` field, and the real `os validate` over `app-crm`, `app-multi-package`, `app-showcase` and `app-todo` reports no `rls-predicate-*` finding.
 
 **What to change.** A field compared with a `json` or `multiple` field has no row-filter form: compare with a single-valued column, or with a literal or a `current_user` value ("one of these values" is `record.status in ['open', 'pending']`, or `record.owner in current_user.org_user_ids`), or move the condition into a validation rule or a hook.
 
