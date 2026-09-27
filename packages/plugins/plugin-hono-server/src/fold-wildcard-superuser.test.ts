@@ -10,6 +10,13 @@ import { foldWildcardSuperUser, clampManagedObjectWrites, type ManagedSchemaLike
  * mirror the server's actual enforcement, which grants writes via a `'*'`
  * modifyAll super-user bypass regardless of another set's explicit per-object
  * deny (most-permissive merge, no deny-wins).
+ *
+ * [#20136] These cases pin the standalone released export, body unchanged. It
+ * is no longer a step of the effective map (`buildEffectiveObjectPermissions`
+ * in `@objectstack/core`), whose super-user fold reads each set on its own:
+ * over a merged map this helper cannot tell a set's OWN narrower entry from
+ * another set's, and it pulls `allowCreate` on `modifyAllRecords`, which the
+ * server does not grant.
  */
 describe('foldWildcardSuperUser', () => {
   it('lifts an explicit per-object deny when the wildcard is a modifyAll super-user grant', () => {

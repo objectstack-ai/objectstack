@@ -9,9 +9,12 @@
  * `effective-api-operations.test.ts`, which exercise them through that
  * package's unchanged re-exports). What is pinned HERE is the composition:
  * the merge rule, the order, the guards, and that the result aliases nothing.
+ * [#20136] `foldWildcardSuperUser` is no longer one of the steps composed:
+ * the super-user fold is per set (the `[#20136]` block below).
  */
 
 import { describe, it, expect } from 'vitest';
+import { objectPermissionGrants } from '@objectstack/spec/security';
 import { buildEffectiveObjectPermissions } from './effective-object-permissions.js';
 
 describe('buildEffectiveObjectPermissions', () => {
@@ -42,11 +45,16 @@ describe('buildEffectiveObjectPermissions', () => {
       sys_member: { name: 'sys_member', managedBy: 'better-auth' },
     };
     const map: any = buildEffectiveObjectPermissions(
-      [{ objects: { '*': { viewAllRecords: true, modifyAllRecords: true }, sys_member: { allowRead: true } } }],
+      [
+        { objects: { '*': { viewAllRecords: true, modifyAllRecords: true } } },
+        // [#20136] Named by ANOTHER set, so the super-user wildcard reaches it and the clamp has something to narrow.
+        { objects: { sys_member: { allowRead: true } } },
+      ],
       { allSchemas: () => Object.values(schemas), schemaOf: (n) => schemas[n] },
     );
-    // Seed → fold: an entry nobody named, pulled true by the super-user bits.
-    expect(map.report).toMatchObject({ allowRead: true, allowEdit: true, allowCreate: true, allowDelete: true });
+    // Seed → fold: an entry nobody named, pulled true by the super-user bits —
+    // [#20136] every bit they grant and no other: `modifyAllRecords` grants no create.
+    expect(map.report).toMatchObject({ allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true, allowCreate: false });
     // Fold → clamp: the guard has the last word on a managed object's writes.
     expect(map.sys_member).toMatchObject({ allowRead: true, allowEdit: false, allowCreate: false, allowDelete: false });
     // Annotate runs last, over the final entries.
@@ -89,9 +97,11 @@ describe('buildEffectiveObjectPermissions', () => {
 
   it('with no schema source at all it is the bare merge plus the fold', () => {
     const map: any = buildEffectiveObjectPermissions([
-      { objects: { '*': { modifyAllRecords: true }, deal: { allowRead: false } } },
+      { objects: { '*': { modifyAllRecords: true } } },
+      { objects: { deal: { allowRead: false } } },
     ]);
-    expect(map.deal).toMatchObject({ allowRead: true, allowEdit: true, allowCreate: true, allowDelete: true });
+    expect(map.deal).toMatchObject({ allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true });
+    expect(map.deal.allowCreate).not.toBe(true);
     expect(map.deal.apiOperations).toBeUndefined();
   });
 });
@@ -281,6 +291,83 @@ describe('[#20134] super-user wildcard: every bit it grants, per set', () => {
     expect(map.crm_account).not.toHaveProperty('apiOperations');
     // A narrowed one is annotated exactly as before, `export` kept.
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+  });
+});
+
+/**
+ * [#20136] The super-user fold is per set, and it is the only one: an entry a
+ * super-user set names ITSELF is that set's whole answer for the object
+ * (`resolveObjectPermission`), and a wildcard lends only the bits the spec's
+ * `objectPermissionGrants` says it grants — `modifyAllRecords` grants no
+ * create. The merged-bypass fold that used to run first granted both, so the
+ * map answered `true` where `PermissionEvaluator.checkObjectPermission`
+ * refuses. Each case reads the entry the way `current_user.can()` does.
+ *
+ * The enumeration over every super-user shape — shipped sets and authored
+ * rows, every verb, the real `can()` against the real evaluator — is pinned
+ * in plugin-security's `get-effective-object-permissions.test.ts`.
+ */
+describe('[#20136] a super-user set\'s own explicit entry is its whole answer', () => {
+  const SCHEMAS: Record<string, any> = {
+    crm_account: { name: 'crm_account' },
+    crm_lead: { name: 'crm_lead' },
+    sys_position: { name: 'sys_position' },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (n: string) => SCHEMAS[n] };
+  const SUPER = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, viewAllRecords: true, modifyAllRecords: true };
+  const grants = (entry: unknown) =>
+    (['allowRead', 'allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer', 'allowExport'] as const)
+      .filter((bit) => objectPermissionGrants(entry as any, bit));
+
+  it('the walled org admin shape: a read-only entry in the super-user set stays read-only', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': SUPER, sys_position: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false } } }],
+      source,
+    );
+    expect(grants(map.sys_position)).toEqual(['allowRead']);
+    // The objects the set does NOT name still take its wildcard, every bit it grants.
+    expect(grants(map.crm_account)).toEqual(['allowRead', 'allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer']);
+  });
+
+  it('an EMPTY entry `{}` in the super-user set grants nothing — read included', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER, crm_account: {} } }], source);
+    expect(grants(map.crm_account)).toEqual([]);
+  });
+
+  it('a super-read wildcard over its own export-only entry: no read, so no export, and `apiOperations` withholds it', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { viewAllRecords: true }, crm_account: { allowExport: true } } }],
+      source,
+    );
+    expect(grants(map.crm_account)).toEqual([]);
+    expect(map.crm_account.apiOperations).not.toContain('export');
+  });
+
+  it('`modifyAllRecords` alone grants no create — on a seeded entry, and on one another set names', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [
+        { objects: { '*': { modifyAllRecords: true } } },
+        { objects: { crm_lead: { allowRead: true } } },
+      ],
+      source,
+    );
+    for (const name of Object.keys(SCHEMAS)) {
+      expect(grants(map[name]), name).toEqual(['allowRead', 'allowEdit', 'allowDelete', 'allowTransfer']);
+    }
+  });
+
+  it('ANOTHER set\'s super-user wildcard still widens that entry — create only where its own wildcard grants it', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [
+        { objects: { '*': SUPER, crm_account: { allowRead: true } } },
+        { objects: { '*': { modifyAllRecords: true } } },
+      ],
+      source,
+    );
+    // The second set does not name `crm_account`: its write bypass reaches it, and grants no create.
+    expect(grants(map.crm_account)).toEqual(['allowRead', 'allowEdit', 'allowDelete', 'allowTransfer']);
+    // Where the first set's wildcard reaches, its own `allowCreate` does.
+    expect(grants(map.crm_lead)).toContain('allowCreate');
   });
 });
 
