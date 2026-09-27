@@ -190,6 +190,7 @@ describe('analytics_cube.public — the internal producers mint visible cubes', 
       name: 'pipeline',
       label: 'Pipeline',
       object: 'opportunity',
+      dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
       measures: [{ name: 'total', aggregate: 'count' }],
     }));
     const inferred = new CubeRegistry().inferFromObject('tasks', [{ name: 'title', type: 'text', label: 'Title' }]);
