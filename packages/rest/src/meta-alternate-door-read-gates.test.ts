@@ -480,3 +480,68 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
         });
     }
 });
+
+// ── The edges the census rows do not reach ────────────────────────────────────
+
+describe('[#20156] edges', () => {
+    it('/layers judges EVERY layer: a code layer the caller may not read is not served beside an effective one they may', async () => {
+        const { rest, protocol } = setup('non-reader');
+        // The shipped book is set-gated; an overlay opened it to the org.
+        const opened = { ...clone(ADMIN_GUIDE), audience: 'org', description: 'Open to everyone now.' };
+        protocol.getMetaItemLayered.mockImplementation(async () => ({
+            type: 'book', name: 'admin_guide', code: clone(ADMIN_GUIDE), overlay: opened, effective: opened,
+        }));
+        const res = await drive(rest, '/layers', 'book', 'admin_guide');
+
+        expect(envelope(res)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(text(res)).not.toContain(BOOK_SECRET);
+    });
+
+    it('a gate-input FAULT on a stored-version door is the fault, never a 403 and never the body', async () => {
+        // The app's docs-audience entry arm reads the books; that read fails.
+        // Pruning every `doc` entry would read here as "part of this app is
+        // withheld from you" — a 403 telling a holder they hold nothing.
+        const { rest, protocol } = setup('reader');
+        const listRead = protocol.getMetaItems.getMockImplementation();
+        protocol.getMetaItems.mockImplementation(async (request: any) => {
+            if (singular(request?.type) === 'book') {
+                throw Object.assign(new Error('The metadata store could not be read.'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+            }
+            return listRead(request);
+        });
+        for (const suffix of ['/layers', '/diff']) {
+            const res = await drive(rest, suffix, 'app', 'crm');
+            expect(envelope(res), suffix).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+            expect(text(res), suffix).not.toContain('nav_finance_ledger');
+        }
+        // The single-document doors keep the plain read's answer to that fault:
+        // the `doc` entries left out, the rest of the navigation served.
+        const plain = await drive(rest, '', 'app', 'crm');
+        const published = await drive(rest, '/published', 'app', 'crm');
+        expect(plain.statusCode).toBe(200);
+        expect(navIds(published.body)).toEqual(navIds(plainItem(plain)));
+        expect(navIds(published.body)).not.toContain('nav_admin_runbook');
+    });
+
+    it('a gated type with nothing behind the name: /diff answers the plain read\'s absence, /history its events', async () => {
+        const { rest, protocol } = setup('non-reader');
+        protocol.getMetaItem.mockImplementation(async ({ type, name }: any) => ({ type: singular(type), name, item: undefined }));
+        const diff = await drive(rest, '/diff', 'doc', 'crm_admin_runbook');
+        const history = await drive(rest, '/history', 'doc', 'crm_admin_runbook');
+
+        expect(envelope(diff)).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+        expect(text(diff)).not.toContain(DOC_SECRET);
+        expect(history.statusCode).toBe(200);
+        expect(Array.isArray(history.body?.events)).toBe(true);
+    });
+
+    it('a type no per-caller gate judges costs its event and diff doors no extra read', async () => {
+        const { rest, protocol } = setup('non-reader');
+        for (const suffix of ['/history', '/audit', '/diff']) {
+            protocol.getMetaItem.mockClear();
+            const res = await drive(rest, suffix, 'view', 'all_leads');
+            expect(res.statusCode, suffix).toBe(200);
+            expect(protocol.getMetaItem, suffix).not.toHaveBeenCalled();
+        }
+    });
+});
