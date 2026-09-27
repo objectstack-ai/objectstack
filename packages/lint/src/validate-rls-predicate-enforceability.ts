@@ -991,15 +991,16 @@ const FIELD_COMPARISON_SYMBOL: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * What a declared field holds when it holds a list or an object, or `null`
- * when it holds one value (see this file's header for the two spec classes).
+ * The declaration that makes a field hold a list or an object, spelled as the
+ * author wrote it, or `null` when the field holds one value (see this file's
+ * header for the two spec classes).
  */
 function listHoldingDeclaration(meta: GraphField | undefined): string | null {
   const type = meta?.type;
   if (!type) return null;
-  if (STRUCTURED_JSON_TYPES.has(type)) return `a \`${type}\` field`;
+  if (STRUCTURED_JSON_TYPES.has(type)) return `\`type: '${type}'\``;
   if (!isMultiValueField({ type, multiple: meta.multiple === true })) return null;
-  return meta.multiple === true ? `a \`multiple\` \`${type}\` field` : `a \`${type}\` field`;
+  return meta.multiple === true ? `\`type: '${type}'\`, \`multiple: true\`` : `\`type: '${type}'\``;
 }
 
 /** One lowered comparison between two columns, at least one of which holds a list or an object. */
@@ -1033,7 +1034,7 @@ function listHoldingComparisons(
     for (const name of new Set([site.field, referenced])) {
       const verdict = resolveFieldPath(graph, object, name);
       const held = verdict?.kind === 'ok' ? listHoldingDeclaration(verdict.meta) : null;
-      if (held) columns.push(`\`${name}\` is ${held}`);
+      if (held) columns.push(`\`${name}\` is declared ${held}`);
     }
     if (columns.length === 0) continue;
     const written = `record.${site.field} ${FIELD_COMPARISON_SYMBOL.get(site.op)} record.${referenced}`;
