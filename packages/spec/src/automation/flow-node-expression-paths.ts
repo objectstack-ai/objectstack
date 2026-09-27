@@ -151,6 +151,24 @@ export interface FlowNodeExpressionPath {
   readonly role: FlowNodeExpressionRole;
   /** Author-facing label for diagnostics, e.g. `screen field visibleWhen`. */
   readonly label: string;
+  /**
+   * The declaring channel REQUIRES this slot on every element the path reaches
+   * (#19961) — its schema lists the key in `required`, so leaving it out, or
+   * writing `null`, is not "not authored" but a declared slot left empty.
+   *
+   * Only meaningful for a `predicate` slot, and it changes one thing: an absent
+   * or `null` value on an element that exists is EMITTED by
+   * {@link resolveFlowNodeExpressions} (for the consumer to refuse through
+   * {@link predicateSlotRefusal}) instead of skipped. The element itself must
+   * exist — a `decision` with no `conditions` declares no branch, and nothing
+   * here says it must.
+   *
+   * Reconciled against the channel's own `required` list by the ratchet that
+   * reconciles the markers (`config-expression-ledger.test.ts` in
+   * `service-automation`), in both directions, so this flag cannot claim a
+   * requirement the contract does not make, nor miss one it does.
+   */
+  readonly required?: true;
 }
 
 /**
@@ -202,10 +220,18 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     // Declared through the schemaless channel — `decision` publishes no
     // descriptor `configSchema`, so the marker lives on
     // `DecisionConditionSchema.expression`'s `.meta()` (#4439).
+    //
+    // `required` (#19961): `DecisionConditionSchema` declares `expression`
+    // `z.string()`, not optional, and the executor evaluates every branch it
+    // reaches — a branch with no `expression` hands `evaluateCondition` an
+    // envelope with no `source`, which it refuses, failing the run AT that
+    // branch. Nothing parses a node's open `config` against that schema, so
+    // this flag is how the requirement reaches the three doors.
     nodeType: 'decision',
     path: 'conditions[].expression',
     role: 'predicate',
     label: 'decision branch expression',
+    required: true,
   },
   {
     nodeType: 'loop',
@@ -318,7 +344,13 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  *
  *  - `predicate`: the slot IS the expression, so every string is emitted —
  *    including one that is blank after trimming (#17493). Absent and `null`
- *    are skipped: "not authored" is not a malformed expression. A **non-string**
+ *    are skipped: "not authored" is not a malformed expression — UNLESS the
+ *    entry is {@link FlowNodeExpressionPath.required} (#19961), where an
+ *    element that exists without its slot is a declared rule left out, and is
+ *    emitted (as `undefined` or `null`, whichever was there) for the consumer
+ *    to refuse through {@link predicateSlotRefusal}, the same way as a blank.
+ *    Only the element's OWN slot is judged: an element that is not an object
+ *    carries no slot, and the walk does not reach it. A **non-string**
  *    is emitted too (#15572), for the consumer to refuse through
  *    {@link predicateSlotRefusal}: it used to be skipped as "a type violation
  *    for the schema pass to report", and for a schemaless node type there is no
@@ -361,9 +393,11 @@ export function resolveFlowNodeExpressions(
         // consumer to refuse (see `predicateSlotRefusal`); a `flow-template`
         // slot keeps skipping it.
         if (entry.role === 'predicate' || NON_BLANK_STRING(value)) out.push({ entry, path, value });
-      } else if (entry.role === 'predicate' && value != null) {
+      } else if (entry.role === 'predicate' && (value != null || entry.required)) {
         // #15572 — a non-string in a predicate slot. Emitted so a consumer can
         // REFUSE it (see `predicateSlotRefusal`), never so it can be parsed.
+        // #19961 — on a REQUIRED slot, absent and `null` are emitted too: the
+        // walk hands over `undefined` for a key an existing element lacks.
         out.push({ entry, path, value });
       }
     });
@@ -453,11 +487,47 @@ export const PREDICATE_SLOT_STRING_REFUSAL =
  * register and `objectstack validate` locates it, instead of the flow running
  * on a predicate no validator ever read.
  *
+ * ## No value at all — refused since #19961, where the slot is required
+ *
+ * `undefined` and `null` get their own detail sentence, under the same lead.
+ * Whether an absent value is a finding at all is the RESOLVER's question, not
+ * this function's: {@link resolveFlowNodeExpressions} emits one only for a
+ * {@link FlowNodeExpressionPath.required} slot — today a `decision` branch's
+ * `expression` — and skips it everywhere else (an absent `visibleWhen` shows
+ * the field). So every door refuses the absent branch predicate through this
+ * one call, with one prescription, exactly as it refuses the blank one.
+ *
+ * The prescription is the blank's, minus the half that does not carry over.
+ * A blank predicate evaluated to `false`, so `expression: 'false'` KEPT its run;
+ * an absent one did not evaluate at all — the executor handed
+ * `evaluateCondition` an envelope with no `source`, which it refuses — so a
+ * run that reached the branch failed there, and there is no run to keep. What
+ * does carry over is the warning: dropping a decision's ONLY branch turns the
+ * node into a plain gateway, releasing the out-edge that branch labelled.
+ *
+ * ⚠️ The sentence is worded for the one required slot there is. A second
+ * `required` entry must re-word it — `flow-node-expression-paths.test.ts` pins
+ * the required set to that one entry so the second cannot arrive silently.
+ *
  * @returns the refusal and the source to attribute it to, or `undefined` when
  *   the value is a non-blank string and therefore this function's business is
  *   done.
  */
 export function predicateSlotRefusal(value: unknown): { message: string; source: string } | undefined {
+  if (value === undefined || value === null) {
+    return {
+      message:
+        `${PREDICATE_SLOT_STRING_REFUSAL} Found ${value === null ? '`null`' : 'nothing — the key is absent'} `
+        + 'where the slot is required: a decision branch is `{ label, expression }` and its `expression` is not '
+        + 'optional, so a branch without one states no rule. Write the predicate the branch was meant to test '
+        + '(e.g. `record.rating >= 4`); a predicate written under another key — `condition` is the edge\'s '
+        + 'spelling — belongs in `expression`. There is no run to keep: the executor evaluates every branch it '
+        + 'reaches, and a branch with no `expression` failed the run there. To keep the branch and its label but '
+        + 'never take it, write `expression: \'false\'`. Not by dropping a decision\'s only branch: the node then '
+        + 'routes by its out-edges alone, and the out-edge that branch labelled is no longer held back.',
+      source: '',
+    };
+  }
   if (typeof value === 'string') {
     if (NON_BLANK_STRING(value)) return undefined;
     return {
