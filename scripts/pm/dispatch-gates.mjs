@@ -3256,8 +3256,16 @@ function populationMarkerPattern(key) {
  *
  * The `--` is SPACE-delimited on both sides here (never `[ \t]*`), because a
  * path may legitimately contain one and a bare separator would split it.
+ *
+ * ⚠️ `local-env` shares this grammar with a list of ENVIRONMENT NAMES in the
+ * path position (#20278). The grammar is LIST-then-reason and never reads what
+ * the list holds; each key's own reader does (`declaredLocalEnv` refuses a
+ * token that is not an env name). The roster keeps its name for the reason
+ * `REASON_TAIL_MARKER_KEYS` states: a rename would move what a reader greps for
+ * without moving a behaviour, and a third builder would be the copy of this
+ * pattern the refusal below forbids.
  */
-const PATH_LIST_MARKER_KEYS = Object.freeze(['inherited-population', 'self-test-reads']);
+const PATH_LIST_MARKER_KEYS = Object.freeze(['inherited-population', 'self-test-reads', 'local-env']);
 
 function pathListMarkerPattern(key) {
   if (!PATH_LIST_MARKER_KEYS.includes(key)) {
@@ -3306,7 +3314,7 @@ const MARKER_REASON_GRAMMARS = Object.freeze(Object.fromEntries([
  * ⚠️ Still spelled `readPopulationMarker` for the reason
  * `REASON_TAIL_MARKER_KEYS` states: the exported half of this machinery is
  * named `population*` and a reader greps for it. `MARKER_REASON_GRAMMARS` is
- * the authority on which keys it reads — today all six, population or not.
+ * the authority on which keys it reads — today all seven, population or not.
  *
  * Returns `{ form, kind, line, reason, cut, match }`, or null when this source
  * carries no usable declaration of that key — no match, or a match whose reason
@@ -4638,6 +4646,18 @@ export function ciOnlyMeasurement(entry, rootScripts = {}) {
  *             LIVE: `check-governed-queue-guard.mjs`, whose step also passes
  *             `GITHUB_TOKEN: ${{ … }}` — #14004's own specimen.
  *
+ * and one limb that is per NAME rather than per family (#20278):
+ *
+ *   localEnv  the script's own `local-env` declaration names values its BARE
+ *             invocation does not need (`declaredLocalEnv`, graded by
+ *             `localEnvRefusal`, scoped by `localEnvAdmitted`). Only the
+ *             declared names leave the list, so a name the script did not
+ *             declare still keeps the family out. LIVE:
+ *             `check-issue-citations.mjs`, whose `lint.yml` step passes
+ *             `GITHUB_TOKEN` and `OS_GATE_MERGE_GROUP_BASE_SHA` and whose own
+ *             declaration says the pull-request run needs neither — while its
+ *             `--census` sibling, which declares nothing, keeps `GITHUB_TOKEN`.
+ *
  * ⚠️ What this does NOT claim, and it is `payloadEnvDependence`'s caveat
  * unchanged: that the gate READS the variable. It reads what the WORKFLOW
  * passes, not what the program consumes, so the family stays NAMED with its
@@ -4650,7 +4670,8 @@ export function workflowEnvValues(entry) {
   if (entry.selfTest) return [];
   if (!entry.direct) return [];
   if (entry.ciOnly) return [];
-  return [...names];
+  const admitted = localEnvAdmitted(entry);
+  return names.filter((name) => !admitted.includes(name));
 }
 
 /**
@@ -4876,6 +4897,132 @@ export function declaredSelfTestReads(scriptSource, readTargets, file = null) {
     );
   }
   return { population, reason };
+}
+
+/**
+ * A GATE SCRIPT's own declaration that its BARE invocation answers CI's
+ * question here WITHOUT some of the values its workflow step passes through
+ * `env:` — a whole-line comment anywhere in the script's source (#20278):
+ *
+ *   // dispatch-gates: local-env <NAME> [<NAME> ...] -- <reason>
+ *   #  dispatch-gates: local-env <NAME> [<NAME> ...] -- <reason>   (shell gates)
+ *
+ * ## The defect this exists for
+ *
+ * `workflowEnvValues` (#15761) marks a family NOT RUNNABLE LOCALLY when its
+ * step hands it a `${{ … }}` value through `env:`, and it reads what the
+ * WORKFLOW passes, never what the program needs. For the step that runs
+ * `node scripts/check-issue-citations.mjs` — the diff-scoped verdict
+ * `Lint & Repo Gates` blocks on — the two answers differ: the step passes
+ * `GITHUB_TOKEN` and `OS_GATE_MERGE_GROUP_BASE_SHA`, and the script needs
+ * neither to answer the pull-request run's question (the base renders EMPTY on
+ * `pull_request`; the token is used when present). So `--commands` offered only
+ * the family's `--self-test`, named the verdict NOT MEASURED, and a dev whose
+ * sweep reconciled clean took the red on CI instead — measured on #20268's CI
+ * run, whose citation the bare command, run here, refuses with the same exit 2.
+ *
+ * ## Why a declaration read from the SCRIPT, not a rule about the variables
+ *
+ * Measured before this landed: dropping the job token and the merge-group base
+ * from the classification GENERICALLY also admits the same script's `--census`
+ * (a report-only enumeration of the whole board that always exits 0) and
+ * `check-required-contexts.mjs --verify-required-set` (exit 2 here, through
+ * the proxy route) — one right answer bought with two wrong ones. Whether a
+ * value is needed is a fact about the PROGRAM and about the MODE, so the
+ * program states it, for the reason `declaredArgvDefaults` reads the usage
+ * block rather than a table here: a script that stops declaring returns its
+ * family to NOT MEASURED on the next run, with no edit in this file.
+ *
+ * ## What it does NOT do
+ *
+ *   guess             only a name the declaration spells is admitted; nothing
+ *                     is inferred from how the script reads the variable.
+ *   admit a name the workflow does not pass
+ *                     every declared name must be one EVERY step running the
+ *                     bare invocation passes as a workflow value through `env:`
+ *                     (`entry.envVariables`, the intersection). A name no step
+ *                     passes, one only some steps pass, a literal-valued one and
+ *                     one the command spells as argv are all REFUSED by
+ *                     `localEnvRefusal`, so a declaration the workflow outgrew
+ *                     reds every run of this tool instead of vouching quietly.
+ *   admit an argv no workflow runs
+ *                     the declaration is scoped to the script's BARE invocation
+ *                     — the key that is the script path alone — and a script
+ *                     that declares one while no workflow runs that invocation
+ *                     is REFUSED the same way.
+ *   touch any other invocation of the same script
+ *                     `--census`, `--self-test` and every other argv keep the
+ *                     classification they had (`localEnvAdmitted` answers []
+ *                     for them). An argv-scoped spelling is not built: no
+ *                     family has pulled one.
+ *   repair an argv value
+ *                     a value the command spells is the argv carrier's, and
+ *                     `declaredArgvDefaults` is its only repair.
+ *
+ * The reason is REQUIRED, separated from the name list by a SPACE-delimited
+ * `--` exactly as the two path-list markers spell it, and graded WHOLE by the
+ * shared reading (#18422): a cut reason throws, naming the file and the line.
+ *
+ * Returns `{ names, reason, line }`, or null when the script declares nothing.
+ */
+export function declaredLocalEnv(scriptSource, file = null) {
+  const read = readPopulationMarker(String(scriptSource), 'local-env');
+  if (!read) return null;
+  refuseCutMarkerReason(read, 'local-env', file);
+  const names = read.match[2].trim().split(/[ \t]+/).filter(Boolean);
+  // The name shape `stepEnvExpressionVariables` reads off a step's `env:` keys,
+  // so a declared token can only ever be one that reader could have produced.
+  const malformed = names.filter((name) => !/^[A-Za-z_][\w.-]*$/.test(name));
+  if (malformed.length > 0) {
+    throw new Error(
+      `dispatch-gates: ${file ?? 'the declaring script'}:${read.line} declares local-env with `
+        + `${malformed.length} token(s) that are not environment variable names: ${malformed.join(', ')} — `
+        + 'the list names `env:` keys of the step that runs this script bare, and nothing else.',
+    );
+  }
+  return { names, reason: read.reason, line: read.line };
+}
+
+/**
+ * Why a `local-env` declaration is REFUSED against the tree's workflows, or
+ * null when it holds (#20278) — the two refusals `declaredLocalEnv`'s docblock
+ * lists, in one pure reading so the discovery and the self-test cannot
+ * disagree about what a stale declaration is.
+ *
+ * `bareEntry` is the discovery entry keyed on the declaring script's path
+ * ALONE — its bare invocation — or null when no workflow runs one. Every entry
+ * that reads the declaring file grades the declaration against that same
+ * entry, so the census, the self-test alias and the bare run all get one
+ * answer, and a declaration whose bare run is gone is refused even when only
+ * some OTHER invocation of the script is still wired.
+ */
+export function localEnvRefusal(declaration, bareEntry, file = null) {
+  if (!declaration) return null;
+  const script = file ?? 'the declaring script';
+  const where = `${script}:${declaration.line}`;
+  if (!bareEntry || !bareEntry.direct || bareEntry.selfTest || bareEntry.check !== bareEntry.script) {
+    return `${where} declares local-env ${declaration.names.join(' ')} for its BARE invocation, and no workflow `
+      + `runs \`node ${script}\` with no argv. The declaration admits nothing there is to run, and left standing it `
+      + 'reads as a promise about a run CI never makes. Delete it, or wire the bare invocation it describes.';
+  }
+  const passed = bareEntry.envVariables ?? [];
+  const unpassed = declaration.names.filter((name) => !passed.includes(name));
+  if (unpassed.length === 0) return null;
+  return `${where} declares local-env ${unpassed.join(', ')}, which the step(s) running \`node ${script}\` do not `
+    + `all pass as a workflow value through \`env:\` (every such step passes: ${passed.join(', ') || 'nothing'}). `
+    + 'A name no step passes is stale; one only SOME steps pass is not a property of the invocation; a literal '
+    + 'value is not a workflow value; and a name the command spells is argv, whose only repair is a usage-block '
+    + 'default. Correct the declaration to the names the step really passes — never widen this reading to admit it.';
+}
+
+/**
+ * The step-`env:` names the classification DROPS for this one invocation, off
+ * its script's `local-env` declaration (#20278) — and [] for every key except
+ * that script's BARE one, which is the whole of the scope rule.
+ */
+export function localEnvAdmitted(entry) {
+  if (!entry?.direct || !entry.script || entry.check !== entry.script || entry.selfTest) return [];
+  return [...(entry.localEnv?.names ?? [])];
 }
 
 /**
@@ -13277,6 +13424,15 @@ function discoverFamiliesPass(tree) {
       // does with an argument it was not given, exactly like the declarations
       // around it.
       if (entry.direct && f === entry.script) entry.argvDefaults = declaredArgvDefaults(source);
+      // ONE read, and one more answer off it (#20278): the step-`env:` values
+      // this script DECLARES its bare invocation does not need. Collected from
+      // EVERY family that reads the file — the bare run, the census, the
+      // self-test alias — so each of them grades the declaration below against
+      // the one bare entry, and a declaration whose bare run is gone is refused
+      // even while another invocation of the script is still wired. It is SPENT
+      // on the bare key alone (`localEnvAdmitted`).
+      const localEnv = declaredLocalEnv(source, f);
+      if (localEnv) (entry.localEnvDeclarations ??= []).push({ file: f, ...localEnv });
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
       // SELF-TEST; a module the script imports carries the population of the
@@ -13452,6 +13608,17 @@ function discoverFamiliesPass(tree) {
     // `--commands` are all the argv one, unchanged. The env names are spelled
     // `env NAME` so the two carriers stay legible in a single list — an argv
     // variable always carries its `$`.
+    // GRADED before it is spent (#20278): a declaration naming a value the step
+    // does not pass, or scoped to a bare run no workflow makes, throws here, and
+    // the CLI answers `derivation failed` — a stale declaration reds every run
+    // rather than quietly listing a command. See `localEnvRefusal`.
+    for (const declaration of entry.localEnvDeclarations ?? []) {
+      const refusal = localEnvRefusal(declaration, byCheck.get(declaration.file) ?? null, declaration.file);
+      if (refusal) throw new Error(`dispatch-gates: ${refusal}`);
+    }
+    entry.localEnv = entry.direct && entry.script
+      ? (entry.localEnvDeclarations ?? []).find((d) => d.file === entry.script) ?? null
+      : null;
     entry.envValues = workflowEnvValues(entry);
     const workflowValues = [
       ...(entry.argvVariables ?? []),
@@ -15101,6 +15268,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     // block, the `--commands` accounting and `--json` cannot disagree about
     // whether a family was repaired or merely rendered.
     argvDefaulted: entry.argvDefaulted ?? [],
+    // And again (#20278): the step-`env:` names this row runs WITHOUT because
+    // its script declares them unneeded, so no rendering can list the command
+    // runnable without also being able to say why a CI-env step became one.
+    localEnv: localEnvAdmitted(entry),
     // The script path, so a rendering can ask whether a family's `--self-test`
     // sibling is in the runnable list beside it — the substitute this card is
     // about, which has to be labelled where it is offered.
@@ -15277,6 +15448,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
         workflows: [...row.workflows],
         via: [...row.via],
         argvDefaulted: [...(row.argvDefaulted ?? [])],
+        localEnv: [...(row.localEnv ?? [])],
       };
       pastedByCommand.set(row.command, merged);
       pastedRows.push(merged);
@@ -15291,10 +15463,11 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
         already.argvDefaulted.push(filled);
       }
     }
+    for (const name of row.localEnv ?? []) if (!already.localEnv.includes(name)) already.localEnv.push(name);
   }
   if (runnableRows.length) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
-    for (const { command, workflows: wfs, via: hits, argvDefaulted } of pastedRows) {
+    for (const { command, workflows: wfs, via: hits, argvDefaulted, localEnv } of pastedRows) {
       // The note rides the SAME line, deliberately: the published harvest ends
       // this block at the first empty line and reads each row with one regexp,
       // so a second line under a row would be harvested as another command. It
@@ -15304,7 +15477,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
         ? `   · ${[...new Set(argvDefaulted.map((d) => `${d.flag} ${d.value}`))].join(', ')} is this script's own documented`
           + ` default; CI pins it to ${[...new Set(argvDefaulted.map((d) => d.variable))].join(', ')}`
         : '';
-      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}${filled}`);
+      // Same line, same reason as the note above (#20278).
+      const unneeded = (localEnv ?? []).length
+        ? `   · runs here without ${localEnv.join(', ')}: its script declares local-env for this bare invocation,`
+          + " and CI passes them through the step's env:"
+        : '';
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}${filled}${unneeded}`);
     }
     // The blank line FIRST, and it is not cosmetic: the published harvest ends
     // the block at the first empty line, so a footer butted against the rows
@@ -17782,6 +17960,137 @@ function selfTest() {
   t('a `check:*` family is invocable by name and its KEY drops the argv, so one step\'s env is not a property of it', workflowEnvValues(envEntry({ direct: false })).length === 0);
   t('a family already named CI-MEASURED ONLY is not named a second time as value-bearing', workflowEnvValues(envEntry({ ciOnly: { env: 'GITHUB_EVENT_PATH' } })).length === 0);
   t('CONTROL: no env carrier at all classifies nothing', workflowEnvValues(envEntry({ envVariables: [] })).length === 0);
+
+  // ── The script's own `local-env` declaration (#20278) ─────────────────────
+  //
+  // Judged on the specimen's own step text: `lint.yml`'s diff-scoped citation
+  // step passes two workflow values through `env:`, and the script declares its
+  // BARE run needs neither. Pinned by DIRECTION — which command reaches the
+  // runnable union and which stays NOT MEASURED — never by a count.
+  const localEnvWf = [
+    'jobs:',
+    '  lint:',
+    '    steps:',
+    '      - name: Issue citations this change adds resolve on the board',
+    '        env:',
+    '          GITHUB_TOKEN: ${{ github.token }}',
+    '          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}',
+    '        run: pnpm check:issue-citations && node scripts/check-issue-citations.mjs',
+    '      - name: the census, report-only',
+    '        env:',
+    '          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}',
+    '        run: node scripts/check-issue-citations.mjs --census',
+  ].join('\n');
+  const localEnvSource = [
+    "export const ROOT_DIR_WATCH_HINTS = ['packages/**'];",
+    '',
+    '// dispatch-gates: local-env GITHUB_TOKEN OS_GATE_MERGE_GROUP_BASE_SHA -- the bare diff run reads a public board and falls back to the merge base',
+    '',
+    'export function run() {}',
+  ].join('\n');
+  const localEnvDecl = declaredLocalEnv(localEnvSource, 'scripts/check-issue-citations.mjs');
+  t(
+    '⭐ a `local-env` declaration reads back its NAMES, its whole reason and its line',
+    localEnvDecl?.names.join(',') === 'GITHUB_TOKEN,OS_GATE_MERGE_GROUP_BASE_SHA'
+      && localEnvDecl?.reason === 'the bare diff run reads a public board and falls back to the merge base'
+      && localEnvDecl?.line === 3,
+  );
+  t('CONTROL: a script that declares nothing reads back null', declaredLocalEnv("export const X = 'local-env';\n") === null);
+  t(
+    'a `local-env` reason cut by the comment line under it is REFUSED, by file and line — the shared wholeness reading reaches this key by construction',
+    (() => {
+      try {
+        declaredLocalEnv('// dispatch-gates: local-env GITHUB_TOKEN -- the diff run\n// needs no token\n', 'scripts/x.mjs');
+        return false;
+      } catch (error) {
+        return String(error.message).includes('scripts/x.mjs:2 continues it with');
+      }
+    })(),
+  );
+  t(
+    'a token in the name list that is not an environment variable name is REFUSED, never read as one',
+    (() => {
+      try {
+        declaredLocalEnv('// dispatch-gates: local-env GITHUB_TOKEN --census -- x\n', 'scripts/x.mjs');
+        return false;
+      } catch (error) {
+        return String(error.message).includes('scripts/x.mjs:1') && String(error.message).includes('--census');
+      }
+    })(),
+  );
+  const localEnvInvs = extractCheckInvocations(localEnvWf, 'lint.yml');
+  const localEnvBareInv = localEnvInvs.find((i) => i.check === 'scripts/check-issue-citations.mjs');
+  const localEnvCensusInv = localEnvInvs.find((i) => i.check === 'scripts/check-issue-citations.mjs --census');
+  t(
+    'CONTROL: the step text yields the bare run and the census as two direct keys, each carrying its OWN step env',
+    (localEnvBareInv?.envVariables ?? []).join(',') === 'GITHUB_TOKEN,OS_GATE_MERGE_GROUP_BASE_SHA'
+      && (localEnvCensusInv?.envVariables ?? []).join(',') === 'GITHUB_TOKEN'
+      && localEnvBareInv?.direct === true && localEnvCensusInv?.direct === true,
+  );
+  const localEnvRow = (inv, declaration) => {
+    const entry = { ...inv, ciOnly: null, localEnv: declaration };
+    const values = workflowEnvValues(entry);
+    return {
+      check: entry.check,
+      command: runnableInvocation(entry),
+      ciOnly: null,
+      notRunnable: values.length > 0 ? { variables: values.map((n) => `env ${n}`), envVariables: values } : null,
+    };
+  };
+  const localEnvRows = [localEnvRow(localEnvBareInv ?? {}, localEnvDecl), localEnvRow(localEnvCensusInv ?? {}, localEnvDecl)];
+  const localEnvCommands = commandsFor({ matchedRows: localEnvRows });
+  const localEnvUnrunnable = notRunnableCommandSet(localEnvRows);
+  t(
+    '⭐ the lint.yml step text, with the script\'s declaration, puts the BARE command in --commands and NOT in the not-runnable set',
+    localEnvCommands.includes('node scripts/check-issue-citations.mjs')
+      && !localEnvUnrunnable.has('node scripts/check-issue-citations.mjs'),
+  );
+  t(
+    '⭐ …while the census invocation of the SAME script stays not-runnable, on the token its own step passes',
+    !localEnvCommands.includes('node scripts/check-issue-citations.mjs --census')
+      && localEnvUnrunnable.has('node scripts/check-issue-citations.mjs --census')
+      && (localEnvRows[1].notRunnable?.variables ?? []).join(',') === 'env GITHUB_TOKEN',
+  );
+  const localEnvUndeclared = [localEnvRow(localEnvBareInv ?? {}, null), localEnvRow(localEnvCensusInv ?? {}, null)];
+  t(
+    'CONTROL: with no declaration the bare run is not-runnable on both names — the reading this card repairs, unchanged for every script that declares nothing',
+    notRunnableCommandSet(localEnvUndeclared).has('node scripts/check-issue-citations.mjs')
+      && (localEnvUndeclared[0].notRunnable?.variables ?? []).join(',') === 'env GITHUB_TOKEN,env OS_GATE_MERGE_GROUP_BASE_SHA',
+  );
+  t(
+    'the limb is per NAME: a declaration naming only the token leaves the undeclared base keeping the family out',
+    (() => {
+      const tokenOnly = { names: ['GITHUB_TOKEN'], reason: 'x', line: 1 };
+      return (localEnvRow(localEnvBareInv ?? {}, tokenOnly).notRunnable?.variables ?? []).join(',') === 'env OS_GATE_MERGE_GROUP_BASE_SHA';
+    })(),
+  );
+  t(
+    'the scope is the BARE key alone: a `--census` or `--self-test` key of the declaring script, and any `check:*` key, admit nothing',
+    localEnvAdmitted({ ...localEnvCensusInv, localEnv: localEnvDecl }).length === 0
+      && localEnvAdmitted({ check: 'scripts/check-issue-citations.mjs --self-test', script: 'scripts/check-issue-citations.mjs', direct: true, selfTest: true, localEnv: localEnvDecl }).length === 0
+      && localEnvAdmitted({ check: 'check:issue-citations', direct: false, localEnv: localEnvDecl }).length === 0
+      && localEnvAdmitted({ ...localEnvBareInv, localEnv: localEnvDecl }).join(',') === 'GITHUB_TOKEN,OS_GATE_MERGE_GROUP_BASE_SHA',
+  );
+  const localEnvBareEntry = { ...(localEnvBareInv ?? {}) };
+  t(
+    'CONTROL: a declaration naming exactly what the bare run\'s step passes is NOT refused',
+    localEnvRefusal(localEnvDecl, localEnvBareEntry, 'scripts/check-issue-citations.mjs') === null,
+  );
+  t(
+    '⭐ a STALE name — one the step does not pass — is REFUSED, naming the file, the line and the name',
+    (localEnvRefusal({ names: ['GITHUB_TOKEN', 'PR_BODY'], reason: 'x', line: 3 }, localEnvBareEntry, 'scripts/check-issue-citations.mjs') ?? '')
+      .includes('scripts/check-issue-citations.mjs:3 declares local-env PR_BODY,'),
+  );
+  t(
+    'a name only SOME steps pass is refused too — the bare key carries the intersection, and a value one step omits is not a property of the invocation',
+    (localEnvRefusal(localEnvDecl, { ...localEnvBareEntry, envVariables: ['GITHUB_TOKEN'] }, 'scripts/check-issue-citations.mjs') ?? '')
+      .includes('declares local-env OS_GATE_MERGE_GROUP_BASE_SHA,'),
+  );
+  t(
+    '⭐ a declaration whose BARE run no workflow makes is REFUSED — an argv no workflow runs admits nothing and must not read as a promise',
+    (localEnvRefusal(localEnvDecl, null, 'scripts/check-issue-citations.mjs') ?? '').includes('no workflow runs `node scripts/check-issue-citations.mjs` with no argv')
+      && localEnvRefusal(localEnvDecl, { ...localEnvCensusInv }, 'scripts/check-issue-citations.mjs') !== null,
+  );
 
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site
@@ -22368,9 +22677,9 @@ function selfTest() {
     Object.keys(MARKER_REASON_GRAMMARS).join(' '),
   );
   t(
-    'and it names all SIX live marker keys, not the three the repair was filed on',
+    'and it names all SEVEN live marker keys, not the three the repair was filed on (`local-env` joined the path-list grammar with #20278)',
     Object.keys(MARKER_REASON_GRAMMARS).sort().join(' ')
-      === 'inherited-population no-check-families no-path-population self-test-reads whole-tree-population wide-population',
+      === 'inherited-population local-env no-check-families no-path-population self-test-reads whole-tree-population wide-population',
     Object.keys(MARKER_REASON_GRAMMARS).sort().join(' '),
   );
   t(
@@ -23107,14 +23416,16 @@ function selfTest() {
     // number in the file.
     const body = maskSelfTests(readFileSync(nodePath.join(ROOT, f), 'utf8'));
     censusCorpus.set(f, body);
-    for (const key of ['inherited-population', 'self-test-reads']) {
+    // The path-list ROSTER, not a hand list (#20278): a key added to that
+    // grammar arrives censused, which is how `local-env` reached this row.
+    for (const key of PATH_LIST_MARKER_KEYS) {
       const read = readPopulationMarker(body, key);
       if (read) censusRead(f, key, read);
     }
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the seven declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the eight declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
       // Seventh row, added with the declaration it names: `checklist-status.yml`
       // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
@@ -23127,6 +23438,9 @@ function selfTest() {
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
+      // Eighth row, added with the declaration it names (#20278): the checker's
+      // bare diff-scoped run declares the two step-`env:` values it does not need.
+      'scripts/check-issue-citations.mjs:204 local-env',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
       'scripts/pm/dispatch-gates.mjs:714 inherited-population',
@@ -23136,7 +23450,7 @@ function selfTest() {
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 7,
+    censusCut.length === 0 && liveMarkerCensus.length === 8,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
@@ -23177,7 +23491,7 @@ function selfTest() {
     .flatMap(([f, text]) => unparsedPopulationMarkers(text, f))
     .filter((u) => !POPULATION_MARKER_KEYS.includes(u.key));
   t(
-    `no live file carries a DROPPED declaration on the three keys outside the population roster `
+    `no live file carries a DROPPED declaration on the four keys outside the population roster `
       + `(${censusWorkflows.length} workflow(s) + ${censusScripts.length} script(s) swept; found `
       + `${censusLookalikes.map((u) => `${u.file}:${u.line} ${u.key}`).join(' · ') || 'none'})`,
     censusLookalikes.length === 0,
@@ -29136,6 +29450,51 @@ function selfTest() {
     );
   }
 
+
+  // ── The DECLARED half of that bucket, on the LIVE tree (#20278) ──────────
+  //
+  // The fixture cases beside `workflowEnvValues`' limbs judge the reader; these
+  // judge the tree, in-process off the discovery this self-test already holds
+  // (no extra CLI spawn). The card's specimen path is the one whose CI run went
+  // red: a change to `rls.zod.ts` owes the diff-scoped citation verdict.
+  {
+    const citations = 'scripts/check-issue-citations.mjs';
+    const specimenPath = 'packages/spec/src/security/rls.zod.ts';
+    const bare = liveDiscovery.byCheck.get(citations);
+    const census = liveDiscovery.byCheck.get(`${citations} --census`);
+    const liveDeclaration = declaredLocalEnv(readFileSync(nodePath.join(ROOT, citations), 'utf8'), citations);
+    const liveRow = (entry) => ({
+      check: entry?.check ?? null,
+      command: entry ? runnableInvocation(entry) : null,
+      ciOnly: entry?.ciOnly ?? null,
+      notRunnable: entry?.notRunnable ?? null,
+    });
+    t(
+      'CONTROL: the live checker declares local-env, and a workflow still runs its bare invocation and its census, so the cases below judge live rows',
+      Boolean(liveDeclaration) && Boolean(bare) && Boolean(census)
+        && liveDeclaration.names.every((name) => (bare.envVariables ?? []).includes(name)),
+    );
+    t(
+      `⭐ the bare diff-scoped run is placed for ${specimenPath} and reaches the runnable union`,
+      Boolean(bare) && placeFamily(bare, [specimenPath]).verdict === 'matched'
+        && commandsFor({ matchedRows: [liveRow(bare)] }).includes(`node ${citations}`),
+    );
+    t(
+      '⭐ …and it is NOT in the NOT MEASURED set any more — no workflow value is left on it',
+      Boolean(bare) && bare.notRunnable === null && !notRunnableCommandSet([liveRow(bare)]).has(`node ${citations}`),
+    );
+    t(
+      '⭐ the census of the same script is placed for the same path and STAYS NOT MEASURED, on the token its step passes',
+      Boolean(census) && placeFamily(census, [specimenPath]).verdict === 'matched'
+        && notRunnableCommandSet([liveRow(census)]).has(`node ${citations} --census`)
+        && (census.notRunnable?.variables ?? []).includes('env GITHUB_TOKEN'),
+    );
+    t(
+      'the names the live bare run is admitted without are exactly the ones its script declares — nothing inferred',
+      Boolean(bare) && Boolean(liveDeclaration)
+        && localEnvAdmitted(bare).join(',') === liveDeclaration.names.join(','),
+    );
+  }
 
   // The non-vacuity half of #15539, read at the tail because that is where
   // every call site passing a reading has already run. The card named six; the
