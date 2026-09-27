@@ -55,14 +55,9 @@ function makeStubDriver() {
   const driver: any = {
     name: 'stub', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(_o: string, q: any) {
-      const id = idOf(q);
-      const inIds = q?.where?.id?.$in as string[] | undefined;
-      const all = [...rows.values()];
-      if (id) return all.filter((r) => r.id === id);
-      if (inIds) return all.filter((r) => inIds.includes(r.id as string));
-      return all;
-    },
+    // Not a query-honouring `find`: nothing here reads rows back through it
+    // (the by-id prior read is `findOne`), so it answers the whole store.
+    async find() { return [...rows.values()]; },
     async findOne(_o: string, q: any) {
       const id = idOf(q);
       return (id ? rows.get(id) : rows.values().next().value) ?? null;
