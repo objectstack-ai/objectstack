@@ -5985,6 +5985,69 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
+      id: 'automation-flow-list-route-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'GET /api/v1/automation — the flow-list route of the automation door, together with '
+        + 'its request and response schemas ListFlowsRequestSchema and ListFlowsResponseSchema '
+        + '(and their ListFlowsRequest, ListFlowsRequestParsed, ListFlowsResponse and '
+        + 'ListFlowsResponseParsed types), FlowSummarySchema and its FlowSummary type, the '
+        + 'listFlows entry of AutomationApiContracts, and the automation.list method of '
+        + '@objectstack/client. Every other automation route is unchanged, including '
+        + 'POST /api/v1/automation (create a flow) at the same path',
+      replacement:
+        'GET /api/v1/meta/flow — flows are metadata (ADR-0106), and this is the governed read of '
+        + 'them; from the SDK it is `client.meta.getItems` with the type `flow`. It answers the '
+        + 'full flow definitions rather than bare names, so a caller that only needs the names '
+        + 'maps each item to its `name`. The runtime enablement and trigger binding of every flow '
+        + '— the one piece of engine state a definition does not carry — is '
+        + '`GET /api/v1/automation/_status` (`client.automation.getRuntimeStatus`), which is '
+        + 'unchanged',
+      reason:
+        'Maintainer ruling on #19543 (door ④, verbatim 「退役，统一走 /meta/flow」, recorded in '
+        + 'that card\'s re-derivation comment of 2026-09-25), under ADR-0049 enforce-or-remove. The '
+        + 'route\'s contract described a capability nobody built: ListFlowsRequestSchema declared '
+        + '`status`, `type`, `limit` (default 50) and `cursor`, and the handler read none of them — '
+        + 'it asked the automation service for its flow names with no arguments at all. '
+        + 'ListFlowsResponseSchema declared a page of FlowSummary rows with `total`, `nextCursor` '
+        + 'and `hasMore`, and the handler answered a bare array of names beside a literal '
+        + '`hasMore: false`. So a caller filtering by status received every flow, a caller paging '
+        + 'with a cursor re-read the only page forever, and a caller reading FlowSummary fields read '
+        + 'undefined — each with a 200 and no error. '
+        + 'Measured before removal, on the main branch of this repository and cloud and on objectui at '
+        + 'both its pinned commit and main: zero callers of the route or of the SDK method outside '
+        + 'their own tests, while both real flow lists in the product — the Console flow-runs page '
+        + 'and the Setup packaged-automation page — already read GET /api/v1/meta/flow. '
+        + 'Implementing the declared contract instead would have built a second, weaker metadata list '
+        + 'beside the governed one; retiring it leaves one read. '
+        + 'There is no alias and no transition window: GET simply stops being mounted there. There is '
+        + 'no D2 conversion and no tombstone, because the shape is HTTP-only — nobody authors a '
+        + 'ListFlowsRequest and nothing persists one — so the three schemas are whole-def removals in '
+        + 'RETIRED_DEFS_BY_MAJOR and this entry carries the record. ADR-0049 / ADR-0087 / ADR-0106, '
+        + '#19543.',
+      acceptanceCriteria:
+        'On the composition `objectstack serve` builds, GET is no longer mounted at '
+        + '/api/v1/automation (nor at its environment-scoped twin), so the host gives its standard '
+        + 'unmatched answer with no residual refusal text of its own. Because POST still lives at '
+        + 'that path, on the Hono host that answer is 405 METHOD_NOT_ALLOWED with an Allow header '
+        + 'naming POST — the same answer any path where only another verb is registered gets, for '
+        + 'anonymous and signed-in callers alike. A transport that forwards every automation path '
+        + 'to the dispatcher is told the domain does not handle it and answers its own not-found '
+        + '404 (the @objectstack/hono catch-all does), and there the domain\'s anonymous floor still '
+        + 'answers an unidentified caller 401 first, as it does for every automation path. The '
+        + 'automation '
+        + 'service\'s flow-name enumeration is never called by any HTTP request. The route-ledger row '
+        + 'for the route is gone, AutomationApiContracts has eight entries and none of them is a GET '
+        + 'at the bare path, and a TypeScript import of any of the removed schemas or types is a '
+        + 'compile error (TS2305). @objectstack/client no longer declares automation.list, so a call '
+        + 'to it is a compile error rather than a request to a path that no longer answers. '
+        + 'POST /api/v1/automation still creates a flow, and every other automation route — the '
+        + 'single-flow reads and writes, trigger, toggle, clone, runs, resume, cancel, '
+        + 'restore-suspension, screen, _status and the actions and connectors catalogs — answers '
+        + 'exactly as before.',
+    },
+    {
       id: 'automation-runs-cursor-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -7251,6 +7314,72 @@ const step18: MigrationStep = {
         + 'deadline is still refused. Two neighbours on this same shape deliberately do NOT move, '
         + 'and a sweep that renamed either has over-applied the rule: batchSize is a COUNT of '
         + 'documents, not a duration, and consistency / projection / hint are not numbers at all.',
+    },
+    // The analytics carriers' half of filter-equality-array-comparand-refused-at-save.
+    // That entry refuses an equality-slot list on save wherever the shared face
+    // refuses it, and names a list inside a nested-relation condition as a position
+    // it deliberately leaves to execution. This one closes that position on the two
+    // carriers the analytics where door charts — a dataset filter and a measure
+    // filter — because that door flattens a nested relation to a dotted member and
+    // refuses the list there. Recorded as its own entry because the surface is
+    // narrower (two carriers, one position) and the shared schema does not move.
+    {
+      id: 'dataset-filter-nested-relation-equality-array-refused-at-save',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'ui.Dataset filter and ui.DatasetMeasure filter — an ARRAY as an EQUALITY comparand on a '
+        + 'field INSIDE a nested-relation condition, now refused when the dataset is PARSED: the '
+        + 'implicit form { account: { region: [...] } } and the explicit form '
+        + '{ account: { region: { $eq: [...] } } }, the empty array included, at any relation depth '
+        + 'and under $and / $or / $not. Every other schema that carries a FilterCondition keeps the '
+        + 'shared schema\'s reach',
+      replacement:
+        'the operator the list was standing in for, on the same field inside the same relation, '
+        + 'exactly as in filter-equality-array-comparand-refused-at-save. "One of these values" is '
+        + '$in: { account: { region: { $in: ["a", "b"] } } } (authoring spelling "in"). "The stored '
+        + 'multi-value field holds this value" is $contains with ONE member (authoring spelling '
+        + '"contains"), and an $or of those for any-of. A filter that meant a single value writes that '
+        + 'value: { account: { region: "a" } }. The list operators keep their arrays, empty lists '
+        + 'included; every scalar, null above all, is untouched; and $ne is NOT judged by this entry',
+      reason:
+        'Measured on origin/main 9e7824a445 before the change: DatasetSchema parsed a dataset whose '
+        + 'filter was { account: { region: ["a"] } }, and one whose measure filter was '
+        + '{ account: { region: { $eq: ["a"] } } }, GREEN — while the analytics where door, which '
+        + 'charts both carriers on every path (the native-SQL and ObjectQL strategies and the draft '
+        + 'preview), flattens the relation to the dotted member account.region and hands the list to '
+        + 'the shared comparand-shape face, which refuses it with INVALID_FILTER / 400. So such a '
+        + 'dataset saved clean and every chart built on it failed, for a different person, later. '
+        + 'The shared FilterConditionSchema does not descend a field spec with no $ key, because the '
+        + 'engine reads one as a deep-equality comparand; ruling A on #19889 (record 5805248669) put '
+        + 'it there and it stays there. Triage on #20080 (record 5825670610) routed the fix to the two '
+        + 'analytics carriers instead: they refine their filter with the analytics door\'s own walk '
+        + '($and / $or arrays and $not descended, other $ keys skipped, a plain object with no $ key '
+        + 'descended as a nested relation at any depth) and refuse, inside a nested relation only, '
+        + 'exactly what that door refuses there, in the face\'s words from the one builder both doors '
+        + 'import. The one difference is that the door appends the location (at '
+        + 'where.account.region) and the carrier does not, because its issue carries the location as '
+        + 'its path (filter.account.region, measures.0.filter.account.region.$eq). A list outside a '
+        + 'nested relation is the shared schema\'s refusal and is reported once. No filter changes '
+        + 'meaning: the refusal moves from chart time to save. Metadata AT REST is not rewritten and '
+        + 'this entry adds no D2 conversion, for the reason the runtime entry gives: an array on '
+        + 'equality has no single honest value. The read path does not re-validate stored rows, so a '
+        + 'stored dataset keeps loading; what changes is that re-saving it through the metadata '
+        + 'protocol (422 INVALID_METADATA), defineStack or os validate is refused at the filter\'s '
+        + 'path. Such a filter has failed every chart since the analytics door began refusing it, so '
+        + 'the refusal is a repair and not a loss. In-repo census at 9e7824a445: no dataset or '
+        + 'measure filter in examples, platform objects, docs or skills carries the shape; deployed '
+        + 'datasets were NOT measured. ADR-0021 / ADR-0087.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every stored dataset: os validate or defineStack, and a '
+        + 'save through the metadata protocol, report each list in an equality slot inside a nested '
+        + 'relation by path, with the field, the received list and both remedies, so the sweep of the '
+        + 'two carriers is mechanical. Decide per filter what it meant — one of these values ($in), '
+        + 'the stored list holds a value ($contains, an $or of them for several), or one value — and '
+        + 're-check what each chart is supposed to show: the filter had been failing every chart. A '
+        + 'filter that reaches the analytics door by any other route, such as a caller where or a '
+        + 'dataset selection runtimeFilter, is still refused only when it is charted, with '
+        + 'INVALID_FILTER / 400 naming the field and the path.',
     },
     {
       id: 'dataset-measure-aggregate-field-type-refused',
@@ -9152,11 +9281,13 @@ const step18: MigrationStep = {
         + 'parseFilterAST and at the engine lowering seam, with INVALID_FILTER / 400; the analytics '
         + 'where door in BOTH spellings, the FilterArray form through parseFilterAST and the OBJECT '
         + 'form because that door hands each equality-slot list to the shared face before it builds '
-        + 'a node, with the same INVALID_FILTER / 400 and the same sentence (that door alone also '
-        + 'refuses a list inside a nested-relation condition, which it flattens to a dotted member); '
-        + 'and, on SAVE, the schema door (FilterConditionSchema and the $eq operator slot), with the '
-        + 'same sentence as a parse issue at the filter\'s own path, which is the sibling entry '
-        + 'filter-equality-array-comparand-refused-at-save. '
+        + 'a node, with the same INVALID_FILTER / 400 and the same sentence (that door alone, among '
+        + 'the runtime doors, also refuses a list inside a nested-relation condition, which it '
+        + 'flattens to a dotted member); and, on SAVE, the schema door (FilterConditionSchema and the '
+        + '$eq operator slot), with the same sentence as a parse issue at the filter\'s own path, '
+        + 'which is the sibling entry filter-equality-array-comparand-refused-at-save, plus the two '
+        + 'carriers that analytics door charts (a dataset filter and a measure filter) inside a '
+        + 'nested relation too, which is dataset-filter-nested-relation-equality-array-refused-at-save. '
         + 'The ruling records the hosted product as running on the SQL family, where the top-level '
         + 'shape was already a 400, so the population that can observe a change is self-hosted '
         + 'driver-mongodb, plus any filter nested under a combinator on the SQL family (a 500 '
@@ -9231,8 +9362,10 @@ const step18: MigrationStep = {
         + 'with no $ key (a nested-relation or deep-equality condition), which the face never '
         + 'descends either. ⚠️ Three positions therefore still refuse only at execution. (1) A list '
         + 'inside a nested-relation condition, { account: { region: ["a"] } }: the analytics where '
-        + 'door flattens that to the dotted member account.region and refuses it when a dataset or '
-        + 'measure filter is charted. (2) The where option of the data-engine calls (find, count, '
+        + 'door flattens that to the dotted member account.region and refuses it when the filter is '
+        + 'charted; a dataset filter and a measure filter refuse it on save as well, which is the '
+        + 'sibling entry dataset-filter-nested-relation-equality-array-refused-at-save. (2) The where '
+        + 'option of the data-engine calls (find, count, '
         + 'update, delete, aggregate, vector find): its type is a union whose first arm is an open '
         + 'record, so it parses and the face refuses it when the call runs. (3) $ne carrying a '
         + 'list, which no ruling has decided. Two request doors parse these carriers and now answer '
@@ -9257,7 +9390,9 @@ const step18: MigrationStep = {
         + 'query. ⛔ A clean re-save is NOT a complete sweep for the three positions the reason '
         + 'names: grep nested-relation conditions and data-engine where options for a field whose '
         + 'value is a list, and exercise them, where the runtime doors refuse with INVALID_FILTER '
-        + '/ 400 naming the field and the path.',
+        + '/ 400 naming the field and the path. A dataset filter or a measure filter is the '
+        + 'exception: its nested-relation lists are refused on save too '
+        + '(dataset-filter-nested-relation-equality-array-refused-at-save).',
     },
     // One entry for two doors on purpose: the two vocabularies spell one operator
     // and the rows being answered are one pair. Splitting it would put half the
@@ -14478,6 +14613,47 @@ const step18: MigrationStep = {
         + 'equals, and operator: "in" with value: ["won"] — select the same rows, so the result '
         + 'set cannot tell you which the metadata meant, and only the author knows.',
     },
+    // The door half of ruling A on objectui#10380 (#20051). A write-time narrowing
+    // of the flattened view overlays: the stored rows it newly refuses are read and
+    // served exactly as before and fail only on their next save, which is why this
+    // is a semantic entry and not a conversion — which key a row meant is a fact
+    // only its author holds.
+    {
+      id: 'view-overlay-options-bag-judged',
+      surface:
+        'The legacy `options` bag on a flattened `view` overlay saved through the metadata write door '
+        + '(`PUT /api/v1/meta/view/:name`, the Studio / MCP save): `options.kanban`, `options.calendar`, '
+        + '`options.gantt`, `options.gallery`, `options.timeline`, `options.chart`, `options.map` and '
+        + '`options.tree` on a list overlay, any other key in the bag, and the bag on a form overlay.',
+      replacement:
+        'Each `options.KIND` block carrying only keys the top-level `KIND` block declares, with values that '
+        + 'block accepts — or, preferred, the same keys moved to the top-level `KIND` block, which wins per key '
+        + 'where both set one. A key the block does not declare is deleted or re-spelled to the declared key the '
+        + 'refusal names (`options.kanban.groupField` becomes `groupByField`, `options.calendar.dateField` '
+        + 'becomes `startDateField`); `options.timeline.metaFields` has no declared successor and is deleted. '
+        + 'Any other key in the bag is deleted, and a form overlay carries no bag at all.',
+      reason:
+        'The list overlay member re-opens its top level with a strip so the console\'s round-trip keys '
+        + 'survive, and that strip dropped the `options` bag from the parse without looking inside it. The save '
+        + 'stores the request body, not the parse output, and objectui\'s interface page forwards a stored '
+        + 'view\'s `options` into the list renderer, which merges `options.KIND` under the top-level block — so a '
+        + 'key the strict block refuses by name (`timeline.metaFields`) was saved and rendered when spelled '
+        + '`options.timeline.metaFields`. Measured on `origin/main` @ `8d1f7ab` through the real save. Ruled '
+        + 'direction A (maintainer 「其他同意」): judge each `options.KIND` with the kind\'s strict schema and '
+        + 'refuse an out-of-contract key by name, as the direct spelling is; refusing the bag whole was ruled '
+        + 'out because the legacy `options.map` path is live and pinned. Judged key by key, because the '
+        + 'renderer reads the bag as a per-key underlay of the top-level block: a bag that carries only the '
+        + 'keys the top-level block leaves to it is legal and stays accepted. Not convertible: whether a '
+        + 'refused key was a typo of a declared one or a retired capability is the author\'s call.',
+      acceptanceCriteria:
+        'Every stored `view` overlay carrying a top-level `options` saves again unchanged. A row that does not '
+        + 'is refused `422 INVALID_METADATA` on its next save, with an `unrecognized_keys` issue at '
+        + '`options.KIND` naming the key and carrying the same message the direct spelling gets at `KIND` — '
+        + 'or at `options` for a key that is not a kind, or a form overlay\'s bag. Nothing is rewritten on '
+        + 'read and nothing is refused on read: a row that fails is served exactly as stored until it is '
+        + 'saved. Verify by re-saving each stored overlay that carries `options` (a GET then a PUT of the '
+        + 'same body) and reading a `200`.',
+    },
     // The display page size a view gets when it declares none moved from 25 to 50
     // (maintainer ruling on objectui#9853). A default move reaches every silent
     // document with no parse error and nothing in the author's diff, so the
@@ -18628,6 +18804,16 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ExportJobSummary',
+    // #19543 (door ④) — `api/FlowSummary` left with its only reader,
+    // `api/ListFlowsResponse` (above). No producer ever built one: the retired
+    // list route answered bare names, so the summary's `label` / `type` /
+    // `status` / `version` / `enabled` / `nodeCount` / `lastRunAt` were a shape
+    // with no emitter, and an exported schema with no consumer reads as a
+    // capability (#3950, the `ui/ThemeMode` rule). Measured before removal: zero
+    // readers in objectstack, objectui (pinned sha and main) or cloud. A flow's
+    // runtime enablement is served by `GET /api/v1/automation/_status`; its
+    // definition by `GET /api/v1/meta/flow`.
+    'api/FlowSummary',
     // #17158 — `api/GetExportJobDownloadRequest`, retired whole with the export-job API family
     // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
     // retired its side first in objectui#10247). It declared
@@ -18679,6 +18865,28 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ListExportJobsResponse',
+    // #19543 (door ④) — `api/ListFlowsRequest`, the query of the retired
+    // `GET /api/v1/automation` flow list (maintainer ruling on #19543:
+    // 「退役，统一走 /meta/flow」). It declared `status` / `type` / `limit`
+    // (default 50) / `cursor`, and the route read none of them: it called
+    // `listFlows()` with no arguments. Retired whole with the route and its
+    // `AutomationApiContracts.listFlows` entry; flows are metadata (ADR-0106) and
+    // the list is `GET /api/v1/meta/flow`. Zero readers measured before removal in
+    // objectstack, objectui (pinned sha and main) and cloud. No carrier key and no
+    // authored document, so no tombstone and no D2 conversion — this table plus
+    // the D3 semantic entry `automation-flow-list-route-retired` ARE the
+    // declaration — the whole-def route-3 shape, as the precedent entry
+    // `package-rollback-response-retired` (and its `api/PackageRollbackResponse`
+    // row) recorded it.
+    'api/ListFlowsRequest',
+    // #19543 (door ④) — `api/ListFlowsResponse`, the answer of the retired
+    // `GET /api/v1/automation` flow list. It declared `FlowSummary[]`, `total`,
+    // `nextCursor` and `hasMore`, while the route answered bare flow NAMES with a
+    // literal `hasMore: false` and never a `nextCursor` — a declaration no build
+    // ever served. Retired whole with the route; the list is `GET /api/v1/meta/flow`.
+    // See `18.api__ListFlowsRequest.ts` and the D3 semantic entry
+    // `automation-flow-list-route-retired` for the record.
+    'api/ListFlowsResponse',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of

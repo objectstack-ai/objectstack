@@ -49,6 +49,7 @@ import {
   AiCompleteRequestSchema,
   AiModelsResponseSchema,
   CreateAiConversationRequestSchema,
+  ListAiConversationsRequestSchema,
   ListAiConversationsResponseSchema,
   UpdateAiConversationRequestSchema,
   // i18n
@@ -384,6 +385,7 @@ describe('ObjectStack Protocol', () => {
         id: 'conv_1', messages: [{ role: 'user', content: 'hi' }],
         createdAt: '2026-07-27T10:00:00Z', updatedAt: '2026-07-27T10:00:00Z',
       }],
+      hasMore: false,
     }).success).toBe(true);
     expect(UpdateAiConversationRequestSchema.safeParse({ title: 'Renamed' }).success).toBe(true);
     expect(
@@ -2718,5 +2720,48 @@ describe('GetPublishedMetaItemResponseSchema stays opaque by ruling (#12038 1C)'
     // type registry; `unknown` accepts every body, including non-objects.
     expect(GetPublishedMetaItemResponseSchema.safeParse('raw-string-body').success).toBe(true);
     expect(GetPublishedMetaItemResponseSchema.safeParse(null).success).toBe(true);
+  });
+});
+
+describe('ListAiConversationsResponseSchema declares the next-page signal (#19543, door ③)', () => {
+  // Ruled on #19543: the list is newest first and pages by keyset, `cursor`
+  // being the id of the last conversation the caller holds. The response used
+  // to be `{ conversations }` alone, so a caller asking for `limit` rows could
+  // not tell a full last page from a truncated one. The server half is
+  // objectstack-ai/cloud#2426.
+  const conv = (id: string) => ({
+    id, messages: [], createdAt: '2026-09-27T10:00:00Z', updatedAt: '2026-09-27T10:00:00Z',
+  });
+
+  it('accepts a page carrying `hasMore`, both values, and keeps it through parse', () => {
+    const more = ListAiConversationsResponseSchema.parse({ conversations: [conv('c2'), conv('c1')], hasMore: true });
+    expect(more.hasMore).toBe(true);
+    expect(more.conversations.map((c) => c.id)).toEqual(['c2', 'c1']);
+    expect(ListAiConversationsResponseSchema.parse({ conversations: [], hasMore: false }).hasMore).toBe(false);
+  });
+
+  it('REFUSES a page without `hasMore` — the flag is required, never an absent-means-unknown optional', () => {
+    const r = ListAiConversationsResponseSchema.safeParse({ conversations: [conv('c1')] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues).toHaveLength(1);
+    expect(r.error!.issues[0]!.code).toBe('invalid_type');
+    expect(r.error!.issues[0]!.path).toEqual(['hasMore']);
+    expect(r.error!.issues[0]!.message).toBe('Invalid input: expected boolean, received undefined');
+  });
+
+  it('refuses a non-boolean `hasMore` — a stringly "false" is not a page signal', () => {
+    const r = ListAiConversationsResponseSchema.safeParse({ conversations: [], hasMore: 'false' });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.code).toBe('invalid_type');
+    expect(r.error!.issues[0]!.path).toEqual(['hasMore']);
+  });
+
+  it('declares no `nextCursor` — the next cursor is the last conversation\'s id, already on the page', () => {
+    expect(Object.keys((ListAiConversationsResponseSchema as any).shape)).toEqual(['conversations', 'hasMore']);
+  });
+
+  it('the request keeps its three keys — `cursor` is described, not reshaped', () => {
+    expect(Object.keys((ListAiConversationsRequestSchema as any).shape)).toEqual(['agentId', 'limit', 'cursor']);
+    expect(ListAiConversationsRequestSchema.parse({ limit: 20, cursor: 'c1' })).toEqual({ limit: 20, cursor: 'c1' });
   });
 });

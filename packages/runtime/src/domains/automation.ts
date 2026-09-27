@@ -1821,7 +1821,12 @@ export async function classifyResumeResult(
  * path: sub-path after /automation/
  *
  * Routes:
- *   GET    /                     → listFlows
+ *   GET    /                     → RETIRED (#19543, door ④ — 「退役，统一走
+ *                                  /meta/flow」): no branch here, so the
+ *                                  request falls through to `handled: false`
+ *                                  and the transport's own unmatched answer.
+ *                                  Flows are metadata (ADR-0106); list them
+ *                                  with `GET /api/v1/meta/flow`
  *   GET    /actions              → getActionDescriptors (ADR-0018; ?paradigm/?source/?category
  *                                  single-string filters — validated, #7360)
  *   GET    /connectors           → getConnectorDescriptors (ADR-0022; ?type single-string
@@ -2035,25 +2040,34 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         }
     }
 
-    // GET / → listFlows
+    // GET / → RETIRED (#19543, door ④). The flow list used to be served
+    // here: `listFlows()` with no arguments, answered as bare names beside a
+    // literal `hasMore: false`, while its declared contract promised
+    // `status` / `type` / `limit` / `cursor` filters and `FlowSummary` rows —
+    // none of which any build ever honoured. Flows are metadata (ADR-0106)
+    // and `GET /api/v1/meta/flow` is their governed read, so the route was
+    // retired rather than implemented (maintainer ruling: 「退役，统一走
+    // /meta/flow」). With no branch for it, `GET /` reaches the `handled:
+    // false` exit at the foot of this function, which `dispatch()` hands back
+    // as-is, so the transport gives its own unmatched answer: the dispatcher
+    // plugin never mounts GET here (Hono then answers 405 + `Allow: POST`,
+    // since createFlow keeps the path), and a catch-all adapter answers its
+    // enveloped 404. The anonymous floor above still runs first, as for every
+    // path of this domain. ⛔ Do not re-add a branch that answers this path —
+    // not even a 410: the retirement's contract is "no GET lives here", the
+    // same answer as a path where one was never registered.
     //
-    // [#7900 AUDIT — stays authenticated-only, with a reason] Together with
-    // `GET /:name`, `GET /actions`, `GET /connectors` and `GET /_status`, this
-    // serves FLOW-DEFINITION and REGISTRY data: names, definitions, the
-    // deployment's action/connector catalogs, per-flow enabled/bound state. None
-    // of it is `sys_automation_run`-class data — no run, no trigger record, no
-    // variable snapshot — so the grant the ruling names says nothing about it,
-    // and requiring it here would not be convergence but a SECOND policy
-    // invented for a different data class, which is precisely what the ruling
-    // forbids. Flow definitions are metadata and are governed on the metadata
-    // plane (`/meta`, ADR-0106); if their read posture should narrow, that is a
-    // metadata-plane decision and belongs to its own card.
-    if (parts.length === 0 && m === 'GET') {
-        if (typeof automationService.listFlows === 'function') {
-            const names = await automationService.listFlows();
-            return { handled: true, response: deps.success({ flows: names, total: names.length, hasMore: false }) };
-        }
-    }
+    // [#7900 AUDIT — the surviving definition reads stay authenticated-only,
+    // with a reason] `GET /:name`, `GET /actions`, `GET /connectors` and
+    // `GET /_status` serve FLOW-DEFINITION and REGISTRY data: definitions, the
+    // deployment's action/connector catalogs, per-flow enabled/bound state.
+    // None of it is `sys_automation_run`-class data — no run, no trigger
+    // record, no variable snapshot — so the grant the ruling names says
+    // nothing about it, and requiring it here would not be convergence but a
+    // SECOND policy invented for a different data class, which is precisely
+    // what the ruling forbids. Flow definitions are metadata and are governed
+    // on the metadata plane (`/meta`, ADR-0106); if their read posture should
+    // narrow, that is a metadata-plane decision and belongs to its own card.
 
     // POST / → createFlow
     if (parts.length === 0 && m === 'POST') {

@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type { EngineSchemaRegistryView, IObjectQLEngine } from './objectql-engine';
+import type {
+  EngineFilterJudgement,
+  EngineFilterJudgementOptions,
+  EngineSchemaRegistryView,
+  IObjectQLEngine,
+} from './objectql-engine';
 import type { ServiceObject } from '../data/object.zod';
+import type { FilterCondition } from '../data/filter.zod';
+import type { ExecutionContext } from '../kernel/execution-context.zod';
 
 /**
  * `getObject` — typed on the contract, not re-declared by consumers
@@ -140,5 +147,67 @@ describe('getSchema return contract (#12481 — #12248 one member over, #11833 f
     expect(typeof readManagedBy).toBe('function');
     expect(typeof readUserActions).toBe('function');
     expect(ok).toBe('substitutable');
+  });
+});
+
+/**
+ * `judgeFilter`: the judge-only filter-admission member (#20157, #19995
+ * ruling C). The engine-side behaviour is pinned in
+ * `packages/objectql/src/engine-judge-filter.test.ts`. These pins hold the
+ * CONTRACT shape: the member is optional, and the ruled consumer can call it
+ * with the values it already holds, with no cast.
+ *
+ * Same discipline as the blocks above: member types read off the contract, no
+ * engine double.
+ */
+describe('judgeFilter contract (#20157, #19995 ruling C)', () => {
+  type Member = IObjectQLEngine['judgeFilter'];
+
+  it('is OPTIONAL: a caller must work with an engine that lacks it', () => {
+    // `undefined` is assignable to the member's type only while it is
+    // optional. Making it required resolves `Optional` to `never`.
+    type Optional = undefined extends Member ? 'optional' : never;
+    const optional: Optional = 'optional';
+    expect(optional).toBe('optional');
+  });
+
+  it('is synchronous: the verdict is a value, never a promise', () => {
+    // A judge that returns a promise could do I/O before answering. The
+    // contract keeps the verdict synchronous, so no driver call fits in it.
+    type Verdict = ReturnType<NonNullable<Member>>;
+    type Sync = Verdict extends PromiseLike<unknown> ? never : 'sync';
+    const sync: Sync = 'sync';
+    expect(sync).toBe('sync');
+  });
+
+  it('the ruled consumer calls it with its read scope and context, without a cast', () => {
+    // The analytics read-scope merge holds a `FilterCondition` (the
+    // `StrategyContext.getReadScope` answer) and an `ExecutionContext`, and it
+    // runs the merged filter through `aggregate`. Each argument below must type
+    // as written.
+    const preJudge = (engine: IObjectQLEngine, scope: FilterCondition, context: ExecutionContext) =>
+      engine.judgeFilter?.('deal', scope, { operation: 'aggregate', context });
+    expect(typeof preJudge).toBe('function');
+  });
+
+  it('a refusal carries code, status and message; ok carries nothing else', () => {
+    const read = (verdict: EngineFilterJudgement) =>
+      verdict.ok ? null : { code: verdict.code, status: verdict.status, message: verdict.message };
+    type Refusal = NonNullable<ReturnType<typeof read>>;
+    type Exact = Refusal extends { code: string; status: number; message: string } ? 'exact' : never;
+    const exact: Exact = 'exact';
+    type OkKeys = keyof Extract<EngineFilterJudgement, { ok: true }>;
+    type OnlyOk = [OkKeys] extends ['ok'] ? 'only-ok' : never;
+    const onlyOk: OnlyOk = 'only-ok';
+    expect(exact).toBe('exact');
+    expect(onlyOk).toBe('only-ok');
+  });
+
+  it('the operation names exactly the six verbs that admit a where', () => {
+    type Operation = NonNullable<EngineFilterJudgementOptions['operation']>;
+    type Six = 'find' | 'findOne' | 'count' | 'aggregate' | 'update' | 'delete';
+    type Same = Operation extends Six ? (Six extends Operation ? 'same' : never) : never;
+    const same: Same = 'same';
+    expect(same).toBe('same');
   });
 });
