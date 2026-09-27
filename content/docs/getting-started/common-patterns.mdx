@@ -50,7 +50,7 @@ export default defineStack({
         // Person references target the platform user object `sys_user`
         owner: { label: 'Owner', type: 'lookup', reference: 'sys_user' },
         due_date: { label: 'Due Date', type: 'date' },
-        budget: { label: 'Budget', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' } },
+        budget: { label: 'Budget', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } },
       }
     }
   ]
@@ -79,7 +79,7 @@ export default defineStack({
         // Person references target the platform user object `sys_user`
         owner: { label: 'Owner', type: 'lookup', reference: 'sys_user' },
         due_date: { label: 'Due Date', type: 'date' },
-        budget: { label: 'Budget', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' } },
+        budget: { label: 'Budget', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } },
       },
     },
   },

@@ -438,7 +438,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       precision: {
         label: "Precisión",
-        helpText: "Decimales (p. ej., 2 para $10.50)"
+        helpText: "Total de dígitos"
       },
       scale: {
         label: "Decimales",

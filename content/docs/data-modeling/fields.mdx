@@ -73,7 +73,6 @@ discount: Field.percent({ label: 'Discount', scale: 2, min: 0, max: 1 }),
 price: Field.currency({
   label: 'Price',
   currencyConfig: {
-    precision: 2,
     currencyMode: 'fixed',      // 'fixed' pins the column to defaultCurrency;
                                 // 'dynamic' (default) shows the tenant default
     defaultCurrency: 'USD',     // the column's currency under 'fixed'

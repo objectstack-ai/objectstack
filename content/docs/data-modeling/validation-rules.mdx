@@ -151,11 +151,10 @@ These properties apply to **all** field types and are validated by the base `Fie
 |:---|:---|:---|:---|
 | `min` | `number` | — | Minimum monetary value |
 | `max` | `number` | — | Maximum monetary value |
-| `currencyConfig.precision` | `number` | `2` | Decimal places (0–10) |
-| `currencyConfig.currencyMode` | `enum` | `dynamic` | `fixed` pins the field to `defaultCurrency`, and an authored `currencyConfig.precision` must agree with that currency's ISO 4217 fraction digits (the field-level `precision`, total digits, is not compared); `dynamic` displays the tenant default currency (the `localization.currency` setting). Not a per-record choice |
+| `currencyConfig.currencyMode` | `enum` | `dynamic` | `fixed` pins the field to `defaultCurrency`; `dynamic` displays the tenant default currency (the `localization.currency` setting). Not a per-record choice |
 | `currencyConfig.defaultCurrency` | `string` | `CNY` | 3-character currency code (ISO 4217 or crypto): the field's currency under `fixed`; not the displayed currency under `dynamic` |
 
-**Default constraints:** Stored as a **bare number** (a finite numeric scalar — `valueSchemaFor` routes `currency` to `z.number().finite()`); there is no `{ value, currency }` envelope on the value path. The currency **code** is never stored per record: it is field configuration, carried by `currencyConfig` above. Precision defaults to 2 decimal places.
+**Default constraints:** Stored as a **bare number** (a finite numeric scalar — `valueSchemaFor` routes `currency` to `z.number().finite()`); there is no `{ value, currency }` envelope on the value path. The currency **code** is never stored per record: it is field configuration, carried by `currencyConfig` above. Decimal places are the currency's ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD) and are declared nowhere — `currencyConfig` has no decimal-places key (`currencyConfig.precision` is refused, with a prescription to delete it), and the field-level `precision` is the total digit count, never compared with the currency.
 
 ### `percent`
 
@@ -529,7 +528,7 @@ section above). See the
 | `html` | — | Sanitized, `maxLength` |
 | `richtext` | — | Sanitized, `maxLength` |
 | `number` | — | `min`, `max`, `precision`, `scale` |
-| `currency` | — | `currencyConfig` (precision, mode, code) |
+| `currency` | — | `currencyConfig` (mode, code) |
 | `percent` | — | `min`, `max`, stored as decimal |
 | `date` | — | ISO 8601 date |
 | `datetime` | — | ISO 8601 datetime, UTC |
