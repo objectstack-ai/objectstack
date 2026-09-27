@@ -621,22 +621,27 @@ describe('RowLevelSecurityPolicySchema — a check on a policy that writes no ro
   it('reaches the permission set: the issue lands at rowLevelSecurity[N].check', () => {
     const result = PermissionSetSchema.safeParse({
       name: 'contributor',
+      objects: {},
       rowLevelSecurity: [
         { ...base, name: 'reads', operation: 'select', using: 'owner_id == current_user.id' },
         { ...base, name: 'deletes', operation: 'delete', using: 'owner_id == current_user.id', check: PREDICATE },
       ],
     });
     expect(result.success).toBe(false);
-    const issue = result.success ? undefined : result.error.issues.find((i) => i.code === 'custom');
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues).toHaveLength(1);
+    const issue = issues[0];
+    expect(issue?.code).toBe('custom');
     expect(issue?.path).toEqual(['rowLevelSecurity', 1, 'check']);
     expect(issue?.message.startsWith('`check` is never evaluated on a `delete` policy:')).toBe(true);
   });
 
   it('reaches the authoring door: defineStack refuses it with the STACK_SCHEMA_INVALID envelope', () => {
     const stack = (check?: string) => ({
-      manifest: { id: 'com.example.rls_check', name: 'rls_check', version: '1.0.0', type: 'app' },
+      manifest: { id: 'com.example.rls-check', name: 'rls_check', version: '1.0.0', type: 'app' },
       permissions: [{
         name: 'contributor',
+        objects: {},
         rowLevelSecurity: [{ ...base, operation: 'delete', using: 'owner_id == current_user.id', ...(check ? { check } : {}) }],
       }],
     });
@@ -649,7 +654,8 @@ describe('RowLevelSecurityPolicySchema — a check on a policy that writes no ro
     const refusal = thrown as { code?: string; status?: number; issues?: Array<{ path: PropertyKey[]; message: string }> };
     expect(refusal?.code).toBe('STACK_SCHEMA_INVALID');
     expect(refusal?.status).toBe(422);
-    const issue = refusal.issues?.find((i) => i.path.at(-1) === 'check');
+    expect(refusal.issues).toHaveLength(1);
+    const issue = refusal.issues?.[0];
     expect(issue?.path).toEqual(['permissions', 0, 'rowLevelSecurity', 0, 'check']);
     expect(issue?.message.startsWith('`check` is never evaluated on a `delete` policy:')).toBe(true);
     // Control: the same stack without the `check` is accepted by the same door.
