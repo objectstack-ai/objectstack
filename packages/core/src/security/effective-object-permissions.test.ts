@@ -283,3 +283,100 @@ describe('[#20134] super-user wildcard: every bit it grants, per set', () => {
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
   });
 });
+
+/**
+ * [#20135] `apiOperations` is what the REST door SERVES this subject — the
+ * door's own two questions, asked per entry:
+ *
+ *  - the object half, `canServeApiOperation` (the spec's
+ *    `apiExposureDenialReason`, which `enforceApiAccess` turns into its 404 /
+ *    405): `enable.apiEnabled: false` refuses every operation, whatever
+ *    `apiMethods` says, so the entry is annotated `[]` — never left bare, which
+ *    a client reads as default-allow;
+ *  - the user half, the export door's `read ∧ allowExport` on the entry
+ *    itself — per set and posture, because the coverage passes put each set's
+ *    `'*'` only where that set reaches — never the MERGED `'*'` export bit.
+ *
+ * Which entries carry the annotation is unchanged in rule: an unrestricted
+ * object whose every operation is still served gets none. The route- and
+ * member-level parity against the door is pinned in plugin-security's
+ * `get-effective-object-permissions.test.ts`.
+ */
+describe('[#20135] apiOperations says what the REST door serves', () => {
+  const SCHEMAS: Record<string, any> = {
+    crm_account: { name: 'crm_account' },
+    crm_exposed: { name: 'crm_exposed', enable: { apiEnabled: true } },
+    crm_lead: { name: 'crm_lead', enable: { apiMethods: ['get', 'list'] } },
+    crm_hidden: { name: 'crm_hidden', enable: { apiEnabled: false } },
+    crm_hidden_lead: { name: 'crm_hidden_lead', enable: { apiEnabled: false, apiMethods: ['get', 'list'] } },
+    crm_secret: { name: 'crm_secret', access: { default: 'private' } },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (n: string) => SCHEMAS[n] };
+  const EVERY = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  /** `admin_full_access`' wildcard shape: both bypass bits, and (#8681) no `allowExport`. */
+  const SUPER = { ...EVERY, viewAllRecords: true, modifyAllRecords: true };
+
+  it('an API-disabled object is annotated `[]` — for a subject that may export, which used to get no annotation at all', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': { ...EVERY, allowExport: true } } }], source);
+    expect(map.crm_hidden.apiOperations).toEqual([]);
+    expect(map.crm_hidden_lead.apiOperations).toEqual([]);
+    // The controls: unrestricted and exposed, every operation still served — no annotation.
+    expect(map.crm_account).not.toHaveProperty('apiOperations');
+    expect(map.crm_exposed).not.toHaveProperty('apiOperations');
+    // …and an `apiMethods` subset says exactly what it said before.
+    expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+  });
+
+  it('an API-disabled object is annotated `[]` — for a subject the export axis narrows, which used to get the full closure', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.crm_hidden.apiOperations).toEqual([]);
+    expect(map.crm_hidden_lead.apiOperations).toEqual([]);
+    // The controls: the export axis alone, which takes `export` and nothing else.
+    expect(map.crm_account.apiOperations).toEqual(
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+    );
+    expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+  });
+
+  it('the entry itself stays: `apiEnabled` closes the API, not the data the server lets this subject write', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.crm_hidden).toMatchObject({ allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true });
+  });
+
+  it('a private object reached only through a PLAIN `*` export grant is not annotated `export`', () => {
+    // The platform admin beside a plain export-only wildcard: the plain `'*'` never covers a private
+    // object, and the super-user `'*'` carries no `allowExport`, so the export door refuses there.
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': SUPER } }, { objects: { '*': { allowExport: true } } }],
+      source,
+    );
+    expect(map.crm_secret.apiOperations).toEqual(
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+    );
+    // The public objects the plain wildcard DOES cover keep `export` — an unrestricted one keeps its whole closure.
+    expect(map.crm_account).not.toHaveProperty('apiOperations');
+    expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+  });
+
+  it('an object the exporting set itself names without the grant is not annotated `export`', () => {
+    // For that set its explicit entry is its whole answer, and no other set grants export.
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { allowRead: true, allowExport: true }, crm_lead: { allowRead: true } } }],
+      source,
+    );
+    expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+  });
+
+  it('an export grant without read is not annotated `export`: the export door is read ∧ grant', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { crm_lead: { allowExport: true } } }], source);
+    expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+  });
+
+  it('read and export arriving from two different sets still annotate `export`, as the export door admits', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { crm_lead: { allowRead: true } } }, { objects: { '*': { allowExport: true } } }],
+      source,
+    );
+    expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+  });
+});

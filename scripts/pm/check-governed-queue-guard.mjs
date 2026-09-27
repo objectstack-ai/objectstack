@@ -374,21 +374,46 @@
  * 9), never a size of zero and never a pass — the sibling's `--pr` refuses on
  * exactly that absence (exit 1 there) for exactly that reason.
  *
- * ⛔ NO APPROVAL LIFTS THIS LIMB, and no review of record does either. The
- * landed predicate says a human MERGE — 「人工审核」 landed as the same terminal
- * a governed diff has (ACCEPT on the card, `needs-user-decision` on the PR, a
- * final 维护者速读, review requested from `GOVERNED_APPROVERS`) and the
- * maintainer's own click (人工直合). ⭐ #19344 — THAT CLICK IS ONE BUTTON
- * OPTION and this text now names it: `main` mandates the queue and requires
- * this check, so the only Merge that is not an enqueue is the Merge button's
- * BYPASS-RULES option, offered only while the ruleset configures a bypass
- * actor. While none was, the remedy named a terminal nobody could reach and
- * PR #19024 was enqueued and refused three times. That it IS offered is a
- * ruleset fact the pin reads. An authorized APPROVED review lifts a
- * Tier H path because the 2026-08-27 ruling said so of PATHS; nothing has
- * said it of the NUMBER, and widening a governance gate past its own ruling is
- * how gates acquire policy nobody agreed to. Widening it is a one-line
- * maintainer decision — in the sibling, where the predicate lives.
+ * ⭐ AN AUTHORIZED APPROVAL LIFTS THIS LIMB (maintainer ruling 2026-09-27,
+ * #20153), exactly as it lifts a Tier H path. Until that day the landed
+ * predicate said a human MERGE and nothing else — 「人工审核」 landed as the same
+ * terminal a governed diff has (ACCEPT on the card, `needs-user-decision` on
+ * the PR, a final 维护者速读, review requested from `GOVERNED_APPROVERS`) and
+ * the maintainer's own click (人工直合); the 2026-08-27 ruling had said
+ * "approval lifts" of PATHS, nothing had said it of the NUMBER, and this file
+ * refused to widen a gate past its own ruling. PR #20125 (about 11.5k changed
+ * lines, APPROVED by `os-zhuang`) was then dequeued twice on exactly this
+ * limb, and the maintainer ruled, verbatim and untranslated:
+ *
+ *   > 所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。
+ *
+ * So this leg now reads THE SAME authorized-approval verdict the governed leg
+ * reads — `authorizedApprovalVerdict`, one derivation, on ANY commit, with
+ * DISMISSED, superseded and unauthorized approvals never counting and an
+ * unreadable review list failing closed — and hands it to the sibling through
+ * the same front door as the size: `testVerdict([], { size, approval })`. The
+ * LIFT itself is the sibling's (`sizeLiftFrom`, read by `landsByHumanMerge`
+ * through `sizeLimbFires`), so the queue and the seat-side `--pr` answer on one
+ * predicate; this file spells no lift condition of its own. The threshold, the
+ * strict comparison and the generated-files inclusion are UNCHANGED, and so is
+ * the FORK limb: no approval lifts a fork. After the approval the OWNING seat
+ * lands the pull request through the queue (席位落地); the maintainer's direct
+ * merge stays the other landing. ⭐ #19344 — THAT CLICK IS ONE BUTTON OPTION
+ * and this text names it: `main` mandates the queue and requires this check,
+ * so the only Merge that is not an enqueue is the Merge button's BYPASS-RULES
+ * option, offered only while the ruleset configures a bypass actor. While none
+ * was, the remedy named a terminal nobody could reach and PR #19024 was
+ * enqueued and refused three times. That it IS offered is a ruleset fact the
+ * pin reads. No review of record (Tier S) lifts this limb: the ruling names an
+ * authorized APPROVED review, and a seat's own record is not one.
+ *
+ * ⚖️ THE COST: one review read (`GET /pulls/{n}/reviews`) per queued pull
+ * request that is OVER the line — the population this leg refused outright
+ * before, so nothing that cleared pays anything new — and none at all when the
+ * governed leg already read that pull request's reviews on this build: the
+ * verdict object is reused, never re-derived. An unreadable review list on an
+ * oversized pull request refuses on exit 8 (over the line, no lift proven),
+ * never on 9, which stays "the SIZE could not be read": the words carry which.
  *
  * ⚠️ `pull_request` leg: SILENT, byte-identical, like the governed leg. The
  * seat-side pre-check already refuses an oversized PR before it is armed, and
@@ -425,8 +450,11 @@
  *   8  REFUSED  — a queued pull request is over the human-merge line:
  *                 `additions + deletions` strictly greater than the sibling's
  *                 `HUMAN_MERGE_LINE_THRESHOLD`, generated files included
- *                 (#19036, the 2026-09-18 ruling). The SIZE leg, not the
- *                 governed one; its remedy is a human merge and nothing else.
+ *                 (#19036, the 2026-09-18 ruling) — and NO authorized APPROVED
+ *                 review lifts it (none, unauthorized, dismissed/superseded, or
+ *                 the review list could not be read; 2026-09-27, #20153). The
+ *                 SIZE leg, not the governed one; its remedies are an authorized
+ *                 approval and then the owning seat's landing, or a human merge.
  *   9  REFUSED  — the SIZE leg could not READ a queued pull request's size (the
  *                 pull read failed, or the object carries no pair), or the merge
  *                 group names no pull request to read it from. Split from 8 the
@@ -438,9 +466,9 @@
  *   ⭐ TWO legs, ONE exit, and the precedence is pinned: every leg's block is
  *   always printed, and the code is the GOVERNED leg's when it refuses, else
  *   the SIZE leg's (`groupExitCode`). The governed refusal sits on top because
- *   its remedy is the stricter one; the size refusal's remedy (a human merge)
- *   is the same terminal as Tier H — a group that is both governed-unsatisfied
- *   and oversized prints both limbs and exits 3.
+ *   its remedy is the stricter one; the size refusal's remedy (an authorized
+ *   approval, or a human merge) is the same terminal as Tier H — a group that
+ *   is both governed-unsatisfied and oversized prints both limbs and exits 3.
  *
  * ## What this file does NOT do
  *
@@ -474,6 +502,7 @@ import {
   pullNumberFromSubject,
   pullSizeFrom,
   recomputeProvenanceFor,
+  renderLiftApprovals,
   testVerdict,
 } from './check-governed-merges.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -515,7 +544,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #15406: a CLEAR reached through a lift is not a clear that saw nothing': 10,
   '⭐ #18020 → #19133 Tier S: a review of record, not an approval': 43,
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
-  '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 30,
+  '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 54,
   '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
   '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 11,
 });
@@ -987,6 +1016,7 @@ export function authorizedApprovalVerdict(reviews, headSha) {
   }
   const head = /^[0-9a-f]{7,40}$/.test(String(headSha ?? '').toLowerCase()) ? String(headSha).toLowerCase() : null;
   const approvers = [];
+  const approvals = [];
   const approvalsOnEarlierCommits = [];
   const unauthorizedApprovers = [];
   for (const [login, review] of latest) {
@@ -998,12 +1028,18 @@ export function authorizedApprovalVerdict(reviews, headSha) {
     // The whole 2026-09-04 ruling in one statement: authorized + APPROVED is
     // the verdict, and `commit_id` is not consulted to reach it.
     approvers.push(login);
+    // ⭐ `approvals` is the SAME set with the commit each was given on — the
+    // field the sibling's `sizeLiftFrom` reads (2026-09-27), and the one the
+    // generic `approvalVerdict` deliberately does not carry: only a verdict
+    // that asked WHO approved can lift the SIZE limb, and this is that verdict.
+    approvals.push({ login, commitId: review.commitId });
     // ...and then, separately, the reading the log prints. It changes nothing.
     if (head !== null && review.commitId !== head) approvalsOnEarlierCommits.push({ login, commitId: review.commitId });
   }
   return {
     state: approvers.length > 0 ? 'approved' : 'unapproved',
     approvers,
+    approvals,
     approvalsOnEarlierCommits,
     unauthorizedApprovers,
     changesRequestedBy: [...latest].filter(([, r]) => r.state === 'CHANGES_REQUESTED').map(([login]) => login),
@@ -1152,7 +1188,8 @@ export function renderGuardVerdict(verdict) {
       if (verdict.event === EVENT_MERGE_GROUP) {
         lines.push(
           '      ⚠️ Scoped to the GOVERNED-SURFACE leg. On merge_group this file ALSO reads every queued pull request',
-          '      for its SIZE — one pull read each, fail-closed — and that leg reports separately below.',
+          '      for its SIZE — one pull read each, plus a review read for one over the line, fail-closed — and',
+          '      that leg reports separately below.',
           '      An outage there DOES refuse this merge group.',
         );
       }
@@ -1633,19 +1670,24 @@ export const SIZE_LEG_NAME = 'Human-Merge Size Line (2026-09-18 ruling)';
  * exceeds: false` for it, which `landsByHumanMerge` would read as clear, and
  * that is precisely the fail-open reading this leg exists to refuse.
  */
-export function sizeReading(pr, size) {
-  const verdict = testVerdict([], { size });
+export function sizeReading(pr, size, approval = null) {
+  const verdict = testVerdict([], { size, approval });
   if (verdict.size?.measured !== true) {
     return {
       pr,
       state: 'unreadable',
       verdict,
+      approval,
       reason:
         'the pull object carries no `additions` / `deletions` pair, so the size cannot be read — ' +
         'an unread size is never a size of zero',
     };
   }
-  return { pr, state: landsByHumanMerge(verdict) ? 'oversized' : 'within', verdict };
+  // Four states, and the LIFT is the sibling's reading (2026-09-27): over the
+  // line with `lifted` set is `lifted`, never `within` — the number is printed
+  // as over, and what lifted it is printed beside it.
+  const state = landsByHumanMerge(verdict) ? 'oversized' : verdict.size.exceeds ? 'lifted' : 'within';
+  return { pr, state, verdict, approval };
 }
 
 /**
@@ -1656,7 +1698,8 @@ export function sizeReading(pr, size) {
  * renders the empty string, so that leg's output stays byte-identical (the
  * 2026-08-27 constraint, kept here). A group that names no pull request has
  * no size to read and refuses; a reading that never arrived is `unreadable`,
- * never `within`.
+ * never `within`. A `lifted` reading (over the line, authorized approval on
+ * record — 2026-09-27) is a CLEAR, and the entry keeps saying it was lifted.
  */
 export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiCalls = 0 }) {
   const base = { event, entries: [], apiCalls, legName: SIZE_LEG_NAME };
@@ -1697,7 +1740,7 @@ export function sizeGuardVerdict({ event, pulls = [], readings = new Map(), apiC
  * count is printed and pinned. A throw is caught into an `unreadable` reading,
  * never a pass and never an escaping rejection.
  */
-export async function runSizeGuard({ event, rows, namedPull = null, fetchPull }) {
+export async function runSizeGuard({ event, rows, namedPull = null, fetchPull, fetchReviews = null, approvals = new Map() }) {
   if (event !== EVENT_MERGE_GROUP) return sizeGuardVerdict({ event });
   const pulls = queuedPullsInGroup(rows, namedPull);
   const readings = new Map();
@@ -1706,7 +1749,30 @@ export async function runSizeGuard({ event, rows, namedPull = null, fetchPull })
     try {
       apiCalls += 1;
       const pull = await fetchPull(pr);
-      readings.set(pr, sizeReading(pr, pull?.size ?? null));
+      let reading = sizeReading(pr, pull?.size ?? null);
+      if (reading.state === 'oversized') {
+        // ⭐ THE LIFT (2026-09-27, #20153): over the line, so the approval is
+        // consulted — the SAME verdict the governed leg computed on this build
+        // when it read this pull request, else the same derivation on a review
+        // read of this leg's own. Never re-derived from a verdict already held,
+        // never read for a pull request under the line, and a read that fails
+        // is `unreadable`: fail closed, on the size code (8), the words saying so.
+        let approval = approvals.get(pr) ?? null;
+        if (approval === null) {
+          if (typeof fetchReviews !== 'function') {
+            approval = unreadableApproval('no review reader was supplied to the size leg');
+          } else {
+            try {
+              apiCalls += 1;
+              approval = authorizedApprovalVerdict(await fetchReviews(pr), pull?.sha ?? null);
+            } catch (error) {
+              approval = unreadableApproval(String(error?.message ?? error).split('\n')[0]);
+            }
+          }
+        }
+        reading = sizeReading(pr, pull?.size ?? null, approval);
+      }
+      readings.set(pr, reading);
     } catch (error) {
       readings.set(pr, {
         pr,
@@ -1749,10 +1815,13 @@ export function remedyPathVerdict({ remedy, ruleset }) {
  * The words a reader acts on for this leg. Returns '' on the `pull_request`
  * leg. Every entry prints WHAT WAS READ — the two numbers, their sum and the
  * threshold — on the clear path as much as on the refusal, so a queue log
- * always shows the number a landing was judged on. The refusal names the limb
- * (SIZE), quotes the ruling untranslated, and names the ONE remedy: a human
- * merge. ⛔ It does not advise making the diff smaller — a guard that
- * suggests how to get under its own line is a guard that gets routed around.
+ * always shows the number a landing was judged on. A lifted entry prints WHAT
+ * LIFTED it — approver, commit, and the ruling's card (2026-09-27). The refusal
+ * names the limb (SIZE), quotes both rulings untranslated, and names the TWO
+ * landings: an authorized APPROVED review and then the owning seat's landing,
+ * or a human merge. ⛔ It does not advise making the diff smaller — a guard
+ * that suggests how to get under its own line is a guard that gets routed
+ * around.
  */
 export function renderSizeVerdict(verdict) {
   if (verdict.conclusion === 'not-applicable') return '';
@@ -1762,12 +1831,29 @@ export function renderSizeVerdict(verdict) {
       `${verdict.apiCalls} pull read(s).`,
   );
   const numbers = (e) => `${e.verdict.size.changedLines} changed line(s) (+${e.verdict.size.additions} / -${e.verdict.size.deletions})`;
+  // Why an oversized entry was NOT lifted, off the approval verdict this leg
+  // read (or reused): the four non-lift cases of the 2026-09-27 ruling, named.
+  const noLift = (approval) => {
+    if (!approval) return 'no review reading was recorded for this pull request';
+    if (approval.state === 'unreadable') return `the review list could NOT be read (${approval.reason ?? 'unknown error'}) — fail closed, no lift`;
+    const unauthorized = (approval.unauthorizedApprovers ?? []).length > 0 ? `; APPROVED only by account(s) outside GOVERNED_APPROVERS: ${approval.unauthorizedApprovers.join(', ')} — never counts` : '';
+    return `no authorized APPROVED review on record (${approval.reviewsRead ?? 0} review(s) read; authorized: ${GOVERNED_APPROVERS.join(', ')}; dismissed and superseded approvals never count)${unauthorized}`;
+  };
   for (const entry of verdict.entries) {
     if (entry.state === 'oversized') {
       lines.push(
         '',
         `  #${entry.pr} — ⛔ ${numbers(entry)} EXCEEDS the human-merge line ${entry.verdict.size.threshold}`,
-        '        (additions + deletions, generated files INCLUDED) — this pull request lands only by a HUMAN MERGE.',
+        '        (additions + deletions, generated files INCLUDED) — and nothing lifts it: ' + noLift(entry.approval) + '.',
+        '        This pull request lands by an authorized APPROVED review and then the OWNING seat, or by a HUMAN MERGE.',
+        `        read from: ${entry.verdict.size.source ?? '(source not recorded)'}`,
+      );
+    } else if (entry.state === 'lifted') {
+      lines.push(
+        '',
+        `  #${entry.pr} — ✅ ${numbers(entry)} EXCEEDS the human-merge line ${entry.verdict.size.threshold}, LIFTED by an authorized`,
+        `        APPROVED review: ${renderLiftApprovals(entry.verdict.size.lifted)} — ${entry.verdict.size.lifted.ruling},`,
+        '        verbatim 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」 — the OWNING seat lands it through the queue.',
         `        read from: ${entry.verdict.size.source ?? '(source not recorded)'}`,
       );
     } else if (entry.state === 'unreadable') {
@@ -1781,8 +1867,9 @@ export function renderSizeVerdict(verdict) {
     lines.push(
       '',
       `  ✅  CLEAR — no queued pull request is over the human-merge line (${HUMAN_MERGE_LINE_THRESHOLD} changed lines,`,
-      '      additions + deletions, generated files INCLUDED). The number is read off the pull object, per queued',
-      '      pull request; the threshold and the comparison are scripts/pm/check-governed-merges.mjs\'s, imported.',
+      '      additions + deletions, generated files INCLUDED) without an authorized APPROVED review lifting it. The number',
+      '      is read off the pull object, per queued pull request; the threshold, the comparison and the lift are',
+      '      scripts/pm/check-governed-merges.mjs\'s, imported.',
     );
     return lines.join('\n');
   }
@@ -1807,13 +1894,15 @@ export function renderSizeVerdict(verdict) {
     lines.push(
       '      At least one queued pull request above is over the human-merge line — the SIZE limb, whatever',
       '      paths it touches (additions + deletions, generated files INCLUDED: no regen family, docs build or',
-      '      revert is carved out, because the case that prompted the ruling, PR #18971, was exactly that).',
-      '      The maintainer\'s ruling (2026-09-18, verbatim, untranslated):',
+      '      revert is carved out, because the case that prompted the ruling, PR #18971, was exactly that) —',
+      '      and no authorized APPROVED review lifts it. The maintainer\'s rulings (verbatim, untranslated):',
       '',
-      '        「修改代码量超过某个行数（比如5000）就应该人工审核」',
+      '        2026-09-18 「修改代码量超过某个行数（比如5000）就应该人工审核」',
+      '        2026-09-27 「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」 (objectstack#20153)',
       '',
-      '      landed as `HUMAN_MERGE_LINE_THRESHOLD` in scripts/pm/check-governed-merges.mjs, which this leg',
-      '      IMPORTS — the number, the comparison and what counts are that file\'s, never restated here.',
+      '      landed as `HUMAN_MERGE_LINE_THRESHOLD` and the lift in scripts/pm/check-governed-merges.mjs, which',
+      '      this leg IMPORTS — the number, the comparison, what counts and what lifts are that file\'s, never',
+      '      restated here.',
     );
   }
   lines.push(
@@ -1821,16 +1910,18 @@ export function renderSizeVerdict(verdict) {
     '      What satisfies this check:',
     '        1. ⭐ Take the pull request out of the queue: convert it back to DRAFT (disarming auto-merge',
     '           alone does NOT dequeue it) and park it there — parked outside the queue is the SAFE state.',
-    '        2. Then a HUMAN MERGE — the same terminal a governed diff has: ACCEPT on the card,',
+    '        2. Then ONE of the two landings — the same terminal a Tier H governed diff has: ACCEPT on the card,',
     '           `needs-user-decision` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
-    `           (${GOVERNED_APPROVERS.join(', ')}); the maintainer's own click lands it (人工直合) — and that`,
-    '           click is the Merge button\'s bypass-rules option, offered only while ruleset `main` configures a',
-    '           bypass actor — ⛔ NOT a second Merge button: `main` mandates the queue and requires this check, so',
-    '           with none configured every re-enqueue comes back here (#19344). The audit log records the bypass',
-    '           and `check-governed-merges` lists such a landing on size.',
-    '           ⛔ An authorized APPROVED review does NOT lift this limb the way it lifts a Tier H path, and no',
-    '           review of record does either: the landed predicate says a human MERGE, and widening it is the',
-    '           maintainer\'s one-line decision in the sibling, not this file\'s.',
+    `           (${GOVERNED_APPROVERS.join(', ')}); and then EITHER`,
+    '           (a) an APPROVED review by one of those accounts, on ANY commit (2026-09-27, objectstack#20153) —',
+    '               the OWNING seat then lands it through the queue (席位落地): ready, auto-merge, this check',
+    '               passes on the lift; a dismissed, superseded or unauthorized approval never counts, no review',
+    '               of record (Tier S) substitutes, and an unreadable review list fails closed on this same code;',
+    '           (b) OR the maintainer\'s own click (人工直合) — the Merge button\'s bypass-rules option, offered',
+    '               only while ruleset `main` configures a bypass actor — ⛔ NOT a second Merge button: `main`',
+    '               mandates the queue and requires this check, so with none configured every re-enqueue comes',
+    '               back here (#19344). The audit log records the bypass and `check-governed-merges` lists such',
+    '               a landing on size, as it lists a lifted one.',
     '',
     '      When the governed-surface leg above ALSO refused, both limbs fired on this group: the exit code is',
     '      the governed leg\'s (precedence governed > size, pinned) and this limb stands regardless.',
@@ -1847,9 +1938,9 @@ export function renderSizeVerdict(verdict) {
  * wins, then the size leg's. The governed refusal sits on top because its
  * remedy is the stricter one (no landing at all without an authorized
  * approval, a record, or the maintainer's own direct merge); the size
- * refusal's remedy is the same human terminal as Tier H — a group that is both
- * governed-unsatisfied and oversized prints both limbs and exits on the
- * governed one. ⛔ No leg's code is swallowed silently: every block is always
+ * refusal's remedy is the same terminal as Tier H (an authorized approval, or
+ * the maintainer's merge) — a group that is both governed-unsatisfied and
+ * oversized prints both limbs and exits on the governed one. ⛔ No leg's code is swallowed silently: every block is always
  * printed, whichever code the run exits on.
  */
 export function groupExitCode({ governed, size }) {
@@ -2207,7 +2298,17 @@ async function main() {
   // The SIZE leg (#19036): every queued pull request, through the same pull
   // reader the governed leg reads heads with. `merge_group` only, '' on the
   // other leg, so the `pull_request` output is byte-identical to what it was.
-  const size = await runSizeGuard({ event: context.event, rows, namedPull: context.namedPull, fetchPull });
+  // The lift (2026-09-27): the approval verdicts the governed leg already
+  // derived on this build are REUSED for the pull requests it read; any other
+  // oversized pull request gets one review read through the same reader.
+  const size = await runSizeGuard({
+    event: context.event,
+    rows,
+    namedPull: context.namedPull,
+    fetchPull,
+    fetchReviews,
+    approvals: new Map(verdict.entries.map((e) => [e.pr, e.approval])),
+  });
   const sizeBlock = renderSizeVerdict(size);
   const report = [
     `${context.label} — ${rows.length} commit(s) in range`,
@@ -3322,6 +3423,8 @@ export async function selfTest() {
     event: EVENT_MERGE_GROUP,
     rows: pr18971,
     fetchPull: async () => pull(HEAD, { size: sizePair(238310, 119, 'GET /repos/objectstack-ai/objectstack/pulls/18971') }),
+    // #18971 landed on an AI review alone: no authorized approval on record.
+    fetchReviews: async () => [],
   });
   const exit18971 = groupExitCode({ governed: g18971, size: s18971 });
   assert(
@@ -3337,13 +3440,21 @@ export async function selfTest() {
     text18971,
   );
   assert(
-    'and-names-the-ONE-remedy-a-HUMAN-MERGE-quoting-the-ruling-untranslated-and-never-advises-shrinking-the-diff',
-    text18971.includes('HUMAN MERGE') && text18971.includes('修改代码量超过某个行数（比如5000）就应该人工审核') && text18971.includes('DRAFT') && !/shrink|split the|smaller/i.test(text18971),
+    'and-names-the-TWO-landings-an-authorized-APPROVAL-or-a-HUMAN-MERGE-quoting-both-rulings-untranslated-and-never-advises-shrinking-the-diff',
+    text18971.includes('HUMAN MERGE') && text18971.includes('修改代码量超过某个行数（比如5000）就应该人工审核') &&
+      text18971.includes('所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。') && text18971.includes('DRAFT') && !/shrink|split the|smaller/i.test(text18971),
     text18971,
   );
   assert(
-    'and-says-an-approval-does-NOT-lift-this-limb-and-points-at-the-sibling-for-the-number',
-    /does NOT lift this limb/.test(text18971) && /check-governed-merges\.mjs --pr/.test(text18971),
+    'and-says-an-authorized-approval-on-ANY-commit-lifts-this-limb-that-no-record-substitutes-and-points-at-the-sibling-for-the-number',
+    /APPROVED review by one of those accounts, on ANY commit/.test(text18971) && /objectstack#20153/.test(text18971) &&
+      /no review\s+of record \(Tier S\) substitutes/.test(text18971) && !/does NOT lift this limb/.test(text18971) && /check-governed-merges\.mjs --pr/.test(text18971),
+    text18971,
+  );
+  assert(
+    'and-an-oversized-entry-with-NO-authorized-approval-says-so-and-names-both-landings-on-its-own-line',
+    /and nothing lifts it: no authorized APPROVED review on record \(0 review\(s\) read/.test(text18971) && /lands by an authorized APPROVED review and then the OWNING seat, or by a HUMAN MERGE/.test(text18971),
+    text18971,
   );
   assert('and-the-read-source-is-printed-so-a-log-shows-where-the-number-came-from', text18971.includes('read from: GET /repos/objectstack-ai/objectstack/pulls/18971'));
   // A governed path AND oversized: both limbs print, one exit — the governed
@@ -3365,18 +3476,134 @@ export async function selfTest() {
     fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }),
     fetchComments: async () => [],
   });
+  // ⭐ 2026-09-27 (#20153): the SAME approval verdict the governed leg derived
+  // is handed to the size leg, which reads it — no second review read (the spy
+  // throws) — and the group exits 0 on both limbs.
+  let sizeReviewReadsReused = 0;
+  const sApprovedBig = await runSizeGuard({
+    event: EVENT_MERGE_GROUP,
+    rows: bothRows,
+    fetchPull: async () => pull(HEAD, { size: sizePair(LINE, 1) }),
+    fetchReviews: async () => {
+      sizeReviewReadsReused += 1;
+      throw new Error('the size leg must REUSE the governed leg\'s verdict, never re-read');
+    },
+    approvals: new Map(gApprovedBig.entries.map((e) => [e.pr, e.approval])),
+  });
   assert(
-    '⛔ an-authorized-APPROVAL-clears-the-path-limb-and-lifts-NOTHING-from-the-size-the-group-still-exits-8',
-    gApprovedBig.conclusion === 'cleared' && groupExitCode({ governed: gApprovedBig, size: sBoth }) === EXIT_REFUSED_OVERSIZED,
+    '⭐ an-authorized-APPROVAL-clears-the-path-limb-AND-lifts-the-size-limb-off-the-SAME-verdict-object-zero-extra-reads-the-group-exits-0',
+    gApprovedBig.conclusion === 'cleared' && sApprovedBig.exitCode === EXIT_CLEAR && sApprovedBig.conclusion === 'clear' &&
+      sApprovedBig.entries[0].state === 'lifted' && sApprovedBig.entries[0].approval === gApprovedBig.entries[0].approval && sizeReviewReadsReused === 0 &&
+      sApprovedBig.apiCalls === 1 && groupExitCode({ governed: gApprovedBig, size: sApprovedBig }) === EXIT_CLEAR,
+    JSON.stringify({ size: sApprovedBig.exitCode, state: sApprovedBig.entries[0].state, reads: sizeReviewReadsReused }),
   );
-  // The lift lifts a PATH, never the number: rows whose every path the register
-  // lifted still pay the size.
+  // The register's lift lifts a PATH, never the number: rows whose every path
+  // the register lifted still pay the size — and with no approval, still refuse.
   const liftedAll = await runSizeGuard({
     event: EVENT_MERGE_GROUP,
     rows: [{ sha: 'f'.repeat(40), subject: 'x (#77)', pr: 77, paths: [] }],
     fetchPull: async () => pull(HEAD, { size: sizePair(237706, 0) }),
+    fetchReviews: async () => [],
   });
   assert('⭐ a-certified-pure-regeneration-lifts-the-PATH-and-lifts-NOTHING-from-the-size-at-the-queue-either', liftedAll.exitCode === EXIT_REFUSED_OVERSIZED);
+  // ── the SIZE limb's LIFT (maintainer ruling 2026-09-27, #20153) — the card's acceptance, in its order ──
+  const bigUngoverned = (pr = 20125) => [{ sha: 'c'.repeat(40), subject: `feat!: retire the saved-report stack (#${pr})`, pr, paths: ['packages/x.ts', 'packages/y.ts'] }];
+  const PR20125_SHA = 'e4ead748' + '1'.repeat(32);
+  const liftRun = (reviews, { size = sizePair(10764, 999, 'GET /repos/objectstack-ai/objectstack/pulls/20125'), sha = PR20125_SHA } = {}) =>
+    runSizeGuard({
+      event: EVENT_MERGE_GROUP,
+      rows: bigUngoverned(),
+      fetchPull: async () => pull(sha, { size }),
+      fetchReviews: typeof reviews === 'function' ? reviews : async () => reviews,
+    });
+  const liftOnHead = await liftRun([approvedAt('os-zhuang', PR20125_SHA)]);
+  const liftOnOlder = await liftRun([approvedAt('os-zhuang', OLD)]);
+  assert(
+    '⭐ #20125-replay-an-authorized-APPROVED-review-on-ANY-commit-LIFTS-the-size-limb-exit-0-two-reads',
+    liftOnHead.exitCode === EXIT_CLEAR && liftOnHead.entries[0].state === 'lifted' && liftOnHead.entries[0].verdict.size.exceeds === true &&
+      liftOnOlder.exitCode === EXIT_CLEAR && liftOnOlder.entries[0].state === 'lifted' && liftOnHead.apiCalls === 2,
+    JSON.stringify({ head: liftOnHead.exitCode, older: liftOnOlder.exitCode, calls: liftOnHead.apiCalls }),
+  );
+  const liftWords = renderSizeVerdict(liftOnHead);
+  assert(
+    'and-the-SIZE-block-prints-the-lift-the-approver-the-commit-and-this-card-with-the-ruling-verbatim',
+    liftWords.includes('#20125') && liftWords.includes('11763 changed line(s) (+10764 / -999)') && liftWords.includes('LIFTED by an authorized') &&
+      liftWords.includes('os-zhuang (on e4ead7481111)') && liftWords.includes('objectstack#20153') && liftWords.includes('2026-09-27') &&
+      liftWords.includes('所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。') && liftWords.includes('OWNING seat lands it through the queue') &&
+      /CLEAR/.test(liftWords) && !/REFUSED/.test(liftWords) && liftWords.includes('read from: GET /repos/objectstack-ai/objectstack/pulls/20125'),
+    liftWords,
+  );
+  assert(
+    'and-an-approval-on-an-older-commit-prints-THAT-commit-not-the-head',
+    renderSizeVerdict(liftOnOlder).includes(`os-zhuang (on ${OLD.slice(0, 12)})`),
+    renderSizeVerdict(liftOnOlder),
+  );
+  const noApproval = await liftRun([]);
+  const unauthorized = await liftRun([approvedAt('not-authorized', PR20125_SHA)]);
+  const dismissed = await liftRun([approvedAt('hotlong', PR20125_SHA), { state: 'DISMISSED', user: { login: 'hotlong' }, commit_id: PR20125_SHA }]);
+  const superseded = await liftRun([approvedAt('os-zhuang', OLD), { state: 'CHANGES_REQUESTED', user: { login: 'os-zhuang' }, commit_id: PR20125_SHA }]);
+  assert(
+    '⛔ no-approval-an-UNAUTHORIZED-one-a-DISMISSED-one-and-a-SUPERSEDED-one-each-still-REFUSE-on-exit-8-as-today',
+    [noApproval, unauthorized, dismissed, superseded].every((v) => v.exitCode === EXIT_REFUSED_OVERSIZED && v.refusalKind === 'oversized' && v.entries[0].state === 'oversized'),
+    JSON.stringify([noApproval, unauthorized, dismissed, superseded].map((v) => v.exitCode)),
+  );
+  assert(
+    'and-each-refusal-names-WHY-nothing-lifted-it',
+    /no authorized APPROVED review on record \(0 review\(s\) read/.test(renderSizeVerdict(noApproval)) &&
+      /outside GOVERNED_APPROVERS: not-authorized — never counts/.test(renderSizeVerdict(unauthorized)) &&
+      /no authorized APPROVED review on record \(2 review\(s\) read/.test(renderSizeVerdict(dismissed)) &&
+      /dismissed and superseded approvals never count/.test(renderSizeVerdict(superseded)),
+    renderSizeVerdict(unauthorized),
+  );
+  const reviewsThrow = await liftRun(async () => {
+    throw new Error('GET /repos/o/r/pulls/20125/reviews answered HTTP 403');
+  });
+  assert(
+    '⛔ an-UNREADABLE-review-list-on-an-oversized-PR-fails-CLOSED-on-exit-8-never-9-and-never-passes-the-words-saying-so',
+    reviewsThrow.exitCode === EXIT_REFUSED_OVERSIZED && reviewsThrow.entries[0].approval.state === 'unreadable' &&
+      /review list could NOT be read \(GET \/repos\/o\/r\/pulls\/20125\/reviews answered HTTP 403\) — fail closed, no lift/.test(renderSizeVerdict(reviewsThrow)),
+    renderSizeVerdict(reviewsThrow),
+  );
+  const noReader = await runSizeGuard({ event: EVENT_MERGE_GROUP, rows: bigUngoverned(), fetchPull: async () => pull(PR20125_SHA, { size: sizePair(LINE, 1) }) });
+  assert(
+    '⛔ a-size-leg-run-with-NO-review-reader-at-all-fails-CLOSED-on-8-too',
+    noReader.exitCode === EXIT_REFUSED_OVERSIZED && /no review reader was supplied/.test(renderSizeVerdict(noReader)),
+  );
+  let sizeReviewReads = 0;
+  const reviewSpy = async () => {
+    sizeReviewReads += 1;
+    throw new Error('the size leg must not read reviews for this pull request');
+  };
+  const underNoRead = await liftRun(reviewSpy, { size: sizePair(LINE, 0) });
+  const unreadableSizeNoRead = await liftRun(reviewSpy, { size: null });
+  assert(
+    '⭐ reviews-are-read-ONLY-over-the-line-a-within-PR-makes-none-and-an-UNREADABLE-size-is-still-exit-9-with-none',
+    sizeReviewReads === 0 && underNoRead.exitCode === EXIT_CLEAR && underNoRead.apiCalls === 1 &&
+      unreadableSizeNoRead.exitCode === EXIT_REFUSED_SIZE_UNREADABLE && unreadableSizeNoRead.refusalKind === 'unreadable',
+    JSON.stringify({ reads: sizeReviewReads, under: underNoRead.exitCode, unreadable: unreadableSizeNoRead.exitCode }),
+  );
+  // End to end, the card's acceptance: an oversized UNGOVERNED group with the
+  // approval on record — the governed leg clear at zero reads, the size leg
+  // lifted, the group exits 0; the same group with no approval exits 8.
+  const g20125 = await runGuard({ event: EVENT_MERGE_GROUP, rows: bigUngoverned(), fetchReviews: explodeForSize, fetchPull: explodeForSize, fetchComments: explodeForSize });
+  assert(
+    '⭐ #20125-end-to-end-governed-CLEAR-at-zero-reads-size-LIFTED-group-exits-0-and-with-no-approval-8',
+    g20125.conclusion === 'clear' && g20125.apiCalls === 0 && groupExitCode({ governed: g20125, size: liftOnHead }) === EXIT_CLEAR &&
+      groupExitCode({ governed: g20125, size: noApproval }) === EXIT_REFUSED_OVERSIZED,
+  );
+  assert(
+    '⭐ sizeReading-has-FOUR-states-and-lifted-is-over-the-line-never-within',
+    sizeReading(1, sizePair(LINE, 1), authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'lifted' &&
+      sizeReading(1, sizePair(LINE, 0), authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'within' &&
+      sizeReading(1, sizePair(LINE, 1), authorizedApprovalVerdict([], HEAD)).state === 'oversized' &&
+      sizeReading(1, null, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'unreadable',
+  );
+  assert(
+    '⭐ the-authorized-verdict-carries-approvals-login-and-commit-the-generic-one-does-NOT-so-only-the-verdict-that-asked-WHO-can-lift',
+    JSON.stringify(authorizedApprovalVerdict([approvedAt('os-zhuang', OLD), approvedAt('not-authorized', HEAD)], HEAD).approvals) === JSON.stringify([{ login: 'os-zhuang', commitId: OLD }]) &&
+      !('approvals' in approvalVerdict([approvedAt('os-zhuang', HEAD)])) &&
+      sizeReading(1, sizePair(LINE, 1), approvalVerdict([approvedAt('os-zhuang', HEAD)])).state === 'oversized',
+  );
   // The exit precedence, the whole table: a group naming NO pull request
   // answers on 9 — both blocks still print their own refusal, and the code is
   // pinned here.
@@ -3411,7 +3638,13 @@ export async function selfTest() {
   assert('⛔ this-file-declares-NO-threshold-of-its-own', sizeOwnSource !== '' && !/HUMAN_MERGE_LINE_THRESHOLD\s*=/.test(sizeOwnSource));
   assert(
     '⛔ and-spells-NO-size-comparison-the-limb-is-reached-through-testVerdict-and-landsByHumanMerge',
-    !/(changedLines|additions\s*\+\s*deletions)\s*>=?\s*/.test(sizeOwnSource) && /testVerdict\(\[\], \{ size \}\)/.test(sizeOwnSource) && /landsByHumanMerge\(verdict\)/.test(sizeOwnSource),
+    !/(changedLines|additions\s*\+\s*deletions)\s*>=?\s*/.test(sizeOwnSource) && /testVerdict\(\[\], \{ size, approval \}\)/.test(sizeOwnSource) && /landsByHumanMerge\(verdict\)/.test(sizeOwnSource),
+  );
+  assert(
+    '⛔ and-spells-NO-lift-condition-of-its-own-the-lift-is-the-siblings-sizeLiftFrom-read-through-landsByHumanMerge',
+    !/\.lifted\s*(===|!==|==|!=|&&|\|\|)/.test(sizeOwnSource) && !/sizeLiftFrom\(/.test(sizeOwnSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')) &&
+      // Spelled apart so this pin's own line cannot satisfy it.
+      !new RegExp(['function size', 'LiftFrom|function size', 'LimbFires'].join('')).test(sizeOwnSource),
   );
   // The scoped merge_group clear now names the size read; the pull_request one
   // is pinned byte-identical above.
