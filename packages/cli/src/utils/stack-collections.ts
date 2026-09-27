@@ -85,6 +85,54 @@ const asBag = (value: unknown): Bag | undefined =>
   value && typeof value === 'object' ? (value as Bag) : undefined;
 
 /**
+ * A stack's `packages` value, judged ONCE for every reader in this package that
+ * walks it: the entries, by position, or `[]` when the key is absent.
+ *
+ * ## A present non-array `packages` is refused, never read as "no packages"
+ *
+ * A `packages` that is present but is not an array (`{}`, `0`, `'x'`) is
+ * MALFORMED, not absent (ruling A on #15293). The rule is stated once, beside
+ * `AssembledPackageBodySchema` (`@objectstack/spec`, `stack.zod.ts`), and it is
+ * enforced by `resolveArtifactPackageOrder` (`@objectstack/core`), which
+ * refuses the value as `INVALID_ARTIFACT_PACKAGES` (ADR-0112, `status: 422`).
+ * The runtime, `@objectstack/core` and the plugin readers already refuse it.
+ * This package's readers used to answer "no packages" instead (#19925): `os
+ * info` printed `0` objects for such a stack and `os lint` passed it. So this
+ * function spells neither the rule nor the refusal. It hands a non-array value
+ * to the resolver, and the refusal the author sees is the resolver's own.
+ *
+ * - ABSENT (`undefined` / `null`) answers `[]`. It is spelled exactly as the
+ *   resolver's own absent branch. `null` is read as absent here as in every
+ *   other reader; whether it should be is a separate decision (#19926), and
+ *   this function does not settle it.
+ * - An array is returned BY REFERENCE and unparsed. The docs readers need
+ *   entries by POSITION (`packages[i]` is where collected docs attach), and the
+ *   resolver answers bodies in LOAD order, so they cannot read its result.
+ *   Parsing each entry is the resolver's job on the path that registers
+ *   packages ({@link packageBodies} reaches it). Adding that parse to the docs
+ *   readers would widen what they refuse, and that is a separate change.
+ * - Any other value goes to the resolver, which refuses it.
+ *
+ * ⛔ Never put an `Array.isArray` in front of this function as a fall-through
+ * to "no packages". That silent answer is exactly what this function removes.
+ *
+ * @throws The resolver's `INVALID_ARTIFACT_PACKAGES` envelope for a present
+ *   non-array `packages`.
+ */
+export function declaredPackageEntries(packages: unknown): readonly unknown[] {
+  if (packages === undefined || packages === null) return [];
+  if (Array.isArray(packages)) return packages;
+  // Present and not an array: the resolver owns the refusal.
+  resolveArtifactPackageOrder({ packages });
+  // Reached only if the resolver ever stops refusing a non-array. An empty
+  // answer here would bring back the silent fall-through, so fail loudly.
+  throw new Error(
+    `resolveArtifactPackageOrder accepted a \`packages\` of type ${typeof packages}; `
+    + 'the CLI package readers cannot walk it by position.',
+  );
+}
+
+/**
  * The assembled package bodies this stack carries, in dependency-topological
  * order — or `[]` when it carries no `packages` list of its own.
  *
@@ -94,10 +142,12 @@ const asBag = (value: unknown): Bag | undefined =>
  * a stack's own top level back onto itself resolves nothing — so this returns
  * an empty list for that case, and every caller below reads the top level
  * first anyway.
+ *
+ * A `packages` that is present but is not an array is refused through
+ * {@link declaredPackageEntries}, never answered `[]`.
  */
 function packageBodies(stack: unknown): Bag[] {
-  const declared = asBag(stack)?.packages;
-  if (!Array.isArray(declared) || declared.length === 0) return [];
+  if (declaredPackageEntries(asBag(stack)?.packages).length === 0) return [];
   return (resolveArtifactPackageOrder(stack) as unknown[])
     .map(asBag)
     .filter((b): b is Bag => b !== undefined);
