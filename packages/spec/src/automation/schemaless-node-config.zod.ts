@@ -543,8 +543,9 @@ export const DecisionConfigSchema = lazySchema(() => strictObject({
     .describe('Ordered decision branches (first true expression wins; omit to branch purely on edge conditions)'),
   /**
    * How many out-edges an edge-branched decision takes when more than one
-   * condition holds — `'exclusive'` (the first, in declaration order; what an
-   * omitted key means) or `'inclusive'` (every one). Read by the engine's
+   * condition holds: `'exclusive'` is the first, in declaration order, and is
+   * the reading an absent key gets — the narrower one, a single branch;
+   * `'inclusive'` is all of them. Read by the engine's
    * traversal: see "Where `mode` is honoured" above. Any other value is
    * refused with {@link decisionModePrescription}; either member beside a
    * non-empty `conditions` list is refused by the `.superRefine` below, with

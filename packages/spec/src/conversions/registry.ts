@@ -11383,9 +11383,11 @@ const reportJoinedChartRemoved: MetadataConversion = {
  * `--from`. `retiredFromLoadPath: true` keeps it off the authoring funnel
  * (`normalizeStackInput`), where an author who wrote two branches today, against
  * the contract that says an omitted `mode` is exclusive, must not be rewritten
- * into an inclusive gateway. The flag's jurisdiction ends there (#16864), so
- * every data-at-rest seam that opens the retired window has to refuse this id
- * by name, on the artifact door's precedent for `app-hidden-to-unpublished`
+ * into an inclusive gateway. The flag's jurisdiction ends there — its own
+ * docblock on `MetadataConversion` says so, and ADR-0087's 2026-07-31 addendum
+ * is why: data-at-rest seams replay retired entries on purpose — so every
+ * data-at-rest seam that opens the retired window has to refuse this id by
+ * name, on the artifact door's precedent for `app-hidden-to-unpublished`
  * (#17885, `DEFAULT_FLIPS_NOT_REPLAYED_HERE` in `@objectstack/metadata-core`):
  * the automation engine's flow rehydration seam does (`registerFlow` serves
  * code-shipped flows, REST bodies and Studio saves alike, none of them dated),
