@@ -80,9 +80,17 @@ export class FlowExpressionFunctionError extends Error {
  * the CEL engine's public boundary (`cel-engine.ts` `coerce`) hands callers a
  * plain number whenever the value fits the safe-integer range. THIS dialect's
  * operators are plain JS, where a BigInt result would throw on the next `/`
- * (`round(x * 100) / 100` — the canonical scale-2 authoring pattern, identical
- * in CEL). So the table returns exactly the post-coercion value the public CEL
- * surface yields. The two edges where that value CANNOT be mirrored into JS
+ * (`round(x * 100) / 100.0` — the scale-2 authoring pattern). So the table
+ * returns exactly the post-coercion value the public CEL surface yields.
+ *
+ * ⚠️ The divisor's decimal point is load-bearing, and NOT in this dialect: here
+ * `/` is JS division, so `/ 100` and `/ 100.0` give the same value. In CEL,
+ * `round()` returns an `int` and `int / int` is INTEGER division — measured,
+ * `round(x * 100) / 100` answers `1234` for `x = 1234.5678` where `/ 100.0`
+ * answers `1234.57` — so the `/ 100` spelling silently drops the decimals the
+ * moment it is copied into a CEL slot (a value envelope, a formula field).
+ * `/ 100.0` is right in both dialects, which is why it is the one prescribed
+ * (#11182 ruling D point 2). The two edges where that value CANNOT be mirrored into JS
  * arithmetic are named errors instead of silent corruption: a non-finite
  * argument (CEL faults there too — `BigInt(NaN)` throws inside the stdlib) and
  * a result beyond `Number.MAX_SAFE_INTEGER` (CEL's boundary switches carrier
@@ -108,7 +116,7 @@ function requireArity(fn: string, args: unknown[]): void {
         // `round(x, 2)` precision form is THE anticipated misuse (#11060), so
         // its refusal carries the supported spelling.
         const precisionHint = fn === 'round' && args.length === 2
-            ? ' There is no precision form — the CEL stdlib\'s round() is integer-only; for N-decimal rounding write round(x * 100) / 100 (scale 2), matching the CEL authoring pattern.'
+            ? ' There is no precision form — the CEL stdlib\'s round() is integer-only; for N-decimal rounding write round(x * 100) / 100.0 (scale 2). Keep the decimal point: in CEL round() returns an int and int / int is integer division, so / 100 drops the decimals there, while / 100.0 is right in both dialects.'
             : '';
         throw new FlowExpressionFunctionError(
             fn,

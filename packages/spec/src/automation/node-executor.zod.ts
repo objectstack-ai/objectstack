@@ -270,9 +270,10 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
    *    The ledger's third role, `value` (#14149), names a slot whose authored
    *    value may be a `{ dialect: 'cel', source }` envelope evaluated by the
    *    expression engine to a value — today the `assignment` node's
-   *    `assignments.*` — declared through the spec Zod contract's
-   *    `.meta({ xExpression: 'value' })` (`AssignmentValueSchema`); only the
-   *    envelope form resolves, a plain string there stays `{var}` interpolation.
+   *    `assignments.*` and the `create_record` / `update_record` `fields.*` —
+   *    declared through the spec Zod contract's `.meta({ xExpression: 'value' })`
+   *    (`AssignmentValueSchema`, `FlowValueSlotSchema`); only the envelope form
+   *    resolves, a plain string there stays `{var}` interpolation.
    *    Its `validateExpression('value', …)` check and its run-time evaluation
    *    are the executor half, in `service-automation`.
    *  - **Types and `required` are enforced at execute time for the

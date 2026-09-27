@@ -3016,6 +3016,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // this file is a local named `scope`; `graph.scope` is a KEY read off the
       // tabled `graph` receiver, so the metadata guard loses no coverage here.
       'scope',
+      // [#19938] The same import-specifier artefact, of
+      // `'./flow-template-grammar.js'` (`grammar.j…`): nothing in this file is
+      // a local named `grammar`.
+      'grammar',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

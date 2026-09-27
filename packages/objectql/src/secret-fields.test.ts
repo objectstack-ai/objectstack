@@ -21,7 +21,12 @@ import {
   collectMaskedPasswordFields,
   collectMaskedReadFields,
 } from './secret-fields.js';
-import { SECRET_MASK as SPEC_SECRET_MASK } from '@objectstack/spec/data';
+import {
+  SECRET_MASK as SPEC_SECRET_MASK,
+  FieldType,
+  ObjectSchema,
+  isMaskedOnReadFieldType,
+} from '@objectstack/spec/data';
 import type { ICryptoProvider, CryptoHandle, CryptoContext } from '@objectstack/spec/contracts';
 
 // ---- minimal stub driver (equality-only WHERE) ----------------------------
@@ -657,5 +662,93 @@ describe('objectql aggregate() rejects credential fields (ADR-0100 / #3171)', ()
     await expect(
       engine.aggregate('authy_user', { aggregations: [{ function: 'max', field: 'password', alias: 'x' }] as any }),
     ).rejects.toThrow(/password/);
+  });
+});
+
+/**
+ * [#20141] The masked-on-read answer for EVERY `FieldType × managedBy` cell —
+ * the security floor of lifting the fact into `@objectstack/spec`.
+ *
+ * Two pins, deliberately separate:
+ *
+ *  - **The floor.** The expected column is written out here (secret always;
+ *    password unless better-auth; nothing else), NOT read from the spec
+ *    declaration: a pin that imported the answer to check the answer would be
+ *    green through any edit to it. Which stored values leave the engine in
+ *    clear is a security decision, so an edit to the declaration has to turn
+ *    this red and be read.
+ *  - **The agreement.** For every cell, the runtime collectors and the spec
+ *    predicate give the same answer. This is what goes red when the runtime
+ *    grows its own copy again (a `def.type === …` arm) instead of deriving.
+ *    objectui keeps an interim copy until its re-bind card points it at the
+ *    same declaration; from then on a runtime-only answer is a field masked
+ *    by the server and drawn in clear by the client.
+ */
+describe('[#20141] masked-on-read: every FieldType × managedBy cell, derived from the spec declaration', () => {
+  const FIELD_TYPES: readonly string[] = FieldType.options;
+  const MANAGED_BY_BUCKETS: readonly string[] = (
+    ObjectSchema.shape.managedBy as unknown as { unwrap(): { options: readonly string[] } }
+  ).unwrap().options;
+  const ABSENT = Symbol('managedBy key absent');
+  const MANAGED_BY: readonly unknown[] = [ABSENT, ...MANAGED_BY_BUCKETS, undefined, null, 'system', 'not-a-bucket'];
+  // Unvalidated metadata reaches these collectors (stored rows, hand-built
+  // schemas), so the table also covers types no FieldType names.
+  const OFF_ENUM_TYPES: readonly unknown[] = [undefined, null, 42, ['secret'], '', 'constructor', 'toString',
+    '__proto__', 'SECRET', 'Password'];
+
+  const objectWith = (type: unknown, managedBy: unknown): any => ({
+    name: 'cell',
+    ...(managedBy === ABSENT ? {} : { managedBy }),
+    fields: { f: { type } },
+  });
+  const label = (type: unknown, managedBy: unknown) =>
+    `${JSON.stringify(type) ?? String(type)} × ${managedBy === ABSENT ? '(absent)' : String(managedBy)}`;
+  const specManagedBy = (managedBy: unknown) => (managedBy === ABSENT ? undefined : managedBy);
+
+  it('reads the live enums (the table below is not over an empty population)', () => {
+    expect(FIELD_TYPES).toContain('secret');
+    expect(FIELD_TYPES).toContain('password');
+    expect(FIELD_TYPES.length).toBeGreaterThan(40);
+    expect(MANAGED_BY_BUCKETS).toContain('better-auth');
+    expect(MANAGED_BY_BUCKETS.length).toBeGreaterThan(1);
+  });
+
+  it('the floor: secret is masked on every object, password on every object but better-auth, nothing else anywhere', () => {
+    let cells = 0;
+    let masked = 0;
+    for (const type of [...FIELD_TYPES, ...OFF_ENUM_TYPES]) {
+      for (const managedBy of MANAGED_BY) {
+        const expected = type === 'secret' || (type === 'password' && managedBy !== 'better-auth');
+        const schema = objectWith(type, managedBy);
+        expect(collectMaskedReadFields(schema).includes('f'), label(type, managedBy)).toBe(expected);
+        expect(collectMaskedPasswordFields(schema).includes('f'), `password half: ${label(type, managedBy)}`)
+          .toBe(expected && type === 'password');
+        cells += 1;
+        if (expected) masked += 1;
+      }
+    }
+    expect(cells).toBe((FIELD_TYPES.length + OFF_ENUM_TYPES.length) * MANAGED_BY.length);
+    // secret: every managedBy row; password: every row but one.
+    expect(masked).toBe(MANAGED_BY.length * 2 - 1);
+  });
+
+  it('the agreement: collectMaskedReadFields answers exactly what the spec predicate answers, cell for cell', () => {
+    for (const type of [...FIELD_TYPES, ...OFF_ENUM_TYPES]) {
+      for (const managedBy of MANAGED_BY) {
+        const schema = objectWith(type, managedBy);
+        const spec = isMaskedOnReadFieldType(type, specManagedBy(managedBy));
+        expect(collectMaskedReadFields(schema).includes('f'), label(type, managedBy)).toBe(spec);
+        expect(collectMaskedPasswordFields(schema).includes('f'), `password half: ${label(type, managedBy)}`)
+          .toBe(spec && type === 'password');
+      }
+    }
+  });
+
+  it('keeps declaration order and skips empty field definitions on a mixed object', () => {
+    const fields = { a: { type: 'text' }, b: { type: 'secret' }, c: { type: 'password' }, d: null, e: { type: 'secret' } };
+    expect(collectMaskedReadFields({ name: 'mixed', fields } as any)).toEqual(['b', 'c', 'e']);
+    expect(collectMaskedReadFields({ name: 'mixed', managedBy: 'better-auth', fields } as any)).toEqual(['b', 'e']);
+    expect(collectMaskedPasswordFields({ name: 'mixed', fields } as any)).toEqual(['c']);
+    expect(collectMaskedPasswordFields({ name: 'mixed', managedBy: 'better-auth', fields } as any)).toEqual([]);
   });
 });
