@@ -19,9 +19,9 @@
 //     shrink the sweep while the file count stayed comfortably non-zero, and the
 //     test would report a clean audit over source it never opened — the exact
 //     shape the rule itself is about, turned on the rule (#4930). So the root is
-//     resolved up front, and the walk's one `catch` (`statListedEntry`) skips
-//     only an entry that VANISHED between its listing and its stat and rethrows
-//     every other error.
+//     resolved up front, the corpus is git's tracked-file list (a git failure
+//     throws with git's stderr), and nothing on the way to the sweep carries a
+//     `catch`.
 //  2. **A rule that matches nothing.** A ratchet that has only ever been green
 //     cannot be told apart from a dead one (#4690), and this one has been green
 //     from its first commit. `the sweep can still fire` therefore pushes a
@@ -39,7 +39,8 @@
 //     gets (2)'s treatment rather than a comment: it is a pure function, and
 //     `the staleness comparison can still fire` pushes a known pair through the
 //     SAME function the real case calls.
-import { lstatSync, readdirSync, readFileSync, statSync, type Stats } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -71,74 +72,57 @@ const LEDGER: Readonly<Record<string, string>> = {};
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'coverage', '.cache', '.next']);
 
 /**
- * `statSync(path)` for an entry the walk's own listing just named, or `null`
- * when that entry VANISHED since. The rule is the one the error-status walker
- * pins (`statListedEntry` in `check-error-status-conformance.mjs` under
- * `scripts/`), spelled the same way so the two read as one rule.
+ * Every auditable `.ts` under `packages/`, taken from git's TRACKED-file list
+ * rather than from a filesystem walk.
  *
- * Why it exists: this suite runs inside the same turbo run as package builds,
- * and tsup (through bundle-require) writes `tsup.config.bundled_<id>.mjs` beside
- * a package's config, imports it and unlinks it. `readdirSync` can list that
- * file and the bare `statSync` then threw `ENOENT` for a `.mjs` the `.ts` filter
- * below would have dropped anyway, failing the whole corpus.
+ * Why git and not a walk. This suite runs in the same turbo run as package
+ * builds and as other packages' tests, and both leave transient entries under
+ * `packages/`: tsup (through bundle-require) writes `tsup.config.bundled_ID.mjs`
+ * beside a config, imports it and unlinks it, and `packages/cli` tests create
+ * and delete `.ts` fixtures under `packages/cli/tmp/`. A walk could list such an
+ * entry and then find it gone at the stat, at the next `readdirSync` or at the
+ * sweep's `readFileSync` (`ENOENT`, the whole corpus red), and a fixture that
+ * lived long enough was audited as if it were source. Neither kind is ever in
+ * the tracked list. `operation-private-keys.pin.test.ts` in `@objectstack/core`
+ * moved its scan surface to git for the same nondeterminism.
  *
- * Skipped: only an entry whose `stat` AND `lstat` both answer `ENOENT` — it is
- * gone, and there is nothing left to audit. Everything else still throws:
- *   - a dangling symlink (`stat` answers `ENOENT`, `lstat` finds the link), as
- *     the entry exists and skipping it would shrink the corpus;
- *   - `ENOTDIR`, `EACCES` and every other code;
- *   - a missing root, which no listing named (the `describe` block stats it).
- * A present entry is stat'ed exactly as before, and nothing is matched by name.
- * Only this per-entry stat is covered: a listed directory that vanishes before
- * its own `readdirSync`, and a collected file that vanishes before the sweep's
- * `readFileSync`, still throw. ⛔ Never a retry.
+ * The population is otherwise the walk's: every tracked path under `packages/`
+ * with no segment in `SKIP_DIRS`, whose name ends in `.ts` and is not a `.d.ts`,
+ * `.test.`, `.spec.` or `.conformance.` file.
+ *
+ * What it gives up, on purpose: a file written but not yet `git add`ed is not
+ * audited until it is added. CI checks out committed files, so nothing reaches
+ * `main` unaudited.
+ *
+ * No `catch`, here or at the read. A git failure (no repository, no `git` on
+ * PATH, a bad argument) throws from `execFileSync`, and its message carries the
+ * command, the exit status and git's stderr. A tracked file missing from the
+ * working tree (deleted, deletion not staged) fails the sweep's `readFileSync`.
+ * Either way the corpus was not fully read, which must not be reported as a
+ * clean audit.
  */
-function statListedEntry(path: string): Stats | null {
-  try {
-    return statSync(path);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw err;
-    let entry: Stats;
-    try {
-      entry = lstatSync(path);
-    } catch (again) {
-      if ((again as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return null; // vanished
-      throw again;
-    }
-    // Present after all. A symlink here is dangling: throw the original error.
-    if (entry.isSymbolicLink()) throw err;
-    // Absent at the stat, back under the same name: for a non-symlink, `lstat`
-    // IS its `stat`, so it is audited as present.
-    return entry;
-  }
-}
-
-/**
- * Every auditable `.ts` under `dir`.
- *
- * No `catch` of its own: an error during the walk means the corpus was only
- * partly read, which must not be reported as a clean audit. The one tolerated
- * error, an entry that vanished between listing and stat, lives in
- * `statListedEntry` above and says what it does not cover.
- */
-function collectSourceFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    if (SKIP_DIRS.has(entry)) continue;
-    const full = join(dir, entry);
-    const stats = statListedEntry(full);
-    if (stats === null) continue;
-    if (stats.isDirectory()) collectSourceFiles(full, out);
-    else if (
-      entry.endsWith('.ts') &&
-      !entry.endsWith('.d.ts') &&
-      !entry.includes('.test.') &&
-      !entry.includes('.spec.') &&
-      !entry.includes('.conformance.')
-    ) {
-      out.push(full);
-    }
-  }
-  return out;
+function collectSourceFiles(): string[] {
+  const listed = execFileSync('git', ['ls-files', '-z', '--cached', '--', 'packages'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 1 << 28,
+  });
+  return listed
+    .split('\0')
+    .filter((path) => {
+      if (path.length === 0) return false;
+      const segments = path.split('/');
+      if (segments.slice(1).some((segment) => SKIP_DIRS.has(segment))) return false;
+      const name = segments[segments.length - 1];
+      return (
+        name.endsWith('.ts') &&
+        !name.endsWith('.d.ts') &&
+        !name.includes('.test.') &&
+        !name.includes('.spec.') &&
+        !name.includes('.conformance.')
+      );
+    })
+    .map((path) => join(repoRoot, path));
 }
 
 /** The sweep, as one function, so the corpus and the non-vacuity case share it. */
@@ -240,7 +224,7 @@ describe('startup open-vocabulary verdicts across packages/ (#4776)', () => {
   expect(stat.isDirectory(), `${packagesDir} must be a directory — the sweep's verdict is drawn from reading it`).toBe(
     true,
   );
-  const files = collectSourceFiles(packagesDir);
+  const files = collectSourceFiles();
 
   /**
    * The findings, swept once for the whole file.
