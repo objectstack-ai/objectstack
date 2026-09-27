@@ -374,13 +374,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   //              console's switcher reads it.
   //   scope      stamped `package` by `expandViewContainer`; nothing writes
   //              `shared` or `personal`.
-  //   owner      no writer and no reader of the view key in either repo.
-  //   hidden     no writer and no reader of the view key in either repo.
+  //   owner      no writer and no reader of the view key in either repo —
+  //              RETIRED since (#20085): a `retiredKey()` tombstone on the
+  //              shared view-item shape, so no form can offer it.
+  //   hidden     no writer and no reader of the view key in either repo —
+  //              RETIRED since (#20085), the same tombstone.
   //
   // None of them gets a row. The first four are authored, so a row would
   // excuse a key a per-arm form may owe an offer, and that is a question for
-  // the first arm form rather than for this ledger. The last three have no
-  // live writer, so there is no platform-written state to give as the reason.
+  // the first arm form rather than for this ledger. `scope` has no live writer
+  // of `shared` or `personal`, so there is no platform-written state to give as
+  // the reason; `owner` and `hidden` are no longer writable at all.
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

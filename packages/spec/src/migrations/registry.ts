@@ -5291,7 +5291,23 @@ const step18: MigrationStep = {
     + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
     + 'a page selects — as it does every filter of a component whose rows are inline, which '
     + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
-    + 'the door and taught the array; the stored-row seams and this chain replay it.',
+    + 'the door and taught the array; the stored-row seams and this chain replay it. '
+    + 'It also retires the view item\'s `owner` and `hidden` (#20085, ADR-0049 '
+    + 'enforce-or-remove). Both sat on the view-item identity layer, were accepted by the '
+    + 'strict authoring door and by the wire member the `view` write door validates, and were '
+    + 'stored verbatim — and nothing read either: both switcher read paths filter on '
+    + '`viewKind` + `object` and sort on `order`, so `hidden: true` hid nothing, and no '
+    + 'per-user scope ever read `owner`, so a view marked as one user\'s was listed for '
+    + 'everyone who can read the object. Per-user view scoping is a parked direction '
+    + '(ADR-0017, amended 2026-09-04), not a shipped mechanism. Both keys are `retiredKey()` '
+    + 'tombstones on the SHARED shape, because that shape also feeds the `.strip()` wire '
+    + 'member, where a bare deletion would be a silent strip. The D2 conversion '
+    + '`view-item-owner-hidden-removed` strips them from the view item RECORD spelling only, '
+    + 'as a lossless delete, in both collections a record travels in — `views` (stack sources '
+    + 'and stored rows) and the assembled-manifest `viewItems` channel (package export, '
+    + 'environment artifacts), whose registration parse would otherwise refuse an artifact '
+    + 'assembled before this release; a flattened overlay keeps its own `owner` / `hidden`, '
+    + 'which are declared on a different door this retirement does not touch.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5328,6 +5344,7 @@ const step18: MigrationStep = {
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
     'page-component-filter-record-to-rule-array',
+    'view-item-owner-hidden-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -18690,6 +18707,56 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // carrying both — and the D2 conversion `chart-config-aria-removed` strips all
     // of them together with the dashboard site.
     'ui/ReportChart:aria',
+    // #20085 (ADR-0049 enforce-or-remove; triage direction 「retire both keys」).
+    // `ViewItem.hidden` promised to hide a view item from the switcher, and nothing
+    // ever read it: no writer and no reader of the view-item key in the framework,
+    // in objectui at its pin and at `main`, or in cloud, and both switcher read
+    // paths filter on `viewKind` + `object` only — `hidden: true` hid nothing.
+    // Tombstoned with `retiredKey()` on the shared `viewItemBaseShape()`, because
+    // that shape also feeds the `.strip()` wire member (`ui/ViewItemWire`,
+    // registered beside this row), where a bare deletion would strip in silence.
+    // The flattened-overlay members declare their own `hidden` on a different door,
+    // untouched. ⚠️ No gate below can JUDGE this row: `ui/ViewItem` is a
+    // discriminated union, whose emitted JSON Schema has no top-level
+    // `properties`, so `authorable-surface/` carries no `ui/ViewItem:*` line and
+    // check (b) never sees the tombstone — the row is declared, not checked.
+    // D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItem:hidden',
+    // #20085 (ADR-0049 enforce-or-remove; triage direction 「retire both keys」).
+    // `ViewItem.owner` named the user a `personal` view item belonged to, and
+    // nothing ever read it: no writer and no reader of the view-item key in the
+    // framework, in objectui at its pin and at `main`, or in cloud, and both
+    // switcher read paths filter on `viewKind` + `object` only — so a view marked
+    // as one user's was listed for everyone who can read the object. Per-user view
+    // scoping is a parked direction (ADR-0017, amended 2026-09-04). Tombstoned with
+    // `retiredKey()` on the shared `viewItemBaseShape()`, because that shape also
+    // feeds the `.strip()` wire member (`ui/ViewItemWire`, registered beside this
+    // row), where a bare deletion would strip in silence. ⚠️ No gate below can
+    // JUDGE this row: `ui/ViewItem` is a discriminated union, whose emitted JSON
+    // Schema has no top-level `properties`, so `authorable-surface/` carries no
+    // `ui/ViewItem:*` line and check (b) never sees the tombstone — the row is
+    // declared, not checked. D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItem:owner',
+    // #20085 — the wire carrier of `ui/ViewItem:hidden` (see that row for the
+    // measurement). `ViewItemWireSchema` is member 1 of the `view` union
+    // `saveMetaItem` validates; it is built from the same `viewItemBaseShape()`, so
+    // the one tombstone refuses the key there too instead of letting `.strip()`
+    // drop it in silence — registered under both def keys, the
+    // `integration/DeclarativeConnectorEntry:connectionTimeoutMs` precedent. Same
+    // blind spot as its sibling: a discriminated-union def emits no top-level
+    // `properties`, so no gate judges this row.
+    // D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItemWire:hidden',
+    // #20085 — the wire carrier of `ui/ViewItem:owner` (see that row for the
+    // measurement). `ViewItemWireSchema` is member 1 of the `view` union
+    // `saveMetaItem` validates; it is built from the same `viewItemBaseShape()`, so
+    // the one tombstone refuses the key there too instead of letting `.strip()`
+    // drop it in silence — registered under both def keys, the
+    // `integration/DeclarativeConnectorEntry:connectionTimeoutMs` precedent. Same
+    // blind spot as its sibling: a discriminated-union def emits no top-level
+    // `properties`, so no gate judges this row.
+    // D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItemWire:owner',
     // </os-generated retired-key:18>
   ],
 };
