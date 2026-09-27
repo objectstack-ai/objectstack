@@ -39,6 +39,15 @@ import {
   isReceiverRegistered,
   receiverCallNameFromNoOverload,
 } from './unknown-function';
+import { DEFAULT_TRAVERSAL_ROOT, type TraversalConflictKind } from './relationship-traversal';
+import type {
+  CelFieldRole,
+  ExprValidationCode,
+  ExpressionRefusal,
+  ExpressionRefusalParams,
+  ExpressionSourceKind,
+} from './expression-refusal';
+import type { CelLimitKey } from './cel-engine';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
 
@@ -163,12 +172,40 @@ export interface ExprSchemaHint {
   traversalHydration?: boolean;
 }
 
-export interface ExprValidationError {
+/**
+ * One refusal (in `errors[]`) or advisory (in `warnings[]`).
+ *
+ * `code` and `params` say the same thing as `message`, for a consumer that
+ * renders its own words: `code` is one of the closed set in
+ * `expression-refusal.ts` and `params` are the values `message` interpolates.
+ * `message` is the English sentence, unchanged.
+ */
+export type ExprValidationError = {
   /** Self-correcting message: what is wrong + the correct form. */
   message: string;
   /** The offending source, echoed for location. */
   source: string;
+} & ExpressionRefusal<ExprValidationCode>;
+
+/**
+ * Build one {@link ExprValidationError}. The single place the correlation
+ * between `code` and `params` is asserted; every call site is checked against
+ * {@link ExpressionRefusalParams} for its own code.
+ */
+function refusal<C extends ExprValidationCode>(
+  code: C,
+  params: ExpressionRefusalParams[C],
+  source: string,
+  message: string,
+): ExprValidationError {
+  return { source, message, code, params } as ExprValidationError;
 }
+
+/** A traversal conflict's kind → the refusal code it is reported under. */
+const TRAVERSAL_CONFLICT_CODE: Readonly<Record<TraversalConflictKind, 'traversal-bare-and-traversed' | 'traversal-multi-hop'>> = {
+  'bare-and-traversed': 'traversal-bare-and-traversed',
+  'multi-hop': 'traversal-multi-hop',
+};
 
 export interface ExprValidationResult {
   ok: boolean;
@@ -229,34 +266,43 @@ function typeSoundnessIssue(
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   const mismatch = firstTypeMismatch(source, toCelFieldTypes(fieldTypes), scope);
   if (!mismatch) return null;
-  const ref = mismatch.field
-    ? (scope === 'record' ? `\`record.${mismatch.field}\`` : `\`${mismatch.field}\``)
-    : null;
+  const reference = mismatch.field
+    ? (scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
+    : undefined;
+  const ref = reference !== undefined ? `\`${reference}\`` : null;
   if (mismatch.category === 'date-arith') {
     const subject = ref ? `${ref} is a date` : 'a date field';
     return {
       severity: 'error',
-      issue: {
+      issue: refusal(
+        'date-arithmetic',
+        { operands: mismatch.operands, ...(reference !== undefined ? { reference } : {}) },
         source,
-        message:
-          `date arithmetic \`${mismatch.operands}\` — ${subject}, and CEL can't do arithmetic on ` +
+        `date arithmetic \`${mismatch.operands}\` — ${subject}, and CEL can't do arithmetic on ` +
           `dates: this faults at runtime, so the field silently evaluates to null. Use ` +
           `\`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
           `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`,
-      },
+      ),
     };
   }
-  const held = mismatch.celType === 'bool' ? 'a boolean' : 'text';
+  const heldKind = mismatch.celType === 'bool' ? 'boolean' : 'text';
+  const held = heldKind === 'boolean' ? 'a boolean' : 'text';
   const subject = ref ? `${ref} holds ${held}` : `${held === 'a boolean' ? 'a boolean' : 'a text'} field`;
   return {
     severity: 'warning',
-    issue: {
+    issue: refusal(
+      'type-mismatch',
+      {
+        operands: mismatch.operands,
+        operator: mismatch.operator,
+        held: heldKind,
+        ...(reference !== undefined ? { reference } : {}),
+      },
       source,
-      message:
-        `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
+      `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
         `against a number. This faults at runtime, so the expression silently evaluates to null ` +
         `(unless the value happens to be numeric). Use a number field, or drop the arithmetic/comparison.`,
-    },
+    ),
   };
 }
 
@@ -270,11 +316,17 @@ export function expectedDialect(role: FieldRole): 'cel' | 'template' {
   return role === 'template' ? 'template' : 'cel';
 }
 
-/** `an array` / `an object` / `a number` — never called with a string or nullish. */
-function describeNonStringSource(value: unknown): string {
-  if (Array.isArray(value)) return 'an array';
-  if (typeof value === 'object') return 'an object';
-  return `a ${typeof value}`;
+/** `array` / `object` / `number` — never called with a string or nullish. */
+function nonStringSourceKind(value: unknown): ExpressionSourceKind {
+  if (Array.isArray(value)) return 'array';
+  return typeof value as ExpressionSourceKind;
+}
+
+/** `an array` / `an object` / `a number` — the kind as the message renders it. */
+function describeNonStringSource(kind: ExpressionSourceKind): string {
+  if (kind === 'array') return 'an array';
+  if (kind === 'object') return 'an object';
+  return `a ${kind}`;
 }
 
 /**
@@ -302,13 +354,13 @@ function describeNonStringSource(value: unknown): string {
  * unchanged — including the `{ ast }` envelope, which carries no `source` at all
  * and whose admission is `ExpressionSchema`'s rule, not this function's.
  */
-function toSource(input: ExprInput): { dialect?: string; source: string; nonStringSource?: string } {
+function toSource(input: ExprInput): { dialect?: string; source: string; nonStringSource?: ExpressionSourceKind } {
   if (input == null) return { source: '' };
   if (typeof input === 'string') return { source: input };
   const raw = (input as { source?: unknown }).source;
   if (raw == null) return { dialect: input.dialect, source: '' };
   if (typeof raw !== 'string') {
-    return { dialect: input.dialect, source: '', nonStringSource: describeNonStringSource(raw) };
+    return { dialect: input.dialect, source: '', nonStringSource: nonStringSourceKind(raw) };
   }
   return { dialect: input.dialect, source: raw };
 }
@@ -323,14 +375,16 @@ function toSource(input: ExprInput): { dialect?: string; source: string; nonStri
 const NON_STRING_SOURCE_REFUSAL =
   'an expression envelope carries its expression as a string `source`';
 
-function bracesHint(source: string): string | null {
+function bracesHint(source: string): { text: string; ref: string } | null {
   const m = SINGLE_BRACE_RE.exec(source);
   if (!m) return null;
   const ref = m[1];
-  return (
-    `it looks like a \`{${ref}}\` template brace was used inside a CEL expression — ` +
-    `\`{…}\` parses as a CEL map literal and fails. Write the bare reference instead, e.g. \`${ref}\`.`
-  );
+  return {
+    ref,
+    text:
+      `it looks like a \`{${ref}}\` template brace was used inside a CEL expression — ` +
+      `\`{…}\` parses as a CEL map literal and fails. Write the bare reference instead, e.g. \`${ref}\`.`,
+  };
 }
 
 /**
@@ -365,24 +419,26 @@ function bracesHint(source: string): string | null {
  * formula value. Shrinking and denormalising are safe everywhere; splitting is
  * offered only with the caveat that the site decides what splitting means.
  */
-function boundsHint(source: string): string | null {
+function boundsHint(source: string): { text: string; limit?: CelLimitKey; limitValue?: number } | null {
   const parsed = parseCelToAstWithReason(source);
   // `celEngine.compile` said `bounds`, and both verdicts are graded by the same
   // `classifyCelFault`, so this holds — but a narrowing that ever stopped
   // holding must degrade to the old trailer, never to a wrong bound name.
   if (parsed.ok || parsed.kind !== 'bounds') return null;
   const { limit, limitValue } = parsed.overrun;
-  const bound =
-    limit && limitValue != null
-      ? `the \`${limit}\` budget (limit ${limitValue})`
-      : "one of the platform's parse budgets";
-  return (
-    `this is valid CEL that exceeds ${bound} — a SIZE fault, not a dialect mistake, so ` +
-    `re-spelling the expression will not fix it. Shrink it (fewer clauses, shallower nesting, ` +
-    `fewer list elements), or precompute the heavy part into a stored field and reference that ` +
-    `field instead. Splitting it into several expressions changes how they combine at this ` +
-    `authoring site, so check that site's semantics before doing that.`
-  );
+  const known = limit && limitValue != null ? { limit, limitValue } : null;
+  const bound = known
+    ? `the \`${known.limit}\` budget (limit ${known.limitValue})`
+    : "one of the platform's parse budgets";
+  return {
+    ...(known ?? {}),
+    text:
+      `this is valid CEL that exceeds ${bound} — a SIZE fault, not a dialect mistake, so ` +
+      `re-spelling the expression will not fix it. Shrink it (fewer clauses, shallower nesting, ` +
+      `fewer list elements), or precompute the heavy part into a stored field and reference that ` +
+      `field instead. Splitting it into several expressions changes how they combine at this ` +
+      `authoring site, so check that site's semantics before doing that.`,
+  };
 }
 
 /**
@@ -458,18 +514,21 @@ function nearestCallable(name: string): string | undefined {
  * contains is being adjudicated separately, and a message asserting a count
  * would be falsified by that ruling.
  */
-function unknownFunctionHint(celMessage: string): string | null {
+function unknownFunctionHint(celMessage: string): { text: string; name: string; suggestion?: string } | null {
   const name = callNameFromNoOverload(celMessage);
   if (!name || CEL_STDLIB_FUNCTIONS.includes(name)) return null;
   const suggestion = nearestCallable(name);
-  return (
-    `\`${name}\` is not a callable name here — a NAME fault, not a dialect mistake, so ` +
-    `re-spelling the expression will not fix it.` +
-    (suggestion ? ` Did you mean \`${suggestion}\`?` : '') +
-    ` The callable names this platform advertises for authoring are the \`functions\` list ` +
-    `\`introspectScope\` returns (\`CEL_STDLIB_FUNCTIONS\`) — pick one of those, or precompute ` +
-    `the value in a stored field and reference that field instead.`
-  );
+  return {
+    name,
+    ...(suggestion ? { suggestion } : {}),
+    text:
+      `\`${name}\` is not a callable name here — a NAME fault, not a dialect mistake, so ` +
+      `re-spelling the expression will not fix it.` +
+      (suggestion ? ` Did you mean \`${suggestion}\`?` : '') +
+      ` The callable names this platform advertises for authoring are the \`functions\` list ` +
+      `\`introspectScope\` returns (\`CEL_STDLIB_FUNCTIONS\`) — pick one of those, or precompute ` +
+      `the value in a stored field and reference that field instead.`,
+  };
 }
 
 /**
@@ -542,22 +601,25 @@ function receiverChainInSource(source: string, name: string): string | undefined
  * class keeps the existing trailer: its fault is the ARGUMENTS, and grading
  * those is the blind spot #13594 deliberately keeps blind.
  */
-function receiverCallHint(celMessage: string, source: string): string | null {
+function receiverCallHint(celMessage: string, source: string): { text: string; name: string; receiver?: string } | null {
   const name = receiverCallNameFromNoOverload(celMessage);
   if (!name || !CEL_STDLIB_FUNCTIONS.includes(name)) return null;
   if (isReceiverRegistered(name)) return null;
   const receiver = receiverChainInSource(source, name);
-  return (
-    `\`${name}\` is callable bare, not as a method — a CALL-SHAPE fault, not a dialect ` +
-    `mistake, so re-spelling the expression will not fix it. ` +
-    (receiver
-      ? `Write \`${name}(${receiver})\` instead.`
-      : `Write \`${name}(…)\` with the receiver as its first argument instead.`) +
-    ` The callable names this platform advertises for authoring (the \`functions\` list ` +
-    `\`introspectScope\` returns, \`CEL_STDLIB_FUNCTIONS\`) take their subject as an ` +
-    `argument; only cel-js's own receiver methods (\`record.name.split(',')\`) are written ` +
-    `after a dot.`
-  );
+  return {
+    name,
+    ...(receiver ? { receiver } : {}),
+    text:
+      `\`${name}\` is callable bare, not as a method — a CALL-SHAPE fault, not a dialect ` +
+      `mistake, so re-spelling the expression will not fix it. ` +
+      (receiver
+        ? `Write \`${name}(${receiver})\` instead.`
+        : `Write \`${name}(…)\` with the receiver as its first argument instead.`) +
+      ` The callable names this platform advertises for authoring (the \`functions\` list ` +
+      `\`introspectScope\` returns, \`CEL_STDLIB_FUNCTIONS\`) take their subject as an ` +
+      `argument; only cel-js's own receiver methods (\`record.name.split(',')\`) are written ` +
+      `after a dot.`,
+  };
 }
 
 function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined, errors: ExprValidationError[]): void {
@@ -571,12 +633,17 @@ function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined,
     if (seen.has(field) || known.has(field)) continue;
     seen.add(field);
     const suggestion = nearest(field, schema.fields);
-    errors.push({
+    errors.push(refusal(
+      'unknown-field',
+      {
+        field,
+        ...(schema.objectName ? { objectName: schema.objectName } : {}),
+        ...(suggestion ? { suggestion } : {}),
+      },
       source,
-      message:
-        `unknown field \`${field}\`${schema.objectName ? ` on \`${schema.objectName}\`` : ''}` +
+      `unknown field \`${field}\`${schema.objectName ? ` on \`${schema.objectName}\`` : ''}` +
         (suggestion ? ` — did you mean \`${suggestion}\`?` : ''),
-    });
+    ));
   }
 }
 
@@ -620,22 +687,25 @@ function isNamespaceUse(name: string, source: string): boolean {
  *    prescriptions at once: two findings pointing opposite ways is the shape
  *    the author cannot act on.
  */
-function mistypedRootMessage(
+function mistypedRootRefusal(
   bare: string,
   source: string,
   surfaceRoots: readonly string[],
   fields: readonly string[] | undefined,
-): string | null {
+): ExprValidationError | null {
   if (surfaceRoots.length === 0) return null;
   if (fields?.includes(bare)) return null;
   if (!isNamespaceUse(bare, source)) return null;
   const suggestion = nearest(bare, surfaceRoots);
   if (!suggestion) return null;
-  return (
+  return refusal(
+    'unbound-root',
+    { name: bare, roots: [...surfaceRoots], suggestion },
+    source,
     `unbound root \`${bare}\` — beyond the record this authoring surface binds ` +
-    `\`${surfaceRoots.join('`, `')}\`, and \`${bare}\` is none of them, so \`${bare}.…\` ` +
-    `resolves to nothing and the expression silently evaluates to null. ` +
-    `Did you mean \`${suggestion}\`?`
+      `\`${surfaceRoots.join('`, `')}\`, and \`${bare}\` is none of them, so \`${bare}.…\` ` +
+      `resolves to nothing and the expression silently evaluates to null. ` +
+      `Did you mean \`${suggestion}\`?`,
   );
 }
 
@@ -713,13 +783,14 @@ function checkRoleCatalog(
       if (known.has(name) || seen.has(name)) continue;
       seen.add(name);
       const suggestion = nearest(name, catalog);
-      errors.push({
+      errors.push(refusal(
+        'unknown-role',
+        { name, ...(suggestion ? { suggestion } : {}), catalog: [...catalog] },
         source,
-        message:
-          `unknown role \`${name}\` — not a defined role` +
+        `unknown role \`${name}\` — not a defined role` +
           (suggestion ? `; did you mean \`${suggestion}\`?` : '.') +
           ` Valid roles: ${catalog.join(', ')}.`,
-      });
+      ));
     }
   }
 }
@@ -746,14 +817,15 @@ export function validateExpression(
     // Attributed to the empty string, deliberately: the value that would be the
     // location IS the value being refused, so echoing it would put a non-string
     // into a `source: string` slot every caller renders.
-    errors.push({
-      source: '',
-      message:
-        `invalid ${role} envelope: ${NON_STRING_SOURCE_REFUSAL} — found ${nonStringSource}. ` +
+    errors.push(refusal(
+      'envelope-source-not-text',
+      { role, found: nonStringSource },
+      '',
+      `invalid ${role} envelope: ${NON_STRING_SOURCE_REFUSAL} — found ${describeNonStringSource(nonStringSource)}. ` +
         `Write the expression as bare text (e.g. ${role === 'template' ? '`Hi {{ record.name }}`' : '`record.rating >= 4`'}), ` +
         `or as an envelope whose \`source\` is that text ` +
         `(e.g. \`{ dialect: '${expectedDialect(role)}', source: '…' }\`).`,
-    });
+    ));
     return { ok: false, errors, warnings };
   }
   if (!source.trim()) return { ok: true, errors, warnings };
@@ -762,22 +834,37 @@ export function validateExpression(
     // Templates must be the `template` dialect (or untyped string). Reject a
     // CEL envelope mistakenly placed in a text field.
     if (dialect && dialect !== 'template') {
-      errors.push({ source, message: `expected a text template but got a \`${dialect}\` expression.` });
+      errors.push(refusal(
+        'template-dialect-mismatch',
+        { dialect },
+        source,
+        `expected a text template but got a \`${dialect}\` expression.`,
+      ));
       return { ok: false, errors, warnings };
     }
     const compiled = templateEngine.compile(source);
     if (!compiled.ok) {
-      errors.push({ source, message: `invalid template: ${compiled.error.message} (holes use \`{{ path }}\`).` });
+      errors.push(refusal(
+        'invalid-template',
+        { detail: compiled.error.message },
+        source,
+        `invalid template: ${compiled.error.message} (holes use \`{{ path }}\`).`,
+      ));
     }
     // A single `{x}` in a template is the legacy/deprecated form (ADR-0032 §3).
     const hint = SINGLE_BRACE_RE.test(source) ? bracesHintForTemplate(source) : null;
-    if (hint) errors.push({ source, message: hint });
+    if (hint) errors.push(refusal('template-single-brace', { ref: hint.ref }, source, hint.text));
     return { ok: errors.length === 0, errors, warnings };
   }
 
   // predicate | value → CEL
   if (dialect && dialect !== 'cel') {
-    errors.push({ source, message: `expected a CEL expression but got a \`${dialect}\` dialect.` });
+    errors.push(refusal(
+      'cel-dialect-mismatch',
+      { dialect },
+      source,
+      `expected a CEL expression but got a \`${dialect}\` dialect.`,
+    ));
     return { ok: false, errors, warnings };
   }
   const compiled = celEngine.compile(source);
@@ -798,19 +885,36 @@ export function validateExpression(
     // mismatch (`1 + 'a'`, `no such overload: int + string`), or a real function
     // handed wrong arguments (`upper(1, 2)`, `record.name.contains()`) — gets
     // null from both and keeps the existing trailer.
-    const classHint =
-      compiled.error.kind === 'bounds'
-        ? boundsHint(source)
-        : compiled.error.kind === 'type'
-          ? (receiverCallHint(compiled.error.message, source) ?? unknownFunctionHint(compiled.error.message))
-          : null;
-    const hint = classHint ?? bracesHint(source);
-    errors.push({
-      source,
-      message:
-        `invalid CEL ${role}: ${compiled.error.message}` +
-        (hint ? ` — ${hint}` : ` — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`),
-    });
+    //
+    // Each arm is its own refusal code, so the one that wrote the prescription
+    // is the one that names the code — the message and the code cannot
+    // disagree about which fault this was.
+    const celRole: CelFieldRole = role;
+    const detail = compiled.error.message;
+    const lead = `invalid CEL ${role}: ${detail}`;
+    const bounds = compiled.error.kind === 'bounds' ? boundsHint(source) : null;
+    const method = !bounds && compiled.error.kind === 'type' ? receiverCallHint(detail, source) : null;
+    const unknownFn = !bounds && !method && compiled.error.kind === 'type' ? unknownFunctionHint(detail) : null;
+    const braces = !bounds && !method && !unknownFn ? bracesHint(source) : null;
+    if (bounds) {
+      const { text, ...budget } = bounds;
+      errors.push(refusal('cel-too-large', { role: celRole, detail, ...budget }, source, `${lead} — ${text}`));
+    } else if (method) {
+      const { text, ...call } = method;
+      errors.push(refusal('cel-method-call', { role: celRole, detail, ...call }, source, `${lead} — ${text}`));
+    } else if (unknownFn) {
+      const { text, ...call } = unknownFn;
+      errors.push(refusal('cel-unknown-function', { role: celRole, detail, ...call }, source, `${lead} — ${text}`));
+    } else if (braces) {
+      errors.push(refusal('cel-template-brace', { role: celRole, detail, ref: braces.ref }, source, `${lead} — ${braces.text}`));
+    } else {
+      errors.push(refusal(
+        'invalid-cel',
+        { role: celRole, detail },
+        source,
+        `${lead} — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`,
+      ));
+    }
   } else {
     checkFieldExistence(source, schema, errors);
     checkRoleCatalog(source, schema, errors);
@@ -825,14 +929,17 @@ export function validateExpression(
       const surfaceRoots = schema.roots ?? [];
       const bare = firstUndeclaredReference(source, surfaceRoots);
       if (bare) {
-        errors.push({
-          source,
-          message:
-            mistypedRootMessage(bare, source, surfaceRoots, schema.fields) ??
-            `bare reference \`${bare}\` — a formula/validation expression binds the record as the ` +
-            `\`record\` namespace, not at top level, so \`${bare}\` resolves to nothing and the ` +
-            `expression silently evaluates to null. Write \`record.${bare}\`.`,
-        });
+        errors.push(
+          mistypedRootRefusal(bare, source, surfaceRoots, schema.fields) ??
+            refusal(
+              'bare-reference',
+              { name: bare },
+              source,
+              `bare reference \`${bare}\` — a formula/validation expression binds the record as the ` +
+                `\`record\` namespace, not at top level, so \`${bare}\` resolves to nothing and the ` +
+                `expression silently evaluates to null. Write \`record.${bare}\`.`,
+            ),
+        );
       } else if (schema.fieldTypes) {
         // #1928 / #3306 — with per-field types in hand, flag a type-unsound
         // operator use that faults at runtime and silently nulls: a text/boolean
@@ -856,13 +963,18 @@ export function validateExpression(
       if (unknown) {
         const suggestion = nearest(unknown, schema.fields);
         if (suggestion) {
-          warnings.push({
+          warnings.push(refusal(
+            'field-near-miss',
+            {
+              name: unknown,
+              suggestion,
+              ...(schema.objectName != null ? { objectName: schema.objectName } : {}),
+            },
             source,
-            message:
-              `\`${unknown}\` is not a field of \`${schema.objectName ?? 'the trigger object'}\` — ` +
+            `\`${unknown}\` is not a field of \`${schema.objectName ?? 'the trigger object'}\` — ` +
               `did you mean \`${suggestion}\`? (flow conditions reference fields bare, e.g. \`${suggestion} == …\`). ` +
               `If \`${unknown}\` is a flow variable this is safe to ignore.`,
-          });
+          ));
         }
       }
       // #1928 / #3306 — the same type-soundness check, for bare-field conditions:
@@ -895,16 +1007,23 @@ export function validateExpression(
         analysis,
         (field) => REFERENCE_VALUE_TYPES.has(schema.fieldTypes![field] ?? ''),
       );
-      for (const conflict of conflicts) errors.push({ source, message: conflict.message });
+      for (const conflict of conflicts) {
+        errors.push(refusal(
+          TRAVERSAL_CONFLICT_CODE[conflict.kind],
+          { root: DEFAULT_TRAVERSAL_ROOT, field: conflict.field },
+          source,
+          conflict.message,
+        ));
+      }
     }
   }
   return { ok: errors.length === 0, errors, warnings };
 }
 
-function bracesHintForTemplate(source: string): string {
+function bracesHintForTemplate(source: string): { text: string; ref: string } {
   const m = SINGLE_BRACE_RE.exec(source);
   const ref = m?.[1] ?? 'field';
-  return `single-brace \`{${ref}}\` is not a valid template hole — use double braces: \`{{ ${ref} }}\`.`;
+  return { ref, text: `single-brace \`{${ref}}\` is not a valid template hole — use double braces: \`{{ ${ref} }}\`.` };
 }
 
 /**

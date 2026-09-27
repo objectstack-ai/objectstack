@@ -452,6 +452,77 @@ export const PREDICATE_SLOT_STRING_REFUSAL =
   + 'envelope, any other non-string, or a string that is blank after trimming is not authorable there.';
 
 /**
+ * What a non-text value in a predicate slot was, as a token. The message
+ * renders it as a phrase (`an expression envelope (…)`, `an array`, `a number`).
+ */
+export type PredicateSlotValueKind =
+  | 'envelope'
+  | 'array'
+  | 'object'
+  | 'number'
+  | 'boolean'
+  | 'bigint'
+  | 'symbol'
+  | 'function';
+
+/**
+ * Refusal code → the params its message interpolates, for
+ * {@link predicateSlotRefusal}. The keys ARE the closed set.
+ *
+ * A consumer that renders its own words — a localized designer — keys its
+ * catalogue row to the `code` and fills it from the `params`; the English
+ * `message` beside them is unchanged. Codes are kebab-case and never change
+ * once published: a new refusal is a new code, a reworded message keeps its
+ * code. ⛔ Not an ADR-0112 error code — an authoring diagnostic returned as a
+ * value, never a failing request's `error.code`.
+ */
+export interface PredicateSlotRefusalParams {
+  /** No value where the slot is required: the key is absent, or holds `null`. */
+  'predicate-slot-missing': { readonly found: 'absent' | 'null' };
+  /** A string that is blank after trimming. */
+  'predicate-slot-blank': Readonly<Record<string, never>>;
+  /** A value that is not text — an expression envelope, or any other non-string. */
+  'predicate-slot-not-text': { readonly found: PredicateSlotValueKind };
+}
+
+/** Every refusal code {@link predicateSlotRefusal} emits. */
+export type PredicateSlotRefusalCode = keyof PredicateSlotRefusalParams;
+
+/**
+ * Why a predicate slot's value is not authorable: the English `message`, the
+ * `source` to attribute it to, and the same refusal as a `code` with its
+ * `params` — narrowing on `code` narrows `params`.
+ */
+export type PredicateSlotRefusal = { message: string; source: string } & {
+  [C in PredicateSlotRefusalCode]: { readonly code: C; readonly params: PredicateSlotRefusalParams[C] };
+}[PredicateSlotRefusalCode];
+
+/**
+ * Keyed by code so the compiler holds {@link PREDICATE_SLOT_REFUSAL_CODES}
+ * equal to {@link PredicateSlotRefusalParams}.
+ */
+const PREDICATE_SLOT_REFUSAL_CODE_TABLE = {
+  'predicate-slot-missing': true,
+  'predicate-slot-blank': true,
+  'predicate-slot-not-text': true,
+} as const satisfies Record<PredicateSlotRefusalCode, true>;
+
+/**
+ * The closed set of {@link predicateSlotRefusal}'s codes, as a value — for a
+ * consumer that must prove it has a catalogue row for every code.
+ */
+export const PREDICATE_SLOT_REFUSAL_CODES: readonly PredicateSlotRefusalCode[] = Object.freeze(
+  Object.keys(PREDICATE_SLOT_REFUSAL_CODE_TABLE) as PredicateSlotRefusalCode[],
+);
+
+/** A non-string, non-nullish slot value's kind. */
+function predicateSlotValueKind(value: object | number | boolean | bigint | symbol): PredicateSlotValueKind {
+  if (isExpressionEnvelopeShaped(value)) return 'envelope';
+  if (Array.isArray(value)) return 'array';
+  return typeof value as PredicateSlotValueKind;
+}
+
+/**
  * Why a value sitting in a `predicate`-role slot is not authorable at all —
  * the SINGLE notion every door applies, derived once (#15572, #17493).
  *
@@ -516,9 +587,11 @@ export const PREDICATE_SLOT_STRING_REFUSAL =
  *   the value is a non-blank string and therefore this function's business is
  *   done.
  */
-export function predicateSlotRefusal(value: unknown): { message: string; source: string } | undefined {
+export function predicateSlotRefusal(value: unknown): PredicateSlotRefusal | undefined {
   if (value === undefined || value === null) {
     return {
+      code: 'predicate-slot-missing',
+      params: { found: value === null ? 'null' : 'absent' },
       message:
         `${PREDICATE_SLOT_STRING_REFUSAL} Found ${value === null ? '`null`' : 'nothing — the key is absent'} `
         + 'where the slot is required: a decision branch is `{ label, expression }` and its `expression` is not '
@@ -534,6 +607,8 @@ export function predicateSlotRefusal(value: unknown): { message: string; source:
   if (typeof value === 'string') {
     if (NON_BLANK_STRING(value)) return undefined;
     return {
+      code: 'predicate-slot-blank',
+      params: {},
       message:
         `${PREDICATE_SLOT_STRING_REFUSAL} Found a string that is blank after trimming, which states no rule. `
         + 'Write the predicate the branch or field was meant to test (e.g. `record.rating >= 4`), or keep what '
@@ -543,20 +618,22 @@ export function predicateSlotRefusal(value: unknown): { message: string; source:
       source: value,
     };
   }
-  const envelope = isExpressionEnvelopeShaped(value);
-  const found = envelope
+  // `value` is neither nullish (the first arm) nor a string (the second), so
+  // its kind is one of the non-text tokens; the phrase is rendered from it.
+  const kind = predicateSlotValueKind(value as object | number | boolean | bigint | symbol);
+  const found = kind === 'envelope'
     ? 'an expression envelope (an object naming a `dialect`)'
-    : Array.isArray(value)
+    : kind === 'array'
       ? 'an array'
-      : value === null
-        ? '`null`'
-        : typeof value === 'object'
-          ? 'an object'
-          : `a ${typeof value}`;
+      : kind === 'object'
+        ? 'an object'
+        : `a ${kind}`;
   // The envelope's own `source`, when it has one, so the finding still points
   // at the text the author wrote rather than at an empty string.
   const rawSource = (value as { source?: unknown } | null | undefined)?.source;
   return {
+    code: 'predicate-slot-not-text',
+    params: { found: kind },
     message:
       `${PREDICATE_SLOT_STRING_REFUSAL} Found ${found}. Write the predicate as bare CEL text `
       + '(e.g. `record.rating >= 4`); the `{ dialect, source }` envelope is the `value`-role spelling '
