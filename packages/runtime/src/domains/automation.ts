@@ -1823,10 +1823,10 @@ export async function classifyResumeResult(
  * Routes:
  *   GET    /                     → RETIRED (#19543, door ④ — 「退役，统一走
  *                                  /meta/flow」): no branch here, so the
- *                                  request falls through to `handled: false`,
- *                                  the dispatcher's ROUTE_NOT_FOUND. Flows are
- *                                  metadata (ADR-0106); list them with
- *                                  `GET /api/v1/meta/flow`
+ *                                  request falls through to `handled: false`
+ *                                  and the transport's own unmatched answer.
+ *                                  Flows are metadata (ADR-0106); list them
+ *                                  with `GET /api/v1/meta/flow`
  *   GET    /actions              → getActionDescriptors (ADR-0018; ?paradigm/?source/?category
  *                                  single-string filters — validated, #7360)
  *   GET    /connectors           → getConnectorDescriptors (ADR-0022; ?type single-string
@@ -2048,11 +2048,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // and `GET /api/v1/meta/flow` is their governed read, so the route was
     // retired rather than implemented (maintainer ruling: 「退役，统一走
     // /meta/flow」). With no branch for it, `GET /` reaches the `handled:
-    // false` exit at the foot of this function, and `dispatch()` answers its
-    // standard 404 ROUTE_NOT_FOUND. The anonymous floor above still runs
-    // first, as for every path of this domain. ⛔ Do not re-add a branch
-    // that answers this path — not even a 410: the retirement's contract is
-    // "the path does not exist", the same answer as one never mounted.
+    // false` exit at the foot of this function, which `dispatch()` hands back
+    // as-is, so the transport gives its own unmatched answer: the dispatcher
+    // plugin never mounts GET here (Hono then answers 405 + `Allow: POST`,
+    // since createFlow keeps the path), and a catch-all adapter answers its
+    // enveloped 404. The anonymous floor above still runs first, as for every
+    // path of this domain. ⛔ Do not re-add a branch that answers this path —
+    // not even a 410: the retirement's contract is "no GET lives here", the
+    // same answer as a path where one was never registered.
     //
     // [#7900 AUDIT — the surviving definition reads stay authenticated-only,
     // with a reason] `GET /:name`, `GET /actions`, `GET /connectors` and

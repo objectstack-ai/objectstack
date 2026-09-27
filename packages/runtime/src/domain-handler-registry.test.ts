@@ -645,30 +645,26 @@ describe('HttpDispatcher extracted domains (PR-6: automation)', () => {
      */
     const auth = { api: { getSession: async () => ({ user: { id: 'u_test' } }) } };
 
-    it('[#19543] GET /automation is RETIRED — ROUTE_NOT_FOUND, and the flow-name enumeration is never called', async () => {
+    it('[#19543] GET /automation is RETIRED — the domain declines it, and the flow-name enumeration is never called', async () => {
         // Door ④: the flow list is `GET /meta/flow`. The domain keeps no branch
-        // for `GET /`, so the real `dispatch()` answers its standard 404 — the
-        // same answer as a path that never existed — even though the service
-        // still offers `listFlows` (it is an engine method, not a route).
+        // for `GET /`, so the real `dispatch()` hands back `handled: false` —
+        // the ownership signal a transport renders as its own unmatched answer
+        // (the dispatcher plugin never mounts the path; a catch-all adapter
+        // answers its enveloped 404) — even though the service still offers
+        // `listFlows` (an engine method, not a route).
         const listFlows = vi.fn().mockResolvedValue(['flow-a', 'flow-b']);
         const getFlowRuntimeStates = vi.fn().mockReturnValue([{ name: 'flow-a', enabled: true, bound: true }]);
         const automation = { listFlows, getFlowRuntimeStates, handlerReady: true };
         const dispatcher = makeDispatcher({ automation, auth });
 
         const result = await dispatcher.dispatch('GET', '/automation', undefined, {}, {} as any);
-        expect(result.handled).toBe(true);
-        expect(result.response?.status).toBe(404);
-        expect(result.response?.body?.error?.code).toBe('ROUTE_NOT_FOUND');
+        expect(result).toEqual({ handled: false });
         expect(listFlows).not.toHaveBeenCalled();
 
-        // …the same answer a path this domain never had gets, modulo the echoed
-        // path itself — no retirement-specific refusal text, code or hint.
-        const never = await dispatcher.dispatch('GET', '/zz-never-mounted', undefined, {}, {} as any);
-        expect(never.response?.status).toBe(404);
-        const echoless = (body: any, path: string) =>
-            JSON.stringify(body).split(path).join('<PATH>');
-        expect(echoless(result.response?.body, '/automation'))
-            .toBe(echoless(never.response?.body, '/zz-never-mounted'));
+        // …exactly what the domain answers for a sub-path it never had: no
+        // retirement-specific refusal, code or hint of its own.
+        const never = await dispatcher.dispatch('GET', '/automation/zz/never/mounted', undefined, {}, {} as any);
+        expect(never).toEqual(result);
 
         // Anti-vacuity: the same dispatcher, identity and service DO serve a
         // surviving read of this domain — the 404 above is the retirement, not a

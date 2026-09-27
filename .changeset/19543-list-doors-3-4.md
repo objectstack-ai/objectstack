@@ -26,7 +26,8 @@ FROM → TO, per surface:
   on the default Hono host a `GET` there answers the host's standard method
   mismatch — `405 METHOD_NOT_ALLOWED` with `Allow: POST` — the same answer any
   POST-only path gets. A transport that forwards every automation path to the
-  dispatcher answers `404 ROUTE_NOT_FOUND`. Fix: read `GET /api/v1/meta/flow`;
+  dispatcher (the `@objectstack/hono` catch-all) is told the domain does not handle
+  it and answers its own not-found `404`. Fix: read `GET /api/v1/meta/flow`;
   flows are metadata (ADR-0106), and it answers full definitions, so map each item
   to its `name` if you only need names. Per-flow runtime enablement and trigger
   binding is `GET /api/v1/automation/_status`, unchanged.

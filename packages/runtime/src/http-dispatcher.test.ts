@@ -353,8 +353,9 @@ describe('HttpDispatcher', () => {
 
         // [#19543, door ④] The flow list is RETIRED — flows are listed through
         // `GET /meta/flow`. The domain keeps no `GET /` branch, so it answers
-        // `handled: false` (the dispatcher's ROUTE_NOT_FOUND, pinned through
-        // the real `dispatch()` in `domain-handler-registry.test.ts`), and the
+        // `handled: false` (the transport's own unmatched answer follows —
+        // pinned on a real socket in
+        // `dispatcher-plugin.anonymous-gate.integration.test.ts`), and the
         // engine's name enumeration is never reached from HTTP even though the
         // contract still declares it.
         it('GET / is retired — unhandled, and listFlows is never called', async () => {
