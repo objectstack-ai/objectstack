@@ -5,9 +5,10 @@
  *
  * Where the conversion layer (D2) breaks *invisibly* — accepting the old shape
  * at load for one major — the migration chain is the L2 rung: *break
- * executably*. For the breaks D2 cannot hide (semantic changes with no lossless
- * mapping) and for the graduated conversions retired from the load path, the
- * spec ships a **permanent, ordered chain of per-major steps**, back to the
+ * executably*. For every retirement family's semantic changes (one D3 entry
+ * per family, even when a lossless D2 conversion also exists for it) and for
+ * the graduated conversions retired from the load path, the spec ships a
+ * **permanent, ordered chain of per-major steps**, back to the
  * chain's support floor (`MIGRATION_SUPPORT_FLOOR`, `registry.ts`). A consumer
  * at or above the floor runs `objectstack migrate meta --from N` and replays
  * every remaining step in one command, however many majors that spans — it
@@ -22,9 +23,10 @@
  *  - **graduated conversions** — the D2 entries with `toMajor === N`, retired
  *    from the load path in N+1 and preserved here as that major's *mechanical*
  *    transforms (reusing the very same declarative transform + fixture pair);
- *  - **semantic changes** — breaks with no lossless mapping, which cannot be
- *    auto-applied and instead emit a structured TODO (surface, reason,
- *    acceptance criteria) so the consumer agent knows exactly what judgment is
+ *  - **semantic changes** — one entry per retirement family, even when a
+ *    lossless D2 conversion also exists for it (D2 carries the mechanical
+ *    data repair only): a structured TODO (surface, reason, acceptance
+ *    criteria) so the consumer agent knows exactly what judgment is
  *    delegated to it, rather than silence.
  */
 
