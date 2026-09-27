@@ -622,7 +622,7 @@ export interface IMetadataService {
     // The optional `getOverlay` / `saveOverlay` / `removeOverlay` /
     // `getEffective` members (typed against the paper protocol's
     // `MetadataOverlay`) were REMOVED per ADR-0049 enforce-or-remove
-    // (#13135, re-charter of #12057): their only implementation was
+    // (retired by commit 9e0ba21a1, re-charter of #12057): their only implementation was
     // `packages/metadata`'s in-memory limb, served by no route and called
     // only by its own unit tests; ADR-0126 §6 wall 4 supersedes the protocol
     // on the record. The layered read that actually ships is

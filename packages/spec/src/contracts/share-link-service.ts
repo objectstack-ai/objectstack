@@ -35,10 +35,10 @@
  *      adjudicates access takes a complete {@link ExecutionContext} — the
  *      whole `resolveAuthzContext` envelope, not a per-site subset. See
  *      {@link ShareLinkExecutionContext} for the boundary this draws and
- *      why (#6206 / #6430).
+ *      why (full-envelope ruling, commit d7e0b4212; #6430).
  *
  *   6. **`publicSharing.eligibility` is a STANDING policy, not a mint-time
- *      check (#13608).** Implementations evaluate the object's declared
+ *      check (commit fc9ba76a5).** Implementations evaluate the object's declared
  *      predicate when the link is minted AND again on every `resolveToken`,
  *      against the record about to be served. A record that stops qualifying
  *      stops being served through tokens minted while it did qualify — no
@@ -133,7 +133,7 @@ export interface ResolveShareLinkResult {
  * **"is this request authenticated at all?"** (their own 401), and nothing
  * more.
  *
- * ## ⛔ Never an enforcement context (#6206, maintainer ruling 2026-08-07)
+ * ## ⛔ Never an enforcement context (maintainer ruling 2026-08-07, landed in commit d7e0b4212)
  *
  * This type must never reach a path that ADJUDICATES access — no
  * `engine.find` / `engine.update` `context`, no visibility probe, no
@@ -200,7 +200,7 @@ export interface ShareLinkExecutionContext {
  * demo links. That bypass is MINT-only: a link seeded this way is governed
  * at redemption like any other (design note 7, #14033).
  *
- * ## The context every method takes (#6206 ruling, #6430)
+ * ## The context every method takes (full-envelope ruling, commit d7e0b4212; #6430)
  *
  * `createLink` / `revokeLink` / `listLinks` all ADJUDICATE access, so each
  * takes a full {@link ExecutionContext} — the complete `resolveAuthzContext`
@@ -250,7 +250,7 @@ export interface IShareLinkService {
    * `publicSharing.enabled` switch is off — the block absent or disabled,
    * however the link was minted (#14033, design note 7) — names a record that
    * no longer exists (#5190), or names a record that no longer satisfies the
-   * object's `publicSharing.eligibility` predicate (#13608).
+   * object's `publicSharing.eligibility` predicate (commit fc9ba76a5).
    *
    * ⛔ That single `null` is the contract, not an implementation detail. The
    * caller of this method may hold nothing but a token, and distinguishing
