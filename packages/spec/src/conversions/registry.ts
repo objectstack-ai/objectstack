@@ -10724,24 +10724,24 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         const at = `${basePath}.${key}`;
         // The filter's own blocker first — it would decline on an object-bound
         // block too, and it is what names the combinator — then the node's.
-        const declined = 'declined' in mapping
-          ? mapping.declined
-          : inline
-            ? `sits on a block whose rows are inline (${inline}): its renderer matches this filter `
-              + 'against those rows in the record dialect, where a rule array would exclude every '
-              + 'row, so no rewrite here is lossless'
-            : undefined;
-        if (declined !== undefined) {
-          context?.reportTodo?.({
-            path: at,
-            from: JSON.stringify(value),
-            reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged `
-              + 'and is refused at this door on its next save.',
-          });
-          return holder;
+        let declined: string;
+        if ('declined' in mapping) {
+          declined = mapping.declined;
+        } else if (inline) {
+          declined = `sits on a block whose rows are inline (${inline}): its renderer matches this `
+            + 'filter against those rows in the record dialect, where a rule array would exclude '
+            + 'every row, so no rewrite here is lossless';
+        } else {
+          emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
+          return { ...holder, [key]: mapping.rules };
         }
-        emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
-        return { ...holder, [key]: mapping.rules };
+        context?.reportTodo?.({
+          path: at,
+          from: JSON.stringify(value),
+          reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged `
+            + 'and is refused at this door on its next save.',
+        });
+        return holder;
       };
 
       let next = component;

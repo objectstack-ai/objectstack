@@ -38,10 +38,10 @@ import { MIGRATIONS_BY_MAJOR } from '../migrations/registry.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
 import { ElementDataSourceSchema } from '../ui/page.zod.js';
-import { collectConversionNotices } from './apply.js';
+import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
-import type { ConversionNotice } from './types.js';
+import { CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice } from './types.js';
 
 const ID = 'page-component-filter-record-to-rule-array';
 const RULE_FORM = '[{ field, operator, value }, ...]';
@@ -58,15 +58,25 @@ function componentOf(stack: Dict): Dict {
   return ((page.regions as Dict[])[0]!.components as Dict[])[0]!;
 }
 
-/** Run the WHOLE chain (retired entries included, as the data-at-rest seams do). */
-function convert(stack: Dict): { stack: Dict; notices: ConversionNotice[] } {
-  return collectConversionNotices(structuredClone(stack), { includeRetired: true });
+/**
+ * Run the WHOLE chain (retired entries included, as the data-at-rest seams do),
+ * collecting the notices AND the TODOs — the site this entry leaves as stored.
+ */
+function convert(stack: Dict): { stack: Dict; notices: ConversionNotice[]; todos: ConversionTodoNotice[] } {
+  const notices: ConversionNotice[] = [];
+  const todos: ConversionTodoNotice[] = [];
+  const out = applyConversions(structuredClone(stack), {
+    includeRetired: true,
+    onNotice: (n) => notices.push(n),
+    onTodo: (t) => todos.push(t),
+  });
+  return { stack: out, notices, todos };
 }
 
 /** The value a converted `properties.filter` on an `object-grid` ends up holding. */
-function gridFilter(filter: unknown): { value: unknown; notices: ConversionNotice[] } {
-  const { stack, notices } = convert(pageWith({ type: 'object-grid', properties: { objectName: 'deal', filter } }));
-  return { value: (componentOf(stack).properties as Dict).filter, notices };
+function gridFilter(filter: unknown): { value: unknown; notices: ConversionNotice[]; todos: ConversionTodoNotice[] } {
+  const { stack, notices, todos } = convert(pageWith({ type: 'object-grid', properties: { objectName: 'deal', filter } }));
+  return { value: (componentOf(stack).properties as Dict).filter, notices, todos };
 }
 
 describe('§0 premises', () => {
