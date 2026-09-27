@@ -344,7 +344,7 @@ the two item-level mechanisms are enforced in *different places*:
 
 | Item property | Enforced where | What it actually does |
 | :--- | :--- | :--- |
-| `requiredPermissions`, `requiresService` | **Server**, in both trees — then re-checked in the shell | The entry is never served: it is absent from the `/meta` body |
+| `requiredPermissions`, `requiresService` | **Server**, in both trees — then re-checked in the shell | The entry is not served: it is absent from the rendered `/meta` body (the stored-version doors below answer by who is asking) |
 | `visible` (CEL), `requiresObject` | **Client only**, at every level | Hides an entry the browser has already received |
 
 Since #4722 the authoritative server-side filter (`filterAppForUser`) runs the
