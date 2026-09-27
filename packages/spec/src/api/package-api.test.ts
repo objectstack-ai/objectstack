@@ -989,6 +989,9 @@ describe('#18058 — install contract bound to the live door', () => {
           url: 'https://marketplace.objectstack.io/artifacts/com.acme.crm/1.0.0.tgz',
           sha256: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
           size: 1024000,
+          // Spelled out: the artifact reference DEFAULTS it, and a round-trip
+          // fixture must be one the parse hands back unchanged.
+          format: 'tgz',
           uploadedAt: '2026-02-01T10:00:00Z',
         },
       };
