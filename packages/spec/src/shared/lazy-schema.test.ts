@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { lazySchema } from './lazy-schema';
@@ -116,4 +118,101 @@ describe('lazySchema × z.toJSONSchema identity', () => {
     const schema = lazySchema(() => z.object({ x: z.number() }).strict().transform((v) => v));
     expect((schema as any)._zod).toBe((schema as any)._zod);
   });
+});
+
+/**
+ * #19101 — a schema referenced through the Proxy converts with the SAME
+ * metadata as the eager instance. zod reads `.describe()` / `.meta()` from its
+ * registry by node identity; the node is the Proxy, the metadata sits on the
+ * real instance, so before the facade aliased it every lazy reference lost its
+ * `description` while `OS_EAGER_SCHEMAS=1` (no Proxy at all) kept it.
+ */
+describe('lazySchema × z.toJSONSchema metadata (#19101)', () => {
+  it('a lazy reference converts exactly like the eager instance — nested and as the root', () => {
+    const factory = () => z.record(z.string(), z.unknown()).describe('lazy-described record');
+    const lazy = lazySchema(factory);
+    const eager = factory();
+    expect(z.toJSONSchema(z.object({ rows: z.array(lazy) }))).toEqual(
+      z.toJSONSchema(z.object({ rows: z.array(eager) })),
+    );
+    expect(z.toJSONSchema(lazy)).toEqual(z.toJSONSchema(eager));
+  });
+
+  it("the real instance's own describe wins over the one it inherits from its parent", () => {
+    const Base = z.string().describe('inherited');
+    const lazy = lazySchema(() => Base.describe('own'));
+    const json = z.toJSONSchema(z.object({ v: lazy })) as unknown as { properties: { v: { description?: string } } };
+    expect(json.properties.v.description).toBe('own');
+  });
+
+  it('`id` is NOT aliased onto the Proxy — aliasing it makes zod throw "Duplicate schema id"', () => {
+    const Leaf: z.ZodType<any> = lazySchema(() =>
+      z.object({ x: z.string() }).meta({ id: 'LazySchemaIdProbe19101', description: 'probe' }),
+    );
+    const Doc = z.object({ a: (Leaf as any).optional(), b: z.lazy(() => Leaf) });
+    const json = z.toJSONSchema(Doc) as unknown as { properties: { b: { description?: string } } };
+    expect(json.properties.b.description).toBe('probe');
+    expect(z.globalRegistry.get(Leaf)?.id).toBeUndefined();
+  });
+});
+
+/**
+ * The same property on the real contract, against a REAL eager run: a child
+ * process imports the spec with `OS_EAGER_SCHEMAS=1` (no Proxy anywhere) and
+ * prints the conversions; this process converts the same schemas lazily. The
+ * child enters through `kernel/metadata-type-schemas.ts`, because an eager
+ * load that starts at `api/` or `data/` dies on the filter.zod → strict-object
+ * → suggestions.zod → field.zod cycle filed as #19930.
+ *
+ * Measured at the fix (lazy before → after, eager unchanged): the nine OpenAPI
+ * components gain 2 descriptions, the
+ * `os generate` IDE schema 445; description is the only key that moved.
+ */
+describe('lazy == eager on the real contract (#19101)', () => {
+  const PKG_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+  const CONTRACT = new URL('../api/contract.zod.ts', import.meta.url).href;
+  const METADATA_TYPES = new URL('../kernel/metadata-type-schemas.ts', import.meta.url).href;
+  const OPTS = { unrepresentable: 'any' } as const;
+  // tsx compiles .ts to CJS, so a namespace may arrive under `default`.
+  const pick = (mod: any, key: string): any => mod[key] ?? mod.default?.[key];
+
+  it('RecordDataSchema inside ListRecordResponse, and the `dataset` /meta/types schema', async () => {
+    const eager = JSON.parse(
+      execFileSync(
+        process.execPath,
+        ['--import', 'tsx', '--input-type=module', '-e',
+          `import ${JSON.stringify(METADATA_TYPES)};
+           const { z } = await import('zod');
+           const pick = (mod, key) => mod[key] ?? mod.default?.[key];
+           const contract = await import(${JSON.stringify(CONTRACT)});
+           const types = await import(${JSON.stringify(METADATA_TYPES)});
+           const opts = ${JSON.stringify(OPTS)};
+           process.stdout.write(JSON.stringify({
+             listRecordResponse: z.toJSONSchema(pick(contract, 'ListRecordResponseSchema'), opts),
+             dataset: z.toJSONSchema(pick(types, 'getMetadataTypeSchema')('dataset'), opts),
+           }));`],
+        {
+          cwd: PKG_ROOT,
+          env: { ...process.env, OS_EAGER_SCHEMAS: '1' },
+          encoding: 'utf8',
+          maxBuffer: 64 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      ),
+    );
+
+    const contract = await import('../api/contract.zod');
+    const types = await import('../kernel/metadata-type-schemas');
+    const lazy = JSON.parse(JSON.stringify({
+      listRecordResponse: z.toJSONSchema(pick(contract, 'ListRecordResponseSchema'), OPTS),
+      dataset: z.toJSONSchema(pick(types, 'getMetadataTypeSchema')('dataset'), OPTS),
+    }));
+
+    // The named leaf first, for a failure that says what went missing.
+    const declared = pick(contract, 'RecordDataSchema').description;
+    expect(typeof declared === 'string' && declared.length > 0).toBe(true);
+    expect(eager.listRecordResponse.properties.data.items.description).toBe(declared);
+    expect(lazy.listRecordResponse.properties.data.items.description).toBe(declared);
+    expect(lazy).toStrictEqual(eager);
+  }, 60_000);
 });

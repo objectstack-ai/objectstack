@@ -257,7 +257,9 @@ describe('#19568 — the hold-out test: what the door sees is what the whole sta
     // The `skill` measurement (#19527), asked of this type. There, the door's
     // snapshot lacked `stack.tools` / `stack.actions`, so one rule produced
     // `ai-skill-tool-unresolved` at the door and `[]` over the whole stack —
-    // a falsehood rendered in Studio, and the reason that type is held out.
+    // a falsehood rendered in Studio, and the reason that type stays outside
+    // the door by design (ruling `5791822697`: cross-item reference resolution
+    // belongs to the whole-stack rule).
     //
     // Here the two runs are the same rule over the same written item, once in
     // the shape a per-write snapshot has (objects + the written collection),
@@ -356,8 +358,9 @@ describe('#19568 — DARK: what this crossing did NOT widen', () => {
 
   it('the types still awaiting their own readings are untouched', () => {
     // The standing ungated controls: group B reads `translation` / `tool`
-    // first, group D retires `doc` / `external_catalog`, and `skill` is held
-    // out on the measurement this file tested itself against.
+    // first, group D retires `doc` / `external_catalog`, and `skill` stays
+    // outside the door by design (ruling `5791822697` on #19527), for the
+    // reason this file tested itself against.
     expect(runtimeAuthoringRulesFor('translation')).toEqual([]);
     expect(runtimeAuthoringRulesFor('tool')).toEqual([]);
     expect(runtimeAuthoringRulesFor('doc')).toEqual([]);

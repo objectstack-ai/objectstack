@@ -35,6 +35,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { NormalizedFilterSchema } from '@objectstack/spec/data';
 import { formatZodErrors } from '../src/utils/format';
 import { childEnv } from './helpers/serve-process.js';
 
@@ -58,15 +59,29 @@ function render(error: z.ZodError): string {
   return stripAnsi(captured.join('\n'));
 }
 
-/** The campaign's shape: a string form OR a strict object form. */
-const ACTION_REF = z.union([
-  z.string(),
-  z.strictObject({ type: z.string(), params: z.record(z.string(), z.unknown()).optional() }),
-]);
+/**
+ * The campaign's shape: a string form OR a closed object form.
+ *
+ * [#19581] The closed arm is a REAL PRODUCT DOOR — `NormalizedFilterSchema`,
+ * whose `closedObject` seal makes its unknown-key refusal terminal — and not a
+ * `z.strictObject` declared here. From zod 4.5.0 an `unrecognized_keys` issue
+ * carries `continue: true`, so a bare `z.strictObject` arm whose only complaint
+ * is an unknown key is the union's lone NON-ABORTED member: zod's
+ * `handleUnionResults` short-circuits and returns that arm's issues unwrapped,
+ * no `invalid_union` is raised, and every assertion below passes over a shape it
+ * was never built to see. A fixture that cannot produce the code under test is
+ * not a weaker pin, it is no pin at all.
+ *
+ * ⛔ Do NOT re-declare this arm from raw zod primitives. What keeps these
+ * assertions honest is that the arm's refusal is TERMINAL, and terminal is a
+ * property the product's closed-object entry confers — not one a test file can
+ * assert about itself.
+ */
+const ACTION_REF = z.union([z.string(), NormalizedFilterSchema]);
 
 describe('[#5341] formatZodErrors expands invalid_union branches', () => {
   it('prints the failing branch prose under the union line', () => {
-    const out = render(ACTION_REF.safeParse({ type: 'log', args: { a: 1 } }).error!);
+    const out = render(ACTION_REF.safeParse({ args: { a: 1 } }).error!);
     // The union's own two lines are PRESERVED — they are what says "no branch
     // matched", and keeping them makes this change strictly additive: nothing
     // that printed before #5341 stopped printing.
@@ -76,7 +91,7 @@ describe('[#5341] formatZodErrors expands invalid_union branches', () => {
   });
 
   it('drops the kind-mismatch branch that carries no prescription', () => {
-    const out = render(ACTION_REF.safeParse({ type: 'log', args: 1 }).error!);
+    const out = render(ACTION_REF.safeParse({ args: 1 }).error!);
     // Paired deliberately: the `not` alone would also pass if the expansion
     // produced NOTHING — a green for the empty reason. The positive assertion
     // is what makes the negative one mean "selected against", not "absent".
@@ -88,7 +103,7 @@ describe('[#5341] formatZodErrors expands invalid_union branches', () => {
 
   it('resolves branch paths against the union, not relative to it', () => {
     const schema = z.object({ actions: z.array(ACTION_REF) });
-    const out = render(schema.safeParse({ actions: [{ type: 'log', args: { a: 1 } }] }).error!);
+    const out = render(schema.safeParse({ actions: [{ args: { a: 1 } }] }).error!);
     expect(out).toContain('✗ actions.0: Unrecognized key: "args"');
     // Never the bare relative path a naive splice would print.
     expect(out).not.toContain('✗ (root): Unrecognized key');
@@ -96,7 +111,7 @@ describe('[#5341] formatZodErrors expands invalid_union branches', () => {
 
   it('expands a union nested inside a union', () => {
     const schema = z.object({ on: z.union([z.string(), z.object({ actions: z.array(ACTION_REF) })]) });
-    const out = render(schema.safeParse({ on: { actions: [{ type: 'log', args: { a: 1 } }] } }).error!);
+    const out = render(schema.safeParse({ on: { actions: [{ args: { a: 1 } }] } }).error!);
     expect(out).toContain('✗ on.actions.0: Invalid input');
     expect(out).toContain('✗ on.actions.0: Unrecognized key: "args"');
   });
@@ -133,7 +148,7 @@ describe('[#5341] formatZodErrors expands invalid_union branches', () => {
   });
 
   it('counts a union as one issue however many lines explain it', () => {
-    const out = render(ACTION_REF.safeParse({ type: 'log', args: { a: 1 } }).error!);
+    const out = render(ACTION_REF.safeParse({ args: { a: 1 } }).error!);
     expect(out).toContain('1 validation error(s) total');
   });
 });

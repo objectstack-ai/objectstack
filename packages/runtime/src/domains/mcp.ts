@@ -18,6 +18,10 @@ import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#15705] The resume door's one refusal table, shared with
+// `POST /automation/:name/runs/:runId/resume` so the two doors answer one
+// engine result identically.
+import { classifyResumeResult } from './automation.js';
 
 /**
  * The legacy branches matched `/mcp/skill` (exact or `?`-suffixed) BEFORE
@@ -725,5 +729,259 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             name: string,
             input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, { driver, envId, ec, getMeta, callData }),
+        // [#15705] `resume_run`: continue the caller's own paused screen run.
+        // Admitted by the same gates as `run_action`; see
+        // {@link resumeActionRun}.
+        resumeRun: async (
+            runId: string,
+            input: { values?: Record<string, unknown> } & AIActionConfirmation,
+        ) => resumeActionRun(deps, context, runId, input ?? {}, { driver, envId, ec, getMeta, callData }),
     };
+}
+
+/**
+ * [#15705] Build the error a resume refusal throws, through the SAME
+ * `deps.error` builder the REST resume door answers with. So the code
+ * (explicit, promoted from `details`, or derived from the status), the message
+ * (with the 5xx leak guard) and the `details` are exactly what the REST door
+ * would serve. The MCP tool layer turns `code` / `status` / `details` back into
+ * the ADR-0112 envelope of its tool error.
+ */
+function resumeDoorError(
+    deps: DomainHandlerDeps,
+    message: string,
+    httpStatus: number,
+    details?: Record<string, unknown>,
+): Error {
+    const response = deps.error(message, httpStatus, details);
+    const envelope = (response?.body as { error?: { code?: unknown; message?: unknown; details?: unknown } } | undefined)?.error;
+    return Object.assign(new Error(typeof envelope?.message === 'string' ? envelope.message : message), {
+        code: typeof envelope?.code === 'string' ? envelope.code : undefined,
+        status: response?.status ?? httpStatus,
+        ...(envelope?.details !== undefined ? { details: envelope.details } : {}),
+    });
+}
+
+/**
+ * [#15705] The one answer for "this is not a paused run you can resume". It is
+ * given when no run has the id, when the run is no longer paused, and when
+ * someone else started it. The three read the same on purpose (the reason is
+ * in {@link resumeActionRun}'s step 2).
+ */
+function notResumableRunMessage(runId: string): string {
+    return (
+        `Run '${runId}' is not a paused run you can resume: no run has this id, the run is no longer paused, `
+        + 'or it was started by a different user. Only the user whose call started a run can resume it.'
+    );
+}
+
+/**
+ * [#15705] The MCP `resume_run` door. It continues a paused SCREEN run with
+ * the screen's field values, so an agent that got `status: 'paused'` plus a
+ * `screen` from `run_action` can finish the run.
+ *
+ * ## The ruling this implements
+ *
+ * Maintainer, on #15705: add the resume verb, and make it pass the SAME
+ * authorization and caller-scope checks as `run_action`. The #16370 fix (a
+ * record the caller cannot read is refused at the door) is named as the rule
+ * resume must not get around. So a call is admitted only when `run_action`
+ * would admit starting this same flow on this same record, for this caller,
+ * now.
+ *
+ * ## Why the REST resume door alone is not enough
+ *
+ * `POST /automation/:name/runs/:runId/resume` checks two things: the caller is
+ * not anonymous, and the node the run is parked on declares `resumeAuthority:
+ * 'any'` (a `screen` does). It never asks who is resuming. That matters
+ * because a resumed run continues under the identity stored in the run, not
+ * the caller's. The run's data nodes run as the user who STARTED it. So
+ * "any authenticated caller with the run id" would let one user continue
+ * another user's run as that other user. The steps below close that for this
+ * door. The REST door is not changed here.
+ *
+ * ## The steps, in order
+ *
+ *  1. The service must implement `resume`, `getRun` and `getSuspendedScreen`.
+ *     Otherwise 501. Ownership cannot be checked without `getRun`, so this
+ *     fails closed.
+ *  2. **Whose run.** `getRun(runId).trigger.userId` must be the caller's
+ *     `userId`, and the run must be `paused`. Otherwise the ONE not-found
+ *     answer, 404. An unknown id, a finished run and another user's run all
+ *     get the same code, status and message. This is the existence
+ *     non-disclosure #16370 used for records: an agent learns nothing about a
+ *     run id it did not start.
+ *  3. **Which action admits it.** The run records its flow and its object, not
+ *     the action that started it. So the candidates are the `type: 'flow'`
+ *     actions whose `target` is the run's flow, on the run's object (the
+ *     object-less key when the run carries no object, because
+ *     `dispatchFlowAction` sets no `object` for one). Each candidate goes
+ *     through `run_action`'s gates in `run_action`'s order, using the same
+ *     helpers: system-object guard, `ai.exposed`, `requiredPermissions`, the
+ *     ADR-0126 activation switch, and `ai.requiresConfirmation`. The first
+ *     candidate that passes admits the call. If none passes, the first
+ *     candidate's refusal is served. If there is no candidate at all, the run
+ *     was not started by a flow action, and the call is refused 403.
+ *     The confirmation gate applies here too because the flow's writes happen
+ *     after the screen, so on resume. A run started with `confirm: true` still
+ *     needs `confirm: true` to resume.
+ *  4. **The subject record, read again as the caller.** This is #16370's rule,
+ *     with the same two shared functions: `loadActionSubjectRecord` and
+ *     `refuseDeniedSubjectLoad`. A record the caller could read when the run
+ *     started but cannot read now is refused `RECORD_NOT_FOUND` / 404, and
+ *     the run is not resumed.
+ *  5. **A screen pause only.** `getSuspendedScreen` must return a screen.
+ *     The verb submits screen values. A run parked on any other node (a
+ *     timer `wait`, for example) is refused 409 and left alone.
+ *  6. **Resume.** The signal is built one field at a time and the input is
+ *     never spread, as the REST door does (#3801). The engine's answer goes
+ *     through {@link classifyResumeResult}, the table both doors share.
+ *
+ * Every refusal is thrown before `resume()` is called, so a refused call
+ * consumes nothing and the run stays parked.
+ *
+ * The success value is `run_action`'s envelope: `{ ok, action, objectName,
+ * recordId?, result }`. `result` is the engine's own answer, so a run that
+ * pauses on its NEXT screen comes back as `status: 'paused'` with a `runId`
+ * and a `screen`, and a multi-screen wizard is walked by calling this again.
+ */
+export async function resumeActionRun(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    runId: string,
+    input: { values?: Record<string, unknown> } & AIActionConfirmation,
+    wiring: {
+        driver: any;
+        envId?: string;
+        ec: any;
+        getMeta: () => Promise<any>;
+        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+    },
+): Promise<any> {
+    const { driver, envId, ec, getMeta, callData } = wiring;
+    if (typeof runId !== 'string' || runId === '') {
+        throw resumeDoorError(deps, 'runId is required', 400);
+    }
+    const values = input?.values;
+    if (values !== undefined && (values === null || typeof values !== 'object' || Array.isArray(values))) {
+        throw resumeDoorError(deps, 'values must be an object that maps screen field names to values', 400);
+    }
+
+    // ── 1. the service, and the three members this door reads ────────────────
+    const automation: any = await actionExec.resolveAutomationService(deps, context, envId);
+    if (
+        !automation
+        || typeof automation.resume !== 'function'
+        || typeof automation.getRun !== 'function'
+        || typeof automation.getSuspendedScreen !== 'function'
+    ) {
+        throw resumeDoorError(
+            deps,
+            'Resuming a run is not supported here: the automation service must implement resume, getRun '
+                + 'and getSuspendedScreen, and getRun is how this door checks who started the run.',
+            501,
+        );
+    }
+
+    // ── 2. whose run: the caller's own, and still paused ─────────────────────
+    const callerId = typeof ec?.userId === 'string' && ec.userId !== '' ? ec.userId : undefined;
+    const run: any = await automation.getRun(runId);
+    const trigger = run?.trigger;
+    if (!run || run.status !== 'paused' || !callerId || trigger?.userId !== callerId) {
+        throw resumeDoorError(deps, notResumableRunMessage(runId), 404);
+    }
+
+    // ── 3. the flow action that admits it, through run_action's gates ────────
+    const flowName: unknown = run.flowName;
+    const runObject = typeof trigger?.object === 'string' && trigger.object !== '' ? trigger.object : undefined;
+    const meta: any = await getMeta();
+    const candidates = (await actionExec.collectActionDeclarations(deps, meta)).filter(({ action, objectName }) =>
+        action?.type === 'flow'
+        && !actionExec.isDeclarativeUpdateAction(action)
+        && typeof action?.target === 'string'
+        && action.target === flowName
+        && (runObject === undefined ? actionExec.isObjectLessActionKey(objectName) : objectName === runObject));
+    const activationEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
+    let admitted: { action: any; objectName: string } | undefined;
+    let firstRefusal: Error | undefined;
+    for (const candidate of candidates) {
+        const refusal = resumeAdmissionRefusal(deps, candidate, ec, input, activationEngine);
+        if (!refusal) {
+            admitted = candidate;
+            break;
+        }
+        firstRefusal ??= refusal;
+    }
+    if (!admitted) {
+        throw firstRefusal ?? resumeDoorError(
+            deps,
+            `Run '${runId}' is a run of flow '${String(flowName)}'${runObject ? ` on '${runObject}'` : ''}, `
+                + 'and no flow action targets that flow there. resume_run only continues a run that an action '
+                + 'exposed to AI could have started.',
+            403,
+        );
+    }
+    const { action, objectName } = admitted;
+
+    // ── 4. the subject record, read again in the caller's own scope ──────────
+    const recordId = typeof trigger?.recordId === 'string' && trigger.recordId !== '' ? trigger.recordId : undefined;
+    const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
+        callData('get', { object: objectName, id: recordId }, driver, envId, ec));
+    actionExec.refuseDeniedSubjectLoad(objectName, recordId, subject);
+
+    // ── 5. a screen pause, and nothing else ──────────────────────────────────
+    const screen = await automation.getSuspendedScreen(runId);
+    if (!screen) {
+        throw resumeDoorError(
+            deps,
+            `Run '${runId}' is paused, but not on a screen. resume_run submits the values of a screen; it does `
+                + 'not continue a run that is waiting on anything else.',
+            409,
+        );
+    }
+
+    // ── 6. resume, answered through the table the REST door uses ─────────────
+    const signal: { variables?: Record<string, unknown> } = {};
+    if (values !== undefined) signal.variables = values;
+    const result = await automation.resume(runId, signal);
+    const refusal = await classifyResumeResult(deps, automation, runId, result);
+    if (refusal) throw resumeDoorError(deps, refusal.message, refusal.status, refusal.details);
+    return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result: result ?? null };
+}
+
+/**
+ * [#15705] `run_action`'s admission gates, in `run_action`'s order, for ONE
+ * candidate action. Answers the refusal, or `undefined` when the candidate
+ * admits the call. Each gate uses the shared helper `invokeBusinessAction`
+ * uses, so the reasons cannot drift apart. The system-object, exposure and
+ * permission refusals are thrown as plain errors there. Here they carry
+ * `PERMISSION_DENIED` / 403 (the code and status REST `/actions` answers for
+ * the permission gate), because a refusal on a new door should be
+ * machine-readable.
+ */
+function resumeAdmissionRefusal(
+    deps: DomainHandlerDeps,
+    candidate: { action: any; objectName: string },
+    ec: any,
+    request: AIActionConfirmation,
+    activationEngine: any,
+): Error | undefined {
+    const { action, objectName } = candidate;
+    if (isSystemObjectName(objectName)) {
+        return resumeDoorError(deps, `Action '${action?.name}' is on a system object and is not exposed via MCP`, 403);
+    }
+    const exposure = actionExec.actionAiExposureError(deps, action, objectName);
+    if (exposure) return resumeDoorError(deps, exposure, 403);
+    const permission = actionExec.actionPermissionError(deps, action, ec, objectName);
+    if (permission) return resumeDoorError(deps, permission, 403);
+    const disabled = actionExec.disabledActionRefusal(deps, activationEngine, action);
+    if (disabled) return resumeDoorError(deps, disabled.message, disabled.status, { code: disabled.code });
+    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName);
+    if (confirmation) {
+        return resumeDoorError(deps, confirmation.message, confirmation.status, {
+            code: confirmation.code,
+            ...confirmation.details,
+        });
+    }
+    return undefined;
 }

@@ -468,7 +468,13 @@ describe('[#13024] `os meta delete --if-match` against the real reset door', () 
     // envelope, never merely "something went wrong" — a bare failure assertion
     // stays green against a command that never sent the header at all.
     expect(run.exitCode).toBe(1);
-    expect(run.out).toContain('metadata_conflict');
+    // stdout is the HUMAN surface and carries prose: `printError` prints the
+    // message and nothing else, and the machine token rides `--format json`
+    // via `errorCodeFields` (the case below). So the operator-facing assertion
+    // is the sentence that names the conflict — not a token that never
+    // belonged on this surface. The structural controls below are what keep
+    // this from degrading into "something went wrong".
+    expect(run.out).toContain('has been modified since you loaded it');
     expect(run.out).toContain('view/race_probe');
 
     // THE point of the pin: the other author's row is still there.
@@ -508,7 +514,14 @@ describe('[#13024] `os meta delete --if-match` against the real reset door', () 
     expect(run.exitCode).toBe(1);
     const payload = JSON.parse(run.out);
     expect(payload.success).toBe(false);
-    expect(String(payload.error)).toContain('metadata_conflict');
+    // `--format json` IS the machine-readable path, and the envelope carries the
+    // token on its own axis — measured here, not assumed:
+    //   { success: false, error: '…has been modified…', code: 'METADATA_CONFLICT', httpStatus: 409 }
+    // so the assertion reads `code`, which a prose match over `error` only ever
+    // approximated. `error` keeps the human sentence.
+    expect(payload.code).toBe('METADATA_CONFLICT');
+    expect(payload.httpStatus).toBe(409);
+    expect(String(payload.error)).toContain('has been modified since you loaded it');
     expect(await overlayRows(engine, 'json_probe')).toHaveLength(1);
   }, 60_000);
 });

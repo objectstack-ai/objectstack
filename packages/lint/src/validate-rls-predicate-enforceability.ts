@@ -29,10 +29,18 @@
  *     on that object then matches zero rows. If other policies also applied,
  *     this one is simply dropped out of the OR and the access it was written to
  *     grant does not exist.
- *  4. **Write path (`check`, ADR-0058 D4).** `computeWriteCheckFilter` collects
- *     only the policies that declare a `check`; the same drop makes the
- *     post-image predicate the deny sentinel, `matchesFilterCondition` fails,
- *     and the write raises `PermissionDeniedError`.
+ *  4. **Write path (`check`, ADR-0058 D4).** `computeWriteCheckFilter` takes
+ *     its set from `writeCheckPolicies`, per single-record insert / by-id
+ *     update and per caller (an array insert and a `multi: true` update never
+ *     reach it): the applicable policies that declare a `check` when any does
+ *     (a USING-only sibling then adds nothing), otherwise every applicable
+ *     policy with a `using`, that `using` compiled as its check. So an
+ *     unlowerable `check` on an `insert` / `update` / `all` policy reaches this
+ *     path, and so does an unlowerable `using` on one whenever no applicable
+ *     policy for that operation declares a `check`. When nothing else in the
+ *     set compiles, the same drop makes the post-image predicate the deny
+ *     sentinel, `matchesFilterCondition` fails, and the write raises
+ *     `PermissionDeniedError`; when something else compiles, it alone decides.
  *
  * So this is not a hole — the runtime fails CLOSED, which is why it has been
  * survivable. It is a policy that reads as an authorization and behaves as a
@@ -160,6 +168,8 @@ import {
 } from '@objectstack/formula';
 import type { CelBoundsOverrun } from '@objectstack/formula';
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
+import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import {
   describeFieldPathVerdict,
   indexObjectGraph,
@@ -246,21 +256,69 @@ function quote(source: string): string {
   return source.length > 200 ? `${source.slice(0, 197)}...` : source;
 }
 
+/**
+ * The INSERT half of a dropped `using`, appended to every `using` consequence
+ * below. The ADR-0058 D4 write check takes its set from `writeCheckPolicies`:
+ * when no applicable policy for the insert declares a `check`, every applicable
+ * policy's `using` is compiled as its check, so the same drop reaches the
+ * single-record insert too. Measured through the real `SecurityPlugin` on an
+ * `insert` and an `all` policy, for all three kinds of drop (an unlowerable shape, an unresolved
+ * `current_user.*`, an undeclared column): with nothing else compiling in that
+ * set, every single-record insert is refused (403); with another applicable
+ * policy's `using` compiling, that one alone decides; with a declared `check`
+ * beside it, the declared check alone decides and this `using` takes no part.
+ */
+const USING_INSERT_CONSEQUENCE =
+  ' On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
+  'whenever no applicable policy for the insert declares a `check` (ADR-0058 D4): when nothing ' +
+  'else in that set compiles, every single-record insert it governs fails with ' +
+  "`PermissionDeniedError`; when another policy's `using` compiles, that one alone decides the insert.";
+
+/**
+ * Qualifies every `check` consequence below. The write check OR-combines the
+ * declared checks of all the applicable policies for the operation, so a
+ * dropped `check` is a blanket refusal only when no other declared `check` in
+ * that set compiles (measured: beside a compiling declared `check`, that one
+ * alone decided; beside a USING-only sibling, every single-record insert was
+ * refused, because a USING-only sibling takes no part once any policy declares
+ * a `check`).
+ */
+const CHECK_SET_QUALIFIER =
+  ' That holds when no other applicable policy for the operation declares a `check` that compiles; ' +
+  'when one does, that `check` alone decides and this one contributes nothing.';
+
+/** How an UNCOMPILABLE predicate is dropped: the runtime's own WARN names the predicate. */
+const DROPPED_UNCOMPILABLE =
+  'so `RLSCompiler` DROPS the policy at request time (one WARN line — "has an uncompilable predicate ' +
+  '… and was DROPPED (no enforcement)" — is the only signal, and nothing reports it at authoring time). ';
+
+/**
+ * How a predicate the compiler refuses PER REQUEST is dropped. The shape check
+ * `compileFilter` consults passes (the refused value exists only per request),
+ * so it never logs the "uncompilable predicate" line: it collects the policy as
+ * that request's denial and WARNs only when that denial is what the request gets.
+ */
+const DROPPED_EVERY_REQUEST =
+  'so `RLSCompiler` DROPS the policy on EVERY request (a request that resolves no value drops it too). The ' +
+  'shape check passes, so the "uncompilable predicate" WARN is never logged; the only signal is a per-request ' +
+  '"DENY (fail closed)" WARN, emitted only when nothing else applicable compiles, and nothing reports it at ' +
+  'authoring time. ';
+
 /** What the runtime does with a predicate it cannot compile, per clause. */
-function consequence(clause: 'using' | 'check'): string {
-  const dropped =
-    'so `RLSCompiler` DROPS the policy at request time (one WARN line — "has an uncompilable predicate ' +
-    '… and was DROPPED (no enforcement)" — is the only signal, and nothing reports it at authoring time). ';
+function consequence(clause: 'using' | 'check', dropped: string = DROPPED_UNCOMPILABLE): string {
   return clause === 'using'
     ? dropped +
         'When it is the only applicable policy for that object and operation, `compileFilter` returns the ' +
         '`RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause: every select / update / ' +
         'delete on the object matches ZERO rows. When other policies also apply, this one just vanishes ' +
-        'from the OR and grants none of the access it appears to.'
+        'from the OR and grants none of the access it appears to.' +
+        USING_INSERT_CONSEQUENCE
     : dropped +
         'On the ADR-0058 D4 write path that leaves the post-image `check` as the `RLS_DENY_FILTER` ' +
-        'sentinel, which no record can satisfy: every insert / update the policy governs fails with ' +
-        '`PermissionDeniedError`. The policy reads as a write rule and behaves as a blanket refusal.';
+        'sentinel, which no record can satisfy: every single-record insert and by-id update the policy ' +
+        'governs fails with `PermissionDeniedError`. The policy reads as a write rule and behaves as a ' +
+        'blanket refusal.' +
+        CHECK_SET_QUALIFIER;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -302,7 +360,16 @@ function consequence(clause: 'using' | 'check'): string {
  * predicate / fix the name / pre-resolve the variable), and an author who
  * suppresses one must not thereby suppress the other. These run only where the
  * shape check PASSED, so the guards are disjoint by construction — a predicate
- * is judged by the shape ids or by these, never both.
+ * is judged by the shape pass or by the reference pass, never both.
+ *
+ * The reference pass ALSO reports under {@link RLS_PREDICATE_UNENFORCEABLE}
+ * (#19951), for the two refusals the shape check cannot see because they
+ * depend on a value, and whose fix is a rewrite of the predicate rather than a
+ * name: a `current_user` value of the wrong TYPE for its position (see
+ * {@link attributeTypeFault}), and a lowered comparand the shared filter faces
+ * refuse (see {@link sharedFaceRefusal}). Same id, because the author's edit is
+ * the same kind — rewrite the predicate inside the enforceable subset — and an
+ * allowlist keyed on it already means "this predicate enforces nothing".
  */
 
 /**
@@ -329,14 +396,45 @@ const PRERESOLVED_USER_KEYS: ReadonlySet<string> = new Set(RESERVED_RLS_MEMBERSH
 /**
  * Probe values bound in place of the real request context.
  *
- * An ARRAY is the value that lowers in EVERY position the pushdown subset has:
- * `lowerMembership` requires `Array.isArray` on the right of `in`, and
- * `lowerComparison` accepts any value at all — so binding every known key to one
- * array lets a well-formed predicate compile without a request. The SCALAR is
+ * Each kernel-resolved key is bound to a value of the type it HOLDS at runtime
+ * (see {@link kernelKeyProbe}): a scalar for a scalar key, an array for a
+ * membership set. The compiler's verdict on a position then matches the
+ * runtime's — `==` / `!=` refuse an array (#19886) and `in` requires one — so a
+ * well-formed predicate compiles without a request, and a predicate the runtime
+ * drops for a type mismatch does not compile here either. The SCALAR is also
  * the discriminator described on {@link userVariableIsScalarPositioned}.
  */
 const PROBE_ARRAY: readonly string[] = ['__objectstack_lint_probe__'];
 const PROBE_SCALAR = '__objectstack_lint_probe__';
+
+/**
+ * The kernel keys `RLSCompiler.compileFilter` copies from an `ExecutionContext`
+ * field of a DIFFERENT name (`id: executionContext.userId`,
+ * `organization_id: executionContext.tenantId`). Every other kernel key is
+ * copied from the field of its own name.
+ */
+const KERNEL_KEY_RENAMED_FROM: Readonly<Record<string, string>> = {
+  id: 'userId',
+  organization_id: 'tenantId',
+};
+
+/**
+ * The probe for one kernel-resolved key: whatever its `ExecutionContext` field
+ * accepts. The type is asked of the declaring schema (`ExecutionContextSchema`,
+ * `@objectstack/spec/kernel`) rather than transcribed here — if that field takes
+ * an array the key is a membership set, otherwise it is a scalar.
+ *
+ * A key with no declared field keeps the array probe this pass used for every
+ * key before #19886; the test that pins the key-binding table goes red first.
+ */
+function kernelKeyProbe(key: string): unknown {
+  const field = KERNEL_KEY_RENAMED_FROM[key] ?? key;
+  const declared = (ExecutionContextSchema.shape as Record<string, { safeParse(v: unknown): { success: boolean } }>)[
+    field
+  ];
+  if (!declared) return PROBE_ARRAY;
+  return declared.safeParse(PROBE_ARRAY).success ? PROBE_ARRAY : PROBE_SCALAR;
+}
 
 /** `variable "current_user.nope" is undefined` → `current_user.nope`. */
 function unresolvedVariablePath(detail: string): string | null {
@@ -348,7 +446,7 @@ type UserProbe = Record<string, unknown>;
 
 function baseUserProbe(): UserProbe {
   const probe: UserProbe = {};
-  for (const key of PRERESOLVED_USER_KEYS) probe[key] = PROBE_ARRAY;
+  for (const key of PRERESOLVED_USER_KEYS) probe[key] = kernelKeyProbe(key);
   return probe;
 }
 
@@ -425,23 +523,33 @@ function isPreresolvedPath(path: string): boolean {
  * rather than `while (true)`: a linter must terminate on input it did not
  * anticipate, and stopping early only costs a finding.
  */
-function resolveReferences(
-  bridged: string,
-): { filter: Record<string, unknown> | null; unresolvedScalars: string[] } {
+function resolveReferences(bridged: string): {
+  filter: Record<string, unknown> | null;
+  unresolvedScalars: string[];
+  /** The probe as the last compile saw it — every discovered key bound. */
+  probe: UserProbe;
+  /** The compiler's `detail` when that compile was refused `unsupported`. */
+  refusal: string | null;
+} {
   const probe = baseUserProbe();
   const unresolvedScalars: string[] = [];
+  const stop = (refusal: string | null = null) => ({ filter: null, unresolvedScalars, probe, refusal });
   for (let pass = 0; pass < 32; pass++) {
     const res = compileWithProbe(bridged, probe);
-    if (res.ok) return { filter: res.filter as Record<string, unknown>, unresolvedScalars };
+    if (res.ok) return { filter: res.filter as Record<string, unknown>, unresolvedScalars, probe, refusal: null };
     if (res.reason !== 'unresolved-variable') {
-      // The predicate passed `isSupportedRlsExpression`, so a shape refusal here
-      // can only be a probe value the position cannot take (an array handed to
-      // `startsWith`). Nothing further is decidable; report what was found.
-      return { filter: null, unresolvedScalars };
+      // [#19951] The predicate passed `isSupportedRlsExpression`, so a shape
+      // refusal here was produced by a VALUE — a membership set under `==` /
+      // `!=` or handed to `startsWith`, a one-value key on the right of `in`,
+      // the whole `current_user` object where one value or one set belongs —
+      // or by a constant comparison whose fold depends on WHICH value the
+      // probe holds. The caller decides which ({@link attributeTypeFault}):
+      // only the first recurs on every request.
+      return stop(res.reason === 'unsupported' ? res.detail : null);
     }
     const path = unresolvedVariablePath(res.detail);
     if (!path || !path.startsWith('current_user.') || isPreresolvedPath(path)) {
-      return { filter: null, unresolvedScalars };
+      return stop();
     }
     if (userVariableIsScalarPositioned(bridged, probe, path)) {
       unresolvedScalars.push(path);
@@ -452,7 +560,7 @@ function resolveReferences(
       setProbePath(probe, path, PROBE_ARRAY);
     }
   }
-  return { filter: null, unresolvedScalars };
+  return stop();
 }
 
 /** Collect every `{ $field: '<path>' }` reference nested anywhere under a value. */
@@ -499,6 +607,301 @@ function filterFieldPaths(filter: Record<string, unknown> | null): Set<string> {
   return fields;
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * #19951 — the refusals the SHAPE check cannot see.
+ *
+ * `isSupportedRlsExpression` judges shape with every `current_user` value
+ * replaced by a placeholder, so two refusals pass it and land per request:
+ *
+ *  1. A `current_user` value of the wrong TYPE for its position:
+ *     `record.reviewer_id != current_user.org_user_ids` (a membership set under
+ *     `!=`), `record.x in current_user.id` (one value on the right of `in`),
+ *     `record.x in current_user` / `record.x.startsWith(current_user)` (the
+ *     whole context object). The compiler refuses each on EVERY request, and
+ *     `RLSCompiler` drops the policy — measured through the real plugin: zero
+ *     rows on a `using` read, 403 on a `check` write. This pass used to stop at
+ *     that refusal and report nothing.
+ *  2. A lowered comparand the shared filter faces refuse by ruling — a `null`
+ *     list member (`x in ['a', null]`) or a `null` ordering bound (`x > null`).
+ *     Those compile; the RLS layer does not pass its own filter through the
+ *     faces, so the backend answers with semantics the platform left undefined.
+ */
+
+/**
+ * The value standing in for the OTHER runtime type in a one-reference swap.
+ *
+ * It begins with {@link PROBE_SCALAR}, so a constant ORDERING fold
+ * (`current_user.id > 'm'`) reads the same after the swap — `[SWAP_SCALAR]`
+ * coerces to this string too — and it is never equal to the probe, so an
+ * equality fold between two references cannot turn true by the swap. Both
+ * keep a VALUE-dependent refusal refused, which is what the discriminator needs.
+ */
+const SWAP_SCALAR = `${PROBE_SCALAR}swap`;
+
+/** A lowered field position, read off the compiler's output. */
+interface LoweredSite {
+  field: string;
+  /** `==` for an implicit equality, otherwise the lowered operator (`$ne`, `$in`, `$startsWith`, …). */
+  op: string;
+  operand: unknown;
+}
+
+/** Every lowered field position whose operand satisfies `hit`, in walk order. */
+function loweredSites(filter: unknown, hit: (op: string, operand: unknown) => boolean): LoweredSite[] {
+  const sites: LoweredSite[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === '$and' || key === '$or' || key === '$not') {
+        walk(value);
+        continue;
+      }
+      if (key.startsWith('$')) continue;
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const [op, operand] of Object.entries(value as Record<string, unknown>)) {
+          if (hit(op, operand)) sites.push({ field: key, op, operand });
+        }
+      } else if (hit('==', value)) {
+        sites.push({ field: key, op: '==', operand: value });
+      }
+    }
+  };
+  walk(filter);
+  return sites;
+}
+
+/** What one `current_user` reference holds on every request. */
+type RuntimeHolding = 'list' | 'one value' | 'context object';
+
+interface TypeFault {
+  /** The reference whose runtime TYPE the position cannot take (`current_user.org_user_ids`, `current_user`). */
+  variable: string;
+  holds: RuntimeHolding;
+  /** Where the swapped value landed once the predicate lowered — what the prescription rewrites. */
+  sites: LoweredSite[];
+}
+
+/**
+ * Does ONE `current_user` reference's runtime TYPE cause this refusal — so it
+ * recurs on every request — or is the refusal an artefact of the probe's VALUES?
+ *
+ * Asked of the COMPILER, the way {@link userVariableIsScalarPositioned} asks
+ * it: rebind one reference to a value of the OTHER type and compile again. If
+ * that one swap makes the predicate lower, the refusal was that reference's
+ * TYPE, and the type is not the probe's to choose — a kernel key holds what
+ * `ExecutionContextSchema` declares on every request ({@link kernelKeyProbe}),
+ * and the bare root is the whole context object on every request — so the
+ * runtime refuses the same position every time.
+ *
+ * What no single swap cures stays SILENT, and that is the probe-artefact class:
+ * a constant comparison with no field (`current_user.email == 'ops@acme.com'`)
+ * folds on the VALUE, lowering to "no restriction" for the one caller it names
+ * and refused for every other caller — a per-caller policy the probe cannot
+ * stand for ({@link SWAP_SCALAR} keeps that fold refused under every swap). It
+ * is also the answer for a predicate with two type faults, which no single swap
+ * cures: the conservative direction for a new finding.
+ *
+ * The cure must also LAND: the swapped value is found in a lowered field
+ * position, which is what the prescription names.
+ */
+function attributeTypeFault(bridged: string, probe: UserProbe): TypeFault | null {
+  const swaps: Array<{ variable: string; holds: RuntimeHolding; context: unknown; marker: unknown }> = [];
+  for (const key of PRERESOLVED_USER_KEYS) {
+    const isList = Array.isArray(probe[key]);
+    const marker = isList ? SWAP_SCALAR : [SWAP_SCALAR];
+    swaps.push({
+      variable: `current_user.${key}`,
+      holds: isList ? 'list' : 'one value',
+      context: { ...probe, [key]: marker },
+      marker,
+    });
+  }
+  // The root, twice: as a list that still carries every key (so a
+  // `current_user.id` beside `x in current_user` keeps resolving), and as one
+  // string (a string method's argument).
+  const rootAsList = Object.assign([SWAP_SCALAR], probe);
+  swaps.push({ variable: 'current_user', holds: 'context object', context: rootAsList, marker: rootAsList });
+  swaps.push({ variable: 'current_user', holds: 'context object', context: SWAP_SCALAR, marker: SWAP_SCALAR });
+
+  for (const swap of swaps) {
+    const res = compileCelToFilter(bridged, { variables: { current_user: swap.context } });
+    if (!res.ok) continue;
+    const sites = loweredSites(res.filter, (_op, operand) => operand === swap.marker);
+    if (sites.length > 0) return { variable: swap.variable, holds: swap.holds, sites };
+  }
+  return null;
+}
+
+/** The kernel keys that hold `holding` on every request, from their declared types. */
+function kernelKeysHolding(holding: 'list' | 'one value'): string[] {
+  return [...PRERESOLVED_USER_KEYS]
+    .filter((key) => Array.isArray(kernelKeyProbe(key)) === (holding === 'list'))
+    .sort();
+}
+
+/** The lowered string-method operators, back to the CEL method an author writes. */
+const STRING_METHOD_OF: ReadonlyMap<string, string> = new Map([
+  ['$startsWith', 'startsWith'],
+  ['$endsWith', 'endsWith'],
+  ['$contains', 'contains'],
+]);
+
+/** The pasteable rewrite for one lowered site of a type fault. */
+function typeFaultRewrite(fault: TypeFault, site: LoweredSite): string {
+  const f = `record.${site.field}`;
+  const v = fault.variable;
+  const method = STRING_METHOD_OF.get(site.op);
+  const oneValueKeys = kernelKeysHolding('one value');
+  if (fault.holds === 'list') {
+    if (site.op === '==') return `replace \`${f} == ${v}\` with \`${f} in ${v}\``;
+    if (site.op === '$ne') return `replace \`${f} != ${v}\` with \`!(${f} in ${v})\``;
+    if (method) {
+      return (
+        `replace \`${f}.${method}(${v})\` with the membership test \`${f} in ${v}\`, or pass one value: ` +
+        oneValueKeys.map((key) => `\`${f}.${method}(current_user.${key})\``).join(' / ')
+      );
+    }
+  }
+  if (fault.holds === 'one value' && site.op === '$in') {
+    return (
+      `replace \`${f} in ${v}\` with \`${f} == ${v}\` (and \`!(${f} in ${v})\` with \`${f} != ${v}\`); for a ` +
+      `set, name a membership key: ` +
+      kernelKeysHolding('list').map((key) => `\`${f} in current_user.${key}\``).join(' / ')
+    );
+  }
+  if (fault.holds === 'context object') {
+    if (site.op === '$in') {
+      return (
+        `replace \`${f} in current_user\` with the key that holds the set: ` +
+        kernelKeysHolding('list').map((key) => `\`${f} in current_user.${key}\``).join(' / ') +
+        `, or an app-staged §7.3.1 set \`${f} in current_user.<key>\``
+      );
+    }
+    if (method) {
+      return (
+        `replace \`${f}.${method}(current_user)\` with the key that holds the string: ` +
+        oneValueKeys.map((key) => `\`${f}.${method}(current_user.${key})\``).join(' / ')
+      );
+    }
+  }
+  return `rewrite the comparison on \`${f}\` so \`${v}\` sits where its value fits`;
+}
+
+const HOLDING_SENTENCE: Readonly<Record<RuntimeHolding, (variable: string) => string>> = {
+  list: (v) =>
+    `\`${v}\` is a membership set: \`ExecutionContext\` declares it, and the kernel resolves it, as a LIST on ` +
+    'every request, so no request can ever put one value in this position.',
+  'one value': (v) =>
+    `\`${v}\` holds ONE value: \`ExecutionContext\` declares it, and the kernel resolves it, as a scalar on ` +
+    'every request, so no request can ever put a list in this position.',
+  'context object': () =>
+    '`current_user` alone is the whole caller context object on every request, never one value and never one set.',
+};
+
+/** The one-sentence rule each holding breaks, leading its hint. */
+const HOLDING_RULE: Readonly<Record<RuntimeHolding, string>> = {
+  list:
+    '`==` / `!=` compare ONE value and a string method takes ONE string; a membership set is tested with `in` — ' +
+    '"one of these" is `x in set`, "none of these" is `!(x in set)`.',
+  'one value': '`in` tests membership in a SET; one value is compared with `==` / `!=`.',
+  'context object': '`current_user` is the caller context, not a value: name the key that holds what you mean.',
+};
+
+/**
+ * The verdict of the shared filter faces on this predicate's LOWERED filter —
+ * `assertListComparandShapes` and `normalizeFilterComparandTypes`
+ * (`@objectstack/spec/data`), the same pair the analytics read-scope compiler
+ * runs on every RLS read scope (`assertReadScopeComparandsRunnable`) and the
+ * engine runs on every caller-supplied filter. The RLS data path does not run
+ * them on its own filter, which is why a refused comparand gets through there.
+ *
+ * Graded by the refusal's `code` (`INVALID_FILTER`), never by its prose (#6223);
+ * the returned message is quoted, never parsed.
+ *
+ * Not a probe artefact: the faces accept a string and a list of strings by
+ * construction, and those are the only values the probe binds — so a refusal
+ * here is about a comparand the AUTHOR wrote, and recurs on every request. A
+ * probe that bound a nested record (a `current_user.a.b` path) is not judged.
+ */
+function sharedFaceRefusal(filter: Record<string, unknown>, probe: UserProbe, clause: string): string | null {
+  if (!Object.values(probe).every((v) => typeof v === 'string' || Array.isArray(v))) return null;
+  try {
+    assertListComparandShapes(filter, undefined, clause);
+    normalizeFilterComparandTypes(filter, undefined, clause);
+    return null;
+  } catch (err) {
+    if ((err as { code?: unknown } | null)?.code !== 'INVALID_FILTER') return null;
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+/** The lowered ordering operators, back to the CEL operator an author writes. */
+const ORDERING_SYMBOL: ReadonlyMap<string, string> = new Map([
+  ['$gt', '>'],
+  ['$gte', '>='],
+  ['$lt', '<'],
+  ['$lte', '<='],
+]);
+
+/** A CEL literal for one list member — a JSON string literal is valid CEL. */
+function celLiteral(value: unknown): string {
+  return typeof value === 'string' ? JSON.stringify(value) : String(value);
+}
+
+/**
+ * The pasteable rewrites for a face refusal: every lowered `null` list member
+ * and `null` ordering bound, rewritten with the null predicate. Each is a LOCAL
+ * replacement, correct under any enclosing `!`, `&&` or `||` — `!(x in ['a'] ||
+ * x == null)` is exactly "none of these, and has a value".
+ */
+function nullComparandRewrites(filter: Record<string, unknown>): string[] {
+  const rewrites: string[] = [];
+  for (const site of loweredSites(filter, (op, operand) =>
+    (op === '$in' && Array.isArray(operand) && operand.includes(null)) ||
+    (ORDERING_SYMBOL.has(op) && operand === null))) {
+    const f = `record.${site.field}`;
+    if (site.op === '$in') {
+      const list = site.operand as unknown[];
+      const written = `${f} in [${list.map(celLiteral).join(', ')}]`;
+      const rest = list.filter((member) => member !== null);
+      rewrites.push(
+        rest.length === 0
+          ? `replace \`${written}\` with \`${f} == null\``
+          : `replace \`${written}\` with \`(${f} in [${rest.map(celLiteral).join(', ')}] || ${f} == null)\` ` +
+              `to keep matching a missing value, or drop the member: \`${f} in [${rest.map(celLiteral).join(', ')}]\``,
+      );
+    } else {
+      rewrites.push(
+        `replace \`${f} ${ORDERING_SYMBOL.get(site.op)} null\` with \`${f} != null\` (has a value) or ` +
+          `\`${f} == null\` (has none), or compare against a real bound`,
+      );
+    }
+  }
+  return rewrites;
+}
+
+/** The leading sentence of a quoted refusal, so an author sees its point and not its whole essay. */
+function firstSentence(message: string): string {
+  const cut = message.indexOf('. ');
+  return cut === -1 ? message : message.slice(0, cut);
+}
+
+/**
+ * What a face-refused comparand does at request time. Not a drop: the compile
+ * succeeds and the policy's filter reaches the backend unjudged.
+ */
+const FACE_REFUSED_CONSEQUENCE =
+  'The RLS layer does not pass its own filter through that check, so the policy is NOT dropped: the refused ' +
+  'comparand reaches the backend, which answers it with semantics the platform has ruled undefined — backends ' +
+  'disagree, and on the SQL drivers a `null` member or bound matches no row, so a negated list holding `null` ' +
+  'or an ordering against `null` can admit NOTHING. One policy can even disagree with itself: a `using` read ' +
+  'on a SQL driver hides rows that its `check` evaluator admits on write. Every analytics query over the ' +
+  'object is refused outright, because its read-scope compiler runs the same check.';
+
 /**
  * What a reference miss costs at request time, per clause. Measured, not inferred.
  *
@@ -532,11 +935,14 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
           'delete matches ZERO rows, so the object DISAPPEARS for every holder of this permission set — ' +
           'not because they were denied, but because the narrowing they were granted resolves to nothing. ' +
           'When other policies also apply, this one vanishes from the OR and grants none of the access it ' +
-          'appears to.'
+          'appears to.' +
+          USING_INSERT_CONSEQUENCE
       : dropped +
-          'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every insert / ' +
-          'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule ' +
-          'and behaves as a blanket refusal for every holder of this permission set.';
+          'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every ' +
+          'single-record insert and by-id update the policy governs fails with `PermissionDeniedError`. ' +
+          'The policy reads as a write rule and behaves as a blanket refusal for every holder of this ' +
+          'permission set.' +
+          CHECK_SET_QUALIFIER;
   }
 
   // ── The FIELD half. ONE direction, in every position and every polarity,
@@ -555,11 +961,15 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
         '`RLS_DENY_FILTER` sentinel: every select / update / delete matches ZERO rows, so the object ' +
         'DISAPPEARS for every holder of this permission set — not because they were denied, but because ' +
         'the narrowing they were granted names a column that is not there. When other policies also ' +
-        'apply, this one vanishes from the OR and grants none of the access it appears to.'
+        'apply, this one vanishes from the OR and grants none of the access it appears to.' +
+        USING_INSERT_CONSEQUENCE
     : dropped +
-        'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every insert / ' +
-        'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule ' +
-        'and behaves as a blanket refusal for every holder of this permission set. ⚠️ On a runtime older ' +
+        'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every ' +
+        'single-record insert and by-id update the policy governs fails with `PermissionDeniedError`. ' +
+        'The policy reads as a write rule and behaves as a blanket refusal for every holder of this ' +
+        'permission set.' +
+        CHECK_SET_QUALIFIER +
+        ' ⚠️ On a runtime older ' +
         'than that guard this clause failed OPEN rather than closed — the write path had no ' +
         'field-existence check at all, so a negated miss was satisfied VACUOUSLY by the post-image and ' +
         'PERMITTED exactly the writes the policy was written to refuse, on every driver. Fix the name ' +
@@ -583,7 +993,7 @@ function referenceFindings(
 ): RlsPredicateFinding[] {
   const findings: RlsPredicateFinding[] = [];
   const bridged = sqlPredicateToCel(source);
-  const { filter, unresolvedScalars } = resolveReferences(bridged);
+  const { filter, unresolvedScalars, probe, refusal } = resolveReferences(bridged);
 
   for (const fieldPath of filterFieldPaths(filter)) {
     const verdict = resolveFieldPath(graph, object, fieldPath);
@@ -632,6 +1042,46 @@ function referenceFindings(
         `must be staged into \`ExecutionContext.rlsMembership\` by an \`IRlsMembershipResolver\` that ` +
         `DECLARES the key, and it can then only be tested with \`in\` (\`<field> in ${variablePath}\`), ` +
         `never compared with \`==\`: the runtime stages membership sets as arrays and never as scalars.`,
+    });
+  }
+
+  // [#19951] The refusals the shape check cannot see (the block above
+  // {@link attributeTypeFault}). A refusal no single type swap cures — the
+  // probe-artefact class — reports nothing.
+  const fault = refusal !== null ? attributeTypeFault(bridged, probe) : null;
+  if (refusal !== null && fault) {
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNENFORCEABLE,
+      where,
+      path,
+      message:
+        `RLS ${clause} \`${quote(source)}\` passes the shape check, but the compiler refuses it for the value ` +
+        `\`${fault.variable}\` holds on every request (${refusal}). ${HOLDING_SENTENCE[fault.holds](fault.variable)} ` +
+        consequence(clause, DROPPED_EVERY_REQUEST),
+      hint:
+        `${HOLDING_RULE[fault.holds]} In this predicate: ` +
+        `${fault.sites.map((site) => typeFaultRewrite(fault, site)).join('; ')}.`,
+    });
+  }
+
+  const faced = filter ? sharedFaceRefusal(filter, probe, clause) : null;
+  if (filter && faced !== null) {
+    const rewrites = nullComparandRewrites(filter);
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNENFORCEABLE,
+      where,
+      path,
+      message:
+        `RLS ${clause} \`${quote(source)}\` lowers, but to a comparand the platform's shared filter check ` +
+        `refuses (${firstSentence(faced)}). ${FACE_REFUSED_CONSEQUENCE}`,
+      hint:
+        rewrites.length > 0
+          ? '`null` has no place inside a list or opposite an ordering operator — the platform refuses both in ' +
+            'every filter it is sent, because no two backends agree on what they match. Test for no value with ' +
+            `\`== null\` and for a value with \`!= null\`: ${rewrites.join('; ')}.`
+          : 'Rewrite the comparand the check names inside the lowerable subset. ' + PUSHDOWN_SUBSET,
     });
   }
 

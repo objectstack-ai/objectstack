@@ -21,7 +21,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { StandardErrorCode } from '../api/errors.zod';
-import { parseFilterAST, RangeOperatorSchema, VALID_AST_OPERATORS } from './filter.zod';
+import {
+  FieldOperatorsSchema,
+  parseFilterAST,
+  RangeOperatorSchema,
+  VALID_AST_OPERATORS,
+} from './filter.zod';
 import { assertListComparandShapes } from './filter-comparand-shape';
 
 type Refusal = Error & { code?: string; status?: number };
@@ -39,10 +44,20 @@ const refusalOf = (run: () => unknown): Refusal => {
  * Which `$` operator an authoring spelling lowers to, derived by LOWERING one
  * rather than by reading a table this file would then be a second copy of.
  * A two-element array is legal for all three list operators, so the probe never
- * trips the door it is used to find.
+ * trips the door it is used to find. The EQUALITY spellings do refuse it, since
+ * the 2026-09-23 arm (#19757) — and they answer `undefined` either way: before
+ * that arm they lowered it to the implicit form, which carries no `$` key.
+ * [#19886] The `$ne` spellings refuse it too, since ruling A, so they answer
+ * `undefined` here now; the `$ne` pins below find their spellings with a
+ * SCALAR probe instead.
  */
 const loweredOperatorOf = (op: string): string | undefined => {
-  const lowered = parseFilterAST([['probe', op, ['a', 'b']]]) as Record<string, unknown> | undefined;
+  let lowered: Record<string, unknown> | undefined;
+  try {
+    lowered = parseFilterAST([['probe', op, ['a', 'b']]]) as Record<string, unknown> | undefined;
+  } catch {
+    return undefined;
+  }
   const spec = lowered?.probe;
   if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) return undefined;
   return Object.keys(spec).find((key) => key.startsWith('$'));
@@ -462,6 +477,266 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       .toMatch(/^Filter comparand at where\.n\.\$gt is undefined/);
   });
 
+  // ── the EQUALITY-slot arm, ruled 2026-09-23 (#19757) ───────────────────
+  //
+  // Ruling 5793368540, letter 乙: an array in the implicit-equality slot is
+  // refused at this face, for every driver at once; ⛔ no alias, ⛔ no grace
+  // window. Before it, `{ tags: ['a'] }` passed this door and was refused by
+  // the SQL family and `driver-memory`, excluded every row on
+  // `@objectstack/formula`, and was ANSWERED by `driver-mongodb` as MongoDB's
+  // array equality — the pins below were each measured RED on the face as it
+  // stood (see the PR's firing control).
+
+  it.each([
+    ['the lowered array form, "equals"', [['tags', 'equals', ['a']]], 'where.tags'],
+    ['the lowered array form, "="', [['tags', '=', ['a', 'b']]], 'where.tags'],
+    ['the object passthrough — implicit', { tags: ['a'] }, 'where.tags'],
+    ['an EMPTY array — still an array in this slot', { tags: [] }, 'where.tags'],
+    ['the object passthrough — explicit $eq', { tags: { $eq: ['a'] } }, 'where.tags.$eq'],
+    ['explicit $eq with an EMPTY array', { tags: { $eq: [] } }, 'where.tags.$eq'],
+    ['nested under $and (lowered)', ['and', ['amount', '>', 5], ['tags', 'eq', ['a']]], 'where.$and[1].tags'],
+    ['nested under $or', { $or: [{ stage: 'won' }, { tags: ['a'] }] }, 'where.$or[1].tags'],
+    ['nested under $not', { $not: { tags: { $eq: ['a'] } } }, 'where.$not.tags.$eq'],
+  ])('refuses an ARRAY in the equality slot — %s', (_label, where, path) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    // ADR-0112 class 1, both halves: on the face as it stood, every one of
+    // these RETURNED — there was no error at all to carry either field.
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain(`at ${path}.`);
+  });
+
+  it('the implicit-equality refusal names the slot and prescribes $in and $contains by their spec spellings', () => {
+    const err = refusalOf(() => parseFilterAST([['tags', 'equals', ['a', 'b']]]));
+    // The leading sentence is driver-memory's own for this condition, kept
+    // verbatim (one condition, one wording across packages).
+    expect(err.message).toMatch(
+      /^The implicit-equality comparand on field "tags" requires a single comparable value, but received an array \(\["a","b"\]\) at where\.tags\./,
+    );
+    // The ruling's prescription: the declared list operator and the
+    // array-containment operator, spec spelling AND authoring spelling.
+    expect(err.message).toContain('"one of these values" use {"$in": […]} (authoring: in)');
+    expect(err.message).toContain(
+      '"the stored list holds a value" on a multi-value field, {"$contains": "…"} (authoring: contains)',
+    );
+    expect(err.message).toContain('an $or of those for any-of');
+    expect(err.message).toMatch(/The filter was NOT applied, .*UNFILTERED result set\.$/);
+  });
+
+  it('the $eq refusal names the operator it was written with, and the same two remedies', () => {
+    const err = refusalOf(() => parseFilterAST({ tags: { $eq: ['a'] } }));
+    expect(err.message).toMatch(
+      /^Operator "\$eq" on field "tags" requires a single comparable value, but received an array \(\["a"\]\) at where\.tags\.\$eq\./,
+    );
+    expect(err.message).toContain('{"$in": […]} (authoring: in)');
+    expect(err.message).toContain('{"$contains": "…"} (authoring: contains)');
+    // A caller-supplied context keeps its prefix, as on every sibling arm.
+    expect(refusalOf(() => assertListComparandShapes({ tags: ['a'] }, "find('deal')")).message)
+      .toMatch(/^find\('deal'\): The implicit-equality comparand on field "tags"/);
+  });
+
+  it('every AST spelling that lowers to EQUALITY refuses an array — the vocabulary, read at source', () => {
+    // Derived by LOWERING a scalar rather than from a hand list: a spelling is
+    // an equality spelling when `[f, op, 'x']` lowers to the implicit form.
+    // (`in` / `between` refuse a scalar probe outright — they are list
+    // operators, so a throw here is a "no", not a failure.)
+    const equality = [...VALID_AST_OPERATORS].filter((op) => {
+      try {
+        const lowered = parseFilterAST([['probe', op, 'x']]) as Record<string, unknown> | undefined;
+        return lowered?.probe === 'x';
+      } catch {
+        return false;
+      }
+    });
+    // Guards the loop from passing vacuously.
+    expect(equality.sort()).toEqual(['=', '==', 'eq', 'equals']);
+    for (const op of equality) {
+      const err = refusalOf(() => parseFilterAST([['tags', op, ['a']]]));
+      expect(err.code, op).toBe(StandardErrorCode.enum.INVALID_FILTER);
+      expect(err.status, op).toBe(400);
+      expect(err.message, op).toMatch(/^The implicit-equality comparand on field "tags"/);
+    }
+  });
+
+  it('the two prescribed operators are DECLARED — the refusal invents no spelling', () => {
+    // The message spells `$in` / `in` and `$contains` / `contains` by hand
+    // (`filter.zod.ts` imports the door, so deriving them would be a cycle).
+    // This is what keeps them the vocabulary's own: both are keys of the
+    // enforced operator schema, and each authoring spelling lowers to its `$`
+    // spelling through the one AST table.
+    const declared = Object.keys(FieldOperatorsSchema.shape);
+    expect(declared).toContain('$in');
+    expect(declared).toContain('$contains');
+    expect(loweredOperatorOf('in')).toBe('$in');
+    expect(loweredOperatorOf('contains')).toBe('$contains');
+    // …and the prescribed spellings actually lower and pass this door.
+    expect(parseFilterAST([['tags', 'in', ['a', 'b']]])).toEqual({ tags: { $in: ['a', 'b'] } });
+    expect(parseFilterAST([['tags', 'contains', 'a']])).toEqual({ tags: { $contains: 'a' } });
+    expect(parseFilterAST({ $or: [{ tags: { $contains: 'a' } }, { tags: { $contains: 'b' } }] }))
+      .toEqual({ $or: [{ tags: { $contains: 'a' } }, { tags: { $contains: 'b' } }] });
+  });
+
+  it('LIT CONTROL — every scalar equality comparand keeps passing, null predicate first', () => {
+    // `{ f: null }` and `$eq: null` ARE the has-no-value predicate (#5332);
+    // the arm is array-shaped and nothing wider.
+    expect(parseFilterAST({ tags: null })).toEqual({ tags: null });
+    expect(parseFilterAST({ tags: { $eq: null } })).toEqual({ tags: { $eq: null } });
+    expect(parseFilterAST([['tags', 'equals', null]])).toEqual({ tags: null });
+    expect(parseFilterAST({ tags: 'a' })).toEqual({ tags: 'a' });
+    expect(parseFilterAST({ n: 0 })).toEqual({ n: 0 });
+    expect(parseFilterAST({ on: false })).toEqual({ on: false });
+    expect(parseFilterAST({ tags: { $eq: '' } })).toEqual({ tags: { $eq: '' } });
+    const day = new Date('2026-07-01T00:00:00.000Z');
+    expect(parseFilterAST({ at: day })).toEqual({ at: day });
+    expect(parseFilterAST({ at: { $eq: day } })).toEqual({ at: { $eq: day } });
+    // #7597's promotion: a `{ $field }` comparand on an equality spelling is
+    // lowered to `$eq` and is not an array — untouched.
+    expect(parseFilterAST([['amount', '=', { $field: 'budget' }]]))
+      .toEqual({ amount: { $eq: { $field: 'budget' } } });
+  });
+
+  it('LIT CONTROL — every array-valued operator the vocabulary declares keeps its array', () => {
+    // Read off the enforced schema rather than listed: the operators whose
+    // declared comparand ACCEPTS an array — exactly the list operators, so a
+    // fourth array-valued operator added to the schema lands in the loop
+    // without an edit here. [#19889] `$eq` left the set when the schema door
+    // began refusing an array there too (ruling A, record 5805248669), in this
+    // face's words — `filter-equality-array-schema-door.test.ts` pins that
+    // door. [#19886] `$ne` left it the same way (ruling A, record 5805254639),
+    // and it is no longer skipped below: the set IS the list operators now, and
+    // `filter-ne-array-schema-door.test.ts` pins the `$ne` door.
+    const arrayValued = Object.keys(FieldOperatorsSchema.shape).filter((op) =>
+      FieldOperatorsSchema.safeParse({ [op]: ['a', 'b'] }).success);
+    expect(arrayValued.sort()).toEqual(['$between', '$in', '$nin']);
+    for (const op of arrayValued) {
+      expect(parseFilterAST({ tags: { [op]: ['a', 'b'] } }), op).toEqual({ tags: { [op]: ['a', 'b'] } });
+    }
+    // The empty lists stay the declared predicates they are.
+    expect(parseFilterAST({ tags: { $in: [] } })).toEqual({ tags: { $in: [] } });
+    expect(parseFilterAST({ tags: { $nin: [] } })).toEqual({ tags: { $nin: [] } });
+    // `$contains` is declared with a STRING comparand — the array-containment
+    // operator takes ONE member, which is why the refusal says `"…"`.
+    expect(FieldOperatorsSchema.safeParse({ $contains: ['a'] }).success).toBe(false);
+  });
+
+  it('an array INSIDE a no-$-key field spec is still not descended into', () => {
+    // The nested-relation / deep-equality boundary this door has always kept:
+    // the arm judges the field's own slot, never the inside of a nested
+    // condition it does not walk.
+    expect(parseFilterAST({ author: { tags: ['a'] } })).toEqual({ author: { tags: ['a'] } });
+  });
+
+  // ── the `$ne` arm, ruling A on #19886 (record 5805254639) ─────────────
+  //
+  // 「The shared comparand-shape face refuses an array under `$ne` for every
+  // driver … one remedy text, naming the declared list-negation operator by
+  // its spec spelling」 — ⛔ no alias, ⛔ no window. A `todo` stood here until
+  // that ruling, because a green pin would have read as a ruling nobody made.
+  // Before the arm, every row below RETURNED from this face (measured on
+  // `origin/main` `9e7824a4`, and again by this PR's ablation).
+
+  it.each([
+    ['the lowered array form, "ne"', [['tags', 'ne', ['a']]], 'where.tags.$ne'],
+    ['the lowered array form, "not_equals"', [['tags', 'not_equals', ['a', 'b']]], 'where.tags.$ne'],
+    ['the lowered array form, "!="', [['tags', '!=', ['a']]], 'where.tags.$ne'],
+    ['the object passthrough', { tags: { $ne: ['a'] } }, 'where.tags.$ne'],
+    ['an EMPTY array — still an array in a one-value slot', { tags: { $ne: [] } }, 'where.tags.$ne'],
+    ['nested under $and (lowered)', ['and', ['amount', '>', 5], ['tags', 'neq', ['a']]], 'where.$and[1].tags.$ne'],
+    ['nested under $or', { $or: [{ stage: 'won' }, { tags: { $ne: ['a'] } }] }, 'where.$or[1].tags.$ne'],
+    ['nested under $not', { $not: { tags: { $ne: ['a'] } } }, 'where.$not.tags.$ne'],
+    ['beside a legal $eq on the same field', { tags: { $eq: 'x', $ne: ['a'] } }, 'where.tags.$ne'],
+  ])('refuses an ARRAY under $ne — %s', (_label, where, path) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    // ADR-0112 class 1, both halves.
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+    expect(err.message).toContain(`at ${path}.`);
+    // The `$ne` sentence, never the equality slot's.
+    expect(err.message).toMatch(/^Operator "\$ne" on field "tags" requires a single comparable value, but received an array/);
+  });
+
+  it('the $ne refusal names the operator and prescribes $nin, by its spec and authoring spellings, and nothing else', () => {
+    const err = refusalOf(() => parseFilterAST([['tags', 'not_equals', ['a', 'b']]]));
+    // The leading sentence is driver-memory's `arrayComparandError` for `$ne`,
+    // word for word (one condition, one wording across packages).
+    expect(err.message).toMatch(
+      /^Operator "\$ne" on field "tags" requires a single comparable value, but received an array \(\["a","b"\]\) at where\.tags\.\$ne\. /,
+    );
+    // The ruling's prescription: the declared list-negation operator.
+    expect(err.message).toContain('For "none of these values" use {"$nin": […]} (authoring: nin, not_in, notin).');
+    expect(err.message).toMatch(/The filter was NOT applied, .*UNFILTERED result set\.$/);
+    // ONE remedy: the equality slot's two operators are the wrong answer for
+    // a negation, and `$notContains` (a STRING operator) is not a list one.
+    expect(err.message).not.toContain('$in"');
+    expect(err.message).not.toContain('$contains');
+    expect(err.message).not.toContain('$notContains');
+    // A caller-supplied context keeps its prefix, as on every sibling arm.
+    expect(refusalOf(() => assertListComparandShapes({ tags: { $ne: ['a'] } }, "find('deal')")).message)
+      .toMatch(/^find\('deal'\): Operator "\$ne" on field "tags"/);
+  });
+
+  it('every AST spelling that lowers to $ne refuses an array — the vocabulary, read at source', () => {
+    // Found with a SCALAR probe: an array would now trip the very arm being
+    // looked for. (`in` / `between` refuse a scalar outright; a throw is a "no".)
+    const inequality = [...VALID_AST_OPERATORS].filter((op) => {
+      try {
+        const lowered = parseFilterAST([['probe', op, 'x']]) as Record<string, unknown> | undefined;
+        const spec = lowered?.probe as Record<string, unknown> | undefined;
+        return spec !== null && typeof spec === 'object' && Object.keys(spec).join() === '$ne';
+      } catch {
+        return false;
+      }
+    });
+    // Guards the loop from passing vacuously.
+    expect(inequality.sort()).toEqual(['!=', '<>', 'ne', 'neq', 'not_equals', 'notequals']);
+    for (const op of inequality) {
+      const err = refusalOf(() => parseFilterAST([['tags', op, ['a']]]));
+      expect(err.code, op).toBe(StandardErrorCode.enum.INVALID_FILTER);
+      expect(err.status, op).toBe(400);
+      expect(err.message, op).toMatch(/^Operator "\$ne" on field "tags"/);
+    }
+  });
+
+  it('the prescribed operator is DECLARED and its spellings are the vocabulary\'s — the refusal invents nothing', () => {
+    // `$nin` is spelled by hand in the shared text (`filter.zod.ts` imports
+    // the face, so deriving it would be a cycle). What keeps it the
+    // vocabulary's own: it is a key of the enforced operator schema, and the
+    // spellings the message lists are EXACTLY the ones that lower to it.
+    expect(Object.keys(FieldOperatorsSchema.shape)).toContain('$nin');
+    const ninSpellings = [...VALID_AST_OPERATORS].filter((op) => loweredOperatorOf(op) === '$nin').sort();
+    expect(ninSpellings).toEqual(['nin', 'not_in', 'notin']);
+    const message = refusalOf(() => parseFilterAST({ tags: { $ne: ['a'] } })).message;
+    expect(message).toContain(`(authoring: ${ninSpellings.join(', ')})`);
+    // …and the prescribed spelling actually lowers and passes this face.
+    expect(parseFilterAST([['tags', 'not_in', ['a', 'b']]])).toEqual({ tags: { $nin: ['a', 'b'] } });
+    expect(parseFilterAST({ tags: { $nin: ['a', 'b'] } })).toEqual({ tags: { $nin: ['a', 'b'] } });
+  });
+
+  it('LIT CONTROL — every non-array $ne comparand keeps passing, the has-a-value predicate first', () => {
+    // `$ne: null` IS the has-a-value predicate (#5332); the arm is array-shaped
+    // and nothing wider.
+    expect(parseFilterAST({ tags: { $ne: null } })).toEqual({ tags: { $ne: null } });
+    expect(parseFilterAST([['tags', 'ne', null]])).toEqual({ tags: { $ne: null } });
+    expect(parseFilterAST({ tags: { $ne: 'a' } })).toEqual({ tags: { $ne: 'a' } });
+    expect(parseFilterAST([['tags', '!=', 'a']])).toEqual({ tags: { $ne: 'a' } });
+    expect(parseFilterAST({ n: { $ne: 0 } })).toEqual({ n: { $ne: 0 } });
+    expect(parseFilterAST({ on: { $ne: false } })).toEqual({ on: { $ne: false } });
+    expect(parseFilterAST({ tags: { $ne: '' } })).toEqual({ tags: { $ne: '' } });
+    const day = new Date('2026-07-01T00:00:00.000Z');
+    expect(parseFilterAST({ at: { $ne: day } })).toEqual({ at: { $ne: day } });
+    // `$ne` is one of the six comparisons a `{ $field }` reference may be the
+    // whole comparand of — not an array, untouched.
+    expect(parseFilterAST([['amount', '!=', { $field: 'budget' }]]))
+      .toEqual({ amount: { $ne: { $field: 'budget' } } });
+  });
+
+  it('a $ne array INSIDE a no-$-key field spec is still not descended into', () => {
+    // The nested-relation / deep-equality boundary the equality arm keeps too:
+    // this face judges the field's own operator map, never the inside of a
+    // nested condition it does not walk.
+    expect(parseFilterAST({ author: { tags: { $ne: ['a'] } } })).toEqual({ author: { tags: { $ne: ['a'] } } });
+  });
+
   // ── the wording contract (#5346 / #5348), unchanged by the move ────────
 
   it('names the operator, the field, what arrived, where, and the fix', () => {
@@ -520,6 +795,19 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       { close_date: { $lte: null } },
       { close_date: { $gt: null } },
       { close_date: { $lt: null } },
+      // The 2026-09-23 equality-slot arm (#19757): two prescriptions plus the
+      // received list. The long list is the tallest this arm assembles — its
+      // preview is cut at the shared 60-char bound — so it is the row that
+      // proves the "NOT applied" tail survives the wire.
+      { close_date: ['a'] },
+      { close_date: { $eq: ['a'] } },
+      { close_date: ['aaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbb', 'cccccccccccccccccccc'] },
+      { $or: [{ close_date: [] }] },
+      // The `$ne` arm (#19886, ruling A): one prescription plus the received
+      // list, the long list cut at the same 60-char preview bound.
+      { close_date: { $ne: ['a'] } },
+      { close_date: { $ne: ['aaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbb', 'cccccccccccccccccccc'] } },
+      { $not: { $or: [{ close_date: { $ne: [] } }] } },
     ]) {
       const err = refusalOf(() => parseFilterAST(where, "find('deal')"));
       expect(err.message.length, JSON.stringify(where)).toBeLessThan(500);
@@ -608,12 +896,12 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
     // comparand, not an operator bag — descending into one would invent a
     // contract no backend agrees with.
     expect(parseFilterAST({ author: { name: 'x' } })).toEqual({ author: { name: 'x' } });
-    // A scalar operator carrying an array is answered per driver, not here.
-    expect(parseFilterAST({ tags: { $eq: ['a', 'b'] } })).toEqual({ tags: { $eq: ['a', 'b'] } });
-    // An implicit-equality array comparand is passed through for the driver to
-    // answer; what it MEANS is not this door's ruling (see the comparand door's
-    // own list of the cases it deliberately does not rule).
-    expect(parseFilterAST({ tags: ['a', 'b'] })).toEqual({ tags: ['a', 'b'] });
+    // ⚠️ Two rows used to sit HERE, pinning `{ tags: { $eq: ['a', 'b'] } }` and
+    // `{ tags: ['a', 'b'] }` as shapes this door passes through for the driver
+    // to answer. Both are INVERTED by the 2026-09-23 ruling (#19757) — they
+    // pinned exactly the open slot that ruling closes — and now live, refused,
+    // in the equality-slot section below. ⛔ Not re-spelled into some other
+    // passing shape: what they asserted is no longer true of this door.
     // An unknown `$` key at node level belongs to the by-name refusals
     // downstream, which carry the specific prescription.
     expect(parseFilterAST({ $wat: [{ stage: { $in: ['won'] } }] }))

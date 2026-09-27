@@ -3,7 +3,7 @@
 /**
  * #19543 — `AutomationEngine.listRunsPage` and the truncation boundary.
  *
- * `GET /api/automation/:name/runs` used to answer `{ runs, hasMore: false }`
+ * `GET /api/v1/automation/:name/runs` used to answer `{ runs, hasMore: false }`
  * with the `false` written as a literal, beside a list the engine had already
  * cut with `.slice(0, limit)`. A caller asking for one row of a thousand was
  * handed one row and told that was all of them, with a `200` and nothing in

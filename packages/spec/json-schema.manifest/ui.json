@@ -46,6 +46,7 @@
     "ui/DatasetDimension",
     "ui/DatasetMeasure",
     "ui/DerivedMeasureOp",
+    "ui/DocNavItem",
     "ui/ElementButtonProps",
     "ui/ElementDataSource",
     "ui/ElementFilterProps",

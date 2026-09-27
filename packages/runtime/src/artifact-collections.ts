@@ -122,6 +122,17 @@
  *     under `packages[]` — which is exactly what a base and its extension are
  *     on an option-B artifact, where nothing merged them.
  *
+ * The stable serialization leaves out the ADR-0010 registration envelope
+ * (`_packageId`, `_provenance`, `_lock`, …, derived from
+ * `MetadataProtectionFields`). Boot registration stamps that envelope onto the
+ * package body's copy of an item IN PLACE — the `manifest` service registers
+ * `packages[]` and never the flattened top level — and `AppPlugin` reads its
+ * collections only after that. So by the time this runs, the body's copy of a
+ * nameless item and its unstamped top-level copy no longer serialize alike: a
+ * seed dataset declared once came back twice, and a `mode: 'insert'` dataset
+ * was applied twice per boot. The envelope says who registered an item, not
+ * what the author declared, so it is not part of the item's identity.
+ *
  * Package bodies deliberately do NOT claim against each other: only the top
  * level claims. Two packages contributing an identical `requires` entry
  * concatenate on the additive shape (`COMPOSE_KEY_DISPOSITIONS`), and they
@@ -157,6 +168,7 @@
 
 import { artifactPackageId, resolveArtifactPackageOrder } from '@objectstack/core';
 import { AssembledPackageBodySchema, ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { MetadataProtectionFields } from '@objectstack/spec/kernel';
 
 /** A Zod object schema, read for its declared key set only. */
 type KeyedShape = { shape: Record<string, unknown> };
@@ -242,13 +254,49 @@ function stableIdentity(value: unknown): string {
     }
 }
 
-/** How one collection item is recognized as "already present". */
+/**
+ * The ADR-0010 protection envelope (`_packageId`, `_packageVersion`,
+ * `_provenance`, `_lock`, …) that registration writes onto an item IN PLACE
+ * (`applyProtection`, `@objectstack/spec/shared`).
+ *
+ * DERIVED from `MetadataProtectionFields`, the declaration the metadata schemas
+ * spread, never restated: an envelope key added to the spec is left out of
+ * identity the day it lands, with no second list to drift. `flow-clone.ts`
+ * derives its own drop set the same way.
+ */
+const REGISTRATION_ENVELOPE_KEYS: ReadonlySet<string> = new Set(Object.keys(MetadataProtectionFields));
+
+/**
+ * `item` without its registration envelope: the part an author wrote.
+ *
+ * Top-level keys only, because that is the only place `applyProtection` writes.
+ * Hands back the argument itself when it carries no envelope key, so the
+ * common case allocates nothing.
+ */
+function withoutRegistrationEnvelope(item: unknown): unknown {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return item;
+    let authored: Record<string, unknown> | undefined;
+    for (const key of Object.keys(item as Record<string, unknown>)) {
+        if (!REGISTRATION_ENVELOPE_KEYS.has(key)) continue;
+        authored ??= { ...(item as Record<string, unknown>) };
+        delete authored[key];
+    }
+    return authored ?? item;
+}
+
+/**
+ * How one collection item is recognized as "already present".
+ *
+ * The VALUE spelling compares what the author wrote, without the registration
+ * envelope — see the module header for the stamped copy it would otherwise
+ * miss.
+ */
 function itemIdentity(item: unknown): string {
     if (item !== null && typeof item === 'object') {
         const named = (item as { name?: unknown }).name;
         if (typeof named === 'string' && named.length > 0) return `name:${named}`;
     }
-    return `value:${stableIdentity(item)}`;
+    return `value:${stableIdentity(withoutRegistrationEnvelope(item))}`;
 }
 
 /** The identities (and object references) one top-level collection claims. */
@@ -374,15 +422,20 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
  * `server`, `i18n`, `runtimeModule`, `onEnable`, `packages`) are the caller's
  * own references, so it is a drop-in for the artifact at any read site.
  *
- * ⚠️ Returns the ARGUMENT ITSELF, unchanged, for anything that does not carry a
- * `packages` array — which is every single-package artifact and every
- * `defineStack()` config the platform has ever booted. That branch is an
- * identity function on purpose: it is the only way to say "this change cannot
- * have moved the shape that ships today" rather than to hope so.
+ * ⚠️ Returns the ARGUMENT ITSELF, unchanged, for a non-object and for an
+ * artifact whose `packages` is ABSENT. That covers every single-package
+ * artifact and every `defineStack()` config the platform has ever booted. The
+ * branch is an identity function on purpose: it is the only way to say "this
+ * change cannot have moved the shape that ships today" rather than to hope so.
+ * A `packages` that is present but is not an array is not absent, so it does
+ * NOT take that branch. It is malformed, and it reaches the refusal below. The
+ * rule is stated once, beside `AssembledPackageBodySchema`
+ * (`packages/spec/src/stack.zod.ts`).
  *
  * @throws The ADR-0112 refusal `resolveArtifactPackageOrder` raises for a
- *   malformed `packages[]` entry, a package with no usable id, or a duplicate
- *   package — the same refusal `ObjectQLPlugin`'s `manifest` service already
+ *   `packages` that is not an array (`INVALID_ARTIFACT_PACKAGES`), a malformed
+ *   `packages[]` entry, a package with no usable id, or a duplicate package.
+ *   It is the same refusal `ObjectQLPlugin`'s `manifest` service already
  *   raises on the same artifact during boot. Resolving collections out of an
  *   artifact the loader would refuse is not a quieter outcome, it is a
  *   different answer to what the artifact contains.
@@ -402,7 +455,11 @@ function mergeCollection(key: string, top: unknown, fromBodies: readonly Contrib
  */
 export function resolveArtifactCollections<T>(artifact: T): T {
     if (artifact === null || typeof artifact !== 'object') return artifact;
-    if (!Array.isArray((artifact as { packages?: unknown }).packages)) return artifact;
+    // ABSENT only. A present non-array `packages` falls to the refusal in
+    // `resolveArtifactPackageOrder` below; see the docblock for where the rule
+    // lives. `null` is read as absent, as the other readers read it.
+    const declared = (artifact as { packages?: unknown }).packages;
+    if (declared === undefined || declared === null) return artifact;
 
     const bodies = resolveArtifactPackageOrder(artifact) as Array<Record<string, unknown> | null | undefined>;
     // `resolveArtifactPackageOrder` has already refused any entry whose manifest

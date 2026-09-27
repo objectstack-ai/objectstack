@@ -83,6 +83,44 @@ supervisors widen to the org) — or model the object with `access: {
 default: 'private' }` + explicit grants, where `modifyAllRecords` bypasses
 RLS by design.
 
+**On a `private` OWD object this recipe needs a matching read grant.** A
+caller may not write a row they cannot read: a single-record `update` first
+re-reads its target under the caller's **own read scope**, and on a `private`
+object that scope is the supervisor's own records, their depth and their
+shares — so the `update` policy above would admit a colleague's record by
+predicate and the write would still be refused (`403 PERMISSION_DENIED`).
+Pair the widener with read reach over the same rows, in the same permission
+set:
+
+```typescript
+objects: {
+  // `viewAllRecords` (or a `readScope` depth) makes the rows readable;
+  // the RLS policy below decides which of them the supervisor may edit.
+  project: { allowRead: true, allowEdit: true, viewAllRecords: true },
+},
+rowLevelSecurity: [
+  {
+    name: 'supervisor_edit_org',
+    object: 'project',
+    operation: 'update',
+    using: 'organization_id == current_user.organization_id',
+    positions: ['supervisor'],
+  },
+],
+```
+
+A criteria sharing rule that shares those records with the supervisor
+position, or a record share to the supervisor, works as the read half too
+(`accessLevel: 'read'` is enough — the policy supplies the edit). An extra `select` policy does **not**: RLS
+only narrows, so it cannot make a `private` row visible. On `public_read` and
+`public_read_write` objects every row is already readable (unless an authored
+`select` policy hides it), and the recipe works as written.
+
+> **Known limitation.** App-authored write wideners (`update` / `delete`
+> `rowLevelSecurity` policies) do not function on a `private` OWD object without
+> a matching read grant — the rows they admit stay unwritable until the caller
+> can also read them. See [RLS — write targets](/docs/permissions/rls#anatomy-of-a-policy).
+
 ## The external dial — `externalSharingModel` (ADR-0090 D11)
 
 Portal/partner scenarios get a second, independent dial with the same enum:

@@ -513,3 +513,81 @@ describe('draft preview diagnostics do not judge the injected `_draft` badge (#7
         });
     });
 });
+
+/**
+ * [#20101] The WRITE half of the served page-type default, pinned against the
+ * #4326 invariant this file exists for.
+ *
+ * `PageSchema` declares `type: PageTypeSchema.default('record')`. The save gate
+ * parsed with that default and then stored the authored body verbatim, so a
+ * page authored without `type` was stored without it, served without it, and
+ * never picked as the object's record page. The read seam now fills the
+ * declared default for such rows (`protocol.stored-conversions.test.ts` pins
+ * that half). The write half is what keeps THIS file's invariant: if the read
+ * seam were the only fix, the served document would carry a key its row did
+ * not, and the first GET → PUT of every such page would write a one-key change
+ * and a history row that nobody authored.
+ *
+ * The expected value is read from the registered schema, the same source the
+ * implementation reads, never spelled as a second literal.
+ */
+describe('[#20101] a page saved without `type` stores and serves the declared default', () => {
+    const DECLARED = (getMetadataTypeSchema('page') as any).shape.type.parse(undefined);
+    const typelessPage = (name: string) => ({ name, label: 'Invoice', object: 'crm_invoice' });
+    const rowOf = (rows: Map<string, Row>, name: string, state = 'active') =>
+        Array.from(rows.values()).find((r) => r.name === name && r.state === state)!;
+
+    it('precondition: the declared default is `record`', () => {
+        expect(DECLARED).toBe('record');
+    });
+
+    it('publish and draft saves store it, and the list and the single read serve it', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await protocol.saveMetaItem({ type: 'page', name: 'invoice_record', item: typelessPage('invoice_record') });
+        await protocol.saveMetaItem({
+            type: 'page', name: 'invoice_record_next', item: typelessPage('invoice_record_next'), mode: 'draft',
+        });
+
+        expect(JSON.parse(rowOf(rows, 'invoice_record').metadata)).toEqual({ ...typelessPage('invoice_record'), type: DECLARED });
+        expect(JSON.parse(rowOf(rows, 'invoice_record_next', 'draft').metadata).type).toBe(DECLARED);
+
+        const listed = (await protocol.getMetaItems({ type: 'page' })).items as any[];
+        expect(listed.find((i) => i.name === 'invoice_record')?.type).toBe(DECLARED);
+        const single: any = await protocol.getMetaItem({ type: 'page', name: 'invoice_record' });
+        expect(single.item.type).toBe(DECLARED);
+        const draft: any = await protocol.getMetaItem({ type: 'page', name: 'invoice_record_next', state: 'draft' });
+        expect(draft.item.type).toBe(DECLARED);
+    });
+
+    it('an explicit non-record `type` is stored and served unchanged', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const appPage = { name: 'launchpad', label: 'Launchpad', type: 'app' };
+
+        await protocol.saveMetaItem({ type: 'page', name: 'launchpad', item: appPage });
+
+        expect(JSON.parse(rowOf(rows, 'launchpad').metadata)).toEqual(appPage);
+        const single: any = await protocol.getMetaItem({ type: 'page', name: 'launchpad' });
+        expect(single.item.type).toBe('app');
+    });
+
+    it('GET → PUT of the served page is byte-identical: same stored body, same checksum, same version', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await protocol.saveMetaItem({ type: 'page', name: 'invoice_record', item: typelessPage('invoice_record') });
+        const before = { ...rowOf(rows, 'invoice_record') };
+
+        const served: any = (await protocol.getMetaItem({ type: 'page', name: 'invoice_record' })).item;
+        expect(served.type).toBe(DECLARED); // precondition — the served body carries the default
+        await protocol.saveMetaItem({ type: 'page', name: 'invoice_record', item: served });
+
+        const after = rowOf(rows, 'invoice_record');
+        expect(after.metadata).toBe(before.metadata);
+        expect(after.checksum).toBe(before.checksum);
+        // The repository's identical-body short-circuit: no write happened at all.
+        expect(after.version).toBe(before.version);
+    });
+});

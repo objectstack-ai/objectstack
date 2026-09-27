@@ -59,9 +59,9 @@
  *   - so tightening `AnalyticsDateRangeSchema` is ⛔ not "deliberately NOT done
  *     here" any more: it is done, upstream, where the contract lives;
  *   - and `POST /analytics/dataset/query` is ⛔ no longer a route that never
- *     Zod-parses its selection — since PR #17548 it parses the selection's
- *     shared members, `timeDimensions` among them, against
- *     `AnalyticsQuerySchema.pick(…)` ahead of the executor
+ *     Zod-parses its selection — PR #17548 doored the selection's shared
+ *     members, `timeDimensions` among them, and #17551 widened that parse to
+ *     the whole selection against `DatasetSelectionSchema`
  *     (`rest/src/analytics-selection-door.ts`, wired in `rest-server.ts`), so on
  *     THAT route the schema door is AHEAD of these faces, not behind them.
  *

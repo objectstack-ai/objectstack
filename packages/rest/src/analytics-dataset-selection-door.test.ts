@@ -12,11 +12,28 @@
  *
  * The card asked whether the dataset route's `selection` is genuinely the same
  * shape as the siblings' before reusing their schema. It is **not** — §1 below
- * drives that against the real schema — so the door parses a PROJECTION of the
- * members whose declarations coincide, and the four dataset-only members are
- * projected away rather than refused. §5 is the other half of that answer and
- * the one that matters most: a fully-loaded VALID selection still passes.
- * A door that refuses too much is a worse defect than the one being fixed.
+ * drives that against the real schema — which is why the door has never parsed
+ * `AnalyticsQueryRequestSchema`. §5 is the other half of that answer and the
+ * one that matters most: a fully-loaded VALID selection still passes. A door
+ * that refuses too much is a worse defect than the one being fixed.
+ *
+ * ## [#17551, ruled] The half #17058 could not door
+ *
+ * #17058 parsed a PROJECTION — the seven members whose declarations coincide
+ * with `AnalyticsQuery`'s — and projected `runtimeFilter`, `dateGranularity`,
+ * `compareTo` and `totals` AWAY, because `DatasetSelection` had no Zod schema
+ * anywhere in the repo and authoring one in this consumer is the second
+ * declaration of a spec-owned wire shape PD #12 forbids. Decision batch #204
+ * item 3 ruled letter A: the schema is authored in `packages/spec` and this
+ * door parses the WHOLE selection against it. So §4 flips from 「these four are
+ * not judged here」 to 「these four are judged here, both directions」, and §6
+ * drives #17550's own specimen — `compareTo: { kind: 'nonsense' }`, which used
+ * to return a previous-period comparison under a 200 — through the real route.
+ *
+ * ⚠️ The SCHEMA's own two-directional pins live beside the schema
+ * (`spec/src/api/dataset-selection.test.ts`). What is pinned HERE is the
+ * ENVELOPE: which refusal shape a failure lands in, how a field path is spelled
+ * against the request body, and that the executor is never reached.
  */
 
 // The dynamic `import()`s below are paid HERE, at module scope, so the
@@ -29,10 +46,7 @@ import '@objectstack/spec/data';
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
-import {
-    SELECTION_MEMBERS_SHARED_WITH_ANALYTICS_QUERY,
-    datasetSelectionRefusal,
-} from './analytics-selection-door';
+import { datasetSelectionRefusal } from './analytics-selection-door';
 
 // ── harness (the shape `analytics-routes.test.ts` uses) ──────────────────────
 
@@ -141,20 +155,27 @@ describe('#17058 §1 — the dataset route\'s `selection` is not the sibling rou
     });
 
     /**
-     * The projection list is a claim about two declarations agreeing. Pin both
-     * directions so a later edit cannot quietly move a member into or out of it.
+     * [#17551] The door no longer carries a member list of its own — the shape
+     * it parses IS the spec's declaration. Pin that this module reaches the
+     * schema rather than a local copy, in the one way a consumer can: the four
+     * dataset-only members are judged here and are still not `AnalyticsQuery`
+     * members. (The schema's own structural pins — the seven shared members
+     * taken off `AnalyticsQuerySchema.shape` BY IDENTITY — live beside it.)
      */
-    it('every projected member is an `AnalyticsQuery` member; no dataset-only member is', async () => {
+    it('the four dataset-only members are judged, and are still not `AnalyticsQuery` members', async () => {
         const { AnalyticsQuerySchema } = await import('@objectstack/spec/data');
+        const { DatasetSelectionSchema } = await import('@objectstack/spec/api');
         const analyticsMembers = Object.keys((AnalyticsQuerySchema as any).shape);
-        for (const member of SELECTION_MEMBERS_SHARED_WITH_ANALYTICS_QUERY) {
-            expect(analyticsMembers, `${member} must be declared on AnalyticsQuery`).toContain(member);
-        }
+        const selectionMembers = Object.keys((DatasetSelectionSchema as any).shape);
         for (const datasetOnly of ['runtimeFilter', 'dateGranularity', 'compareTo', 'totals']) {
+            expect(selectionMembers, `${datasetOnly} must be declared on the selection`)
+                .toContain(datasetOnly);
             expect(analyticsMembers).not.toContain(datasetOnly);
-            expect(SELECTION_MEMBERS_SHARED_WITH_ANALYTICS_QUERY as readonly string[])
-                .not.toContain(datasetOnly);
         }
+        // …and the door really parses THAT schema: a value only it can refuse
+        // must be refused here.
+        expect(await datasetSelectionRefusal({ measures: ['revenue'], compareTo: { kind: 'nope' } }))
+            .toBeDefined();
     });
 });
 
@@ -275,26 +296,104 @@ describe('#17058 §3 — the generic refusal is 400 VALIDATION_FAILED + details.
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §4 — the four dataset-only members keep passing (they are projected away)
+// §4 — [#17551] the four dataset-only members, both directions
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#17058 §4 — the dataset-only members are NOT judged by the sibling schema', () => {
-    const datasetOnly: Array<[string, unknown]> = [
+/**
+ * ⚠️ This section is the one #17551 turned over. It used to assert that these
+ * four 「reach the service untouched」 BECAUSE the door projected them away —
+ * true of the projection, and the gap the ruling closed. What survives
+ * unchanged is the half that still has to hold: a LEGAL value of each one still
+ * reaches the service, by identity. What is added is the other half: a
+ * malformed value of each is now refused at the door, with a remedy, and the
+ * executor never sees it.
+ */
+describe('#17551 §4 — the dataset-only members are judged at the door now', () => {
+    const legal: Array<[string, unknown]> = [
         ['runtimeFilter', { region: { $ne: 'EU' } }],
         ['dateGranularity', 'quarter'],
         ['compareTo', { kind: 'previousYear' }],
         ['totals', { groupings: [[]] }],
     ];
 
-    for (const [member, value] of datasetOnly) {
-        it(`\`${member}\` reaches the service untouched`, async () => {
+    for (const [member, value] of legal) {
+        it(`CONTROL — a legal \`${member}\` still reaches the service untouched`, async () => {
             const selection = { dimensions: ['region'], measures: ['revenue'], [member]: value };
             const { res, queryDataset } = await post({ dataset: inlineDataset, selection });
             expect(res.statusCode).toBe(200);
             expect(queryDataset).toHaveBeenCalledTimes(1);
+            // Validation-only: the CALLER's object, by identity — never a parse
+            // output that could carry a schema default.
             expect(queryDataset.mock.calls[0][1]).toBe(selection);
         });
     }
+
+    const malformed: Array<{ member: string; value: unknown; field: string; says: string }> = [
+        {
+            // ⚠️ No dataset-only sentence is invented for this one, deliberately.
+            // `runtimeFilter` carries the canonical `FilterCondition`, so its
+            // refusals are that vocabulary’s own — byte-identical to what the
+            // sibling body's `where` answers for the same input. A second
+            // wording here would be exactly the #5240 defect this card's own
+            // `compareTo.kind` builder exists to avoid.
+            member: 'runtimeFilter',
+            value: 'region = NA',
+            field: 'selection.runtimeFilter',
+            says: 'expected record',
+        },
+        {
+            member: 'dateGranularity',
+            value: 'fortnight',
+            field: 'selection.dateGranularity',
+            says: 'month',
+        },
+        {
+            member: 'compareTo',
+            value: { kind: 'previousPeriod', offset: '7d' },
+            field: 'selection.compareTo',
+            says: 'offset',
+        },
+        {
+            member: 'totals',
+            value: { groupings: ['region'] },
+            field: 'selection.totals.groupings.0',
+            says: 'array',
+        },
+    ];
+
+    for (const c of malformed) {
+        it(`a malformed \`${c.member}\` answers 400 and never reaches the service`, async () => {
+            const selection = { dimensions: ['region'], measures: ['revenue'], [c.member]: c.value };
+            const { res, queryDataset } = await post({ dataset: inlineDataset, selection });
+            expect(res.statusCode).toBe(400);
+            expect(res.body.code).toBe('VALIDATION_FAILED');
+            const fields: Array<{ field: string }> = res.body.details.fields;
+            expect(fields.map((f) => f.field)).toContain(c.field);
+            expect(String(res.body.message).toLowerCase()).toContain(c.says.toLowerCase());
+            expect(queryDataset).not.toHaveBeenCalled();
+        });
+    }
+
+    it('an UNDECLARED key is named against the request body, not dropped', async () => {
+        // ⚠️ The root rename is live here and was inert before #17551: a
+        // `.strict()` parse of the whole selection puts an unrecognized-keys
+        // issue at the ROOT, which the shared mapper spells `(body)` — true for
+        // the sibling routes, false here, where the object sits under
+        // `selection`.
+        const { res, queryDataset } = await post({
+            dataset: inlineDataset,
+            selection: { measures: ['revenue'], runtimeFillter: { region: 'NA' } },
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.body.code).toBe('VALIDATION_FAILED');
+        const fields: Array<{ field: string }> = res.body.details.fields;
+        expect(fields.map((f) => f.field)).toContain('selection');
+        expect(fields.map((f) => f.field)).not.toContain('selection.(body)');
+        // The refusal carries the fix, which is the whole point of doing this
+        // in the schema rather than with a key list here.
+        expect(res.body.message).toContain('\`runtimeFillter\` → \`runtimeFilter\`');
+        expect(queryDataset).not.toHaveBeenCalled();
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -450,5 +549,98 @@ describe('#17598 §5 — the arity refusal carries one wording on the wire', () 
 
         expect(res.statusCode).toBe(400);
         expect(res.body.message).toContain('selection.timeDimensions.0.dateRange.1');
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §6 — ⭐ [#17550] the card this door closes, driven through the real route
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * #17550: `shiftRange` branched only on `previousYear` and fell through to the
+ * `previousPeriod` arm, so `compareTo: { kind: 'nonsense' }` returned a
+ * previous-period comparison under an ordinary **200**. Nothing in the response
+ * distinguished it from a real answer, and the wrong answer is a comparison
+ * WINDOW — a number a dashboard renders and a person reads as fact.
+ *
+ * That card's own fix put an exhaustive `switch` in `shiftRange`, which closes
+ * it for an IN-PROCESS caller. ⚠️ It could not close it at the door: the door
+ * projected `compareTo` away, so a body still travelled into the executor and
+ * was answered there, one layer past the boundary that owns request shape —
+ * and only for a `compareTo` that survived long enough to be shifted at all.
+ * This section is that half: the refusal now happens AT THE DOOR, in the
+ * route's own envelope, before the analytics service is called.
+ *
+ * ⛔ Both halves stay. The executor's refusal is not redundant — `shiftRange`
+ * is a published export of `service-analytics` and `queryDataset` is reachable
+ * in-process by a caller that never posted a body. What is shared between them
+ * is the SENTENCE (`datasetCompareKindRefusalMessage`), so one condition keeps
+ * one wording (#5240).
+ */
+describe('#17550 §6 — an unrecognised `compareTo.kind` is refused at the door', () => {
+    it('the card\'s specimen answers 400 and the executor is never called', async () => {
+        const { res, queryDataset } = await post({
+            dataset: inlineDataset,
+            selection: {
+                dimensions: ['region'],
+                measures: ['revenue'],
+                timeDimensions: [{ dimension: 'close_date', dateRange: 'last_30_days' }],
+                compareTo: { kind: 'nonsense' },
+            },
+        });
+
+        // ⛔ Not a 200 with a comparison in it — that IS the defect.
+        expect(res.statusCode).toBe(400);
+        expect(res.body.code).toBe('VALIDATION_FAILED');
+        const fields: Array<{ field: string }> = res.body.details.fields;
+        expect(fields.map((f) => f.field)).toContain('selection.compareTo.kind');
+        // ⭐ The whole point of the ruling's North Star clause: loud, AND with a
+        // prescription. What arrived, the closed vocabulary, and what to do.
+        expect(res.body.message).toContain('"nonsense"');
+        expect(res.body.message).toContain("'previousPeriod'");
+        expect(res.body.message).toContain("'previousYear'");
+        expect(res.body.message).toContain('drop compareTo');
+        // The refusal is the whole reason a door exists.
+        expect(queryDataset).not.toHaveBeenCalled();
+    });
+
+    it('the envelope\'s code is a registered vocabulary member, not a dialect', async () => {
+        const { ApiErrorSchema } = await import('@objectstack/spec/api');
+        const { res } = await post({
+            dataset: inlineDataset,
+            selection: { measures: ['revenue'], compareTo: { kind: 'nonsense' } },
+        });
+        const parsed = (ApiErrorSchema as any).safeParse({
+            code: res.body.code,
+            message: res.body.message,
+            httpStatus: res.statusCode,
+        });
+        expect(parsed.success, JSON.stringify(parsed.success ? null : parsed.error.issues)).toBe(true);
+    });
+
+    it('CONTROL — the same selection with a declared kind still answers 200', async () => {
+        const selection = {
+            dimensions: ['region'],
+            measures: ['revenue'],
+            timeDimensions: [{ dimension: 'close_date', dateRange: 'last_30_days' }],
+            compareTo: { kind: 'previousPeriod' },
+        };
+        const { res, queryDataset } = await post({ dataset: inlineDataset, selection });
+        expect(res.statusCode).toBe(200);
+        expect(queryDataset).toHaveBeenCalledTimes(1);
+        expect(queryDataset.mock.calls[0][1]).toBe(selection);
+    });
+
+    it('the door and the executor answer the SAME sentence, differing only in where', async () => {
+        const { datasetCompareKindRefusalMessage } = await import('@objectstack/spec/api');
+        const { res } = await post({
+            dataset: inlineDataset,
+            selection: { measures: ['revenue'], compareTo: { kind: 'nonsense' } },
+        });
+        // The verdict clause — everything before the origin clause — is what
+        // both raise. Pinning it here is what keeps a second wording from
+        // arriving at this door later.
+        const verdict = datasetCompareKindRefusalMessage('nonsense', 'schema').split(' Refused at')[0];
+        expect(res.body.message).toContain(verdict);
     });
 });

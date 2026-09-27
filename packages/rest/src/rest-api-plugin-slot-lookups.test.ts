@@ -105,7 +105,6 @@ const PROVIDERS = [
   { index: 7, label: 'objectQLProvider', slot: 'objectql' },
   { index: 8, label: 'emailServiceProvider', slot: 'email' },
   { index: 9, label: 'sharingServiceProvider', slot: 'sharing' },
-  { index: 10, label: 'reportsServiceProvider', slot: 'reports' },
   { index: 11, label: 'approvalsServiceProvider', slot: 'approvals' },
   { index: 12, label: 'sharingRulesServiceProvider', slot: 'sharingRules' },
   { index: 13, label: 'i18nServiceProvider', slot: 'i18n' },
@@ -140,6 +139,11 @@ const PROVIDERS = [
  * now forces a decision here instead of landing uncovered.
  */
 const NON_PROVIDERS_IN_SPAN = [
+  {
+    index: 10,
+    label: '_retiredReportsServiceProvider',
+    why: 'RETIRED slot (#20102) — the saved-report provider left with its routes; kept positional, passed `undefined`',
+  },
   {
     index: 16,
     label: 'serviceExistsProvider',
@@ -276,6 +280,18 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
       [...classified].filter((i) => i >= args.length),
       'a row points past the end of the argument list the composition root passes',
     ).toEqual([]);
+  });
+
+  it('passes nothing in the retired saved-report slot (#20102)', async () => {
+    // The slot survives only so later positional arguments keep their
+    // binding. Anything but `undefined` here would be a provider for routes
+    // that no longer exist — and `RestServer` types the slot `undefined`, so
+    // the composition root cannot compile one in.
+    const { args } = await boot(allServices());
+    expect(args.length).toBeGreaterThan(10);
+    expect(args[10]).toBeUndefined();
+    expect(typeof args[9], 'the neighbour is still the sharing provider').toBe('function');
+    expect(typeof args[11], 'the neighbour is still the approvals provider').toBe('function');
   });
 
   it('passes the env-registry and default-environment seams as RestServer declares them', async () => {

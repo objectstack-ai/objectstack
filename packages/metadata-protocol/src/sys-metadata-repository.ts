@@ -941,7 +941,7 @@ export class SysMetadataRepository implements MetadataRepository {
     });
     if (!draftRow) {
       const err: any = new Error(
-        `[no_draft] No pending draft exists for ${ref.type}/${ref.name} — nothing to publish.`,
+        `No pending draft exists for ${ref.type}/${ref.name} — nothing to publish.`,
       );
       err.code = 'NO_DRAFT';
       err.status = 404;
@@ -1001,7 +1001,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * a Studio package is UPDATED in place rather than missed by a lookup
    * narrowed to `package_id IS NULL` (#6215).
    *
-   * Throws `[version_not_found]` (404) if the target version row is
+   * Throws `VERSION_NOT_FOUND` (404) if the target version row is
    * missing or is a delete tombstone (no body to restore).
    */
   async restoreVersion(
@@ -1021,7 +1021,7 @@ export class SysMetadataRepository implements MetadataRepository {
     });
     if (!row) {
       const err: any = new Error(
-        `[version_not_found] No history row at version ${targetVersion} for ${ref.type}/${ref.name}.`,
+        `No history row at version ${targetVersion} for ${ref.type}/${ref.name}.`,
       );
       err.code = 'VERSION_NOT_FOUND';
       err.status = 404;
@@ -1030,7 +1030,7 @@ export class SysMetadataRepository implements MetadataRepository {
     const raw = (row as any).metadata;
     if (raw === null || raw === undefined) {
       const err: any = new Error(
-        `[version_not_restorable] Version ${targetVersion} for ${ref.type}/${ref.name} is a delete tombstone — nothing to restore.`,
+        `Version ${targetVersion} for ${ref.type}/${ref.name} is a delete tombstone — nothing to restore.`,
       );
       err.code = 'VERSION_NOT_RESTORABLE';
       err.status = 409;
@@ -1640,8 +1640,12 @@ export class SysMetadataRepository implements MetadataRepository {
     const detail = intent === 'runtime-only'
       ? `'${type}' has neither allowOrgOverride nor allowRuntimeCreate in the registry. `
       : `'${type}' is not allowOrgOverride in the registry. `;
+    // ⛔ No `[${code}]` opener: the token below IS the `code` this throw
+    // declares three lines down, so a bracketed restatement duplicates onto the
+    // prose axis a fact the envelope already carries — and, spelled by
+    // interpolation, it is invisible to every grep for a literal tag.
     const err: any = new Error(
-      `[${code}] ${detail}` +
+      `${detail}` +
       `Overlay-allowed: ${Array.from(new Set(allowed)).join(', ') || '(none)'}. ` +
       `Set OS_METADATA_WRITABLE to enable additional types at runtime.`,
     );
@@ -1691,7 +1695,7 @@ export class SysMetadataRepository implements MetadataRepository {
     name?: string,
   ): Error {
     const err: any = new Error(
-      `[writable_package_required] Cannot create ${name ? `${type}/${name}` : type} in package '${packageId}': `
+      `Cannot create ${name ? `${type}/${name}` : type} in package '${packageId}': `
       + `that package is read-only (provided by code or an installed app), so it is not a writable base. `
       + `Switch to a writable package in the package selector, or create a new one, and retry.`
       // [#8146] Said only when the hatch IS set, because otherwise it is noise.
@@ -1741,7 +1745,7 @@ export class SysMetadataRepository implements MetadataRepository {
   static readOnlyBaseOverrideError(type: string, packageId: string, hatchOpen = false): Error {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     const err: any = new Error(
-      `[item_locked] Cannot overlay '${type}' in package '${packageId}': that package is read-only `
+      `Cannot overlay '${type}' in package '${packageId}': that package is read-only `
       + `(provided by code or an installed app) and the type has no per-org overlay channel `
       + `(allowOrgOverride=false), so this item is locked against runtime edits. `
       // [#8146] The prescription is chosen by whether the hatch is ALREADY

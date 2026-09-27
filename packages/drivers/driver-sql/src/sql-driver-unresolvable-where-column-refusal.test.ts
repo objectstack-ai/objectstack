@@ -113,6 +113,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import knex from 'knex';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqlDriver, isUnresolvableColumnError, unresolvableColumnNameOf } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -151,7 +152,15 @@ const RECOGNISED_CELLS = DIALECT_CELLS.filter(
  * place to throw the type away.
  */
 const UNRESOLVABLE: ReadonlyArray<{ label: string; where: NonNullable<DriverQuery['where']>; named: string }> = [
-  { label: 'a plain unknown column', where: { nosuchcol: SECRET_LITERAL }, named: 'nosuchcol' },
+  // [#20020] Marked 'author', as a read-scope merge boundary marks a caller's
+  // own predicate: the refusal names the column only for a predicate the caller
+  // is known to have written (the #8220 contract). The unmarked and
+  // policy-marked answers are pinned in `sql-driver-refusal-door-provenance.test.ts`.
+  {
+    label: 'a plain unknown column',
+    where: markFilterSubtreeProvenance({ nosuchcol: SECRET_LITERAL }, 'author'),
+    named: 'nosuchcol',
+  },
 ];
 
 /**
@@ -428,9 +437,12 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
   // shape is recorded above, its CONTENT is contracted here.
   it('a dotted key never puts the caller\'s bound literal on the wire (#8931 Q3)', async () => {
     const expected = DOTTED_STATUS_QUO[cell.id];
+    // [#20020] Marked 'author' (see `UNRESOLVABLE`): `identifies` pins the
+    // author-facing answer, which names the dotted key.
+    const dotted = () => markFilterSubtreeProvenance({ 'title.x': SECRET_LITERAL }, 'author');
     for (const [half, run] of [
-      ['find', () => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } })],
-      ['count', () => driver.count(TABLE, { where: { 'title.x': SECRET_LITERAL } })],
+      ['find', () => driver.find(TABLE, { where: dotted() })],
+      ['count', () => driver.count(TABLE, { where: dotted() })],
     ] as const) {
       const err = await caught(run);
       expect(err.message, `${half}: message`).not.toContain(SECRET_LITERAL);
@@ -608,7 +620,11 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
   // the ladder actually fixed.
   it('refuses when the WHERE is unresolvable even though the projection was recoverable', async () => {
     const err = await caught(() =>
-      driver.find(TABLE, { fields: ['title', 'nosuchfield'], where: { alsomissing: 'x' } }),
+      driver.find(TABLE, {
+        fields: ['title', 'nosuchfield'],
+        // [#20020] Marked 'author' (see `UNRESOLVABLE`).
+        where: markFilterSubtreeProvenance({ alsomissing: 'x' }, 'author'),
+      }),
     );
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);

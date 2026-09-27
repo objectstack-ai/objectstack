@@ -286,23 +286,38 @@ describe("[#7598] the #5222 corpus's REFUSAL arm — routed, or refused at this 
       .toContain('StringOperatorSchema');
     expect(refusalOf(() => tree({ amount: { $in: [{ $field: 'budget' }, 1] } })).message)
       .toContain('cannot be bound as a SQL parameter');
+    // [#20010] RE-JUDGED: the `$between` endpoint is now answered one step
+    // earlier, by the shared comparand-shape face this door hands every field
+    // entry to, in the face's words (its #7596 endpoint arm, enforced on the
+    // face itself). Still a third gate with its own wording, which is this case's
+    // point; the FilterArray spelling gets the same bytes.
     expect(refusalOf(() => tree({ amount: { $between: [{ $field: 'budget' }, 100] } })).message)
-      .toContain('may not be a field reference on any backend');
+      .toContain('does not accept a { "$field": … } reference as an endpoint');
     // …and the scalar position is not refused at all here any more.
     expect(tree({ amount: { $gt: { $field: 'budget' } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'gt', values: [{ $field: 'budget' }],
     });
   });
 
-  it('the `$between` refusal names the laundering it prevents, not a bind failure', () => {
+  it('the `$between` refusal names the endpoint and the two-bound spelling, not a bind failure', () => {
     // The repair a `$between` author needs is different from the one a
     // read-scope author needs, so the two sentences are different (#5240 in the
     // direction that separates rather than merges).
+    //
+    // [#20010] RE-JUDGED. This pinned this door's own sentence, which named the
+    // laundering (`index 1`, `#7596`). The door now hands every field entry to
+    // the shared comparand-shape face before any leaf is built, and the face's
+    // endpoint arm answers first — the 2026-08-11 ruling (#7596), as the face
+    // records it: "The reference stays legal in the four ORDERING slots …
+    // the alternative this refusal prescribes". Same verdict, the face's words,
+    // which are the words the FilterArray spelling already got on this door.
+    // What the case protects is unchanged: the side is named, and the message
+    // points at the spelling that IS served.
     const err = refusalOf(() => tree({ amount: { $between: [0, { $field: 'budget' }] } }));
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
-    expect(err.message).toContain('index 1');
-    expect(err.message).toContain('#7596');
+    expect(err.message).toContain('at where.amount.$between[1], the MAX bound');
+    expect(err.message).not.toContain('cannot be bound');
     // It points at the spelling that IS served, rather than at "use a literal"
     // alone — the capability exists one operator away.
     expect(err.message).toContain('"$gte"');
@@ -399,23 +414,48 @@ describe('[#7598] the field-reference shape is read exactly as `driver-sql` read
     expect(err.message).toContain('budget');
   });
 
-  it('a NON-STRING `$field` is not a reference — it stays the object account', () => {
+  it('a NON-STRING `$field` is not a reference — it is the ordinary object account', () => {
     // `driver-sql`'s `fieldReferenceOf` requires `typeof ref === 'string'`, and
     // this package mirrors that spelling rather than inventing a third reading.
-    // It is therefore NOT routed either: it binds as JSON, exactly as any other
-    // object comparand does, which is the account #5234 left open on purpose.
+    // It is therefore NOT routed either: it is judged exactly as any other
+    // object comparand is, on BOTH doors, each in its own envelope — and on
+    // neither is it read as a reference.
+    //
+    // It used to BIND on both: as JSON text on the `where` door (the account
+    // #5234 left open on purpose there) and as the object itself in the
+    // read-scope lowering. The maintainer's ruling on #7872 (2026-08-12) puts
+    // a plain object outside the accepted comparand types, and the shared type
+    // face 「refuses everything else loudly at the compile face」. Each door now
+    // runs that face:
     expect(findCrossFieldComparand({ amount: { $gt: { $field: 5 } } })).toBeNull();
-    expect(tree({ amount: { $gt: { $field: 5 } } })).toEqual({
-      kind: 'leaf', member: 'amount', operator: 'gt', values: [{ $field: 5 }],
-    });
-    expect(scope({ amount: { $gt: { $field: 5 } } }).params).toEqual([{ $field: 5 }]);
+    // [#20035] RE-JUDGED: the `where` door runs it on the object spelling
+    // before any node is built — refused INVALID_FILTER / 400, as a plain
+    // object, at the face's path.
+    const whereErr = refusalOf(() => tree({ amount: { $gt: { $field: 5 } } }));
+    expect(whereErr.code).toBe('INVALID_FILTER');
+    expect(whereErr.status).toBe(400);
+    expect(whereErr.message.startsWith('Filter comparand at where.amount.$gt is a plain object ({"$field":5})')).toBe(true);
+    // [#20018] The read-scope lowering runs it after its own gates (the
+    // ObjectQL execute face's answer too): READ_SCOPE_COMPILE_FAILED / 500.
+    // The refusal is the type face's, not the field-reference gate's.
+    const scopeErr = refusalOf(() => scope({ amount: { $gt: { $field: 5 } } }));
+    expect(scopeErr.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(scopeErr.status).toBe(500);
+    expect(scopeErr.message).toContain('is a plain object');
+    expect(scopeErr.message).not.toContain('compares against the field reference');
   });
 
-  it('an ordinary object comparand is untouched — #5234 left that account open', () => {
+  it('an ordinary object comparand is not a reference either — #7872 closed the account #5234 left open', () => {
+    // [#20035] RE-JUDGED — FLIPPED. This pinned `{ $eq: { a: 1 } }` compiling
+    // to a leaf, the account #5234 left open. The #7872 ruling (2026-08-12,
+    // 「refuses everything else loudly at the compile face」) now answers it on
+    // this door too; the routing detector still ignores it, which is the half
+    // this block is about.
     expect(findCrossFieldComparand({ amount: { $eq: { a: 1 } } })).toBeNull();
-    expect(tree({ amount: { $eq: { a: 1 } } })).toEqual({
-      kind: 'leaf', member: 'amount', operator: 'equals', values: [{ a: 1 }],
-    });
+    const err = refusalOf(() => tree({ amount: { $eq: { a: 1 } } }));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message.startsWith('Filter comparand at where.amount.$eq is a plain object ({"a":1})')).toBe(true);
   });
 });
 
@@ -482,7 +522,12 @@ describe('[#7693] `$icontains` is fenced on the `where` door, like its four sibl
     const where = refusalOf(() => tree({ name: { $icontains: { foo: 1 } } }));
     expect(where.code).toBe('INVALID_FILTER');
     expect(where.status).toBe(400);
-    expect(where.message).toContain('[object Object]');
+    // [#20035] RE-JUDGED: still refused rather than bound, now by the shared
+    // type face first (#7872: 「refuses everything else loudly at the compile
+    // face」), whose sentence names the value as a plain object rather than the
+    // `[object Object]` pattern the LIKE-family sentence quoted. The sibling
+    // comparison below — the point of #7693 — holds in the face's words.
+    expect(where.message.startsWith('Filter comparand at where.name.$icontains is a plain object ({"foo":1})')).toBe(true);
 
     // The envelope `$contains` gets, said about the same shape — the point of
     // the card is that these two rows are now identical apart from the operator.
@@ -505,12 +550,20 @@ describe('[#7693] `$icontains` is fenced on the `where` door, like its four sibl
     expect(tree({ name: { $icontains: 'admin' } })).toEqual({
       kind: 'leaf', member: 'name', operator: 'icontains', values: ['admin'],
     });
-    expect(tree({ name: { $icontains: 5 } })).toEqual({
-      kind: 'leaf', member: 'name', operator: 'icontains', values: [5],
-    });
-    expect(tree({ name: { $icontains: null } })).toEqual({
-      kind: 'leaf', member: 'name', operator: 'icontains', values: [null],
-    });
+    // [#20068] RE-JUDGED: `5` and `null` were in this control group as
+    // "legitimate" comparands, and they are not. `FILTER_TEXT_CASES` declares a
+    // non-string `$icontains` comparand REFUSED (`INVALID_FILTER`, naming
+    // `$icontains`), and this door now asks the published predicate, so both are
+    // refused here as they are at the spec's parse door and on `driver-sql`.
+    // Kept, flipped: the fence stays narrow for a non-empty string (above) and
+    // refuses exactly the table's rows. `icontains-text-comparand-refusal.test.ts`
+    // carries the rows on every face.
+    for (const refused of [5, null]) {
+      const err = refusalOf(() => tree({ name: { $icontains: refused } }));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$icontains');
+    }
     // …and the sibling door is unmoved, which is the no-regression half.
     expect(scope({ name: { $icontains: 'admin' } }).params).toEqual(['%admin%', '\\']);
   });

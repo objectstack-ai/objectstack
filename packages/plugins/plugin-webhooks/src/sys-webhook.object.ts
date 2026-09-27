@@ -354,8 +354,10 @@ export const SysWebhook = ObjectSchema.create({
    * on this object was reduced. It was not, and `apiMethods` is the wrong
    * instrument for it: `url` (#8025 — won't-fix on masking, because the URL is
    * the routing key an operator must be able to see, search, sort and edit) and
-   * a legacy row's un-migrated `definition_json.headers` (#7986 —
-   * `readLegacyHeaders` in `auto-enqueuer.ts` still reads them and warns) are
+   * a legacy row's un-migrated `definition_json.headers` (#7986 — no longer
+   * delivered from, and refused at the write door, since
+   * `webhook-legacy-cleartext.ts`; a row the boot sweep could not convert
+   * still holds them until it does) are
    * both served by `get`/`list`, which is exactly what the console requires.
    * Any set that removes them removes the admin surface with them. A survey
    * that greps this file for `enable:` and stops is measuring the wrong thing;

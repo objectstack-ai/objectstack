@@ -52,7 +52,10 @@ import { z } from 'zod';
  * ```
  * 
  * @example Programmatic Use
+ * <!-- os:check -->
  * ```typescript
+ * import type { ODataQuery } from '@objectstack/spec/api';
+ *
  * const query: ODataQuery = {
  *   $select: ['name', 'email'],
  *   $filter: "country eq 'US' and revenue gt 100000",

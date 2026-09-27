@@ -49,6 +49,7 @@ const ENTRY_NAMESPACES: ReadonlyArray<[string, () => Promise<object>]> = [
   ['.', () => import('../src/index')],
   ['./ai', () => import('../src/ai/index')],
   ['./api', () => import('../src/api/index')],
+  ['./api-assembled', () => import('../src/api-assembled/index')],
   ['./automation', () => import('../src/automation/index')],
   ['./contracts', () => import('../src/contracts/index')],
   ['./data', () => import('../src/data/index')],

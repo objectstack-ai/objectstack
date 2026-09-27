@@ -545,7 +545,7 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
 
   // ── An empty set is a constant, not an absent predicate ───────────────────
 
-  describe('an empty `$in` / bare `[]` is the FALSE constant, not a dropped clause', () => {
+  describe('an empty `$in` is the FALSE constant, not a dropped clause', () => {
     it('`{stage: {$in: []}}` matches no row — was the whole dataset', async () => {
       expect(await ids({ stage: { $in: [] } })).toEqual([]);
       const { sql } = await sqlFor({ stage: { $in: [] } });
@@ -556,8 +556,14 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       expect(await ids({ stage: { $nin: [] } })).toEqual(ALL);
     });
 
-    it('a bare `[]` is the same constant its explicit spelling is', async () => {
-      expect(await ids({ stage: [] })).toEqual([]);
+    // [#19888] RE-JUDGED. This pinned the bare `[]` as the FALSE constant its
+    // explicit `$in: []` spelling is. Ruling 乙 (#19757) refuses a list in the
+    // equality slot, the empty one included — only `$in: []` / `$nin: []` are
+    // declared predicates — so the bare spelling is refused and the explicit
+    // one above keeps its constant. `where-equality-slot-list-refusal.test.ts`
+    // pins the refusal at every depth.
+    it('a bare `[]` is refused (INVALID_FILTER / 400); only `$in: []` is the FALSE constant', async () => {
+      await expect(ids({ stage: [] })).rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
     });
 
     it('it composes: FALSE absorbs an `$and`, is the identity of an `$or`', async () => {
@@ -738,8 +744,12 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // into a statement with no `WHERE` (#5297's lesson, one call above the
       // compiler). So this asserts the refusal reaches the executing seam, not
       // merely that the normalizer throws in isolation.
+      //
+      // [#20035] RE-JUDGED for the wording only: the shared comparand-TYPE face
+      // answers first now (#7872, 2026-08-12: 「refuses everything else loudly
+      // at the compile face」), in its sentence and at its path.
       await expect(ids({ stage: undefined, owner: 'u1' })).rejects.toThrowError(
-        /comparand at "stage" is undefined/,
+        /^Filter comparand at where\.stage is undefined\./,
       );
       // `$not: undefined` is NOT the same condition and must not borrow the same
       // message: it is a combinator with a missing operand, and the branch that

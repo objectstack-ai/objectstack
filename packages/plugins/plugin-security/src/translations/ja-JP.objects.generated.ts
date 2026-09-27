@@ -318,6 +318,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "割り当て ID",
         help: "割り当ての UUID。"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the permission set assigned to them (computed on read)"
+      },
       user_id: {
         label: "ユーザー",
         help: "sys_user への外部キー。"
@@ -371,6 +375,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "バインド ID",
         help: "ポジション権限セットバインドの UUID。"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the position and the permission set bound to it (computed on read)"
+      },
       position_id: {
         label: "ポジション",
         help: "sys_position への外部キー。"
@@ -395,6 +403,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "割り当て ID",
         help: "ユーザーポジション割り当ての UUID。"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and the position they hold (computed on read)"
       },
       user_id: {
         label: "ユーザー",

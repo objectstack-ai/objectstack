@@ -21,8 +21,8 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 452 |
-| Still-open (strip) sites | 126 |
+| Object sites in them | 453 |
+| Still-open (strip) sites | 125 |
 | Files carrying at least one | 22 |
 
 Remaining strip sites by class:
@@ -31,7 +31,7 @@ Remaining strip sites by class:
 |---|---|
 | authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 121 |
+| wire / open — out of forced scope | 120 |
 | no door — no carrier, ADR-0049 territory | 3 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
@@ -44,12 +44,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 178 | 168 | 3 | 0 | 7 |
+| `ui/` | 180 | 170 | 3 | 0 | 7 |
 | `data/` | 159 | 76 | 1 | 0 | 82 |
-| `automation/` | 68 | 43 | 0 | 1 | 24 |
+| `automation/` | 67 | 43 | 0 | 1 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **452** | **321** | **4** | **1** | **126** |
+| **total** | **453** | **323** | **4** | **1** | **125** |
 
 ## File-level triage — site counts
 
@@ -63,7 +63,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 |---|---|
 | `action-params.zod.ts` | 1 |
 | `action.zod.ts` | 9 |
-| `app.zod.ts` | 18 |
+| `app.zod.ts` | 19 |
 | `bulk-action.zod.ts` | 4 |
 | `chart.zod.ts` | 8 |
 | `component.zod.ts` | 48 |
@@ -74,9 +74,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `report.zod.ts` | 3 |
 | `responsive.zod.ts` | 1 |
 | `sharing.zod.ts` | 1 |
-| `view.zod.ts` | 61 |
+| `view.zod.ts` | 62 |
 | `widget.zod.ts` | 1 |
-| **total** | **178** |
+| **total** | **180** |
 
 ### `data/` — sites
 
@@ -117,7 +117,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `bpmn-interop.zod.ts` | 5 |
 | `builtin-node-config.zod.ts` | 10 |
 | `control-flow.zod.ts` | 6 |
-| `execution.zod.ts` | 13 |
+| `execution.zod.ts` | 12 |
 | `flow-function.zod.ts` | 1 |
 | `flow.zod.ts` | 11 |
 | `io-node-config.zod.ts` | 2 |
@@ -126,7 +126,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `state-machine.zod.ts` | 6 |
 | `time-relative-trigger.zod.ts` | 1 |
 | `webhook.zod.ts` | 1 |
-| **total** | **68** |
+| **total** | **67** |
 
 ### `security/` — sites
 
@@ -155,15 +155,15 @@ over it is here.
 
 ### `ui/` — open
 
-**7 strip of 178**, in 4 file(s).
+**7 strip of 180**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
-| `app.zod.ts` | 1 | 18 |
-| `view.zod.ts` | 4 | 61 |
+| `app.zod.ts` | 1 | 19 |
+| `view.zod.ts` | 4 | 62 |
 | `widget.zod.ts` | 1 | 1 |
-| **total** | **7** | **178** |
+| **total** | **7** | **180** |
 
 | Bucket | Sites |
 |---|---|
@@ -204,22 +204,22 @@ over it is here.
 
 ### `automation/` — open
 
-**24 strip of 68**, in 5 file(s).
+**23 strip of 67**, in 5 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `bpmn-interop.zod.ts` | 5 | 5 |
 | `control-flow.zod.ts` | 1 | 6 |
-| `execution.zod.ts` | 13 | 13 |
+| `execution.zod.ts` | 12 | 12 |
 | `flow.zod.ts` | 1 | 11 |
 | `node-executor.zod.ts` | 4 | 4 |
-| **total** | **24** | **68** |
+| **total** | **23** | **67** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 24 |
+| wire / open — out of forced scope | 23 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
@@ -257,11 +257,11 @@ directory rather than per file.
 | Dir | Sites |
 |---|---|
 | `ai/` | 78 |
-| `api/` | 451 |
+| `api/` | 432 |
 | `identity/` | 32 |
 | `integration/` | 8 |
-| `kernel/` | 257 |
+| `kernel/` | 247 |
 | `marketplace/` | 29 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 351 |
+| `system/` | 352 |

@@ -174,7 +174,7 @@ export type CacheAvalanchePreventionParsed = z.infer<typeof CacheAvalanchePreven
 // is printed verbatim at an author who has no tracker to resolve it with, and its
 // durable reference is ADR-0049 (`check:doc-authoring` Rule 3).
 const WARMUP_STRATEGY_SCHEDULED_RETIRED =
-  "`CacheWarmup.strategy: 'scheduled'` was removed in @objectstack/spec 18 (ADR-0049 "
+  "`CacheWarmup.strategy: 'scheduled'` was removed in @objectstack/spec 17 (ADR-0049 "
   + 'enforce-or-remove) — the cron key it selected, `CacheWarmup.schedule`, was deleted in '
   + 'this same major, and no cache-warmup engine has ever existed on the platform, '
   + 'so the value named a cadence with nothing to configure it and nothing to run it. Use '
@@ -204,7 +204,7 @@ export const CacheWarmupSchema = lazySchema(() => z.object({
   }).default('lazy')
     .describe('Warmup strategy: eager (at startup), lazy (on first access)'),
   /*
-   * `CacheWarmup.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * `CacheWarmup.schedule` was DELETED here in @objectstack/spec 17 (ADR-0049
    * enforce-or-remove, #16320): declared, parsed into the cron envelope and read by
    * nothing — `CacheWarmupSchema` has no consumer outside `packages/spec`, so no
    * warmup ever ran on a schedule. Deleted outright — no `retiredKey()` tombstone, no

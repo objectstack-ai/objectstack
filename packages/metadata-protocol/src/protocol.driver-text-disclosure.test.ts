@@ -430,15 +430,15 @@ describe('[#8136] the overlay-delete re-wraps name the operation without quoting
 describe('[#8136] [GUARD] a declared 4xx refusal is quoted verbatim — green in BOTH directions, red under the over-broad variant', () => {
     /**
      * The bound that stops this fix being satisfied by "withhold everything".
-     * `SysMetadataRepository`'s refusals (`[item_locked]`,
-     * `[writable_package_required]`, `[no_draft]`, …) name the exact remedy,
+     * `SysMetadataRepository`'s refusals (`ITEM_LOCKED`,
+     * `WRITABLE_PACKAGE_REQUIRED`, `NO_DRAFT`, …) name the exact remedy,
      * and #4277 is the card that exists so they do. Blanking them would trade a
      * usability regression for no disclosure gain — measured red under the
      * over-broad variant, see the PR body.
      */
     it('keeps a repository refusal intact through the re-wrap', async () => {
         const refusal: any = new Error(
-            "[item_locked] Cannot overlay 'view' in package 'showcase': that package is read-only. "
+            "Cannot overlay 'view' in package 'showcase': that package is read-only. "
             + 'Edit the source artifact and redeploy.',
         );
         refusal.code = 'ITEM_LOCKED';
@@ -455,7 +455,7 @@ describe('[#8136] [GUARD] a declared 4xx refusal is quoted verbatim — green in
 
         // The prescription survives, whole — this is the half a blanket
         // sanitizer would destroy.
-        expect(String(err.message)).toContain('[item_locked]');
+        expect(String(err.message)).toContain('that package is read-only');
         expect(String(err.message)).toContain('Edit the source artifact and redeploy.');
         // …and the envelope #7426 installed is unchanged.
         expectDeclaredEnvelope(err, 'ITEM_LOCKED', 403);

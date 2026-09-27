@@ -23,13 +23,22 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // enforcement hole this closes gets re-opened one seam over.
 import { isRowActive } from '@objectstack/core';
 // [#14754] The engine's organization refusal for a system write on a
-// tenant-scoped object (#8844). Imported as a TYPE only: the runtime check is a
-// `code` compare, which is the convention that class itself documents ("a
-// caller that catches it identifies it by `code`") so the check survives the
-// package boundary where two copies of that module can exist. Typing the
-// literal FROM the class is what keeps the two spellings from drifting — a
-// typo here would not be a failing test, it would be a catch that never fires.
-import type { SystemWriteOrganizationRequiredError } from '@objectstack/objectql';
+// tenant-scoped object (#8844). The runtime check is a `code` compare, which is
+// the convention that refusal itself documents ("a caller that catches it
+// identifies it by `code`") so the check survives the package boundary where
+// two copies of that module can exist — `instanceof` is unsound across the dual
+// build and fails SILENTLY, as a catch that never fires.
+//
+// [#14936] The recognizer and the code are taken FROM the engine rather than
+// re-spelled here. The engine publishes both precisely so a consumer can
+// perform the compare without authoring the string itself: a local literal is a
+// second spelling that can drift from what the engine throws, and it acquires a
+// `check:error-code-provenance` stamp site in this package for a code this
+// package only ever RECOGNISES.
+import {
+  isSystemWriteOrganizationRequiredError,
+  SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
+} from '@objectstack/objectql';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
@@ -128,15 +137,6 @@ function rowFromRule(row: any): SharingRuleRow {
     updated_at: row.updated_at ?? undefined,
   };
 }
-
-/**
- * [#14754] The one engine refusal a reconcile pass absorbs per grant.
- *
- * Spelled once, and typed from the engine's own declaration so it cannot drift
- * from the code the engine actually throws.
- */
-const ENGINE_ORGANIZATION_REFUSAL_CODE: SystemWriteOrganizationRequiredError['code'] =
-  'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED';
 
 /**
  * [#14754] What one reconcile pass did, plus the grants the engine's
@@ -1649,7 +1649,7 @@ export class SharingRuleService implements ISharingRuleService {
    *
    * `sys_record_share` is tenant-scoped in the #13491 ledger (#14484), so on a
    * walled install an organization-less system insert on it is refused loudly
-   * with {@link ENGINE_ORGANIZATION_REFUSAL_CODE}. `SharingService.grant`
+   * with {@link SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE}. `SharingService.grant`
    * resolves the organization on every path that can; a platform-global rule
    * (`organization_id = null`, its sweep unscoped) materialising onto an
    * organization-less record resolves none, and meets the refusal.
@@ -1663,8 +1663,9 @@ export class SharingRuleService implements ISharingRuleService {
    *
    * ## Why the catch is narrow, and must stay narrow
    *
-   * ONLY {@link ENGINE_ORGANIZATION_REFUSAL_CODE} is absorbed; everything else
-   * rethrows unchanged. Two reasons, and the second is measured:
+   * ONLY the engine's organization refusal is absorbed — recognised through
+   * the engine's own {@link isSystemWriteOrganizationRequiredError}; everything
+   * else rethrows unchanged. Two reasons, and the second is measured:
    *
    * - A catch-all would swallow real defects — a driver outage, a criteria
    *   bug, a permission failure — and report a pass that "completed" having
@@ -1701,7 +1702,7 @@ export class SharingRuleService implements ISharingRuleService {
       );
       return true;
     } catch (err: any) {
-      if (err?.code !== ENGINE_ORGANIZATION_REFUSAL_CODE) throw err;
+      if (!isSystemWriteOrganizationRequiredError(err)) throw err;
       this.logger?.warn?.(
         '[sharing-rule] grant refused by the engine organization rule — counted, pass continues',
         {
@@ -1709,7 +1710,7 @@ export class SharingRuleService implements ISharingRuleService {
           object: rule.object_name,
           record: recordId,
           recipient: recipientId,
-          code: ENGINE_ORGANIZATION_REFUSAL_CODE,
+          code: SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
         },
       );
       return false;

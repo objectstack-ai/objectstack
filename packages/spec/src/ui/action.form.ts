@@ -22,6 +22,18 @@ export const actionForm = defineForm({
         { field: 'icon', colSpan: 1, helpText: 'Lucide icon name (e.g., "check", "x-circle")' },
         { field: 'type', required: true, colSpan: 1, helpText: 'What happens when clicked' },
         { field: 'variant', colSpan: 1, helpText: 'Button style (primary=blue, danger=red, ghost=transparent)' },
+        // #19331 — six of this form's nine additions are scalars ActionSchema
+        // declares and no control offered, so the Source tab's free-text JSON
+        // was the only door. Each `options` list below exists because the raw
+        // enum member would read as a word rather than as the contract it names;
+        // where the member IS the contract the enum is left to derive.
+        { field: 'mode', type: 'select', colSpan: 1, helpText: 'Semantic mode of the action. Read today by the AI human-in-the-loop heuristic only — no renderer branches on it.', options: [
+          { label: 'Create', value: 'create' },
+          { label: 'Edit', value: 'edit' },
+          { label: 'Delete', value: 'delete' },
+          { label: 'Custom', value: 'custom' },
+        ] },
+        { field: 'order', type: 'number', colSpan: 1, helpText: 'Sort order within a location group — lower sorts higher, and the record header takes the first as its primary button. Unset keeps registration order.' },
       ],
     },
     {
@@ -80,9 +92,23 @@ export const actionForm = defineForm({
             { field: 'requiresFeature', label: 'Requires Feature' },
           ],
         },
+        { field: 'operation', type: 'select', helpText: "Declarative single-record field write: 'update' applies `patch`, merged under the collected `params`, to the current record AS THE CALLER — never system-elevated, so the caller's permissions, the object's hooks and its validations all fire as for a user edit.", options: [
+          { label: 'Update the current record', value: 'update' },
+        ] },
+        { field: 'undoable', type: 'boolean', visibleWhen: "data.operation == 'update'", helpText: 'Offer an Undo affordance after this update succeeds. The undo captures the prior value of every field the action writes — the merged bag, `patch` under the collected `params`. An action with no `operation` declares no write set, so there is nothing to capture.' },
+        // `perRecord` carries an uppercase letter and `FormSelectOptionSchema`
+        // values are system identifiers (`^[a-z][a-z0-9_.]*$`), so this enum
+        // cannot be written as an inline option list — it derives from the
+        // served schema and the contract rides the help text.
+        { field: 'execution', helpText: "The bulk dispatch contract this action's body is written for: 'perRecord' sends one dispatch per selected row carrying that row's recordId; 'aggregate' sends ONE dispatch for the whole selection, with every id in params._selectedIds. Omitted, the action is dispatched per record." },
         { field: 'confirmText', helpText: 'Confirmation message (e.g., "Are you sure?")' },
         { field: 'successMessage', helpText: 'Success message after completion' },
         { field: 'refreshAfter', helpText: 'Refresh the list/page after action completes' },
+        // `new-tab` is hyphenated, so the same system-identifier bound on
+        // `FormSelectOptionSchema.value` applies: the enum derives.
+        { field: 'openIn', visibleWhen: "data.type == 'url'", helpText: "Where to open a static `target` URL — 'self' navigates in place, 'new-tab' opens a new browser tab. Omitted, an absolute or external URL opens in a new tab and a relative one navigates in place." },
+        { field: 'opensInNewTab', type: 'boolean', helpText: "Open the action RESULT in a new tab: the renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. Distinct from `openIn`, which routes a static URL target." },
+        { field: 'newTabUrl', label: 'New-tab URL', type: 'text', visibleWhen: "data.opensInNewTab == true", helpText: 'Direct new-tab URL template, with a {recordId} placeholder. Set together with `opensInNewTab` the renderer navigates the pre-opened tab here immediately and posts nothing — so the endpoint must enforce auth itself.' },
       ],
     },
     {
@@ -95,6 +121,10 @@ export const actionForm = defineForm({
         { field: 'component', helpText: 'How to render (button, icon, menu item)' },
         { field: 'visible', widget: 'textarea', helpText: 'CEL expression: show only when condition is true' },
         { field: 'disabled', widget: 'textarea', helpText: 'CEL expression: disable when condition is true' },
+        // The enum derives: every member IS the public auth feature flag it
+        // names, so an inline list would only restate them and could drift from
+        // the registry the parse step resolves against.
+        { field: 'requiresFeature', helpText: 'Public auth feature flag gating this action. It is lowered into the `visible` predicate at parse time and stripped from the output, so no downstream consumer ever sees the key.' },
         // `shortcut` input removed with the key (#3896 close-out) — a form
         // input for an unenforced capability is the UI half of false compliance.
       ],

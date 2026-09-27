@@ -297,35 +297,6 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Reserved by a dedicated epic PM, parent or sub-issue; other PMs never take it; never with pm:queue" 2>/dev/null || true
 done
 
-# needs:contract-review — the clause-② enqueue gate's re-review chain (SKILL.md
-# 入队与落地): a PR whose ACTUAL diff touches the contract surface — or whose
-# card's claim comment declares `Clause-②: yes` (the content limb, judged from
-# the card, path-independent) — but was dispatched below the contract-review
-# tier waits outside the queue under this label until the review sub-round
-# clears it. Named consumers: the enqueue gate and the triage sub-round's label
-# query. Main repo only — the contract surface (packages/spec) lives here. The
-# label names WHAT is reviewed, never a model; the tier's single source is
-# CONTRACT_REVIEW_TIER in scripts/pm/dispatch-gates.mjs. The -d below is kept
-# ≤100 chars (the hard cap — see the header). It did NOT match the live label
-# object: measured 2026-08-20, that object was grey with an EMPTY description,
-# so the claim this comment used to make had never been true — nothing had ever
-# checked it. `--reconcile` is what makes it true.
-#
-# ⚠️ WHAT THIS FILE DOES AND DOES NOT DO, because a card read it the other way
-# (#13922): everything here reconciles the label OBJECT — its colour and its
-# description. It says nothing about whether the label is HUNG correctly on any
-# pair, and it never did. Two other files answer that, and neither is this one:
-#   * `scripts/pm/check-half-states.mjs` H31 — the two carriers of one gate
-#     compared across the whole board, on the half-state patrol's schedule.
-#   * `scripts/pm/check-clause2-carriers.mjs` — the same comparison anchored on
-#     ONE pair (`--pair <pr>`, a pre-arm predicate), plus the two readings H31
-#     cannot make: the DECLARATION limb quoted three paragraphs up has no other
-#     reader in this repo, and a gate missing from BOTH carriers is a carrier
-#     comparison's silent case.
-# ⛔ None of the three writes the label. Hanging or clearing a review gate from
-# a script would be issuing the review verdict, which is 自查放行.
-gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d "Clause-② enqueue gate: dispatched below contract-review tier — blocked until the review clears it" 2>/dev/null || true
-
 # needs:pack-smoke — the opt-in pre-merge pack smoke (#14214, derived from the
 # #14000 ruling; maintainer-approved 2026-09-01, director batch #23, 「同意」).
 # Its named consumer is a GATE rather than a query: the job guard in
@@ -353,6 +324,24 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d
 # lane, not a state, and not a routing seam, and borrowing one of their colours
 # would assert a kinship the paragraph above spends its length denying.
 gh label create needs:pack-smoke -R objectstack-ai/objectstack -c 006b75 -d "Opt-in pre-merge pack smoke: self-declared breaking auth/audience change (see CONTRIBUTING.md)" 2>/dev/null || true
+
+# needs:contract-review — a MARKER, never a gate; rules in
+# .claude/skills/pm-dispatch/references/contract-review.md 〈等复核标记〉. The
+# dispatching seat hangs it on the PR at ACCEPT when either clause-② limb hits
+# and no same-form PASS is on the current head; the seat posting that PASS, or
+# the dispatching seat at merge/close, clears it (a FAIL leaves it on). Named
+# readers: the maintainer's PR-list filter
+# `is:pr is:open label:needs:contract-review` and each seat's patrol and
+# handover. ⛔ No check, workflow, queue guard or patrol script reads it — the
+# queue releases on the `## Contract review` record alone.
+# Restored by the maintainer's instruction recorded on #19973, verbatim:
+# 「恢复 needs:contract-review，把这句原话写进一张 skills 车道的卡」 — answering a
+# question that proposed a marker, not a gate. The gate role, `--pair`, the
+# double carrier and the independence pair that ruling record 5770886272
+# retired stay retired. Main repo only: the clause-② contract surface lives
+# here. Colour bfdadc sits outside the state and red (blocked / decision)
+# families.
+gh label create needs:contract-review -R objectstack-ai/objectstack -c bfdadc -d "Marker only — PR awaits its at-tier Contract review PASS; no check reads it, the record decides" 2>/dev/null || true
 
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
@@ -408,8 +397,7 @@ gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam c
 #
 # ⛔ Two acts this record deliberately does NOT perform. Stripping the label off
 # those 4 live carriers is a BOARD act for the PM at the landing window —
-# nothing in this file ever hangs or clears a label on a card (the
-# needs:contract-review block above states the same discipline). And the
+# nothing in this file ever hangs or clears a label on a card. And the
 # `repo:*` predicate in `scripts/pm/check-half-states.mjs` H14 stays LITERAL:
 # narrowing it is a predicate change ruled on #13992, never a side effect of a
 # vocabulary record. SKILL.md names no `repo:objectstack` (checked 2026-09-01),

@@ -121,6 +121,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Delivery ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the delivery channel and its recipient (computed on read)"
+      },
       notification_id: {
         label: "Notification Event",
         help: "FK → sys_notification (L2 event)"
@@ -191,6 +195,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Preference ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user, the topic and the channel this toggle covers (computed on read)"
+      },
       user_id: {
         label: "User",
         help: "Recipient user id, or '*' for the admin-global default."
@@ -235,6 +243,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "Subscription ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the subscribing principal and the topic (computed on read)"
       },
       topic: {
         label: "Topic",
@@ -312,6 +324,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Delivery ID",
         help: "UUID — also doubles as the receiver-side idempotency key"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the delivery label, when set, and its target URL (computed on read)"
       },
       source: {
         label: "Source",

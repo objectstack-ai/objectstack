@@ -55,6 +55,9 @@ export {
   type RemoteBackfillKind,
   type RemoteBackfillLogger,
   type CanonicalSqlFor,
+  type NonTemporalTextSqlFor,
+  type RemoteBackfillSql,
+  type RemoteBackfillSqlRules,
   type RemoteCanonicalBackfillOptions,
   type RemoteCanonicalBackfillReport,
 } from './remote-canonical-backfill.js';

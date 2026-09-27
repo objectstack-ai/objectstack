@@ -88,7 +88,7 @@
     "chokidar": "^5.0.0",
     "glob": "^13.0.6",
     "js-yaml": "^5.2.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.1"
   },
   "devDependencies": {
     "@objectstack/driver-sqlite-wasm": "workspace:*",

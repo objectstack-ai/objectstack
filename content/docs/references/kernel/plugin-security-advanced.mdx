@@ -14,8 +14,15 @@ Features:
 - Fine-grained permission system
 - Resource access control
 - Sandboxing and isolation
-- Security scanning and verification
 - Runtime security monitoring
+
+⛔ NOT security scanning. The scan-result family — `KernelSecurityScanResult`,
+`KernelSecurityVulnerability`, `PluginSecurityManifest.scanResults` and its
+sibling list `.vulnerabilities` — was retired under ADR-0049 enforce-or-remove
+(#15932), after the runtime scanner that was its last type-only importer went
+the same way. That scanner retirement was issue 14919 — a number DELETED from
+the board and no longer resolving; its live record is PR #15930, which landed
+the removal. Nothing on this platform scans a plugin.
 
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/plugin-security-advanced.zod.ts`
@@ -24,8 +31,8 @@ Features:
 ## TypeScript Usage
 
 ```typescript
-import { KernelSecurityPolicySchema, KernelSecurityScanResultSchema, KernelSecurityVulnerabilitySchema, PermissionActionSchema, PermissionScopeSchema, PluginPermissionSchema, PluginPermissionSetSchema, PluginSecurityManifestSchema, PluginTrustLevelSchema, ResourceTypeSchema, RuntimeConfigSchema, SandboxConfigSchema } from '@objectstack/spec/kernel';
-import type { KernelSecurityPolicy, KernelSecurityScanResult, KernelSecurityVulnerability, PermissionAction, PermissionScope, PluginPermission, PluginPermissionSet, PluginSecurityManifest, PluginTrustLevel, ResourceType, RuntimeConfig, SandboxConfig } from '@objectstack/spec/kernel';
+import { KernelSecurityPolicySchema, PermissionActionSchema, PermissionScopeSchema, PluginPermissionSchema, PluginPermissionSetSchema, PluginSecurityManifestSchema, PluginTrustLevelSchema, ResourceTypeSchema, RuntimeConfigSchema, SandboxConfigSchema } from '@objectstack/spec/kernel';
+import type { KernelSecurityPolicy, PermissionAction, PermissionScope, PluginPermission, PluginPermissionSet, PluginSecurityManifest, PluginTrustLevel, ResourceType, RuntimeConfig, SandboxConfig } from '@objectstack/spec/kernel';
 
 // Validate data
 const result = KernelSecurityPolicySchema.parse(data);
@@ -91,62 +98,6 @@ const result = KernelSecurityPolicySchema.parse(data);
 | **events** | `string[]` | optional | Events to log |
 | **retentionDays** | `integer` | optional | Log retention in days |
 | **retention** | `never` | optional | [REMOVED] `KernelSecurityPolicy.auditLog.retention` was renamed to `retentionDays` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged. |
-
-
----
-
-## KernelSecurityScanResult
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **scanner** | `{ name: string; version: string }` | ✅ |  |
-| **status** | `Enum<'passed' \| 'failed' \| 'warning'>` | ✅ |  |
-| **vulnerabilities** | `{ cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]` | optional |  |
-| **codeIssues** | `{ severity: Enum<'error' \| 'warning' \| 'info'>; type: string; file: string; line?: integer; … }[]` | optional |  |
-| **dependencyVulnerabilities** | `{ package: string; version: string; vulnerability: object }[]` | optional |  |
-| **licenseCompliance** | `{ status: Enum<'compliant' \| 'non-compliant' \| 'unknown'>; issues?: object[] }` | optional |  |
-| **summary** | `{ totalVulnerabilities: integer; criticalCount: integer; highCount: integer; mediumCount: integer; … }` | ✅ |  |
-
-### Nested Shape: `KernelSecurityScanResult.codeIssues[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ |  |
-| **type** | `string` | ✅ | Issue type (e.g., sql-injection, xss) |
-| **file** | `string` | ✅ |  |
-| **line** | `integer` | optional |  |
-| **message** | `string` | ✅ |  |
-| **suggestion** | `string` | optional |  |
-
-
----
-
-## KernelSecurityVulnerability
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **cve** | `string` | optional |  |
-| **id** | `string` | ✅ |  |
-| **severity** | `Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>` | ✅ |  |
-| **category** | `string` | optional |  |
-| **title** | `string` | ✅ |  |
-| **location** | `string` | optional |  |
-| **remediation** | `string` | optional |  |
-| **description** | `string` | ✅ |  |
-| **affectedVersions** | `string[]` | ✅ |  |
-| **fixedIn** | `string[]` | optional |  |
-| **cvssScore** | `number` | optional |  |
-| **exploitAvailable** | `boolean` | optional (default: `false`) |  |
-| **patchAvailable** | `boolean` | optional (default: `false`) |  |
-| **workaround** | `string` | optional |  |
-| **references** | `string[]` | optional |  |
-| **discoveredDate** | `string` | optional |  |
-| **publishedDate** | `string` | optional |  |
 
 
 ---
@@ -277,8 +228,8 @@ Scope of permission application
 | **permissions** | `{ permissions: object[]; groups?: object[]; defaultGrant?: Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'> }` | ✅ |  |
 | **sandbox** | `{ enabled?: boolean; level?: Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>; runtime?: object; filesystem?: object; … }` | ✅ |  |
 | **policy** | `{ csp?: object; cors?: object; rateLimit?: object; authentication?: object; … }` | optional |  |
-| **scanResults** | `{ timestamp: string; scanner: object; status: Enum<'passed' \| 'failed' \| 'warning'>; vulnerabilities?: object[]; … }[]` | optional |  |
-| **vulnerabilities** | `{ cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]` | optional |  |
+| **scanResults** | `never` | optional | [REMOVED] `PluginSecurityManifest.scanResults` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing on this platform ever produced, stored or read a security scan result, so an authored array parsed cleanly and changed nothing. Delete the key. There is no replacement key: plugin security scanning is not a platform capability. What this manifest still enforces is `permissions` and `sandbox`; artifact provenance is answered by the plugin signature verifier, which tells you an artifact is the one its publisher signed and never that it is safe. Audit dependencies with a tool built for it (npm audit, pnpm audit, Dependabot, the GitHub Advisory Database, OSV). |
+| **vulnerabilities** | `never` | optional | [REMOVED] `PluginSecurityManifest.vulnerabilities` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it was an array of `KernelSecurityVulnerability`, the other half of the scan-result family, and leaves with it: nothing ever wrote the list and nothing ever read it, so declaring a known vulnerability against a plugin warned nobody and blocked no install. Delete the key. There is no replacement key: plugin security scanning is not a platform capability. Publish vulnerability contact and disclosure terms through the surviving `securityContact` and `vulnerabilityDisclosure` blocks on this same manifest, and audit dependencies with a tool built for it (npm audit, pnpm audit, Dependabot, the GitHub Advisory Database, OSV). |
 | **codeSigning** | `{ signed: boolean; signature?: string; certificate?: string; algorithm?: string; … }` | optional |  |
 | **certifications** | `{ name: string; issuer: string; issuedDate: string; expiryDate?: string; … }[]` | optional |  |
 | **securityContact** | `{ email?: string; url?: string; pgpKey?: string }` | optional |  |

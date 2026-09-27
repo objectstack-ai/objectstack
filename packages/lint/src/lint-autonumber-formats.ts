@@ -19,9 +19,17 @@
  *
  * A self-reference (`{self}` on the autonumber field itself) is always an
  * ERROR — the value does not exist yet when the format renders.
+ *
+ * The format checked is the one the runtime mints with, answered by
+ * `resolveAutonumberFormat` — the resolver the engine and the SQL driver call —
+ * never by a precedence rule kept here. A local copy already disagreed with it
+ * once: it took `autonumberFormat: ''` as declared, checked nothing, and passed
+ * a `format` shorthand the runtime then rendered and threw on. A field that
+ * declares neither key is checked against the contract default, which is what
+ * it mints with.
  */
 
-import { parseAutonumberFormat, referencedFields } from '@objectstack/spec/data';
+import { parseAutonumberFormat, referencedFields, resolveAutonumberFormat } from '@objectstack/spec/data';
 import { recordsOf } from './object-graph.js';
 
 export interface AutonumberLintFinding {
@@ -57,10 +65,7 @@ export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
     for (const f of fields) {
       if (f.type !== 'autonumber') continue;
       const name = typeof f.name === 'string' ? f.name : '(unnamed field)';
-      const fmt = typeof f.autonumberFormat === 'string'
-        ? f.autonumberFormat
-        : (typeof f.format === 'string' ? f.format : '');
-      if (!fmt) continue;
+      const fmt = resolveAutonumberFormat(f);
       const tokens = parseAutonumberFormat(fmt);
       const refs = referencedFields(tokens);
       const where = `object '${objectName}' · field '${name}' (autonumber "${fmt}")`;

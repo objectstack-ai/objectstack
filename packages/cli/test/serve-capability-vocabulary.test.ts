@@ -49,16 +49,8 @@ describe('serve capability registries vs spec vocabulary (#3265)', () => {
    * `Serve.ALWAYS_ON_CAPABILITIES` is a re-export of the spec slate, so this is
    * a SURFACE pin rather than a second copy of the spec-side one: it asserts
    * the split survives the hop the CLI takes, and that hop is what decides
-   * which tokens land in an app's `requires`.
-   *
-   * ⚠️ Measured on `serve`'s resolver at c17ff70f3f and deliberately NOT
-   * asserted: `Serve.CAPABILITY_PROVIDERS` keys `marketplace` and does not yet
-   * key `package-registry`, so appending this token mounts nothing under
-   * `objectstack serve` until the runtime half of the same ruling lands
-   * (#17676 items 2/3/5, the engine lane). Pinning that ABSENCE here would
-   * turn the engine lane's own fix red for doing the ruled thing, so the gap
-   * is recorded in words and the pin states only what must hold either side of
-   * it.
+   * which tokens land in an app's `requires`. Whether an appended token then
+   * MOUNTS anything is the next pin's question.
    */
   it("appends the package-registry persistence to every app, never the catalogue half (#17676 A')", () => {
     expect(Serve.ALWAYS_ON_CAPABILITIES).toContain('package-registry');
@@ -69,6 +61,41 @@ describe('serve capability registries vs spec vocabulary (#3265)', () => {
     // stay resolvable spellings for `requires`.
     expect(PLATFORM_CAPABILITY_TOKENS).toContain('package-registry');
     expect(PLATFORM_CAPABILITY_TOKENS).toContain('marketplace');
+  });
+
+  /**
+   * #19387 — the absence direction, which this file used to record in words
+   * only.
+   *
+   * `serve` force-appends every slate token to an app's `requires`, and then
+   * mounts a token through exactly one of two paths: a CAPABILITY_PROVIDERS
+   * entry (the `requires` resolver) or a CAPABILITY_TO_TIER entry (the
+   * dedicated tier blocks — the named list whose own docblock says why those
+   * tokens carry no provider entry). A slate token on NEITHER path passes both
+   * conjuncts of the resolver's no-provider branch — it was not declared by
+   * the app, and it is inside the vocabulary — so it mounts nothing and says
+   * nothing. That is how `package-registry` sat on the slate inert after the
+   * #17676 A' carve-out landed its spec half.
+   *
+   * ⛔ So a slate entry with no mount goes red HERE, on the pull request that
+   * adds it, rather than being noticed as a missing service after release.
+   * The spec slate and this package ship in one fixed release group, so a
+   * green pin covers every published pairing; the runtime branch is not given
+   * a warning for a case this makes unreachable.
+   */
+  it('every always-on slate token has a serve mount — a provider entry or a tier (#19387)', () => {
+    const providerTokens = new Set(Object.keys(Serve.CAPABILITY_PROVIDERS));
+    const tierTokens = new Set(Object.keys(Serve.CAPABILITY_TO_TIER));
+    // Non-vacuity: an empty slate would pass the filter below over nothing.
+    expect(Serve.ALWAYS_ON_CAPABILITIES.length).toBeGreaterThan(0);
+    const unmounted = Serve.ALWAYS_ON_CAPABILITIES.filter(
+      (token) => !providerTokens.has(token) && !tierTokens.has(token),
+    );
+    expect(
+      unmounted,
+      'always-on tokens that `serve` force-appends to every app and then mounts NOTHING for — ' +
+        'key each one in Serve.CAPABILITY_PROVIDERS at the provider PLATFORM_CAPABILITY_PROVIDERS declares',
+    ).toEqual([]);
   });
 });
 

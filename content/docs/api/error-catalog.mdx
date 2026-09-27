@@ -69,7 +69,7 @@ entry's cross-reference sentence so the in-process one stays findable.
   "httpStatus": 400,
   "retryable": false,
   "fields": [
-    { "field": "email", "message": "Invalid email format", "code": "invalid_format" }
+    { "field": "email", "message": "Invalid email format", "code": "invalid_email" }
   ]
 }
 ```
@@ -197,18 +197,57 @@ rather than deriving it from the table at the end of this page.
 </Callout>
 
 ### `INVALID_FORMAT`
-**Cause:** Field value does not match the expected format (e.g., invalid email, wrong date format).  
-**Fix:** Ensure the value matches the field's `format` constraint or built-in type validation.  
+**Cause:** Reserved for a value that does not match an expected format. **No route emits it
+today.** A malformed value is refused as a *field-level* failure inside `VALIDATION_FAILED`
+instead, and its `fields[].code` names what checked it:
+
+- **the field's `type`** — an `email`, `url` or `phone` field runs a built-in shape check keyed
+  on `type` itself and answers `invalid_email` / `invalid_url` / `invalid_phone`; a value a
+  `date`, `datetime` or `time` field cannot parse answers `invalid_date` / `invalid_time`;
+- **a [`format` validation rule](/docs/data-modeling/validation#format-validation)** — its
+  `regex`, or its named `format` (`email` | `url` | `phone` | `json`) — answers `invalid_format`.
+
+A value that misses a declared `pattern` outside record metadata (a settings value, a request
+body a route parses with Zod) also answers field-level `invalid_format`.  
+**Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` + `fields[].code`. To change
+what a field accepts, change its `type` or the `format` validation rule — a field-level `format`
+key runs no write-time check on any field type, so editing it changes nothing.  
 **Retry:** `no_retry`
 
 ### `VALUE_TOO_LONG`
-**Cause:** String value exceeds the field's `maxLength` constraint.  
-**Fix:** Truncate the value to the maximum allowed length.  
+**Cause:** Reserved for a string value longer than its declared maximum. **No route emits it
+today.** A length miss is refused as a *field-level* `max_length` entry instead, and where that
+entry rides depends on what was written:
+
+- **a record write** (a string over a field's `maxLength`) and **a request body a route parses
+  with Zod** answer `400 VALIDATION_FAILED` with the entry in `fields[]` — top-level on the
+  `/data` routes, under `details` when the runtime dispatcher serves it (see
+  [`VALIDATION_FAILED`](#validation_failed)); on a record write its `constraint` carries
+  `maxLength` and the `actual` length;
+- **a settings write** (a value over its declared maximum) answers `400 SETTINGS_VALIDATION`
+  with the entry in `details.fields[]`.
+
+**Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` + `fields[].code`
+`max_length`, or on `SETTINGS_VALIDATION` + `details.fields[].code` `max_length` for a settings write,
+and shorten the value to fit the declared maximum.  
 **Retry:** `no_retry`
 
 ### `VALUE_TOO_SHORT`
-**Cause:** String value is below the field's `minLength` constraint.  
-**Fix:** Provide a longer value that meets the minimum length requirement.  
+**Cause:** Reserved for a string value shorter than its declared minimum. **No route emits it
+today.** A length miss is refused as a *field-level* `min_length` entry instead, and where that
+entry rides depends on what was written:
+
+- **a record write** (a string under a field's `minLength`) and **a request body a route parses
+  with Zod** answer `400 VALIDATION_FAILED` with the entry in `fields[]` — top-level on the
+  `/data` routes, under `details` when the runtime dispatcher serves it (see
+  [`VALIDATION_FAILED`](#validation_failed)); on a record write its `constraint` carries
+  `minLength` and the `actual` length;
+- **a settings write** (a value under its declared minimum) answers `400 SETTINGS_VALIDATION`
+  with the entry in `details.fields[]`.
+
+**Fix:** Do not branch on this code; branch on `VALIDATION_FAILED` + `fields[].code`
+`min_length`, or on `SETTINGS_VALIDATION` + `details.fields[].code` `min_length` for a settings write,
+and lengthen the value to meet the declared minimum.  
 **Retry:** `no_retry`
 
 ### `VALUE_OUT_OF_RANGE`
@@ -606,7 +645,7 @@ unchanged returns the same `400`.
   "success": false,
   "error": {
     "code": "INVALID_REQUEST",
-    "message": "[invalid_request] 'viewes' is not a recognised spelling of metadata type 'view'. Address it as 'view' or 'views'. Refused rather than treated as a plugin-registered type, because forwarding an unrecognised spelling of a declared type would create a second namespace under type='viewes'.",
+    "message": "'viewes' is not a recognised spelling of metadata type 'view'. Address it as 'view' or 'views'. Refused rather than treated as a plugin-registered type, because forwarding an unrecognised spelling of a declared type would create a second namespace under type='viewes'.",
     "httpStatus": 400
   }
 }
@@ -657,7 +696,7 @@ the type segment, and the exemption below decides whether it fires at all.
   "success": false,
   "error": {
     "code": "INVALID_REQUEST",
-    "message": "[invalid_request] 'fieldz' is not a metadata type. The platform declares no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one either — so this write would mint a sys_metadata namespace under type='fieldz' that nothing reads and nothing serves. Address a real metadata type; GET /api/v1/meta/types lists the ones this deployment carries.",
+    "message": "'fieldz' is not a metadata type. The platform declares no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one either — so this write would mint a sys_metadata namespace under type='fieldz' that nothing reads and nothing serves. Address a real metadata type; GET /api/v1/meta/types lists the ones this deployment carries.",
     "httpStatus": 400
   }
 }

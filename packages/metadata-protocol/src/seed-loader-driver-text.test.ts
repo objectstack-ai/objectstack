@@ -313,11 +313,11 @@ describe('[#8442] [GUARD] a DECLARED refusal is quoted whole — the per-record 
 
     it('a declared 4xx refusal keeps its sentence (#8333’s rule, still in force)', async () => {
         const { result } = await loadFailing(() => Object.assign(
-            new Error('[item_locked] Cannot overlay this item: the package is read-only.'),
+            new Error('Cannot overlay this item: the package is read-only.'),
             { code: 'ITEM_LOCKED', status: 403 },
         ));
 
-        expect(result.errors[0].message).toContain('[item_locked]');
+        expect(result.errors[0].message).toContain('the package is read-only');
         expect(result.errors[0].message).toContain('the package is read-only.');
     });
 });

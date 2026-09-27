@@ -370,7 +370,10 @@ describe('[#14287] RemoteTransport — an unsafe identifier is a 400 INVALID_REQ
       const report = await backfillRemoteCanonicalColumn(
         neverCalled,
         { table: UNSAFE, field: 'at', kind: 'datetime' },
-        (_kind, columnSql) => columnSql,
+        {
+          canonical: (_kind, columnSql) => columnSql,
+          nonTemporalText: (columnSql) => `(${columnSql} is not null)`,
+        },
       );
       expect(report.error).toBe(
         `remote canonical backfill: unsafe identifier rejected: "${UNSAFE}"`,

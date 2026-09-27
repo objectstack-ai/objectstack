@@ -16,7 +16,12 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
-import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
+import {
+  assertReadScopeCannotVacate,
+  assertReadScopeComparandsRunnable,
+  assertReadScopePlaceholdersResolvable,
+  compileScopedFilterToSql,
+} from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
@@ -556,9 +561,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#15684] …and the same dialect, so the echoed scope prints the
       // construct the executed one runs — `GLOB` on SQLite, where a plain
       // `LIKE` folds ASCII case and admits rows the policy excludes.
+      // [#20075] …and the request context `execute()` forwards to the engine,
+      // so the echo prints the value the engine resolves a scope placeholder
+      // to, and refuses one it cannot resolve, as `execute()` does.
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
         nonTextColumn: nonTextColumnResolver(ctx, tableName),
         dialect: sqlDialectFor(ctx, tableName),
+        context: ctx.context,
       });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
@@ -650,6 +659,23 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the same disposition from `compileScopedFilterToSql` itself (#13571);
     // this is the same ruling at the door that compiler never sees.
     assertReadScopeCannotVacate(scope, objectName);
+    // [#19995] …and the comparand half of the same door. A scope carrying a
+    // comparand the engine's shared faces refuse came back as the engine's
+    // `INVALID_FILTER` / 400 — a 4xx the HTTP doors relay verbatim, naming the
+    // policy's field and comparand, where NativeSQL and the echo refuse the
+    // same scope in the withheld `READ_SCOPE_COMPILE_FAILED` / 500 (#5367).
+    // Judged on the scope ALONE, for the attribution reason above; the
+    // caller's own `where` keeps reaching the engine's doors and its 400.
+    assertReadScopeComparandsRunnable(scope, objectName);
+    // [#19995] …and the placeholder half. The engine resolves `{…}` values on
+    // the COMPOSED `where`, so a placeholder in the scope it cannot resolve
+    // came back as its `FILTER_TOKEN_*` / 400 with the token relayed. Judged
+    // with the engine's own resolver and the context the caller forwards to
+    // `executeAggregate` alongside this filter. After the comparand faces
+    // because the engine resolves after its lowering doors, so a scope with
+    // both defects logs the sentence the engine would have given; the wire
+    // envelope is the same either way. Before the mark, like its siblings.
+    assertReadScopePlaceholdersResolvable(scope, objectName, ctx.context);
     const scopeFilter = markFilterSubtreeProvenance(scope as Record<string, unknown>, 'policy');
     if (!userFilter) return scopeFilter;
     return { $and: [userFilter, scopeFilter] };
@@ -1133,6 +1159,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // landing in the RESTRICTED bucket. Guarded before the mark, so a refused
     // scope is never stamped as vouched-for policy content.
     if (scope != null) assertReadScopeCannotVacate(scope, refObject);
+    // [#19995] …and the comparand half, as at `withReadScope`: a comparand the
+    // engine refuses would come back as its relayed 400, naming the referenced
+    // object's policy. Before the mark, for the same reason as the line above.
+    if (scope != null) assertReadScopeComparandsRunnable(scope, refObject);
+    // [#19995] …and the placeholder half, as at `withReadScope`, with the
+    // context forwarded to `executeAggregate` below.
+    if (scope != null) assertReadScopePlaceholdersResolvable(scope, refObject, ctx.context);
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {
@@ -1758,16 +1791,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * re-type them. The two `coerceFilterValueForObjectQL` calls this replaced
    * existed only to undo `stringifyForCube`, and undoing it required guessing.
    *
-   * The four LIKE-family arms are the exception, and a contract one:
-   * `filter.zod.ts` declares `$contains` / `$notContains` / `$startsWith` /
-   * `$endsWith` as `z.string()`, so this PRODUCER must hand the engine a real
-   * string — `String(…)`, the same normalisation `like-pattern.ts` applies at the
-   * two SQL emitters and `driver-sql`'s `applyLike` applies at the driver, so one
-   * `$contains` means one thing on every face (#5567's invariant).
+   * The four LIKE-family arms and `$icontains` are the exception, and a
+   * contract one: `filter.zod.ts` declares `$contains` / `$notContains` /
+   * `$startsWith` / `$endsWith` / `$icontains` as `z.string()`, so this PRODUCER
+   * must hand the engine a real string — `String(…)`, the same normalisation
+   * `like-pattern.ts` applies at the two SQL emitters and `driver-sql`'s
+   * `applyLike` applies at the driver, so one `$contains` means one thing on
+   * every face (#5567's invariant).
    *
-   * [#5234] Those four `String(…)` calls now only ever see a value that renders
+   * [#5234] Those `String(…)` calls now only ever see a value that renders
    * faithfully: `fieldLeaves` refuses an object comparand on this family before a
-   * leaf exists. That ordering is load-bearing rather than incidental — this arm
+   * leaf exists (and, for `$icontains`, any empty or non-string one, #20068).
+   * That ordering is load-bearing rather than incidental — this arm
    * is a PRODUCER for the engine, so stringifying an object here would have
    * laundered it into `'[object Object]'` and handed a driver a perfectly
    * well-typed string. A strict driver downstream could never have seen the shape
@@ -1842,6 +1877,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       case 'notContains': return { $notContains: String(v0) };
       case 'startsWith': return { $startsWith: String(v0) };
       case 'endsWith': return { $endsWith: String(v0) };
+      // [#20098] The case-INSENSITIVE twin (#6520) had no arm, so every
+      // `$icontains` — a valid `'acme'` included — fell to the `default:` below
+      // and `/analytics/query` answered an uncoded 500 on a datasource this
+      // strategy serves, while the native face and the echo served the rows.
+      // Like the four above it passes through as the canonical spec operator
+      // (`FILTER_OPERATORS` declares `$icontains`), and the ASCII-only fold
+      // (#4706 Q1 = A) stays where every other face gets it: the engine and
+      // the driver. ⛔ No fold here — lower-casing the comparand would answer
+      // `'café'` for `'CAFÉ'`, a row the contract excludes — and no `$regex`
+      // (#5557). `String(…)` is the family's normalisation, and an identity on
+      // everything that can arrive: the door refuses an empty or non-string
+      // comparand before a leaf exists (#20068).
+      case 'icontains': return { $icontains: String(v0) };
       case 'in': return { $in: all };
       case 'notIn': return { $nin: all };
       default:

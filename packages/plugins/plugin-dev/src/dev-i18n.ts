@@ -95,6 +95,26 @@ const declaresTranslationArray = (body: unknown): boolean => {
  * read the top-level `translations` a second time — the same answer, reached
  * twice, for every single-package stack the platform has ever emitted.
  *
+ * ## Why this reader KEEPS a private guard, and what the guard may not decide
+ *
+ * The rule for which `packages` values are absent and which are refused is
+ * stated once, beside `AssembledPackageBodySchema` (`@objectstack/spec`,
+ * `stack.zod.ts`). `resolveArtifactPackageOrder` is where it is enforced. A
+ * reader should not spell it a second time, and the security reader's twin of
+ * this guard was dropped for that reason. This one stays, deliberately, because
+ * dropping it was measured NOT to be behaviour-equal here. Its answer and its
+ * refusals do not move, but a single-package stack then reads its
+ * `translations` twice instead of once. The pin "a single-package stack reads
+ * its `translations` ONCE" (`dev-i18n-packages-reader.test.ts`) holds this
+ * reader to exactly the old path, and it goes red without the guard.
+ *
+ * ⛔ So the guard is allowed to decide ONE thing: the ABSENT branch, spelled
+ * exactly as the resolver's own absent branch (`undefined` / `null`). Every
+ * other value goes to the resolver, so a present non-array `packages` (`{}`,
+ * `0`, `'x'`) is REFUSED as `INVALID_ARTIFACT_PACKAGES`. ⛔ Never widen it to
+ * `Array.isArray`: that is the silent fall-through the rule above forbids. If
+ * the resolver's absent branch ever changes, this line changes with it.
+ *
  * ## A malformed `packages[]` is refused, not skipped
  *
  * A non-array `packages`, an entry inlined instead of wrapped under `manifest:`
@@ -120,17 +140,11 @@ const declaresTranslationArray = (body: unknown): boolean => {
  * maintainer question filed separately; it is not decided here, and this
  * function's own semantics are unchanged by it.
  *
- * ## The guard divergence with `@objectstack/core`, recorded rather than fixed
- *
- * This reader treats only an ABSENT `packages` key (`undefined` / `null`) as
- * "single package"; anything else goes to the gate, so `packages: {}` is
- * REFUSED. `resolveArtifactPackageOrder`'s own second branch is spelled
- * `declared === undefined || declared === null` too, but the sibling reader in
- * `@objectstack/metadata` guards with `Array.isArray`, which silently accepts a
- * non-array. Two readers in one program answering the same input differently is
- * a program-level split, not this file's to settle (#15226 spells it as this
- * file does). Recorded here so the next author does not "fix" one side into
- * agreement without ruling the other.
+ * ⚠️ The refusal is reached only when the question reaches the package pass. A
+ * stack whose top-level `translations` already answers `true` returns before
+ * the walk, so its `packages` is never read here, malformed or not. That is the
+ * top-level-first order above, and it is deliberate: this reader refuses what
+ * it READS. Such a stack is refused by the load path instead.
  *
  * ## `i18n` is NOT read from `packages[]`, and that is not an omission
  *

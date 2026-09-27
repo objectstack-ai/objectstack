@@ -1,5 +1,11 @@
 # Validation Rules
 
+- [Available Rule Types](#available-rule-types) · [Expression Syntax](#expression-syntax) · [Script Validation](#script-validation)
+- [Uniqueness — Use Unique Indexes](#uniqueness--use-unique-indexes) · [State Machine Validation](#state-machine-validation)
+- [Format](#format-validation) · [Cross-Field](#cross-field-validation) · [JSON Schema](#json-schema-validation) · [Conditional](#conditional-validation)
+- [External / Custom Validation → Lifecycle Hooks](#external--custom-validation--lifecycle-hooks) · [Validation Properties](#validation-properties)
+- [Incorrect vs Correct](#incorrect-vs-correct)
+
 Comprehensive guide for implementing validation rules in ObjectStack.
 
 ## Available Rule Types

@@ -124,13 +124,23 @@
  *
  * A third position was never written down, and a gate in this tree was standing
  * on it. `tenant-audit-census.mjs` reads a receiver's declared type out of a
- * source that PARSED, stores that type's text whitespace-collapsed, and later
- * re-parses the stored text as a synthetic type alias
+ * source that PARSED and re-parses that type's text as a synthetic type alias
  * (`type CensusReceiver = <the stored text>;`) to ask whether it declares a
- * write door. When the collapse loses a member separator -- a type literal may
- * separate its members by a newline alone, which is legal TypeScript and
- * collapses to nothing -- the synthetic alias does not parse, and the census
- * takes `EXIT_UNPARSEABLE` for the whole run.
+ * write door. It USED TO store that text whitespace-collapsed, and when the
+ * collapse lost a member separator -- a type literal may separate its members
+ * by a newline alone, which is legal TypeScript and collapses to nothing -- the
+ * synthetic alias did not parse, and the census took `EXIT_UNPARSEABLE` for the
+ * whole run.
+ *
+ * ⚠️ Both halves of that have since been repaired at the census: the verdict
+ * comes back through the door below instead of ending the run, and the text is
+ * stored as the source spells it, so the collapse is no longer how this arm is
+ * reached. ⛔ The door is NOT about the collapse, and reading it that way would
+ * retire it for the wrong reason: any caller that re-parses text it synthesised
+ * itself can fail the same way for a cause nobody has met yet, and the whole
+ * point below is that such a failure must not be spelled the same as "I could
+ * not read the tree". The measurement is kept because it is a fact about the
+ * PARSER, which has not changed.
  *
  * Measured on 2026-09-18 against TypeScript 6.0.3:
  *

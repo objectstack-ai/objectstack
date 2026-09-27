@@ -2322,12 +2322,19 @@ describe('AutomationEngine - Parallel Branch Execution', () => {
 
     it('should execute unconditional branches in parallel', async () => {
         const executionOrder: string[] = [];
+        // Entry/exit trace of the branch bodies, recorded by the executor the
+        // engine calls — the observable that makes the fan-out's SHAPE readable.
+        // `executionOrder` alone records only that both branches ran, which a
+        // sequential engine satisfies just as well.
+        const trace: string[] = [];
 
         engine.registerNodeExecutor({
             type: 'script',
             async execute(node) {
+                trace.push(`enter:${node.id}`);
                 const delay = (node.config as any)?.delay ?? 0;
                 await new Promise(r => setTimeout(r, delay));
+                trace.push(`exit:${node.id}`);
                 executionOrder.push(node.id);
                 return { success: true };
             },
@@ -2351,17 +2358,32 @@ describe('AutomationEngine - Parallel Branch Execution', () => {
             ],
         });
 
-        const start = Date.now();
         const result = await engine.execute('parallel_flow');
-        const elapsed = Date.now() - start;
 
         expect(result.success).toBe(true);
         // Both branches should execute (order may vary in parallel)
         expect(executionOrder).toContain('branch_a');
         expect(executionOrder).toContain('branch_b');
-        // Parallel execution should be faster than sequential (10+10=20ms)
-        // Allow generous margin but expect it's faster than fully sequential
-        expect(elapsed).toBeLessThan(100); // generous but parallel should be ~15ms
+
+        // What makes this fan-out parallel is that both branch bodies are IN
+        // FLIGHT AT ONCE — a structural fact about what the engine did, in what
+        // order, and ⛔ never a wall-clock window. `Promise.all` over eagerly
+        // created tasks enters every branch body before awaiting any of them,
+        // so everything preceding the FIRST branch return is an entry, and both
+        // entries are among them. An engine that awaited the branches one at a
+        // time traces `enter:branch_a, exit:branch_a, enter:branch_b, …`, whose
+        // slice below holds a single entry — red at ANY runner speed.
+        //
+        // ⛔ A clocked bound cannot witness this property in either direction:
+        // the sequential path it claims to rule out (two 10 ms branches) fits
+        // inside any bound generous enough for a contended runner, so such an
+        // assertion is green on the regression AND red on a slow box. Nothing
+        // below reads a clock or picks a bound; a branch's delay only stretches
+        // the wait between its own entry and its own exit, and can never
+        // reorder an entry across a sibling's return.
+        const firstReturn = trace.findIndex(event => event.startsWith('exit:'));
+        const beforeFirstReturn = firstReturn === -1 ? trace : trace.slice(0, firstReturn);
+        expect([...beforeFirstReturn].sort()).toEqual(['enter:branch_a', 'enter:branch_b']);
     });
 });
 

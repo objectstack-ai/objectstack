@@ -28,13 +28,13 @@
  * gate in `@objectstack/lint` (`validate-expressions`) rejects at authoring
  * time — for `readonlyWhen` since #4889 and for `requiredWhen` since #4977.
  *
- * The two runtimes then part ways on the unbindable case, deliberately: an
- * unbound `parent` leaves a `readonlyWhen` field LOCKED (#4889 — refusing to
- * wave a declared lock through), while a `requiredWhen` stays fail-OPEN
- * (#4977 — a 422 on a write whose header is merely unreadable was ruled too
- * loud, and left to the next review of ADR-0058 D5). That asymmetry is why the
- * build-time gate covers BOTH slots: it is the only thing standing between an
- * unbindable `requiredWhen` and a requirement that enforces nothing in silence.
+ * The two runtimes then part ways on the unbindable case: an unbound `parent`
+ * leaves a `readonlyWhen` field LOCKED (#4889 — refusing to wave a declared
+ * lock through), while a `requiredWhen` REFUSES the write (ADR-0137 D2 — the
+ * review of ADR-0058 D5 that #4977 left the 422 to; until then it stayed
+ * fail-OPEN). Neither is a runtime an author wants to meet on every write, which
+ * is why the build-time gate covers BOTH slots: the unbindable declaration is
+ * refused at authoring rather than at the first write.
  *
  * ## The tolerance, and the measurement behind it
  *

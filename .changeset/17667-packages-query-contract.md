@@ -12,8 +12,8 @@ with the reads, per the maintainer-approved ruling of 2026-09-13 (decision batch
 **BREAKING** — `limit` and `cursor` no longer parse on
 `ListInstalledPackagesRequestSchema`, and `limit`'s `.default(50)` is gone with
 them. Both were declared here and read by nothing: the serving door filters on
-`status` / `type` and then returns every remaining row, so no page was ever
-withheld and no continuation token was ever minted. The response half's
+`status` / `type` / `enabled` and then returns every remaining row, so no page
+was ever withheld and no continuation token was ever minted. The response half's
 `nextCursor` has never been emitted, so a caller looping "until the cursor runs
 out" re-read the first and only page forever, with no error and no `400`.
 

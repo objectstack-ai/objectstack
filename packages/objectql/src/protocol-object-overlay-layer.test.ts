@@ -570,7 +570,9 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
         }
 
         expect(booted.res).toMatchObject({ loaded: 0, errors: 1 });
-        expect(warned.join('\n')).toContain('object_overlay_package_mismatch');
+        // A log line has no envelope, so the boot warning names the declared
+        // code itself rather than inheriting it from the refusal prose.
+        expect(warned.join('\n')).toContain('code=OBJECT_OVERLAY_PACKAGE_MISMATCH');
 
         // The packaged definition is served, untouched — no half-applied layer.
         expect(kinds(booted.registry, 'myapp_invoice')).toEqual(['own']);

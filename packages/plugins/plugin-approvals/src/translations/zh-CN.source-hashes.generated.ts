@@ -18,6 +18,8 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_approval_delegation.fields.display_title.help": "2831a1ffde72b425",
+  "objects.sys_approval_delegation.fields.display_title.label": "70f7aadecce647a5",
   "objects.sys_approval_request.fields.flow_node_id.help": "154aa23b4eee4cae",
   "objects.sys_approval_request.fields.flow_node_id.label": "052ad568aa41227c",
   "objects.sys_approval_request.fields.flow_run_id.help": "35c92818f5e11090",

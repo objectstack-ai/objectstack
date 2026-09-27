@@ -168,7 +168,9 @@ All translatable content for a single object is aggregated under
 
 Top-level groups alongside `objects`: `apps` (label, description, navigation),
 `messages`, `globalActions` (object-less actions), `dashboards`, `datasets`, `pages`,
-`flows`, `settings`, `metadataForms`, `settingsCommon`.
+`flows`, `metadataForms`, `settingsCommon`. `settings` is **platform-only** — it is
+keyed by a settings manifest's namespace and only the platform declares one, so an
+app bundle carrying it is refused by name.
 
 For the exact Zod shape (and any field that may have been added since), read
 `node_modules/@objectstack/spec/src/system/translation.zod.ts` —

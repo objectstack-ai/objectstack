@@ -72,8 +72,6 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_oauth_refresh_token',
     'sys_oauth_resource',
     'sys_organization',
-    'sys_report_schedule',
-    'sys_saved_report',
     'sys_scim_connection_binding',
     'sys_scim_connection_credential',
     'sys_scim_group',

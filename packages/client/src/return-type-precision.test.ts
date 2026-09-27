@@ -69,10 +69,12 @@ import type { SearchAllResponse } from '@objectstack/spec/api';
 // [#17536] The two READ doors' declared element, and the branch of it that made
 // the client's authoring-stage declaration wrong. Both are imported as TYPES:
 // the pins below are the only thing that can observe a return-type move.
+// Published from `@objectstack/spec/api-assembled` since the #18576 split: the
+// declarations that embed the assembled package body left `/api`.
 import type {
     AssembledInstalledPackage,
     InstalledPackageAtEitherStage,
-} from '@objectstack/spec/api';
+} from '@objectstack/spec/api-assembled';
 import type {
     AnalyticsMetadataResponse,
     AnalyticsSqlResponse,
@@ -85,8 +87,6 @@ import type {
     ImportObjectResult,
     RecordShare,
     RemoteTable,
-    ReportSchedule,
-    SavedReport,
     SearchResult,
     ShareLink,
     SharingRuleRow,
@@ -152,8 +152,6 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // ── shape class 3: array ELEMENT typed through the client's own unwrap ─
     // These routes answer `{ data: rows }` with no `success` flag, so
     // `unwrapResponse` passes it through and the method folds it to an array.
-    expectTypeOf(await client.reports.list()).toEqualTypeOf<SavedReport[]>();
-    expectTypeOf(await client.reports.listSchedules('rep_1')).toEqualTypeOf<ReportSchedule[]>();
     expectTypeOf(await client.shares.list('lead', 'rec_1')).toEqualTypeOf<RecordShare[]>();
     expectTypeOf(await client.shares.rules.list()).toEqualTypeOf<SharingRuleRow[]>();
     expectTypeOf(await client.shareLinks.list()).toEqualTypeOf<ShareLink[]>();
@@ -237,9 +235,6 @@ export async function returnTypePrecisionPins(): Promise<void> {
     // @ts-expect-error the route answers `{ tables }`, not a bare array
     const wrongTables: RemoteTable[] = await client.datasources.external.listTables('ds');
 
-    // @ts-expect-error `reports.list` answers SavedReport[], not a single row
-    const wrongReport: SavedReport = await client.reports.list();
-
     // @ts-expect-error a flow definition is not an execution log
     const wrongFlow: ExecutionLog = await client.automation.getFlow('flow_a');
 
@@ -257,7 +252,6 @@ export async function returnTypePrecisionPins(): Promise<void> {
 
     void wrongScope;
     void wrongTables;
-    void wrongReport;
     void wrongFlow;
     void wrongSearch;
     void wrongClone;
@@ -692,14 +686,17 @@ declare const assembledRow: AssembledInstalledPackage;
  *
  * ⛔ It does NOT measure object-shaped tolerance, and at this head there is
  * some: on the assembled branch `manifest` is declared `Record<string, unknown>`
- * (the deliberate annotation at `packages/spec/src/stack.zod.ts:1283`, #14513),
- * so an object `manifest` belonging to NEITHER stage compiles against these
- * members. The runtime is the half that is correct —
+ * (the deliberate annotation on `RecordStagePackageBodySchema` in
+ * `packages/spec/src/stack.zod.ts`, the #14513 pattern), so an object
+ * `manifest` belonging to NEITHER stage compiles against these members. The
+ * runtime is the half that is correct —
  * `InstalledPackageAtEitherStageSchema.safeParse()` refuses that same row, and
  * that refusal is pinned beside its producer in
  * `packages/runtime/src/domains/packages-read-delete-response-conformance.test.ts`.
- * The type-level gap is #19324's to close; the third pin below records it as the
- * behaviour it is, so the day it closes this file says so.
+ * The type-level gap is the accepted static contract: #19324 was ruled (letter
+ * 丙) to record it at `RecordStagePackageBodySchema` rather than close it. The
+ * third pin below records it as the behaviour it is, so the day the body is
+ * typed precisely this file says so.
  *
  * ## Ablation, measured rather than asserted
  *
@@ -767,16 +764,20 @@ export function installedPackageEitherStagePins17536(): void {
     // ⛔ NOT a guarantee — a measurement, written down so it cannot change in
     // silence. `AssembledInstalledPackage['manifest']` is
     // `Record<string, unknown>` (from the deliberate
-    // `z.ZodType<Record<string, unknown>, …>` annotation at
-    // `packages/spec/src/stack.zod.ts:1283`, #14513 — TS7056 and a
-    // declaration-chunk ceiling), so the assembled branch admits ANY object and
-    // the assignment below COMPILES at this head. Measured with `tsc` against the
-    // published declarations; the runtime disagrees and is the correct half:
+    // `z.ZodType<Record<string, unknown>, …>` annotation on
+    // `RecordStagePackageBodySchema` in `packages/spec/src/stack.zod.ts`, the
+    // #14513 pattern — TS7056 and a declaration-chunk ceiling), so the
+    // assembled branch admits ANY object and the assignment below COMPILES at
+    // this head. Measured with `tsc` against the published declarations; the
+    // runtime disagrees and is the correct half:
     // `InstalledPackageAtEitherStageSchema.safeParse()` answers `success: false`
-    // for this very row.
+    // for this very row. #19324 was ruled (letter 丙) to keep this as the
+    // accepted static contract, so this pin stays until the body is typed
+    // precisely.
     //
-    // ⚠️ There is deliberately no `@ts-expect-error` here. The day #19324 types
-    // the assembled body, tsc reds on THIS line — and that red is the
+    // ⚠️ There is deliberately no `@ts-expect-error` here. The day the assembled
+    // body is typed precisely (the A2 form recorded at
+    // `RecordStagePackageBodySchema`), tsc reds on THIS line — and that red is the
     // notification this pin exists to deliver: read it as "the gap closed", then
     // delete this block and tighten the `manifest` guidance on
     // `ObjectStackClient.packages.list` in `index.ts`, which sends callers

@@ -226,15 +226,28 @@ describe('#18024 — `os build` reports a permission-set name another package in
     expect(await findPermissionSetNameCollisions(parsed)).toEqual([]);
   });
 
-  it('reports the collision ONCE, not once per surface the composed artifact carries it on', async () => {
-    // `manifest: 'preserve'` is ADDITIVE: `permissions` composes by `concat`,
-    // so on an artifact the top-level collection is the union of every
-    // package's sets with their per-package provenance flattened away. A walk
-    // that read both levels would report each collision twice — the second time
-    // attributed to whichever manifest composition picked.
+  it('reports the collision ONCE, not once per surface an artifact carries it on', async () => {
+    // A multi-package artifact built before #14512's emitter half carries BOTH
+    // surfaces: `permissions` composes by `concat`, so its top-level collection
+    // is the union of every package's sets with their per-package provenance
+    // flattened away, beside the bodies that still carry them. Such artifacts
+    // are on disk and D4's read-both rule still loads them, so the hazard this
+    // case exists for is live: a walk reading both levels reports each
+    // collision twice — the second time attributed to whichever manifest
+    // composition picked.
     const parsed = parsedArtifact([ordersStack([ordersSet(SHARED_NAME)]), coreStack([coreSet(SHARED_NAME)])]);
-    expect((parsed.permissions as unknown[]).length, 'the top level really does carry both sets').toBe(2);
+    expect(parsed.permissions, 'today the composer emits ONE surface (#14512)').toBeUndefined();
     expect(await findPermissionSetNameCollisions(parsed)).toHaveLength(1);
+
+    // The legacy shape, synthesized: the flattened union written back beside
+    // the bodies, which is exactly what this walk must not double-count.
+    const legacy = {
+      ...parsed,
+      permissions: (parsed.packages as Array<{ manifest: { permissions?: unknown[] } }>)
+        .flatMap((entry) => entry.manifest.permissions ?? []),
+    };
+    expect((legacy.permissions as unknown[]).length, 'the legacy top level really does carry both sets').toBe(2);
+    expect(await findPermissionSetNameCollisions(legacy)).toHaveLength(1);
   });
 
   it('a set whose name no OTHER package here declares is not a finding — the cross-artifact case stays supported', async () => {

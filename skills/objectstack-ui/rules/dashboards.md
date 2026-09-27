@@ -1,5 +1,11 @@
 # Dashboards, Reports & Cubes
 
+- [Dashboards](#dashboards) · [Widget Types](#widget-types) · [Dataset-Bound Widgets](#dataset-bound-widgets) · [KPI Widgets, Filters, Drilldown](#kpi-widgets-filters-drilldown)
+- [Dashboard filters](#dashboard-filters--globalfilters--per-widget-filterbindings) · [Period-over-period](#period-over-period--compareto)
+- [Server-side date bucketing](#server-side-date-bucketing--dategranularity-adr-0021) · [Widget `options`](#widget-options--the-five-declared-keys) · [Drilldown](#drilldown)
+- [Report Configuration](#report-configuration)
+- [Analytics Cubes — Semantic Layer](#analytics-cubes--semantic-layer) · [Cube Rules](#cube-rules)
+
 ## Dashboards
 
 Dashboards are a grid of widgets (`columns` × `rowHeight`) sharing a

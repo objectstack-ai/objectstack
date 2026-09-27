@@ -250,15 +250,30 @@ describe('#8053: a member revokes their OWN sys_api_key', () => {
     const originalOwner = before.row.user_id;
     expect(originalOwner).toBeTruthy();
 
+    // Re-owning the key is refused before the whitelist ever strips it: the
+    // `sys_api_key_self` policy declares no `check`, so its `using`
+    // (`user_id == current_user.id`) is the post-image check (ADR-0058 D4
+    // default), and a new row owned by someone else fails it. The whole patch,
+    // `revoked` included, is refused on the ADR-0112 envelope.
+    const reowned = await stack.apiAs(memberToken, 'PATCH', `/data/sys_api_key/${id}`, {
+      revoked: true,
+      user_id: 'usr_someone_else',
+    });
+    expect(reowned.status).toBe(403);
+    const reownedBody: any = await reowned.json();
+    expect(reownedBody.code ?? reownedBody.error?.code).toBe('PERMISSION_DENIED');
+    const untouched = await readKey(memberToken, id);
+    expect(untouched.row.user_id, 're-owning a key is privilege transfer').toBe(originalOwner);
+    expect(untouched.row.revoked).toBeFalsy();
+
     const res = await stack.apiAs(memberToken, 'PATCH', `/data/sys_api_key/${id}`, {
       revoked: true,
       key: 'forged-hash-value',
-      user_id: 'usr_someone_else',
     });
     expect(res.status).toBe(200);
 
     const after = await readKey(memberToken, id);
-    expect(after.row.user_id, 're-owning a key is privilege transfer').toBe(originalOwner);
+    expect(after.row.user_id).toBe(originalOwner);
     expect(after.row.revoked).toBe(true);
 
     // The decisive proof that `key` was stripped: the ORIGINAL secret is still

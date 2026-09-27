@@ -656,8 +656,10 @@ describe('#6563 — revertCommit restores a runtime-created `object`', () => {
       name: 'myapp_invoice',
       code: 'NOT_OVERRIDABLE',
     });
+    // The token is asserted on `code` just above; the message carries the
+    // human sentence and no longer restates it.
     expect(res.failed[0].error).toContain(
-      `[NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry.`,
+      `'object' is not allowOrgOverride in the registry.`,
     );
     // Refused means refused: the edit the commit made is still the live body.
     expect(storedFields(rows, 'myapp_invoice').fields).toContain('due_date');
@@ -852,8 +854,10 @@ describe('#6620 — revertCommit soft-removes a runtime-CREATED `object`', () =>
       name: 'myapp_invoice',
       code: 'NOT_OVERRIDABLE',
     });
+    // The token is asserted on `code` just above; the message carries the
+    // human sentence and no longer restates it.
     expect(res.failed[0].error).toContain(
-      `[NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry.`,
+      `'object' is not allowOrgOverride in the registry.`,
     );
     // Refused means refused: the artifact-backed row is still there.
     expect(storedRows(rows, 'myapp_invoice')).toHaveLength(1);

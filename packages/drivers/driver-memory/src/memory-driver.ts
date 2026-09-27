@@ -9,7 +9,7 @@ import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectst
 // [#7536] `$like`/`$ilike`'s pattern language, from the spec's one definition —
 // the same translation `formula` evaluates and the same pattern `driver-sql`
 // hands to LIKE/GLOB, so this face cannot answer a pattern differently.
-import { hasDanglingLikeEscape, likePatternToRegexSource } from '@objectstack/spec/data';
+import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegexSource } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -32,6 +32,8 @@ import {
   // [#7536] The `$like`/`$ilike` comparand refusals, beside their siblings.
   likePatternComparandError,
   danglingLikeEscapeError,
+  // [#20041] ...and the U+0000 one.
+  nulLikePatternError,
   // [#10576] The per-aggregation `filter` refusal — this driver evaluates none.
   refusePerAggregationFilter,
   // [#13524] The declared authorable field vocabulary, IN DECLARATION ORDER —
@@ -1389,6 +1391,8 @@ export class InMemoryDriver implements IDataDriver {
       case 'like': case 'ilike': {
         if (typeof value !== 'string') throw likePatternComparandError(field, canonical, value);
         if (hasDanglingLikeEscape(value)) throw danglingLikeEscapeError(field, canonical, value);
+        // [#20041] The same U+0000 refusal as the `$`-spelling's shape gate.
+        if (hasNulInLikePattern(value)) throw nulLikePatternError(field, canonical, value);
         return {
           [field]: { $regex: new RegExp(likePatternToRegexSource(value, canonical === 'ilike')) },
         };
@@ -1628,11 +1632,13 @@ export class InMemoryDriver implements IDataDriver {
         case '$ilike':
           // The comparand's shape was settled by `assertFieldConstraintShape`
           // on the whole tree before this ran (the #5324/#5328 discipline every
-          // arm here follows), so `val` is a string with no dangling escape.
-          // The re-check is the totality floor a translator owes itself, the
-          // same one `driver-sql`'s emitter keeps beside its own gate.
+          // arm here follows), so `val` is a string with no dangling escape and
+          // no U+0000 (#20041). The re-check is the totality floor a translator
+          // owes itself; for the dangling escape it is the same one
+          // `driver-sql`'s emitter keeps beside its own gate.
           if (typeof val !== 'string') throw likePatternComparandError(field, op, val, path);
           if (hasDanglingLikeEscape(val)) throw danglingLikeEscapeError(field, op, val, path);
+          if (hasNulInLikePattern(val)) throw nulLikePatternError(field, op, val, path);
           regexConditions.push({
             $regex: new RegExp(likePatternToRegexSource(val, op === '$ilike')),
           });

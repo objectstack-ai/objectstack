@@ -187,7 +187,16 @@ export function checkSingleOwner(map: SkillCoreMap, shared: Record<string, strin
 /**
  * Which transitive pointers a package publishes, when the closure is wrong.
  *
- * ## The feasibility question this answers, decided before anything was built
+ * A row here is a DECLARED pointer. It publishes when the file exists under
+ * `packages/spec/src` and ships (`*.zod.ts` is what the package's `files`
+ * allowlist sends to a consumer's `node_modules`), whether or not the textual
+ * import closure of the package's core files reaches it. For a package with a
+ * list, the closure decides nothing; the list does. A package with NO entry
+ * here publishes its full closure, unchanged. Declaring a list is a claim about
+ * that package's authorable face, and only a package whose face someone has
+ * actually read should carry one.
+ *
+ * ## Why a list beside the map, and not a rule over the import graph
  *
  * The closure walks every local `import ... from` edge out of a package's core
  * files. Two routes were on the table for constraining it: (1) a REACHABILITY
@@ -197,14 +206,14 @@ export function checkSingleOwner(map: SkillCoreMap, shared: Record<string, strin
  * made precise. It cannot, and the measurement is specific rather than
  * hand-wavy:
  *
- *  - `objectstack-i18n` publishes eight transitive pointers, and SEVEN of them
- *    arrive through one edge -- `shared/strict-object.ts` imports
- *    `shared/suggestions.zod.ts` for its "did you mean?" text, which imports
- *    `data/field.zod.ts`, which drags in filter, expression, field-value,
- *    identifiers and value-domain. That is a schema-building HELPER's
- *    implementation, not the authorable shape of a translation bundle. Cutting
- *    traversal through non-shipping helpers is the obvious precise rule, and it
- *    removes five of the five pointers the finding names.
+ *  - `objectstack-i18n` published eight transitive pointers, and SEVEN of them
+ *    arrived through one edge -- `shared/strict-object.ts` imports
+ *    `shared/suggestions.zod.ts` for its "did you mean?" text, which at the
+ *    time imported `data/field.zod.ts`, which dragged in filter, expression,
+ *    field-value, identifiers and value-domain. That is a schema-building
+ *    HELPER's implementation, not the authorable shape of a translation
+ *    bundle. Cutting traversal through non-shipping helpers is the obvious
+ *    precise rule, and it removes five of the five pointers the finding named.
  *  - It also removes `shared/identifiers.zod.ts`, which MUST STAY: a bundle's
  *    object and field keys are the `snake_case` identifiers that file defines,
  *    and the SKILL.md spends a table and a "Critical:" note on exactly that.
@@ -220,15 +229,30 @@ export function checkSingleOwner(map: SkillCoreMap, shared: Record<string, strin
  * not in the graph. Route 1 is therefore not merely unbuilt here; it is
  * unbuildable from this input, and route 2 is what ships.
  *
+ * ## Why a row publishes on existence, not on reachability
+ *
+ * The list began as a FILTER over the closure: a row published only when some
+ * import edge also reached the file, and the guard refused a row the closure
+ * missed. That tied every declared pointer to whichever helper edge happened
+ * to reach it. Both `objectstack-i18n` rows were reached through exactly the
+ * `suggestions.zod.ts` -> `field.zod.ts` edge above, and that edge was one
+ * side of an import cycle that made every `/api` and `/data` first import
+ * throw under `OS_EAGER_SCHEMAS=1`, the documented rollback of lazy schemas.
+ * Breaking the cycle removed the edge; as a filter, the list would then have
+ * dropped both pointers the i18n SKILL.md teaches, and the generator refused
+ * instead. Keeping a type-only import alive to steer this generator was
+ * refused too: an edge kept for a generator is the accidental edge the fix
+ * removes. So a row means what its comment says -- the SKILL.md teaches this
+ * schema -- and the guard below asks only what a hand-authored row can get
+ * wrong on its own: a package the map does not have, a file that is not there,
+ * a file that would not ship, a row that is already a core entry, a row
+ * written twice. Reachability is not one of those questions.
+ *
  * The list is an ALLOWLIST, not a denylist, and that is the half that keeps it
  * from rotting the way the closure did: `shared/value-domain.zod.ts` joined the
- * i18n index recently, unnoticed, when a new import edge appeared several files
- * away. An allowlist cannot silently gain a row; a denylist silently misses
- * every new arrival.
- *
- * A package with NO entry here publishes its full closure, unchanged. Declaring
- * a list is a claim about that package's authorable face, and only a package
- * whose face someone has actually read should carry one.
+ * i18n index unnoticed when a new import edge appeared several files away. An
+ * allowlist cannot silently gain a row; a denylist silently misses every new
+ * arrival.
  */
 export const TRANSITIVE_ALLOWLIST: Record<string, readonly string[]> = {
   // Kept iff `skills/objectstack-platform/SKILL.md` names one of the module's
@@ -256,19 +280,29 @@ export const TRANSITIVE_ALLOWLIST: Record<string, readonly string[]> = {
   ],
 };
 
+/** Whether a `packages/spec/src`-relative path exists on disk; injected so the guard stays pure. */
+export type ExistsInSpecSrc = (rel: string) => boolean;
+
+/** A path the published package carries: a `*.zod.ts` source that exists. */
+function shipsFromSpec(rel: string, exists: ExistsInSpecSrc): boolean {
+  return rel.endsWith('.zod.ts') && exists(rel);
+}
+
 /**
- * A declared transitive allowlist must name a real package and reachable files.
+ * A declared transitive allowlist must name a real package and real, shipped files.
  *
  * The list is hand-authored, and a hand-authored list that can quietly say
  * nothing is the same defect one layer up: a typo'd package name would leave
- * the over-eager closure fully published while the map LOOKS constrained, and a
- * file the closure never reaches would read as a pointer that is being kept
- * when it was never there to keep.
+ * the over-eager closure fully published while the map LOOKS constrained; a
+ * file that is not on disk would read as a pointer that is being kept when
+ * there is nothing to keep; a file outside `*.zod.ts` would publish a pointer
+ * that 404s in every consumer's `node_modules`. Reachability through the import
+ * closure is deliberately NOT asked -- see `TRANSITIVE_ALLOWLIST`.
  */
 export function checkTransitiveAllowlist(
   map: SkillCoreMap,
   allowlist: Record<string, readonly string[]>,
-  closures: Record<string, readonly string[]>,
+  exists: ExistsInSpecSrc,
 ): string[] {
   const problems: string[] = [];
   for (const [skillName, allowed] of Object.entries(allowlist)) {
@@ -281,7 +315,6 @@ export function checkTransitiveAllowlist(
       continue;
     }
     const core = new Set(coreFiles);
-    const closure = new Set(closures[skillName] ?? []);
     const seen = new Set<string>();
     for (const rel of allowed) {
       if (seen.has(rel)) {
@@ -294,15 +327,50 @@ export function checkTransitiveAllowlist(
           `${skillName} → ${rel} is already a core entry; listing it as a transitive ` +
             `pointer says it is both, and the index would name it once regardless.`,
         );
-      } else if (!closure.has(rel)) {
+      } else if (!rel.endsWith('.zod.ts')) {
         problems.push(
-          `${skillName} → ${rel} is in TRANSITIVE_ALLOWLIST but nothing in the package's ` +
-            `core closure imports it — this row keeps a pointer that does not exist.`,
+          `${skillName} → ${rel} is in TRANSITIVE_ALLOWLIST but is not a *.zod.ts path — only ` +
+            `those sources ship in @objectstack/spec, so this row would publish a pointer that ` +
+            `404s in a consumer's node_modules. Point it at the schema file, or drop the row.`,
+        );
+      } else if (!exists(rel)) {
+        problems.push(
+          `${skillName} → ${rel} is in TRANSITIVE_ALLOWLIST but no such file exists under ` +
+            `packages/spec/src — this row keeps a pointer that does not exist. Point it at the ` +
+            `schema's current path, or drop the row.`,
         );
       }
     }
   }
   return problems;
+}
+
+/**
+ * The pointer rows one package's index publishes, sorted.
+ *
+ * `closure` is the package's resolved import closure as the generator computed
+ * it -- already restricted to shipped `*.zod.ts` files and already containing
+ * the core files that exist. With no allowlist the closure is the answer,
+ * unchanged. With one, the index publishes the core files plus every declared
+ * row that ships from `packages/spec/src`, and nothing the closure reached on
+ * its own: a declared row publishes whether or not any import edge reaches it,
+ * and an undeclared file stays out whether or not one does. A declared row
+ * that does not ship is left out here so the run cannot crash on it; the guard
+ * above refuses the run for it by name.
+ */
+export function publishedPointers(
+  coreFiles: readonly string[],
+  closure: readonly string[],
+  allowed: readonly string[] | undefined,
+  exists: ExistsInSpecSrc,
+): string[] {
+  if (allowed === undefined) return [...closure];
+  const coreSet = new Set(coreFiles);
+  const kept = new Set(closure.filter((rel) => coreSet.has(rel)));
+  for (const rel of allowed) {
+    if (shipsFromSpec(rel, exists)) kept.add(rel);
+  }
+  return [...kept].sort();
 }
 
 /**

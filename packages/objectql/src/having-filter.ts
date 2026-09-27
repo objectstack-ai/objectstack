@@ -62,8 +62,74 @@
 // [#7158] A THIRD divergence has been REMOVED rather than added: this face had
 // no comparand-shape gate, which is what the five sibling faces refuse an
 // unevaluable `$icontains` comparand with. See {@link icontainsComparandError}.
+//
+// [#20099] THE VERDICT IS THE FILTER'S, NOT THE DATA'S. This walker runs once
+// per aggregated row, so every refusal it raises used to depend on the rows: an
+// empty grouped set never reached it, a `$or` whose first branch held never
+// reached its second, and a column the row does not carry left the walk at the
+// no-value exit before the operator was ever read. So `{ total: { $median: 1 } }`
+// was a 400 on a populated set and a 200 `[]` on an empty one. The engine now
+// judges the whole clause ONCE, before any driver is asked for a row — see
+// {@link assertHavingIsFilterCondition} and {@link assertHavingIsEvaluable},
+// called from `ObjectQL.aggregate` beside the shared comparand-shape face and
+// the comparand-TYPE door that `where` also takes. The refusals below keep their
+// words; they are only raised earlier. The per-row throws stay as the floor for
+// a caller that evaluates rows directly.
+//
+// [#20099] A `{ $field }` reference is RESOLVED against the row, as the whole
+// comparand of the six scalar comparisons — the one position the Filter
+// Protocol declares for it (`FieldReferenceSchema`) and the one the
+// `{ $field }` `$between` refusal prescribes. See {@link compareWithReference}.
+//
+// [#20122] …and the per-aggregation `filter` takes the same row-independent
+// walk. It shares this walker (`matchesAggregationFilter`), so its refusals
+// depended on the rows exactly as `having`'s did: `{ amount: { $median: 1 } }`
+// was a 400 on a populated table and a 200 on an empty one. The engine now
+// judges each `aggregations[i].filter` once, before any driver is asked for a
+// row — see {@link assertAggregationFilterIsEvaluable}.
+//
+// [#20127] In `having`, a reference carrying `addDays` is judged by the rule
+// `FieldReferenceSchema.addDays` declares — "between two temporal columns of
+// the same class (date/date, datetime/datetime)", the offset column numeric —
+// against each aggregated column's class, read statically off the query and
+// the object's declaration. See {@link aggregatedRowColumnClasses}.
+//
+// [#20148] In the per-aggregation `filter`, a `{ $field }` names a field the
+// object declares and an `addDays` pair follows that same class rule, judged
+// against the object's declared fields and refused in the words `where` gets
+// for the same comparison ({@link assertAggregationFilterReferencesAreDeclared}).
+// And on both positions a `Date` bound is compared as an instant
+// ({@link instantsOf}), as the same bound in a `where` is.
+//
+// [#20176] …and, where the column's CLASS is known, every temporal comparand is
+// compared by that column's storage rule — the rule the drivers apply to the
+// same comparand in a `where`, `@objectstack/core`'s `temporalStorageForm`,
+// with ADR-0053 D-D's whole-day reading of a bare-day upper bound on a
+// `datetime` column. The class comes from the object's declaration for the
+// per-aggregation `filter` (`declaredFieldClasses`) and from the query for
+// `having` (`aggregatedRowColumnClasses`, #20127's rule). See
+// {@link checkCondition}. Before, both positions compared a temporal comparand
+// as written, so an ISO instant against a `date` column counted 1 row where the
+// same condition in a `where` counted 3.
 
 import type { FilterCondition } from '@objectstack/spec/data';
+// [#20099] The reference's own declaration, so a malformed `addDays` is refused
+// in the spec's words rather than in a second copy of them.
+import { FieldReferenceSchema } from '@objectstack/spec/data';
+// [#20099] The in-memory evaluator the SQL family's cross-field compiler is
+// held to row for row (`cross-field-conformance-cases.ts`): the NULL totality
+// and the whole-day `addDays` arithmetic of a reference live there once.
+import { matchesFilterCondition } from '@objectstack/formula';
+// [#20127] The declared value classes an aggregated column's class is read
+// from — the spec's sets, so this face and the SQL compilers classify a field
+// type by one list.
+import {
+  BOOLEAN_VALUE_TYPES,
+  CALENDAR_DATE_TYPES,
+  CLOCK_TIME_TYPES,
+  INSTANT_TYPES,
+  NUMERIC_VALUE_TYPES,
+} from '@objectstack/spec/data';
 // [#5702] The retired operators and the prescription a refusal prints. HAVING is
 // the fifth of the five refusal sites `RETIRED_FILTER_OPERATORS`' own doc names,
 // and reads the table for the same reason the four driver sites do: one
@@ -73,6 +139,16 @@ import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 // of one vocabulary, and it reads the fold from the spec for the same reason it
 // reads the retirement prescriptions from there: one rule, one definition.
 import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+// [#20148] The spec's reading of a `Date` against stored text for a TYPE-BLIND
+// evaluator — the lift `@objectstack/formula` applies to the same pairing — so a
+// `Date` bound here compares the way the same bound in a `where` does.
+import { utcInstantMs } from '@objectstack/spec/data';
+// [#20176] The storage rule a temporal column puts a value in — ONE function,
+// shared with `driver-sql`'s and `driver-memory`'s `where` — and the whole-day
+// reading of a bare-day upper bound on a `datetime` column (ADR-0053 D-D), from
+// the spec, where that rule is declared.
+import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
+import { nextUtcCalendarDay } from '@objectstack/spec/data';
 // [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
 // `filter-comparand-shape.ts` rather than re-declared here — see the note on
 // {@link invalidFilterError} and on {@link unknownOperator} below.
@@ -138,6 +214,44 @@ const CONDITION_OPERATORS = [
   '$in', '$nin', '$exists', '$null',
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ] as const;
+
+/**
+ * [#20099] The operators whose WHOLE comparand may be a `{ $field }` reference —
+ * the six scalar comparisons `FieldReferenceSchema` names, and the only
+ * positions the SQL family compiles one in. Every other position (a list
+ * member, a text pattern, `$exists` / `$null`) is refused by
+ * {@link assertHavingIsEvaluable} rather than compared against the reference
+ * OBJECT, which matched nothing.
+ */
+const REFERENCE_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
+]);
+
+/**
+ * [#20099] A `{ $field: … }` reference by SHAPE — a non-array object carrying a
+ * `$field` key, the test `@objectstack/formula`'s evaluator applies. Whether
+ * the `$field` value is a string is the comparand-TYPE door's question, and it
+ * runs first: `{ $field: 42 }` in a scalar slot is refused there as the plain
+ * object it is.
+ */
+function isFieldReferenceShape(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && !(value instanceof Date)
+    && '$field' in value;
+}
+
+/** A bounded rendering of an offending value, for a human reading a 400. */
+function preview(value: unknown): string {
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? String(value);
+  } catch {
+    text = String(value);
+  }
+  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
+}
 
 /**
  * The refusal this face raises for an operator it will not evaluate — retired
@@ -251,6 +365,219 @@ function icontainsComparandError(field: string, value: unknown, path: string): E
 }
 
 /**
+ * [#20099] `having` is not a filter condition at all — an array, a string, a
+ * number, a class instance.
+ *
+ * `QuerySchema.having` and `EngineAggregateOptions.having` declare
+ * `FilterConditionSchema`, which refuses every one of these. The walker read
+ * them anyway: an array's index keys became column names (`"0"`, `"1"`), so
+ * `[['total', '>', 100]]` kept no group, and anything that is not an object
+ * was taken as NO condition, so `'total > 100'` kept every group.
+ *
+ * The array half names the `FilterArray` sugar on purpose. The spec declares
+ * that input-only form on `where` alone — the transport widens that one slot,
+ * and `parseFilterAST` lowers it there — so an author carrying it over from a
+ * `where` is told which slot takes it rather than that it is malformed.
+ */
+function havingNotAConditionError(having: unknown): Error {
+  const shape = 'a filter condition OBJECT over the aggregated rows — { "ALIAS": { "$gt": 100 } }';
+  if (Array.isArray(having)) {
+    return invalidFilterError(
+      `\`having\` received an array (${preview(having)}), and \`having\` is ${shape}. The array `
+      + `form — [field, operator, value] tuples and ["and", …] groups — is input-only sugar that is `
+      + `lowered on \`where\` alone; \`having\` does not declare it, and it was never applied as the `
+      + `filter it spells. Write the object form.`,
+    );
+  }
+  const kind = typeof having === 'object' ? 'an object that is not a plain filter node' : `a ${typeof having}`;
+  return invalidFilterError(
+    `\`having\` received ${kind} (${preview(having)}), which is not a filter condition. \`having\` is `
+    + `${shape}. A value of any other kind was answered as NO condition, returning every group. `
+    + `Write the object form, or omit \`having\`.`,
+  );
+}
+
+/**
+ * [#20099] `{ field: { $field: 'other' } }` — a reference with no operator.
+ *
+ * Refused, not read as equality: the in-memory evaluator the SQL family is held
+ * to answers this shape `false` for every row (its `$field` is an unknown
+ * operator there), and `driver-sql` refuses it naming `$eq`. So the spelling is
+ * given back with the operator written in. The columns are the author's own —
+ * `having` carries no policy subtree — so the corrected filter names them.
+ */
+function bareFieldReferenceError(field: string, spec: Record<string, unknown>, path: string): Error {
+  return invalidFilterError(
+    `Field "${field}" at ${path} is constrained by a bare ${preview(spec)} reference with no operator. `
+    + `Write the comparison explicitly — { "${field}": { "$eq": ${preview(spec)} } } — or put $ne, $gt, `
+    + `$gte, $lt or $lte in place of $eq. A reference is a comparand, never a condition on its own.`,
+  );
+}
+
+/**
+ * [#20099] A `{ $field }` reference outside the six scalar comparisons — a
+ * `$in` / `$nin` member, a text pattern, an `$exists` / `$null` operand.
+ * Before this, the walker compared the reference OBJECT itself and matched
+ * nothing (`$nin` kept everything). `$between` endpoints never get here: the
+ * shared comparand-shape face refuses them first, in its own words.
+ */
+function fieldReferencePositionError(field: string, op: string, path: string, index?: number): Error {
+  const at = index === undefined ? '' : ` at index ${index} of its value list`;
+  return invalidFilterError(
+    `Operator "${op}" on field "${field}" at ${path} compares against a { "$field": … } reference${at}. `
+    + `A reference is evaluated only as the WHOLE comparand of a scalar comparison — $eq, $ne, $gt, `
+    + `$gte, $lt or $lte — never as a list member or a text pattern. Compare against a literal here, or `
+    + `write the test as one of those comparisons.`,
+  );
+}
+
+/**
+ * [#20099] A reference that names no column of the aggregated row.
+ *
+ * The aggregated row's columns are known before any row exists — the groupBy
+ * projections and the aggregation aliases — so a reference that cannot resolve
+ * is refused on the filter, never answered per row as "no value". The column
+ * list is printed because it is the author's own query, and it is the answer.
+ */
+function unresolvedFieldReferenceError(
+  name: string,
+  path: string,
+  columns: readonly string[],
+): Error {
+  const known = columns.length ? columns.join(', ') : '(none — the query projects no column)';
+  return invalidFilterError(
+    `The { "$field": "${name}" } reference at ${path} names no column of the aggregated row. A `
+    + `reference in \`having\` resolves against that row's own columns — the groupBy projections and `
+    + `the aggregation aliases — which here are: ${known}. A reference that cannot resolve is refused `
+    + `rather than compared against nothing.`,
+  );
+}
+
+/** [#20099] A reference its own declaration refuses — today, a malformed `addDays`. */
+function malformedFieldReferenceError(path: string, detail: string): Error {
+  return invalidFilterError(`The { "$field" } reference at ${path} is malformed: ${detail}`);
+}
+
+/**
+ * [#20123] A `having` KEY that names no column of the aggregated row — the
+ * twin of {@link unresolvedFieldReferenceError} for the other place a column
+ * is named.
+ *
+ * Refused on the filter, never answered per row: {@link checkCondition} reads
+ * such a key as a column with NO VALUE in every group, so a typo for an alias
+ * (`{ totl: { $gt: 100 } }`) kept no group and a negated test on it
+ * (`$ne`, `$exists: false`, a `$not`) kept every group — an answer
+ * indistinguishable from a real one. It is the same mistake the REST
+ * ingress refuses on `where` for a field the object does not have, and the
+ * opening words follow that refusal's ("filters on 'X', which is not a …";
+ * "the query was refused instead of answered"). The code stays this face's
+ * own `INVALID_FILTER`: the name is a column of the QUERY's own projection,
+ * not a field of the object, which is what `INVALID_FIELD` answers about.
+ *
+ * Every unknown key is named, the first with its position, and the column
+ * list is printed because it is the author's own query, and it is the answer.
+ */
+function unknownHavingColumnError(
+  unknown: ReadonlyArray<{ key: string; path: string }>,
+  columns: readonly string[],
+): Error {
+  const [first] = unknown;
+  const others = [...new Set(unknown.map((u) => u.key))].filter((key) => key !== first.key);
+  const also = others.length ? ` (also: ${others.join(', ')})` : '';
+  const known = columns.length ? columns.join(', ') : '(none — the query projects no column)';
+  return invalidFilterError(
+    `\`having\` filters on '${first.key}' at ${first.path}, which is not a column of the aggregated `
+    + `row${also}. A condition on a column the row does not carry is answered as if that column had no `
+    + `value in every group — a test for a value keeps no group, and a test for its absence or a `
+    + `negation keeps every group — so the query was refused instead of answered. \`having\` filters `
+    + `the aggregated row's own columns — the groupBy projections and the aggregation aliases — which `
+    + `here are: ${known}.`,
+  );
+}
+
+/**
+ * [#20127] A `{ $field, addDays }` reference between aggregated columns the
+ * offset has no meaning on.
+ *
+ * `FieldReferenceSchema.addDays` declares where the offset applies: "between
+ * two temporal columns of the same class (date/date, datetime/datetime)", read
+ * from an integer or a numeric column. `driver-sql` compiles exactly that on
+ * `where` and refuses every other pair. `having` evaluated every pair through
+ * `@objectstack/formula`, which reads a number as epoch milliseconds, so
+ * `{ total: { $gt: { $field: 'max_cap', addDays: 1 } } }` answered — a day
+ * added to a sum. The aggregated row now carries a class per column
+ * ({@link aggregatedRowColumnClasses}), so the pair is judged here, once.
+ *
+ * `reason` is `driver-sql`'s own sentence for the same pair on `where`
+ * (`applyCrossFieldComparison`'s `addDays` arm), with "is stored as" read as
+ * "is" — an aggregated column is computed, not stored. Unlike `driver-sql`'s,
+ * this diagnostic is not withheld: every column it names is the author's own
+ * projection, as in {@link unresolvedFieldReferenceError}.
+ */
+function offsetPairError(field: string, op: string, ref: string, path: string, reason: string): Error {
+  return invalidFilterError(
+    `Operator "${op}" on field "${field}" at ${path} compares against another column `
+    + `({ "$field": "${ref}" } with addDays), which cannot be evaluated here: ${reason} An aggregated `
+    + `column's class is read off the query: a groupBy projection takes its field's declared type (a `
+    + `"day" date bucket is a date, a coarser bucket a text label), count / count_distinct / sum / avg `
+    + `are numeric, and min / max take the type of the field they read.`,
+  );
+}
+
+/**
+ * [#20127] The `addDays` pair rule, in `driver-sql`'s order: the two compared
+ * columns share a class, that class is temporal, and an offset column is
+ * numeric. A class the declaration cannot tell is not judged.
+ */
+function assertOffsetPairIsTemporal(
+  field: string,
+  op: string,
+  reference: Record<string, unknown>,
+  path: string,
+  classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+): void {
+  const reason = offsetPairViolation(field, reference, classes);
+  if (reason !== undefined) throw offsetPairError(field, op, String(reference.$field), path, reason);
+}
+
+/**
+ * [#20148] The rule {@link assertOffsetPairIsTemporal} applies, returned as the
+ * reason a pair breaks it (`driver-sql`'s sentence for the same pair on
+ * `where`, with "is stored as" read as "is"), or `undefined` when it holds.
+ * One rule, two positions: `having` judges it against the aggregated row's
+ * classes and names the columns; the per-aggregation `filter` judges it against
+ * the object's declared fields and withholds them
+ * ({@link assertAggregationFilterReferencesAreDeclared}).
+ */
+function offsetPairViolation(
+  field: string,
+  reference: Record<string, unknown>,
+  classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+): string | undefined {
+  const ref = String(reference.$field);
+  const refClass = classes.get(ref);
+  const targetClass = classes.get(field);
+  if (refClass !== undefined && targetClass !== undefined && refClass !== targetClass) {
+    return `"${field}" is ${targetClass} but "${ref}" is ${refClass}, and a cross-class comparison answers `
+      + `differently in SQL (storage-class ordering) than in memory (JS coercion) — compare same-class `
+      + `columns.`;
+  }
+  if (refClass !== undefined && refClass !== 'date' && refClass !== 'datetime') {
+    return `addDays adds whole days to a date or datetime column, and "${ref}" is ${refClass} — an offset `
+      + `has no meaning on it.`;
+  }
+  const offset = reference.addDays;
+  if (!isFieldReferenceShape(offset)) return undefined;
+  const offsetRef = String(offset.$field);
+  const offsetClass = classes.get(offsetRef);
+  if (offsetClass !== undefined && offsetClass !== 'numeric') {
+    return `the addDays offset "${offsetRef}" (${offsetClass}) is not a numeric column, and a day offset `
+      + `must be a number of days.`;
+  }
+  return undefined;
+}
+
+/**
  * [#5905] Operators whose answer for a column with NO VALUE is decided by the
  * operator's own arm below, not by the early exit in {@link checkCondition}.
  *
@@ -272,13 +599,540 @@ const NO_VALUE_ANSWERED_BY_OPERATOR: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * [#20099] The aggregated row's column set — the namespace `having` filters and
+ * a `{ $field }` reference in it resolves against — read off the QUERY, so it
+ * is known before any row exists: every groupBy projection (the field name, or
+ * a structured item's `alias` — the name `applyInMemoryAggregation` projects)
+ * and every aggregation alias. Malformed entries contribute nothing; their own
+ * validation is elsewhere.
+ */
+export function aggregatedRowColumns(groupBy: unknown, aggregations: unknown): string[] {
+  const columns = new Set<string>();
+  for (const g of Array.isArray(groupBy) ? groupBy : []) {
+    const item = g as { alias?: unknown; field?: unknown } | null;
+    const name = typeof g === 'string' ? g : (item?.alias ?? item?.field);
+    if (typeof name === 'string') columns.add(name);
+  }
+  for (const a of Array.isArray(aggregations) ? aggregations : []) {
+    const alias = (a as { alias?: unknown } | null)?.alias;
+    if (typeof alias === 'string') columns.add(alias);
+  }
+  return [...columns];
+}
+
+/**
+ * [#20127] An aggregated column's comparison class — `driver-sql`'s
+ * cross-field vocabulary (`crossFieldComparisonClass`), so the words a `having`
+ * refusal prints are the words the same pair gets on `where`.
+ */
+export type AggregatedColumnClass = 'numeric' | 'text' | 'boolean' | 'date' | 'datetime' | 'time';
+
+/** The aggregation functions whose result is a number whatever they read. */
+const NUMERIC_RESULT_FUNCTIONS: ReadonlySet<string> = new Set(['count', 'count_distinct', 'sum', 'avg']);
+
+/** The aggregation functions whose result is one of the values they read. */
+const VALUE_RESULT_FUNCTIONS: ReadonlySet<string> = new Set(['min', 'max']);
+
+/**
+ * A declared field's class, by the spec's value-class sets. `undefined` when
+ * the declaration cannot tell: no field map (a registry-less host), no such
+ * field, or a `formula`, whose type names no stored value class.
+ */
+function declaredFieldClass(
+  fields: Record<string, unknown> | undefined,
+  name: unknown,
+): AggregatedColumnClass | undefined {
+  if (!fields || typeof fields !== 'object' || typeof name !== 'string') return undefined;
+  if (!Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
+  const type = (fields[name] as { type?: unknown } | undefined)?.type;
+  if (typeof type !== 'string' || type === 'formula') return undefined;
+  if (CALENDAR_DATE_TYPES.has(type)) return 'date';
+  if (INSTANT_TYPES.has(type)) return 'datetime';
+  if (CLOCK_TIME_TYPES.has(type)) return 'time';
+  if (NUMERIC_VALUE_TYPES.has(type)) return 'numeric';
+  if (BOOLEAN_VALUE_TYPES.has(type)) return 'boolean';
+  // Everything else is read and compared as text, as `driver-sql` stores it.
+  return 'text';
+}
+
+/**
+ * [#20127] Each aggregated column's class, read STATICALLY — off the query and
+ * the object's field declaration, never off a row — so a verdict that needs it
+ * is the filter's, the same on an empty grouped set as on a populated one:
+ *
+ * - a groupBy projection takes its field's declared class; a `day` date bucket
+ *   is a calendar DATE (its label is `YYYY-MM-DD` on every face — the bucket
+ *   label contract in `@objectstack/core`'s `bucketDateKey`), and a coarser
+ *   bucket (`week` / `month` / `quarter` / `year`) is a text label;
+ * - `count` / `count_distinct` / `sum` / `avg` are numeric;
+ * - `min` / `max` take the class of the field they read.
+ *
+ * A column whose class the declaration cannot tell maps to `undefined`, and a
+ * rule reading this map does not judge it — the fail-open direction the
+ * engine's other declared-type doors take for a registry-less host.
+ */
+export function aggregatedRowColumnClasses(
+  groupBy: unknown,
+  aggregations: unknown,
+  fields: Record<string, unknown> | undefined,
+): Map<string, AggregatedColumnClass | undefined> {
+  const classes = new Map<string, AggregatedColumnClass | undefined>();
+  for (const g of Array.isArray(groupBy) ? groupBy : []) {
+    if (typeof g === 'string') {
+      classes.set(g, declaredFieldClass(fields, g));
+      continue;
+    }
+    const item = g as { alias?: unknown; field?: unknown; dateGranularity?: unknown } | null;
+    const name = item?.alias ?? item?.field;
+    if (typeof name !== 'string') continue;
+    const granularity = item?.dateGranularity;
+    classes.set(name, granularity == null
+      ? declaredFieldClass(fields, item?.field)
+      : granularity === 'day' ? 'date' : 'text');
+  }
+  for (const a of Array.isArray(aggregations) ? aggregations : []) {
+    const agg = a as { alias?: unknown; function?: unknown; field?: unknown } | null;
+    if (typeof agg?.alias !== 'string') continue;
+    const fn = String(agg.function);
+    classes.set(agg.alias, NUMERIC_RESULT_FUNCTIONS.has(fn)
+      ? 'numeric'
+      : VALUE_RESULT_FUNCTIONS.has(fn) ? declaredFieldClass(fields, agg.field) : undefined);
+  }
+  return classes;
+}
+
+/**
+ * [#20176] Each declared field's class — what a per-aggregation `filter` reads
+ * a comparand against, since that filter narrows the object's RAW rows. The
+ * same classification {@link aggregatedRowColumnClasses} gives a groupBy
+ * projection of the field, and the same three temporal types the drivers index
+ * for their `where` (`driver-memory`'s `indexTemporalFields`,
+ * `SqlDriver.temporalFieldKind`), so this position and the driver's `where`
+ * read one field by one rule. No usable field map (a registry-less host) ⇒ an
+ * empty map, and every comparand is compared as written.
+ */
+export function declaredFieldClasses(fields: unknown): Map<string, AggregatedColumnClass | undefined> {
+  const classes = new Map<string, AggregatedColumnClass | undefined>();
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return classes;
+  const map = fields as Record<string, unknown>;
+  for (const name of Object.keys(map)) classes.set(name, declaredFieldClass(map, name));
+  return classes;
+}
+
+/**
+ * [#20176] The storage rule a column of `cls` takes, or `undefined` for a class
+ * that has none (numeric, text, boolean) and for a column whose class the
+ * declaration cannot tell.
+ */
+function temporalKindOf(cls: AggregatedColumnClass | undefined): TemporalComparandKind | undefined {
+  return cls === 'date' || cls === 'datetime' || cls === 'time' ? cls : undefined;
+}
+
+/**
+ * [#20099] Refuse a `having` that is not a filter condition at all: anything but
+ * `null` / `undefined` (no clause) and a plain object. See
+ * {@link havingNotAConditionError} for what each shape used to answer.
+ *
+ * Called by `ObjectQL.aggregate` FIRST on the clause, before the comparand
+ * faces, because every later door walks a filter node and steps silently
+ * around anything that is not one.
+ */
+export function assertHavingIsFilterCondition(having: unknown): void {
+  if (having == null) return;
+  if (typeof having === 'object' && !Array.isArray(having)) {
+    const proto = Object.getPrototypeOf(having);
+    if (proto === Object.prototype || proto === null) return;
+  }
+  throw havingNotAConditionError(having);
+}
+
+/**
+ * [#20099] Judge a whole `having` clause ONCE, independent of the rows — every
+ * refusal the per-row walk can raise, plus the `{ $field }` reference's
+ * position and name.
+ *
+ * `ObjectQL.aggregate` calls this after the shared comparand-shape face and the
+ * comparand-TYPE door, the order `where` takes the same doors in, and before
+ * `getDriver`, the middleware chain and both `applyHaving` doors. So an empty
+ * grouped set refuses what a populated one refuses, a `$or` refuses a branch it
+ * would have short-circuited past, and a condition on a column the row does not
+ * carry is still read for its operator.
+ *
+ * What it refuses, in the order the per-row walk would meet it:
+ * - an unknown or retired `$` key, at node or condition level — the walker's
+ *   own {@link unknownOperator} words;
+ * - an `$icontains` comparand that is not a non-empty string —
+ *   {@link icontainsComparandError};
+ * - a bare `{ field: { $field } }` — {@link bareFieldReferenceError};
+ * - a reference outside the six scalar comparisons —
+ *   {@link fieldReferencePositionError};
+ * - a reference its declaration refuses (a malformed `addDays`), or one naming
+ *   no column of the aggregated row — {@link unresolvedFieldReferenceError};
+ * - [#20127] a reference whose `addDays` pairs columns the offset has no
+ *   meaning on — not two temporal columns of one class, or an offset column
+ *   that is not numeric — judged against `classes` when the caller passes it
+ *   ({@link offsetPairError});
+ * - [#20123] and, once the whole clause has passed those, a KEY naming no
+ *   column of the aggregated row, at any depth —
+ *   {@link unknownHavingColumnError}. Last on purpose: a condition on a column
+ *   the row does not carry is still read for its operator first (the #20099
+ *   rule above), so the refusal an author meets for `{ nope: { $median: 1 } }`
+ *   is the operator's, and fixing it does not reveal a second one they could
+ *   have been told about already.
+ *
+ * Read-only; `having` is assumed to have passed
+ * {@link assertHavingIsFilterCondition}.
+ */
+export function assertHavingIsEvaluable(
+  having: unknown,
+  columns: readonly string[],
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+): void {
+  const unknownKeys: Array<{ key: string; path: string }> = [];
+  assertNodeIsEvaluable(having, 'having', { clause: HAVING_CLAUSE, columns, classes, unknownKeys });
+  if (unknownKeys.length > 0) throw unknownHavingColumnError(unknownKeys, columns);
+}
+
+/**
+ * [#20122] Judge one `aggregations[i].filter` ONCE, independent of the rows —
+ * the same walk {@link assertHavingIsEvaluable} takes, in the words the
+ * per-row walk ({@link matchesAggregationFilter}) uses for that position.
+ *
+ * The per-aggregation filter is evaluated by the in-memory fallback, per SOURCE
+ * row of each bucket, so every refusal the walker raises used to depend on the
+ * rows: an empty table never reached it (`200 []`, or `[{ n: 0 }]` without a
+ * `groupBy`), a `$or` whose first branch held never reached its second (the
+ * UNFILTERED count), and a column the row does not carry left the walk at the
+ * no-value exit before the operator was read (a count of zero). The same
+ * filter was a 400 on a populated table.
+ *
+ * `ObjectQL.aggregate` calls this in its per-aggregation loop, after the
+ * shared doors `where` also takes there and the comparand-TYPE door, and
+ * before `getDriver`, the middleware chain and the fallback that evaluates the
+ * filter. The walk refuses exactly {@link assertHavingIsEvaluable}'s list
+ * minus the name checks: the filter reads the object's RAW columns, not the
+ * aggregated row's, so a KEY is not judged here (the REST door refuses an
+ * unknown one, as it does in `where`) and a `{ $field }` is judged by the walk
+ * for its position and its declaration only.
+ *
+ * [#20148] Its NAME, and an `addDays` pair's classes, are judged after the
+ * walk when the caller hands over the object's declaration — the two
+ * cross-field rules `where` gets from `driver-sql`'s compiler, against the
+ * object's DECLARED fields: a `{ $field }` (and an `addDays` offset's nested
+ * `{ $field }`) names a field the object declares, and an `addDays` pair
+ * follows the class rule `FieldReferenceSchema.addDays` declares
+ * ({@link offsetPairViolation}). Measured on the base through
+ * `engine.aggregate` and `POST /data/:object/query`, on driver-memory and
+ * driver-sql, each such filter counted no row (every row under `$ne`, a
+ * `$not`, or a `$or` branch that held), while the same comparison in `where`
+ * is refused on driver-sql. After the walk on purpose — the order `having`'s
+ * key check takes (#20123): an author meets an operator's refusal first, and
+ * fixing it does not reveal one they could have been told about already.
+ * {@link assertAggregationFilterReferencesAreDeclared} carries the words.
+ *
+ * Read-only.
+ */
+export function assertAggregationFilterIsEvaluable(
+  filter: unknown,
+  index: number,
+  declared?: AggregationFilterDeclaration,
+): void {
+  const clause = aggregationFilterClause(index);
+  assertNodeIsEvaluable(filter, clause.root, { clause });
+  if (declared) assertAggregationFilterReferencesAreDeclared(filter, clause.root, declared);
+}
+
+/**
+ * [#20148] What the per-aggregation `filter`'s reference rules judge against:
+ * the object's declared field map, the object's name for the server-side
+ * diagnostic, and where that diagnostic goes.
+ */
+export interface AggregationFilterDeclaration {
+  /** The object the filter reads — named in the server-side diagnostic only. */
+  object: string;
+  /**
+   * The object's declared field map. Not a usable map (absent, an array,
+   * empty) ⇒ nothing is judged: a registry-less host must not invent a verdict
+   * about a declaration it cannot see, the direction every declared-type door
+   * of the engine takes.
+   */
+  fields: unknown;
+  /**
+   * Handed the full diagnostic — the half the refusal withholds — just before
+   * the refusal is thrown, so the host puts it in its server log.
+   */
+  reportWithheld: (diagnostic: string) => void;
+}
+
+/**
+ * [#20148] The names a per-aggregation reference may take: every declared
+ * field, plus the columns every row carries whether or not the map lists them
+ * — the set the REST door's unknown-field gate reads (`resolveQueryFields`).
+ */
+function declaredReferenceNames(fields: Record<string, unknown>): ReadonlySet<string> {
+  return new Set([...Object.keys(fields), 'id', 'created_at', 'updated_at']);
+}
+
+/**
+ * [#20148] A `{ $field }` in a per-aggregation filter that `where`'s
+ * cross-field rules refuse — a referent the object does not declare, or an
+ * `addDays` pair the offset has no meaning on.
+ *
+ * The WORDS follow `where`'s. `driver-sql` refuses the same comparison in a
+ * `where` with the fields, the operator and the specific reason withheld from
+ * the message and written to the server log — its disclosure posture for every
+ * cross-field refusal — so this refusal withholds exactly those and hands the
+ * diagnostic to the host's log instead. What stays is the refusal's identity
+ * (`INVALID_FILTER` / 400), WHICH aggregation carries the reference (a position
+ * in the query, not in the predicate), and the capability boundary — none of
+ * them derived from what the filter names.
+ */
+function withheldAggregationReferenceError(root: string): Error {
+  // Under the REST envelope's 500-character bound (`truncateClientMessage`), so
+  // the sentence saying where the withheld half went is never the part cut off.
+  return invalidFilterError(
+    `A { "$field" } reference in \`${root}\` cannot be evaluated. It must name a field the object `
+    + `declares, and an addDays offset applies only between two date or two datetime fields, read from `
+    + `an integer or a numeric field; evaluated anyway, its count would be silently wrong. The fields, the `
+    + `operator and the reason are withheld from the message, as for the same comparison in a `
+    + `\`where\`; the full diagnostic is in the server log.`,
+  );
+}
+
+/**
+ * [#20148] Judge every scalar-comparison `{ $field }` reference in one
+ * per-aggregation filter against the object's declaration — the same
+ * traversal {@link assertNodeIsEvaluable} takes, which has already run: `$and`
+ * / `$or` / `$not` are descended, every other `$` key has been refused there,
+ * and a reference is judged only as the whole comparand of the six scalar
+ * comparisons, the one position that walk lets it stand.
+ *
+ * In `driver-sql`'s order: the referent is declared, an offset column is
+ * declared, then the `addDays` pair rule. A filter KEY the object does not
+ * declare (or a formula) has no class here, so the same-class half of the pair
+ * rule does not judge it.
+ */
+function assertAggregationFilterReferencesAreDeclared(
+  filter: unknown,
+  root: string,
+  declared: AggregationFilterDeclaration,
+): void {
+  const { fields } = declared;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
+  const map = fields as Record<string, unknown>;
+  if (Object.keys(map).length === 0) return;
+  const names = declaredReferenceNames(map);
+  const classes = new Map<string, AggregatedColumnClass | undefined>(
+    [...names].map((name) => [name, declaredFieldClass(map, name)]),
+  );
+  const refuse = (field: string, op: string, path: string, ref: string, reason: string): never => {
+    declared.reportWithheld(
+      `Operator "${op}" on field "${field}" at ${path} compares against another field `
+      + `({ "$field": "${ref}" }), which cannot be evaluated here: ${reason}`,
+    );
+    throw withheldAggregationReferenceError(root);
+  };
+  const walk = (cond: unknown, path: string): void => {
+    if (!cond || typeof cond !== 'object') return;
+    for (const [key, value] of Object.entries(cond)) {
+      const here = `${path}.${key}`;
+      if (key === '$and' || key === '$or') {
+        const branches = Array.isArray(value) ? value : [value];
+        branches.forEach((c, i) => walk(c, `${here}[${i}]`));
+        continue;
+      }
+      if (key === '$not') {
+        walk(value, here);
+        continue;
+      }
+      if (key.startsWith('$')) continue;
+      if (typeof value !== 'object' || value === null || value instanceof Date || Array.isArray(value)) continue;
+      for (const [op, target] of Object.entries(value)) {
+        if (!REFERENCE_COMPARISON_OPERATORS.has(op) || !isFieldReferenceShape(target)) continue;
+        const at = `${here}.${op}`;
+        const ref = String(target.$field);
+        if (!names.has(ref)) {
+          refuse(key, op, at, ref,
+            `"${ref}" is not a declared field of "${declared.object}" — only declared fields can be referenced.`);
+        }
+        const offset = target.addDays;
+        if (isFieldReferenceShape(offset) && !names.has(String(offset.$field))) {
+          refuse(key, op, at, ref,
+            `the addDays offset "${String(offset.$field)}" is not a declared field of "${declared.object}" — `
+            + `only declared fields can be referenced.`);
+        }
+        if (offset !== undefined) {
+          const reason = offsetPairViolation(key, target, classes);
+          if (reason !== undefined) refuse(key, op, at, ref, reason);
+        }
+      }
+    }
+  };
+  walk(filter, root);
+}
+
+/**
+ * [#20122] What one row-independent walk judges against: the clause whose
+ * words its refusals use, and — where the position has a closed namespace —
+ * the column set a key and a `{ $field }` reference must name.
+ */
+interface EvaluableScope {
+  clause: FilterClause;
+  /**
+   * The names a key and a `{ $field }` reference may take. `undefined` when
+   * the position has no closed column set to judge a name against (the
+   * per-aggregation filter reads the object's raw columns).
+   */
+  columns?: readonly string[];
+  /**
+   * [#20127] Each column's class, where the query and the declaration tell
+   * it — what an `addDays` pair is judged against. `undefined` = not judged.
+   */
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>;
+  /** [#20123] Keys naming none of `columns`, collected in walk order. */
+  unknownKeys?: Array<{ key: string; path: string }>;
+}
+
+/** One node: the `$and` / `$or` / `$not` walk {@link matchesHaving} takes. */
+function assertNodeIsEvaluable(cond: unknown, path: string, scope: EvaluableScope): void {
+  if (!cond || typeof cond !== 'object') return;
+  for (const [key, value] of Object.entries(cond)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      const branches = Array.isArray(value) ? value : [value];
+      branches.forEach((c, i) => assertNodeIsEvaluable(c, `${here}[${i}]`, scope));
+      continue;
+    }
+    if (key === '$not') {
+      assertNodeIsEvaluable(value, here, scope);
+      continue;
+    }
+    if (key.startsWith('$')) throw unknownOperator(key, 'logical', [], scope.clause);
+    assertConditionIsEvaluable(value, key, here, scope);
+    // [#20123] Rows carry exactly the columns the query projects, so a key
+    // outside them can only ever read "no value" — see unknownHavingColumnError.
+    if (scope.columns && !scope.columns.includes(key)) scope.unknownKeys?.push({ key, path: here });
+  }
+}
+
+/** One column's condition: the arms {@link checkCondition} would refuse. */
+function assertConditionIsEvaluable(
+  condition: unknown,
+  field: string,
+  path: string,
+  scope: EvaluableScope,
+): void {
+  // Implicit equality with a literal: nothing to refuse here. An array in this
+  // slot is the shared comparand-shape face's, and it has already run.
+  if (
+    typeof condition !== 'object'
+    || condition === null
+    || condition instanceof Date
+    || Array.isArray(condition)
+  ) return;
+  const spec = condition as Record<string, unknown>;
+  const keys = Object.keys(spec);
+  if (!keys.some((k) => k.startsWith('$'))) return;
+  for (const op of keys) {
+    const target = spec[op];
+    if (op === '$field') throw bareFieldReferenceError(field, spec, path);
+    if (op === '$icontains' && (typeof target !== 'string' || target === '')) {
+      throw icontainsComparandError(field, target, `${path}.${op}`);
+    }
+    if (!(CONDITION_OPERATORS as readonly string[]).includes(op)) {
+      throw unknownOperator(op, 'condition', keys, scope.clause);
+    }
+    if (REFERENCE_COMPARISON_OPERATORS.has(op)) {
+      if (isFieldReferenceShape(target)) {
+        assertReferenceResolves(target, `${path}.${op}`, scope.columns);
+        if (scope.classes && target.addDays !== undefined) {
+          assertOffsetPairIsTemporal(field, op, target, `${path}.${op}`, scope.classes);
+        }
+      }
+      continue;
+    }
+    if (Array.isArray(target)) {
+      const index = target.findIndex(isFieldReferenceShape);
+      if (index !== -1) throw fieldReferencePositionError(field, op, `${path}.${op}`, index);
+    } else if (isFieldReferenceShape(target)) {
+      throw fieldReferencePositionError(field, op, `${path}.${op}`);
+    }
+  }
+}
+
+/**
+ * [#20099] A reference in a scalar comparison: well-formed by its own
+ * declaration, and naming columns the aggregated row has — the `$field`, and an
+ * `addDays` offset's nested `$field` when it carries one.
+ *
+ * [#20122] `columns` is absent for a position with no closed column set (the
+ * per-aggregation filter); there only the declaration is judged.
+ */
+function assertReferenceResolves(
+  reference: Record<string, unknown>,
+  path: string,
+  columns: readonly string[] | undefined,
+): void {
+  const parsed = FieldReferenceSchema.safeParse(reference);
+  if (!parsed.success) {
+    throw malformedFieldReferenceError(path, parsed.error.issues[0]?.message ?? 'it does not parse');
+  }
+  if (!columns) return;
+  const names = [reference.$field];
+  if (isFieldReferenceShape(reference.addDays)) names.push(reference.addDays.$field);
+  for (const name of names) {
+    if (!columns.includes(String(name))) throw unresolvedFieldReferenceError(String(name), path, columns);
+  }
+}
+
+/**
+ * [#20099] Evaluate `value <op> { $field }` on one row, with the reference
+ * resolved against that row.
+ *
+ * The comparison is `@objectstack/formula`'s `matchesFilterCondition`, not a
+ * third copy of it. That evaluator is the cross-field semantics the SQL family
+ * compiles to row for row (NULL-total: an ordering against a missing value is
+ * false, `$eq` against one is "both have none"), and it owns the whole-day
+ * `addDays` arithmetic. It is handed a three-column PROBE rather than the row:
+ * a row here is flat — aggregation aliases and groupBy projections, read by
+ * direct key like every other column in this walker — while that evaluator
+ * walks dotted paths, so re-keying keeps a column name from ever being read as
+ * a path.
+ */
+function compareWithReference(
+  row: Record<string, any>,
+  value: unknown,
+  op: string,
+  reference: Record<string, unknown>,
+): boolean {
+  const probe: Record<string, unknown> = { value, referent: row?.[String(reference.$field)] };
+  const resolved: Record<string, unknown> = { $field: 'referent' };
+  const offset = reference.addDays;
+  if (isFieldReferenceShape(offset)) {
+    probe.offset = row?.[String(offset.$field)];
+    resolved.addDays = { $field: 'offset' };
+  } else if (offset !== undefined) {
+    resolved.addDays = offset;
+  }
+  return matchesFilterCondition(probe, { value: { [op]: resolved } } as FilterCondition);
+}
+
+/**
  * Filter aggregated rows by the query's `having` condition. An absent or empty
  * condition returns the rows unchanged (same vacuous-filter convention as
  * `where`).
+ *
+ * [#20176] `classes` is each aggregated column's class
+ * ({@link aggregatedRowColumnClasses}): a temporal column's comparands are
+ * compared by its storage rule. Absent ⇒ every comparand as written.
  */
-export function applyHaving(rows: any[], having: FilterCondition | null | undefined): any[] {
+export function applyHaving(
+  rows: any[],
+  having: FilterCondition | null | undefined,
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+): any[] {
   if (!having || typeof having !== 'object' || Object.keys(having).length === 0) return rows;
-  return rows.filter((row) => matchesHaving(row, having));
+  return rows.filter((row) => matchesHaving(row, having, 'having', HAVING_CLAUSE, classes));
 }
 
 /**
@@ -288,35 +1142,44 @@ export function applyHaving(rows: any[], having: FilterCondition | null | undefi
  * `having`, `having.$and[0]`, `having.$not` — carried down so a comparand
  * refusal can NAME where the offending key sits. It defaults, so this stays the
  * two-argument function every existing caller (and `applyHaving` below) uses.
+ *
+ * [#20176] `classes` maps a column to its class — the aggregated row's for
+ * `having`, the object's declared fields for a per-aggregation `filter` — and a
+ * column whose class is temporal has its comparands compared by that column's
+ * storage rule ({@link checkCondition}). Absent, or a column it does not name ⇒
+ * compared as written.
  */
 export function matchesHaving(
   row: Record<string, any>,
   cond: any,
   path = 'having',
   clause: FilterClause = HAVING_CLAUSE,
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
 ): boolean {
   if (!cond || typeof cond !== 'object') return true;
   for (const [key, value] of Object.entries(cond)) {
     const here = `${path}.${key}`;
     if (key === '$and') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause))) return false;
+      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes))) return false;
       continue;
     }
     if (key === '$or') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause))) return false;
+      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes))) return false;
       continue;
     }
     if (key === '$not') {
-      if (matchesHaving(row, value, here, clause)) return false;
+      if (matchesHaving(row, value, here, clause, classes)) return false;
       continue;
     }
     if (key.startsWith('$')) throw unknownOperator(key, 'logical', [], clause);
     // Aggregated rows are flat (aliases + group projections) — direct access,
     // no dotted-path resolution. [#10576] The per-aggregation filter walks the
     // same way on purpose: it reads `driver.find()` rows, which are flat too.
-    if (!checkCondition(row?.[key], value, key, here, clause)) return false;
+    // [#20099] The row itself goes down too: a `{ $field }` comparand resolves
+    // against it. [#20176] …and the column's storage rule, when it has one.
+    if (!checkCondition(row?.[key], value, key, here, clause, row, temporalKindOf(classes?.get(key)))) return false;
   }
   return true;
 }
@@ -335,33 +1198,128 @@ export function matchesHaving(
  * unknown operator here is refused naming the aggregation position it sits in,
  * because ignoring it would silently answer the UNFILTERED aggregate — the
  * precise #10413 defect this key exists to close.
+ *
+ * [#20176] `classes` is the object's declared field classes
+ * ({@link declaredFieldClasses}), so a temporal comparand here is read by the
+ * column's storage rule, as the same comparand in a `where` is by the driver.
  */
 export function matchesAggregationFilter(
   row: Record<string, any>,
   filter: FilterCondition,
   index: number,
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
 ): boolean {
   const clause = aggregationFilterClause(index);
-  return matchesHaving(row, filter, clause.root, clause);
+  return matchesHaving(row, filter, clause.root, clause, classes);
 }
 
-/** One column's condition — implicit equality or an operator object. */
+/**
+ * [#20148] The two operands as UTC instants — when one of them is a `Date` and
+ * both denote an instant — else `null`, and the comparison runs exactly as it
+ * always did.
+ *
+ * A `Date` bound met the stored text of a datetime column (canonical UTC ISO on
+ * every driver, ADR-0053 D-B) and JS compared the two by coercion: `<` and
+ * friends read the `Date` as its epoch and the ISO string as `NaN`, and `==`
+ * read the `Date` as its `toString()`. So
+ * `{ opened_at: { $gt: new Date('2026-02-01') } }` counted NO row in a
+ * per-aggregation `filter` (and kept no group in `having`), `$ne` / `$nin`
+ * counted every row, and a `$between` of two `Date`s kept every row — while the
+ * same bound in a `where` answered 4 of 6 on driver-memory and driver-sql
+ * alike, each driver reading it by the column's storage rule. Where this walker
+ * is TYPE-BLIND — [#20176] a column whose class it is not handed, or whose class
+ * is not temporal; a temporal column's pair is put in its storage form first
+ * ({@link checkCondition}), and no `Date` is left in it — it reads the pair the
+ * way the spec defines for a type-blind evaluator — {@link utcInstantMs}, the
+ * lift `@objectstack/formula`'s evaluator applies to the same pairing: a
+ * `Date`, epoch milliseconds, a bare `YYYY-MM-DD` (its UTC midnight) or an
+ * ISO / zone-naive timestamp. Anything else — a wall-clock `time` value, junk,
+ * an Invalid Date — is not an instant, and the pair is left to the comparison
+ * below, unchanged.
+ */
+function instantsOf(value: unknown, target: unknown): readonly [number, number] | null {
+  if (!(value instanceof Date) && !(target instanceof Date)) return null;
+  const a = utcInstantMs(value);
+  const b = utcInstantMs(target);
+  return a === null || b === null ? null : [a, b];
+}
+
+/** [#20148] Equality: the instants when a `Date` is in the pair, else the walker's loose `==`. */
+function comparandEquals(value: unknown, target: unknown): boolean {
+  const instants = instantsOf(value, target);
+  return instants ? instants[0] === instants[1] : value == target;
+}
+
+/** [#20148] An ordering: the instants when a `Date` is in the pair, else the operands as they are. */
+function ordered(value: unknown, target: unknown, compare: (a: any, b: any) => boolean): boolean {
+  const instants = instantsOf(value, target);
+  return instants ? compare(instants[0], instants[1]) : compare(value, target);
+}
+
+/** [#20148] List membership: `includes` as before, or a `Date` member naming the same instant. */
+function listHolds(list: readonly unknown[], value: unknown): boolean {
+  return list.includes(value) || list.some((member) => {
+    const instants = instantsOf(value, member);
+    return instants !== null && instants[0] === instants[1];
+  });
+}
+
+/**
+ * [#20176] ADR-0053 D-D: a bare `YYYY-MM-DD` as the UPPER bound of a
+ * `datetime` column (`$lte`, a `$between` max) means that WHOLE day — the
+ * exclusive bound at the next day's midnight, in the column's storage form.
+ * `undefined` when the rule does not apply: another class, or a bound that is
+ * not a bare calendar day (a full timestamp and a `Date` keep instant
+ * semantics). The same decision both drivers' `where` emitters take
+ * (`SqlDriver.calendarDayUpperBoundRewrite`, `driver-memory`'s `$lte` arm),
+ * read from the spec's `nextUtcCalendarDay`.
+ */
+function wholeDayUpperBound(bound: unknown, kind: TemporalComparandKind | undefined): unknown {
+  if (kind !== 'datetime') return undefined;
+  const next = nextUtcCalendarDay(bound);
+  return next === null ? undefined : temporalStorageForm(next, 'datetime');
+}
+
+/**
+ * One column's condition — implicit equality or an operator object.
+ *
+ * [#20176] `kind` is the column's temporal storage rule, when the caller knows
+ * its class and the class is `date`, `datetime` or `time`. Then the row's value
+ * AND every comparand of `$eq` / `$ne` / the four orderings / `$between` /
+ * `$in` / `$nin` / implicit equality are put in that rule's storage form
+ * (`temporalStorageForm`) before they are compared, and a bare-day upper bound
+ * on a `datetime` column reads as the whole day ({@link wholeDayUpperBound}) —
+ * the reading the drivers give the same comparand in a `where`. So
+ * `'2026-02-01T00:00:00.000Z'` against a `date` column is the day
+ * `'2026-02-01'`, `'2026-02-01'` as a `datetime` `$lte` includes that day's
+ * rows, epoch milliseconds are an instant, and a `Date` against a `date` or
+ * `time` column is its UTC day or time of day. The value takes the form too
+ * because that is the pairing the drivers compare (`driver-sql` wraps a legacy
+ * SQLite column in the same canon); rows a driver returns are in it already.
+ * Presence (`$exists`, `$null`), the text operators and a `{ $field }`
+ * reference are not comparands of a value, and are read as before.
+ */
 function checkCondition(
   value: any,
   condition: any,
   field: string,
   path: string,
   clause: FilterClause = HAVING_CLAUSE,
+  row: Record<string, any> = {},
+  kind?: TemporalComparandKind,
 ): boolean {
+  const form = (operand: unknown): unknown => (kind === undefined ? operand : temporalStorageForm(operand, kind));
   // Implicit equality (primitives, null, Date, array exact-match) — loose `==`
-  // to mirror the Filter Protocol's memory evaluation.
+  // to mirror the Filter Protocol's memory evaluation. [#20148] A `Date` bound
+  // is compared as an instant ({@link instantsOf}). [#20176] On a temporal
+  // column, both sides in the column's storage form first.
   if (
     typeof condition !== 'object'
     || condition === null
     || condition instanceof Date
     || Array.isArray(condition)
   ) {
-    return value == condition;
+    return comparandEquals(form(value), form(condition));
   }
 
   const keys = Object.keys(condition);
@@ -389,18 +1347,45 @@ function checkCondition(
       throw icontainsComparandError(field, target, `${path}.${op}`);
     }
     if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
+    // [#20099] A `{ $field }` reference as the whole comparand of a scalar
+    // comparison is RESOLVED against this row. The arms below would compare the
+    // reference OBJECT itself — `500 > { $field: 'cap' }` is false, and `$ne`
+    // against it is true for every row — so the declared form answered
+    // nothing, or everything, silently.
+    if (REFERENCE_COMPARISON_OPERATORS.has(op) && isFieldReferenceShape(target)) {
+      if (!compareWithReference(row, value, op, target)) return false;
+      continue;
+    }
+    // [#20148] The comparison and list arms read a `Date` bound — or a `Date`
+    // value — as an instant ({@link instantsOf}); every other pair compares
+    // exactly as before. [#20176] On a temporal column both sides are in its
+    // storage form first (`form`), and a bare-day upper bound on a `datetime`
+    // column is the whole day ({@link wholeDayUpperBound}).
+    const stored = form(value);
     switch (op) {
-      case '$eq': if (value != target) return false; break;
-      case '$ne': if (value == target) return false; break;
-      case '$gt': if (!(value > target)) return false; break;
-      case '$gte': if (!(value >= target)) return false; break;
-      case '$lt': if (!(value < target)) return false; break;
-      case '$lte': if (!(value <= target)) return false; break;
-      case '$between':
-        if (Array.isArray(target) && (value < target[0] || value > target[1])) return false;
+      case '$eq': if (!comparandEquals(stored, form(target))) return false; break;
+      case '$ne': if (comparandEquals(stored, form(target))) return false; break;
+      case '$gt': if (!ordered(stored, form(target), (a, b) => a > b)) return false; break;
+      case '$gte': if (!ordered(stored, form(target), (a, b) => a >= b)) return false; break;
+      case '$lt': if (!ordered(stored, form(target), (a, b) => a < b)) return false; break;
+      case '$lte': {
+        const dayAfter = wholeDayUpperBound(target, kind);
+        if (dayAfter !== undefined
+          ? !ordered(stored, dayAfter, (a, b) => a < b)
+          : !ordered(stored, form(target), (a, b) => a <= b)) return false;
         break;
-      case '$in': if (!Array.isArray(target) || !target.includes(value)) return false; break;
-      case '$nin': if (Array.isArray(target) && target.includes(value)) return false; break;
+      }
+      case '$between': {
+        if (!Array.isArray(target)) break;
+        const dayAfter = wholeDayUpperBound(target[1], kind);
+        if (ordered(stored, form(target[0]), (a, b) => a < b)
+          || (dayAfter !== undefined
+            ? ordered(stored, dayAfter, (a, b) => a >= b)
+            : ordered(stored, form(target[1]), (a, b) => a > b))) return false;
+        break;
+      }
+      case '$in': if (!Array.isArray(target) || !listHolds(target.map(form), stored)) return false; break;
+      case '$nin': if (Array.isArray(target) && listHolds(target.map(form), stored)) return false; break;
       case '$exists': {
         const exists = value !== undefined && value !== null;
         if (exists !== !!target) return false;

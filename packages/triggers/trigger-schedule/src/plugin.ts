@@ -2,7 +2,18 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ScheduleTrigger } from './schedule-trigger.js';
-import type { FlowTrigger, JobServiceSurface, ScheduleDispatchLedger } from './schedule-trigger.js';
+import type {
+    FlowTrigger,
+    JobServiceSurface,
+    ScheduleDispatchLedger,
+    ScheduledWorkTriggerOptions,
+} from './schedule-trigger.js';
+
+/**
+ * [#19834] Construction options for {@link ScheduleTriggerPlugin}. Every field
+ * is optional; `new ScheduleTriggerPlugin()` behaves exactly as before.
+ */
+export type ScheduleTriggerPluginOptions = ScheduledWorkTriggerOptions;
 
 /**
  * The slice of the automation engine this plugin needs: register a trigger on
@@ -38,6 +49,16 @@ export class ScheduleTriggerPlugin implements Plugin {
     type = 'standard' as const;
     version = '7.3.0';
     dependencies = ['com.objectstack.service.job'];
+
+    private readonly options: ScheduleTriggerPluginOptions;
+
+    /**
+     * @param options.scheduledWorkPolicy - [#19834] THIS kernel's scheduled-work
+     *   policy (a value or a resolver). Absent, the deployment default applies.
+     */
+    constructor(options: ScheduleTriggerPluginOptions = {}) {
+        this.options = options;
+    }
 
     async init(ctx: PluginContext): Promise<void> {
         ctx.logger.info('Schedule trigger plugin initialized');
@@ -78,6 +99,8 @@ export class ScheduleTriggerPlugin implements Plugin {
                     const svc = this.resolveService<Partial<ScheduleDispatchLedger>>(ctx, 'automation');
                     return svc && typeof svc.claim === 'function' ? (svc as ScheduleDispatchLedger) : null;
                 },
+                undefined, // default wall clock
+                { scheduledWorkPolicy: this.options.scheduledWorkPolicy },
             );
             automation.registerTrigger(trigger);
             ctx.logger.info('ScheduleTriggerPlugin: schedule trigger registered');

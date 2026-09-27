@@ -257,7 +257,7 @@ describe('[#9111] `hydrateOverlayIntoRegistry` asserts its type is canonical', (
         expect(() => protocol.hydrateOverlayIntoRegistry('objects', { name: 'ticket' }, {
             packageId: null,
             organizationId: null,
-        })).toThrowError(/registry_type_not_canonical/);
+        })).toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
         expect(registeredItems).toHaveLength(0);
     });
 
@@ -269,12 +269,12 @@ describe('[#9111] `hydrateOverlayIntoRegistry` asserts its type is canonical', (
         expect(() => protocol.hydrateOverlayIntoRegistry('fields', { name: 'x' }, {
             packageId: null,
             organizationId: 'org_alpha',
-        })).toThrowError(/registry_type_not_canonical/);
+        })).toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
         // …and a body with no `name` at all.
         expect(() => protocol.hydrateOverlayIntoRegistry('fields', { label: 'no name' }, {
             packageId: null,
             organizationId: null,
-        })).toThrowError(/registry_type_not_canonical/);
+        })).toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
     });
 
     it('cannot refuse a canonical type or a plugin-registered kind', () => {

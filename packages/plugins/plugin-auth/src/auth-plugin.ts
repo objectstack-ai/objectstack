@@ -3126,44 +3126,68 @@ export class AuthPlugin implements Plugin {
       return;
     }
 
-    // ── Plain-HTTP OAuth notice (maintainer ruling 2026-09-21) ────────
+    // ── Plain-HTTP OAuth notices (maintainer ruling 2026-09-21; how the
+    //    ruled sentence is carried: ruling batch #210 item 5) ───────────
     //
-    // The ruling fixes this line's wording verbatim, and its acceptance says
-    // the startup log CARRIES it — so the phrase is in the emitted STRING,
-    // not only in this comment, and the English detail follows it on the same
-    // line. The specific ruling outranks the repository's general
-    // English-artefact convention here; whether that convention should be
-    // amended is a separate decision, not this call site's to make.
+    // The ruled sentence, verbatim, is 「OAuth 未加密:仅限可信内网」 — item ④
+    // of the #19489 ruling. Ruling batch #210 item 5 then settled HOW it is
+    // carried: the emitted line is ENGLISH, the repository's convention for
+    // code artefacts, and the maintainer's sentence is kept here in this
+    // comment, cited — read as the line's MEANING, not as its literal
+    // encoding. ⛔ No CJK executable string enters `packages/*/src`, and
+    // ⛔ no bilingual line. Neither ruling amends the language convention.
     //
-    // `isOAuthEligibleBaseUrl` accepts plain HTTP when the deployment's own
-    // host is loopback or a private / link-local address, so an unencrypted
-    // authorization server is a SUPPORTED posture here (intranet installs, a
-    // dev bind on a LAN address) rather than an impossible one. It is never a
-    // SILENT posture: one loud line, emitted once at mount — and none under
-    // TLS. ⛔ No configuration key or environment variable gates either the
-    // rule or this notice.
+    // ⚠️ Eligibility decides WHICH sentence is emitted, never WHETHER one is
+    // (ruling batch #210 item 5, D1). The two are different sentences with
+    // opposite meanings, and neither may be reached for the other's case:
     //
-    // ⚠️ BOTH halves of the condition are load-bearing. Plain HTTP alone is
-    // not enough: on a PUBLIC plain-HTTP deployment the transport rule
-    // REFUSED this origin and the OAuth track is dark, so a line saying the
-    // transport is accepted would be a false statement about that deployment
-    // — an operator reading it would conclude a public plaintext AS is
-    // something this rule permits. That deployment's line is the `OAuth track
-    // is NOT live` warning further down: a different sentence, the opposite
-    // meaning.
+    //   ACCEPTED origin (loopback / private / link-local) — an unencrypted
+    //     authorization server is a SUPPORTED posture here (intranet
+    //     installs, a dev bind on a LAN address) rather than an impossible
+    //     one, so the line says the transport rule accepted this origin, and
+    //     why.
+    //   REFUSED origin (a PUBLIC host) — the OAuth track is dark, so a line
+    //     saying the transport is accepted would be FALSE of that deployment.
+    //     Silence is worse still: the three `.well-known` discovery documents
+    //     mounted below go up regardless of transport, so a public plain-HTTP
+    //     boot publishes its authorization-server metadata in the clear. That
+    //     is the loudest-needed posture and it used to be the QUIETEST — the
+    //     `OAuth track is NOT live` warning further down sits INSIDE the
+    //     MCP-surface condition, so a public plain-HTTP boot with
+    //     `OS_MCP_SERVER_ENABLED=false` emitted no line at all. Which is why
+    //     this branch sits HERE, beside its sibling, and ⛔ not in there.
     //
-    // Read off the PUBLISHED issuer — the authorization-server identity these
-    // documents are about — so the line names the exact URL a client is sent
-    // to rather than a value only this method can see.
+    // ⛔ Whether those discovery routes should be mounted at all on a refused
+    // origin is pre-existing behaviour that neither ruling touched, and it is
+    // not decided at this call site.
+    //
+    // Neither line is gated by a configuration key or an environment
+    // variable, each is emitted once at mount, and neither is emitted under
+    // TLS. Both read off the PUBLISHED issuer — the authorization-server
+    // identity these documents are about — so each names the exact URL a
+    // client is sent to rather than a value only this method can see.
     const authIssuer = this.authManager!.getAuthIssuer();
-    if (/^http:\/\//i.test(authIssuer) && isOAuthEligibleBaseUrl(authIssuer)) {
+    const servedOverPlainHttp = /^http:\/\//i.test(authIssuer);
+    if (servedOverPlainHttp && isOAuthEligibleBaseUrl(authIssuer)) {
       ctx.logger.warn(
-        'OAuth 未加密:仅限可信内网 — OAuth is served UNENCRYPTED: this deployment publishes its ' +
+        'OAuth is served UNENCRYPTED: this deployment publishes its ' +
           `authorization server over plain HTTP (${authIssuer}), so authorization codes, access tokens ` +
           'and bearer headers cross the network in the clear and anything that can observe it can ' +
           'replay them. The transport rule accepts this origin only because the host is loopback or a ' +
           'private / link-local address; put TLS in front of any deployment reachable from a public ' +
           'network, where the same origin is refused outright.',
+      );
+    } else if (servedOverPlainHttp) {
+      ctx.logger.warn(
+        'OAuth discovery is served over PUBLIC plain HTTP: this deployment publishes its ' +
+          'authorization-server metadata (/.well-known/oauth-authorization-server and ' +
+          `/.well-known/openid-configuration, issuer ${authIssuer}) over an unencrypted public ` +
+          'origin, where anything on the network path can read and rewrite it. The MCP OAuth track ' +
+          'is DISABLED on this deployment — the transport rule refuses a public plain-HTTP origin, ' +
+          'so /api/v1/mcp stays API-key-only and no protected-resource metadata is advertised — but ' +
+          'the discovery documents above are mounted regardless of transport and are reachable now. ' +
+          'TLS is the remedy: serve this deployment over https. No configuration key and no ' +
+          'environment variable changes either half.',
       );
     }
 

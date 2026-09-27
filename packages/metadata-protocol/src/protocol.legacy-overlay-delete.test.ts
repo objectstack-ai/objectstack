@@ -397,23 +397,27 @@ describe('#6960 — the boundary holds: the `object` tier does NOT move', () => 
      * substitute one: the prose is what an operator reads, and #7426 adds a
      * field to the envelope without restating the sentence.
      *
-     * ⚠️ …and it is deliberately CASE-INSENSITIVE, which is a measurement, not
-     * a convenience. Promoting the old control-plane-only substring check to
-     * every leg turned the project-kernel legs red: the two producers spell the
-     * marker inside their *prose* differently — `deleteMetaItem`'s own block
-     * writes `[not_overridable]`, `SysMetadataRepository` writes
-     * `[NOT_OVERRIDABLE]`. Only the `code` FIELD is uniform, which is exactly
-     * ADR-0112's point (the catalog governs `error.code`; message prose is a
-     * different surface) and exactly why the field is the assertion that
-     * belongs here. Recorded rather than papered over — the prose divergence is
-     * pre-existing and outside #7426's scope.
+     * ⚠️ …and the marker is read off the `code` FIELD, never off the prose.
+     * That was a measurement before it was a rule: promoting the old
+     * control-plane-only substring check to every leg turned the project-kernel
+     * legs red, because the two producers spelled the marker inside their prose
+     * differently — one lowercase, one uppercased out of the declared code by
+     * interpolation. Only the `code` field was ever uniform, which is exactly
+     * ADR-0112's point: the catalog governs `error.code`, and message prose is
+     * a different surface. Both prose markers are now gone — `error` is human
+     * language and `code` is the machine token — so the field is not merely the
+     * assertion that belongs here, it is the only one there could be.
      */
     const expectRefused = (err: any, environmentId: string | undefined, ctx: string) => {
         void environmentId;
         expect(err, `${ctx}: the delete was accepted`).toBeInstanceOf(Error);
         expect(err.status, ctx).toBe(403);
         expect(err.code, ctx).toBe('NOT_OVERRIDABLE');
-        expect(String(err.message).toUpperCase(), ctx).toContain('NOT_OVERRIDABLE');
+        // The prose still has to SAY something — the envelope assertion above
+        // is about the machine axis, and a refusal that lost its sentence would
+        // pass it while telling the operator nothing.
+        expect(String(err.message), ctx).toMatch(/code package|allowOrgOverride/);
+        expect(String(err.message).startsWith('['), ctx).toBe(false);
     };
 
     for (const { label, environmentId } of KERNELS) {

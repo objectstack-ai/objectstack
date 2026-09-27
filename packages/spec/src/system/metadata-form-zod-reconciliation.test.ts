@@ -73,6 +73,31 @@
  * the walk is pinned at the bottom against a synthetic fixture, so a gate that
  * reaches nothing at depth two cannot report green.
  *
+ * ## The coordinates include the root, and the overlay is not surface
+ *
+ * Two instruments the top-level direction (#19188) needs, neither of them
+ * wired to an assertion here:
+ *
+ * - **The ledger had no top-level coordinate.** Every `path` was a
+ *   `nestedLists` path, so a deliberate omission at the *top* level could not
+ *   be recorded at all — the resolve test looks a coordinate up in
+ *   `nestedLists(form)`, which yields only nested paths, and
+ *   `subSchemaAt(root, '')` walks one empty segment because `''.split('.')` is
+ *   `['']` and not `[]`. `ROOT_PATH` is that missing coordinate and
+ *   `resolveCoordinate` is the single place that knows both spellings.
+ * - **The ADR-0010 provenance/lock overlay is not authoring surface.** 132 of
+ *   the 274 top-level keys no form offers are that overlay — 119 of them the
+ *   seven `_`-prefixed envelope keys on all 17 forms, plus `protection` on 13
+ *   — so a top-level zod-only direction without a skip is half overlay noise,
+ *   and 132 ledger rows for one overlay with one reason is the wrong shape.
+ *   `FRAMEWORK_FIELDS` skips it, mirroring the liveness gate, which grades the
+ *   same set auto-live (`FRAMEWORK_FIELDS` in `scripts/liveness/`).
+ *
+ * Neither changes what this gate asserts: the top-level zod-only direction
+ * stays unwired, and the skip is kept off every nested coordinate — where a
+ * leg is asserting today, over a sub-schema that really does carry the
+ * overlay.
+ *
  * @see control-flow-form-zod-ledger.test.ts — same pattern for the flow designer
  */
 
@@ -80,13 +105,74 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
 import { METADATA_FORM_REGISTRY } from './metadata-form-registry';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+
+// ────────────────────────────────────────────────────────────────────────────
+// Coordinates — what a ledger `path` may say, including the one the dotted
+// algebra has no spelling for.
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The ledger coordinate for a form's **top level**.
+ *
+ * Every other coordinate is a dotted path produced by `nestedLists`
+ * (`fields`, `fields.options`, `lifecycle.ttl`). The top level is the
+ * zero-segment path, and the dotted algebra has no zero-segment element, so it
+ * needs a coordinate of its own. Why a sentinel and not `''`:
+ *
+ * - `''` is **falsy**, and `path ? … : …` is the load-bearing spelling in this
+ *   very file (`nestedLists`' own `prefix` test). Any reader written that way
+ *   reads the root coordinate as "no path given" — the one confusion a
+ *   coordinate must not have.
+ * - A `path` a future author leaves unfilled then cannot masquerade as a
+ *   deliberate root row: `''` is not this sentinel, so an empty one fails the
+ *   resolve test loudly instead of quietly excusing a top-level key.
+ * - Parentheses cannot occur in a form's `field:` name, so the sentinel cannot
+ *   collide with a real dotted path — asserted over the live registry below,
+ *   rather than assumed.
+ * - It reads unambiguously in a failure label: `object.(root).apiMethods`, not
+ *   `object..apiMethods`.
+ */
+const ROOT_PATH = '(root)';
+
+/**
+ * The ADR-0010 provenance/lock overlay: system-stamped onto a metadata item by
+ * the loader, never authored in a form. The liveness gate grades exactly this
+ * set auto-live (`FRAMEWORK_FIELDS`, `scripts/liveness/check-liveness.mts`);
+ * this is the reconciliation gate's equivalent, and it exists because the
+ * overlay is 132 of the 274 top-level keys the forms do not offer.
+ *
+ * **Derived, not hand-copied.** The seven `_`-prefixed keys ARE
+ * `MetadataProtectionFields` — the one raw shape every metadata schema spreads
+ * — so a key added to or dropped from the envelope moves this set in the same
+ * commit. A second copy of the liveness gate's eight names would have been the
+ * hand-copied-list shape this whole file exists to abolish, and that `const`
+ * is module-local to a `.mts` script, so there is nothing to import from it
+ * anyway: the shape is the better source for both.
+ *
+ * `protection` is the one name written out. It is the author-facing block the
+ * loader translates INTO that envelope (`applyProtection`,
+ * `shared/protection.zod.ts`), spliced under that name by each schema rather
+ * than carried in a shape of its own — so it is pinned below against what it
+ * resolves to on every live type that declares it, and the name stays a
+ * measured claim.
+ */
+const FRAMEWORK_FIELDS: ReadonlySet<string> = new Set<string>([
+  ...Object.keys(MetadataProtectionFields),
+  'protection',
+]);
+
+/** Is `key` part of that overlay — i.e. not authoring surface at all? */
+const isFrameworkField = (key: string): boolean => FRAMEWORK_FIELDS.has(key);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Ledger — deliberate zod-only omissions. `omit` names one key; `subset`
 // declares a whole nested list as a curated subset (coverage unenforced there,
-// the form-only direction still is).
+// the form-only direction still is). `path` is a `nestedLists` path or
+// {@link ROOT_PATH}.
 // ────────────────────────────────────────────────────────────────────────────
 
 type OmitEntry = { kind: 'omit'; type: string; path: string; key: string; why: string };
@@ -141,6 +227,160 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'onlyWhen',
     why: "the mirror of `retention.onlyWhen` — one shape by design (`lifecycleOnlyWhenSchema`, object.zod.ts) — with the same boundary: a row-filter map with no scalar rendering among the ttl block's text inputs, and its one writer today is the code-declared sys_session object (`revoked_at: { $null: true }`). Offering it needs a structured control, a form-face addition rather than a reconciliation",
   },
+  // ── The root coordinate (#19333): top-level keys no form may offer ──
+  //
+  // Three reasons, each read off the key's own `describe()` or its liveness
+  // verdict (`packages/spec/liveness/TYPE.json`) rather than decided here:
+  // platform-written state, a deprecated or legacy alias, and a key declared
+  // but not enforced yet. A fourth reason covers far more keys and has no row
+  // at all: the ADR-0010 provenance/lock overlay, whose one reason is
+  // `FRAMEWORK_FIELDS` above — a root row naming one of its keys is refused by
+  // the resolve test below.
+  //
+  // `view` rows are here although `view` is outside the top-level direction
+  // until its per-arm forms exist: each reason holds on every arm, so none of
+  // these rows can excuse a key a future arm form ought to offer. Seven other
+  // `view` keys carry no row; the block at the end of this ledger records
+  // what was measured for each of them, and why none gets a row.
+  //
+  // The not-enforced-yet rows hold only while the verdict does. Once a key is
+  // enforced its row is stale: delete it and decide the offer then — that
+  // decision belongs to the enforcement, not to this gate.
+
+  // Platform-written, never authored.
+  {
+    kind: 'omit',
+    type: 'app',
+    path: ROOT_PATH,
+    key: '_unpublished',
+    why: "platform-written, never authored — the schema's own words: `Machine-managed publish gate (ADR-0045 §3) … Written by AI materialization, cleared by publish-drafts. Never authored`. The `_` prefix is the tooling-stamped channel ADR-0010's envelope also uses, but the key is not in that envelope (`MetadataProtectionFields`), so the overlay skip does not reach it and this row does. A control would let an author publish or re-gate an app by hand",
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'system',
+    why: "platform-written, never authored — the schema calls it the `Auto-injected system/audit field` marker, kept apart from `author-declared business fields`, and every writer is platform code (the injected-column provenance table, the search companion, audit-field governance). The record validator reads it on the write path and skips its required and multi-value checks for a flagged column, so a control would let an author claim a false provenance that silently switches those checks off",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'columnState',
+    why: "platform-written, never authored — `Studio round-trip: per-user column order/widths (runtime-only state, written by the console grid — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'isPinned',
+    why: "platform-written, never authored — `Studio round-trip: view pinned in the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'sortOrder',
+    why: "platform-written, never authored — `Studio round-trip: position within the switcher (per-user state, written by the console — not authored)`; the authoring door (`ViewItemSchema`) rejects the key by name and points the author at `order`, the authored default",
+  },
+
+  // Deprecated or legacy alias — deliberately not offered to new authors, the
+  // `page.interfaceConfig.sourceView` precedent at the top of this ledger.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'displayNameField',
+    why: "`[DEPRECATED → nameField]` alias, accepted on read for back-compat and deliberately not offered to new authors: this form offers the canonical `nameField` (ADR-0079), and a second control beside it would teach the retired spelling",
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'titleFormat',
+    why: "`[DEPRECATED → nameField (ADR-0079)]` render-only title template the server cannot return or query, deliberately not offered to new authors; its own describe prescribes the migration — a single-field title to `nameField`, a composite to a formula field designated as `nameField` — and both targets are authorable",
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'drawerWidth',
+    why: '`[DEPRECATED → size buckets]` pixel drawer width, deliberately not offered to new authors: a pixel width cannot be chosen without knowing the client viewport, so the renderer derives it from the size bucket',
+  },
+  {
+    kind: 'omit',
+    type: 'view',
+    path: ROOT_PATH,
+    key: 'groups',
+    why: '`[LEGACY ALIAS → sections]` accepted for back-compat and folded onto `sections` at parse (`sections` wins when both are present), deliberately not offered to new authors',
+  },
+
+  // Declared, not enforced yet — no offer until it is enforced.
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'externalSharingModel',
+    why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0090 D11: validated at authoring time only; the audience-aware evaluator branch that would honour it is scheduled, not built). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'useGrouping',
+    why: 'declared, not enforced yet — liveness verdict `planned` (the renderer read side that maps it onto `Intl.NumberFormat` is not landed). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'requires',
+    why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0080: inferred at compile time; save/load enforcement of plugin presence is deferred). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'agent',
+    path: ROOT_PATH,
+    key: 'structuredOutput',
+    why: 'declared, not enforced yet — `[EXPERIMENTAL — not enforced]` in its own describe and `experimental` in the liveness ledger: parsed, no runtime consumer. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'onSuccess',
+    why: 'declared, not enforced yet — both of its children (`navigate`, `openIn`) carry the liveness verdict `planned`: no console consumer reads the block yet. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+
+  // Measured, and deliberately NOT recorded: seven `view` keys with no
+  // liveness verdict at any coordinate. `liveness/view.json` cannot hold them:
+  // the liveness walk stops at the union's `container` arm (its `shapeOf`
+  // takes the first OBJECT member, and the `viewItem` arm is a discriminated
+  // union), so a row for any of the seven is an ORPHAN — planting `config`
+  // there failed `check:liveness`. Read at framework 7e6ca1787a and objectui
+  // 62597c588, then re-read at framework 980bc05e5b and objectui f8a9d0fb0596
+  // (the console pin on that main) with the same readings:
+  //
+  //   config     the viewItem arm's REQUIRED body. Authored (`defineViewItem`,
+  //              the console's `viewEnvelope`); `getViewsByObject` serves it.
+  //   viewKind   that arm's discriminator. Authored, and also stamped by
+  //              `expandViewContainer`, `viewIdentityPatch` and the console's
+  //              `buildPersistedViewBody`; `getViewsByObject` filters on it.
+  //   order      authored: the authoring door's own guidance names it the
+  //              authored default beside the per-user `sortOrder`.
+  //              `getViewsByObject` sorts on it.
+  //   isDefault  declared on the strict authoring door, AND written by the
+  //              console's set-default (`setDefaultViewPatches`); the
+  //              console's switcher reads it.
+  //   scope      stamped `package` by `expandViewContainer`; nothing writes
+  //              `shared` or `personal`.
+  //   owner      no writer and no reader of the view key in either repo.
+  //   hidden     no writer and no reader of the view key in either repo.
+  //
+  // None of them gets a row. The first four are authored, so a row would
+  // excuse a key a per-arm form may owe an offer, and that is a question for
+  // the first arm form rather than for this ledger. The last three have no
+  // live writer, so there is no platform-written state to give as the reason.
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -339,6 +579,49 @@ function subSchemaAt(root: unknown, path: string): unknown {
   return node;
 }
 
+/**
+ * The two sides a ledger coordinate resolves to: the keys the form offers
+ * there, and the schema node they are judged against. `undefined` when the
+ * form has no hand-written list at that coordinate any more — the state the
+ * resolve test reports.
+ *
+ * The root coordinate is why this is a function rather than a
+ * `nestedLists(form).find(…)` at the call site. `nestedLists` yields only
+ * nested paths, so a root entry looked up there is always missing, and
+ * `subSchemaAt(root, '')` resolves to `undefined` because the walk takes one
+ * empty segment. The top level is resolved instead from the pair that actually
+ * describes it: every `field:` across every section, against the type's own
+ * root schema.
+ */
+function resolveCoordinate(
+  form: any,
+  root: unknown,
+  path: string,
+): { offered: string[]; sub: unknown } | undefined {
+  if (path === ROOT_PATH) return { offered: topLevelFields(form), sub: root };
+  const list = nestedLists(form).find((l) => l.path === path);
+  return list ? { offered: list.offered, sub: subSchemaAt(root, path) } : undefined;
+}
+
+/**
+ * The keys a form could offer at a coordinate: authorable (not a tombstone),
+ * and — at the root coordinate **only** — not the ADR-0010 overlay. `null`
+ * when the node is not key-bearing, same as `authorableKeysOf`.
+ *
+ * The skip stops at the root deliberately. The overlay is spread into nested
+ * shapes as well (three times in `view.zod.ts` alone), and one hand-written
+ * nested list resolves to a sub-schema carrying all seven `_`-prefixed keys:
+ * `object.fields`, whose `subset` entry has to keep earning its place against
+ * the keys the quick-add grid really could offer. Skipping the overlay there
+ * would move a number a leg reads today — and the top-level direction this
+ * instrument is for is not that leg.
+ */
+function offerableKeysAt(sub: unknown, path: string): string[] | null {
+  const keys = authorableKeysOf(sub);
+  if (!keys) return null;
+  return path === ROOT_PATH ? keys.filter((k) => !isFrameworkField(k)) : keys;
+}
+
 type Ledger = ReadonlyArray<OmitEntry | SubsetEntry>;
 const TYPES = Object.keys(METADATA_FORM_REGISTRY);
 const ledgerFor = (ledger: Ledger, type: string, path: string) =>
@@ -464,33 +747,48 @@ describe('metadata form ↔ Zod reconciliation (#3786)', () => {
       const root = getMetadataTypeSchema(entry.type);
       expect(root, `ledger references unknown metadata type '${entry.type}'`).toBeDefined();
 
-      const lists = nestedLists(METADATA_FORM_REGISTRY[entry.type]);
-      const list = lists.find((l) => l.path === entry.path);
-      expect(list, `${entry.type}.${entry.path}: no hand-written list at this path any more`).toBeDefined();
+      // One lookup for both coordinate spellings — a dotted `nestedLists`
+      // path, and the root.
+      const at = resolveCoordinate(METADATA_FORM_REGISTRY[entry.type], root, entry.path);
+      expect(at, `${entry.type}.${entry.path}: no hand-written list at this path any more`).toBeDefined();
 
-      const sub = subSchemaAt(root, entry.path);
-      const subKeys = keysOf(sub);
-      expect(subKeys, `${entry.type}.${entry.path}: sub-schema is not key-bearing any more`).toBeTruthy();
+      // Authorable, not merely present, and at the root not the overlay: the
+      // keys the form COULD offer here. `null` iff the node is not key-bearing,
+      // which is the same fact `keysOf` reports.
+      const offerable = offerableKeysAt(at!.sub, entry.path);
+      expect(offerable, `${entry.type}.${entry.path}: sub-schema is not key-bearing any more`).toBeTruthy();
 
       if (entry.kind === 'omit') {
-        // Authorable, not merely present: an `omit` whose key has since been
-        // TOMBSTONED is excusing an omission that is now mandatory, and the
-        // entry has to go — otherwise the ledger's own "still resolves" check
-        // is what keeps a dead excuse alive.
+        // The overlay is skipped at the root, so a row naming one of its keys
+        // excuses an omission that was never owed — the same reasoning
+        // `reconcileNestedLists` applies to a tombstone: the only correct thing
+        // to do with a key that is not authoring surface is not to offer it,
+        // and no ledger row is owed for it.
+        if (entry.path === ROOT_PATH) {
+          expect(
+            isFrameworkField(entry.key),
+            `${entry.type}.${entry.path}.${entry.key}: an ADR-0010 provenance/lock overlay field, skipped at the root coordinate — a ledger row excuses nothing here. Drop the entry`,
+          ).toBe(false);
+        }
+
+        // An `omit` whose key has since been TOMBSTONED is excusing an omission
+        // that is now mandatory, and the entry has to go — otherwise the
+        // ledger's own "still resolves" check is what keeps a dead excuse alive.
         expect(
-          authorableKeysOf(sub),
+          offerable,
           `${entry.type}.${entry.path}.${entry.key}: not an authorable key any more — removed, or retired to a tombstone (a retired key is excused automatically). Drop the ledger entry`,
         ).toContain(entry.key);
         expect(
-          list!.offered,
+          at!.offered,
           `${entry.type}.${entry.path}.${entry.key}: the form offers it now — drop the ledger entry`,
         ).not.toContain(entry.key);
       } else {
         // A `subset` that covers everything is no longer a subset — counted over
-        // AUTHORABLE keys, so a tombstone left in the shape cannot prop up an
-        // entry whose real coverage gap has closed.
+        // the keys the form could offer, so neither a tombstone left in the
+        // shape nor (at the root) the overlay can prop up an entry whose real
+        // coverage gap has closed.
         expect(
-          authorableKeysOf(sub)!.filter((k) => !list!.offered.includes(k)).length,
+          offerable!.filter((k) => !at!.offered.includes(k)).length,
           `${entry.type}.${entry.path}: the form now covers the whole authorable schema — drop the ledger entry`,
         ).toBeGreaterThan(0);
       }
@@ -688,5 +986,136 @@ describe('the nested walk reaches every depth (#14327)', () => {
       { kind: 'subset', type: 'probe', path: 'items', why: 'synthetic: the parent list is a subset' },
     ]);
     expect(at(misfiled, 'items.options')?.zodOnly).toEqual(['extra']);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// The root coordinate, and the overlay skip.
+//
+// Both are instruments for the top-level direction (#19188), and both are
+// pinned the way the depth-two walk above is: a SYNTHETIC form and schema
+// driven through the same `resolveCoordinate` / `offerableKeysAt` the live
+// resolve test uses, plus two readings taken from the live registry — so "a
+// root entry can be recorded" and "the overlay is skipped at the root and
+// nowhere else" are measured facts rather than assumptions.
+//
+// What is deliberately NOT here: an assertion that the top-level zod-only set
+// is empty. It is not — 274 keys across the 17 forms, 132 of them this overlay
+// — and wiring that direction is #19188's work, not this instrument's.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('the ledger has a root coordinate, and the overlay is not surface', () => {
+  const schema = z.object({
+    name: z.string(),
+    label: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    gone: retiredKey('`Probe.gone` was removed in @objectstack/spec 17.0.0. Delete the key.'),
+    nested: z.object({ a: z.string(), b: z.string().optional(), ...MetadataProtectionFields }).optional(),
+    protection: ProtectionSchema.optional(),
+    ...MetadataProtectionFields,
+  });
+  const form = {
+    sections: [
+      { fields: [{ field: 'name' }, { field: 'label' }] },
+      { fields: [{ field: 'nested', fields: [{ field: 'a' }] }] },
+    ],
+  };
+
+  it('the root coordinate resolves to the top-level pair, which no nested path can', () => {
+    // The failure mode the coordinate exists to end, named: the resolve test
+    // looks a coordinate up among the hand-written lists, and those are nested
+    // by construction — the root is never among them.
+    expect(nestedLists(form).map((l) => l.path)).toEqual(['nested']);
+    expect(nestedLists(form).find((l) => l.path === ROOT_PATH)).toBeUndefined();
+
+    const at = resolveCoordinate(form, schema, ROOT_PATH);
+    expect(at?.offered).toEqual(['label', 'name', 'nested']);
+    expect(at?.sub).toBe(schema);
+    // …and the zod side is the whole top-level shape, so a key no section
+    // offers is reachable from the coordinate at all.
+    expect(keysOf(at?.sub)).toContain('tags');
+  });
+
+  it('the empty string is not the coordinate — an unfilled path fails loudly instead', () => {
+    // Why the coordinate is a sentinel: a row whose `path` was never filled in
+    // must not read as a deliberate root row. `''` resolves to nothing on
+    // either side, which is what the resolve test reports as "no hand-written
+    // list at this path any more".
+    expect(resolveCoordinate(form, schema, '')).toBeUndefined();
+    expect(subSchemaAt(schema, '')).toBeUndefined();
+  });
+
+  it('no live form has a hand-written list at the sentinel, so it cannot be shadowed', () => {
+    // Dark control over the real registry: parentheses cannot occur in a
+    // `field:` name, and this is what keeps that a measurement.
+    const collisions = TYPES.flatMap((type) =>
+      nestedLists(METADATA_FORM_REGISTRY[type])
+        .filter((l) => l.path === ROOT_PATH)
+        .map((l) => `${type}.${l.path}`),
+    );
+    expect(collisions).toEqual([]);
+  });
+
+  it('the overlay set IS the ADR-0010 shape, not a second hand-copied list', () => {
+    const envelope = Object.keys(MetadataProtectionFields);
+    expect(envelope.length).toBeGreaterThan(0);
+    expect([...FRAMEWORK_FIELDS].sort()).toEqual([...envelope, 'protection'].sort());
+    // Every `_`-prefixed member comes from the shape — nothing is hand-added
+    // beside it, so the envelope cannot drift away from the skip.
+    expect([...FRAMEWORK_FIELDS].filter((k) => k.startsWith('_')).sort()).toEqual([...envelope].sort());
+
+    // `protection` is the one name written out, so it is pinned against what it
+    // resolves to on every live type that declares it.
+    const declaring = TYPES.filter((type) => (keysOf(getMetadataTypeSchema(type)) ?? []).includes('protection'));
+    expect(declaring.length).toBeGreaterThan(0);
+    for (const type of declaring) {
+      expect(
+        keysOf(subSchemaOf(getMetadataTypeSchema(type), 'protection')),
+        `${type}.protection no longer resolves to ProtectionSchema's shape — the one hand-written name in the overlay set`,
+      ).toEqual(keysOf(ProtectionSchema));
+    }
+  });
+
+  it('positive control: the overlay drops out of the offerable keys at the root, and nothing else does', () => {
+    expect(FRAMEWORK_FIELDS.size).toBeGreaterThan(0);
+    const offerable = offerableKeysAt(schema, ROOT_PATH)!;
+    for (const key of FRAMEWORK_FIELDS) {
+      expect(keysOf(schema), `the probe must declare ${key} for this control to measure anything`).toContain(key);
+      expect(offerable, `${key} is overlay and must not be offerable at the root`).not.toContain(key);
+    }
+    // The skip is narrow: an ordinary key the form does not offer is still
+    // offerable, so the top-level direction keeps something to ask for.
+    expect(offerable).toContain('tags');
+    // And a tombstone is still excluded — by `authorableKeysOf`, not by the skip.
+    expect(offerable).not.toContain('gone');
+  });
+
+  it('dark control: the skip does not reach a nested coordinate, live instance included', () => {
+    // Applying it below the root would move a number an asserting leg reads
+    // today: `object.fields` resolves to a sub-schema carrying the whole
+    // envelope, and its `subset` entry is judged on how much of that schema the
+    // quick-add grid does NOT cover.
+    const envelope = Object.keys(MetadataProtectionFields);
+    expect(offerableKeysAt(subSchemaAt(schema, 'nested'), 'nested')).toEqual(expect.arrayContaining(envelope));
+    expect(offerableKeysAt(subSchemaAt(getMetadataTypeSchema('object'), 'fields'), 'fields')).toEqual(
+      expect.arrayContaining(envelope),
+    );
+  });
+
+  it('a top-level omission is recordable, and a row naming the overlay is not', () => {
+    // The whole point of the coordinate, driven through the same two functions
+    // the live resolve test uses: `tags` is authorable, unoffered and not
+    // overlay, so a root `omit` for it resolves on both sides…
+    const at = resolveCoordinate(form, schema, ROOT_PATH)!;
+    const offerable = offerableKeysAt(at.sub, ROOT_PATH)!;
+    expect(offerable).toContain('tags');
+    expect(at.offered).not.toContain('tags');
+    expect(isFrameworkField('tags')).toBe(false);
+
+    // …while a root `omit` naming an overlay key is the row the resolve test
+    // rejects: it is not offerable there, and the predicate says why.
+    expect(isFrameworkField('_lock')).toBe(true);
+    expect(isFrameworkField('protection')).toBe(true);
+    expect(offerable).not.toContain('_lock');
   });
 });

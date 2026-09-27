@@ -464,6 +464,11 @@ import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 // The human-merge line threshold is declared ONCE, in the landing gate; this
 // tool prints the same reading at dispatch time and never carries a second copy.
 import { HUMAN_MERGE_LINE_THRESHOLD, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
+// The test-file predicate the clause-② suspect table EXCEPTS by, read from the
+// gate whose whole question is which files under a package's `src/` are
+// published source and which are its tests — never respelled here (#19936). See
+// SUSPECT_TIER_GLOBS for why this predicate and not one of the repo's others.
+import { isTestPath } from '../check-undeclared-dep-imports.mjs';
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
 // runs, not copies of them. They used to be written twice — see the shared
@@ -2856,6 +2861,92 @@ export function jobFilteredSteps(entries, paths) {
       if (steps.length === 0) continue;
       counts.named += 1;
       rows.push({ workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped, steps });
+    }
+  }
+  return { rows, counts };
+}
+
+/**
+ * Does this `run:` line invoke a TypeScript type-check PROGRAM?
+ *
+ * Two spellings, both read as ARGV TOKENS and never as substrings, because the
+ * substring reading over-matches on this very tree: an `echo` about a
+ * `tsc-built package` and the lane aggregator's own `console.log` about a
+ * `type-check lane` each carry the word and neither runs anything.
+ *
+ *   - `tsc` as a token together with `--noEmit`, `-p` or `--project`;
+ *   - `run` followed by `typecheck` or `type-check` — the task or script name,
+ *     whoever runs it (`turbo run typecheck`, `pnpm --filter X run typecheck`).
+ *
+ * ⛔ The MISSES are silent, every one — `pnpm typecheck`, `pnpm -r typecheck`
+ * and `node --run typecheck` carry no `run` token; `tsc --build`, `tsc -b`,
+ * `vue-tsc` and `tsgo` are not this vocabulary. So the producer SIZES its walk,
+ * and the live control pins the required aggregate's lanes BY NAME.
+ */
+export function isTypeCheckInvocation(command) {
+  if (typeof command !== 'string') return false;
+  const tokens = command.split(/\s+/).filter((t) => t !== '').map((t) => t.replace(/^['"]+|['"]+$/g, ''));
+  if (tokens.includes('tsc') && tokens.some((t) => ['--noEmit', '-p', '--project'].includes(t) || t.startsWith('--project='))) return true;
+  return tokens.some((t, i) => t === 'run' && ['typecheck', 'type-check'].includes(tokens[i + 1]));
+}
+
+/**
+ * ⭐ The TYPE-CHECK LANES CI runs — every step whose `run:` invokes a
+ * TypeScript type-check program, read from the SAME workflow entries the two
+ * blocks above read, so no block can describe a different revision of a
+ * workflow than the families printed beside it.
+ *
+ * ## The measured failure (#19172)
+ *
+ * A dev derived this tool's families for a PR, ran all 82 green, and shipped a
+ * red on the required `TypeScript Type Check` context: `packages/spec`'s own
+ * `typecheck` exited 2 on two TS7016 errors one added import line introduced.
+ *
+ * ⛔ What was missing was NOT the steps. Measured: all four rows this walk
+ * returns were already rows of the always-runs tail — same workflow, job, step
+ * and command, 4 of its 33. Missing was a NAME for them and any disclosure at
+ * all on `--commands`, where a dispatch order is built. ⭐ And that absence did
+ * not read as one: the derivation DOES emit `check:type-check-coverage` and
+ * `check:type-check-debt` for a TypeScript-touching path — on that PR's paths,
+ * 2 of 70 commands matched a `typecheck` grep, both of them those LEDGER gates.
+ * So a reader greps the one word they would grep, finds something, and stops.
+ *
+ * Claimed for a row: this step's `run:` invokes a type-check program, read off
+ * the argv of the SPLICED command text (`joinLineContinuations`, the reading
+ * `jobFilteredSteps` takes — an unspliced split drops a continued invocation
+ * silently). ⛔ NOT claimed: the step's INTENT — `alwaysRunLines` refuses that
+ * classification and the reason carries unchanged. ⛔ NOT runnable and ⛔ never
+ * in `--commands`: every row is CI's own shell over its whole-workspace filters.
+ *
+ * A job or step carrying an `if:` is KEPT and MARKED, never excluded: the two
+ * blocks above drop a conditional because each claims CI definitely runs the
+ * step, and this one claims only that the lane exists — a lane a reader cannot
+ * see because it MIGHT be skipped is the absence this block was filed on.
+ */
+export function typeCheckLaneSteps(entries) {
+  const rows = [];
+  const counts = { prWorkflows: 0, nonPullRequestWorkflows: 0, steps: 0, runLines: 0, conditional: 0 };
+  for (const { file, text } of entries) {
+    if (!declaresPullRequestTrigger(text)) {
+      counts.nonPullRequestWorkflows += 1;
+      continue;
+    }
+    counts.prWorkflows += 1;
+    for (const job of extractJobBlocks(text)) {
+      for (const step of extractStepBlocks(job.text)) {
+        const lines = runCommandTexts(step.text)
+          .flatMap((c) => joinLineContinuations(c).split('\n'))
+          .map((l) => l.trim())
+          .filter((l) => l !== '');
+        if (lines.length === 0) continue;
+        counts.steps += 1;
+        counts.runLines += lines.length;
+        const commands = lines.filter((l) => isTypeCheckInvocation(l));
+        if (commands.length === 0) continue;
+        const conditional = Boolean(job.if) || Boolean(step.if);
+        if (conditional) counts.conditional += 1;
+        rows.push({ workflow: file, job: job.name, step: step.name, commands, conditional });
+      }
     }
   }
   return { rows, counts };
@@ -11883,6 +11974,43 @@ export function jobFilteredStepLines(rows, counts) {
 }
 
 /**
+ * The type-check lanes, rendered — printed on EVERY run, like the two step
+ * blocks around it and for the same reason: it is not about the card's paths,
+ * and the family list provably does not cover it (#19172). Rows carry the JOB
+ * NAME, which is what CI and a red check call it. ⭐ Absence renders LOUD
+ * instead of vanishing — a tree whose pull-request workflows yield no lane is a
+ * recogniser that has rotted, not a farm with nothing left to disclose.
+ */
+export function typeCheckLaneLines(rows, counts) {
+  const { prWorkflows = 0, steps = 0, runLines = 0 } = counts ?? {};
+  const walked = `${steps} command-carrying step(s) / ${runLines} spliced \`run:\` line(s) across ${prWorkflows} pull-request workflow(s)`;
+  if (rows.length === 0) {
+    return [
+      'Type-check lanes — ⊘ NOT MEASURED, and THE SOURCE OF TRUTH CAME BACK EMPTY.',
+      `  Walked ${walked}, and not one line in them invokes a TypeScript type-check program.`,
+      '  ⛔ Read that as a BROKEN READ, never as a tree without type checking: this block names what CI runs, so a reading of zero',
+      '    is a statement about this walk. It is printed rather than dropped because a missing block looks exactly like a covered surface.',
+    ];
+  }
+  const lines = [
+    `Type-check lanes — ${rows.length} CI step(s) run a TypeScript type-check PROGRAM and ⊘ NOT ONE of them is measured by anything above.`,
+    `  Walked ${walked} to find them: the DENOMINATOR, so a recogniser that stops spelling a lane shows as a dip rather than as silence.`,
+    '  ⛔ NOT the `check:type-check-coverage` / `check:type-check-debt` families the matched block may carry: those ratchet a LEDGER and a',
+    '    lane reds on a per-package `tsc` program instead — finding those two in a grep for `typecheck` is the false reassurance this block',
+    '    exists to break. NOT runnable as spelled either: CI\'s own shell over CI\'s whole-workspace filters, OUTSIDE the runnable total, and',
+    '    a row marked conditional MAY be skipped. ⇒ What a card owes instead: `pnpm --filter <pkg> run typecheck` for every package whose',
+    '    TypeScript this diff changes what a program can SEE — one added import or one new root-level declaration is enough.',
+  ];
+  for (const row of rows) {
+    lines.push(`  - [${row.workflow} · ${row.job}] ${row.step}${row.conditional ? '   (conditional — CI may skip it)' : ''}`);
+    for (const command of row.commands.slice(0, ALWAYS_RUN_COMMAND_CAP)) lines.push(`      ${command}`);
+    const elided = row.commands.length - ALWAYS_RUN_COMMAND_CAP;
+    if (elided > 0) lines.push(`      … ${elided} more line(s) — read the step in ${row.workflow}`);
+  }
+  return lines;
+}
+
+/**
  * The whole-tree channel, rendered (#14189) — its own heading, identical on
  * every card, printed ABOVE the reconciliation because its commands are inside
  * that total.
@@ -12105,9 +12233,9 @@ export function residueLines(
  * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
  * at, both halves of it — the spec and skills lanes' review of every round
  * they deliver (a card that changes contract accept/reject behaviour or
- * widens the public surface is spec-lane work, whichever seat found it), and
- * the `needs:contract-review` re-review sub-round (its opening self-check
- * reads this). The BUILD of such a card is at the default judgment tier, so
+ * widens the public surface is spec-lane work, whichever seat found it) and
+ * the `Served-tier:` line every `## Contract review` record carries. The
+ * BUILD of such a card is at the default judgment tier, so
  * this constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
  * file — the clause-① mandate rows below read it, the self-test compares
@@ -12120,26 +12248,43 @@ export function residueLines(
  * convenience. The review label deliberately names WHAT is reviewed, never a
  * model (maintainer, 2026-08-16: 「needs:fable-review 这个标签不好,下次模型升级怎么办」).
  *
- * ## A tier that is GONE is not a tier that is EXHAUSTED (#19544)
+ * ## A tier that is GONE is not a tier that is EXHAUSTED — and a SESSION not
+ * served one is neither of them (#19544, reversed by #19680)
  *
  * The exits below carry a QUOTA exemption: a tier that is exhausted comes
  * back, so the card waits out of the queue and the review is never downgraded
  * and never self-reviewed. A tier that has been RETIRED never comes back, and
  * the two cases differ on WHO MAY ACT: a seat reading 「⛔ 不许降档」 onto a
  * vanished tier holds its whole lane forever, and a seat picking the
- * replacement itself is the silent downgrade the fuse exists to stop. So a
+ * replacement itself is the silent downgrade this rule exists to stop. So a
  * retirement is a maintainer ruling and ⛔ never a seat's reading — and when
  * the ruling lands, this VALUE is the one line that moves. The ceiling of the
  * ladder `tierLines` prints is DERIVED from it ({@link TIER_CEILING}) so the
- * two cannot drift apart. This value moved off the retired ceiling on the
- * maintainer's 2026-09-21 ruling — verbatim: 「fable 没有了」, answered with
- * 「改成 opus」 — which is why the docblocks below still name the retired tier
- * where they record what was ruled AT THE TIME; a record of what was served
- * then stays true. Rule text: `references/contract-review.md` 「降档保险丝」.
+ * two cannot drift apart.
  *
- * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
+ * A THIRD case is what this line was once actually moved on, and it is neither
+ * of the two above. On 2026-09-21 two review dispatches died on their first
+ * request with an HTTP 429 quota refusal at this tier; that reading — ONE
+ * agent, temporarily, not authorized — was written in here as a retirement,
+ * and the skills moved with it. It is not a retirement. Maintainer,
+ * 2026-09-22, verbatim and untranslated (ruling record: issue comment
+ * 5771798588): 「复核档应该就是 fable 啊」 ·
+ * 「某个agent临时没有fable给的特殊授权，不应该改变skills」 ·
+ * 「fable 撤回卡 你来创建」.
+ *
+ * As one rule, and this docblock is its home — the PM skill points every tier
+ * value at this file, so there is nowhere else it could live: a tier word is
+ * RETIRED only by the maintainer's explicit ruling that NAMES a retirement; a
+ * 429, an exhausted quota or a missing authorization on one session is ⛔
+ * never a retirement; and a seat this tier is not served to renders the review
+ * through an isolated at-tier subagent or waits outside the queue — ⛔ never
+ * by editing this line. What one session is authorized for is a property of
+ * that session; this constant is a property of the lane's governance, and the
+ * two ⛔ never trade places.
+ *
+ * Rulebook: `.claude/skills/pm-dispatch/references/contract-review.md` — the review of record and its `Served-tier:` line.
  */
-export const CONTRACT_REVIEW_TIER = 'claude-opus-5';
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 
 /**
  * The globs that MANDATE a model tier for any card whose file surface touches
@@ -12207,9 +12352,10 @@ export const CONTRACT_REVIEW_TIER = 'claude-opus-5';
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
- *     SUSPECT_TIER_GLOBS below marks the contract surface itself, and `--tier`
- *     prints a hint for it — never a verdict. The enforcement lives one step
- *     later, in the PM skill's enqueue gate over the PR's ACTUAL diff.
+ *     SUSPECT_TIER_GLOBS below marks the contract surface itself — its test
+ *     files excepted, because tests do not ship — and `--tier` prints a hint
+ *     for it — never a verdict. The enforcement lives one step later, in the
+ *     PM skill's enqueue gate over the PR's ACTUAL diff.
  *
  * A path derivation that pretended to cover clause ② would produce the failure
  * this whole file is written against, one level up: a "no mandate" line read as
@@ -12336,11 +12482,48 @@ export const MANDATORY_TIER_GLOBS = [
  * enqueue gate before the card may enqueue — the diff is a fact; the card's
  * semantics were a prediction. The gate itself lives in the PM skill
  * (入队与落地); this output only points at it.
+ *
+ * ## Test files are EXCEPTED, by a predicate this file imports (#19936)
+ *
+ * The enqueue gate's path limb reads this surface, and the review rule it
+ * guards (the skill's contract-review reference) owes an at-tier review for
+ * `packages/spec/src/**` NON-TEST files only. Without an exception the two
+ * disagreed on a test-only diff: the limb demanded an at-tier record that the
+ * review rule forbade spawning an agent to write, so an off-tier seat's
+ * test-only spec PR could never enqueue. The maintainer's ruling (director
+ * batch #219 item 1, letter A, comment 5805897677) settled it toward the review
+ * rule: a published-contract change owes the record; a test-only change does
+ * not, because tests do not ship.
+ *
+ * So an entry may carry `except`, a predicate over a path its glob covers, and
+ * `deriveTier` drops a path it answers true for BEFORE recording a suspicion.
+ * The predicate is `isTestPath`, imported from `check-undeclared-dep-imports.mjs`
+ * and never respelled, as the ruling orders ("the repo's own test-file
+ * predicate, not a new spelling"). Chosen over the repo's other test predicates
+ * on measurement, not taste: that gate's own question is which files under a
+ * package's `src/` are published source and which are its tests — the ruling's
+ * question exactly; it covers the four shapes the ruling names (`*.test.ts`,
+ * `*.pin.test.ts`, anything under `__tests__/`, fixtures under a test
+ * directory); and it excepts no directory word a contract domain carries. A
+ * census predicate that treats `qa/` as a test directory would drop
+ * `packages/spec/src/qa/testing.zod.ts`, a real contract schema — pinned.
+ *
+ * A subtraction fails SILENT, so this one is held live: the self-test reds if
+ * the exception drops any tracked `*.zod.ts` (the package's `files[]` ships
+ * every `*.zod.ts` under `src/` verbatim), and if the predicate stops being
+ * the imported one. The call hands it the repo-relative path although it was
+ * written for package-relative ones; for this glob that is exact, because no
+ * segment of `packages/spec/src/` is a test-directory name. ⛔ The exception
+ * narrows the SUSPICION only: MANDATORY_TIER_GLOBS carries none, and an input
+ * that CONTAINS the contract surface (a directory surface such as
+ * `packages/spec`) is still a suspect, since the predicate answers no for it.
  */
 export const SUSPECT_TIER_GLOBS = [
   {
     glob: 'packages/spec/src/**',
     why: 'the contract surface (error-code ledger, *.zod.ts contract schemas) — the normal landing zone of a clause-② card',
+    except: isTestPath,
+    exceptWhy: 'a test file ships nothing, so a test-only diff changes no published contract and owes no at-tier record (the review rule already reads non-test files only)',
   },
 ];
 
@@ -12383,15 +12566,23 @@ export function tierWordOf(modelId) {
 export const TIER_CEILING = tierWordOf(CONTRACT_REVIEW_TIER);
 
 /**
- * Tier family words this ladder once printed and must never print again.
+ * Tier family words a maintainer ruling has RETIRED — none today.
  *
  * ⛔ Not a tier table and ⛔ not an ordering — a RETIRED-SPELLING guard, the
  * same shape as the retired clause-② keys pinned further down. The self-test
  * asserts no rendering contains one, so the day a ceiling is written down by
  * hand again it reds instead of quietly outliving the harness that served it.
- * A word leaves this list only when a maintainer ruling brings the tier back.
+ *
+ * EMPTY is this list's correct steady state, ⛔ not a disabled guard. A word
+ * enters it only on the maintainer's explicit ruling that names a retirement
+ * and leaves it only on a ruling that brings the tier back — the conditions
+ * {@link CONTRACT_REVIEW_TIER}'s docblock states; the one entry this list held
+ * was written on a session's quota refusal, which is none of those. Because an
+ * empty list clears every rendering for free, the self-test proves the guard
+ * on a MUTATED copy — a list naming a word the ladder really prints has to red
+ * — so the green above it is measured rather than vacuous.
  */
-export const RETIRED_TIER_WORDS = Object.freeze(['fable']);
+export const RETIRED_TIER_WORDS = Object.freeze([]);
 
 /**
  * Place a card's file surface against the mandatory globs. Pure over its
@@ -12400,6 +12591,10 @@ export const RETIRED_TIER_WORDS = Object.freeze(['fable']);
  * Throws when two globs covering the same surface mandate DIFFERENT tiers:
  * this file encodes no ordering over tiers, so choosing between them would be a
  * guess printed as a derivation.
+ *
+ * A suspect glob's `except` is applied per PATH, before the suspicion is
+ * recorded (SUSPECT_TIER_GLOBS says why test files are excepted): a mixed diff
+ * keeps every non-excepted path's suspicion, and a mandate is never excepted.
  */
 export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = SUSPECT_TIER_GLOBS) {
   const hits = [];
@@ -12409,7 +12604,9 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = S
       if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why, oneLineExit: g.oneLineExit !== false });
     }
     for (const g of suspectGlobs) {
-      if (hintCovers(g.glob, p)) suspects.push({ path: p, glob: g.glob, why: g.why });
+      if (hintCovers(g.glob, p) && !(typeof g.except === 'function' && g.except(p))) {
+        suspects.push({ path: p, glob: g.glob, why: g.why });
+      }
     }
   }
   const tiers = [...new Set(hits.map((h) => h.tier))];
@@ -12512,10 +12709,12 @@ export function changedLineLines(size) {
     ];
   }
   return [
-    `${reading} ⛔ OVER — this PR lands only by a HUMAN MERGE (maintainer ruling 2026-09-18; no exemption for generated` +
-      ' files, regen artefacts, docs builds or reverts). The governed terminal: no seat flips it ready, enqueues it, or' +
-      ' arms auto-merge — ACCEPT on the card, `needs-user-decision` on the PR, the final 维护者速读, review requested' +
-      ' from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the PR\'s own number.',
+    `${reading} ⛔ OVER — this PR lands as a Tier H surface does: an authorized APPROVED review (GOVERNED_APPROVERS, on ANY` +
+      ' commit) and then the owning seat, or a HUMAN MERGE (maintainer rulings 2026-09-18 and 2026-09-27; no exemption for' +
+      ' generated files, regen artefacts, docs builds or reverts). The governed terminal: no seat flips it ready, enqueues' +
+      ' it, or arms auto-merge before that — ACCEPT on the card, `needs-user-decision` on the PR, the final 维护者速读,' +
+      ' review requested from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the' +
+      ' PR\'s own number.',
   ];
 }
 
@@ -13419,6 +13618,10 @@ export function outsideBlockNames({
     // that renders it, like the three above, so the name cannot outlive the
     // heading.
     ...(jobFilteredJobs > 0 ? [`the ${jobFilteredJobs} path-scheduled CI job(s)`] : []),
+    // UNCONDITIONAL, like the unreachable listing and the tail below it: its
+    // block prints on every run, at zero rows as loudly as at four (#19172). ⛔
+    // So no count — a name sized off a row array goes missing on the empty walk.
+    'the type-check lanes',
     'the always-runs tail',
   ];
 }
@@ -14387,7 +14590,7 @@ function notMeasuredEvidenceTerm(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, size = null, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+export function derivationJson({ paths, size = null, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} }, typeCheckLanes = { rows: [], counts: {} } }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -14453,6 +14656,10 @@ export function derivationJson({ paths, size = null, matchedRows, kindGroups, pe
     // for) and a consumer that had to recount it could name a set the rows do
     // not contain.
     jobFilteredSteps: { jobs: jobFiltered.rows, counts: jobFiltered.counts },
+    // IN this document and ⛔ NOT in `commands` (#19172), on the disposition of
+    // the key above it: these are CI's own type-check programs, not families.
+    // `counts` is the walk's DENOMINATOR — an empty `lanes` is not a bare tree.
+    typeCheckLanes: { lanes: typeCheckLanes.rows, counts: typeCheckLanes.counts },
     counts,
   };
 }
@@ -14476,13 +14683,13 @@ export function derivationJson({ paths, size = null, matchedRows, kindGroups, pe
  * and the declared WIDE population was not mentioned in it at all. It reads
  * `outsideBlockNames` now, with the counts this function already holds (#16795).
  */
-function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
+function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} }, typeCheckLanes = { rows: [], counts: {} } }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, size, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, size, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered, typeCheckLanes }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -14576,6 +14783,24 @@ function machineReadableOutput(mode, { paths, size = null, matchedRows, kindGrou
       );
     }
     console.error('      ⇒ Run without --commands/--json to see each step printed as CI spells it.');
+  }
+  // ⭐ The SEVENTH thing stdout deliberately omits (#19172) — and the lane this
+  // card was filed on, because `--commands` disclosed it in no form at all. It
+  // is stated at BOTH zero and non-zero: an omitted heading reads as a clearance.
+  if (typeCheckLanes.rows.length) {
+    console.error(
+      `  + ${typeCheckLanes.rows.length} CI step(s) run a TYPE-CHECK PROGRAM and are ${mode === 'json' ? 'under typeCheckLanes, not in commands' : 'NOT above'} —` +
+        " CI's own shell over CI's whole-workspace filters, so there is no local invocation to hand you." +
+        ` Walked ${typeCheckLanes.counts?.steps ?? 0} step(s) / ${typeCheckLanes.counts?.runLines ?? 0} run: line(s) to find them.`,
+    );
+    for (const row of typeCheckLanes.rows) {
+      const more = row.commands.length > 1 ? `   (+${row.commands.length - 1} more lane line(s) in this step)` : '';
+      console.error(`      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}] ${row.commands[0]}${more}${row.conditional ? '   (conditional)' : ''}`);
+    }
+    console.error('      ⛔ pnpm check:type-check-coverage and pnpm check:type-check-debt are NOT these, whichever list they are in:'
+      + ' they ratchet a ledger. What this card owes is `pnpm --filter <pkg> run typecheck` per package whose TypeScript it touches.');
+  } else {
+    console.error(`  + ⊘ TYPE-CHECK LANES: ${typeCheckLanes.counts?.steps ?? 0} step(s) walked across ${typeCheckLanes.counts?.prWorkflows ?? 0} pull-request workflow(s), NONE found — read that as a broken read, never as a tree without type checking.`);
   }
   // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
   // the reason the three above are: the block is prose, and prose in the stream
@@ -14785,6 +15010,10 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     return recon.ok ? 0 : 1;
   }
 
+  // The SAME entries, for the reason the `jobFiltered` line states — and BELOW
+  // the `--ran` return, which renders no block of it (#19172).
+  const typeCheckLanes = typeCheckLaneSteps(workflowEntries);
+
   if (mode !== 'human') {
     machineReadableOutput(mode, {
       paths,
@@ -14796,6 +15025,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
       widePopulationRows,
       rosters,
       jobFiltered,
+      typeCheckLanes,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
@@ -15103,6 +15333,13 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
     console.log('');
     for (const line of jobFilteredOut) console.log(line);
   }
+
+  // The type-check lanes (#19172), directly above the tail because the tail is
+  // where these steps otherwise dissolve: one row among thirty-three, unnamed
+  // and unclassified by contract. The heading IS the repair — the rows were
+  // never missing, the name was.
+  console.log('');
+  for (const line of typeCheckLaneLines(typeCheckLanes.rows, typeCheckLanes.counts)) console.log(line);
 
   // The always-runs tail prints on every run for the same reason and with the
   // same standing: it is not about the card's paths either, and the family list
@@ -22709,7 +22946,7 @@ function selfTest() {
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
       'scripts/cli-build-prerequisite.mjs:111 inherited-population',
       'scripts/pm/check-expected-skips.mjs:131 self-test-reads',
-      'scripts/pm/dispatch-gates.mjs:708 inherited-population',
+      'scripts/pm/dispatch-gates.mjs:713 inherited-population',
     ].join(' · '),
     censusRows.join(' · '),
   );
@@ -25214,7 +25451,7 @@ function selfTest() {
   // per-file entry under `skills/` has quietly returned.
   t('a catalog file is covered by exactly ONE entry — skills/** — now that the published PM skill and its own entry are gone', catalogHit.hits.length === 1 && catalogHit.hits[0].glob === 'skills/**');
   t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
-  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
+  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/state-machine.md']).mandatory === false);
   t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
   t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
   const catalogLines = tierLines(catalogHit).join('\n');
@@ -25315,9 +25552,22 @@ function selfTest() {
   t('the ladder prints a ceiling DERIVED from the contract-review constant, so the two cannot drift apart', ladderLine.includes(`ceiling ${tierWordOf(CONTRACT_REVIEW_TIER)})`), ladderLine || 'no ladder line was rendered at all');
   t("…in the ladder's own vocabulary — the constant's FAMILY word, so a parseable id NEVER reaches the ladder verbatim", /^claude-[a-z]+-/.test(CONTRACT_REVIEW_TIER) && TIER_CEILING === tierWordOf(CONTRACT_REVIEW_TIER) && !ladderLine.includes(CONTRACT_REVIEW_TIER), ladderLine);
   t('tierWordOf reads the family out of an id, and hands an unreadable one back VERBATIM rather than guessing a word', tierWordOf('claude-example-9-9') === 'example' && tierWordOf('an-unfamiliar-shape') === 'an-unfamiliar-shape' && tierWordOf(null) === '');
-  t(`⛔ no RETIRED tier word survives in any live RULE — ladder, exits, clause-② note and suspicion line all read the constant (dirty: ${ladderRenderings.map((l, i) => RETIRED_TIER_WORDS.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`).join(' ')).filter(Boolean).join(' ') || 'none'})`, ladderRenderings.every((l) => RETIRED_TIER_WORDS.every((w) => !l.toLowerCase().includes(w))));
+  // The guard is driven through ONE function so the live reading and its
+  // control run the same search. RETIRED_TIER_WORDS is EMPTY — no ruling has
+  // retired a tier word — so the live case below clears every rendering for
+  // free, and a case asserting only that green would pass just as happily on a
+  // search that had stopped matching anything. The non-vacuity case therefore
+  // moved off the LIVE list, where it could only ever count entries, and onto
+  // a MUTATED copy: feed the guard a word the ladder demonstrably prints and
+  // it must red. That is the invariant an empty list has to keep provable — a
+  // word still in the ladder can never be in this list.
+  const retiredWordHits = (words) =>
+    ladderRenderings.flatMap((l, i) => words.filter((w) => l.toLowerCase().includes(w)).map((w) => `${i}/${w}`));
+  t(`⛔ no RETIRED tier word survives in any live RULE — ladder, exits, clause-② note and suspicion line all read the constant (dirty: ${retiredWordHits(RETIRED_TIER_WORDS).join(' ') || 'none'})`, retiredWordHits(RETIRED_TIER_WORDS).length === 0);
   t('…and the guard is not reading an empty string — every rendering it clears still carries its own rule text', ladderRenderings.every((l) => l.includes('Model tier')) && ladderRenderings.some((l) => l.includes('Exits,')));
-  t('the retired-spelling guard is not vacuous — it names at least one word, and none of them is a tier still in the ladder', RETIRED_TIER_WORDS.length > 0 && !RETIRED_TIER_WORDS.includes(TIER_FLOOR) && !RETIRED_TIER_WORDS.includes(TIER_DEFAULT) && !RETIRED_TIER_WORDS.includes(TIER_CEILING));
+  t(`no tier word is RETIRED today — the list is empty and frozen, which is what "a temporary lack of authorization is not a retirement" looks like in data (holds: ${[...RETIRED_TIER_WORDS].join(', ') || 'none'})`, Array.isArray(RETIRED_TIER_WORDS) && RETIRED_TIER_WORDS.length === 0 && Object.isFrozen(RETIRED_TIER_WORDS));
+  t(`…and the guard is NOT vacuous, proved on a MUTATED copy: a list naming the ladder's own ceiling word (${TIER_CEILING}) REDS, so the green above is the empty list and not a broken search (mutated hits: ${retiredWordHits([TIER_CEILING]).join(' ') || 'NONE — the control never fired'})`, retiredWordHits([TIER_CEILING]).length > 0 && retiredWordHits(['a-word-no-rendering-prints']).length === 0);
+  t('…and the invariant that copy stands for: no tier word still in the ladder may ever enter the live list', [TIER_FLOOR, TIER_DEFAULT, TIER_CEILING].every((w) => !RETIRED_TIER_WORDS.includes(w)));
   // A sibling case further down pins the constant's CURRENT value to exactly
   // one site under these roots. What that case cannot see is a RETIRED id left
   // behind — it is not the current value, so nothing compares it to anything,
@@ -25342,12 +25592,12 @@ function selfTest() {
     });
   }
   t(`${SKILL_RULEBOOK_ROOT} spells NO model id at all — ${skillRulebookFiles.length} file(s) read, and a RETIRED id left there is caught HERE, where a current-value pin cannot see it (found: ${skillIdSpellings.join(', ') || 'none'})`, skillRulebookFiles.length > 0 && skillIdSpellings.length === 0);
-  // The rulebook half of the same coupling: the skill names the constant, and
-  // its downgrade fuse carries the case the quota exemption never had.
+  // The rulebook half of the same coupling: the skill names the constant. Its
+  // downgrade-fuse section is retired (maintainer 2026-09-22 「降档保险丝 不留」,
+  // #19061 comment 5772289798), so the guard below reds if that text creeps back.
   const fuseRules = readFileSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/contract-review.md'), 'utf8');
   t('the rulebook names the contract-review tier by its CONSTANT, so a retirement moves the value and the prose follows', fuseRules.includes('`CONTRACT_REVIEW_TIER`'));
-  t('…and its fuse keeps the quota exemption pointed at DISPATCH, never at the review', /额度耗尽豁免[^\n]*⛔[^\n]*不及复核/.test(fuseRules));
-  t('…and carries the case it never had: a RETIRED tier is not an exhausted one, and it is a maintainer ruling, ⛔ never a seat\'s reading', /档位退役[^\n]*≠[^\n]*耗尽[^\n]*维护者裁决[^\n]*⛔[^\n]*非席位读数/.test(fuseRules));
+  t('the rulebook no longer carries the retired 降档保险丝 lines (maintainer 2026-09-22 「降档保险丝 不留」, #19061 comment 5772289798)', !/额度耗尽豁免[^\n]*不及复核/.test(fuseRules) && !/档位退役[^\n]*≠[^\n]*耗尽/.test(fuseRules));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
   //
@@ -25371,10 +25621,56 @@ function selfTest() {
   t('a mandated surface still prints its suspect paths — the enqueue gate reads diffs, not dispatch tiers', mandatedAndSuspect.mandatory && mandatedAndSuspect.suspects.length === 1 && tierLines(mandatedAndSuspect).join('\n').includes('SUSPECT'));
   t('a verdict built without a suspects field still renders (suspicion defaults empty)', tierLines({ mandatory: false, tier: null, hits: [], declared: 1 }).length === 3);
 
+  // ── Test files under the contract surface are EXCEPTED (#19936) ──────────
+  //
+  // The path limb must read what the review rule reads — non-test contract
+  // files — or a test-only spec PR from an off-tier seat can never enqueue.
+  // Ruling 5805897677 (letter A) names the pins: a test-only spec diff shows
+  // no SUSPECT line, a `*.zod.ts` diff still does, and PR #19932's one file is
+  // the lit case. The shapes are the four the ruling lists; the paths are
+  // judged by the pure function, so a hypothetical one decides as well as a
+  // tracked one does.
+  const LIT_TEST_ONLY = 'packages/spec/src/type-alias-convention.pin.test.ts';
+  const litTestOnly = fableOf([LIT_TEST_ONLY]);
+  const litRendered = tierLines(litTestOnly).join('\n');
+  t('⭐ the lit case — a test-only spec diff, PR #19932\'s one file — raises NO suspicion', litTestOnly.suspects.length === 0 && !litTestOnly.mandatory, litTestOnly.suspects);
+  t('…renders no SUSPECT line, and still prints the clause-② note, so the silence is not a clearance', !litRendered.includes('SUSPECT') && litRendered.includes('Clause ② is NOT reachable from paths'), litRendered);
+  const zodStill = fableOf(['packages/spec/src/ui/view.zod.ts']);
+  t('⭐ a *.zod.ts contract schema is STILL a suspect and still renders the SUSPECT line', zodStill.suspects.length === 1 && tierLines(zodStill).join('\n').includes('SUSPECT'));
+  for (const [shape, path] of [
+    ['a plain *.test.ts', 'packages/spec/src/stack.test.ts'],
+    ['a *.pin.test.ts', LIT_TEST_ONLY],
+    ['a helper under __tests__/', 'packages/spec/src/data/__tests__/filter-helpers.ts'],
+    ['a fixture under a __tests__/ directory', 'packages/spec/src/data/__tests__/fixtures/filter.fixture.json'],
+    ['a fixture under a test/ directory', 'packages/spec/src/ui/test/fixtures/view-fixture.ts'],
+  ]) {
+    t(`${shape} on the contract surface is excepted — no suspicion`, fableOf([path]).suspects.length === 0, path);
+  }
+  const mixedDiff = fableOf([LIT_TEST_ONLY, 'packages/spec/src/ui/view.zod.ts']);
+  t('a MIXED diff keeps its contract file\'s suspicion — the exception is per path, never per diff', mixedDiff.suspects.length === 1 && mixedDiff.suspects[0].path === 'packages/spec/src/ui/view.zod.ts', mixedDiff.suspects);
+  t('⛔ a contract domain whose NAME reads test-flavoured is no test: qa/testing.zod.ts stays a suspect', fableOf(['packages/spec/src/qa/testing.zod.ts']).suspects.length === 1);
+  t('…while the test file beside it is excepted', fableOf(['packages/spec/src/qa/testing.test.ts']).suspects.length === 0);
+  t('an input that CONTAINS the contract surface is still a suspect — the exception narrows files, never the reverse match', fableOf(['packages/spec']).suspects.length === 1);
+  t('a mandate is never excepted: a test-named file under a mandated root keeps its mandate', fableOf(['skills/objectstack-data/x.test.ts']).mandatory === true);
+  const contractEntry = SUSPECT_TIER_GLOBS.find((g) => g.glob === 'packages/spec/src/**');
+  t('the exception is the IMPORTED test-file predicate — the repo\'s own, never a respelling here', contractEntry?.except === isTestPath);
+  t('…whose home is a gate script, so a card editing it derives this gate by gate-script identity', isGateScriptPath('scripts/check-undeclared-dep-imports.mjs', gateFamilyFiles()));
+  t('every suspect entry that excepts carries a predicate and the reason for it', SUSPECT_TIER_GLOBS.every((g) => g.except === undefined || (typeof g.except === 'function' && typeof g.exceptWhy === 'string' && g.exceptWhy.length > 0)));
+  // The subtraction held LIVE, because a subtraction fails silent: the
+  // package's files[] ships every `*.zod.ts` under `src/` verbatim, so an
+  // exception that dropped one would take a shipped contract off the limb.
+  const specSrcTracked = trackedFiles().filter((f) => f.startsWith('packages/spec/src/'));
+  const specSrcZod = specSrcTracked.filter((f) => f.endsWith('.zod.ts'));
+  const exceptedZod = specSrcZod.filter((f) => fableOf([f]).suspects.length === 0);
+  t(`no tracked *.zod.ts on the contract surface is excepted (${specSrcZod.length} read; excepted: ${exceptedZod.join(', ') || 'none'})`, specSrcZod.length > 0 && exceptedZod.length === 0);
+  const exceptedTracked = specSrcTracked.filter((f) => fableOf([f]).suspects.length === 0);
+  t('the exception is live, not vacuous: it drops tracked test files on this tree, and only what the predicate names', exceptedTracked.length > 0 && exceptedTracked.every((f) => isTestPath(f)), `${exceptedTracked.length} of ${specSrcTracked.length}`);
+
   // ── The changed-line reading beside the tier verdict (2026-09-18 ruling) ──
   const overLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 1 }).join('\n');
-  t('over the threshold, the line says HUMAN MERGE, names the governed terminal and the landing pre-check',
-    overLine.includes('HUMAN MERGE') && overLine.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}`) && overLine.includes('arms auto-merge') && overLine.includes('check-governed-merges.mjs --pr'), overLine);
+  t('over the threshold, the line names BOTH landings — an authorized APPROVED review or a HUMAN MERGE — the governed terminal and the landing pre-check',
+    overLine.includes('HUMAN MERGE') && overLine.includes('authorized APPROVED review (GOVERNED_APPROVERS, on ANY commit)') && !overLine.includes('lands only by') &&
+      overLine.includes(`threshold ${HUMAN_MERGE_LINE_THRESHOLD}`) && overLine.includes('arms auto-merge') && overLine.includes('check-governed-merges.mjs --pr'), overLine);
   const atLine = changedLineLines({ additions: HUMAN_MERGE_LINE_THRESHOLD, deletions: 0 }).join('\n');
   t('exactly at the threshold is under it — strictly greater, as the gate reads it', atLine.includes('under.') && !atLine.includes('HUMAN MERGE'), atLine);
   const noneLine = changedLineLines(null).join('\n');
@@ -26306,8 +26602,16 @@ function selfTest() {
   t('and refuses the one-line-class exit on stdout, where the claim comment reads it', (catalogCli.stdout ?? '').includes('NOT available') && !(catalogCli.stdout ?? '').includes('drops to opus execution'));
   const catalogAiCli = runCli(['--tier', 'skills/objectstack-ai/SKILL.md']);
   t('⭐ a second catalog SKILL.md prints the same mandate', catalogAiCli.status === 0 && (catalogAiCli.stdout ?? '').includes('MANDATORY') && (catalogAiCli.stdout ?? '').includes("'skills/**'"));
-  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/core-rules.md']);
+  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/state-machine.md']);
   t('⭐ --tier on an internal pm-dispatch references file still prints NO mandate', internalRefsCli.status === 0 && (internalRefsCli.stdout ?? '').includes('no path-derived mandate') && !(internalRefsCli.stdout ?? '').includes('MANDATORY'));
+  // The clause-② test exception on the real CLI (#19936): the ruling's pins are
+  // on `--tier` OUTPUT, so both acceptance paths are measured end to end. The
+  // lit case goes through the asserted helper, so a later rename of that file
+  // leaves the pin deciding rather than refusing as an absent path.
+  const litTierCli = runCliHypothetical(['--tier', 'packages/spec/src/type-alias-convention.pin.test.ts']);
+  t('⭐ --tier on the lit case (a test-only spec diff) derives, and prints NO SUSPECT line', litTierCli.status === 0 && (litTierCli.stdout ?? '').includes('no path-derived mandate') && !(litTierCli.stdout ?? '').includes('SUSPECT'), litTierCli.stdout);
+  const zodTierCli = runCliHypothetical(['--tier', 'packages/spec/src/ui/view.zod.ts']);
+  t('⭐ --tier on a *.zod.ts contract schema still prints the SUSPECT line naming it', zodTierCli.status === 0 && (zodTierCli.stdout ?? '').includes('SUSPECT') && (zodTierCli.stdout ?? '').includes('packages/spec/src/ui/view.zod.ts'), zodTierCli.stdout);
 
   // ── The entry guard (#9757) ───────────────────────────────────────────────
   //
@@ -26926,6 +27230,43 @@ function selfTest() {
     outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
   );
 
+  // ── Type-check lanes (#19172): the negatives are the live over-matches a SUBSTRING reading produces here ──
+  t('a `tsc --noEmit` or `-p <config>` invocation is a lane',
+    isTypeCheckInvocation('pnpm --filter @objectstack/spec exec tsc --noEmit') && isTypeCheckInvocation('npx tsc -p tsconfig.test.json'));
+  t('a `run typecheck` task is a lane whoever runs it',
+    isTypeCheckInvocation("pnpm exec turbo run typecheck --filter='./packages/*'") && isTypeCheckInvocation("pnpm --filter './examples/*' run typecheck"));
+  t('⛔ the two LEDGER families are NOT lanes — the substitution this block exists to break',
+    !isTypeCheckInvocation('pnpm check:type-check-coverage') && !isTypeCheckInvocation('pnpm check:type-check-debt'));
+  t('⛔ nor is prose that merely carries the word, which is both live over-matches',
+    !isTypeCheckInvocation('echo "::error::Compiled test files found. A tsc-built package is"')
+      && !isTypeCheckInvocation('console.log(`::error::type-check lane ${id} concluded ${result}.`);'));
+  const laneWf = tailWf.replace('run: pnpm check:engine-double-contract', "run: pnpm exec turbo run typecheck --filter='./packages/*'")
+    .replace('run: pnpm check:console-pin', 'run: pnpm --filter @objectstack/spec exec tsc --noEmit');
+  const laneFix = typeCheckLaneSteps([{ file: 'fixture.yml', text: laneWf }]);
+  t('a lane in an unconditional job is a row, and one in a CONDITIONAL job is KEPT and marked',
+    laneFix.rows.some((r) => r.job === 'gates' && !r.conditional)
+      && laneFix.rows.some((r) => r.job === 'conditional-job' && r.conditional) && laneFix.counts.conditional === 1,
+    laneFix.rows.map((r) => `${r.job}:${r.conditional}`).join(' · '));
+  t('a workflow with no pull_request trigger contributes no lane and is sized rather than dropped',
+    typeCheckLaneSteps([{ file: 'p.yml', text: 'on:\n  push:\njobs:\n  t:\n    steps:\n      - run: pnpm run typecheck' }]).counts.nonPullRequestWorkflows === 1);
+  const laneLines = typeCheckLaneLines(laneFix.rows, laneFix.counts);
+  t('the heading sizes the surface and the block prints the narrowed prescription',
+    laneLines[0].includes('2 CI step(s)') && laneLines.some((l) => l.includes('pnpm --filter <pkg> run typecheck')));
+  t('⭐ an EMPTY walk renders LOUD rather than dropping the block',
+    typeCheckLaneLines([], { prWorkflows: 7 })[0].includes('CAME BACK EMPTY')
+      && typeCheckLaneLines([], { prWorkflows: 7 }).some((l) => l.includes('7 pull-request workflow(s)')));
+  t('the closing enumeration names the block UNCONDITIONALLY, so an empty walk cannot hide it',
+    outsideBlockNames({}).includes('the type-check lanes'));
+  // ⭐ THE POSITIVE CONTROL, live, pinned BY NAME and ⛔ never by row count: a
+  // count stays green while three of four lanes vanish. `Type Check · debt
+  // ledger` is deliberately absent — its only `run:` IS the ledger family.
+  const liveLanes = typeCheckLaneSteps(liveWorkflows);
+  const liveLaneJobs = liveLanes.rows.map((r) => r.job);
+  t('LIVE: every lane behind the required aggregate is found BY NAME, and no ledger family is mistaken for one',
+    ['Type Check · source gates', 'Type Check · workspace', 'Type Check · consumer gates'].every((j) => liveLaneJobs.includes(j))
+      && liveLanes.rows.every((r) => r.commands.every((c) => !c.includes('check:type-check'))),
+    `${liveLaneJobs.join(' · ')} - walked ${liveLanes.counts.steps} step(s) / ${liveLanes.counts.runLines} run line(s)`);
+
   // ── The seam between this tool and its caller (#13462) ────────────────────
   //
   // Unit half first: the split and the footer are pure, so their edge cases are
@@ -27080,6 +27421,7 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 3 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the type-check lanes',
       'the always-runs tail',
     ]) {
       t(`and it names "${name}" — every block printed below it, not a subset`, namesOutside(outsideLine, [name]));
@@ -27090,7 +27432,7 @@ function selfTest() {
     // output meets the blocks in the order this line promised them.
     t('and spells them in the order they are PRINTED below, as one phrase', (outsideLine ?? '').includes(
       'The 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
-        + ' the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+        + ' the unreachable listing, the type-check lanes and the always-runs tail below are each OUTSIDE it, each with its own count.',
     ));
     // The THREE counts are the lengths of the arrays that RENDER those blocks,
     // so the enumeration cannot name a block the run did not print: at zero rows
@@ -27104,7 +27446,7 @@ function selfTest() {
     // pending family the sentence pointed below at a heading that is not there
     // (#16795). It is conditional on its own count now, like the two above it.
     t('nor the pending-changeset block, whose heading is absent at zero too', !(noBlocksLine ?? '').toLowerCase().includes('pending-changeset'));
-    t('...while still naming the two blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the always-runs tail']));
+    t('...while still naming the three blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the type-check lanes', 'the always-runs tail']));
     // ...and the CONTROL for that pair: a run with pending families and nothing
     // else names the third block and neither of the other two, so the case
     // above cannot be passing because the name went away for good.
@@ -27125,6 +27467,7 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 1 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the type-check lanes',
       'the always-runs tail',
     ])));
     // ...and the SHORT-harvest warning is conditional, on the rule the ⛔
@@ -28167,7 +28510,7 @@ function selfTest() {
     }
     t('and spells them in PRINT order, as the one phrase the human lane spells', ranAllBlocks.includes(
       'the 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
-        + ' the unreachable listing, the 4 path-scheduled CI job(s) and the always-runs tail are each outside the derived total',
+        + ' the unreachable listing, the 4 path-scheduled CI job(s), the type-check lanes and the always-runs tail are each outside the derived total',
     ));
     // The NEGATIVE: at zero rows those three blocks are not printed by the run
     // this sentence points at, so naming them would send a reader to headings
@@ -28180,7 +28523,7 @@ function selfTest() {
         && !ranNoBlocks.toLowerCase().includes('pending-changeset')
         && !ranNoBlocks.toLowerCase().includes('path-scheduled'),
     );
-    t('...while still naming the two that print unconditionally', ranNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    t('...while still naming the three that print unconditionally', ranNoBlocks.includes('the unreachable listing, the type-check lanes and the always-runs tail'));
 
     // ── Lane 2: the `--commands` / `--json` stderr accounting ───────────────
     //
@@ -28257,7 +28600,7 @@ function selfTest() {
         && !commandsNoBlocks.toLowerCase().includes('pending-changeset')
         && !commandsNoBlocks.toLowerCase().includes('path-scheduled'),
     );
-    t('...while still naming the two that print unconditionally', commandsNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    t('...while still naming the three that print unconditionally', commandsNoBlocks.includes('the unreachable listing, the type-check lanes and the always-runs tail'));
     // ⛔ And the stream stays a STREAM: the accounting is stderr-only, so a
     // consumer redirecting stdout gets commands with no prose in front of them.
     // That is the property the whole mode exists for, and a disclaimer that

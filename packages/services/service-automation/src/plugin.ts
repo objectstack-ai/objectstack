@@ -13,7 +13,7 @@ import type {
 import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { AutomationEngine } from './engine.js';
-import type { RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
@@ -127,6 +127,13 @@ export interface AutomationServicePluginOptions {
      * — only its default-level narration is.
      */
     runSummaryLog?: RunSummaryLogLevel;
+    /**
+     * [#19834] This kernel's scheduled-work policy, forwarded to the engine
+     * unchanged — see {@link AutomationEngineOptions.scheduledWorkPolicy}.
+     * Absent, the deployment default (`OS_AUTOMATION_SCHEDULED_WORK_ENABLED`)
+     * applies exactly as before.
+     */
+    scheduledWorkPolicy?: AutomationEngineOptions['scheduledWorkPolicy'];
     /**
      * Per-flow cap on terminal run-history rows, enforced at write time (the
      * "or 100 runs/flow, whichever first" half of the #2585 retention
@@ -288,7 +295,6 @@ function connectorInstanceSignature(entry: {
     icon?: unknown;
     type?: unknown;
     retryConfig?: unknown;
-    connectionTimeoutMs?: unknown;
     requestTimeoutMs?: unknown;
 }): string {
     return stableStringify({
@@ -304,7 +310,12 @@ function connectorInstanceSignature(entry: {
         // edit to it must re-materialize, exactly like a `providerConfig` edit.
         // Omitting it here would leave the old policy serving until restart.
         retryConfig: entry.retryConfig ?? null,
-        connectionTimeoutMs: entry.connectionTimeoutMs ?? null,
+        // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049). It was
+        // in the fingerprint for the reason above, but it was never a
+        // materialization input: no provider applied it, so an edit to it
+        // re-materialized a bundle that behaved identically and only changed the
+        // number the reported def echoed. Dropping it narrows the fingerprint to
+        // the inputs that actually change the transport.
         requestTimeoutMs: entry.requestTimeoutMs ?? null,
     });
 }
@@ -332,11 +343,15 @@ interface DeclaredConnectorItem {
     /**
      * The entry's declared resilience policy, raw as authored — defaults are
      * NOT applied here (see the note above), so `retryConfig` is parsed on the
-     * way onto `ConnectorProviderContext` and the two timeouts are carried
+     * way onto `ConnectorProviderContext` and `requestTimeoutMs` is carried
      * verbatim, `undefined` standing for "the author stated nothing".
+     *
+     * `connectionTimeoutMs` was a third member and is REMOVED with the spec key
+     * (ADR-0049): the platform never applied it as a connect deadline, and a
+     * stored row that still carries it is stripped by the D2 conversion
+     * `connector-connection-timeout-ms-removed` on rehydration.
      */
     retryConfig?: unknown;
-    connectionTimeoutMs?: number;
     requestTimeoutMs?: number;
 }
 
@@ -595,6 +610,7 @@ export class AutomationServicePlugin implements Plugin {
         this.engine = new AutomationEngine(ctx.logger, undefined, {
             maxLogSize: this.options.maxLogSize,
             runSummaryLog: this.options.runSummaryLog,
+            scheduledWorkPolicy: this.options.scheduledWorkPolicy,
         });
 
         // Register as global service — other plugins access via ctx.getService('automation')
@@ -1586,7 +1602,6 @@ export class AutomationServicePlugin implements Plugin {
                 // `connectorFetchOptions()` → `resilientFetch()`; a custom
                 // provider doing its own I/O reads it here.
                 retryConfig,
-                connectionTimeoutMs: entry.connectionTimeoutMs,
                 requestTimeoutMs: entry.requestTimeoutMs,
                 // #3016 — lets a factory dereference relative file refs (e.g.
                 // openapi's `providerConfig.spec: './billing-openapi.json'`),
@@ -1779,7 +1794,8 @@ export class AutomationServicePlugin implements Plugin {
             status: 'error',
             enabled: true,
             authentication: { type: 'none' },
-            connectionTimeoutMs: 30000,
+            // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049): it
+            // was written here only so the literal satisfied the post-parse type.
             requestTimeoutMs: 30000,
             actions: [],
         };

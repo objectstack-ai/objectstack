@@ -188,17 +188,22 @@ describe('#5005 rule 3 — a key with no declared rule warns', () => {
     expect(warnSpy.mock.calls.map((c) => String(c[0])).some((w) => w.includes("'futureList'"))).toBe(true);
   });
 
-  it('warns rather than skipping a collection key that holds a non-array value', () => {
+  it('refuses — never skips — a collection key that holds a non-array value (#19784)', () => {
+    // Skipping it (the #5005 warn-and-drop) composed an artifact that silently
+    // lacked stack B's views; the full per-key census lives in
+    // `compose-stacks-concat-shape-refusal.test.ts`.
     const a = raw({ manifest: manifestA, views: [{ name: 'v1' }] });
     const b = raw({ manifest: manifestB, views: 'not-an-array' });
 
-    const composed = composeStacks([a, b]);
-    expect(composed.views).toHaveLength(1);
-    expect(
-      warnSpy.mock.calls
-        .map((c) => String(c[0]))
-        .some((w) => w.includes('composeStacks') && w.includes("'views'") && w.includes('cannot be composed')),
-    ).toBe(true);
+    let thrown: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      composeStacks([a, b]);
+    } catch (e) {
+      thrown = e as Error & { code?: string; status?: number };
+    }
+    expect(thrown?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(thrown?.status).toBe(422);
+    expect(thrown?.message).toContain("'views'");
   });
 
   it('does NOT warn for keys the composer has a declared rule for', () => {

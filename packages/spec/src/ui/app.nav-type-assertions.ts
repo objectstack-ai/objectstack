@@ -136,7 +136,7 @@ asInput(42);
 // @ts-expect-error — a nav item is not a string
 asInput('nonsense');
 
-// @ts-expect-error — `type` must be one of the nine declared discriminants
+// @ts-expect-error — `type` must be one of the ten declared discriminants
 asInput({ id: 'bad_type', type: 'not_a_variant', label: 'X' });
 
 // @ts-expect-error — `group` requires `children` on both sides
@@ -147,6 +147,18 @@ asInput({ id: 'grp', type: 'group', label: 'G', children: [], defaultOpen: true 
 
 // @ts-expect-error — only `object` and `group` nest, on this side too
 asInput({ id: 'page_probe', type: 'page', label: 'P', pageName: 'probe_page', children: [] });
+
+/**
+ * The `doc` branch: a book entry, a page entry, and both. The "at least one of
+ * `book` / `doc`" rule is a refinement, so it is the RUNTIME's to refuse (pinned
+ * in `app-doc-nav-item.test.ts`); the type admits the target-less shape.
+ */
+asInput({ id: 'nav_help', type: 'doc', label: 'Help', book: 'crm_manual' });
+asInput({ id: 'nav_guide', type: 'doc', doc: 'crm_lead_guide' });
+asInput({ id: 'nav_both', type: 'doc', book: 'crm_manual', doc: 'crm_lead_guide' });
+
+// @ts-expect-error — `doc` is the `doc` branch's key, not a `page` item's
+asInput({ id: 'page_doc', type: 'page', label: 'P', pageName: 'probe_page', doc: 'crm_lead_guide' });
 
 /* ────────────────────────────────────────────────────────────────────────────
  * The halves must stay DIFFERENT.

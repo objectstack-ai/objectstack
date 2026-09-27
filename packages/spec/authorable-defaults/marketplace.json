@@ -3,7 +3,6 @@
   "category": "marketplace",
   "defaults": [
     "marketplace/ArtifactReference:format = \"tgz\"",
-    "marketplace/MarketplaceInstallRequest:enableOnInstall = true",
     "marketplace/MarketplaceListing:packageType = \"app\"",
     "marketplace/MarketplaceListing:pricing = \"free\"",
     "marketplace/MarketplaceListing:status = \"draft\"",

@@ -234,8 +234,13 @@ describe('[#5526] the SQL bind form converts only what a driver cannot bind', ()
     // The `null` half of the same position is untouched and asserted below, in
     // the SQL/engine consumer blocks — that is the pair this file exists to keep
     // apart, and they live one `===` apart in every polarity table in the module.
+    //
+    // [#20035] RE-JUDGED for the wording only: the refusal now comes from the
+    // shared comparand-TYPE face, which the door runs before any leaf is built
+    // (#7872, 2026-08-12: 「refuses everything else loudly at the compile
+    // face」), in its sentence and at its path — the FilterArray spelling's.
     const refusal = (): unknown => normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } });
-    expect(refusal).toThrowError(/comparand at "code"\.\$eq is undefined/);
+    expect(refusal).toThrowError(/^Filter comparand at where\.code\.\$eq is undefined\./);
     // Still the module's one envelope (#5352), so the REST face answers 400.
     try {
       refusal();
@@ -461,17 +466,33 @@ describe("[#5526] analytics SQL path — a text column's own spelling is what ge
     expect(await bindsFor({ code: { $eq: false } as never })).toEqual([0]);
   });
 
-  it('a null comparand in an ORDERING position binds NULL, so the widget draws nothing', async () => {
-    // Uncovered by any ruling before this (#5332 said so explicitly): the encoder
-    // wrote `''`, i.e. `code > ''`, a real comparison that on a text column
-    // returned rows. NULL is UNKNOWN for every row — no rows, no accident.
+  it('a null comparand in an ORDERING position is REFUSED before anything binds', async () => {
+    // Uncovered by any ruling when #5526 landed (#5332 said so explicitly): the
+    // encoder wrote `''`, i.e. `code > ''`, a real comparison that on a text
+    // column returned rows, and #5526 left it binding NULL (UNKNOWN for every
+    // row: no rows, no accident).
+    //
+    // [#20010] RE-JUDGED. The position has a ruling now: 2026-09-01 (#14080),
+    // quoted from the shared comparand-shape face — "A `null` comparand of
+    // `$gt` / `$gte` / `$lt` / `$lte` … refused at this door, same envelope, so
+    // the divergent cells are constructively unreachable". This door runs that
+    // face on the object spelling, so the filter is refused INVALID_FILTER /
+    // 400 and no statement binds anything. The concern this case was written
+    // for still holds, more strongly: no `''` is ever bound.
     bound.length = 0;
-    const result = await new NativeSQLStrategy().execute(
-      { cube: 'orders', measures: ['total'], dimensions: ['id'], where: { code: { $gt: null } } } as AnalyticsQuery,
-      ctx,
-    );
-    expect(bound[0]).toEqual([null]);
-    expect(result.rows).toEqual([]);
+    let err: { code?: unknown; status?: unknown; message?: unknown } | undefined;
+    try {
+      await new NativeSQLStrategy().execute(
+        { cube: 'orders', measures: ['total'], dimensions: ['id'], where: { code: { $gt: null } } } as AnalyticsQuery,
+        ctx,
+      );
+    } catch (e) {
+      err = e as typeof err;
+    }
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err?.status).toBe(400);
+    expect(String(err?.message).startsWith('Operator "$gt" on field "code" does not accept a null comparand')).toBe(true);
+    expect(bound).toEqual([]);
   });
 });
 

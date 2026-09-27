@@ -201,12 +201,22 @@ function makeEngine() {
       (tables[object] ??= []).push({ ...data });
       return data;
     },
-    async update(object: string, data: any, options?: any) {
+    // [#19989] `opCtx` is the operation the middleware chain ran on. The engine
+    // runs an installed write-image check on every update before it writes, on
+    // the rows it will STORE, each merged with the payload: not the payload
+    // alone, which would judge a row missing every field the update leaves
+    // unchanged. So this double does the same.
+    async update(object: string, data: any, options?: any, opCtx?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);
       const rows = (tables[object] ??= []);
       const targets = dispatch.kind === 'by-id'
         ? rows.filter((r) => r.id === dispatch.id)
         : rows.filter((r) => matches(r, options?.where));
+      const seam = opCtx?.postHookWriteImageCheck;
+      if (seam) {
+        seam.honoured = true;
+        await seam.evaluate(targets.map((r) => ({ ...r, ...data })));
+      }
       for (const r of targets) Object.assign(r, data);
       return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
@@ -303,14 +313,17 @@ async function makeStack(resolver: Resolver | null): Promise<Stack> {
           // past a gate that never ran, and the middleware refuses exactly that
           // (fail closed) rather than vouching for it. Flag first — it answers
           // "did the seam run", never "did the write pass". This harness runs
-          // no hooks, so the row that would be stored IS `opCtx.data`.
-          const seam = opCtx.postHookWriteImageCheck;
-          if (seam) {
-            seam.honoured = true;
-            await seam.evaluate([opCtx.data]);
-          }
-          if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data);
-          else await engine.update(opCtx.object, opCtx.data, opCtx.options);
+          // no hooks, so the row an insert would store IS `opCtx.data`.
+          // [#19989] An update installs the seam too; the double's `update`
+          // runs it on the stored row, the table's row merged with the payload.
+          if (opCtx.operation === 'insert') {
+            const seam = opCtx.postHookWriteImageCheck;
+            if (seam) {
+              seam.honoured = true;
+              await seam.evaluate([opCtx.data]);
+            }
+            await engine.insert(opCtx.object, opCtx.data);
+          } else await engine.update(opCtx.object, opCtx.data, opCtx.options, opCtx);
           reached = true;
         });
       });

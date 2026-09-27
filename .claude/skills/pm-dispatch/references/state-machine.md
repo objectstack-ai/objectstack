@@ -5,9 +5,8 @@
 ## 跨状态通则
 
 - 六态 = `pm:{queue,dispatched,blocked,on-hold,awaiting-maintainer}` 加 `needs-user-decision`。
-- 六态 ONE-OF 的成因恒是半写的转换;判定以 `check-half-states.mjs` 的 H29/H30/H31 为权威。
+- 六态 ONE-OF 的成因恒是半写的转换;判定以 `check-half-states.mjs` 的 H29/H30 为权威。
 - 生成物不分叉:`skills/**` 生成器产物跑 `check-governed-merges.mjs --test`,⛔ 不按路径手判。
-- `needs:contract-review` 卡侧先挂而 PR 尚不存在是合法中间态,⛔ 不读作半写。
 - 交接即标签:只写交接评论而不同笔挂标 = 空交接,收件箱只认标签。
 
 ## `pm:on-hold`

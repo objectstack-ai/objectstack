@@ -36,8 +36,8 @@
  *    below is that reproduction, kept as the pin).
  *  - **Every authored refusal reaching these catches already declares 4xx** —
  *    `NOT_OVERRIDABLE` 403, `INVALID_METADATA` 422, `METADATA_CONFLICT` 409,
- *    and the repository's `[version_not_found]` 404 / `[item_locked]` 403 /
- *    `[writable_package_required]` 422 — with ONE exception, P9's, handled at
+ *    and the repository's `VERSION_NOT_FOUND` 404 / `ITEM_LOCKED` 403 /
+ *    `WRITABLE_PACKAGE_REQUIRED` 422 — with ONE exception, P9's, handled at
  *    its producer (section 4).
  *  - **P8's authored population never enters its catch at all.** The real
  *    materializer (plugin-security) reports a refusal by RETURNING
@@ -430,7 +430,7 @@ describe('[#8333] [GUARD] a declared 4xx refusal is quoted verbatim — green in
 
         const r = await protocol.publishPackageDrafts({ packageId: PKG });
 
-        expect(r.failed[0].error).toContain('[not_overridable]');
+        expect(r.failed[0].error).toContain("Metadata type 'api' is not draftable");
         expect(r.failed[0].error).toContain('is not draftable');
         expect(r.failed[0].code).toBe('NOT_OVERRIDABLE');
     });
@@ -489,12 +489,12 @@ describe('[#8333] [GUARD] a declared 4xx refusal is quoted verbatim — green in
 
         // The whole #4277 self-correcting sentence, not just the code: it names
         // the offending key AND how to spell it correctly.
-        expect(r.failed[0].error).toContain('[invalid_metadata]');
+        expect(r.failed[0].error).toContain('failed spec validation');
         expect(r.failed[0].error).toContain('Unrecognized key(s) on this view container');
         expect(r.failed[0].error).toContain('defineView(');
     });
 
-    it('P11 keeps the repository’s `[version_not_found]`, with its `code`', async () => {
+    it('P11 keeps the repository’s `VERSION_NOT_FOUND` sentence, with its `code`', async () => {
         const { protocol, engine } = makeKernel({
             seed: [row({ type: 'view', name: 'acct_view' })],
         });
@@ -504,12 +504,12 @@ describe('[#8333] [GUARD] a declared 4xx refusal is quoted verbatim — green in
 
         const r = await protocol.revertCommit({ commitId: 'c1' });
 
-        expect(r.failed[0].error).toContain('[version_not_found]');
+        expect(r.failed[0].error).toContain('No history row at version 99');
         expect(r.failed[0].error).toContain('version 99');
         expect(r.failed[0].code).toBe('VERSION_NOT_FOUND');
     });
 
-    it('P12 keeps `[commit_not_found]`', async () => {
+    it('P12 keeps `COMMIT_NOT_FOUND`’s sentence', async () => {
         const { protocol, engine } = makeKernel();
         let seen = 0;
         engine.findOne = async (t: string) => {
@@ -523,11 +523,11 @@ describe('[#8333] [GUARD] a declared 4xx refusal is quoted verbatim — green in
 
         const r = await protocol.rollbackToPackageCommit({ commitId: 'c1' });
 
-        expect(r.failed[0].error).toContain('[commit_not_found]');
+        expect(r.failed[0].error).toContain("No commit 'c1'.");
         expect(r.failed[0].error).toContain("No commit 'c1'");
     });
 
-    it('P13 keeps `[item_locked]`’s remedy', async () => {
+    it('P13 keeps `ITEM_LOCKED`’s remedy', async () => {
         const { protocol } = makeKernel({
             seed: [row({
                 type: 'page', name: 'crm_landing',
@@ -536,7 +536,7 @@ describe('[#8333] [GUARD] a declared 4xx refusal is quoted verbatim — green in
         });
         protocol.saveMetaItem = async () => {
             throw declaredRefusal(
-                "[item_locked] Cannot overlay 'page' in package 'showcase': that package is read-only. "
+                "Cannot overlay 'page' in package 'showcase': that package is read-only. "
                 + 'Edit the source artifact and redeploy.',
                 'ITEM_LOCKED', 403,
             );
@@ -544,7 +544,7 @@ describe('[#8333] [GUARD] a declared 4xx refusal is quoted verbatim — green in
 
         const r = await protocol.migrateStoredMetadata({ apply: true });
 
-        expect(r.rows[0].reason).toContain('[item_locked]');
+        expect(r.rows[0].reason).toContain('that package is read-only');
         expect(r.rows[0].reason).toContain('Edit the source artifact and redeploy.');
     });
 });
@@ -633,7 +633,7 @@ describe('[#8333] the seed request’s schema rejection DECLARES itself, so the 
         );
 
         expect(r.success).toBe(false);
-        expect(r.error).toContain('[invalid_metadata]');
+        expect(r.error).toContain('failed spec validation');
         expect(r.error).toContain('failed spec validation');
         // The dotted path an author can act on. The pre-#8333 dump spelled it
         // as a raw JSON array (`"path": [ "seeds", 0, "mode" ]`) inside a

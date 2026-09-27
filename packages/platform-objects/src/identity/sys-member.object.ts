@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec/shared';
 import { BUILTIN_MEMBERSHIP_ROLE_OPTIONS, MEMBERSHIP_ROLE_MEMBER } from '@objectstack/spec/identity';
 
 /**
@@ -27,6 +28,18 @@ export const SysMember = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Organization membership records',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // columns `titleFormat` names. With no pointer declared, the registry's
+  // designate-only pass stamped `nameField: 'id'` (the first title-eligible
+  // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
+  // wins over `titleFormat`) drew the raw id as the record page's H1.
+  // `titleFormat` stays for renderers that still read it first;
+  // `identity-display-title.test.ts` holds the two to the same text.
+  // `user_id` is a lookup, so the formula reads its stored id: a formula
+  // is evaluated on the stored row, before `$expand`, and cannot reach the
+  // related record's own title.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   // Org-independent title: organization_id is null in single-org mode, so a
   // '{user_id} in {organization_id}' format renders "… in null". User + role
   // identifies the membership in both single- and multi-org deployments.
@@ -233,6 +246,16 @@ export const SysMember = ObjectSchema.create({
       label: 'Member ID',
       required: true,
       readonly: true,
+    }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. `role` is nullable, so a row without one
+    // is titled by its user alone rather than failing to evaluate.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.role != null ? record.user_id + ' (' + record.role + ')' : record.user_id`,
+      description: 'Record title: the member and, when recorded, their role (computed on read)',
     }),
     
     created_at: Field.datetime({

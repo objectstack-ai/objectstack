@@ -453,7 +453,7 @@
       "title": "An invalid authored shape is rejected at save with a LOCATED error and is not persisted",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -474,7 +474,7 @@
       ],
       "acceptance": [
         {
-          "clause": "an invalid object shape is rejected at save with a located error naming the failing path (the '[invalid_metadata] … fields.<name>.type: Required' shape)",
+          "clause": "an invalid object shape is rejected at save with a located error naming the failing path (the 'object/<name> failed spec validation: <N> issue(s) — fields.<name>.type [<zod code>]' headline beside code INVALID_METADATA, the per-issue prose on the structured issues[] carried with it)",
           "oracle": "api",
           "verify": "the rejection is 4xx and its body names the exact field path that failed spec validation",
           "evidence": "the error body"
@@ -511,13 +511,15 @@
       ],
       "traps": ["stale-console-bundle", "automation-input"],
       "source": [
-        "packages/runtime/src/http-dispatcher.test.ts#error (the located '[invalid_metadata] object/bad failed spec validation: fields.amount.type: Required' error shape)",
+        "packages/runtime/src/http-dispatcher.test.ts#error (the dispatcher keeps the 422 and code INVALID_METADATA and threads the field-anchored issues through details.issues; its thrown message is a hand-built mock, not the producer's text)",
+        "packages/metadata-protocol/src/protocol.ts#specValidationFindings (the producer's per-face rendering of the spec-validation message: the REST and dispatcher doors get the 'path [zod code]' headline, the prose rides issues[])",
         "packages/spec/src/ui/view.zod.ts#viewKind (container guidance map: type/columns/data/viewKind/filters/sort each name the wrap prescription)",
         "dashboards.strict-widget-rejects-stray-keys (dashboard-kind stray keys — cross-referenced, not duplicated)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: authoring validation with located errors and verified non-persistence, sampling object + view kinds and cross-referencing the deepened dashboard stray-key item instead of duplicating it", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "recorded run #7695's sighting of the ALREADY-KNOWN spurious '_diagnostics' banner on a freshly saved VALID draft (the designer re-validates the server's own annotation on read-back) as a knownGap + a NOT-this-item's-FAIL negative, so the sighting is not filed as a new defect and the false positive is told apart from a real located-error miss. Note only; no clause changed", "ref": "#7753" }
+        { "revision": 2, "date": "2026-08-11", "change": "recorded run #7695's sighting of the ALREADY-KNOWN spurious '_diagnostics' banner on a freshly saved VALID draft (the designer re-validates the server's own annotation on read-back) as a knownGap + a NOT-this-item's-FAIL negative, so the sighting is not filed as a new defect and the false positive is told apart from a real located-error miss. Note only; no clause changed", "ref": "#7753" },
+        { "revision": 3, "date": "2026-09-23", "change": "re-spelled the located-error shape, which had stopped being true: the clause quoted '[invalid_metadata] … fields.<name>.type: Required', but saveMetaItem's spec-validation refusal no longer opens with a bracketed restatement of its code (retired in 7a25a3ee9c; the token rides code INVALID_METADATA), and on the REST and dispatcher doors its message is a headline of 'path [zod code]' locators with the per-issue prose on issues[]. Measured on c11852406 for a field missing its type: 'object/qa_invalid_probe failed spec validation: 1 issue — fields.amount.type [invalid_value]', 422, INVALID_METADATA. The dispatcher source pointer presented that test's hand-built mock message as the producer's text; it now says what the test pins, and the producer's per-face renderer is cited beside it. The capability itself (4xx, located path, nothing persisted) is unchanged", "ref": "#19709" }
       ]
     },
     {

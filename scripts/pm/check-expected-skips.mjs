@@ -114,9 +114,9 @@
  * restated). The roster, however, is THIS repository's workflows — a sibling
  * repo needs its own roster, and pointing this file at another board judges
  * that board's skips against objectstack's roster; the provenance line says
- * which board was read so the mismatch is visible. Reads go down the same
- * ladder `check-clause2-carriers.mjs` reports: the exported token first, and
- * the header-less public read when the token is refused. In a proxied agent
+ * which board was read so the mismatch is visible. Reads go down a two-rung
+ * ladder: the exported token first, and the header-less public read when the
+ * token is refused. In a proxied agent
  * container node's `fetch` bypasses `HTTPS_PROXY`, so a live run re-execs
  * itself once with `--use-env-proxy` (the plan is imported, the guard variable
  * is this file's own).

@@ -125,8 +125,11 @@ describe('matchesFilterCondition — FAIL CLOSED', () => {
   it('nested relation object (non-$ key) → false', () => {
     expect(m(rec, { account: { region: 'EMEA' } } as never)).toBe(false);
   });
-  it('bare array value → false', () => {
-    expect(m(rec, { stage: ['won'] } as never)).toBe(false);
+  it('bare array value → REFUSED, not answered (#19886; the full pins are matches-filter-array-comparand.test.ts)', () => {
+    let err: { code?: string; status?: number } | undefined;
+    try { m(rec, { stage: ['won'] } as never); } catch (e) { err = e as { code?: string; status?: number }; }
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err?.status).toBe(400);
   });
   it('malformed (array/scalar) filter → false', () => {
     expect(m(rec, [] as never)).toBe(false);

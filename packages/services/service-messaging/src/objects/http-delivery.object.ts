@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Field, ObjectSchema } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec';
 
 /**
  * `sys_http_delivery` — durable outbox row for one outbound-HTTP attempt
@@ -42,8 +43,14 @@ export const HttpDelivery = ObjectSchema.create({
     userActions: { create: false, edit: false, delete: false, import: false },
     description:
         'Durable outbox row for one outbound-HTTP attempt (ADR-0018). Managed by @objectstack/service-messaging; do not write directly.',
-    displayNameField: 'id',
-    nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
+    // [ADR-0079] The record title is `display_title`, a text formula over the
+    // same two columns `titleFormat` names. The pointer used to be `id`: once a
+    // renderer honours ADR-0079's order (an explicit `nameField` wins over
+    // `titleFormat`), that made the record page's H1 the raw delivery UUID.
+    // `titleFormat` stays for renderers that still read it first;
+    // `http-delivery-display-title.test.ts` holds the two to the same text.
+    displayNameField: 'display_title',
+    nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
     titleFormat: '{label} → {url}',
     highlightFields: ['source', 'url', 'status', 'attempts', 'next_retry_at'],
 
@@ -91,6 +98,17 @@ export const HttpDelivery = ObjectSchema.create({
             label: 'Delivery ID',
             required: true,
             description: 'UUID — also doubles as the receiver-side idempotency key',
+        }),
+
+        // [ADR-0079] The record title (`nameField` above). A formula is computed
+        // on read and has no stored column. `label` is nullable, so a row
+        // without one is titled by its target URL alone rather than failing to
+        // evaluate.
+        display_title: Field.formula({
+            label: 'Title',
+            returnType: 'text',
+            expression: F`record.label != null ? record.label + ' → ' + record.url : record.url`,
+            description: 'Record title: the delivery label, when set, and its target URL (computed on read)',
         }),
 
         source: Field.text({

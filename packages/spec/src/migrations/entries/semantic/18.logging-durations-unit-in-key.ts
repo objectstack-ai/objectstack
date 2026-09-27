@@ -45,10 +45,10 @@ export const entry: SemanticMigration = {
     + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
     + 'and its test the only occurrences are the generated rows in '
     + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-    + 'objectui checkout — `.objectui-sha` = `87af769e9a3ee28ace099fdd653d3ebd79fe82e2` — spells '
+    + 'objectui checkout — `.objectui-sha` = `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52` — spells '
     + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-    + 'across its 8228 tracked files, against lit controls `useState` 2383 and `timeout` 1075 on '
-    + 'the same corpus.',
+    + 'across its 8512 tracked files, against lit controls `useState` 2391 and `timeout` 1096 on '
+    + 'the same corpus (all four 0 across 8303, against 2389 and 1086, at 62597c588).',
   acceptanceCriteria:
     'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
     + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Build @object-ui/console at the SHA pinned in .objectui-sha and copy
 # its dist/ into packages/console/ so @objectstack/console can publish
-# a version-matched, prebuilt Console SPA alongside the framework.
+# a version-matched, prebuilt Console SPA alongside the framework. The
+# tracked repo-root sdui.manifest.json ships in that dist too (see the
+# block near the end).
 #
 # Resolution order for the objectui source tree:
 #   1. $OBJECTUI_ROOT (if set and a git repo)         — explicit override
@@ -271,29 +273,43 @@ node "${FRAMEWORK_ROOT}/scripts/assert-console-spec-injection.mjs" \
   --vendored "${BUILD_ROOT}/node_modules/@objectstack/spec" \
   --assets "${TARGET}/assets"
 
+# ── Ship the TRACKED SDUI manifest (ADR-0080) ────────────────────────
+# One producer, one artefact: the repo-root sdui.manifest.json is written by
+# scripts/gen-sdui-manifest-node.mjs from THIS built tree at the pin, and held
+# against .objectui-sha (plus its sha256 record) by scripts/check-sdui-manifest.mjs
+# in the required lint job. The console dist ships that file as-is. Measured
+# before the switch: the browser dump this replaces (the retired
+# scripts/gen-sdui-manifest.sh, a vite dev server plus Playwright chromium over
+# this same tree) and the node output were `cmp`-identical, so the copy loses
+# nothing and the console build gains no browser dependency. Nothing here
+# regenerates the manifest: a pin that moved without regeneration is reported
+# below, and lint is red on it until the regeneration lands.
+MANIFEST_SRC="${FRAMEWORK_ROOT}/sdui.manifest.json"
+MANIFEST_RECORD="${FRAMEWORK_ROOT}/scripts/sdui-manifest.record.json"
+if [[ ! -f "$MANIFEST_SRC" ]]; then
+  echo "✗ ${MANIFEST_SRC} is missing — the console dist ships the tracked SDUI manifest."
+  echo "  Regenerate it from the tree this run just built: node scripts/gen-sdui-manifest-node.mjs"
+  exit 1
+fi
+cp "$MANIFEST_SRC" "${TARGET}/sdui.manifest.json"
+RECORDED_SHA="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).objectuiSha ?? ""))' "$MANIFEST_RECORD" 2>/dev/null || true)"
+if [[ "$RECORDED_SHA" == "$PINNED_SHA" ]]; then
+  echo "✓ Shipped the tracked sdui.manifest.json (recorded at objectui@${PINNED_SHA:0:12}, this pin)."
+else
+  echo "⚠ Shipped the tracked sdui.manifest.json, but its record names objectui@${RECORDED_SHA:0:12}, not this pin ${PINNED_SHA:0:12}."
+  echo "  Moved the pin? Regenerate from the tree this run just built, then re-run this build to ship it:"
+  echo "      node scripts/gen-sdui-manifest-node.mjs"
+  echo "  scripts/check-sdui-manifest.mjs keeps the required lint job red until the regeneration lands."
+fi
+
 BYTES="$(du -sk "$TARGET" 2>/dev/null | awk '{print $1}')"
 echo "✓ @objectstack/console dist ready (${BYTES} KB) from objectui@${PINNED_SHA:0:12}"
 
-# ADR-0080/0081: neither SDUI manifest is generated here, and the spec↔registry
-# react-block declaration-parity ratchet is not run here either. Two different files
-# wear that name, and the difference is what the reminder below exists to carry:
-#
-#   sdui.manifest.json (repo root) + scripts/sdui-manifest.record.json — TRACKED,
-#     written only by `node scripts/gen-sdui-manifest-node.mjs`, which installs the
-#     published @object-ui packages (no browser). `scripts/check-sdui-manifest.mjs`
-#     in the required lint job reds once the pin moves and they have not followed,
-#     and ADR-0082 D4's ratchet reads the tracked manifest on every PR (#12924).
-#   packages/console/dist/sdui.manifest.json — GITIGNORED, written by
-#     `pnpm sdui:manifest` (scripts/gen-sdui-manifest.sh), which needs a real browser
-#     to enumerate the console registry. Nothing gates it; the console build must not
-#     drag in a browser dependency, so it stays on demand (#5960).
-#
 # The reminder names the TRIGGER, not just the command (#5960): `pnpm objectui:refresh`
 # runs bump-objectui.sh and then this script, so this is the last output an operator
 # sees while moving the pin. bump-objectui.sh prints the same step; this repeats it
 # because that one has scrolled past a whole console build by now.
-echo "ℹ SDUI manifest + declaration-parity ratchet are decoupled from the console build."
-echo "  Moved the objectui pin? Regenerate the TRACKED manifest — the required lint gate:"
-echo "      node scripts/gen-sdui-manifest-node.mjs --objectui-version {the version the new pin ships}"
-echo "  It writes sdui.manifest.json + scripts/sdui-manifest.record.json. 'pnpm sdui:manifest'"
-echo "  writes neither: it is the browser dump to the gitignored packages/console/dist/."
+echo "ℹ Moved the objectui pin? Regenerate the TRACKED SDUI manifest — the required lint gate:"
+echo "      node scripts/gen-sdui-manifest-node.mjs"
+echo "  It reads the tree this script just built (.cache/objectui-${PINNED_SHA:0:12}/apps/console) and"
+echo "  rewrites sdui.manifest.json + scripts/sdui-manifest.record.json; no browser, no npm install."

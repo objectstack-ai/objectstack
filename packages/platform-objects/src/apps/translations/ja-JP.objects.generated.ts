@@ -35,7 +35,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "プラットフォームロール",
-        help: "プラットフォームレベルのロール（admin、user など）。「プラットフォームロールを設定」アクションから設定します。"
+        help: "レガシーな better-auth ロールスカラー値（admin、user など）。ObjectStack はもはやこの値を書き込みません（ADR-0068 D2）。プラットフォーム管理者権限を付与するには、そのユーザーの確認済みメールアドレスを `OS_PLATFORM_OWNER_EMAIL` に列挙してください。`single` テナンシー態勢では、`sys_user_permission_set` 内のスコープ指定なしの `admin_full_access` 割り当てでも同様にこの権限が付与されます。"
       },
       banned: {
         label: "利用停止",
@@ -407,6 +407,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "アカウント ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：プロバイダーと、そのプロバイダーが発行したアカウント ID（読み取り時に計算）"
+      },
       created_at: {
         label: "作成日時"
       },
@@ -498,6 +502,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "検証 ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：検証対象の識別子（読み取り時に計算）"
       },
       created_at: {
         label: "作成日時"
@@ -606,6 +614,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "メンバー ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：メンバーと、記録されている場合はそのロール（読み取り時に計算）"
+      },
       created_at: {
         label: "作成日時"
       },
@@ -667,6 +679,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "招待 ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：招待先のメールアドレス（読み取り時に計算）"
       },
       created_at: {
         label: "作成日時"
@@ -815,6 +831,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "チームメンバー ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：ユーザーとチーム（読み取り時に計算）"
+      },
       created_at: {
         label: "作成日時"
       },
@@ -932,6 +952,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "メンバー ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：ユーザーと、その割り当て先のビジネスユニット（読み取り時に計算）"
+      },
       business_unit_id: {
         label: "ビジネスユニット"
       },
@@ -1048,6 +1072,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "二要素認証 ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：この認証情報を所有するユーザー（読み取り時に計算）"
       },
       created_at: {
         label: "作成日時"
@@ -2091,6 +2119,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：プロビジョニングされたユーザーとグループ（読み取り時に計算）"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "タイトル",
+        help: "レコードタイトル：投影されたロールと、その付与先のユーザー（読み取り時に計算）"
       },
       connection_id: {
         label: "Connection ID"
@@ -2601,130 +2637,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       customized: {
         label: "Customized",
         help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
-      },
-      created_at: {
-        label: "作成日時"
-      },
-      updated_at: {
-        label: "更新日時"
-      }
-    }
-  },
-  sys_saved_report: {
-    label: "保存済みレポート",
-    pluralLabel: "保存済みレポート",
-    description: "永続化された ObjectQL レポート定義 — 再実行およびスケジュール可能",
-    fields: {
-      id: {
-        label: "レポート ID"
-      },
-      name: {
-        label: "名前"
-      },
-      description: {
-        label: "説明"
-      },
-      object_name: {
-        label: "オブジェクト",
-        help: "レポートがクエリするオブジェクトの短い名前"
-      },
-      query_json: {
-        label: "クエリ",
-        help: "ObjectQL クエリエンベロープ — { filter, fields, orderBy, limit, groupBy }"
-      },
-      format: {
-        label: "フォーマット",
-        help: "IReportService.run() とメールダイジェストで使用するレンダリング",
-        options: {
-          csv: "CSV",
-          json: "JSON",
-          html_table: "HTML テーブル"
-        }
-      },
-      owner_id: {
-        label: "所有者",
-        help: "レポート定義を所有するユーザー（共有を促進）"
-      },
-      last_run_at: {
-        label: "最終実行",
-        help: "正常実行時に IReportService.run() がスタンプします"
-      },
-      last_row_count: {
-        label: "最終行数"
-      },
-      created_at: {
-        label: "作成日時"
-      },
-      updated_at: {
-        label: "更新日時"
-      }
-    }
-  },
-  sys_report_schedule: {
-    label: "レポートスケジュール",
-    pluralLabel: "レポートスケジュール",
-    description: "sys_saved_report のメールによる定期配信",
-    fields: {
-      id: {
-        label: "スケジュール ID"
-      },
-      report_id: {
-        label: "レポート"
-      },
-      name: {
-        label: "名前",
-        help: "ダイジェストの任意の表示名 — メール件名で使用"
-      },
-      interval_minutes: {
-        label: "間隔（分）",
-        help: "送信頻度（1440 = 毎日、10080 = 毎週）"
-      },
-      cron_expression: {
-        label: "Cron 式",
-        help: "オプションの 5/6 フィールド Cron — 存在する場合 interval_minutes を上書き"
-      },
-      timezone: {
-        label: "タイムゾーン"
-      },
-      active: {
-        label: "有効"
-      },
-      recipients: {
-        label: "受信者",
-        help: "カンマ区切りのメールアドレス"
-      },
-      format: {
-        label: "フォーマット",
-        help: "レンダリング形式 — CSV は添付、HTML テーブルはインライン",
-        options: {
-          csv: "CSV",
-          html_table: "HTML テーブル"
-        }
-      },
-      subject_template: {
-        label: "件名テンプレート",
-        help: "メール件名。{{name}} / {{date}} / {{rows}} が置換されます"
-      },
-      owner_id: {
-        label: "所有者"
-      },
-      next_run_at: {
-        label: "次回実行",
-        help: "next_run_at <= 現在時刻のスケジュールをディスパッチャーが読み込みます"
-      },
-      last_sent_at: {
-        label: "最終送信日時"
-      },
-      last_status: {
-        label: "最終ステータス",
-        options: {
-          ok: "正常",
-          failed: "失敗",
-          skipped: "スキップ"
-        }
-      },
-      last_error: {
-        label: "最終エラー"
       },
       created_at: {
         label: "作成日時"

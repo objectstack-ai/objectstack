@@ -77,6 +77,11 @@ const entries = [
   'src/kernel/index.ts',
   'src/automation/index.ts',
   'src/api/index.ts',
+  // The API-protocol declarations that embed the ASSEMBLED package body, split
+  // off `./api` so the browser-facing entry stops linking the whole metadata
+  // vocabulary and the datasource/driver validators (maintainer ruling on
+  // #18576, letter B). See `src/api-assembled/index.ts`.
+  'src/api-assembled/index.ts',
   'src/ui/index.ts',
   'src/ai/index.ts',
   'src/security/index.ts',
@@ -117,12 +122,17 @@ const browserConditionedEntries = [
   'src/data/index.ts',
   'src/system/index.ts',
   'src/kernel/index.ts',
-  // `./api` joined the poisoned set when the package read API began declaring
-  // the assembled manifest stage: its record body reaches the datasource
-  // declaration, and with it the driver-config validators. Same seam, same
-  // swap, same degradation the 2026-08-22 ruling accepted — not a second
-  // mechanism.
-  'src/api/index.ts',
+  // `./api-assembled` carries the package read API's assembled-stage
+  // declarations: their record body reaches the datasource declaration, and
+  // with it the driver-config validators. Same seam, same swap, same
+  // degradation the 2026-08-22 ruling accepted — not a second mechanism.
+  //
+  // ⛔ `./api` is NOT here any more, and must not come back. It joined this set
+  // when those declarations lived in it; the #18576 ruling (letter B) moved
+  // them to `./api-assembled`, so `./api`'s graph no longer reaches the pg
+  // grammar and its ordinary bundles are what a browser bundler loads — which
+  // `check:browser-reachable-entries` rule 2 now judges directly.
+  'src/api-assembled/index.ts',
 ];
 
 /**

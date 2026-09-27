@@ -230,9 +230,17 @@ describe("ADR-0130 D4 — `manifest: 'preserve'` assembles each input stack", ()
     expect((byId.get('com.example.multi.orders')?.objects as { name: string }[]).map((o) => o.name))
       .toEqual(['crm_order']);
 
-    // The flattened top level still carries BOTH — preserve is additive, and
-    // the metadata service's artifact door reads exactly that top level.
-    expect((composed().objects ?? []).map((o) => o.name).sort()).toEqual(['crm_account', 'crm_order']);
+    // ⭐ And the flattened top level carries NEITHER (#14512, ADR-0130 D4
+    // addendum 2026-09-22): a multi-package artifact serializes each definition
+    // ONCE, under the package that owns it. The union across the bodies is the
+    // whole artifact, which is what the metadata service's artifact door and
+    // every other reader resolve through `packages[]`.
+    expect(composed().objects).toBeUndefined();
+    const acrossBodies = entries
+      .flatMap((e) => (e.manifest.objects as { name: string }[] | undefined) ?? [])
+      .map((o) => o.name)
+      .sort();
+    expect(acrossBodies).toEqual(['crm_account', 'crm_order']);
   });
 
   it('SEAM 1 — `defineStack` accepts the composed project', () => {

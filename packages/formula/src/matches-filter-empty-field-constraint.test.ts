@@ -109,9 +109,9 @@ describe('[#5240] matchesFilterCondition refuses a zero-operator field constrain
       expect(matchesFilterCondition(RECORD, { stage: { nested: 'won' } } as never)).toBe(false);
     });
 
-    it('a bare array field spec', () => {
-      expect(matchesFilterCondition(RECORD, { stage: ['won'] } as never)).toBe(false);
-    });
+    // [#19886] A bare array field spec is no longer in this group: it is
+    // REFUSED (INVALID_FILTER / 400), with `$eq` / `$ne` carrying an array —
+    // pinned in `matches-filter-array-comparand.test.ts`.
 
     it('an unknown top-level operator', () => {
       expect(matchesFilterCondition(RECORD, { $nope: 1 } as never)).toBe(false);

@@ -41,6 +41,16 @@ export const pageForm = defineForm({
         // region template, so hide it there (same rationale as Data Context / Layout).
         { field: 'template', colSpan: 2, visibleWhen: "data.type != 'list'", helpText: 'Layout template (e.g., "header-sidebar-main")' },
         { field: 'description', widget: 'textarea', colSpan: 2, helpText: 'Page description for navigation' },
+        // #19331 — `source` is declared by PageSchema and was offered by no
+        // control, so a source-authored page could only be written through the
+        // Source tab's free-text JSON. `type: 'code'` rather than a textarea:
+        // the value is program text, and the code control is what this registry
+        // already uses for every other program-text row (`action.body.source`,
+        // `object.fields.expression`). `visibleWhen` is a MEANINGFULNESS gate,
+        // not a parse gate — `PageSchema` accepts the key whatever the `kind`,
+        // but only the three source-compiled kinds ever read it; the two layout
+        // kinds (`full` / `slotted`) compose regions and slots instead.
+        { field: 'source', type: 'code', language: 'jsx', colSpan: 2, visibleWhen: "data.kind in ['html','jsx','react']", helpText: "Page source text. For kind 'html' (alias 'jsx') it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime." },
       ],
     },
     {

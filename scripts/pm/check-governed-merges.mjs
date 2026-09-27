@@ -161,12 +161,14 @@
  *
  *   「还有应该完善skills，修改代码量超过某个行数（比如5000）就应该人工审核。」
  *
- * Read as: a pull request whose changed line count exceeds 5,000 lands only by
- * a human merge — the same terminal as a governed diff (ACCEPT on the card,
+ * Read as: a pull request whose changed line count exceeds 5,000 lands by the
+ * same terminal as a Tier H governed diff (ACCEPT on the card,
  * `needs-user-decision` on the PR, a final 维护者速读, review requested from
- * `GOVERNED_APPROVERS`), whatever paths it touches. 「比如」 makes 5,000 the
- * ruled DEFAULT, declared once as `HUMAN_MERGE_LINE_THRESHOLD` so it moves by
- * one word from the maintainer and by one edit here.
+ * `GOVERNED_APPROVERS`), whatever paths it touches — on 2026-09-18 that meant
+ * the maintainer's own merge alone; since 2026-09-27 it means the two landings
+ * a Tier H path has (the "SIZE limb's LIFT" section below). 「比如」 makes
+ * 5,000 the ruled DEFAULT, declared once as `HUMAN_MERGE_LINE_THRESHOLD` so it
+ * moves by one word from the maintainer and by one edit here.
  *
  * The count is GitHub's `additions + deletions` on the PR — the number the API
  * and the size labeller report — and generated files are INCLUDED. The case
@@ -213,12 +215,47 @@
  * What did NOT change: `testVerdict(paths)` with no size answers the PATH
  * question exactly as before (the queue guard's governed leg imports it for
  * that question; since #19036 its SIZE leg hands this file the pull object's
- * pair through `testVerdict([], { size })` and judges `landsByHumanMerge`, so
- * the queue and the seat-side pre-check read one predicate); the governed
- * answer, its words and the exception register are untouched. The one
- * addition to every rendering is the size line — measured, or NOT MEASURED
- * with the remedy — because a verifier that silently skips a leg it could not
- * run reports success it did not measure.
+ * pair through `testVerdict([], { size, approval })` and judges
+ * `landsByHumanMerge`, so the queue and the seat-side pre-check read one
+ * predicate); the governed answer, its words and the exception register are
+ * untouched. The one addition to every rendering is the size line — measured,
+ * or NOT MEASURED with the remedy — because a verifier that silently skips a
+ * leg it could not run reports success it did not measure.
+ *
+ * ## The SIZE limb's LIFT (maintainer ruling, 2026-09-27; objectstack#20153)
+ *
+ * The maintainer, asked why PR #20125 (about 11.5k changed lines, APPROVED by
+ * `os-zhuang`) was dequeued twice on this limb, verbatim and untranslated:
+ *
+ *   「所以阈值写死成 5000 行 , 维护者已经批准了就是可以合并。」
+ *
+ * So an authorized APPROVED review lifts the SIZE limb EXACTLY as it lifts a
+ * Tier H path: an account in `GOVERNED_APPROVERS` (the queue guard's constant)
+ * holding a latest-decisive APPROVED review, on ANY commit (the 2026-09-04
+ * unpinning); dismissed, superseded and unauthorized approvals never count; an
+ * unreadable review list fails closed. After the approval the OWNING seat lands
+ * the PR through the queue (席位落地); the maintainer's direct merge stays the
+ * other landing, unchanged. The threshold, the strict `>` and the generated-
+ * files inclusion are UNCHANGED — `exceeds` still reads true over the line;
+ * what the ruling adds is `lifted` beside it, and `landsByHumanMerge` reads the
+ * pair through `sizeLimbFires`. The FORK limb is untouched: no approval lifts
+ * it, and the post-merge sweep still LISTS every oversized landing (it hands the
+ * predicate no approval, so a landing over the line is an entry as before).
+ *
+ * ⭐ ONE derivation of the approval, and it is NOT here: the review list is
+ * reduced to an authorized-approval verdict by the queue guard's
+ * `authorizedApprovalVerdict` (its file declares `GOVERNED_APPROVERS`; this
+ * file cannot import it — the module cycle is measured under "This is a MIRROR"
+ * below). That verdict OBJECT is handed in through the one front door,
+ * `testVerdict(paths, { size, approval })`, and `sizeLiftFrom` reads only its
+ * `state` and its `approvals` — the authorized derivation's own field naming the
+ * login and the commit each counted approval was given on, which the generic
+ * per-reviewer reduction does not carry, so a verdict that never asked WHO can
+ * lift nothing. This file never re-derives the approval from a review list
+ * (#11705, "⛔ do not author a second mechanism"), which is also why `--pr`,
+ * `--branch` and `--test` read no reviews: they answer the SIZE question the way
+ * they answer the PATH question — over the line is exit 3, and the words name
+ * the two landings the queue leg then holds the pull request to.
  *
  * ## The FORK predicate (maintainer ruling, 2026-09-21)
  *
@@ -327,8 +364,8 @@
  *   S  席内达档复核落地 — the whole `.claude/**` tree: the owning seat lands it
  *      through the queue once the PR thread (or its card) carries a
  *      `## Contract review` record for the PR's CURRENT head with
- *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**`,
- *      `check-clause2-carriers.mjs --pair N` reads 0 and every check is green.
+ *      `Served-tier: CONTRACT_REVIEW_TIER` and `**VERDICT: PASS**` and every
+ *      check is green.
  *      Exactly the path the fact layer (`.claude/skills/pm-dispatch/references/`)
  *      used since #17950, generalised to the tier; the post-merge audit (this
  *      sweep) and the director seat's 职责四 are the compensating control, and a
@@ -921,7 +958,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #15406: the sweep row names the register it does not recompute': 10,
   '⭐ #17003: the list is DERIVED three-dot, or refused': 43,
   '⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away': 11,
-  '⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths': 30,
+  '⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths': 44,
   '⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner': 18,
   '⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones': 20,
   '⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery': 6,
@@ -1025,7 +1062,7 @@ export const GOVERNED_TIERS = Object.freeze({
     name: 'Tier S(席内达档复核落地)',
     landing:
       'the owning seat lands it through the queue on a `## Contract review` record for the CURRENT head ' +
-      '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`), `check-clause2-carriers.mjs --pair N` at 0 and every check green',
+      '(`Served-tier: CONTRACT_REVIEW_TIER`, `**VERDICT: PASS**`) and every check green',
   }),
 });
 
@@ -1444,11 +1481,11 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
  * same in all five governed repos, so a seat can run this from anywhere with
  * the file list of any PR in any of them.
  */
-export function testVerdict(paths, { size = null, fork = null, checks = null } = {}) {
+export function testVerdict(paths, { size = null, fork = null, checks = null, approval = null } = {}) {
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
   const matched = governedPathsIn(list);
   const hit = new Set(matched.flatMap((s) => s.files));
-  const sized = sizeVerdict(size);
+  const sized = sizeVerdict(size, approval);
   const forked = fork && typeof fork === 'object' ? fork : forkVerdict(null); // the FORK limb, or NOT MEASURED
   return {
     governed: matched.length > 0,
@@ -1462,34 +1499,69 @@ export function testVerdict(paths, { size = null, fork = null, checks = null } =
     clearPaths: list.filter((p) => !hit.has(p)),
     size: sized,
     fork: forked, checks: checks && typeof checks === 'object' ? checks : null,
-    humanMerge: matched.length > 0 || sized.exceeds || forked.isFork === true,
+    humanMerge: matched.length > 0 || sizeLimbFires(sized) || forked.isFork === true,
   };
+}
+
+/** The lift's citation, printed on every lifted reading so a queue log names what lifted it. */
+export const SIZE_LIFT_RULING = 'maintainer ruling 2026-09-27, objectstack#20153';
+
+/**
+ * The lift an authorized-approval verdict grants the SIZE limb (maintainer
+ * ruling 2026-09-27, header section "The SIZE limb's LIFT"). Pure, and a READER
+ * of the queue guard's `authorizedApprovalVerdict` result — never a derivation
+ * of its own: it asks for `state: 'approved'` AND a non-empty `approvals` list
+ * (`{ login, commitId }` per counted approver), the field only the AUTHORIZED
+ * reduction carries. The generic per-reviewer reduction, an `unapproved` or an
+ * `unreadable` verdict, and no verdict at all answer null: no lift, fail closed.
+ */
+export function sizeLiftFrom(approval = null) {
+  if (approval?.state !== 'approved' || !Array.isArray(approval.approvals) || approval.approvals.length === 0) return null;
+  const approvals = approval.approvals
+    .filter((a) => typeof a?.login === 'string' && a.login !== '')
+    .map((a) => ({ login: a.login, commitId: typeof a.commitId === 'string' ? a.commitId : '' }));
+  if (approvals.length === 0) return null;
+  return { approvers: approvals.map((a) => a.login), approvals, ruling: SIZE_LIFT_RULING };
 }
 
 /**
  * The SIZE limb (maintainer ruling 2026-09-18, header section "The SIZE
  * predicate"), as data. Pure. `size` is `{ additions, deletions, source? }` or
  * null; anything that is not a pair of non-negative integers is NOT MEASURED —
- * never a size of zero, which would read as under the threshold.
+ * never a size of zero, which would read as under the threshold. `approval`
+ * is the queue guard's authorized-approval verdict, or null when the caller
+ * read no reviews: `lifted` is that verdict's lift (2026-09-27) and exists only
+ * over the line — under it there is nothing to lift; `approvalState` records
+ * what was handed in (`null` when nothing was) so a `--json` reader can tell
+ * "no approval" from "no reading".
  */
-export function sizeVerdict(size = null) {
+export function sizeVerdict(size = null, approval = null) {
   const additions = size?.additions;
   const deletions = size?.deletions;
+  const approvalState = typeof approval?.state === 'string' ? approval.state : null;
   const measured =
     Number.isInteger(additions) && additions >= 0 && Number.isInteger(deletions) && deletions >= 0;
   if (!measured) {
-    return { measured: false, additions: null, deletions: null, changedLines: null, threshold: HUMAN_MERGE_LINE_THRESHOLD, exceeds: false, source: null };
+    return { measured: false, additions: null, deletions: null, changedLines: null, threshold: HUMAN_MERGE_LINE_THRESHOLD, exceeds: false, lifted: null, approvalState, source: null };
   }
   const changedLines = additions + deletions;
+  const exceeds = changedLines > HUMAN_MERGE_LINE_THRESHOLD;
   return {
     measured: true,
     additions,
     deletions,
     changedLines,
     threshold: HUMAN_MERGE_LINE_THRESHOLD,
-    exceeds: changedLines > HUMAN_MERGE_LINE_THRESHOLD,
+    exceeds,
+    lifted: exceeds ? sizeLiftFrom(approval) : null,
+    approvalState,
     source: typeof size?.source === 'string' && size.source !== '' ? size.source : null,
   };
+}
+
+/** Does the SIZE limb send this PR to the human terminal? Over the line AND not lifted (2026-09-27). Pure. */
+export function sizeLimbFires(size) {
+  return size?.exceeds === true && !size?.lifted;
 }
 
 /** The FORK limb (header section "The FORK predicate") off the PR object. Pure: NOT MEASURED without a `base.repo`; a deleted fork is a fork, fail closed. */
@@ -1500,9 +1572,13 @@ export function forkVerdict(pull = null) {
   return { measured: true, isFork: headRepo === null || headRepo !== baseRepo, headRepo, baseRepo };
 }
 
-/** Any limb: the PATH register, the SIZE threshold or a FORK head. The exit code reads this, never `governed` alone. */
+/**
+ * Any limb: the PATH register, the SIZE threshold (unless an authorized approval
+ * lifted it — 2026-09-27, `sizeLimbFires`) or a FORK head. The exit code reads
+ * this, never `governed` alone.
+ */
 export function landsByHumanMerge(verdict) {
-  return verdict?.governed === true || verdict?.size?.exceeds === true || verdict?.fork?.isFork === true;
+  return verdict?.governed === true || sizeLimbFires(verdict?.size) || verdict?.fork?.isFork === true;
 }
 
 /**
@@ -1547,7 +1623,7 @@ export function renderTestVerdict(verdict) {
   const size = verdict.size ?? sizeVerdict(null);
   const intake = renderForkLines(verdict.fork, verdict.checks);
   if (!verdict.governed) {
-    if (size.exceeds || verdict.fork?.isFork === true) {
+    if (sizeLimbFires(size) || verdict.fork?.isFork === true) {
       // The PATH limb is clear and the SIZE or FORK limb is not: the "ordinary
       // queue landing applies" sentence would be false here, so it is not printed.
       return (
@@ -1581,8 +1657,8 @@ export function renderTestVerdict(verdict) {
       `${head}\n` +
       `  ⛔  GOVERNED — Tier S(席内达档复核落地): every governed path here lies under a Tier S surface, so the OWNING\n` +
       `      seat lands this PR through the queue once its thread (or its card) carries a \`## Contract review\` record\n` +
-      `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — with\n` +
-      `      \`check-clause2-carriers.mjs --pair N\` at 0 and every check green (AGENTS.md Prime Directive #14).\n` +
+      `      for the CURRENT head — \`Served-tier: CONTRACT_REVIEW_TIER\`, \`**VERDICT: PASS**\` — and every\n` +
+      `      check green (AGENTS.md Prime Directive #14).\n` +
       `      Before that record no seat flips it ready, enqueues it, or arms auto-merge; ⛔ no seat approves it either,\n` +
       `      and no maintainer click is waited for. One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」;\n` +
       `      one Tier H path among the hits and the whole PR would be Tier H.\n` +
@@ -1624,12 +1700,28 @@ export function renderSizeLines(size) {
   // verdict stays byte-identical across modes on the same list and numbers.
   const reading = `${s.changedLines} changed line(s) (+${s.additions} / -${s.deletions})`;
   if (!s.exceeds) return `  size: ${reading} ≤ ${t} — under the human-merge threshold (generated files included in the count).`;
+  if (s.lifted) {
+    return (
+      `  ✅  SIZE LIFTED — ${reading} > ${t}, over the human-merge line, and an authorized APPROVED review lifts it\n` +
+      `      (${s.lifted.ruling}): ${renderLiftApprovals(s.lifted)}.\n` +
+      `      The OWNING seat lands this PR through the queue (席位落地); the maintainer's direct merge is the other landing.`
+    );
+  }
   return (
-    `  ⛔  HUMAN MERGE — ${reading} > ${t}: this PR lands only by a human merge (maintainer ruling 2026-09-18;\n` +
+    `  ⛔  HUMAN MERGE OR AUTHORIZED APPROVAL — ${reading} > ${t}: over the human-merge line (maintainer ruling 2026-09-18;\n` +
     `      generated files INCLUDED — no exemption for regen artefacts, docs builds or reverts). The same terminal\n` +
-    `      as a Tier H governed diff: no seat flips it ready, enqueues it, or arms auto-merge. ACCEPT on the card,\n` +
+    `      as a Tier H governed diff: no seat flips it ready, enqueues it, or arms auto-merge until an account in\n` +
+    `      GOVERNED_APPROVERS has APPROVED it, on ANY commit (${SIZE_LIFT_RULING}) — then the OWNING seat lands it\n` +
+    `      through the queue; the maintainer's own merge is the other landing. ACCEPT on the card,\n` +
     `      \`needs-user-decision\` on the PR, the final 维护者速读, review requested from GOVERNED_APPROVERS.`
   );
+}
+
+/** The approver(s) and the commit each approval was given on, as one clause. Pure; `--self-test` pins it. */
+export function renderLiftApprovals(lifted) {
+  return (lifted?.approvals ?? [])
+    .map((a) => `${a.login} (on ${a.commitId ? a.commitId.slice(0, 12) : 'a commit the review did not name'})`)
+    .join(', ');
 }
 
 /** The FORK limb's words + the head's check-run count (header section "The FORK predicate"). Pure; `--self-test` pins every branch. */
@@ -2753,14 +2845,14 @@ export const PROXY_REARM_GUARD = 'OS_GOVERNED_MERGES_PROXY_REARMED';
  * scope with a top-level `await loadGovernedRegister()`, which awaits
  * `import('./check-governed-queue-guard.mjs')`, which imports THIS file at
  * module scope. The lazy door `check-governed-queue-guard.mjs`'s
- * `CONTRACT_REVIEW_LABEL` describes is shut here too, because this file's own
+ * `REVIEW_OF_RECORD_LOCATION` describes is shut here too, because this file's own
  * `--self-test` dispatch is a module-scope `await`. And the reverse edge is
  * barred for a second, independent reason the patrol's own header records: that
  * file TRAVELS — a sibling repo's `scripts/pm/` holds it alone — so it can
  * never statically import the governed pair either.
  *
  * So the mirror stays, and the `--self-test` battery pins it to its OWNER the
- * way `CONTRACT_REVIEW_LABEL` is pinned: by reading that file's SOURCE off disk,
+ * way the guard's mirror is pinned: by reading that file's SOURCE off disk,
  * plus the REASON — when the patrol's module-scope `await` goes away, the case
  * that fails says to make this a real import.
  *
@@ -3951,7 +4043,7 @@ async function selfTest() {
   const tierHCase = testVerdict(['packages/spec/src/index.ts', '.claude/agents/os-dev.md', 'AGENTS.md']);
   const tierSText = renderTestVerdict(tierSCase);
   const tierHText = renderTestVerdict(tierHCase);
-  assert('a-Tier-S-verdict-renders-its-OWN-block-naming-the-record-on-thread-landing', /Tier S/.test(tierSText) && /## Contract review/.test(tierSText) && /CONTRACT_REVIEW_TIER/.test(tierSText) && /--pair/.test(tierSText), tierSText);
+  assert('a-Tier-S-verdict-renders-its-OWN-block-naming-the-record-on-thread-landing', /Tier S/.test(tierSText) && /## Contract review/.test(tierSText) && /CONTRACT_REVIEW_TIER/.test(tierSText) && !/--pair/.test(tierSText), tierSText);
   assert('and-still-says-GOVERNED-with-the-three-verbs-so-every-grep-reader-keeps-its-answer', /GOVERNED/.test(tierSText) && /arms auto-merge/.test(tierSText) && !/human merge is the review record/.test(tierSText), tierSText);
   assert('a-Tier-H-verdict-keeps-its-wording-word-for-word-and-names-its-tier', /a human merge is the review record for this PR/.test(tierHText) && /landing tier: H/.test(tierHText) && !/Tier S/.test(tierHText), tierHText);
   assert('a-mixed-list-renders-H-the-one-Tier-H-path-decides', tierHCase.tier === GOVERNED_TIER_H && tierHCase.hitPaths.join() === '.claude/agents/os-dev.md,AGENTS.md', JSON.stringify(tierHCase.hitPaths));
@@ -3966,7 +4058,7 @@ async function selfTest() {
   assert('the-tier-is-recomputed-on-the-LIFTED-slice', preLift.tier === GOVERNED_TIER_H && postLift.tier === GOVERNED_TIER_S && postLift.governed === true, JSON.stringify([preLift.tier, postLift.tier]));
   const allLifted = applyGeneratedExceptions(testVerdict([liftPath]), lifted);
   assert('and-null-once-every-hit-is-lifted', allLifted.governed === false && allLifted.tier === null, JSON.stringify(allLifted.tier));
-  assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && /--pair/.test(GOVERNED_TIERS.S.landing));
+  assert('the-tier-words-name-the-landing-each-waits-for', /GOVERNED_APPROVERS/.test(GOVERNED_TIERS.H.landing) && /Contract review/.test(GOVERNED_TIERS.S.landing) && !/--pair/.test(GOVERNED_TIERS.S.landing));
 
   // ── --since parsing ───────────────────────────────────────────────────────
   battery('since parsing');
@@ -5743,6 +5835,56 @@ async function selfTest() {
     JSON.stringify({ governed: liftedBig.governed, humanMerge: liftedBig.humanMerge }));
   assert('and-the-rendering-carries-both-the-lift-and-the-HUMAN-MERGE',
     renderTestVerdict(liftedBig).includes('PURE REGENERATION') && renderTestVerdict(liftedBig).includes('HUMAN MERGE'), renderTestVerdict(liftedBig));
+  // ── the SIZE limb's LIFT (maintainer ruling 2026-09-27, objectstack#20153) ──
+  // The approval verdict is the queue guard's `authorizedApprovalVerdict` SHAPE,
+  // handed in as data; this file derives nothing from a review list. Fixtures
+  // spell that shape once, and the non-lift cases are the card's own list: no
+  // approval, an unauthorized one (the authorized reduction leaves it OUT of
+  // `approvals`), a dismissed/superseded one (`unapproved`), an unreadable list.
+  const LIFT_SHA = 'e4ead748' + '0'.repeat(32);
+  const authorizedVerdict = (approvals, extra = {}) => ({
+    state: approvals.length > 0 ? 'approved' : 'unapproved', approvers: approvals.map((a) => a.login), approvals,
+    approvalsOnEarlierCommits: [], unauthorizedApprovers: [], changesRequestedBy: [], reviewsRead: 1, headSha: LIFT_SHA, ...extra,
+  });
+  const liftedByApproval = testVerdict(['packages/spec/src/index.ts'], { size: { additions: 10764, deletions: 999, source: 'a fixture' }, approval: authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }]) });
+  assert('⭐ an-authorized-APPROVED-review-LIFTS-the-size-limb-exceeds-stays-TRUE-and-the-PR-no-longer-lands-by-human-merge',
+    liftedByApproval.size.exceeds === true && liftedByApproval.size.changedLines === 11763 && liftedByApproval.size.lifted !== null &&
+      liftedByApproval.size.lifted.approvers.join() === 'os-zhuang' && liftedByApproval.size.lifted.approvals[0].commitId === LIFT_SHA &&
+      liftedByApproval.humanMerge === false && landsByHumanMerge(liftedByApproval) === false && sizeLimbFires(liftedByApproval.size) === false,
+    JSON.stringify(liftedByApproval.size));
+  assert('and-the-threshold-the-strict-comparison-and-the-generated-files-inclusion-are-UNCHANGED-by-the-lift',
+    liftedByApproval.size.threshold === 5000 && sizeVerdict({ additions: 5000, deletions: 0 }, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])).exceeds === false &&
+      sizeVerdict({ additions: 5000, deletions: 1 }, null).exceeds === true);
+  const liftedWords = renderTestVerdict(liftedByApproval);
+  assert('and-the-words-print-the-lift-the-approver-the-commit-and-this-card-and-name-the-seat-landing',
+    liftedWords.includes('SIZE LIFTED') && liftedWords.includes('os-zhuang (on e4ead7480000)') && liftedWords.includes('objectstack#20153') &&
+      liftedWords.includes('2026-09-27') && liftedWords.includes('OWNING seat lands this PR through the queue') && !liftedWords.includes('HUMAN MERGE OR') &&
+      liftedWords.includes('NOT governed'), liftedWords);
+  assert('and-it-exits-on-the-NOT-governed-code-the-queue-lands-it', runTestModeExitFor(['packages/spec/src/index.ts'], { additions: 10764, deletions: 999 }, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])) === EXIT_TEST_NOT_GOVERNED);
+  const overSize = { additions: 6000, deletions: 0 };
+  assert('⛔ NO-approval-handed-in-still-lands-by-human-merge-or-authorized-approval-the-2026-09-18-reading-unchanged',
+    sizeLimbFires(sizeVerdict(overSize, null)) === true && sizeVerdict(overSize, null).lifted === null && sizeVerdict(overSize, null).approvalState === null);
+  assert('⛔ an-UNAPPROVED-verdict-dismissed-or-superseded-lifts-nothing',
+    sizeLimbFires(sizeVerdict(overSize, authorizedVerdict([]))) === true && sizeVerdict(overSize, authorizedVerdict([])).approvalState === 'unapproved');
+  assert('⛔ an-UNAUTHORIZED-approval-is-outside-approvals-and-lifts-nothing',
+    sizeLimbFires(sizeVerdict(overSize, authorizedVerdict([], { unauthorizedApprovers: ['not-authorized'] }))) === true);
+  assert('⛔ an-UNREADABLE-review-list-fails-CLOSED',
+    sizeLimbFires(sizeVerdict(overSize, { state: 'unreadable', approvers: [], changesRequestedBy: [], reviewsRead: 0, reason: 'HTTP 403' })) === true &&
+      sizeVerdict(overSize, { state: 'unreadable' }).approvalState === 'unreadable');
+  assert('⛔ the-GENERIC-per-reviewer-reduction-carries-no-approvals-field-and-lifts-nothing-a-verdict-that-never-asked-WHO',
+    sizeLimbFires(sizeVerdict(overSize, { state: 'approved', approvers: ['anyone'], changesRequestedBy: [], reviewsRead: 1 })) === true &&
+      sizeLiftFrom({ state: 'approved', approvers: ['os-zhuang'], approvals: [] }) === null && sizeLiftFrom({ state: 'approved', approvals: [{ commitId: 'x' }] }) === null);
+  assert('an-approval-under-the-line-lifts-nothing-because-there-is-nothing-to-lift',
+    sizeVerdict({ additions: 10, deletions: 2 }, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null && sizeVerdict(null, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null);
+  const liftedGoverned = testVerdict(['AGENTS.md'], { size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]) });
+  assert('⭐ the-lift-moves-the-SIZE-limb-only-a-governed-PATH-still-lands-per-its-tier-and-a-FORK-head-is-untouched',
+    liftedGoverned.governed === true && landsByHumanMerge(liftedGoverned) === true && liftedGoverned.size.lifted !== null &&
+      landsByHumanMerge(testVerdict(['x.ts'], { size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]), fork: forkVerdict({ base: { repo: { full_name: 'o/r' } }, head: { repo: { full_name: 'f/r' } } }) })) === true);
+  assert('⭐ the-post-merge-sweep-hands-in-NO-approval-so-an-oversized-landing-is-STILL-listed',
+    classifyCommit({ sha: 'b'.repeat(40), date: '2026-09-27T02:02:33Z', subject: 'feat!: retire the saved-report stack (#20125)' }, ['packages/x.ts'], null, { additions: 10764, deletions: 999 }) !== null);
+  assert('and-the-not-lifted-words-name-BOTH-landings-the-authorized-approval-and-the-maintainers-merge',
+    bigWords.includes('until an account in') && bigWords.includes('GOVERNED_APPROVERS has APPROVED it, on ANY commit') && bigWords.includes('objectstack#20153') &&
+      bigWords.includes("the maintainer's own merge is the other landing") && !bigWords.includes('lands only by a human merge'), bigWords);
   // The number's sources. `--numstat`, parsed: text rows sum, a binary row counts 0 as on GitHub.
   const numstat = parseNumstat('3\t1\tsrc/a.ts\n-\t-\timg/logo.png\n10\t0\tsrc/b.ts\n\n');
   assert('numstat-sums-text-rows-and-counts-a-binary-row-as-zero-lines',
@@ -6192,9 +6334,9 @@ async function selfTest() {
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
-function runTestModeExitFor(paths, size = null) {
+function runTestModeExitFor(paths, size = null, approval = null) {
   if (paths.length === 0) return EXIT_CANNOT_SWEEP;
-  return landsByHumanMerge(testVerdict(paths, { size })) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
+  return landsByHumanMerge(testVerdict(paths, { size, approval })) ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
 }
 
 // `invokedDirectly` for the same reason the main-invocation guard above

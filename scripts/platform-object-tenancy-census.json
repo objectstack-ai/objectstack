@@ -24,8 +24,8 @@
   "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
-    "registered": 84,
-    "inReach": 58,
+    "registered": 82,
+    "inReach": 56,
     "outOfReach": 26
   },
   "reasonTotals": {
@@ -454,20 +454,6 @@
     {
       "name": "sys_record_share",
       "file": "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
-    },
-    {
-      "name": "sys_report_schedule",
-      "file": "packages/platform-objects/src/audit/sys-report-schedule.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
-    },
-    {
-      "name": "sys_saved_report",
-      "file": "packages/platform-objects/src/audit/sys-saved-report.object.ts",
       "reach": "in",
       "tenantField": "organization_id",
       "reasons": []

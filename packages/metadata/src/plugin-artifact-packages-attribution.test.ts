@@ -196,11 +196,12 @@ describe('#14599 artifact door — a `packages[]` artifact is registered per pac
         expect(artifact.packages.map((e: any) => e.manifest.id).sort())
             .toEqual([CORE_ID, ORDERS_ID]);
 
-        // …AND the flattened top level carrying the same definitions, which is
-        // what `preserve` being ADDITIVE means. If the producer half of #14512
-        // ever lands, THIS is the assertion that will report it — and the cases
-        // below keep passing, because they read the bodies.
-        expect(artifact.objects.map((o: any) => o.name).sort())
+        // …and NO flattened top level beside them: #14512's producer half
+        // landed (ADR-0130 D4 addendum 2026-09-22), so a multi-package artifact
+        // carries each definition once, under the package that owns it. The
+        // cases below never moved when it did, because they read the bodies.
+        expect(artifact.objects).toBeUndefined();
+        expect(artifact.packages.flatMap((e: any) => e.manifest.objects ?? []).map((o: any) => o.name).sort())
             .toEqual(['crm_account', 'crm_order']);
 
         // The divergence itself: the artifact's own identity is the App
@@ -288,15 +289,19 @@ describe('#14599 artifact door — a `packages[]` artifact is registered per pac
     it('keeps a top-level item that NO package body declares, attributed to the artifact', async () => {
         // `packages` composes by `concat`, so an artifact built from one stack
         // that already carried `packages` and one that did not has top-level
-        // collections outside every body. Dropping those would take metadata a
-        // booted instance can see today off every door.
+        // collections outside every body — as does every multi-package artifact
+        // built before #14512's producer half, whose whole flattened top level
+        // sits beside the bodies. Dropping those would take metadata a booted
+        // instance can see today off every door, which is why the residual
+        // sweep exists and why the top level is ASSIGNED here rather than
+        // appended to a key a composed artifact no longer carries.
         const artifact = twoPackageArtifact();
-        artifact.objects.push({
+        artifact.objects = [{
             name: 'crm_orphan',
             label: 'Orphan',
             sharingModel: 'private',
             fields: { name: { name: 'name', type: 'text', label: 'Name', required: true } },
-        });
+        }];
 
         const { plugin, ctx } = await load(artifact);
 

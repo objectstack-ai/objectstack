@@ -101,6 +101,12 @@ export const flowForm = defineForm({
         { field: 'version', colSpan: 1, helpText: 'Version number (auto-incremented)' },
         { field: 'runAs', colSpan: 1, helpText: 'Execute as system (admin) or user (current user permissions)' },
         { field: 'errorHandling', type: 'composite', colSpan: 2, helpText: 'What to do when a node fails (fail, retry, continue)' },
+        // #19331 — both messages are declared by FlowSchema and were offered by
+        // no control. The copy states the reach the runtime actually gives them:
+        // they ride AutomationResult for EVERY terminal run, not only screen
+        // flows, and the screen-flow UI is the surface that renders them.
+        { field: 'successMessage', type: 'text', colSpan: 2, helpText: 'Message carried on the run result when the flow completes; the screen-flow UI shows it as a toast instead of a generic "Done".' },
+        { field: 'errorMessage', type: 'text', colSpan: 2, helpText: 'Message carried on the run result when the flow fails; the screen-flow UI shows it as a toast instead of the raw error.' },
       ],
     },
   ],

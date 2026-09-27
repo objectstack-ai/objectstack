@@ -1,6 +1,6 @@
 # 车道岗位说明:domain:devx
 
-见 SKILL.md 〈座位贴协议〉;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
+见 seat-lifecycle.md;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
 
 ## 范围
 
@@ -16,7 +16,7 @@
 - `content/docs/releases/**` 是 release-owned,恰两条通道;发布页作用域只管 v16 及以后。
 - 通道一:完整性缺口逐卡批准,⛔ 不构成先例。通道二:事实错误走专用 docs-only PR。
 - ⛔ 不做任何发布动作,含改根 `version` 脚本链;能点绿的门禁不等于该点绿。
-- 受管面 PR 照 SKILL.md 〈复核〉的路径分叉执行,⛔ 此处不另抄。
+- 受管面 PR 照 SKILL.md 〈路径分叉〉的路径分叉执行,⛔ 此处不另抄。
 - 设计如此的红门禁必须在 PR 上说明红因并声明不修。
 - changeset 按 publish 面判:根 `scripts/`、docs、test-only ⇒ `skip-changeset`。
 - 落进已发布包的源 ⇒ 真 changeset。

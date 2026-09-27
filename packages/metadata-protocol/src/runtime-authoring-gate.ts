@@ -770,8 +770,16 @@ export function evaluateRuntimeAuthoringGate(args: {
         return { error: null, advisories };
     }
 
+    // The message opens with the sentence, not with a bracketed restatement of
+    // the `code` assigned below. The 2026-08-29 maintainer ruling is one
+    // envelope semantics — `error` is HUMAN LANGUAGE, `code` is the MACHINE
+    // TOKEN — and `withoutDeclaredCodePrefix` strips only the `CODE:` spelling,
+    // so a lowercase `[tag]` opener reached every caller's `error.message`
+    // restating what `code` already carries. The `[rule]` locators inside
+    // `headline` stay: they name WHICH finding, a fact no other field carries.
+    // Pinned as an absence in `protocol.bracketed-refusal-opener-absence.test.ts`.
     const err = new Error(
-        `[invalid_metadata] ${args.type}/${args.name} failed author-time validation: ${headline}`,
+        `${args.type}/${args.name} failed author-time validation: ${headline}`,
     );
     (err as any).code = 'INVALID_METADATA';
     (err as any).status = 422;

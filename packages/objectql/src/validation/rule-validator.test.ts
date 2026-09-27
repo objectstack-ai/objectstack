@@ -210,19 +210,21 @@ describe('parent-scoped readonlyWhen (#4889)', () => {
     expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('LOCKED'))).toBe(true);
   });
 
-  it('keeps fail-OPEN for a predicate that is simply broken (undeclared key)', () => {
+  it('REFUSES a predicate that is simply broken (undeclared key) — ADR-0137 D2', () => {
     // Not an unbound root — `record` IS bound, the key under it is not declared.
-    // #4649 deliberately left this fail-open for field predicates; #4889 must
-    // not have widened itself into that case.
+    // #4649 left this fail-open for field predicates and #4889 did not widen
+    // itself into it; ADR-0137 D2 is what closed it — the write is refused,
+    // naming the field and the rule, and the refusal is logged too.
     const warnings: string[] = [];
-    const out = stripReadonlyWhenFields(
+    const entry = fieldRuleRefusal(() => stripReadonlyWhenFields(
       { fields: { amount: { type: 'currency', readonlyWhen: "record.no_such_field == 'paid'" } } },
       { amount: 999 },
       { amount: 1 },
       { warn: (m: string) => warnings.push(m) } as never,
-    );
-    expect(out).toEqual({ amount: 999 });
-    expect(warnings.some((w) => w.includes('change allowed through'))).toBe(true);
+    ), 'amount', 'readonlyWhen');
+    expect(entry.constraint).toMatchObject({ missingKey: 'no_such_field' });
+    expect(warnings.some((w) => w.includes("Field 'amount' readonlyWhen could not be evaluated"))).toBe(true);
+    expect(warnings.some((w) => w.includes('change allowed through'))).toBe(false);
   });
 
   it('leaves a RECORD-scoped lock on the same object working unchanged', () => {
@@ -303,6 +305,29 @@ const sentLineFields = {
   },
 };
 
+/**
+ * [ADR-0137 D2] The refusal a field-rule predicate that cannot be evaluated
+ * produces: the thrown `ValidationError`'s entry for `field`, asserted to be
+ * the unevaluable-rule envelope for `slot`. Fails when nothing was thrown.
+ */
+function fieldRuleRefusal(run: () => unknown, field: string, slot: 'requiredWhen' | 'readonlyWhen') {
+  let err: unknown;
+  try {
+    run();
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ValidationError);
+  expect((err as ValidationError).code).toBe('VALIDATION_FAILED');
+  const entry = (err as ValidationError).fields.find((f) => f.field === field);
+  expect(entry).toMatchObject({
+    field,
+    code: 'rule_violation',
+    constraint: expect.objectContaining({ rule: slot, reason: 'unevaluable' }),
+  });
+  return entry!;
+}
+
 /** Collect the ValidationError field codes, or `null` when the write is accepted. */
 function violations(
   schema: unknown,
@@ -333,34 +358,41 @@ describe('parent-scoped requiredWhen (#4977)', () => {
   });
 
   it('accepts the write once the field is supplied', () => {
-    expect(violations(sentLineFields, { invoice: 'inv1', description: 'seat' }, 'insert', {
+    // `quantity` is supplied too: the row-scoped `note` rule orders it against
+    // 100, and over a null that faults — which since ADR-0137 D2 refuses the
+    // write instead of silently skipping `note`'s requirement.
+    expect(violations(sentLineFields, { invoice: 'inv1', description: 'seat', quantity: 1 }, 'insert', {
       parent: { id: 'inv1', status: 'sent' },
     })).toBeNull();
   });
 
-  it('is FAIL-OPEN when `parent` could not be bound — the #4889 asymmetry', () => {
-    // The twin above resolves an unbound root to LOCKED. Here the ruling
-    // deliberately kept the historical fail-open exit: the requirement is
-    // skipped and the write is ACCEPTED. Do not "restore symmetry" — that is
-    // option B, reserved for the next review of ADR-0058 D5.
+  it('REFUSES when `parent` could not be bound — ADR-0137 D2 (option B, taken)', () => {
+    // The `readonlyWhen` twin resolves an unbound root to LOCKED. This arm kept
+    // the historical fail-open exit under #4977 and left the refusal ("option
+    // B") to the next review of ADR-0058 D5 — ADR-0137 is that review, and its
+    // D2 refuses the write, naming the field and the rule.
     const warnings: string[] = [];
-    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+    const entry = fieldRuleRefusal(() => evaluateValidationRules(sentLineFields as never, { invoice: 'inv1', quantity: 1 }, 'insert', {
       logger: { warn: (m: string) => warnings.push(m) },
-    })).toBeNull();
-    expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('NOT enforced'))).toBe(true);
+    } as never), 'description', 'requiredWhen');
+    // The unbound header is named as such — not as the generic record/previous scope.
+    expect(entry.message).toContain("reads 'parent', the master-detail header");
+    expect(warnings.some((w) => w.includes("requiredWhen for 'description' failed to evaluate") && w.includes('write rejected'))).toBe(true);
+    expect(warnings.some((w) => w.includes('NOT enforced'))).toBe(false);
   });
 
-  it('keeps the plain fail-open message for a predicate that is simply broken', () => {
+  it('REFUSES a predicate that is simply broken, naming the key and not `parent`', () => {
     // Not an unbound root — `record` IS bound, the key under it is undeclared.
     const warnings: string[] = [];
-    expect(violations(
-      { fields: { amount: { type: 'currency', requiredWhen: "record.no_such_field == 'x'" } } },
+    const entry = fieldRuleRefusal(() => evaluateValidationRules(
+      { fields: { amount: { type: 'currency', requiredWhen: "record.no_such_field == 'x'" } } } as never,
       { amount: 1 },
       'insert',
-      { logger: { warn: (m: string) => warnings.push(m) } },
-    )).toBeNull();
-    expect(warnings.some((w) => w.includes('failed to evaluate — skipped'))).toBe(true);
-    expect(warnings.some((w) => w.includes("reads 'parent'"))).toBe(false);
+      { logger: { warn: (m: string) => warnings.push(m) } } as never,
+    ), 'amount', 'requiredWhen');
+    expect(entry.constraint).toMatchObject({ missingKey: 'no_such_field' });
+    expect(entry.message).not.toContain("reads 'parent'");
+    expect(warnings.some((w) => w.includes('— skipped'))).toBe(false);
   });
 
   it('leaves the ROW-scoped requiredWhen on the same object working unchanged', () => {
@@ -535,15 +567,11 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
   it('does NOT materialise when the prior row is not in hand (no fabrication)', () => {
     // `declared-fields.ts`'s standing rule: without the persisted state,
     // defaulting a declared field to null would FABRICATE a value that
-    // contradicts the stored row. So this case keeps the historical fault →
-    // fail-open exit, and the engine avoids it by fetching the prior row
-    // whenever the object declares a readonlyWhen field (`needsPriorRecord`).
-    const warnings: string[] = [];
-    const out = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, null, {
-      warn: (m: string) => warnings.push(m),
-    } as never);
-    expect(out).toEqual({ amount: 999 });
-    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+    // contradicts the stored row. So this case keeps the historical fault —
+    // which since ADR-0137 D2 REFUSES the write instead of letting the change
+    // through — and the engine avoids it by fetching the prior row whenever
+    // the object declares a readonlyWhen field (`needsPriorRecord`).
+    fieldRuleRefusal(() => stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, null), 'amount', 'readonlyWhen');
   });
 
   it('never mutates the caller\'s prior record (it is the engine\'s hookContext.previous)', () => {
@@ -556,31 +584,28 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
     expect('approved_at' in rows[0]!).toBe(false);
   });
 
-  it('leaves the fail-open branch ALIVE — an ordering comparison still faults over a total record', () => {
+  it('leaves the fault branch ALIVE — an ordering comparison still faults over a total record, and refuses', () => {
     // `null < null` is `no such overload`, so materialising does not make every
-    // predicate evaluable. This is exactly why the null-guard gate exists.
-    const warnings: string[] = [];
-    const out = stripReadonlyWhenFields(
+    // predicate evaluable. This is exactly why the null-guard gate exists —
+    // and since ADR-0137 D2 the fault refuses the write rather than writing it.
+    const entry = fieldRuleRefusal(() => stripReadonlyWhenFields(
       { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: 'record.notes < record.approved_at' } } },
       { amount: 999 },
       sparsePrior(),
-      { warn: (m: string) => warnings.push(m) } as never,
-    );
-    expect(out).toEqual({ amount: 999 });
-    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+    ), 'amount', 'readonlyWhen');
+    expect(entry.constraint).toMatchObject({ hint: 'null-comparison' });
   });
 
-  it('keeps fail-OPEN for an UNDECLARED key — materialising covers declared fields only', () => {
+  it('keeps an UNDECLARED key unevaluable — materialising covers declared fields only — and refuses it', () => {
     // The #4649 line, unmoved: a typo must stay unevaluable so it is reported,
-    // not silently read as null.
-    const warnings: string[] = [];
-    expect(stripReadonlyWhenFields(
+    // not silently read as null. What ADR-0137 D2 moved is the report: the
+    // write is refused, naming the key, instead of the change going through.
+    const entry = fieldRuleRefusal(() => stripReadonlyWhenFields(
       { fields: { amount: { type: 'currency', readonlyWhen: 'record.stauts == null' } } },
       { amount: 999 },
       { id: 'r1', amount: 100 },
-      { warn: (m: string) => warnings.push(m) } as never,
-    )).toEqual({ amount: 999 });
-    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+    ), 'amount', 'readonlyWhen');
+    expect(entry.constraint).toMatchObject({ missingKey: 'stauts' });
   });
 
   // ── the consequence that moves the OTHER way, pinned rather than discovered ──
@@ -639,31 +664,27 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
       warn: (m: string) => warnings.push(m),
     } as never)).toEqual({});
     expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('LOCKED'))).toBe(true);
-    // [#6457 — RE-ANNOTATED, verdict deliberately NOT flipped here.]
+    // [#6457 — RE-ANNOTATED; the verdict flipped with ADR-0137 D2, not here.]
     //
     // A parent that IS bound but does not carry the key is still a fault at
-    // THIS seam: fail-open, the change goes through. That was the hole #6457
-    // closed, and the sentence below is the reason this assertion nonetheless
-    // stays exactly as PR #6454 wrote it.
+    // THIS seam — `No such key`, not the unbound-root fault. That was the hole
+    // #6457 closed from the ENGINE side: its ruling materialises the header
+    // inside `resolveMasterDetailParent(s)`, using the MASTER object's
+    // declared-field table — the one thing this pure function does not and
+    // cannot have. So the strip's own contract is unchanged (its signature
+    // never grew a second field table), and a caller that hands it a genuinely
+    // sparse header still meets the fault.
     //
-    // #6457's ruling materialises the header INSIDE the engine's
-    // `resolveMasterDetailParent(s)`, using the MASTER object's declared-field
-    // table — the one thing this pure function does not and cannot have. So the
-    // strip's own contract is unchanged (its signature never grew a second field
-    // table), and a caller that hands it a genuinely sparse header still gets
-    // the fail-open answer pinned here. What changed is that the ENGINE no
-    // longer hands it one.
-    //
-    // The moved verdict therefore lives where the change lives, and is pinned
-    // end-to-end against a real driver in `engine-readonly-when-parent.test.ts`
-    // ("ROW 2 — THE FIX"), with its `requiredWhen` mirror in
-    // `engine-required-when-parent.test.ts`. Read the two together: this one
-    // says the strip did not move, that one says the write path did.
-    const warnings2: string[] = [];
-    expect(stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, {
-      warn: (m: string) => warnings2.push(m),
-    } as never, { id: 'inv1' })).toEqual({ quantity: 9999 });
-    expect(warnings2.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+    // What the fault DOES moved with ADR-0137 D2: it was fail-open (the change
+    // went through) and now REFUSES the write. The #6457 verdict on the write
+    // path is pinned end-to-end in `engine-readonly-when-parent.test.ts` ("ROW
+    // 2 — THE FIX"), with its `requiredWhen` mirror in
+    // `engine-required-when-parent.test.ts`.
+    fieldRuleRefusal(
+      () => stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, undefined, { id: 'inv1' }),
+      'quantity',
+      'readonlyWhen',
+    );
   });
 });
 

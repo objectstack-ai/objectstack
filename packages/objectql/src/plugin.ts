@@ -55,27 +55,6 @@ interface ProtocolWithDbRestore {
   }>;
 }
 
-/**
- * [#14423] The keyed plural read the governance audit reads the metadata plane
- * through — `MetadataManager.loadManyKeyed(type)`, structurally.
- *
- * Declared HERE, beside the one call site, rather than on `IMetadataService`:
- * `packages/spec` is a contract surface owned by another lane, and widening it
- * is its own decision with its own review. This is the same position
- * `loadDiagnosed` was in before it was declared — the call site and the
- * implementation agreed, and the contract was what nobody had written — and
- * the same remedy applies when that lane takes it: delete this and read the
- * contract. ⛔ Not `any`: intersecting the slot's real contract keeps the
- * lookup typed (#4251), and the member stays optional so a plane that predates
- * it type-checks and is simply read as "no keyed read here".
- */
-type KeyedPluralMetadataRead = {
-  loadManyKeyed?<T = unknown>(
-    type: string,
-    options?: Record<string, unknown>,
-  ): Promise<Array<{ name: string; data: T }>>;
-};
-
 /** Type guard — checks whether the service exposes `loadMetaFromDb`. */
 function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
   return (
@@ -2555,14 +2534,11 @@ export class ObjectQLPlugin implements Plugin {
    */
   private async resolveGovernanceMetadataService(
     ctx: PluginContext,
-  ): Promise<(IMetadataService & KeyedPluralMetadataRead) | undefined> {
+  ): Promise<IMetadataService | undefined> {
     const scopeId = this.environmentId;
     if (scopeId && typeof ctx.getServiceScoped === 'function') {
       try {
-        const scoped = await ctx.getServiceScoped<IMetadataService & KeyedPluralMetadataRead>(
-          'metadata',
-          scopeId,
-        );
+        const scoped = await ctx.getServiceScoped<IMetadataService>('metadata', scopeId);
         if (scoped != null) return scoped;
       } catch {
         // Not resolvable under a scope on this host — nothing registered under
@@ -2573,7 +2549,7 @@ export class ObjectQLPlugin implements Plugin {
       }
     }
     try {
-      return ctx.getService<IMetadataService & KeyedPluralMetadataRead>('metadata');
+      return ctx.getService<IMetadataService>('metadata');
     } catch {
       return undefined;
     }

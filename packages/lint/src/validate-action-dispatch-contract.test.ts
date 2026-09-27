@@ -207,3 +207,80 @@ describe('validateActionDispatchContract — every list tier', () => {
     expect(findings[0]!.where).toContain('object "task"');
   });
 });
+
+// ABSENCE COUNTS AS DISAGREEMENT — the disarm `collectDeclaredContracts`
+// states in its docblock. Action names are one flat namespace (global and
+// object-embedded, pooled), so ONE same-named action that declares no
+// `execution`, anywhere in the stack, turns the rule off for that name. That is
+// deliberate: zero false positives, and undeclared is not defaulted. It is
+// pinned here because nothing else holds it: with the `'none'` arm deleted,
+// every other test in this package stays green.
+//
+// A zero is a reading only when a control fires beside it, so every disarm
+// below runs the SAME stack twice: without the sibling (exactly one finding)
+// and with it (none). The agreeing-sibling control narrows the cause further:
+// a sibling that DECLARES the same contract leaves the finding standing, so it
+// is the sibling's silence that disarms the name, not its mere presence.
+describe('validateActionDispatchContract — absence counts as disagreement (the disarm)', () => {
+  type Findings = ReturnType<typeof validateActionDispatchContract>;
+
+  const RECALC_AGGREGATE = { name: 'recalc', type: 'api', execution: 'aggregate' };
+  const RECALC_UNDECLARED = { name: 'recalc', type: 'api' };
+
+  /**
+   * One view on `task`, wiring `recalc` as a bare string (the per-record
+   * contract). `invoice` is an object the view never resolves through.
+   */
+  const disarmStack = (at: {
+    global?: Record<string, unknown>[];
+    task?: Record<string, unknown>[];
+    invoice?: Record<string, unknown>[];
+  }) => ({
+    objects: [
+      { name: 'task', actions: at.task ?? [] },
+      { name: 'invoice', actions: at.invoice ?? [] },
+    ],
+    actions: at.global ?? [],
+    views: [{ name: 'task', object: 'task', list: { bulkActions: ['recalc'] } }],
+  });
+
+  const expectOneMismatch = (findings: Findings) => {
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.rule).toBe(ACTION_DISPATCH_CONTRACT_MISMATCH);
+    expect(findings[0]!.path).toBe('views[0].list.bulkActions[0]');
+  };
+
+  it('CONTROL: a global `recalc` declared `aggregate`, wired as a bare string, is refused', () => {
+    expectOneMismatch(validateActionDispatchContract(disarmStack({ global: [RECALC_AGGREGATE] })));
+  });
+
+  it('CONTROL: a same-named sibling that DECLARES the same contract leaves the finding standing', () => {
+    expectOneMismatch(
+      validateActionDispatchContract(disarmStack({ global: [RECALC_AGGREGATE], task: [RECALC_AGGREGATE] })),
+    );
+    expectOneMismatch(
+      validateActionDispatchContract(disarmStack({ global: [RECALC_AGGREGATE], invoice: [RECALC_AGGREGATE] })),
+    );
+  });
+
+  it("an undeclared sibling embedded in the view's own object disarms the name", () => {
+    expectOneMismatch(validateActionDispatchContract(disarmStack({ global: [RECALC_AGGREGATE] })));
+    expect(
+      validateActionDispatchContract(disarmStack({ global: [RECALC_AGGREGATE], task: [RECALC_UNDECLARED] })),
+    ).toEqual([]);
+  });
+
+  it('an undeclared sibling on an UNRELATED object disarms the name too — declarations are not scoped by the view', () => {
+    expectOneMismatch(validateActionDispatchContract(disarmStack({ global: [RECALC_AGGREGATE] })));
+    expect(
+      validateActionDispatchContract(disarmStack({ global: [RECALC_AGGREGATE], invoice: [RECALC_UNDECLARED] })),
+    ).toEqual([]);
+  });
+
+  it('an undeclared GLOBAL sibling disarms an object-embedded declaration', () => {
+    expectOneMismatch(validateActionDispatchContract(disarmStack({ task: [RECALC_AGGREGATE] })));
+    expect(
+      validateActionDispatchContract(disarmStack({ task: [RECALC_AGGREGATE], global: [RECALC_UNDECLARED] })),
+    ).toEqual([]);
+  });
+});

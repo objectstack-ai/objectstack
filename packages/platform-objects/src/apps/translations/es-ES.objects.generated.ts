@@ -35,7 +35,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Rol de plataforma",
-        help: "Rol a nivel de plataforma (admin, user, …). Se establece mediante la acción Establecer rol de plataforma."
+        help: "Valor de rol heredado de better-auth (admin, user, …). ObjectStack ya no lo escribe (ADR-0068 D2). Para conceder la condición de administrador de la plataforma, incluya el correo verificado del usuario en `OS_PLATFORM_OWNER_EMAIL`; bajo la postura de tenencia `single`, una asignación sin ámbito de `admin_full_access` en `sys_user_permission_set` también la concede."
       },
       banned: {
         label: "Bloqueado",
@@ -407,6 +407,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de cuenta de autenticación"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el proveedor y el ID de cuenta que emitió (calculado al leer)"
+      },
       created_at: {
         label: "Creado el"
       },
@@ -498,6 +502,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID de verificación"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el identificador que se verifica (calculado al leer)"
       },
       created_at: {
         label: "Creado el"
@@ -606,6 +614,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de miembro"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el miembro y, si consta, su rol (calculado al leer)"
+      },
       created_at: {
         label: "Creado el"
       },
@@ -667,6 +679,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID de invitación"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: la dirección de correo electrónico invitada (calculado al leer)"
       },
       created_at: {
         label: "Creado el"
@@ -815,6 +831,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de miembro del equipo"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario y el equipo (calculado al leer)"
+      },
       created_at: {
         label: "Creado el"
       },
@@ -932,6 +952,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID de miembro"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario y la unidad de negocio a la que está asignado (calculado al leer)"
+      },
       business_unit_id: {
         label: "Unidad de negocio"
       },
@@ -1048,6 +1072,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID de doble factor"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario al que pertenece la credencial (calculado al leer)"
       },
       created_at: {
         label: "Creado el"
@@ -2091,6 +2119,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "ID"
       },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el usuario aprovisionado y el grupo (calculado al leer)"
+      },
       connection_id: {
         label: "Connection ID"
       },
@@ -2161,6 +2193,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "ID"
+      },
+      display_title: {
+        label: "Título",
+        help: "Título del registro: el rol proyectado y el usuario al que se concede (calculado al leer)"
       },
       connection_id: {
         label: "Connection ID"
@@ -2601,130 +2637,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       customized: {
         label: "Customized",
         help: "Set when an admin edits a package-declared template; boot seeding will no longer overwrite the row (a reworded password-reset mail survives redeploys). Meaningless on admin rows."
-      },
-      created_at: {
-        label: "Creado el"
-      },
-      updated_at: {
-        label: "Actualizado el"
-      }
-    }
-  },
-  sys_saved_report: {
-    label: "Informe guardado",
-    pluralLabel: "Informes guardados",
-    description: "Definición de informe ObjectQL persistida; se puede volver a ejecutar y programar",
-    fields: {
-      id: {
-        label: "ID de informe"
-      },
-      name: {
-        label: "Nombre"
-      },
-      description: {
-        label: "Descripción"
-      },
-      object_name: {
-        label: "Objeto",
-        help: "Nombre corto del objeto que consulta el informe."
-      },
-      query_json: {
-        label: "Consulta",
-        help: "Envoltorio de consulta ObjectQL: { filter, fields, orderBy, limit, groupBy }."
-      },
-      format: {
-        label: "Formato",
-        help: "Renderizado utilizado por IReportService.run() y los resúmenes por correo.",
-        options: {
-          csv: "CSV",
-          json: "JSON",
-          html_table: "Tabla HTML"
-        }
-      },
-      owner_id: {
-        label: "Propietario",
-        help: "Usuario propietario de la definición del informe (controla la compartición)."
-      },
-      last_run_at: {
-        label: "Última ejecución",
-        help: "Marcado por IReportService.run() tras una ejecución correcta."
-      },
-      last_row_count: {
-        label: "Último recuento de filas"
-      },
-      created_at: {
-        label: "Creado el"
-      },
-      updated_at: {
-        label: "Actualizado el"
-      }
-    }
-  },
-  sys_report_schedule: {
-    label: "Programación de informe",
-    pluralLabel: "Programaciones de informes",
-    description: "Entrega recurrente de un sys_saved_report por correo electrónico",
-    fields: {
-      id: {
-        label: "ID de programación"
-      },
-      report_id: {
-        label: "Informe"
-      },
-      name: {
-        label: "Nombre",
-        help: "Nombre visible opcional para el resumen; se usa en el asunto del correo."
-      },
-      interval_minutes: {
-        label: "Intervalo (minutos)",
-        help: "Frecuencia de envío (1440 = diario, 10080 = semanal)."
-      },
-      cron_expression: {
-        label: "Expresión Cron",
-        help: "Cron opcional de 5/6 campos; sustituye a interval_minutes cuando está presente."
-      },
-      timezone: {
-        label: "Zona horaria"
-      },
-      active: {
-        label: "Activo"
-      },
-      recipients: {
-        label: "Destinatarios",
-        help: "Direcciones de correo electrónico separadas por comas."
-      },
-      format: {
-        label: "Formato",
-        help: "Formato de renderizado; csv se adjunta y html_table se inserta en línea.",
-        options: {
-          csv: "CSV",
-          html_table: "Tabla HTML"
-        }
-      },
-      subject_template: {
-        label: "Plantilla de asunto",
-        help: "Asunto del correo; se sustituyen {{name}} / {{date}} / {{rows}}."
-      },
-      owner_id: {
-        label: "Propietario"
-      },
-      next_run_at: {
-        label: "Próxima ejecución",
-        help: "El despachador carga las programaciones cuyo next_run_at <= now."
-      },
-      last_sent_at: {
-        label: "Último envío"
-      },
-      last_status: {
-        label: "Último estado",
-        options: {
-          ok: "Correcto",
-          failed: "Fallido",
-          skipped: "Omitido"
-        }
-      },
-      last_error: {
-        label: "Último error"
       },
       created_at: {
         label: "Creado el"

@@ -31,9 +31,9 @@ model: opus
    - 探针遇 403 ⇒ 停下报 `blocked`,⛔ 不进重试循环;只有网络错误才退避重试。
    - Scratchpad 按 issue 隔离:在 scratchpad 目录下建 `issue-<n>/` 子目录,临时文件全写进去。
    - 同批 agents 共用一个 scratchpad 目录,自然命名的文件会被彼此静默覆盖。
-2. **assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
+2. **卡 assignee 归 PM。** 派发原子对已把它设好;共享身份下该字段答不了是谁。
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
-   - 你恒不写 assignee;到手时它为空照常开工,报进 `summary`。
+   - 恒不写卡的 assignee(空也开工,报 `summary`);PR assignee = 卡的:`--issue PR_NUMBER --assign LOGIN`。
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
@@ -42,21 +42,22 @@ model: opus
    - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
-   - (a) 须今天可达,分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
+   - 三类同欠 `reach:`:公开入口(HTTP/界面/`os validate`/保存)一次实测错误,或具名真实生产者。
+   - 例外三种照报,`reach:` 写明哪种:可能泄露数据;发版即固化的错误文字;维护者直派。
    - (c) 元数据 = 他人存储并再作者化的键,须具名生产者:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
-   - 其余 ⛔ 不立卡:观察、休眠、零拉动、死代码、未演练漂移、抛光、风格、nit、命名。
-   - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条带 `class: a|b|c`+证据或 `carrier:`。
+   - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
+   - 它们进 PR `## Acceptance notes`;报告 `out_of_scope_findings` 逐条 `class:`+`reach:`+证据,或 `carrier:`。
    - `carrier:` = 将碰该文件的 PR 或人,答不出写「承接者:无」;皆无 ⇒ 只进 Acceptance notes。
-   - dev ⛔ 不查重,只附 3–5 个查重词;查询与命中数由立卡席写,⛔ 不扫 open issues、不拉板。
-   - GitHub 写一律走 REST 代理(`curl` 带 `GITHUB_TOKEN`);归属 = 文本里的 session ID,非 `user.login`。
-   - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
+   - 同族发现 ⛔ 不开单点卡,报告点名并入该族收口卡;收口卡定义住 pm-dispatch 报告契约。
+   - dev ⛔ 不查重、不扫 open issues、不拉板,只附 3–5 个查重词;查询与命中数由立卡席写。
+   - GitHub 写一律经 `scripts/pm/` 写工具;云容器里经 `fleet-write` 中继落为 `objectstack-fleet[bot]`。
+   - 归属 = 文本里的 session ID,非 `user.login`;`git push` 不是 REST 写,不走中继。
+   - 写预算四笔:`git push`、一次 `pr_create`(draft)、`label-write`(含 PR assignee)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
-   - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`、⛔ 不静默弃报;预算外零写。
+   - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
-   - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
    - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`;越界真写了的照列注明缘由,⛔ 不漏记。
-   - PM 的去重读数随派发词下发,当既有事实用,只复核其后增量,⛔ 不重跑。
    - 归挂不散落:落在已排队 issue 范围内的发现,报告点名为它的 sub-issue(自动进派发池)。
    - 只是依赖它的,报告点名独立单带 `Blocked-by:` 行;立在修复落地的仓,带回链;席位代立。
    - 有界就地修豁免,四条全立才就地修:① 与本卡同一缺陷类;② 机械修且形态已被钉死。
@@ -117,7 +118,6 @@ model: opus
 - 缺一种该文件没有的 double 时,覆写文件里已有的 double 优于 pin 新的:不动台账。
 - 匹配到零个脚本的 `pnpm --filter` 运行以 0 退出:什么都没跑,读上去却是通过。
 - objectui 把 typecheck 拼作 `type-check`(连字符);核对输出里确实回显了脚本名。
-- 退出码先重定向再捕获,⛔ 永不隔着管道下结论(见本地验证范围节)。
 - 浏览器验证:Chromium 已预装,`PLAYWRIGHT_BROWSERS_PATH` 指向 `/opt/pw-browsers`。
 - launch 传 `executablePath: '/opt/pw-browsers/chromium'`;⛔ 永不跑 `playwright install`。
 - `cdn.playwright.dev` 的 403 不是没有浏览器的证据:下载被拦不证明产物缺席,先找产物。
@@ -283,8 +283,8 @@ model: opus
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - harness 归属提醒凭其优先级句让位本文件;harness 自写含模型名 trailer 只报,⛔ 不仿不改史。
-- 受管路径全在 `.claude/skills/pm-dispatch/references/` 者为事实层,席位复审即记录;余为规则层。
-- 规则层 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;事实层不欠。
+- 受管路径全在 `.claude/**` 者 Tier S,达档复核 PASS 在案即由席位入队落地;余皆 Tier H 等人批。
+- 受管面 PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空;两层同欠。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
@@ -295,12 +295,12 @@ model: opus
 - 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
 - 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
-- 发布面动了要 changeset;`skip-changeset` 唯一判据是没动:已发布 = 各包 `files[]` 实际发运内容。
+- 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
+- PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的,确认走 PR 文字。
 - objectstack:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
-- `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
 - 写恒经 `scripts/pm/label-write.mjs`:取现集、加法 POST、回读比 union、缺者重挂一次并报告。
 - 读回只检测剥除防不了(size-labeler 整组 PUT),门标签被剥恰成绿灯;加法写同样必要不充分。
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
@@ -373,7 +373,7 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["class: a|b|c · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
+  "out_of_scope_findings": ["class: a|b|c · reach: <public door + wrong answer | named producer | exception: security|release-text|maintainer> · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
 }
 ```
 
@@ -399,5 +399,4 @@ _Generated by [Claude Code](https://claude.ai/code)_                ← bare:评
 _Generated by [Claude Code](https://claude.ai/code/session_<id>)_   ← session-URL:创建 PR 正文用
 ```
 
-- 页脚形态随通道(MCP / REST)与动作(建 / 改)变,⛔ 不由一条推其余;发你要存的,写后必回读。
 - 耐久归属写进正文散文或评论,⛔ 不循环重贴页脚;完整读数住 AGENTS.md 同条。

@@ -1,0 +1,55 @@
+{
+  "skill_name": "objectstack-query",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Find active enterprise accounts in the US or EU whose email is at company.com (case-insensitive), highest revenue first, newest first as a tiebreak.",
+      "expected_output": "`engine.find('account', { where: { status: 'active', type: 'enterprise', region: { $in: ['us', 'eu'] }, email: { $icontains: '@company.com' } }, orderBy: [{ field: 'revenue', order: 'desc' }, { field: 'created_at', order: 'desc' }] })` — the object is the FIRST argument, `$icontains` (not `$contains`, which is case-sensitive), `orderBy` as an array of sort nodes.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["engine.find('account'", "$in", "$icontains", "orderBy"],
+        "must_not_contain": ["$contains:", "joins:"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "An infinite-scroll activity feed over millions of `activity` rows, newest first.",
+      "expected_output": "Keyset paging: a `where` on the sort key past the last row seen (`created_at: { $lt: lastSeenCreatedAt }`), `orderBy: [{ field: 'created_at', order: 'desc' }]` in the same direction, and a `limit`. Not `offset` (the database still scans the skipped rows) and not `query.cursor`, which was removed in 17.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["orderBy", "limit", "$lt", "keyset"],
+        "must_not_contain": ["cursor:", "offset: page"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Total and average deal amount per region for deals won this year, plus how many distinct owners closed them.",
+      "expected_output": "`engine.aggregate('deal', { where: { stage: 'closed_won', closed_at: { $gte: ... } }, groupBy: ['region'], aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }, { function: 'avg', field: 'amount', alias: 'avg_amount' }, { function: 'count_distinct', field: 'owner_id', alias: 'owners' }] })`. No `fields` / `orderBy` in the aggregate bag, no `distinct: true` (use `count_distinct`), measures read under their `alias`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["engine.aggregate(", "groupBy", "aggregations", "count_distinct", "alias"],
+        "must_not_contain": ["distinct: true", "orderBy:"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Search tasks by keyword across the title and the parent project's name, and show each task's assignee name and email.",
+      "expected_output": "`engine.find('task', { search: 'term', searchFields: ['title', 'project_name'], fields: ['title', 'status', 'assignee'], expand: { assignee: { object: 'user', fields: ['name', 'email'] } } })`: `search` never traverses, so the project name is a stored mirror field on `task` (objectstack-data), never a dotted `project_id.name`; the projection keeps the `assignee` FK column or `expand` resolves nothing. No `fuzzy` / `boost` / `highlight` knobs — validated then ignored.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["searchFields", "expand", "fields", "stored"],
+        "must_not_contain": ["'project_id.name'", "fuzzy"]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "In a `beforeInsert` hook I need to check whether a project with this name already exists, regardless of which organization the caller belongs to.",
+      "expected_output": "Passes an execution `context`: `engine.find('project', { where: { name }, limit: 1, context: { isSystem: true } })` — without it the read runs as the caller's identity and org-scoping returns fewer rows, indistinguishable from no data. `context` may sit in the query bag or the trailing options argument on reads.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["context", "isSystem: true", "limit: 1"],
+        "must_not_contain": []
+      }
+    }
+  ]
+}

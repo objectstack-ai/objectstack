@@ -245,8 +245,12 @@ export function classifyPackagedPermissionSet(
  *
  * `NOT_OVERRIDABLE` / 403 is deliberately the SAME envelope the metadata
  * protocol's ADR-0005 tier gate already answers with for this exact condition
- * — one condition, one vocabulary (ADR-0112's closed set; the code is a
- * StandardErrorCode, so no ledger entry is minted). What changes is the
+ * — one condition, one vocabulary. The code is NOT a `StandardErrorCode`
+ * member: it is an ADR-0112 registered extension code, and because this
+ * package stamps it, `ERROR_CODE_LEDGER['@objectstack/plugin-security']`
+ * lists it beside metadata-protocol's row (provenance, not identity — a code
+ * shipped in `dist` is registered under every package that stamps it; the
+ * same holds for the two overlay-discard codes). What changes is the
  * MESSAGE: the producer's says the type has not opted into overlay writes,
  * which tells an admin nothing they can act on. The ruling's whole point is
  * that the refusal teaches the sanctioned path.

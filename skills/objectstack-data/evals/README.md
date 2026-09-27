@@ -1,11 +1,12 @@
 # Evaluation Tests (evals/)
 
-⚠️ **Not yet implemented** — placeholder for future skill evals.
+JSON fixtures in the objectui shape (`skill_name`, `evals[]`: `prompt`,
+`expected_output`, `assertions.must_contain` / `must_not_contain`):
 
-Candidate data-domain scenarios: naming (snake_case names, lowercase option
-values), field-type selection (`secret` vs `password`, `lookup` vs
-`master_detail`), relationships (junction object vs multi-value lookup,
-`deleteBehavior`), validation (script inversion, `state_machine` transitions,
-unique **index** not a validation type), hooks (`before*` vs `after*`,
-sandboxed `body` capabilities), and seeds (`externalId` choice, natural-key
-lookups, CEL dynamic values).
+- `objects-fields-relationships.json` — naming, field types (`secret` vs
+  `password`), relationships (junction vs multi-value lookup,
+  `deleteBehavior`), validation (`state_machine`, unique **index**),
+  conditional field rules.
+- `hooks-security-seeds-datasources.json` — search mirrors via hooks,
+  permission-set scopes, external datasources, seeds (`externalId`,
+  CEL dynamic values).

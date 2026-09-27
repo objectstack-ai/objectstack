@@ -41,12 +41,24 @@
  *
  *   1. **The throw.** Both branches rethrow, byte-identical, so no caller's
  *      control flow depends on the level chosen here.
- *   2. **The write verbs.** `insert`/`update`/`delete` keep an unconditional
- *      `error` — a write to a table that does not exist is not a normal answer
- *      for any caller, and nothing landed.
+ *   2. **The write verbs.** `insert`/`update`/`delete` do not join the read
+ *      door's `debug` demotion — a write to a table that does not exist is not
+ *      a normal answer for any caller, and nothing landed. (Their level is
+ *      `warn` since #17052, like every write fault's.)
  *   3. **The `excludes` boundary** (#6347). Postgres' `column "x" of relation
  *      "y" does not exist` CONTAINS a legal missing-table phrase but is a
- *      column fault on a table that exists. It stays `error`.
+ *      column fault on a table that exists. It stays on the loud branch.
+ *
+ * ## [#17212] The loud branch is `warn`, not `error`
+ *
+ * `find`'s `catch` rethrows, so the caller IS told — AGENTS.md's third legal
+ * answer: "a failure handed to the CALLER is not a degradation at all … Do not
+ * bolt a `logger.error` onto such a site". So "loud" here means: one `warn`
+ * frame whose meta carries the object, the message AND the stack (the engine
+ * builds it with `writeFailureLogMeta`, because `warn` has no `Error` slot),
+ * and NO `error` frame at all. The discrimination this file pins is
+ * unchanged: `debug` without a stack for a missing table, the loud branch
+ * with one for everything else.
  *
  * Drives a fake DRIVER (not a fake engine), so no engine write-verb dispatch
  * contract is involved.
@@ -222,6 +234,7 @@ describe('engine `find` failure log level is chosen by CAUSE (#13273)', () => {
   function frames() {
     return {
       error: logger.lines.error.filter((l: any) => l.msg === 'Find operation failed'),
+      warn: logger.lines.warn.filter((l: any) => l.msg === 'Find operation failed'),
       debug: logger.lines.debug.filter((l: any) => l.msg === 'Find operation failed'),
     };
   }
@@ -241,6 +254,7 @@ describe('engine `find` failure log level is chosen by CAUSE (#13273)', () => {
 
         const seen = frames();
         expect(seen.error).toHaveLength(0);
+        expect(seen.warn).toHaveLength(0);
         expect(seen.debug).toHaveLength(1);
       });
     }
@@ -280,31 +294,53 @@ describe('engine `find` failure log level is chosen by CAUSE (#13273)', () => {
 
   // --------------------------------------------- positive control: loud --
 
-  describe('⭐ positive control — a read that genuinely FAILED is still loud', () => {
+  describe('⭐ positive control — a read that genuinely FAILED is still loud, at `warn` (#17212)', () => {
+    /**
+     * The one loud frame's meta, asserted in full: the object, the envelope's
+     * message and the envelope's stack. `warn(message, meta)` — meta is the
+     * FIRST trailing arg, and there is no second: an Error handed to `warn` as
+     * meta would serialize `{}`, so the stack travels as `meta.error.stack`.
+     */
+    function expectLoudFrame(meta: unknown, thrown: Error) {
+      expect(meta).toMatchObject({
+        object: OBJECT,
+        error: { message: thrown.message, stack: thrown.stack },
+      });
+      expect(String((meta as any).error.message)).toContain(
+        `The database refused to run this query for object '${OBJECT}'`,
+      );
+      // The stack is what the demoted `debug` record drops; the loud one keeps it.
+      expect(String((meta as any).error.stack)).toContain('    at ');
+      // ⛔ No classification on the loud branch — `reason` is the benign verdict.
+      expect(meta).not.toHaveProperty('reason');
+    }
+
     for (const [label, make] of STILL_LOUD) {
-      it(`one \`error\` frame carrying the Error, no \`debug\` frame — ${label}`, async () => {
-        await boot(() => envelope(make()));
+      it(`one \`warn\` frame carrying message + stack, no \`error\` and no \`debug\` frame — ${label}`, async () => {
+        let thrown: Error | undefined;
+        await boot(() => (thrown = envelope(make())));
 
         await expect(engine.find(OBJECT)).rejects.toThrow();
 
         const seen = frames();
         expect(seen.debug).toHaveLength(0);
-        expect(seen.error).toHaveLength(1);
-        // `error(message, error, meta)` — the Error object is the FIRST
-        // trailing arg, which is what puts the stack in the record.
-        const [err, meta] = seen.error[0].args;
-        expect(err).toBeInstanceOf(Error);
-        expect(typeof (err as Error).stack).toBe('string');
-        expect(meta).toMatchObject({ object: OBJECT });
+        // ⛔ The caller was told (the rethrow), so nothing reaches `error`.
+        expect(seen.error).toHaveLength(0);
+        expect(seen.warn).toHaveLength(1);
+        expect(seen.warn[0].args).toHaveLength(1);
+        expectLoudFrame(seen.warn[0].args[0], thrown!);
       });
     }
 
     it('an unrecognised failure is loud — a benign verdict is earned, never defaulted to', async () => {
-      await boot(() => envelope(new Error('something nobody has classified yet')));
+      let thrown: Error | undefined;
+      await boot(() => (thrown = envelope(new Error('something nobody has classified yet'))));
       await expect(engine.find(OBJECT)).rejects.toThrow();
 
-      expect(frames().error).toHaveLength(1);
+      expect(frames().warn).toHaveLength(1);
+      expect(frames().error).toHaveLength(0);
       expect(frames().debug).toHaveLength(0);
+      expectLoudFrame(frames().warn[0].args[0], thrown!);
     });
   });
 

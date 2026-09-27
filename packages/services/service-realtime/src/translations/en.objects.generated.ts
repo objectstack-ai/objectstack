@@ -23,6 +23,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "Presence ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user and their presence status (computed on read)"
+      },
       created_at: {
         label: "Created At"
       },

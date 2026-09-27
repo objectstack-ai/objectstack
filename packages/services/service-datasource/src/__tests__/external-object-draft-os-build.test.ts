@@ -135,7 +135,7 @@ describe('defect 1 — the generated object name carries the package namespace p
     // …and the rendered file agrees with the structured definition.
     expect(draft.definition.name).toBe('wh_customers');
     expect(draft.source).toContain("name: 'wh_customers'");
-    expect(draft.source).toContain('const wh_customers: ServiceObject = {');
+    expect(draft.source).toContain('export const wh_customers = ObjectSchema.create({');
   });
 
   it('does NOT double-prefix a remote table that already carries the namespace', async () => {
@@ -227,7 +227,14 @@ describe('an absent or blank namespace must not trade one invalid draft for anot
 
     expect(draft.name).toBe('customers');
     expect(draft.name.startsWith('_')).toBe(false);
-    expect(draft.source).not.toContain('_customers:');
+    // Spelled against the binding the authorised shape emits. The old spelling
+    // (`'_customers:'`) read the annotated literal's `const _customers:` and
+    // went vacuous the moment the type annotation left the file — it matches no
+    // substring of `export const _customers = ObjectSchema.create({`. A bare
+    // `not.toContain('_customers')` cannot replace it either: the no-namespace
+    // TODO block legitimately renders `'<namespace>_customers'`.
+    expect(draft.source).toContain('export const customers = ObjectSchema.create({');
+    expect(draft.source).not.toContain('export const _customers');
     expect(ObjectSchema.safeParse(draft.definition).success).toBe(true);
   });
 

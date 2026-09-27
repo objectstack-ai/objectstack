@@ -128,9 +128,12 @@ describe('ObjectStackProtocolImplementation - getMetaTypes rich response', () =>
         delete process.env.OS_METADATA_WRITABLE;
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         resetEnvWritableMetadataTypes();
+        // Asserted on the ENVELOPE, not on a token inside the prose: the
+        // message is human language and the code is the machine axis, so a
+        // regex over the sentence is not what pins this gate.
         await expect(
             scoped.saveMetaItem({ type: 'agent', name: 'my_agent', item: { name: 'my_agent' } })
-        ).rejects.toThrow(/not_(overridable|creatable)/);
+        ).rejects.toMatchObject({ code: expect.stringMatching(/^NOT_(OVERRIDABLE|CREATABLE)$/), status: 403 });
 
         // With env var: `agent` writes allowed.
         process.env.OS_METADATA_WRITABLE = 'agent';

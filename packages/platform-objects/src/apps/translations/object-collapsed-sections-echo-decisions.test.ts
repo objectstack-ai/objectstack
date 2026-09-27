@@ -878,18 +878,38 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     expect(FORM_SECTIONS.length).toBe(4);
     expect(COLLAPSED_SECTIONS).toEqual(['capabilities', 'advanced']);
     expect(OPEN_SECTIONS).toEqual(['basics', 'fields']);
-    // 45 leaves: 9 this round decides, 2 already authored, 32 deferred.
-    expect(PANEL_LEAVES.length).toBe(45);
+    // 55 leaves — the 45 that predate #19331, plus 10 that arrived with it.
+    // ⚠️ The `9 this round decides / 2 already authored / 32 deferred`
+    // decomposition this line used to carry accounts for 43 of those 45, not
+    // all of them. That two-leaf shortfall is OLDER than #19331 and is left
+    // standing here rather than absorbed into it: this file's whole job is to be
+    // the measured record, so a later round re-deriving provenance from this
+    // comment must not read two leaves as having arrived with a card that did
+    // not bring them. It is not explained here.
+    // #19331's own contribution is exact and is all it may claim: that card gave
+    // the object form's five declared top-level scalars an `advanced` row each —
+    // `ownership`, `sharingModel`, `managedBy`, `editMode`, `fileAccessDelegate`
+    // — a label and a help text apiece. That is the +10 the `advanced` count
+    // below reads (36 → 46) and the +10 this total reads, and the same card
+    // authored all thirty of their translated leaves (10 × 3 locales), so the
+    // ratchet further down still reads zero. The population is DERIVED from the
+    // form, so the arrival needed no edit here; these counts are the measured
+    // facts that moved with it.
+    expect(PANEL_LEAVES.length).toBe(55);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(9);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(36);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(46);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {
     // 94 leaves are left out. The sharpest single exclusion is a key #19403's
     // own body samples as the echoing field-editor panel: it is OUT, and it is
     // already authored, so a walk that wrongly swept it in would not go red.
-    expect(OPEN_LEAVES.length).toBe(94);
+    // 96 since #19331 gave `basics` its `nameField` row — the ADR-0079
+    // record-title pointer the schema declared and no control offered — whose
+    // label and help text are authored in all three locales by that same card,
+    // so the `openEchoes` reading below is unchanged at zero.
+    expect(OPEN_LEAVES.length).toBe(96);
     expect(PANEL_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(false);
     expect(OPEN_LEAVES.some((l) => l.path === 'fields.placeholder')).toBe(true);
     for (const path of ['name', 'label', 'fields', 'fields.valueDomain', 'fields.deleteBehavior', 'fields.expression']) {

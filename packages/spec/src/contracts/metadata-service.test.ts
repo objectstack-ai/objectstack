@@ -514,4 +514,112 @@ describe('Metadata Service Contract', () => {
       expect(params).toEqual({});
     });
   });
+
+  // ==========================================
+  // Keyed plural loader read (#15385 batch #123 item 5)
+  // ==========================================
+
+  describe('loadManyKeyed (optional member)', () => {
+    /** A minimal base implementation with only the REQUIRED members. */
+    const baseService = (): IMetadataService => ({
+      register: async () => {},
+      get: async () => undefined,
+      list: async () => [],
+      unregister: async () => {},
+      exists: async () => false,
+      listNames: async () => [],
+      getObject: async () => undefined,
+      listObjects: async () => [],
+    });
+
+    /**
+     * A stored body with NO top-level `name` — the shape the whole member
+     * exists for. Its identity is the key the store holds it under, so keying
+     * the unkeyed plural read by `data.name` has nothing to key it by.
+     */
+    const namelessBody = { label: 'Account overrides', fields: [] as unknown[] };
+
+    it('is optional — an implementation without it still satisfies the contract', () => {
+      const service = baseService();
+
+      // The optional-member convention: consumers probe before they call.
+      expect(typeof service.loadManyKeyed).toBe('undefined');
+      expect(typeof (service as IMetadataService).loadManyKeyed === 'function').toBe(false);
+    });
+
+    it('is probeable with typeof === "function" when provided', () => {
+      const service: IMetadataService = {
+        ...baseService(),
+        loadManyKeyed: async () => [],
+      };
+
+      expect(typeof service.loadManyKeyed).toBe('function');
+    });
+
+    it('answers (key, body) pairs, and an empty set for a type nothing holds', async () => {
+      const service: IMetadataService = {
+        ...baseService(),
+        // Generic, because the declaration is: a double holding one fixed body
+        // can only answer under the `T` its CALLER names.
+        loadManyKeyed: async <T = unknown>(type: string) =>
+          type === 'customization' ? [{ name: 'account', data: namelessBody as T }] : [],
+      };
+
+      const keyed = await service.loadManyKeyed!<typeof namelessBody>('customization');
+      expect(keyed).toEqual([{ name: 'account', data: namelessBody }]);
+
+      expect(await service.loadManyKeyed!('no_such_type')).toEqual([]);
+    });
+
+    it('carries the key BESIDE the body — nothing is folded into `data`', async () => {
+      const service: IMetadataService = {
+        ...baseService(),
+        loadManyKeyed: async <T = unknown>() => [{ name: 'account', data: namelessBody as T }],
+      };
+
+      const keyed = await service.loadManyKeyed!<typeof namelessBody>('customization');
+
+      // The body is the same object the unkeyed read would have returned...
+      expect(keyed[0]!.data).toBe(namelessBody);
+      // ...so the key lives only on the pair, never synthesised into the body.
+      expect('name' in keyed[0]!.data).toBe(false);
+      expect(keyed[0]!.name).toBe('account');
+    });
+
+    it('types the key as string and the body as T', async () => {
+      type Overrides = { label: string; fields: unknown[] };
+
+      const service: IMetadataService = {
+        ...baseService(),
+        loadManyKeyed: async <T = unknown>() => [{ name: 'account', data: namelessBody as T }],
+      };
+
+      // Type-level shape assertion: these annotations only compile against the
+      // declared `Promise<Array<{ name: string; data: T }>>`.
+      const keyed = await service.loadManyKeyed!<Overrides>('customization');
+      const name: string = keyed[0]!.name;
+      const body: Overrides = keyed[0]!.data;
+
+      expect(name).toBe('account');
+      expect(body.label).toBe('Account overrides');
+    });
+
+    it('takes the same engine-local options bag as its unkeyed sibling', async () => {
+      let seen: Record<string, unknown> | undefined;
+      const service: IMetadataService = {
+        ...baseService(),
+        loadManyKeyed: async (_type: string, options?: Record<string, unknown>) => {
+          seen = options;
+          return [];
+        },
+      };
+
+      await service.loadManyKeyed!('customization', { patterns: ['*.json'] });
+      expect(seen).toEqual({ patterns: ['*.json'] });
+
+      // `options` is optional — the one in-repo caller passes nothing.
+      await service.loadManyKeyed!('customization');
+      expect(seen).toBeUndefined();
+    });
+  });
 });

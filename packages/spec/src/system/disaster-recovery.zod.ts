@@ -53,7 +53,7 @@ export const BackupConfigSchema = lazySchema(() => z.object({
   /** Backup strategy */
   strategy: BackupStrategySchema.default('incremental').describe('Backup strategy'),
   /*
-   * `BackupConfig.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * `BackupConfig.schedule` was DELETED here in @objectstack/spec 17 (ADR-0049
    * enforce-or-remove, #16320): declared, parsed into the cron envelope and read by
    * nothing — no backup engine exists on the platform, so an automated backup never
    * ran on it. Deleted outright — no `retiredKey()` tombstone, no D2 conversion, no D3
@@ -256,7 +256,7 @@ export const DisasterRecoveryPlanSchema = lazySchema(() => z.object({
     /** Enable periodic DR testing */
     enabled: z.boolean().default(false).describe('Enable automated DR testing'),
     /*
-     * `DisasterRecoveryPlan.testing.schedule` was DELETED here in @objectstack/spec 18
+     * `DisasterRecoveryPlan.testing.schedule` was DELETED here in @objectstack/spec 17
      * (ADR-0049 enforce-or-remove, #16320): declared, parsed into the cron envelope and
      * read by nothing — no disaster-recovery test runner exists on the platform, so a
      * periodic DR test never ran. Deleted outright — no `retiredKey()` tombstone, no D2

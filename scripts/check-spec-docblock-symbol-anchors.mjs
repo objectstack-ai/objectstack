@@ -8,6 +8,7 @@
  *   node scripts/check-spec-docblock-symbol-anchors.mjs
  *   node scripts/check-spec-docblock-symbol-anchors.mjs --list
  *   node scripts/check-spec-docblock-symbol-anchors.mjs --list-unresolvable
+ *   node scripts/check-spec-docblock-symbol-anchors.mjs --present-tense
  *   node scripts/check-spec-docblock-symbol-anchors.mjs --self-test
  *
  * ⚠️ THE MECHANISM IS NOT HERE. The grammar, the extractor, the comment-prose
@@ -96,24 +97,6 @@
  * site in the file it names, and a file-level anchor with a `#fragment` must
  * name a file the tree really has.
  *
- * ## ⚠️ `counts.symbol` is ZERO on this corpus, and that is a census result
- *
- * The whole of `packages/spec/src` contains exactly ONE span written in symbol
- * anchor form, and it does not resolve: `packages/spec/src/api/websocket.zod.ts`
- * anchors `RealtimeSubscriptionOptions` to a PACKAGE-RELATIVE spelling of the
- * contracts file, so no tracked file is at that path -- the symbol itself is
- * real and lives in `packages/spec/src/contracts/realtime-service.ts`. The
- * citation as written is pinned in `CENSUS_RESIDUAL` below, and ⛔ it is NOT
- * requoted in anchor form here: this header is itself swept by the `scripts/**`
- * corpus, so quoting a broken anchor verbatim makes THIS file a finding.
- *
- * So the live-corpus self-test here asserts `fileLevel`, ⛔ never `symbol > 0`
- * the way `scripts/**` can: a corpus the convention has not reached yet cannot
- * prove the extractor works by finding a resolved symbol in it. What stands in
- * for that positive control is the residual's exactness loop -- the one
- * symbol-shaped span in the tree must still be SEEN, every run, or its row goes
- * stale and this gate reds.
- *
  * ## The exit contract, and why it is a pinned residual rather than reporting
  *
  * `#17065` left the exit contract to the census, and the census forces this
@@ -176,12 +159,58 @@
  * is the correct disposition -- they are reported and never red -- but the rows
  * are noise rather than signal, and the next author to read this report should
  * know why they are there.
+ *
+ * ## The present-tense report -- REPORT-ONLY, and it never touches the exit code
+ *
+ * A second, separate reading rides this corpus, ruled on #19017 (ruling record
+ * `5805901449`, letter 甲 「只报告」). A doc block that states the repository's
+ * own state in the PRESENT TENSE -- "always `true` this phase", "the real bit
+ * is a follow-up" -- turns false the day the thing it describes lands, and no
+ * reader reds. The shape recurred three times (#18991, #17487, #16208); on
+ * #18991 the rotted sentence read as a licence to delete a live parameter.
+ *
+ * ⛔ REPORT-ONLY. Each hit prints as a `📝 [present-tense]` line naming the
+ * file, the line and the phrase, under one summary line. Nothing in that pass
+ * can exit: it runs inside a catch that prints NOT MEASURED instead of
+ * throwing, and it runs BEFORE the anchor verdict, so it prints on a red run
+ * too and moves neither verdict. ⛔ It is never a required check, and ⛔ no dev
+ * is dispatched on its output: a seat that reads a hit it judges still true
+ * dismisses it in one line. Promoting it to a failing gate needs the
+ * maintainer's own word, not an edit here.
+ *
+ * WHAT IT READS is this corpus's own population and projection: the files
+ * `sweepCorpus` walked (its `byDoc`), through `commentProse`, so "doc block"
+ * means what it means for the anchor gate -- EVERY comment, line and block,
+ * and never code or a string literal. Minus test sources, which this family
+ * never excluded before; the definition is borrowed from the package's own
+ * test runner, whose `local` project includes every `.test.ts` under `src/`
+ * (`packages/spec/vitest.config.ts`). Comment delimiters and the JSDoc gutter
+ * are blanked and whitespace is folded across lines, so a phrase wrapped over
+ * two lines is one hit, reported at the line it starts on. Matching is
+ * case-insensitive and whole-word.
+ *
+ * THE LIST is `PRESENT_TENSE_PHRASES`, exactly the four the ruling names, and
+ * it GROWS ONLY BY A MEASURED NEAR-ZERO FALSE-POSITIVE READING: a new phrase
+ * arrives with its own count in `PRESENT_TENSE_CENSUS`, taken with this
+ * instrument at a named sha, and the self-test reds on a listed phrase that
+ * carries no reading. ⛔ Wide phrases stay out: `there is no` alone reads 320
+ * comment-prose hits today (`PRESENT_TENSE_REFUSED_WIDE`).
+ *
+ * TODAY'S READING (`PRESENT_TENSE_CENSUS.measuredOn`; 1,046 non-test sources
+ * read, 504 test sources skipped), per phrase: `this phase` 0,
+ * `is a follow-up` 0, `not yet implemented` 1, `currently no` 0. The one hit
+ * is a trailing line comment glossing what the `NOT_IMPLEMENTED` error code
+ * means, and it is still true. The same instrument on the card's own tree
+ * reads 2, 1, 1, 0: the three #18991 sites, found -- the positive control. The
+ * card's own probe also counted one `currently no`; that one sits in a string
+ * literal, outside this projection.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -229,6 +258,301 @@ export const CENSUS_17065 = {
    * makes the small number honest rather than reassuring. */
   findingsIfUntrackedWereJudged: 189,
 };
+
+/**
+ * ⚠️ THE RE-CENSUS (#17242) -- the DECLINED residual, taken again and
+ * CLASSIFIED. `CENSUS_17065` above is frozen at its own sha and is ⛔ not
+ * restated or corrected here; the two are separate readings of one surface.
+ *
+ * ⭐ THIS RECORD EXISTS AS DATA BECAUSE THIS GATE CANNOT RE-DERIVE IT. The
+ * classification below needs a checkout of the sibling objectui repo, which
+ * this gate is deliberately not given -- the same reason its cross-repo
+ * anchors are reported rather than judged. `--list-unresolvable` enumerates
+ * the residual, and that much any reader can reproduce.
+ *
+ * ⚠️ The two classifications are NOT equally reproducible, and saying "only an
+ * outside reading can say what the rows ARE" flattered the weaker one. The
+ * BINDING split is re-runnable: its predicate is written out below and carried
+ * as data, so a reader holding both checkouts at the named shas lands on these
+ * cells. The TENSE split is not: the classifier that produced its three rows
+ * exists NOWHERE in this repository, so ⛔ NOTHING can re-derive it -- no
+ * reader, no checkout, no instrument. Those three rows are one round's reading
+ * and nothing more, and the row-level tense claim that DOES carry weight is
+ * the enumerated one below, which was read by hand.
+ *
+ * ## The population grew, and the instrument did NOT move it
+ *
+ * The declined count read 183 at the `CENSUS_17065` sha, 217 two days later,
+ * and 467 here. The shared resolver was rewritten between the second and third
+ * readings, so this tree was swept with BOTH resolvers: they return the
+ * identical 467, declined-by-shape included. ⇒ the growth is real population,
+ * ⛔ NOT instrument drift, and the three numbers are comparable. The old
+ * resolver also reproduced `commentProseLineCitations` and `declinedCitations`
+ * verbatim at the `CENSUS_17065` sha, which is what licenses that comparison.
+ *
+ * ## ⭐ What the residual IS -- the headline, and it is not rot
+ *
+ * Every declined citation was bound against the sibling objectui checkout and
+ * against this repo under a spec-relative base. 462 of 467 name a file that
+ * REALLY EXISTS. ⇒ this residual is a SPELLING population -- abbreviated
+ * cross-repo and package-relative citations -- ⛔ not the stale-citation rot
+ * its headline number suggests, and ⛔ not the shape #17591 measured on the
+ * bare-path axis.
+ *
+ * ⛔ A MOVING REF IS NOT AN ANCHOR. Both sibling trees are named by sha in the
+ * record itself -- `objectuiPinSha` and `objectuiMainSha` -- beside the
+ * objectstack tree the sweep ran on, `boundAgainstSha`. Naming "objectui's
+ * main" and stopping there was the earlier form of this sentence and it was
+ * not a reading. The two objectui trees agree ROW BY ROW, ⛔ not merely in the
+ * totals: all 467 rows land on the same verdict against the pin and against
+ * main (`objectuiPinAndMainAgreeRowwise`), so the split does not depend on
+ * which sibling tree is read.
+ *
+ * ## The BINDING PREDICATE -- stated, so the cells can be re-run
+ *
+ * A round that publishes a three-way split owes the predicate that produced
+ * it: two harnesses disagreeing on the cells while agreeing on the total
+ * differ in their PREDICATE, never in their arithmetic.
+ *
+ *   1. TOKEN. A declined row carrying a path of its own uses it. A row
+ *      carrying none -- a continuation -- inherits one by an ANTECEDENT WALK:
+ *      project the source with `commentProse`, take the maximal run of lines
+ *      non-blank after trimming that contains the citation (its own comment
+ *      block), scan that block forward as far as the citation, and keep the
+ *      LAST path-shaped token before it. `bindingTokenPattern` carries that
+ *      token grammar verbatim. ⛔ The walk is BACKWARD-only and BLOCK-local, so
+ *      a block naming its file only AFTER the continuation, or not at all,
+ *      yields no token and the row binds nowhere.
+ *   2. RESOLUTION, first hit wins, objectui before here within each tier:
+ *      exact tracked path, then TAIL match -- a tracked path equal to the
+ *      token, or ending in a slash followed by it. The tail tier is what binds
+ *      the package-relative spellings on both sides, the spec-relative ones
+ *      included.
+ *   3. ⚠️ WHERE IT IS LENIENT, named because the leniency is what moves rows
+ *      between repos: a token carrying NO slash has nothing but its basename
+ *      to match on, so its tail match IS a basename match and a generic
+ *      basename can attribute to the wrong repo. A token that DOES carry a
+ *      directory keeps it -- this predicate ⛔ does NOT fall back to the
+ *      basename there. `bindingUnderDirectoryLenientVariant` is the same
+ *      reading with that fallback ON; it moves exactly one row.
+ *   4. TIE-BREAK. A token resolving in BOTH trees is credited to objectui, and
+ *      `ambiguousBothTrees` records how many rows that decides.
+ *
+ * ⚠️ These cells MOVED off the ones the first round published, and the
+ * predicate above is the whole reason: it is stricter about directory-
+ * qualified tokens and it walks comment BLOCKS rather than whole files. ⛔ The
+ * earlier cells are not restated here as though they had been re-measured;
+ * what stands is what this predicate yields.
+ *
+ * ## Tense -- the defect cell is EMPTY, and the rows are NAMED
+ *
+ * A citation naming no tracked file is a defect ONLY when the surrounding
+ * sentence is LIVE-TENSE. The rows binding nowhere are ENUMERATED in
+ * `bindingInNeitherRepoRows`, each carrying the coordinate it was read at in
+ * the named tree, its citation text, why no tree binds it, and the tense of
+ * the sentence around it. Not one is live-tense: one is a retirement record
+ * naming a file in the `cloud` repo in prose (`packages/spec/src/ai/agent.zod.ts`);
+ * three are continuations inside dated re-reads at a named objectui pin whose
+ * own block names no file before them (`packages/spec/src/ui/component.zod.ts`);
+ * and one is an objectui citation whose DIRECTORY spelling is stale while its
+ * basename is not (`packages/spec/src/ui/dashboard.zod.ts`). ⇒ ZERO live-tense
+ * defects -- held now by a list a reader can check, ⛔ not by a sentence that
+ * could not be reconciled with the tree.
+ *
+ * ## ⛔ THE TRAP, measured -- repairing the PATH alone turns this gate RED
+ *
+ * The obvious cleanup is to rewrite a package-relative citation to its
+ * repo-root spelling so it resolves. That makes the path TRACKED, which moves
+ * the citation out of the declined set and into the judged one -- where a line
+ * number is exactly what this gate refuses. One such repair was performed on a
+ * single citation in `packages/spec/src/shared/union-author-message-pins.test.ts`
+ * and this gate went from green to one hard finding, then was restored.
+ *
+ * ⇒ the path is only HALF the repair; the citation must also leave ANCHOR
+ * FORM. A round that "works the residual down" by fixing spellings alone lands
+ * one finding per repair.
+ */
+export const RECENSUS_17242 = {
+  measuredOn: 'fa29803417cbb4853f4dbb54ae7a830457e11bb8',
+  tsFilesTotal: 1518,
+  commentProseLineCitations: 473,
+  trackedTargetLineCitations: 6,
+  declinedCitations: 467,
+  declinedFiles: 39,
+  declinedByShape: { 'bare-filename': 144, continuation: 191, 'directory-qualified': 132 },
+  /* Same tree, the resolver `CENSUS_17065` was taken with. Equal by both
+   * readings -- the control that makes 183 -> 467 a population statement. */
+  declinedUnderPreviousResolver: 467,
+  /* ── The cross-repo reading's ANCHORS ──────────────────────────────────────
+   * ⛔ A moving ref is not an anchor, so every tree this split was taken
+   * against is a sha here rather than a branch name in prose. The binding
+   * sweep ran on the objectstack tree `boundAgainstSha`, whose `packages/spec`
+   * subtree is byte-identical to `measuredOn`'s -- the only file differing
+   * between the two commits is this gate -- so the declined population it read
+   * is the same 467 rows recorded above.
+   *
+   * ⭐ That byte-identity is also what lets the self-test's reality pin read
+   * `.objectui-sha` at `measuredOn` rather than here. It matters because the two
+   * anchors have different LIFETIMES, not different contents: `measuredOn` is a
+   * commit this branch was cut from, `boundAgainstSha` is a commit ON it, and a
+   * squash merge leaves only the first resolvable. The pin block in `selfTest()`
+   * states the consequence and takes both. Where both resolve, it requires
+   * `.objectui-sha` to read `objectuiPinSha` at each; ⛔ it compares no other
+   * file, so the byte-identity above is not checked by it. */
+  boundAgainstSha: 'cdd68cf15ed863468ce6eecdd5c0824b760ea22a',
+  objectuiPinSha: '87af769e9a3ee28ace099fdd653d3ebd79fe82e2',
+  objectuiMainSha: '0cf2d6644bdb96a9a6784ef801ee6a60a5306bd8',
+  /* ⭐ Stronger than "the totals matched": every one of the 467 rows lands on
+   * the same verdict, with the same inherited token, against both trees. */
+  objectuiPinAndMainAgreeRowwise: true,
+  /* ── The split, under the predicate the header states ──────────────────────
+   * ⭐ The split #17242 filed as NOT MEASURED. Continuations carry no path of
+   * their own and are attributed by the header's antecedent walk: 188 of the
+   * 191 continuations inherit a token that way, 3 inherit none and bind
+   * nowhere, and the other 276 carry their own path. */
+  namingAnExistingObjectuiFile: 409,
+  namingAnExistingFileHere: 53,
+  bindingInNeitherRepo: 5,
+  /* ⛔ The same 467 rows split by HOW each one got the token it was bound by --
+   * the sentence above, carried as data because a via-split stated in prose and
+   * held by nothing is the defect this whole record exists to stop. The two
+   * `antecedent` cells ARE the continuations, so they must sum to the
+   * `continuation` shape count, and all three must exhaust the declined
+   * population. The rows that inherit NO token are the three `via: 'antecedent'`
+   * entries enumerated below -- which is what ties this cell to a list a reader
+   * can check rather than to a number nobody can open. */
+  bindingVia: Object.freeze({ ownPath: 276, antecedentInherited: 188, antecedentNoToken: 3 }),
+  /* The token grammar the antecedent walk keeps the LAST match of. Carried as
+   * data so the predicate is copyable rather than paraphrased.
+   *
+   * ⭐ What keeps a `tsx` citation from being eaten as `ts` -- which would
+   * silently re-point the token at a file that does not exist -- is the
+   * TRAILING NEGATIVE LOOKAHEAD, ⛔ NOT the longest-first alternation: a `ts`
+   * arm FAILS that lookahead when the next character is `x`, and the engine
+   * backtracks into the `tsx` arm. Measured on this pattern, both ways round: a
+   * shortest-arm-first alternation returns the IDENTICAL token, and removing
+   * the lookahead while keeping longest-first also truncates nothing -- only
+   * removing BOTH truncates. ⇒ the ordering is a redundant second guard, and it
+   * is the lookahead the self-test pins. */
+  bindingTokenPattern: String.raw`(?:[A-Za-z0-9_.@-]+\/)*[A-Za-z0-9_.-]+\.(?:tsx|ts|mts|cts|jsx|js|mjs|cjs)(?![A-Za-z0-9_])`,
+  /* How many rows resolve in BOTH trees and are decided by the objectui-first
+   * tie-break alone. Every one of them is a bare basename. */
+  ambiguousBothTrees: 5,
+  /* The declared sensitivity: the same reading with the basename fallback
+   * extended to directory-qualified tokens. It moves exactly one row out of
+   * `bindingInNeitherRepo`, which is the whole distance between a strict and a
+   * lenient reading of this corpus. */
+  bindingUnderDirectoryLenientVariant: Object.freeze({ objectui: 410, here: 53, neither: 4 }),
+  /* ⛔ THE ENUMERATION, because a cell nobody can list is a cell nobody can
+   * check. `line` is a COORDINATE into `boundAgainstSha`, ⛔ not an anchor: a
+   * row's identity is its document plus its citation TEXT, and the number is
+   * here only so a reader can open the tree at the named sha and land on it.
+   * ⚠️ What the self-test does with that identity, stated as what it DOES: it
+   * requires every row to CARRY both, and it refuses two rows that share them.
+   * It does ⛔ NOT key a live lookup off them the way `CENSUS_RESIDUAL`'s triage
+   * does -- this reading is frozen at the shas above, so there is no live
+   * finding for a row to be matched against. `tense` was read BY HAND, one row
+   * at a time -- the classifier that produced the three tense totals above
+   * exists nowhere and cannot be asked. */
+  bindingInNeitherRepoRows: Object.freeze([
+    {
+      doc: 'packages/spec/src/ai/agent.zod.ts',
+      line: 253,
+      raw: 'knowledge-tools.ts:96',
+      token: 'knowledge-tools.ts',
+      via: 'own-path',
+      why: 'the prose names the `cloud` repo, which is a third tree neither side of this reading holds',
+      tense: 'record',
+    },
+    {
+      doc: 'packages/spec/src/ui/component.zod.ts',
+      line: 2921,
+      raw: '`:227`',
+      token: null,
+      via: 'antecedent',
+      why: 'its block names the file it continues only AFTER the citation, and the walk is backward-only',
+      tense: 'dated-measurement',
+    },
+    {
+      doc: 'packages/spec/src/ui/component.zod.ts',
+      line: 2922,
+      raw: '`:237`',
+      token: null,
+      via: 'antecedent',
+      why: 'its block names the file it continues only AFTER the citation, and the walk is backward-only',
+      tense: 'dated-measurement',
+    },
+    {
+      doc: 'packages/spec/src/ui/component.zod.ts',
+      line: 3921,
+      raw: '`:359`',
+      token: null,
+      via: 'antecedent',
+      why: 'its block cites a read point in the sibling repo without naming any file at all',
+      tense: 'dated-measurement',
+    },
+    {
+      doc: 'packages/spec/src/ui/dashboard.zod.ts',
+      line: 1118,
+      raw: 'plugin-view/ObjectView.tsx:989',
+      token: 'plugin-view/ObjectView.tsx',
+      via: 'own-path',
+      why: 'the basename is live in objectui, the DIRECTORY spelling is not, and this predicate keeps directories',
+      tense: 'dated-measurement',
+    },
+  ]),
+  /* The tense axis, over the whole residual. `record` and `dated-measurement`
+   * are both correct historical prose; only `live` can carry a defect, and it
+   * carries none because every live-tense row names a file that exists.
+   * ⛔ These three totals are the ONE part of this record nothing can re-derive
+   * -- the classifier that produced them was never committed, so they are a
+   * round's reading and must not be read as a measurement a reader can check.
+   * The tense claim that IS checkable is the per-row one on
+   * `bindingInNeitherRepoRows`, which is where `liveTenseDefects: 0` is held. */
+  liveTenseCitations: 300,
+  historicalRecordCitations: 38,
+  datedMeasurementCitations: 129,
+  liveTenseDefects: 0,
+};
+
+/**
+ * The CLOSED tense vocabulary an enumerated `bindingInNeitherRepoRows` row may
+ * carry. Closed on purpose: `liveTenseDefects: 0` is held by asserting that no
+ * enumerated row is `live`, and an open vocabulary turns that assertion into a
+ * spelling test -- a row typed `live-tense` or `current` would pass a
+ * not-equal-to-`live` check while meaning exactly what the check exists to
+ * catch.
+ */
+export const NEITHER_ROW_TENSES = Object.freeze(['record', 'dated-measurement', 'live']);
+
+/**
+ * The CLOSED `via` vocabulary an enumerated `bindingInNeitherRepoRows` row may
+ * carry, and the counterpart of the tense vocabulary above. Closed for the same
+ * reason: `bindingVia.antecedentNoToken` is held by COUNTING the rows typed
+ * `antecedent`, so a row typed `antecedent-walk` would leave that count short
+ * while reading, to a human, exactly like the rows it meant to join.
+ */
+export const NEITHER_ROW_VIAS = Object.freeze(['own-path', 'antecedent']);
+
+/**
+ * The trailing guard of `RECENSUS_17242.bindingTokenPattern`, carried as its
+ * own constant so the self-test can pin its PRESENCE rather than restate the
+ * mechanism in a message.
+ *
+ * ⭐ This is the part that does the work the record's comment describes: with
+ * it, a shorter extension arm cannot match a longer extension's prefix, because
+ * the character after that prefix is one this guard refuses. Without it, the
+ * alternation's ORDER becomes load-bearing -- a far weaker guarantee, since
+ * re-ordering an alternation reads as tidying.
+ */
+export const BINDING_TOKEN_TAIL_GUARD = String.raw`(?![A-Za-z0-9_])`;
+
+/**
+ * The repo-root file in which this repository records the sibling objectui
+ * commit it is pinned to. Named once, as data, so the self-test's frozen
+ * reality pin reads it at a sha rather than restating the path in prose.
+ */
+export const OBJECTUI_PIN_FILE = '.objectui-sha';
 
 /**
  * ⚠️ THE DAY-ONE RESIDUAL -- the findings the census enumerated, pinned.
@@ -358,8 +682,204 @@ export function triage(findings, residual = CENSUS_RESIDUAL) {
   return { hard, soft, pinned, stale };
 }
 
+/* ── The present-tense report (REPORT-ONLY; see the header) ─────────────────── */
+
+/**
+ * The phrases the report prints. Exactly the four the ruling names. ⛔ A phrase
+ * joins only with a measured near-zero false-positive reading recorded in
+ * `PRESENT_TENSE_CENSUS`; the self-test reds on a listed phrase without one.
+ */
+export const PRESENT_TENSE_PHRASES = Object.freeze(['this phase', 'is a follow-up', 'not yet implemented', 'currently no']);
+
+/**
+ * ⛔ Wide phrases the ruling keeps OUT, with the comment-prose reading that
+ * keeps them out, taken with this instrument at `PRESENT_TENSE_CENSUS.measuredOn`.
+ * The self-test holds this set disjoint from the list.
+ */
+export const PRESENT_TENSE_REFUSED_WIDE = Object.freeze({ 'there is no': 320 });
+
+/**
+ * A test source, by the package's own test runner's definition: the `local`
+ * project in `packages/spec/vitest.config.ts` includes every `.test.ts` under
+ * `src/`. The anchor gate above has no test exclusion, so this is the report's
+ * alone.
+ */
+export const PRESENT_TENSE_TEST_SOURCE = /\.test\.ts$/;
+
+/** The CLOSED judgement vocabulary a census row may carry. */
+export const PRESENT_TENSE_JUDGEMENTS = Object.freeze(['still-true', 'rotted']);
+
+/**
+ * The readings the list was admitted on. ⛔ Historical measurements, frozen at
+ * their shas and held only by the self-test's internal pins, never against the
+ * live tree: pinning a reading to the tree would turn a report into a ratchet.
+ * `line` is a COORDINATE into `measuredOn`, never an anchor. `judgement` was
+ * read by hand, one row at a time.
+ */
+export const PRESENT_TENSE_CENSUS = Object.freeze({
+  measuredOn: '5581d3000f27daa19991cf9d13d5ad1ed8cf8913',
+  nonTestSources: 1046,
+  testSourcesSkipped: 504,
+  hits: Object.freeze({ 'this phase': 0, 'is a follow-up': 0, 'not yet implemented': 1, 'currently no': 0 }),
+  rows: Object.freeze([
+    {
+      doc: 'packages/spec/src/api/errors.zod.ts',
+      line: 114,
+      phrase: 'not yet implemented',
+      judgement: 'still-true',
+      why: 'a trailing line comment glossing what the NOT_IMPLEMENTED error code means: a definition, not a claim about the repository',
+    },
+  ]),
+  /* The same instrument on the tree the card's own census was taken on: the
+   * positive control. The three `api-derivation.ts` rows are the sites #18991
+   * repaired; the card's probe also counted one `currently no`, a string
+   * literal this projection never reads. */
+  cardTree: Object.freeze({
+    measuredOn: '43f4766889e39d7a4590c5787d38e5956d0b4cb6',
+    nonTestSources: 1000,
+    hits: Object.freeze({ 'this phase': 2, 'is a follow-up': 1, 'not yet implemented': 1, 'currently no': 0 }),
+    rows: Object.freeze([
+      {
+        doc: 'packages/spec/src/data/api-derivation.ts',
+        line: 129,
+        phrase: 'this phase',
+        judgement: 'rotted',
+        why: 'the user-level export bit this sentence called always true had already been wired',
+      },
+      {
+        doc: 'packages/spec/src/data/api-derivation.ts',
+        line: 130,
+        phrase: 'is a follow-up',
+        judgement: 'rotted',
+        why: 'the same sentence, calling that already-landed wiring a follow-up',
+      },
+      {
+        doc: 'packages/spec/src/data/api-derivation.ts',
+        line: 196,
+        phrase: 'this phase',
+        judgement: 'rotted',
+        why: 'the second copy of the always-true claim, on the option declaration itself',
+      },
+      {
+        doc: 'packages/spec/src/api/errors.zod.ts',
+        line: 114,
+        phrase: 'not yet implemented',
+        judgement: 'still-true',
+        why: 'the same error-code gloss today reading still carries',
+      },
+    ]),
+    refusedWide: Object.freeze({ 'there is no': 286 }),
+  }),
+});
+
+/**
+ * The comment prose of `source` folded to ONE line: `commentProse` first, then
+ * comment delimiters and the JSDoc gutter blanked, then every whitespace run
+ * (newlines included) collapsed to a single space. `offsets[i]` is the source
+ * offset of `text[i]`, which is what lets a phrase wrapped over two lines be
+ * reported at the line it starts on. The projection blanks and never deletes,
+ * so every offset is an offset into the real file.
+ */
+export function foldCommentProse(source) {
+  const prose = CORPUS.docProjection(source)
+    .replace(/\/\*+|\*+\/|\/{2,}/g, (m) => ' '.repeat(m.length))
+    .replace(/^([ \t]*)\*+/gm, (m, indent) => indent + ' '.repeat(m.length - indent.length));
+  const parts = [];
+  const offsets = [];
+  for (const m of prose.matchAll(/\S+/g)) {
+    if (parts.length > 0) { parts.push(' '); offsets.push(m.index - 1); }
+    parts.push(m[0]);
+    for (let k = 0; k < m[0].length; k += 1) offsets.push(m.index + k);
+  }
+  return { text: parts.join(''), offsets };
+}
+
+/** Case-insensitive, whole-word, global: `currently no` must not match `currently none`. */
+function phrasePattern(phrase) {
+  return new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+}
+
+/**
+ * Every hit of `phrases` in the non-test members of `docs` (paths relative to
+ * `root`). Returns the hits sorted by file and line, plus how many sources
+ * were read and how many test sources were skipped -- a skip is counted, so
+ * "skipped" is told apart from "never handed over". Throws on an unreadable
+ * source; `reportPresentTense` is the only caller that prints, and it catches.
+ */
+export function presentTenseHits(root, docs, phrases = PRESENT_TENSE_PHRASES) {
+  const hits = [];
+  let scanned = 0;
+  let skippedTests = 0;
+  for (const doc of docs) {
+    if (PRESENT_TENSE_TEST_SOURCE.test(doc)) { skippedTests += 1; continue; }
+    scanned += 1;
+    const source = readFileSync(join(root, doc), 'utf8');
+    const { text, offsets } = foldCommentProse(source);
+    for (const phrase of phrases) {
+      for (const m of text.matchAll(phrasePattern(phrase))) {
+        const at = offsets[m.index];
+        hits.push({
+          doc,
+          line: source.slice(0, at).split('\n').length,
+          phrase,
+          excerpt: text.slice(Math.max(0, m.index - 48), m.index + m[0].length + 48),
+        });
+      }
+    }
+  }
+  hits.sort((a, b) => (a.doc === b.doc ? a.line - b.line : a.doc < b.doc ? -1 : 1));
+  return { hits, scanned, skippedTests };
+}
+
+/**
+ * Print the report. ⛔ REPORT-ONLY BY CONSTRUCTION: it has no exit path, sets
+ * no exit code, and turns any throw into a NOT MEASURED line -- so it cannot
+ * move the anchor gate's verdict in either direction. Returns the reading, or
+ * `null` when none was taken.
+ */
+export function reportPresentTense(root, docs) {
+  const notMeasured = (why) => console.log(
+    `⚠️  present-tense report NOT MEASURED: ${why} — this report never fails the gate, so read a missing `
+      + 'reading as missing, never as zero hits.',
+  );
+  try {
+    const reading = presentTenseHits(root, docs);
+    for (const h of reading.hits) {
+      console.log(`📝 [present-tense] ${h.doc}:${h.line}  "${h.phrase}"\n      …${h.excerpt}…`);
+    }
+    if (reading.scanned === 0) {
+      notMeasured(`0 non-test spec sources were read (${reading.skippedTests} test sources skipped), `
+        + 'so the instrument is blind rather than the corpus clean');
+      return reading;
+    }
+    const perPhrase = PRESENT_TENSE_PHRASES
+      .map((p) => `"${p}" ${reading.hits.filter((h) => h.phrase === p).length}`).join(', ');
+    console.log(
+      `ℹ️  present-tense report (REPORT-ONLY, never fails): ${reading.hits.length} hit(s) over `
+        + `${reading.scanned} non-test spec sources, ${reading.skippedTests} test sources skipped — ${perPhrase}. `
+        + 'A hit judged still true is dismissed in one line; no hit is a failure.',
+    );
+    return reading;
+  } catch (e) {
+    notMeasured(e?.message ?? String(e));
+    return null;
+  }
+}
+
+/** `--present-tense`: the report alone, over the same population. Exits 0 whatever it reads. */
+function presentTenseOnly(root = process.cwd()) {
+  let docs;
+  try {
+    docs = [...sweepCorpus(CORPUS, root).byDoc.keys()];
+  } catch (e) {
+    console.log(`⚠️  present-tense report NOT MEASURED: the corpus sweep failed — ${e?.message ?? String(e)}`);
+    return;
+  }
+  reportPresentTense(root, docs);
+}
+
 export function runCheck(root = process.cwd()) {
-  const { findings, counts } = sweepCorpus(CORPUS, root);
+  const { findings, counts, byDoc } = sweepCorpus(CORPUS, root);
   const { hard, soft, pinned, stale } = triage(findings);
 
   if (counts.anchors === 0) {
@@ -378,6 +898,11 @@ export function runCheck(root = process.cwd()) {
         + '      Delete its CENSUS_RESIDUAL row in the same PR that repairs it.',
     );
   }
+
+  // ⛔ REPORT-ONLY: printed before the verdict so a red run carries it too, and
+  // `reportPresentTense` can neither exit nor throw, so `failed` below reads
+  // exactly what it read before this line existed.
+  reportPresentTense(root, [...byDoc.keys()]);
 
   const failed = hard.length > 0 || stale.length > 0;
   if (hard.length > 0) {
@@ -441,6 +966,82 @@ function listUnresolvable(root = process.cwd()) {
 
 function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock-symbol-anchors --self-test: ${msg}`); process.exit(1); } }
 
+/**
+ * The contents of `path` at `commit`, WITH THE CAUSE when there are none.
+ *
+ * ⛔ A single `null` was the previous shape and it is what made this readable as
+ * one cause. `git show <commit>:<path>` fails in each of four cases -- git
+ * missing, cwd not a repository, the commit absent, and the path absent at a
+ * commit that is perfectly present -- so a caller handed one `null` can name a
+ * cause only by guessing, and the caller here named the anchor's absence out loud
+ * on a run where the anchor resolved fine. The four are separated here, before
+ * the read, by two cheap probes:
+ *
+ *   'no-repo'        `git rev-parse --git-dir` fails: git is missing, or this
+ *                    directory is not a repository. Nothing about any commit can
+ *                    be established from here.
+ *   'commit-absent'  the repository answers and `git cat-file -e <commit>^{commit}`
+ *                    does not resolve: the literal names no commit of this
+ *                    repository, or names one this clone does not hold. This
+ *                    probe does not tell the two apart.
+ *   'path-absent'    the commit IS an object here and `path` is not readable at it.
+ *                    A hard failure, ⛔ never a skip: this is the state a renamed or
+ *                    mistyped pin file produces, and reporting it as an unreachable
+ *                    anchor switches the caller's guard off while telling the reader
+ *                    to expect the skip.
+ *   'ok'             `text` is the trimmed contents.
+ *
+ * ⛔ Callers must read every status but `'ok'` as NOT MEASURED, never as agreement,
+ * and must name the status they were HANDED rather than whichever cause reads best.
+ * It is spelled as a return rather than a throw because the caller decides, per
+ * anchor, whether `'commit-absent'` is a skip.
+ *
+ * Spawned with `gitFreeEnv()` per the rule in `scripts/git-env.mjs`: these are
+ * local reads that must resolve against the repository their `cwd` names, and an
+ * inherited `GIT_DIR` would point them at a different one.
+ *
+ * @param {string} commit
+ * @param {string} path
+ * @returns {{ status: 'ok' | 'no-repo' | 'commit-absent' | 'path-absent', text: string | null }}
+ */
+function readTextAtCommit(commit, path) {
+  const gitAnswers = (args) => {
+    try {
+      execFileSync('git', args, { env: gitFreeEnv(), stdio: ['ignore', 'ignore', 'ignore'] });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!gitAnswers(['rev-parse', '--git-dir'])) return { status: 'no-repo', text: null };
+  if (!gitAnswers(['cat-file', '-e', `${commit}^{commit}`])) return { status: 'commit-absent', text: null };
+  try {
+    return {
+      status: 'ok',
+      text: execFileSync('git', ['show', `${commit}:${path}`], {
+        encoding: 'utf8',
+        env: gitFreeEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim(),
+    };
+  } catch {
+    return { status: 'path-absent', text: null };
+  }
+}
+
+/** `true` only when `git rev-parse --is-shallow-repository` answers `true`. */
+function gitReportsShallow() {
+  try {
+    return execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+      encoding: 'utf8',
+      env: gitFreeEnv(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
 // A module-level `assert()` that exits on the first failure used to be this
@@ -456,18 +1057,36 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-spec-docblock
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 // ⛔ Three of these cases are registered PER `CENSUS_RESIDUAL` row (the
-// exactness loop below runs three `check()`s over each row), so 21 of the 64
+// exactness loop below runs three `check()`s over each row), so 21 of the 124
 // are the 7 day-one rows, and REPAIRING a citation and deleting its row
 // legitimately lowers this floor by 3 — that is the ONLY reason it may be
 // lowered. Any other drop is cases that STOPPED RUNNING; find what stopped
 // registering instead of moving the number.
+//
+// ⛔ A SECOND per-row loop registers seven cases per enumerated
+// `bindingInNeitherRepoRows` row — 35 of the 124 — and it is NOT a second
+// lowering reason. Those rows are a reading frozen at the shas the record
+// names, so they are never repaired and never deleted; a drop there is the
+// enumeration being edited away from the cell it is supposed to hold.
+//
+// ⛔ The number is READ OFF A PROBE, never derived from a diff: run the self-test
+// with this entry raised to something unreachable and take the count its own floor
+// message prints. 120 -> 124 was read that way.
+//
+// The present-tense report is its OWN battery, registered after every case
+// above, so it cannot inflate the 124. Read off the same kind of probe: 38.
+// None of its cases reads the live tree's hits, so no docblock edit anywhere
+// can move this floor. A phrase added to the list adds cases here (its planted
+// hit, its spawned line, and its row count in each of the two readings) — read
+// the new number off the probe rather than adding it up.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-spec-docblock-symbol-anchors self-test': 64,
+  'check-spec-docblock-symbol-anchors self-test': 124,
+  'present-tense report': 38,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -622,12 +1241,6 @@ export function selfTest() {
   // 4. ⭐ The live corpus is not empty, and the projection really is wired.
   //    This is the ONLY thing separating a clean tree from an extractor that
   //    silently matches nothing.
-  //    ⚠️ `symbol > 0` is NOT assertable here and that is a census result, not
-  //    an oversight: the whole tree holds exactly ONE symbol-anchor-shaped span
-  //    and it does not resolve (see the header, and the `websocket.zod.ts`
-  //    residual row). The file-level population is what proves the extractor
-  //    ran; the residual's exactness loop below is what proves it still SEES
-  //    that one symbol-shaped span.
   const live = sweepCorpus(CORPUS);
   check(live.counts.anchors > 1000, `the live spec corpus must yield its anchors, got ${live.counts.anchors}`);
   check(live.counts.fileLevel > 1000, `the live corpus must resolve its file-level anchors, got ${live.counts.fileLevel}`);
@@ -639,8 +1252,7 @@ export function selfTest() {
   // 5. ⛔ Every residual row is EXACT IN BOTH DIRECTIONS against the LIVE tree.
   //    A row whose citation is repaired has done its job and must be DELETED;
   //    leaving it is how a dated residual becomes a permanent exemption nobody
-  //    re-reads. This loop is also the positive control for the ONE
-  //    symbol-shaped span in the corpus (case 4's note).
+  //    re-reads.
   const liveTriage = triage(live.findings);
   check(liveTriage.stale.length === 0,
     'every CENSUS_RESIDUAL row must still match a LIVE finding — a stale row is a repaired citation whose row was '
@@ -688,6 +1300,390 @@ export function selfTest() {
     CENSUS_17065.barePathsTrackedAtRepoRoot + CENSUS_17065.barePathsResolvingOnlySpecRelative
       + CENSUS_17065.barePathsBindingNeitherBase === CENSUS_17065.barePathSpans,
     'the three bare-path resolution bases must exhaust the bare-path spans',
+  );
+
+  // 8. ⭐ THE RE-CENSUS, held exactly as case 7 holds the census above. Two
+  //    records thirty lines apart in one file, one held by case 7's arithmetic
+  //    and the other held by nothing, is how a record and the code it describes
+  //    drift apart in silence — which is the defect class this whole corpus
+  //    exists for. (⛔ Deliberately not "pinned N ways": a count of the pins
+  //    above is itself an unheld number, and it was wrong in this comment's
+  //    first spelling.)
+  //    ⚠️ These pins are INTERNAL to the record, with ONE stated exception
+  //    below, and that is deliberate: the reading is frozen at the shas it
+  //    names, so holding a cell against the LIVE tree would turn a historical
+  //    record into a ratchet that reds on every unrelated spec docblock edit.
+  //    What they close is the other drift — a cell edited one at a time until
+  //    the record says something no reading ever said.
+  //    ⛔ What an internal pin CANNOT catch is a sentence ABOUT A TREE that
+  //    nothing reading that tree holds — which is what the via sentence was. So
+  //    where a pin against reality is both cheap and FROZEN, it is taken: the
+  //    objectui-pin cases below are those, and they are the only ones here.
+  //    ⚠️ "Cheap and FROZEN" does not by itself pick an anchor, and the previous
+  //    spelling read that as if it did. Two of this record's shas are commits of
+  //    this repository, and only `measuredOn` is an ancestor of main. The pin
+  //    block below states which is which, and takes both.
+  check(
+    RECENSUS_17242.trackedTargetLineCitations + RECENSUS_17242.declinedCitations
+      === RECENSUS_17242.commentProseLineCitations,
+    `judged (${RECENSUS_17242.trackedTargetLineCitations}) + declined (${RECENSUS_17242.declinedCitations}) must `
+      + `exhaust the re-census's comment-prose population (${RECENSUS_17242.commentProseLineCitations})`,
+  );
+  check(
+    Object.values(RECENSUS_17242.declinedByShape).reduce((a, b) => a + b, 0) === RECENSUS_17242.declinedCitations,
+    're-census: the declined shape tally must sum to the declined count',
+  );
+  check(RECENSUS_17242.declinedUnderPreviousResolver === RECENSUS_17242.declinedCitations,
+    're-census: the previous resolver\'s reading is the control that makes 183 -> 467 a POPULATION statement — '
+      + 'the two must stay equal or the control is gone');
+  // ⭐ The cross-repo split's own arithmetic: the three binding cells must
+  // exhaust the declined population, or one of them is a guess.
+  check(
+    RECENSUS_17242.namingAnExistingObjectuiFile + RECENSUS_17242.namingAnExistingFileHere
+      + RECENSUS_17242.bindingInNeitherRepo === RECENSUS_17242.declinedCitations,
+    `the three binding cells (${RECENSUS_17242.namingAnExistingObjectuiFile} / `
+      + `${RECENSUS_17242.namingAnExistingFileHere} / ${RECENSUS_17242.bindingInNeitherRepo}) must exhaust the `
+      + `declined population (${RECENSUS_17242.declinedCitations})`,
+  );
+  // ⭐ ...and so must the VIA split, which is the other arithmetic the record's
+  // sentence makes. A row carrying no path of its own IS a continuation, so the
+  // two antecedent cells must be exactly the `continuation` shape count — and
+  // once they are, `ownPath` is forced to the other two shapes. Shipping that
+  // split as prose with nothing holding it is how a wrong total (`279`) stood
+  // twenty lines from the `declinedByShape` that contradicted it.
+  const via = RECENSUS_17242.bindingVia;
+  check(
+    via.ownPath + via.antecedentInherited + via.antecedentNoToken === RECENSUS_17242.declinedCitations,
+    `the via cells (${via.ownPath} own-path / ${via.antecedentInherited} inherited / ${via.antecedentNoToken} `
+      + `inheriting none) must exhaust the declined population (${RECENSUS_17242.declinedCitations})`,
+  );
+  check(
+    via.antecedentInherited + via.antecedentNoToken === RECENSUS_17242.declinedByShape.continuation,
+    `the two antecedent cells (${via.antecedentInherited} + ${via.antecedentNoToken}) must be exactly the `
+      + `continuations (${RECENSUS_17242.declinedByShape.continuation}) — a row with no path of its own is a `
+      + 'continuation by definition, so any other total means the via split and the shape split were read over '
+      + 'different rows',
+  );
+  // ...and so must the tense split, which is measured over the same rows.
+  check(
+    RECENSUS_17242.liveTenseCitations + RECENSUS_17242.historicalRecordCitations
+      + RECENSUS_17242.datedMeasurementCitations === RECENSUS_17242.declinedCitations,
+    `the three tense cells must exhaust the declined population (${RECENSUS_17242.declinedCitations})`,
+  );
+  // ⛔ A moving ref is not an anchor: every tree this split was taken against
+  // must be a full sha, so a later reader can check it out. `measuredOn` is in
+  // this list because the reality pin below READS AT IT — an anchor a case
+  // depends on is one the format rule has to cover.
+  for (const field of ['measuredOn', 'boundAgainstSha', 'objectuiPinSha', 'objectuiMainSha']) {
+    check(/^[0-9a-f]{40}$/.test(RECENSUS_17242[field]),
+      `\`${field}\` must be a full 40-character sha — a branch name, a short sha or a ref is not an anchor, `
+        + `got \`${RECENSUS_17242[field]}\``);
+  }
+  // ⭐ THE REALITY PINS this battery takes, and there are TWO because the record
+  // names two commits of this repository.
+  //
+  // The mechanism is one: this repo records the objectui commit it builds against
+  // in its own pin file, so reading that file AT a tree the sweep stood on says
+  // which sibling tree it was standing on. It must be `objectuiPinSha`.
+  // ⛔ Read AT a sha, never from the working tree: the live pin moves, and a live
+  // read would turn a frozen historical record into a ratchet that reds on every
+  // unrelated objectui bump.
+  //
+  // ⚠️ WHICH sha decides whether the pin survives the merge, and the previous
+  // spelling took the one that does not. `boundAgainstSha` is a commit on the
+  // BRANCH carrying this record: a squash drops it from main's history, the read
+  // stops resolving, and from then on `objectuiPinSha` is held by nothing but its
+  // 40-hex format above. Measured, with a deliberately WRONG `objectuiPinSha` as
+  // the lit control: it reds in a clone that fetched this branch, and passes in a
+  // depth-1 clone of head and in a clone whose objects are main's.
+  //
+  // `measuredOn` is the other anchor the record already carries and it is an
+  // ANCESTOR OF MAIN, so under `lint.yml`'s `fetch-depth: 0` checkout it resolves
+  // on every run, before and after the squash. The pin file is byte-identical at
+  // the two commits — the only file differing between them is this gate, which is
+  // the record's own claim at `boundAgainstSha` — so reading at `measuredOn` reads
+  // the same pin.
+  //
+  // ⇒ `measuredOn` is the PRIMARY pin: in a clone git does not report as shallow,
+  // it is taken or this battery reds. `boundAgainstSha` is a SECOND one, skipped
+  // wherever it names no commit in this clone.
+  //
+  // ⛔ NOT TAKEN is printed only for an anchor naming no commit in this clone, and
+  // for the primary only when git reports the clone as shallow. Every other failed
+  // read is a hard red: a renamed or mistyped pin file lands there at any anchor
+  // that resolves, and so does a mistyped primary literal in a clone git does not
+  // report as shallow.
+  const realityPins = [
+    ['primary', 'measuredOn', RECENSUS_17242.measuredOn],
+    ['second', 'boundAgainstSha', RECENSUS_17242.boundAgainstSha],
+  ].map(([role, field, commit]) => ({ role, field, commit, read: readTextAtCommit(commit, OBJECTUI_PIN_FILE) }));
+  for (const { role, field, commit, read } of realityPins) {
+    const shallow = read.status === 'commit-absent' && gitReportsShallow();
+    const skipped = read.status === 'commit-absent' && (role === 'second' || shallow);
+    if (skipped) {
+      console.log(
+        `   ⚠️ ${role} reality pin NOT TAKEN: \`${commit}\` (\`${field}\`) names no commit in this clone, which git `
+          + `${shallow ? 'reports' : 'does not report'} as shallow, so \`${OBJECTUI_PIN_FILE}\` could not be read at it.`,
+      );
+    }
+    // ⛔ Every failed read not `skipped` is a hard red, and the
+    // message names the status it was HANDED rather than picking a cause — which
+    // is the whole of what went wrong here. ⚠️ Measured: `no-repo` is not
+    // reachable through `--self-test`, because the live-corpus sweep above asks
+    // `git ls-files` and throws first; it is discriminated anyway so this caller
+    // never has to infer it.
+    check(read.status === 'ok' || skipped,
+      `the ${role} reality pin was NOT taken, and not for a reason this battery skips: the read of `
+        + `\`${OBJECTUI_PIN_FILE}\` at \`${commit}\` (\`${field}\`) answered \`${read.status}\`. \`commit-absent\` `
+        + 'is a failure only for the primary anchor, in a clone git does not report as shallow — a mistyped '
+        + '`measuredOn` in such a clone lands here. `path-absent` means the anchor RESOLVED and the pin file is not readable at it — a renamed or '
+        + 'mistyped pin path lands here, and reporting that as an unreachable anchor is how this pin gets switched off '
+        + 'while its own notice tells the reader to expect the skip. `no-repo` means `git rev-parse --git-dir` failed '
+        + 'here. ⛔ In every case the pin is NOT MEASURED, and NOT MEASURED is not a pass.');
+    check(read.status !== 'ok' || read.text === RECENSUS_17242.objectuiPinSha,
+      `\`objectuiPinSha\` (${RECENSUS_17242.objectuiPinSha}) must be the objectui commit this repo was pinned to at `
+        + `\`${field}\` — the pin file reads \`${read.text}\` there, so the binding sweep and this repo were standing `
+        + 'on different sibling trees');
+  }
+  // ⭐ Where both anchors resolve, the loop above requires each to read
+  // `objectuiPinSha`. ⛔ It compares no other file between them, so the record's
+  // "the only file differing between the two commits is this gate" is not held
+  // here.
+  // ⛔ A further case comparing the two reads TO EACH OTHER was written here and
+  // removed: it can only be reached once both have been asserted equal to the same
+  // string, so it can never fail. That is a phantom check — a case that evaluates,
+  // registers against the floor, and discriminates nothing — and this file is the
+  // wrong place to keep one.
+  // The DECLARED sensitivity must be a variant of the SAME reading: it sweeps
+  // the same rows, so it exhausts the same population, and loosening the
+  // predicate can only move rows INTO a repo, never out of one.
+  const lenient = RECENSUS_17242.bindingUnderDirectoryLenientVariant;
+  check(lenient.objectui + lenient.here + lenient.neither === RECENSUS_17242.declinedCitations,
+    'the directory-lenient variant must exhaust the same declined population — a variant that does not is a '
+      + 'different reading, not a sensitivity');
+  check(
+    lenient.neither <= RECENSUS_17242.bindingInNeitherRepo
+      && lenient.objectui >= RECENSUS_17242.namingAnExistingObjectuiFile
+      && lenient.here >= RECENSUS_17242.namingAnExistingFileHere,
+    'relaxing a predicate can only move rows OUT of the unbound cell — a lenient variant binding FEWER rows means '
+      + 'the two readings were not taken against the same trees',
+  );
+  // ⛔ The enumeration IS the cell. A count nobody can list is a count nobody
+  // can check, and that is exactly what the previous round shipped.
+  check(RECENSUS_17242.bindingInNeitherRepoRows.length === RECENSUS_17242.bindingInNeitherRepo,
+    `the enumerated unbound rows (${RECENSUS_17242.bindingInNeitherRepoRows.length}) must equal the cell `
+      + `(${RECENSUS_17242.bindingInNeitherRepo}) — a cell that outruns its list is a number without evidence`);
+  // ⭐ ...and the via cell that HAS a list is held against that list.
+  // `antecedentNoToken` is the only via cell small enough to enumerate, so it is
+  // the one that can be checked against rows rather than against arithmetic.
+  const inheritedNothing = RECENSUS_17242.bindingInNeitherRepoRows.filter((row) => row.via === 'antecedent');
+  check(inheritedNothing.length === via.antecedentNoToken,
+    `the enumerated rows the antecedent walk gave NO token (${inheritedNothing.length}) must equal `
+      + `\`bindingVia.antecedentNoToken\` (${via.antecedentNoToken}) — that cell IS these rows, not a second count`);
+  // A row's identity is its document plus its citation text, so two rows may not
+  // share the pair: a duplicate is one row counted twice in a cell whose whole
+  // point is that a reader can check it off one row at a time.
+  const rowIdentities = RECENSUS_17242.bindingInNeitherRepoRows.map((row) => JSON.stringify([row.doc, row.raw]));
+  check(new Set(rowIdentities).size === rowIdentities.length,
+    `two enumerated rows share a document AND a citation text, which is a row's identity here: ${rowIdentities.join(', ')}`);
+  for (const row of RECENSUS_17242.bindingInNeitherRepoRows) {
+    check(row.doc.startsWith(`${SPEC_SRC_DIR}/`),
+      `an enumerated unbound row may only name a file in this corpus, got \`${row.doc}\``);
+    check(Number.isInteger(row.line) && row.line > 0 && typeof row.raw === 'string' && row.raw.length > 0,
+      `the enumerated row in \`${row.doc}\` must carry the coordinate it was read at AND the citation text it was `
+        + 'read for — the text is its identity, the coordinate is only how a reader finds it');
+    check(NEITHER_ROW_TENSES.includes(row.tense),
+      `the enumerated row for \`${row.raw}\` must carry a tense from the closed vocabulary `
+        + `(${NEITHER_ROW_TENSES.join(' / ')}), got \`${row.tense}\``);
+    check(row.tense !== 'live',
+      `the enumerated row for \`${row.raw}\` in \`${row.doc}\` is LIVE-TENSE and names no file in either tree — `
+        + 'that is a real defect and `liveTenseDefects: 0` no longer holds');
+    check(typeof row.why === 'string' && row.why.length > 20,
+      `the enumerated row for \`${row.raw}\` must say WHY no tree binds it — an unexplained row is the sentence `
+        + 'nobody could reconcile, one indirection further down');
+    check(NEITHER_ROW_VIAS.includes(row.via),
+      `the enumerated row for \`${row.raw}\` must carry a via from the closed vocabulary `
+        + `(${NEITHER_ROW_VIAS.join(' / ')}), got \`${row.via}\``);
+    check(row.via === 'antecedent' ? row.token === null : typeof row.token === 'string' && row.token.length > 0,
+      `the enumerated row for \`${row.raw}\` must agree with its own via — an \`antecedent\` row is one the walk gave `
+        + 'NO token and so carries `token: null`, an `own-path` row carries the token it was read as. A row claiming '
+        + 'one and holding the other is how `bindingVia.antecedentNoToken` gets counted off the wrong rows');
+  }
+  // ...and the predicate itself is carried as a usable pattern, not a paraphrase.
+  const tokenUnder = (pattern, text) => new RegExp(pattern).exec(text)?.[0] ?? null;
+  const qualified = 'plugin-grid/src/ObjectGrid.tsx';
+  check(new RegExp(RECENSUS_17242.bindingTokenPattern).test(qualified),
+    'the recorded token grammar must match a directory-qualified sibling-repo citation');
+  // ⭐ The guard that stops a longer extension being eaten as its own prefix is
+  // the TRAILING LOOKAHEAD, pinned here by PRESENCE and by BEHAVIOUR. ⛔ The
+  // order of the alternation is not that guard, and the third case measures it:
+  // a check whose message says otherwise describes a mechanism this pattern
+  // does not have, which is the same unheld-sentence defect one layer down.
+  check(RECENSUS_17242.bindingTokenPattern.endsWith(BINDING_TOKEN_TAIL_GUARD),
+    `the recorded token grammar must END in \`${BINDING_TOKEN_TAIL_GUARD}\` — that guard is what makes a shorter `
+      + 'extension arm FAIL on a longer extension, and without it the alternation order becomes load-bearing');
+  check(tokenUnder(RECENSUS_17242.bindingTokenPattern, qualified) === qualified,
+    'the recorded token grammar must keep the WHOLE extension — a token truncated to its two-letter prefix points at '
+      + `a file that does not exist, got \`${tokenUnder(RECENSUS_17242.bindingTokenPattern, qualified)}\``);
+  const shortestArmFirst = RECENSUS_17242.bindingTokenPattern.replace('tsx|ts|', 'ts|tsx|');
+  check(shortestArmFirst !== RECENSUS_17242.bindingTokenPattern,
+    'the order-independence case must actually RE-ORDER the alternation — if that substitution stops applying, the '
+      + 'case below compares a pattern with itself and holds nothing');
+  check(tokenUnder(shortestArmFirst, qualified) === tokenUnder(RECENSUS_17242.bindingTokenPattern, qualified),
+    'a shortest-arm-first alternation must return the SAME token — ordering is not what prevents truncation, and '
+      + 'this record must not claim it is');
+  // ⚠️ The record's docblock states a THIRD leg — "removing the lookahead while
+  // keeping longest-first also truncates nothing; only removing BOTH truncates" —
+  // and ⛔ deliberately does not claim the battery pins it (`it is the lookahead
+  // the self-test pins`). A case for it was written here and removed: every
+  // mutation that would light it is caught first by the two guard cases above (the
+  // pattern must end in the tail guard; the re-order substitution must apply), so
+  // the leg's truth is ENTAILED by cases that already ran and a case for it could
+  // not fail. The sentence is a recorded measurement, not an unheld claim about
+  // this battery — so it stays prose, and the battery stays honest about what it
+  // pins.
+
+  // 9. ⭐ THE PRESENT-TENSE REPORT, its own battery so the 124 above stay exactly
+  //    the cases they were. ⛔ Nothing here reads the LIVE tree's hits: a case
+  //    holding today's reading would make a report-only instrument fail CI on an
+  //    unrelated doc edit. Every case below reds only when the MECHANISM breaks.
+  battery('present-tense report');
+  const ptTmp = mkdtempSync(join(tmpdir(), 'check-spec-docblock-present-tense-'));
+  try {
+    const write = (rel, body) => { mkdirSync(dirname(join(ptTmp, rel)), { recursive: true }); writeFileSync(join(ptTmp, rel), body); };
+    // The sentence #18991 repaired, verbatim and wrapped as it was: `this phase`
+    // starts on line 3 and ends on line 4, so a matcher that does not fold
+    // across the JSDoc gutter misses it.
+    write('packages/spec/src/pt/rotted.ts', [
+      '/**',
+      ' * - `export` derives from `list` and the caller\'s export slot',
+      ' *   (`ResolveApiOptions.userExportAllowed`, always `true` this',
+      ' *   phase — the real permission bit is a follow-up, wiring it',
+      ' *   changes no contract here).',
+      ' */',
+      'export const rotted = 1;',
+    ].join('\n'));
+    // The other two phrases, in the other two comment forms and in upper case.
+    write('packages/spec/src/pt/more.ts', [
+      '// Feature not yet implemented.',
+      '/* Currently NO reader holds it. */',
+      'export const more = 1;',
+    ].join('\n'));
+    // ⛔ What must NOT print: the wide phrase, whole-word near misses, and the
+    // listed phrases inside a string literal, which is code, not prose.
+    write('packages/spec/src/pt/refused.ts', [
+      '// there is no reader for it yet, for now.',
+      '// currently none; currently nothing; this phased rollout; it is a follow-upper.',
+      "export const message = 'not yet implemented, currently no reader, this phase';",
+    ].join('\n'));
+    // ⛔ A test source carrying all four: skipped, and counted as skipped.
+    write('packages/spec/src/pt/skipped.test.ts',
+      '// this phase: the bit is a follow-up, not yet implemented, currently no reader.\n');
+    execFileSync('git', ['init', '-q'], { cwd: ptTmp, env: gitFreeEnv() });
+    execFileSync('git', ['add', '-A'], { cwd: ptTmp, env: gitFreeEnv() });
+
+    // The population is the anchor corpus's own walk, the same call `runCheck` makes.
+    const docs = [...sweepCorpus(CORPUS, ptTmp).byDoc.keys()];
+    check(docs.includes('packages/spec/src/pt/skipped.test.ts'),
+      'the test source must be IN the population the report is handed, or "skipped" cannot be told from "never seen"');
+    const reading = presentTenseHits(ptTmp, docs);
+    check(reading.skippedTests === 1 && reading.scanned === docs.length - 1,
+      `exactly the one test source must be skipped and every other source read, got ${reading.skippedTests} skipped, `
+        + `${reading.scanned} read of ${docs.length}`);
+    const expected = [
+      ['this phase', 'packages/spec/src/pt/rotted.ts', 3],
+      ['is a follow-up', 'packages/spec/src/pt/rotted.ts', 4],
+      ['not yet implemented', 'packages/spec/src/pt/more.ts', 1],
+      ['currently no', 'packages/spec/src/pt/more.ts', 2],
+    ];
+    check(expected.map(([p]) => p).join('|') === PRESENT_TENSE_PHRASES.join('|'),
+      'the fixture must plant exactly one hit per listed phrase — a phrase added to the list needs a planted hit here');
+    for (const [phrase, doc, line] of expected) {
+      const got = reading.hits.filter((h) => h.phrase === phrase);
+      check(got.length === 1 && got[0].doc === doc && got[0].line === line,
+        `the planted "${phrase}" must be ONE hit at ${doc} line ${line}, got `
+          + `${JSON.stringify(got.map((h) => [h.doc, h.line]))}`);
+    }
+    check(reading.hits.length === expected.length,
+      `the fixture must yield exactly its ${expected.length} planted hits, got ${reading.hits.length}: `
+        + `${reading.hits.map((h) => `${h.doc} ${h.line} ${h.phrase}`).join(', ')}`);
+    check(!reading.hits.some((h) => h.doc.endsWith('refused.ts')),
+      'the wide phrase, the whole-word near misses and a string literal must print nothing');
+    check(!reading.hits.some((h) => h.doc.endsWith('.test.ts')), 'a test source must print nothing');
+    // ⛔ The wide phrase is kept out by the LIST, not by a blind matcher: asked
+    // for it directly, the same instrument finds it.
+    check(Object.keys(PRESENT_TENSE_REFUSED_WIDE).every((w) => !PRESENT_TENSE_PHRASES.includes(w)),
+      'a refused wide phrase must never be on the list');
+    check(presentTenseHits(ptTmp, docs, ['there is no']).hits.length === 1,
+      'the instrument must SEE `there is no` when asked, so its absence from the report is the list, not blindness');
+
+    // ⭐ REPORT-ONLY, measured as an exit status: the CLI arm, spawned over a tree
+    // carrying hits, must exit 0 and print each one as file:line plus phrase.
+    const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--present-tense'], {
+      cwd: ptTmp, env: gitFreeEnv(), encoding: 'utf8',
+    });
+    check(run.status === 0, `the report arm must exit 0 WITH hits, got ${run.status}: ${run.stderr}`);
+    for (const [phrase, doc, line] of expected) {
+      check(run.stdout.includes(`📝 [present-tense] ${doc}:${line}  "${phrase}"`),
+        `the spawned report must print ${doc}:${line} "${phrase}"`);
+    }
+    check(!/refused\.ts|skipped\.test\.ts/.test(run.stdout),
+      'the spawned report must print nothing for the refused file or the test source');
+    check(run.stdout.includes(`ℹ️  present-tense report (REPORT-ONLY, never fails): ${expected.length} hit(s)`),
+      'the spawned report must print its summary line with the hit count');
+
+    // ⛔ ...and in-process it cannot move an exit code or throw, even when the
+    // read fails or reads nothing. Its output is captured, not printed.
+    const captured = [];
+    const realLog = console.log;
+    const exitCodeBefore = process.exitCode;
+    let unreadable;
+    let blind;
+    let withHits;
+    console.log = (...args) => { captured.push(args.join(' ')); };
+    try {
+      withHits = reportPresentTense(ptTmp, docs);
+      unreadable = reportPresentTense(ptTmp, [...docs, 'packages/spec/src/pt/vanished.ts']);
+      blind = reportPresentTense(ptTmp, ['packages/spec/src/pt/skipped.test.ts']);
+    } finally {
+      console.log = realLog;
+    }
+    check(withHits?.hits.length === expected.length && process.exitCode === exitCodeBefore,
+      'reporting hits must leave `process.exitCode` exactly as it found it');
+    check(unreadable === null && captured.some((l) => l.includes('NOT MEASURED')),
+      'an unreadable source must turn into a NOT MEASURED line and a null reading, never a throw');
+    check(blind?.scanned === 0 && captured.filter((l) => l.includes('NOT MEASURED')).length === 2,
+      'a population with no non-test source must say NOT MEASURED, never report zero hits');
+    // A presence pin, not behaviour — the behaviour is the spawned arm above. It
+    // catches the call being deleted from the gate run, which nothing else would.
+    check(String(runCheck).includes('reportPresentTense(root, [...byDoc.keys()])'),
+      'runCheck must print the report over its own sweep\'s population');
+  } finally {
+    rmSync(ptTmp, { recursive: true, force: true });
+  }
+
+  // The admission record, held INTERNALLY: every listed phrase carries a reading
+  // at a named sha, every enumerated row adds up to its cell, and no row carries
+  // a judgement outside the closed vocabulary.
+  for (const [label, census] of [['today', PRESENT_TENSE_CENSUS], ['card tree', PRESENT_TENSE_CENSUS.cardTree]]) {
+    check(Object.keys(census.hits).join('|') === PRESENT_TENSE_PHRASES.join('|'),
+      `the ${label} reading must count exactly the listed phrases, in order — a phrase joins the list only with a `
+        + `measured reading: ${Object.keys(census.hits).join(', ')}`);
+    check(/^[0-9a-f]{40}$/.test(census.measuredOn), `the ${label} reading must name a full sha, got \`${census.measuredOn}\``);
+    for (const phrase of PRESENT_TENSE_PHRASES) {
+      check(census.rows.filter((r) => r.phrase === phrase).length === census.hits[phrase],
+        `the ${label} rows for "${phrase}" must enumerate its count of ${census.hits[phrase]}`);
+    }
+    check(census.rows.every((r) => PRESENT_TENSE_JUDGEMENTS.includes(r.judgement) && r.why.length > 20
+      && Number.isInteger(r.line) && r.doc.startsWith(`${SPEC_SRC_DIR}/`) && !PRESENT_TENSE_TEST_SOURCE.test(r.doc)),
+    `every ${label} row must be a non-test spec source with a line, a closed-vocabulary judgement and a reason`);
+  }
+  check(Object.keys(PRESENT_TENSE_CENSUS.cardTree.refusedWide).join('|')
+    === Object.keys(PRESENT_TENSE_REFUSED_WIDE).join('|'),
+  'both readings must record the same refused wide phrases');
+  console.log(
+    `   ✓ present-tense report: ${PRESENT_TENSE_PHRASES.length} listed phrases provoked, wide phrase refused, `
+      + 'test source skipped, exit 0 with hits (spawned)',
   );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
@@ -754,6 +1750,7 @@ if (isEntrypoint(import.meta.url)) {
       process.exit(1);
     }
   } else if (process.argv.includes('--list-unresolvable')) listUnresolvable();
+  else if (process.argv.includes('--present-tense')) presentTenseOnly();
   else if (process.argv.includes('--list')) list();
   else runCheck();
 }

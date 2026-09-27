@@ -101,18 +101,15 @@
  *
  * NOT walked, each verified against the schema rather than assumed:
  *
- *   - **A saved report's `query.orderBy`.** Verified: it is not an authoring
- *     surface at all. `sys_saved_report` is a platform OBJECT and the envelope
- *     lives in its `query_json` COLUMN (`packages/platform-objects/src/audit/
- *     sys-saved-report.object.ts`, `contracts/report-service.ts`) — a runtime
- *     record written through the reports API, never a key in stack metadata.
- *     The stack's own `reports[]` is `ReportSchema`, whose ADR-0021 single-form
- *     cutover REMOVED the inline query; what it declares instead is
- *     `order[].by`, naming a dataset dimension or measure, and `checkReportOrder`
- *     already refines that against what the report selects. So there is no
- *     authored `query.orderBy` for a stack rule to reach; the engine door
- *     (#7095) is the only door that surface has, which is precisely why #7095
- *     added it.
+ *   - **A report's `query.orderBy`.** Verified: no such authoring surface
+ *     exists. The one place a raw report query ever lived was a runtime record
+ *     (the saved-report stack's `query_json` column), never a key in stack
+ *     metadata — and that stack was retired whole in #20102. The stack's own
+ *     `reports[]` is `ReportSchema`, whose ADR-0021 single-form cutover REMOVED
+ *     the inline query; what it declares instead is `order[].by`, naming a
+ *     dataset dimension or measure, and `checkReportOrder` already refines that
+ *     against what the report selects. So there is no authored `query.orderBy`
+ *     for a stack rule to reach.
  *   - **Flow node sort config.** Verified: none exists.
  *     `automation/builtin-node-config.zod.ts`'s record-reading node declares
  *     `limit` and no ordering key at all, and no schema under

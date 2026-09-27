@@ -340,14 +340,22 @@ describe('[#6444] the two pure shapes do not move', () => {
     expect(String(refusalFor({ stage: { $sortOf: 'won' } })?.message)).toContain('Unsupported filter operator');
   });
 
-  it('a mixed wrapper whose $-comparand is undefined is refused by the #6386 gate first', () => {
-    // Measured ordering, pinned as a fact rather than a contract:
-    // `assertDefinedComparands` runs at `fieldLeaves`'s entry, this gate in the
-    // wrapper arm below it. Both refusals share the envelope, so the REST face
-    // answers 400 either way — which is why the ordering is allowed to be an
-    // implementation fact.
+  it('a mixed wrapper whose $-comparand is undefined is refused as the comparand first', () => {
+    // Measured ordering, pinned as a fact rather than a contract: both refusals
+    // share the envelope, so the REST face answers 400 either way — which is why
+    // the ordering is allowed to be an implementation fact.
+    //
+    // [#20035] RE-JUDGED. The comparand is still diagnosed before the mix, but
+    // by an earlier gate in different words: `assertDefinedComparands` (#6386)
+    // at `fieldLeaves`'s entry used to answer, and now the shared comparand-TYPE
+    // face answers in `lowerAnalyticsWhere`, before any node is built — the
+    // maintainer's ruling on #7872 (2026-08-12), 「refuses everything else
+    // loudly at the compile face」. The face judges the `$eq` comparand and
+    // steps over the non-`$` sibling, so a mixed wrapper whose operators carry
+    // only accepted comparands still reaches this gate (every row above).
     const err = refusalFor({ d: { $eq: undefined, nested: 'x' } });
-    expect(String(err?.message)).toContain('comparand at "d".$eq is undefined');
+    expect(String(err?.message).startsWith('Filter comparand at where.d.$eq is undefined.')).toBe(true);
+    expect(String(err?.message)).not.toContain('mixes $-operator keys');
     expect(err?.code).toBe('INVALID_FILTER');
     expect(err?.status).toBe(400);
   });

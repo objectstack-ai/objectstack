@@ -34,7 +34,7 @@
   "content/docs/releases/v17/17-0.mdx": 2,
   "content/docs/ui/forms.mdx": 3,
   "skills/objectstack-ai/SKILL.md": 1,
-  "skills/objectstack-automation/SKILL.md": 1,
+  "skills/objectstack-automation/references/state-machines-and-approvals.md": 1,
   "skills/objectstack-data/SKILL.md": 1,
   "skills/objectstack-data/references/data-hooks.md": 3,
   "skills/objectstack-data/rules/relationships.md": 1,
@@ -42,5 +42,5 @@
   "skills/objectstack-query/rules/filters.md": 8,
   "skills/objectstack-ui/rules/list-views.md": 1,
   "skills/objectstack-ui/rules/navigation.md": 1,
-  "skills/objectstack-upgrade/SKILL.md": 1
+  "skills/objectstack-upgrade/references/examples-upgrade.md": 1
 }

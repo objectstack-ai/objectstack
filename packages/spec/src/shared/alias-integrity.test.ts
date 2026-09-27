@@ -545,12 +545,12 @@ describe('alias integrity — coverage', () => {
     // both name a mechanism that can break silently, and both moved into the
     // shape-backed registry at #5593 rather than disappearing with it.
     //
-    // (a) `ui/app.zod.ts`'s nine navigation branches share ONE
-    //     `navItemSurface(variant)` options factory. Nine variants in, nine
+    // (a) `ui/app.zod.ts`'s ten navigation branches share ONE
+    //     `navItemSurface(variant)` options factory. Ten variants in, ten
     //     tables out — the count IS the coverage, and it is the assertion that
     //     fails if the de-duplication above ever collapses them onto one.
     const navTables = SURFACES.filter((s) => PROSE_TARGET_SURFACE.test(s.options.surface));
-    expect(navTables.length, 'one strict branch per nav-item `type`').toBe(9);
+    expect(navTables.length, 'one strict branch per nav-item `type`').toBe(10);
 
     // (b) `data/object.zod.ts` used to build its error map on FIRST USE, to
     //     step around a temporal dead zone, and needed a synthetic-issue poke in
@@ -649,6 +649,8 @@ const PROSE_ALIAS_TARGETS: ReadonlySet<string> = new Set([
   "type: 'dashboard' (with dashboardName)",
   "type: 'report' (with reportName)",
   "type: 'component' (with componentRef)",
+  "type: 'doc' (with book)",
+  "type: 'doc' (with doc)",
   "type: 'group' (with expanded)",
 ]);
 
@@ -998,7 +1000,12 @@ describe('alias integrity — every table is a true claim about its schema', () 
 
     const tenancy = bySurface.get('`tenancy`');
     expect(tenancy, 'TenancyConfigSchema no longer declares through strictObject').toBeDefined();
-    expect(Object.keys(tenancy!.options.guidance ?? {}).sort()).toEqual(['crossTenantAccess', 'strategy']);
+    // `organizationField` joined the table at protocol 18 (#19054, ADR-0049):
+    // the strict-deletion route removes the key from the shape and serves its
+    // prescription from this very map, so the retirement is only audible
+    // through the folded channel this assertion holds open.
+    expect(Object.keys(tenancy!.options.guidance ?? {}).sort())
+      .toEqual(['crossTenantAccess', 'organizationField', 'strategy']);
   });
 
   it('no live surface still reports the shared view/page FAMILY name (#8202)', () => {

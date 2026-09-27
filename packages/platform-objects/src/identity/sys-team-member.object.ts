@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { F } from '@objectstack/spec/shared';
 
 /**
  * sys_team_member — System Team Member Object
@@ -26,6 +27,18 @@ export const SysTeamMember = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Team membership records linking users to teams',
+  // [ADR-0079] The record title is `display_title`, a text formula over the
+  // columns `titleFormat` names. With no pointer declared, the registry's
+  // designate-only pass stamped `nameField: 'id'` (the first title-eligible
+  // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
+  // wins over `titleFormat`) drew the raw id as the record page's H1.
+  // `titleFormat` stays for renderers that still read it first;
+  // `identity-display-title.test.ts` holds the two to the same text.
+  // `user_id` and `team_id` are lookups, so the formula reads their stored
+  // ids: a formula is evaluated on the stored row, before `$expand`, and
+  // cannot reach a related record's own title.
+  displayNameField: 'display_title',
+  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{user_id} in {team_id}',
   highlightFields: ['user_id', 'team_id', 'created_at'],
 
@@ -85,6 +98,16 @@ export const SysTeamMember = ObjectSchema.create({
       label: 'Team Member ID',
       required: true,
       readonly: true,
+    }),
+
+    // [ADR-0079] The record title (`nameField` above). A formula is computed on
+    // read and has no stored column. Every source column is required, so the
+    // expression needs no null guard.
+    display_title: Field.formula({
+      label: 'Title',
+      returnType: 'text',
+      expression: F`record.user_id + ' in ' + record.team_id`,
+      description: 'Record title: the user and the team (computed on read)',
     }),
     
     created_at: Field.datetime({

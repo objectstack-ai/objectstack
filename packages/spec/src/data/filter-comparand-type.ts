@@ -88,7 +88,11 @@
  *   `driver-memory` refuse it, each with its own message; `driver-mongodb`
  *   hands it to MongoDB and inherits that engine's array semantics); the matrix
  *   did not measure it and the ruling does not name it, so the door leaves it
- *   to the layers that already answer it.
+ *   to the layers that already answer it. [#19757] For the EQUALITY slot —
+ *   implicit and `$eq` — the layer that answers it is now the comparand-SHAPE
+ *   door one file over (ruled 2026-09-23), which runs first inside
+ *   `parseFilterAST` and at the engine seam, so no array reaches this walk
+ *   there; `$ne` and the other scalar operators stay per driver.
  * - **An operator outside the declared vocabulary** (`$wat`, retired `$regex`):
  *   the unknown-/retired-operator refusals downstream carry the specific
  *   prescriptions (`RETIRED_FILTER_OPERATORS`), which a generic type refusal

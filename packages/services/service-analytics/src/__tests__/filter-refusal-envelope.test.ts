@@ -94,9 +94,16 @@ const REFUSALS: Array<{
     issueBullet: true,
   },
   {
+    // [#20010] RE-WORDED, same input, same verdict, same envelope. The door now
+    // hands every field entry to the shared comparand-shape face before any
+    // leaf is built, and the face's arity arm answers first, in the words the
+    // FilterArray spelling already got. `fieldLeaves`' own "needs a
+    // two-element" check stays as that function's invariant and is no longer
+    // reached from this door. The row keeps #5352's bullet: the authoring
+    // mistake is the one #5352 named.
     name: '$between without exactly two bounds',
     where: { amount: { $between: [10] } },
-    message: /needs a two-element \[min, max\] array/,
+    message: /Operator "\$between" on field "amount" requires a \[min, max\] value array/,
     issueBullet: true,
   },
   // FLIPPED with the #5322 ruling: these two entries were "$and/$or with an
@@ -150,7 +157,11 @@ const REFUSALS: Array<{
     // envelope block below covers the tenth site the way it covers the nine.
     name: 'an undefined comparand (#6386)',
     where: { stage: undefined },
-    message: /comparand at "stage" is undefined/,
+    // [#20035] RE-JUDGED for the wording only: the shared comparand-TYPE face
+    // answers first now (#7872, 2026-08-12: 「refuses everything else loudly at
+    // the compile face」), in its sentence and at its path; the verdict and
+    // the envelope are this row's and do not move.
+    message: /^Filter comparand at where\.stage is undefined\./,
     issueBullet: false,
     addedAfter5352: '#6386',
   },

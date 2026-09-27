@@ -5,6 +5,7 @@ import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { QueryAST } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /**
  * Regression: `$and`/`$or` sub-filters that compile to nothing must get the
@@ -269,6 +270,13 @@ describe('RemoteTransport $and/$or identity elements (#1073)', () => {
   });
 
   describe('(e) a branch element that is NOT a filter node is refused, never read as TRUE', () => {
+    // [#20039] The element's kind, its preview and its position are the
+    // predicate's detail, named on the wire only for a `where` the caller is
+    // known to have written (the #8220 contract) — so these pins mark theirs
+    // author-written, as a read-scope merge boundary marks a caller's own
+    // predicate. The withheld half is pinned in
+    // `remote-transport-compile-refusal-seam.test.ts`.
+    const own = (where: Record<string, unknown>) => markFilterSubtreeProvenance(where, 'author');
     const cases: Array<[string, unknown, RegExp]> = [
       ['null', null, /is null, not a filter condition/],
       ['undefined', undefined, /is undefined, not a filter condition/],
@@ -283,28 +291,28 @@ describe('RemoteTransport $and/$or identity elements (#1073)', () => {
     for (const [label, sub, message] of cases) {
       it(`refuses ${label} in a $or branch`, async () => {
         const { t } = transportWithCapturingClient();
-        await expect(t.find('deal', { where: { $or: [{ stage: 'won' }, sub] } as any })).rejects.toThrow(
+        await expect(t.find('deal', { where: own({ $or: [{ stage: 'won' }, sub] }) as any })).rejects.toThrow(
           message,
         );
       });
 
       it(`refuses ${label} in a $and branch`, async () => {
         const { t } = transportWithCapturingClient();
-        await expect(t.find('deal', { where: { $and: [sub] } as any })).rejects.toThrow(message);
+        await expect(t.find('deal', { where: own({ $and: [sub] }) as any })).rejects.toThrow(message);
       });
     }
 
     it('names the branch and the INDEX so the offending element is findable', async () => {
       const { t } = transportWithCapturingClient();
       await expect(
-        t.find('deal', { where: { $or: [{ stage: 'won' }, { stage: 'lost' }, null] } as any }),
+        t.find('deal', { where: own({ $or: [{ stage: 'won' }, { stage: 'lost' }, null] }) as any }),
       ).rejects.toThrow(/\$or\[2\] on 'deal'/);
     });
 
     it('refuses a non-node nested one level down too', async () => {
       const { t } = transportWithCapturingClient();
       await expect(
-        t.find('deal', { where: { $and: [{ $or: [null] }] } as any }),
+        t.find('deal', { where: own({ $and: [{ $or: [null] }] }) as any }),
       ).rejects.toThrow(/\$or\[0\] on 'deal'/);
     });
 

@@ -168,7 +168,6 @@ The `@objectstack/client` SDK aims to implement the ObjectStack API protocol spe
 | **automation** | ✅ | 18 | Flow CRUD, trigger/execute, runs, screen-flow resume, descriptor/status registries |
 | **actions** | ✅ | 2 | Server-registered action handlers (`engine.registerAction`) |
 | **approvals** | ✅ | 12 | Approval requests (ADR-0019): inbox, decisions, recall, revise/resubmit (ADR-0044), thread interactions, audit trail |
-| **reports** | ✅ | 8 | Saved reports: definitions, execution, recurring email schedules (501 without `@objectstack/plugin-reports`) |
 | **shares** | ✅ | 8 | Per-record sharing grants (list/grant/revoke) + tenant-wide sharing rules (`shares.rules.*`, M10.17) |
 | **search** | ✅ | 1 | Global cross-object search (M10.5) |
 | **email** | ✅ | 1 | Transactional send via IEmailService (M11.B1) |
@@ -394,7 +393,9 @@ await client.ai.models();                // plan-filtered picker list (ADR-0028)
 
 // Conversations — all six routes, scoped to the authenticated user server-side.
 const conv = await client.ai.conversations.create({ title: 'Q3 pipeline' });
-await client.ai.conversations.list({ limit: 20 });
+const page = await client.ai.conversations.list({ limit: 20 });        // newest first
+// The next page: the cursor is the id of the last conversation you hold.
+await client.ai.conversations.list({ limit: 20, cursor: page.at(-1)?.id });
 await client.ai.conversations.get(conv.id);
 await client.ai.conversations.addMessage(conv.id, { role: 'user', content: 'hi' });
 await client.ai.conversations.update(conv.id, { title: 'Renamed' });

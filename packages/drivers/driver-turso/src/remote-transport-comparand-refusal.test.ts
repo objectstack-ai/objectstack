@@ -169,9 +169,12 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
 
     it('still refuses the BARE marker via the #1004 unknown-operator arm', async () => {
       const { t, calls } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { amount: { $field: 'budget' } } })).rejects.toThrow(
-        /\$field/,
-      );
+      // [#20020] Marked author-written: the unknown-operator arm now withholds
+      // the operator and target from a predicate no boundary vouched, and WHICH
+      // arm answers is what this case asks about.
+      await expect(
+        t.find('deal', { where: markFilterSubtreeProvenance({ amount: { $field: 'budget' } }, 'author') }),
+      ).rejects.toThrow(/\$field/);
       expect(calls).toHaveLength(0);
     });
 

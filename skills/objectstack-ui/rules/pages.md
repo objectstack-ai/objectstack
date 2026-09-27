@@ -1,5 +1,11 @@
 # Pages & Docs
 
+- [Pages — Lightning-Style Page Layouts](#pages--lightning-style-page-layouts) · [Page Types](#page-types) · [Templates & Regions](#templates--regions)
+- [Component Catalogue](#component-catalogue-selection) · [Example — Record Detail Page](#example--record-detail-page)
+- [AI-authored source pages](#ai-authored-source-pages--kindhtml-and-kindreact-adr-00800081) · [Styling a page](#styling-a-page-adr-0065--responsivestyles-not-classname)
+- [Docs — Package Documentation](#docs--package-documentation-adr-0046) · [Authoring rules](#authoring-rules-each-enforced-by-os-build)
+- [Routing model](#routing-model--platform-level-viewer-opt-in-entry) · [Inline metadata views](#inline-metadata-views--the-metadata-fence-adr-0051) · [Example](#example)
+
 ## Pages — Lightning-Style Page Layouts
 
 A **Page** is a Salesforce-Lightning-style layout composed of **regions**

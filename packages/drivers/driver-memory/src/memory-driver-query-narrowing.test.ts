@@ -146,7 +146,7 @@ describe('InMemoryDriver — driver-owned query methods take DriverQuery (#6212 
 
     it('restores the `orderBy` check a blanket cast switched off (#4674)', async () => {
       // `orderBy` is `SortNode[]` (`{ field, order }`), closed since #4721. The
-      // `direction` spelling is `IReportService`'s vocabulary and sorted the
+      // `direction` spelling is another contract's vocabulary and sorted the
       // wrong way in silence. Before this batch the only way to hand `aggregate`
       // a bare AST was `as any`, which switched this check off with it.
       await driver.aggregate(tbl, {

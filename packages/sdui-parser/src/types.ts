@@ -159,7 +159,18 @@ export interface ManifestComponent {
   type: string;
   /** plugin namespace — provenance that drives `requires` */
   namespace?: string;
+  /**
+   * The declared authoring surface. An input named `children` (type `slot`)
+   * is ALSO the containment declaration: `validateTree` draws
+   * `not-a-container` on a child list under any component whose `inputs`
+   * carry no such entry (objectui#9910; `acceptsChildren` in `validate.ts`).
+   */
   inputs: ManifestInput[];
+  /**
+   * LAYOUT containment (objectui#6804, objectui#9910 Q2-A): the flag the
+   * react-page JSX scope builder skips and the public layout ledger lists.
+   * ⛔ Not "accepts children" — this tier's containment check does not read it.
+   */
   isContainer?: boolean;
 }
 

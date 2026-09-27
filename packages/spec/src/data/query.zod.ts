@@ -45,8 +45,8 @@ import { strictObject } from '../shared/strict-object';
 // but a DIFFERENT SET OF ROWS, with no signal anywhere in the response.
 //
 // `direction` gets a named alias rather than a distance-based suggestion because
-// it is not a typo: it is `IReportService.orderBy`'s live vocabulary
-// (`contracts/report-service.ts`), a genuinely different contract that
+// it is not a typo: it is the live vocabulary of a genuinely different
+// contract — better-auth's adapter `sortBy` — which
 // `plugin-auth/objectql-adapter.ts` already translates by hand. Edit distance
 // can never reach a different WORD for the same intent — the `visibleWhen →
 // visible` class (see `shared/strict-object.ts`) — so only a hand-written entry

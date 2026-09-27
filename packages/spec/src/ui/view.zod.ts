@@ -51,7 +51,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictObject, strictObjectError } from '../shared/strict-object';
+import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
@@ -70,6 +70,12 @@ import { retiredKey } from '../shared/retired-key';
 // docblock for the measurement and for the two routes that were not taken.
 import { MAX_RENDERABLE_SCALE, SCALE_UPPER_BOUND_MESSAGE } from '../shared/scale-ceiling';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
+// [#19514] The text-comparand door the Filter Protocol publishes for the
+// case-insensitive contains operator — the discrimination `FILTER_TEXT_CASES`'
+// two REJECTION rows are about, and the reason text that answers them. Imported
+// rather than restated so this vocabulary and the `$` dialect cannot drift into
+// judging two different sets; the module imports nothing, so no cycle.
+import { isRefusedTextComparand, textComparandRefusalReason } from '../data/filter-text-comparand';
 import { BulkActionDefSchema } from './bulk-action.zod';
 
 /**
@@ -518,6 +524,34 @@ function previewFilterValue(value: unknown): string {
 }
 
 /**
+ * The operators that take their direction from their NAME and ignore `value`.
+ *
+ * Deliberately NOT exported, where {@link VIEW_FILTER_LIST_VALUE_OPERATORS} and
+ * {@link VIEW_FILTER_PAIR_VALUE_OPERATORS} are. Those two exist because a
+ * PRODUCER has to ask the question the schema asks — `@object-ui`'s filter
+ * builder decides `isMultiOperator` and would otherwise keep its own list. This
+ * set answers the opposite question ("may I skip the value check?"), which only
+ * the check below asks; publishing it would enlarge the package's public face to
+ * carry a fact nothing outside this file needs. The vocabulary itself is
+ * declared once, in {@link VIEW_FILTER_OPERATORS}, and this is a subset of it.
+ */
+const VIEW_FILTER_VALUELESS_OPERATORS = [
+  'is_empty', 'is_not_empty', 'is_null', 'is_not_null',
+] as const satisfies readonly ViewFilterOperator[];
+
+/**
+ * The one operator this vocabulary spells for which `FILTER_TEXT_CASES` writes
+ * comparand REJECTION rows — the infix twin of the `$` dialect's `$icontains`
+ * (the `AST_OPERATOR_MAP` row that made them one capability, not two spellings).
+ *
+ * A named constant rather than a literal at the comparison, so the coupling
+ * between "the operator this door judges" and "the spelling the refusal names"
+ * is one declaration. Private for the same reason
+ * {@link VIEW_FILTER_VALUELESS_OPERATORS} is.
+ */
+const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOperator;
+
+/**
  * [#6227] `value` must have the shape the rule's OPERATOR can execute.
  *
  * ## The two-stage failure this closes
@@ -534,33 +568,97 @@ function previewFilterValue(value: unknown): string {
  * module docblock names this schema as the reachable authoring source of the
  * defect.
  *
- * ## Why this mirrors the runtime gate EXACTLY, and refuses to go further
+ * ## Why this mirrors the query path's refusals, and refuses to go further
  *
- * The checks below are `assertListComparandShapes`' three constraints, one for
- * one: `$in`/`$nin` must be an array, `$between` must be a 2-array. Nothing else
- * is judged here, deliberately — #5685 already ruled on the opposite error, where
- * `FieldOperatorsSchema` declared `$gt` as `number | Date | FieldReference` while
- * every first-party producer put an ISO STRING there; the schema was ruled the
- * wrong side and widened to match the runtime. A publish-time gate refusing more
- * than the query path refuses would re-create that mismatch pointing the other
- * way, and would reject stored metadata that executes correctly today.
- * Specifically NOT refused, because the runtime does not refuse them:
+ * The first two checks below are `assertListComparandShapes`' constraints, one
+ * for one: `$in`/`$nin` must be an array, `$between` must be a 2-array. The
+ * third — a SCALAR operator handed an array — is `driver-sql`'s
+ * `assertCompilableComparand` scalar arm. The fourth — a scalar operator handed
+ * NO value (#19751) — is `parseFilterAST`'s undefined-comparand refusal: a
+ * stored rule without `value` lowers to `[field, operator]`, which lowers in
+ * turn to an undefined comparand and is refused for every scalar operator
+ * (thirteen at this change, `icontains` among them); the unary four lower to
+ * `$null` and never reach it.
+ * Nothing beyond those is judged, deliberately — #5685 already ruled on the
+ * opposite error, where `FieldOperatorsSchema` declared `$gt` as
+ * `number | Date | FieldReference` while every first-party producer put an ISO
+ * STRING there; the schema was ruled the wrong side and widened to match the
+ * runtime. A publish-time gate refusing
+ * more than the query path refuses would re-create that mismatch pointing the
+ * other way, and would reject stored metadata that executes correctly today.
+ *
+ * ⚠️ **The scalar arm REVERSES a reading recorded here at #6227**, which said
+ * `equals: ['a','b']` "lowers to a bare `{ field: value }` deep-equality
+ * comparand, which every backend answers". **The backends a lowered view rule
+ * reaches at this change do not agree** — so
+ * each is named rather than generalised, in the present tense:
+ *
+ * - **The SQL family REFUSES** — `driver-sql`, the `driver-turso` /
+ *   `driver-sqlite-wasm` drivers built on it, and turso's `RemoteTransport`. The
+ *   lowered `{ tags: ['a'] }` reaches `driver-sql`'s bare `{ field: value }`
+ *   loop, which calls `assertCompilableComparand(column, '=', value)`; `'='` is
+ *   in that file's `SCALAR_COMPARAND_OPERATORS`, `isBindableComparand(['a'])` is
+ *   `false` (an array is none of the six accepted comparand types —
+ *   `isAcceptedFilterComparand`, `filter-comparand-type.ts`), and the comparand
+ *   is refused with the withheld `INVALID_FILTER` / 400 envelope.
+ * - **`driver-memory` REFUSES** the same shape in the same envelope — `match()`
+ *   runs `assertFilterConditionShape`, whose implicit-equality arm throws on an
+ *   array (`filter-refusal.ts`). That refusal first shipped in
+ *   `@objectstack/driver-memory@17.4.0`; published 17.3.0 returned the row
+ *   stored as `['a']` (run in this change's review; which other rows it
+ *   selected is NOT MEASURED).
+ * - **`driver-mongodb` ANSWERS** — `translateFilter({ tags: ['a'] })` emits
+ *   `{"tags":["a"]}` unchanged (the array falls to the implicit-equality arm),
+ *   and the engine's shared comparand doors — `normalizeFilterComparandTypes`
+ *   and `assertListComparandShapes` — both pass the shape, so the server
+ *   applies MongoDB's equality rule for an array operand: a row matches when
+ *   its stored array EQUALS `['a']` or HOLDS `['a']` as an element, and a row
+ *   storing the scalar `'a'` does not (mingo 7.2.4, over `['a']`, `'a'`,
+ *   `['a','b']`, `['b','a']`, `[['a'],'x']`, `[['a']]` and `'b'`, selects
+ *   `['a']`, `[['a'],'x']` and `[['a']]`). ⚠️ Read at the driver's compile
+ *   face, at those engine doors and through `mingo`; a live `mongod` cell is
+ *   NOT MEASURED.
+ *
+ * Method: `driver-sql` on SQLite, `driver-memory`,
+ * `driver-mongodb`'s `translateFilter` and `mingo` were each run on the
+ * lowered `{ tags: ['a'] }` beside a scalar and an `$in` control;
+ * MySQL, a live Turso server and
+ * a live `mongod` are NOT MEASURED, and so is whether any SQL-family release
+ * before this change answered the shape.
+ *
+ * So **none reads the array as the SCALAR the operator
+ * declares**: `driver-mongodb` returns
+ * rows for a different predicate — array equality, and only on an array-valued
+ * field (live `mongod` NOT MEASURED). The ORIGINAL reading was therefore the one that widened the accept
+ * set past the query path; this arm pulls it back to what `value`'s own
+ * `.describe()` has declared since #6227 — 「every other operator takes a
+ * scalar」.
+ * Direction set by objectui#9050's ruling C′ (「the differences are the
+ * protocol's to close」); prescription registered as the ADR-0087 entry
+ * `view-filter-rule-scalar-operator-array-refused`.
+ *
+ * Specifically NOT refused, because the query path does not refuse them:
  *
  * - **`in: []` / `not_in: []`.** An empty list is a legitimate declared predicate
  *   — "matches nothing" / "matches everything" — and the runtime gate says so in
  *   as many words. Arity is not this check's business for membership; only "is it
  *   a list at all".
- * - **A scalar operator carrying an array** (`equals: ['a','b']`). `equals`
- *   lowers to a bare `{ field: value }` deep-equality comparand
- *   (`convertComparison`), which every backend answers.
  * - **A string operator carrying a number** (`contains: 5`). Lowers to
- *   `$contains: 5`; no backend refuses it.
- * - **A unary operator carrying a value** (`is_empty: ''`). The null predicates
- *   take their direction from the operator NAME — `convertComparison` maps them
- *   to `{ $null: true|false }` and ignores the value position entirely — and the
- *   ObjectUI client deliberately sends a truthy PLACEHOLDER value for both
- *   `isnull` and `isnotnull`. Refusing it would break a live first-party producer
- *   to enforce nothing.
+ *   `$contains: 5`; none of the backends above refuses it (`driver-sql`
+ *   on SQLite and `driver-memory` answer it, `driver-mongodb` compiles it to a
+ *   `$regex`). `icontains` is the ONE
+ *   exception and it is not an analogy — `FILTER_TEXT_CASES` declares that
+ *   comparand refused as data, and {@link checkViewFilterRuleTextComparand}
+ *   below answers those rows and only those rows.
+ * - **A unary operator carrying a value** (`is_empty: ''`, and `is_empty: []`)
+ *   **or carrying none.** The null predicates take their direction from the
+ *   operator NAME — `convertComparison` maps them to `{ $null: true|false }` and
+ *   ignores the value position entirely — and the ObjectUI client deliberately
+ *   sends a truthy PLACEHOLDER value for both `isnull` and `isnotnull`. Refusing
+ *   it would break a live first-party producer to enforce nothing, which is why
+ *   the scalar arm skips them explicitly, BEFORE its absent-value check, rather
+ *   than by accident. `value`'s own `.describe()` carves them out in the same
+ *   words, and they are the only operators on which an absent value parses.
  *
  * ## Why `superRefine` and not `z.discriminatedUnion` (measured, not assumed)
  *
@@ -598,6 +696,15 @@ function previewFilterValue(value: unknown): string {
  * two moments it can be reported. The TAIL deliberately differs: the runtime's
  * closing fact is "the filter was NOT applied", which is false here — nothing
  * ran, the metadata is being refused — so this one prescribes the fix instead.
+ *
+ * The absent-value arm keeps `undefinedComparandRefusal`'s leading sentence,
+ * "Filter comparand at PATH is undefined", with the one substitution the list
+ * and range arms already make: the location is named in the vocabulary the
+ * author wrote — operator and field — because a view rule has no `where.…`
+ * path, and the `$` spelling in that path is not one a view author can write.
+ * Its prescription is this vocabulary's, not the runtime's: the runtime tells a
+ * `$` author to write `{"$eq": null}`, and a view author's equivalent is one of
+ * the valueless operators.
  */
 function checkViewFilterRuleValueShape(
   rule: { field?: unknown; operator?: unknown; value?: unknown },
@@ -630,16 +737,123 @@ function checkViewFilterRuleValueShape(
     return;
   }
 
-  if (!isPair) return;
-  if (Array.isArray(value) && value.length === 2) return;
+  if (isPair) {
+    if (Array.isArray(value) && value.length === 2) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message:
+        `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+        + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
+        + `A range needs exactly two bounds, in order. This is refused at authoring time `
+        + `because the query path refuses it too (400 INVALID_FILTER).`,
+    });
+    return;
+  }
+
+  // Everything left takes a SCALAR — `value`'s own `.describe()` has said so
+  // since #6227 and nothing judged it, so the whole class rode through. The one
+  // carve-out is the one the query path itself makes: the valueless operators,
+  // whose `value` position is discarded by `convertComparison` — so for them
+  // anything goes, an absent value included, and they are answered FIRST.
+  //
+  // [#19751] An ABSENT value is NOT a carve-out on any other operator, though
+  // this comment used to name it as one. The key is optional because the unary
+  // operators need none; every operator that reaches this line takes one. Both
+  // lowerings of a stored rule — the console's and the REST picker route's —
+  // emit an absent value as the two-element `[field, operator]` node, and
+  // `parseFilterAST` refuses that with its undefined-comparand `INVALID_FILTER`
+  // / 400 for every one of these operators (measured over the whole class).
+  // Nothing on the way drops the rule first, so one valueless rule failed every
+  // query that read its view.
+  if ((VIEW_FILTER_VALUELESS_OPERATORS as readonly string[]).includes(operator)) return;
+  if (value === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message:
+        `Filter comparand for operator "${operator}" on field "${field}" is undefined. `
+        + `The rule carries no value, and "${operator}" compares the field against one — write `
+        + `the value to compare against, or, if the rule means the field has no value, use an `
+        + `operator that takes none ("${VIEW_FILTER_VALUELESS_OPERATORS.join('" / "')}"), which `
+        + `reads its direction from its name. This is refused at authoring time because the `
+        + `query path refuses it too (400 INVALID_FILTER).`,
+    });
+    return;
+  }
+  if (!Array.isArray(value)) return;
   ctx.addIssue({
     code: 'custom',
     path: ['value'],
     message:
-      `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+      `Operator "${operator}" on field "${field}" requires a SCALAR value. `
       + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
-      + `A range needs exactly two bounds, in order. This is refused at authoring time `
-      + `because the query path refuses it too (400 INVALID_FILTER).`,
+      + `Only "${VIEW_FILTER_LIST_VALUE_OPERATORS.join('" / "')}" take a list and only `
+      + `"${VIEW_FILTER_PAIR_VALUE_OPERATORS.join('" / "')}" takes a [min, max] range — write `
+      + `${value.length > 0 ? previewFilterValue(value[0]) : 'the value to compare against'} `
+      + `to compare against one value, or use "${VIEW_FILTER_LIST_VALUE_OPERATORS[0]}" to test `
+      + `membership of the list.`,
+  });
+}
+
+/**
+ * [#19514] `icontains` takes the comparand `FILTER_TEXT_CASES` declares.
+ *
+ * ## The half this answers, and the half it leaves alone
+ *
+ * `@objectstack/spec/data` publishes two REJECTION rows for the
+ * case-insensitive contains operator — an EMPTY comparand and a NON-STRING one,
+ * each `code: 'INVALID_FILTER'`, `mustMention: ['$icontains']` — and publishes
+ * the discrimination those rows are about as {@link isRefusedTextComparand},
+ * with the author-facing half as {@link textComparandRefusalReason}. Three
+ * objectui faces already seat that reason in their own envelopes.
+ *
+ * ⭐ This arm CALLS the predicate rather than restating it. A hand-written
+ * `typeof value !== 'string' || value === ''` here would be a second spelling of
+ * a rule the table owns, and the two would drift the first time a row moved —
+ * which is the failure the predicate was lifted into spec to end. A row added to
+ * the table therefore reaches this door without an edit here.
+ *
+ * ## Three carve-outs, each the caller's own and none of them a new row
+ *
+ * 1. **ABSENCE.** `isRefusedTextComparand(undefined)` answers `true`, and its
+ *    docblock says in as many words that a vocabulary with an "absent" must test
+ *    for it BEFORE asking. A view rule is exactly that vocabulary — `value` is
+ *    optional on every rule — so an omitted comparand is left to whatever judges
+ *    absence, and the table says nothing about it.
+ * 2. **ARRAYS** are {@link checkViewFilterRuleValueShape}'s business. One defect,
+ *    one issue: an author who wrote `icontains: ['a']` is told about the SHAPE,
+ *    which is what they have to fix first.
+ * 3. **THE SIBLING OPERATORS.** `contains` / `starts_with` / `ends_with`
+ *    keep the answer they give today. Widening by
+ *    analogy is the table's decision to make, never this door's.
+ *
+ * ## The `$` twin is named here, not in the contract half
+ *
+ * `textComparandRefusalReason` names the spelling that ARRIVED — `icontains`
+ * from this vocabulary — and deliberately does not substitute the `$` dialect's
+ * `$icontains` for it, because a view author cannot write that key. Naming the
+ * wire operator is the FACE's job, and this tail does it: that is where the
+ * refusal the author will hit at query time is spelled, and it is what the
+ * published rows' `mustMention` is written in.
+ */
+function checkViewFilterRuleTextComparand(
+  rule: { field?: unknown; operator?: unknown; value?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (rule.operator !== VIEW_FILTER_TEXT_COMPARAND_OPERATOR) return;
+  const value = rule.value;
+  if (value === undefined) return;
+  if (Array.isArray(value)) return;
+  if (!isRefusedTextComparand(value)) return;
+  const field = typeof rule.field === 'string' ? rule.field : '<field>';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['value'],
+    message:
+      `The ${textComparandRefusalReason(field, VIEW_FILTER_TEXT_COMPARAND_OPERATOR, value)}. `
+      + `This rule lowers to the wire operator "$icontains", where the query path refuses the `
+      + `same comparand (400 INVALID_FILTER).`,
   });
 }
 
@@ -712,16 +926,28 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
    * Filter value (optional for unary operators like is_empty, is_null).
    *
    * The accepted SHAPE is coupled to `operator` by
-   * {@link checkViewFilterRuleValueShape} (#6227).
+   * {@link checkViewFilterRuleValueShape} (#6227, scalar arm #19514), and the
+   * `icontains` COMPARAND by {@link checkViewFilterRuleTextComparand} (#19514).
    */
   value: z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.union([z.string(), z.number()]))])
     .optional().describe(
       'Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an '
       + 'array (any length, including []), `between` takes exactly [min, max], every other '
       + 'operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / '
-      + 'is_not_null) take their direction from the operator name and ignore this key.',
+      + 'is_not_null) take their direction from the operator name and ignore this key. '
+      + 'One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY '
+      + 'STRING, the comparand the Filter Protocol conformance table declares for it — an '
+      + 'empty comparand constrains nothing and a non-string one would answer a query nobody '
+      + 'wrote, and both are refused at the query path too.',
     ),
-}).superRefine(checkViewFilterRuleValueShape).describe('View filter rule'));
+}).superRefine((rule, ctx) => {
+  // ONE refinement calling two checks, rather than two chained `.superRefine`s:
+  // zod runs every check in the chain even after one has added an issue, so a
+  // chain would report an `icontains` array TWICE — once for its shape and once
+  // for its comparand. The order is the order an author fixes them in.
+  checkViewFilterRuleValueShape(rule, ctx);
+  checkViewFilterRuleTextComparand(rule, ctx);
+}).describe('View filter rule'));
 
 export type ViewFilterRule = z.input<typeof ViewFilterRuleSchema>;
 /** Post-parse shape of {@link ViewFilterRule} — defaults applied, transforms run (ADR-0122). */
@@ -827,29 +1053,35 @@ export const ListColumnSchema = lazySchema(() => strictObject({
   surface: 'this list column',
   history: VIEW_HISTORY,
 }, {
-  field: z.string().describe('Field name (snake_case)'),
-  label: I18nLabelSchema.optional().describe('Display label override'),
-  width: z.number().positive().optional().describe('Column width in pixels'),
-  align: z.enum(['left', 'center', 'right']).optional().describe('Text alignment'),
-  hidden: z.boolean().optional().describe('Hide column by default'),
-  sortable: z.boolean().optional().describe('Allow sorting by this column'),
-  resizable: z.boolean().optional().describe('Allow resizing this column'),
-  wrap: z.boolean().optional().describe('Allow text wrapping'),
-  type: z.string().optional().describe('Renderer type override (e.g., "currency", "date")'),
+  field: z.string().describe('Field name (snake_case)').meta({ title: 'Field' }),
+  label: I18nLabelSchema.optional().describe('Display label override').meta({ title: 'Label' }),
+  width: z.number().positive().optional().describe('Column width in pixels').meta({ title: 'Width (px)' }),
+  align: z.enum(['left', 'center', 'right']).optional().describe('Text alignment').meta({ title: 'Alignment' }),
+  hidden: z.boolean().optional().describe('Hide column by default').meta({ title: 'Hidden' }),
+  sortable: z.boolean().optional().describe('Allow sorting by this column').meta({ title: 'Sortable' }),
+  resizable: z.boolean().optional().describe('Allow resizing this column').meta({ title: 'Resizable' }),
+  wrap: z.boolean().optional().describe('Allow text wrapping').meta({ title: 'Wrap Text' }),
+  type: z.string().optional().describe('Renderer type override (e.g., "currency", "date")')
+    .meta({ title: 'Renderer Type' }),
 
   /** Pinning (Airtable-style frozen columns) */
-  pinned: z.enum(['left', 'right']).optional().describe('Pin/freeze column to left or right side'),
+  pinned: z.enum(['left', 'right']).optional().describe('Pin/freeze column to left or right side')
+    .meta({ title: 'Pinned' }),
 
   /** Column Footer Summary (Airtable-style aggregation) */
   summary: z.union([ColumnSummarySchema, ColumnSummaryConfigSchema]).optional()
-    .describe('Footer aggregation for this column — the function alone, or { type, field } to aggregate another field'),
+    .describe('Footer aggregation for this column — the function alone, or { type, field } to aggregate another field')
+    .meta({ title: 'Summary' }),
 
   /** Compound cell (Airtable-style): render another field inline before the value */
-  prefix: ColumnPrefixSchema.optional().describe('Field rendered inline before this cell value'),
+  prefix: ColumnPrefixSchema.optional().describe('Field rendered inline before this cell value')
+    .meta({ title: 'Prefix' }),
 
   /** Interaction */
-  link: z.boolean().optional().describe('Functions as the primary navigation link (triggers View navigation)'),
-  action: z.string().optional().describe('Registered Action ID to execute when clicked'),
+  link: z.boolean().optional().describe('Functions as the primary navigation link (triggers View navigation)')
+    .meta({ title: 'Primary Link' }),
+  action: z.string().optional().describe('Registered Action ID to execute when clicked')
+    .meta({ title: 'Click Action' }),
 }));
 
 /**
@@ -864,12 +1096,21 @@ export const SelectionConfigSchema = lazySchema(() => strictObject({
 
 /**
  * List View Pagination Configuration
+ *
+ * `pageSize` defaults to 50 — the platform's display page size, set by the
+ * maintainer's ruling on objectui#9853 (「9853 默认页大小改为50」). This
+ * declaration is the one place that number lives: a renderer reads the spec
+ * default, it never keeps a page size of its own.
  */
 export const PaginationConfigSchema = lazySchema(() => strictObject({
   surface: 'this pagination configuration',
   history: VIEW_HISTORY,
 }, {
-  pageSize: z.number().int().positive().default(25).describe('Number of records per page'),
+  pageSize: z.number().int().positive().default(50).describe(
+    'Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch '
+    + 'ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered '
+    + 'set is larger than it, show a visible truncation signal saying what is on screen is not the whole set',
+  ),
   pageSizeOptions: z.array(z.number().int().positive()).optional().describe('Available page size options'),
 }));
 
@@ -1133,198 +1374,10 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   + 'AND-ed into the view filter. Compiled by `compileListViewGroupQuery` / `compileListViewGroupRowsQuery`',
 ));
 
-/*
- * ---------------------------------------------------------------------------
- * `limit` — the author-settable row ceiling of the page-shaped views (#17393)
- * ---------------------------------------------------------------------------
- *
- * Declared here because the PROTOCOL was the thing that was wrong: two
- * renderers already cap by author choice, and the key they read was never a
- * protocol key. Measured in objectui at `dda8f3815d`:
- *
- *   - `ObjectKanban.tsx:573` fetches `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT`
- *     (`= 100` at `:84`), and that `limit` is declared in `@object-ui/types`
- *     alone (`zod/objectql.zod.ts:1762`, `z.number().int().positive().optional()`);
- *   - `ObjectTimeline.tsx:328` fetches `$top: schema.limit ?? DEFAULT_TIMELINE_LIMIT`
- *     (`= 100` at `:29`), with `limit` on that component's own props interface
- *     (`:129`) and on no published schema at all;
- *   - `ObjectGallery.tsx` sends no `$top` and reads no ceiling at all — the
- *     unbounded fetch objectui#7390 is ruled to close by reading this key.
- *
- * Consumer-local author-settable keys the protocol never declared are the
- * divergence the contract-first directive forbids, so the knob enters the
- * protocol first and the three spellings come under one declaration (the
- * director seat's amendment of 2026-09-10T11:0xZ on objectui#7390, on the
- * maintainer's principle 「我们的项目以objectstack 协议为准，文档应该以实际实现
- * 为准。协议不正确的应该先修改协议。」).
- *
- * ## Why on the per-view config blocks, and not as a member of the list view
- *
- * The alternative shape — one row ceiling on {@link ListViewShapeSchema}
- * itself — is rejected on three properties of this tree:
- *
- *   1. The base shape ALREADY carries the row-bounding knob every view type
- *      reaches: `pagination.pageSize` ({@link PaginationConfigSchema}, default
- *      25). A second base-level row key would leave one view with two
- *      base-level row bounds and no declared precedence between them — and the
- *      `virtualScroll` tombstone at the bottom of this same shape prescribes
- *      `pagination` for exactly that question.
- *   2. A base member is reachable from EVERY `type`, the non-grid four
- *      (gantt / calendar / map / tree) included. Their ceiling is a platform
- *      constant the renderer owns (objectui#7210) and this card does not touch
- *      them, so a base member would publish an authorable ceiling on four view
- *      kinds no renderer reads — declared-but-unenforced on the day it lands.
- *   3. The per-kind block is what actually REACHES the renderer: objectui's
- *      `ListView` merges `schema.<kind>` into the generated node — its kanban
- *      branch spreads the rest of the block flat onto `object-kanban`, so
- *      `kanban.limit` lands exactly where `schema.limit` is read — while a
- *      base-level key is forwarded into no per-kind node at all.
- *
- * The NAME is `limit` for the same reason: it is the name the consumer already
- * reads, so this declaration absorbs the two consumer-local keys instead of
- * buying a second divergence spelled differently.
- *
- * ⚠️ NOT the kanban LANE's `limit`. objectui's node-level
- * `ObjectKanbanLaneSchema.limit` is a WIP warning threshold that never reaches
- * a query; no lane object exists on this face at all
- * ({@link KanbanConfigSchema}'s `columns` is a list of card FIELD names), so
- * the two cannot be confused here.
- */
-export const DEFAULT_VIEW_ROW_LIMIT = 100;
-
-/** What a page-shaped view's ceiling bounds, per view type. */
-const ROW_LIMIT_SUBJECT = {
-  gallery: 'cards the gallery fetches and draws',
-  kanban: 'records the board fetches across all its lanes',
-  timeline: 'rows the timeline fetches onto its rail',
-} as const;
-
-/** The three view configs that cap by AUTHOR choice (not by platform ceiling). */
-type RowLimitView = keyof typeof ROW_LIMIT_SUBJECT;
-
-/**
- * The `limit` declaration for one page-shaped view config.
- *
- * The default is APPLIED, not merely described: a `.describe()` naming a
- * default the schema does not apply is a second contract that nothing
- * enforces, and the two drift the first time either is edited. The agreement
- * is pinned from both sides in `view.test.ts` (#17393) — the parsed default is
- * compared against the number the describe text states.
- *
- * ⛔ The truncation signal is the renderer's half and cannot be enforced from
- * here; it is stated in the describe because a bounded-and-silent view reads
- * as complete, which is worse than the unbounded-and-silent one this key
- * replaces — the author needs to know the cap is visible, and the renderer
- * author needs to know it is owed.
- *
- * ⚠️ WHICH FACE THIS KEY IS ON, and why that has to be said first. There are
- * TWO `limit`s a reader can confuse, on two different documents, and three
- * rounds of #19228 went wrong on the boundary:
- *   · **VIEW FACE** — THIS key. A member of a `ListViewSchema` document's
- *     `kanban` / `gallery` / `timeline` block. An ADAPTER turns that document
- *     into a rendered node; no renderer reads this document directly.
- *   · **ELEMENT FACE** — a page component node's OWN `limit`
- *     (`ObjectKanbanPropsSchema`, `ObjectTimelinePropsSchema`),
- *     declared in `component.zod.ts`, with no applied default. That is the key
- *     every renderer and `ElementDataSourceGate` actually read.
- * Every sentence below names its face before it says anything else.
- *
- * ⚠️ WHAT THIS VIEW-FACE KEY REACHES TODAY — recorded, not repaired (#19228).
- * Measured first-hand at the pin this repo builds against (`.objectui-sha` =
- * `87af769e9`), 2026-09-21T09:15Z, with TWO instruments, because one was not
- * enough and the first one's answer was wrong:
- *
- *  1. PROPERTY-ACCESS spellings. ⛔ Published as its EXPRESSION, not as a
- *     number — this card exists because a confident count was wrong once, so
- *     a control nobody can re-derive is not a control. Run at the pin, from
- *     an objectui checkout, over every tracked file:
- *       probe:   git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.limit\b'
- *       control: git grep -nIE '\.(kanban|gallery|timeline)(\?)?\.(groupByField|scale|coverField)\b'
- *     Probe: **0** lines, 0 files. Control: **13** lines across **6** files —
- *     `app-shell/src/views/ObjectView.galleryBinding-7547.test.tsx:41`,
- *     `app-shell/src/views/ObjectView.tsx:450`,
- *     `plugin-list/src/ListView.tsx:2538`, `:2540`, `:2547`, `:3057`, `:3114`,
- *     `:3116`,
- *     `plugin-list/src/__tests__/ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`,
- *     `:99`, `plugin-view/src/ObjectView.tsx:1695`, and
- *     `types/src/__tests__/object-kanban-group-by-limit-7322.test.ts:146`, `:148`.
- *     ⚠️ Filtering changes that number and the filter must be stated with it.
- *     Of the 13: **2 are COMMENTS** (`ObjectView.galleryBinding-7547.test.tsx:41`,
- *     `ListView.kanbanOptionsBagCanonical-8193.test.tsx:42`), **1 is an
- *     `it()` TITLE string** (same file, `:99` — ⛔ not a comment), and **2 are
- *     lines inside a QUOTED source-text pin**
- *     (`object-kanban-group-by-limit-7322.test.ts:146`, `:148`). So a reader
- *     counting executable reads only gets **8**. All three readings are of one
- *     hit set. A live instrument — and a WRONG answer.
- *  2. ⭐ SPREADS — a spread carries a key without ever spelling it, so it is
- *     the hole instrument 1 cannot see by construction. ⛔ Re-take it by its
- *     PREDICATE, not by its count: **a spread whose target is the object
- *     literal an adapter RETURNS as the node** — flattening onto the node —
- *     as against a merge that builds a nested config (`...mergedTimeline` is
- *     the lit control for the instrument AND the example of what the predicate
- *     excludes). A grep broad enough to find these also returns the nested
- *     merges, so the rule, not the number, is what makes it reproducible.
- *     ⛔ And name what the predicate EXCLUDES, or the next reader re-finds
- *     it and wonders: `app-shell/src/views/ObjectView.tsx:206` and `:342`
- *     ARE spreads of a view block, inside `timelineViewOptions` (`:201`) and
- *     `galleryViewOptions` (`:334`). They build an OPTIONS BAG that feeds
- *     `ListView`'s nested forward, not the object literal an adapter returns
- *     as the node, so the predicate excludes them — deliberately, not by
- *     oversight. Two more the predicate excludes for their own reasons:
- *     `plugin-list/src/ListView.tsx:3044-3046` (`mergedGallery`) builds a
- *     NESTED gallery prop, the `...mergedTimeline` family; and
- *     `app-shell/src/views/ObjectView.tsx:1284`
- *     (`spec.kanban = { ...(spec.kanban || {}), columns }`) writes back into a
- *     VIEW document's own block — a metadata write, not a node build.
- *     Under that predicate, at that pin, the VIEW-face per-kind blocks give:
- *       `plugin-list/src/ListView.tsx:2979`   `...restKanban`
- *       `plugin-view/src/ObjectView.tsx:1638`  `...restKanban`
- *       `plugin-view/src/ObjectView.tsx:1697`  `...(viewOptions.gallery || {})`
- *       `plugin-view/src/ObjectView.tsx:1725`  `...(viewOptions.timeline || {})`
- *     Neither `restKanban` destructure strips `limit` (`ListView.tsx:2952`,
- *     `ObjectView.tsx:1579`), so a VIEW's per-kind `limit` — INCLUDING the 100
- *     this applied default materializes — becomes the generated node's
- *     ELEMENT-face flat `limit`, which is the key the renderers read.
- *
- * ⇒ **A view's `kanban.limit`: flattened on BOTH adapter routes, and read.**
- *   `ObjectKanban.tsx:553` runs `describeRefusedRowLimit(schema.limit, …)`
- *   unconditionally.
- * ⇒ **A view's `timeline.limit`: ROUTE-DEPENDENT.** `plugin-view` flattens it
- *   (`ObjectView.tsx:1725`) and the node it returns carries no `timeline`
- *   block at all, so the value arrives as the node's flat `limit` and
- *   `ObjectTimeline.tsx:279` reads it. `plugin-list` instead forwards the
- *   block NESTED (`ListView.tsx:3084`), where nothing reads it.
- * ⇒ **A view's `gallery.limit`: flattened by `ObjectView.tsx:1697` and read by
- *   NOBODY** — `ObjectGallery.tsx` contains no `limit` at all (0 occurrences,
- *   case-insensitive, against a lit control `schema.imageField` /
- *   `schema.titleField` at `:340` / `:348`). ⛔ Do not generalise that
- *   asymmetry to the other two; it is gallery's alone.
- *
- * ⚠️ Where it IS read, the `$top` it would govern (`ObjectKanban.tsx:676`,
- * `ObjectTimeline.tsx:407`) is still not issued on either adapter route today:
- * both hosts hand rows down as a React `data` prop (`ListView.tsx:4702`,
- * `ObjectView.tsx:2319`) and both children short-circuit their own fetch on it
- * (`ObjectKanban.tsx:559`, `ObjectTimeline.tsx:420`). ⛔ That is a statement
- * about the QUERY, not about the key being unread.
- *
- * ⚠️ A consequence of APPLIED that the open decision needs: through those
- * spreads a spec-parsed view emits a node carrying an authored-LOOKING
- * ELEMENT-face `limit: 100` that no author wrote. ⛔ Flagged, not acted on —
- * changing it is a contract direction, not a tidy-up.
- *
- * ⛔ Which of the row bounds wins is NOT decided here and NOT implied by this
- * declaration: #19228 opens that question and picks nothing, and neither does
- * this note. What is recorded is only what each key reaches today.
- */
-const rowLimitKey = (view: RowLimitView) =>
-  z.number().int().positive().default(DEFAULT_VIEW_ROW_LIMIT).describe(
-    `Row ceiling — the most ${ROW_LIMIT_SUBJECT[view]}; default `
-    + `${DEFAULT_VIEW_ROW_LIMIT} when the key is absent. The renderer owes two things: bound its `
-    + 'fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), '
-    + 'show a visible truncation signal saying what is on screen is not the whole set — a bounded '
-    + 'view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a '
-    + 'renderer that reads this key yet; which do is recorded on the declaration.',
-  );
+/** The per-kind blocks answer `limit` with this; `timeline` is also nested on `object-timeline`. */
+const VIEW_ROW_BOUND_GUIDANCE =
+  'This block declares no `limit`. Delete the key: the row bound is `pagination.pageSize` on a view, '
+  + 'or the flat `limit` on a page component node.';
 
 /**
  * Gallery View Configuration (Airtable-style)
@@ -1333,13 +1386,13 @@ const rowLimitKey = (view: RowLimitView) =>
 export const GalleryConfigSchema = lazySchema(() => strictObject({
   surface: 'this gallery configuration',
   history: VIEW_HISTORY,
+  guidance: { limit: VIEW_ROW_BOUND_GUIDANCE },
 }, {
   coverField: z.string().optional().describe('Attachment/image field to display as card cover'),
   coverFit: z.enum(['cover', 'contain']).default('cover').describe('Image fit mode for card cover'),
   cardSize: z.enum(['small', 'medium', 'large']).default('medium').describe('Card size in gallery view'),
   titleField: z.string().optional().describe('Field to display as card title'),
   visibleFields: z.array(z.string()).optional().describe('Fields to display on card body'),
-  limit: rowLimitKey('gallery'),
 }).describe('Gallery/card view configuration'));
 
 /**
@@ -1349,6 +1402,7 @@ export const GalleryConfigSchema = lazySchema(() => strictObject({
 export const TimelineConfigSchema = lazySchema(() => strictObject({
   surface: 'this timeline configuration',
   history: VIEW_HISTORY,
+  guidance: { limit: VIEW_ROW_BOUND_GUIDANCE },
 }, {
   startDateField: z.string().describe('Field for timeline item start date'),
   endDateField: z.string().optional().describe('Field for timeline item end date'),
@@ -1362,7 +1416,6 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
     ),
   colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
-  limit: rowLimitKey('timeline'),
 }).describe('Timeline view configuration'));
 
 /**
@@ -1472,15 +1525,15 @@ export const ViewTabSchema = lazySchema(() => strictObject({
   surface: 'this view tab',
   history: VIEW_HISTORY,
 }, {
-  name: SnakeCaseIdentifierSchema.describe('Tab identifier (snake_case)'),
-  label: I18nLabelSchema.optional().describe('Display label'),
-  icon: z.string().optional().describe('Tab icon name'),
-  view: z.string().optional().describe('Referenced list view name from listViews'),
-  filter: z.array(ViewFilterRuleSchema).optional().describe('Tab-specific filter criteria'),
-  order: z.number().int().min(0).optional().describe('Tab display order'),
-  pinned: z.boolean().default(false).describe('Pin tab (cannot be removed by users)'),
-  isDefault: z.boolean().default(false).describe('Set as the default active tab'),
-  visible: z.boolean().default(true).describe('Tab visibility'),
+  name: SnakeCaseIdentifierSchema.describe('Tab identifier (snake_case)').meta({ title: 'Name' }),
+  label: I18nLabelSchema.optional().describe('Display label').meta({ title: 'Label' }),
+  icon: z.string().optional().describe('Tab icon name').meta({ title: 'Icon' }),
+  view: z.string().optional().describe('Referenced list view name from listViews').meta({ title: 'List View' }),
+  filter: z.array(ViewFilterRuleSchema).optional().describe('Tab-specific filter criteria').meta({ title: 'Filter' }),
+  order: z.number().int().min(0).optional().describe('Tab display order').meta({ title: 'Display Order' }),
+  pinned: z.boolean().default(false).describe('Pin tab (cannot be removed by users)').meta({ title: 'Pinned' }),
+  isDefault: z.boolean().default(false).describe('Set as the default active tab').meta({ title: 'Default Tab' }),
+  visible: z.boolean().default(true).describe('Tab visibility').meta({ title: 'Visible' }),
 }).describe('Tab configuration for multi-tab view interface'));
 
 /**
@@ -1637,6 +1690,7 @@ export const AddRecordConfigSchema = lazySchema(() => strictObject({
 export const KanbanConfigSchema = lazySchema(() => strictObject({
   surface: 'this kanban configuration',
   history: VIEW_HISTORY,
+  guidance: { limit: VIEW_ROW_BOUND_GUIDANCE },
 }, {
   groupByField: z.string()
     .superRefine(groupByFieldCheck('kanban'))
@@ -1666,7 +1720,6 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    */
   titleField: z.string().optional().describe('Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   columns: z.array(z.string()).describe('Fields to show on cards'),
-  limit: rowLimitKey('kanban'),
 }));
 
 /**
@@ -1949,14 +2002,28 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
  * EXECUTING the pinned declarations, not by reading them, and RE-READ at pin
  * `87af769e9` on 2026-09-20 — every one of the seven anchors below moved on
- * that hop, one of them lost the symbol it quoted, and the quotes now read the
- * NEW tree; each anchor quotes the line it was read at, so the next pin bump
- * reds instead of rotting (`check:objectui-pin-citations`):
+ * that hop, one of them lost the symbol it quoted, and the quotes read that
+ * tree. RE-READ again at pin `62597c588` on 2026-09-23: that bump redded the
+ * two `ObjectMap.tsx` anchors, as designed, and they are re-pointed below —
+ * objectui `2252653d0` rewrote the docblock and dev warning ABOVE
+ * `getMapConfig` (the remedy for a top-level `style` now names the declared
+ * `map: { style }`, which the flatten whitelist carries out as `mapStyle`),
+ * while `getMapConfig` itself is byte-identical, so both read points moved 19
+ * lines and neither changed what it does; the other five anchors sit in files
+ * byte-identical to `87af769e9`. RE-READ again at pin `f8a9d0fb0` on
+ * 2026-09-24: that bump redded three anchors, and each MOVED with the block it
+ * opens byte-identical — `ObjectView.tsx`'s `case 'map':` `1764` -> `1792`
+ * (17 lines), `ObjectMapConfigSchema` `1574` -> `1589` (the whole 47-line
+ * declaration) and `LIST_VIEW_LOCAL_OVERRIDES` `734` -> `741` (the whole
+ * list, still without `map`); `ObjectMap.tsx` and the `ListView.tsx` anchors
+ * did not move. Each anchor quotes the line it was read at,
+ * so the next pin bump reds instead of rotting
+ * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:146` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1764` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:1792` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
  *   (`packages/plugin-list/src/ListView.tsx:85` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
@@ -1968,14 +2035,14 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:1574` first line
+ *   `packages/types/src/zod/objectql.zod.ts:1589` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. `getMapConfig` consults that `safeParse`
- *   (`packages/plugin-map/src/ObjectMap.tsx:385` first line
+ *   (`packages/plugin-map/src/ObjectMap.tsx:404` first line
  *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
  *   whether to `console.warn`, then returns a spread of the AUTHORED block
- *   (`:390` first line `return { ...config, style: config.style || style };`),
+ *   (`:409` first line `return { ...config, style: config.style || style };`),
  *   undeclared key and all. That spread is reached by objectui's own
  *   component-node `map` prop, never by this face's flatten product ("neither
  *   flattener emits a `map` key at all", `getMapConfig`).
@@ -1984,7 +2051,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * checker at all: it dies in the whitelist without a word, and the one schema
  * that could have reported it is open and warn-only. And this parse is the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:734`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:741`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -1994,10 +2061,15 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (`schema.map?.style`) while this block did not declare it, so strictness here
  * refused a style URL the renderer honours — an author could not declare a map
  * style through this face at all (#18406, director decision batch #153 item 4).
- * The two key sets match again. Re-read at the `.objectui-sha` pin `87af769e9`
- * (2026-09-20; each of these three moved on the hop and each was re-READ):
- * `packages/types/src/zod/objectql.zod.ts:1574` declares the eight keys,
- * `packages/plugin-map/src/ObjectMap.tsx:377` reads
+ * The two key sets match again. Re-read at the `.objectui-sha` pin `62597c588`
+ * (2026-09-23: `objectql.zod.ts` and `plugin-map.mdx` are byte-identical to
+ * `87af769e9`, and the `ObjectMap.tsx` read MOVED `377` -> `396` with its line
+ * byte-identical; at `87af769e9`, 2026-09-20, each of these three had moved
+ * and each was re-READ; at `f8a9d0fb0`, 2026-09-24, `ObjectMap.tsx` and
+ * `plugin-map.mdx` are byte-identical to `62597c588` and the declaration MOVED
+ * `1574` -> `1589` byte-identical):
+ * `packages/types/src/zod/objectql.zod.ts:1589` declares the eight keys,
+ * `packages/plugin-map/src/ObjectMap.tsx:396` reads
  * `schema.mapStyle || schema.map?.style`, and objectui's own
  * `content/docs/plugins/plugin-map.mdx:143` documents `style` in the block —
  * so the divergence was against the documented surface this docblock cites, not
@@ -2432,11 +2504,27 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Data Source Configuration */
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
   
-  /** Shared Query Config */
+  /**
+   * Shared Query Config
+   *
+   * `columns` is the PROJECTION member of the per-view field composition
+   * declared on `hiddenFields` / `fieldOrder` below: it is the candidate set
+   * and the baseline order, `hiddenFields` subtracts from it, and `fieldOrder`
+   * orders what survives. Neither of those two keys can add a field this list
+   * omits. An EMPTY list declares no projection, so neither of them applies
+   * (step 1 of the composition docblock below states the boundary).
+   */
   columns: z.union([
     z.array(z.string()), // Legacy: simple field names
     z.array(ListColumnSchema), // Enhanced: detailed column config
-  ]).describe('Fields to display as columns'),
+  ]).describe(
+    'Fields to display as columns — the PROJECTION of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the '
+    + 'baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. '
+    + '`hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares '
+    + 'no projection, so neither of them applies: which columns show is then left to the '
+    + 'renderer (objectui\'s `ListView` grid derives the object\'s default columns).',
+  ),
   filter: z.array(ViewFilterRuleSchema).optional().describe('Filter criteria (JSON Rules)'),
   /**
    * Sort order — the structured `{ field, order }[]` array, and only that.
@@ -2487,8 +2575,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
       id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
     },
   }, {
-    field: z.string(),
-    order: z.enum(['asc', 'desc'])
+    // Titles mirror the shared `SortItemSchema` (`shared/enums.zod.ts`): this
+    // entry is an INLINE shape, so titling that schema never reached it.
+    field: z.string().meta({ title: 'Field' }),
+    order: z.enum(['asc', 'desc']).meta({ title: 'Direction' }),
   }), {
     // Only the spelling that used to be legal gets the retirement message; a
     // number, an object, anything else keeps zod's default `invalid_type`.
@@ -2564,9 +2654,56 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Row Color (Airtable-style) */
   rowColor: RowColorConfigSchema.optional().describe('Color rows based on field value'),
 
-  /** Field Visibility & Ordering per View (Airtable-style) */
-  hiddenFields: z.array(z.string()).optional().describe('Fields to hide in this specific view'),
-  fieldOrder: z.array(z.string()).optional().describe('Explicit field display order for this view'),
+  /**
+   * Field Visibility & Ordering per View (Airtable-style)
+   *
+   * ## The composition, declared (#15184 ruling B, 2026-09-11)
+   *
+   * Three keys on this schema together build one field list, and they
+   * COMPOSE — they are not three ways to say the same thing, and none of them
+   * is a fallback for another:
+   *
+   * 1. `columns` is the **projection**: the candidate set and the baseline
+   *    order. An EMPTY `columns` declares no projection, so steps 2 and 3 do
+   *    not apply: which columns show is left to the renderer (objectui's
+   *    `ListView` hands its grid no columns, and the grid derives the
+   *    object's default ones).
+   * 2. `hiddenFields` **subtracts** from that projection: every name it lists
+   *    is removed. A name it lists that `columns` never projected subtracts
+   *    nothing.
+   * 3. `fieldOrder` **orders what survives**: it sorts the set left after the
+   *    subtraction and never adds to it. A surviving column absent from
+   *    `fieldOrder` sorts LAST, after every listed one, keeping its
+   *    `columns`-relative order among its fellow unlisted columns; a name
+   *    `fieldOrder` lists that did not survive orders nothing.
+   *
+   * ⛔ This is a DECLARATION of the order of application, not a precedence
+   * rule between rival spellings: `columns` and `fieldOrder` never contradict
+   * each other, because one selects and the other sorts.
+   *
+   * The composition was ruled into the contract rather than retired to one key
+   * because it is the shape objectui's list-view renderer already applies —
+   * `packages/plugin-list/src/ListView.tsx`, the `effectiveFields` memo, runs
+   * these three steps in this order, with one more between steps 1 and 2: it
+   * drops the columns field-level security denies the current user read on.
+   * The ledger row
+   * (`packages/spec/liveness/view.json`, `/props/list/children/fieldOrder`)
+   * carries the measured citation; `view-field-order-composition.pin.test.ts`
+   * holds this declaration and the accept set together.
+   */
+  hiddenFields: z.array(z.string()).optional().describe(
+    'Fields to hide in this specific view — the SUBTRACTION of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the '
+    + '`columns` projection before `fieldOrder` orders the remainder. A name `columns` never '
+    + 'projected subtracts nothing.',
+  ),
+  fieldOrder: z.array(z.string()).optional().describe(
+    'Explicit field display order for this view — the ORDERING of the per-view field composition '
+    + '`columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus '
+    + '`hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts '
+    + 'LAST, after every listed one, keeping its `columns`-relative order; a name listed here '
+    + 'that did not survive orders nothing.',
+  ),
 
   /** Row & Bulk Actions */
   rowActions: z.array(z.string()).optional().describe('Actions available for individual row items'),
@@ -2777,7 +2914,7 @@ export const FormSelectOptionSchema = lazySchema(() => {
     guidance: {
       default:
         '`options[].default` on a form-view field was removed from the FormView vocabulary in '
-        + '@objectstack/spec 18 (ADR-0049 declared-but-unenforced) — on this surface the key '
+        + '@objectstack/spec 17.3.0 (ADR-0049 declared-but-unenforced) — on this surface the key '
         + 'parsed clean and nothing read it: the insert-path default falls back to the OBJECT '
         + "definition's option list, never a form view's, and no form renderer seeds a value "
         + 'from it. Delete the key. Declare the pre-selected choice on the object definition '
@@ -2965,8 +3102,25 @@ const FormFieldBaseSchema = lazySchema(() => {
    * [#12868] `FormSelectOptionSchema`, not `SelectOptionSchema`: the form-view
    * face refuses the per-option `default` key the object-field face enforces —
    * see the narrowed schema's docblock for the ruling and the census.
+   *
+   * [#19678] Derive only where a member cannot be spelled (ruling 乙 on
+   * #19907, record 5805845085, which narrows item 1 of ruling 不动 + 声明,
+   * record 5793380467). An option `value` keeps the system-identifier bound it
+   * shares by reference with the object-field face, so an enum member carrying
+   * a hyphen or a capital (`system-data`, `new-tab`, `perRecord`) cannot be
+   * written as one at all. On a metadata form — schema-bound, built by
+   * {@link defineForm} — an enum-typed row MAY carry an inline `options` list,
+   * for human labels or a deliberate subset (the #19331 `object.ownership` /
+   * `sharingModel` rows and the master_detail `deleteBehavior` rows are the
+   * reference shapes). A row whose members cannot be spelled as option values
+   * OMITS `options`: the control derives the members from the served JSON
+   * Schema, and their meanings go in `helpText` (the `object.managedBy` /
+   * `action.openIn` / `action.execution` rows are the reference shape). The
+   * describe below states the rule where an author meets it, and
+   * `defineForm`'s module-load refusal of an unspellable value names the
+   * derive path as its remedy.
    */
-  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition)'),
+  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`.'),
   
   /** Reference object for lookup/master_detail fields */
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
@@ -3040,7 +3194,9 @@ const FormFieldBaseSchema = lazySchema(() => {
   colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
    * [#2578] Relative field width. 'full' resolves to the form grid's full
-   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:153`); which
+   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:154` at
+   * `62597c588`, one line down from `:153` at `87af769e9` — an import was
+   * added above it, the function is unchanged); which
    * container-query tiers receive the span class is the form renderer's, not
    * this key's.
    * At the `.objectui-sha` pin `87af769e9` the renderer emits one clamped
@@ -3052,9 +3208,14 @@ const FormFieldBaseSchema = lazySchema(() => {
    * objectui#9244 / objectui#9253 (objectui `bd09957380`, 2026-09-12) land
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
-   * 720px) no longer reproduces at the pin this repo builds against.
+   * 720px) no longer reproduces at the pin this repo builds against
+   * (`.objectui-sha` = `f8a9d0fb0`, re-read 2026-09-24: `form.tsx` changed on
+   * this hop only in its registration's input list, objectui#9910's
+   * `children` slot, and `spanLadderFor` at `:204-231` is byte-identical, so it
+   * still emits the ladder; `plugin-form`'s `autoLayout.ts` is byte-identical
+   * to `62597c588`, where `form.tsx` was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `87af769e9`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f8a9d0fb0596`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -3157,7 +3318,7 @@ const FormFieldBaseSchema = lazySchema(() => {
   visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
-  return z.object(shape, {
+  const base = z.object(shape, {
     error: strictObjectError({
       ...VISIBILITY_STRICT_OPTIONS,
       // #8202 — this shape names ITSELF. The shared table's `'this view/page
@@ -3193,6 +3354,22 @@ const FormFieldBaseSchema = lazySchema(() => {
       aliases: { disabled: 'readonly' },
     }, shape),
   });
+  // [#19581] Sealed HERE, on the open base, rather than on the `.strict()`
+  // extension below. Three instruments read these two declarations and all
+  // three keep reading them unchanged this way: the literal `z.object(shape,
+  // { error: strictObjectError(…) })` above is still the expression the
+  // strictness ledger's AST reader counts as this file's one `authorable`
+  // strip site (see this schema's docblock), `FormFieldSchema`'s expression
+  // below is still the composition `declaration-map` unwinds to reach
+  // `FormFieldBaseSchema`, and `closedObject` reaches the extension anyway —
+  // `util.clone()` rebuilds through `_zod.constr`, so `.extend()` and
+  // `.strict()` both carry the seal forward. Sealing an OPEN shape is a no-op
+  // by itself (it has no unknown key to refuse); the extension is where it
+  // bites, and without it that member is the only non-aborted arm of the
+  // `z.union([z.string(), FormFieldSchema])` a section's `fields` uses, so zod
+  // returns its issues unwrapped instead of the `invalid_union` this door's
+  // diagnosis is built on.
+  return closedObject(base);
 });
 
 /**
@@ -3312,8 +3489,56 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   name: z.string().optional().describe('Stable section identifier for i18n lookup (snake_case)'),
   label: I18nLabelSchema.optional(),
   description: z.string().optional().describe('Optional description rendered under the section header.'),
-  collapsible: z.boolean().default(false),
-  collapsed: z.boolean().default(false),
+  /**
+   * ## The collapse pair, declared once for both members
+   *
+   * Two independent booleans, both `.default(false)`, and the dependency
+   * between them is a RENDERER rule rather than anything parse does — so it
+   * has to be stated on the declaration or it reaches nobody. `collapsed`
+   * IMPLIES `collapsible`: a section that starts closed always carries the
+   * disclosure control that reopens it, `collapsed: true` needs no
+   * `collapsible` beside it, and it outranks an explicit `collapsible: false`
+   * (maintainer ruling 2026-09-18, letter A). Letter B — refusing the
+   * combination at the declaration — and letter C — a dev-only warning — were
+   * both REFUSED, so ⛔ neither this schema nor a lint rule may grow one:
+   * `collapsed: true` alone is a CORRECT spelling of "collapsed by default",
+   * which is why the ruling made the renderer widen instead.
+   *
+   * ⚠️ The pair is NOT normalized at parse, in either direction — measured
+   * against the built package: `{ collapsed: true }` parses to
+   * `{ collapsible: false, collapsed: true }`, verbatim, and
+   * `safeParseAsync` agrees. So a consumer reading the parsed `collapsible`
+   * is reading what the author typed, NOT whether a control renders; it
+   * applies the implication itself, from the declaration and never from live
+   * collapse state (deriving it from the latter deletes the control the
+   * moment the reader opens the section). That is the opposite of the
+   * `fieldGroups` pair on `ObjectSchema`, which a parse-time mapping folds
+   * onto the `collapse` enum — ⛔ do not carry a reading across.
+   *
+   * Only `true` is refused on a wizard step and beside `group`; `false` is
+   * accepted in both, because it declares exactly what those surfaces already
+   * deliver (see `trueOnlyDerivedKeys` below and the FormViewSchema wizard
+   * refinement).
+   */
+  collapsible: z.boolean().default(false).describe(
+    'Whether the section renders a disclosure control, so a reader can close it and open it again. '
+    + 'Default `false`: a section declaring neither collapse key is always open and shows no control. '
+    + '⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take '
+    + 'the control away (ruled 2026-09-18). The renderer resolves that from the DECLARATION; parse never '
+    + 'rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is '
+    + 'refused on a wizard step and beside `group`; `false` is accepted in both, because it declares '
+    + 'exactly what those surfaces already deliver.',
+  ),
+  collapsed: z.boolean().default(false).describe(
+    'Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is '
+    + 'sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that '
+    + 'reopens it, and it outranks an explicit `collapsible: false` (ruled 2026-09-18; refusing the '
+    + 'combination at the declaration, and warning on it, were both rejected — nobody can depend on a '
+    + 'section that cannot be opened). The implication is a renderer rule, never a parse-time rewrite: '
+    + '`{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed '
+    + '`collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not '
+    + 'collapse) and beside `group`, whose field group declares the pair.',
+  ),
   /**
    * Conditional-visibility predicate (CEL) — the whole section is shown only
    * when TRUE (ADR-0089, canonical `*When` name). Same per-layer binding root as
@@ -5209,6 +5434,101 @@ const ViewContainerWireSchema = lazySchema(() =>
 );
 
 /**
+ * [#20051] The per-kind blocks of the list-view shape, keyed by kind — the
+ * vocabulary of the legacy `options` bag below, each judged KEY BY KEY.
+ *
+ * Derived, never hand-listed: a kind is a value of the shape's own `type` enum
+ * that ALSO names a block on the shape (`grid` names none), and each entry is
+ * the very schema the direct spelling is judged by — the same strict key set,
+ * the same per-key schemas, the same unknown-key message — with every key made
+ * optional (`.partial()`). So a new kind with a new block is judged under
+ * `options` in the same edit, and `options.timeline` can never be judged by
+ * anything but `timeline`'s schema.
+ *
+ * Why `.partial()` and not the block as-is (measured, not preferred): the
+ * renderer reads `options.KIND` as an UNDERLAY of the top-level block, merged
+ * per key with the top-level block winning (objectui `ListView`: kanban,
+ * calendar, gallery, timeline, gantt and map spread `options.KIND` first and
+ * `KIND` last). A legacy bag that carries only the keys the top-level block
+ * does not restate (`kanban: { groupByField }` beside `options.kanban:
+ * { titleField }`) is therefore legal config — objectui pins exactly that
+ * population (`ObjectView.namedViewProtocolKeys-8980.test.tsx`, "the merge is
+ * per-key, not wholesale") — and judging it with the block's REQUIRED keys
+ * would refuse it for a key it never meant to carry. What the ruling asks is
+ * kept whole: an out-of-contract key is refused by name, and a value the key's
+ * own schema refuses is refused at that key. Required-ness belongs to the
+ * block the renderer builds, not to one layer of it.
+ *
+ * `.partial()` throws on an object that carries refinements (zod 4), which is
+ * the loud answer this derivation wants: a kind block that grows a cross-key
+ * check forces a decision about how that check reads on a partial underlay,
+ * instead of silently losing it.
+ */
+function listViewKindBlocks(): Record<string, z.ZodTypeAny> {
+  const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
+  const blocks: Record<string, z.ZodTypeAny> = {};
+  for (const kind of overlayTypeValues(ListViewShapeSchema)) {
+    const block = shape[kind] as unknown as { unwrap?: () => { partial: () => z.ZodTypeAny } } | undefined;
+    if (block?.unwrap) blocks[kind] = block.unwrap().partial().optional();
+  }
+  return blocks;
+}
+
+/**
+ * [#20051] The legacy `options` bag on a flattened LIST overlay, judged.
+ *
+ * The renderer still reads `options.KIND` beside the top-level `KIND` block
+ * (objectui's `ListView` merges the two per key, and its interface page
+ * forwards a stored view's `options` whole), so a stored bag is live config.
+ * Before this schema the overlay member's top-level `.strip()` dropped the bag
+ * from the parse without looking inside it, `saveMetaItem` stored the request
+ * body as sent, and the interface page rendered it: `options.timeline.metaFields`
+ * saved `200` while `timeline.metaFields` was refused `unrecognized_keys`.
+ *
+ * Ruled direction A (objectui#10380, maintainer 「其他同意」): each
+ * `options.KIND` is judged by the kind's own strict schema, so an out-of-contract
+ * key is refused by NAME, with the same code and the same surface text as the
+ * direct spelling — only the path gains the `options` prefix. Key by key: see
+ * {@link listViewKindBlocks} for why the block's required keys are not asked of
+ * an underlay. The bag itself is closed too: it carries per-kind blocks and
+ * nothing else, so `options.foo` is refused rather than dropped (ruled out:
+ * refusing the bag WHOLE, which would break the legacy `options.map` path
+ * objectui pins).
+ *
+ * Declared on the list overlay member ONLY — never on the authoring shape (the
+ * bag is a legacy wire spelling, not something to teach an author), and the
+ * form overlay pins it absent ({@link FORM_OVERLAY_OPTIONS_REFUSED}).
+ */
+const ListViewOverlayOptionsSchema = lazySchema(() => strictObject({
+  surface: 'this legacy `options` bag',
+  history:
+    'Until this bag was judged at the view write door it was dropped from the parse unread and '
+    + 'stored as sent, so a key its own block refuses still reached the rendered view.',
+  guidance: {
+    grid: 'A grid has no per-kind block: its settings (`columns`, `sort`, `filter`, …) are top-level keys of the view itself. Remove `options.grid`.',
+  },
+}, listViewKindBlocks()).describe(
+  'Legacy per-kind nesting (`options.kanban`, `options.timeline`, …) a stored list overlay may carry. '
+  + 'Each block is judged key by key by the same schema as the top-level block of that kind, which wins '
+  + 'per key where both set one; prefer the top-level spelling.',
+));
+
+/**
+ * [#20051] The refusal the flattened FORM overlay gives an `options` bag.
+ *
+ * `options` is list-view vocabulary, so a body carrying it is a list overlay —
+ * the same structural-guard reasoning as `config` / `list` / `form` pinned
+ * absent in {@link flattenedViewOverlayFields}. Without this pin the form
+ * member, which `.strip()`s and requires no list key, would ACCEPT a list
+ * overlay the list member refused over its `options` bag (a column-less,
+ * type-less personalization body reaches it), and the bag would be stored
+ * unjudged after all.
+ */
+const FORM_OVERLAY_OPTIONS_REFUSED =
+  'A form view carries no `options` bag: `options.kanban`, `options.timeline` and the other per-kind blocks '
+  + 'belong to a list view. Remove `options`, or save this body as a list view (`viewKind: "list"` with its `columns`).';
+
+/**
  * [#6391] Member 3 of {@link ViewMetadataSchema} — a flattened runtime LIST
  * overlay: an inline `ListView` config at the top level plus the optional
  * identity/round-trip fields a personalization PUT carries. Published as
@@ -5226,6 +5546,10 @@ const ViewContainerWireSchema = lazySchema(() =>
  * [#7741] `object` + `viewKind` are required on this arm (and its form
  * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
  * measured serving filter that decides exactly this pair.
+ *
+ * [#20051] …and `options` is DECLARED here, judged by
+ * {@link ListViewOverlayOptionsSchema}: `.strip()` re-opens the top level for
+ * round-trip keys, and a bag the renderer reads is not one of those.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
@@ -5236,7 +5560,10 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // author reaches, so it is the last place the refusals may go missing.
   // `viewDoorsCarryingObjectLevelChecks` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
-  ListViewShapeSchema.extend(flattenedViewOverlayFields()).strip()
+  ListViewShapeSchema.extend({
+    ...flattenedViewOverlayFields(),
+    options: ListViewOverlayOptionsSchema.optional(),
+  }).strip()
     .superRefine(checkListViewCalendarVisualization),
 );
 
@@ -5246,9 +5573,15 @@ const ListViewOverlayWireSchema = lazySchema(() =>
  * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}; the
  * list member is tried first, and a flattened form (no required `columns`,
  * disjoint `type` enum) then matches here.
+ *
+ * [#20051] `options` is pinned ABSENT here — see
+ * {@link FORM_OVERLAY_OPTIONS_REFUSED} for the fall-through it closes.
  */
 const FormViewOverlayWireSchema = lazySchema(() =>
-  FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
+  FormViewSchema.extend({
+    ...flattenedViewOverlayFields(),
+    options: z.undefined({ error: () => FORM_OVERLAY_OPTIONS_REFUSED }).optional(),
+  }).strip(),
 );
 
 /**
@@ -5935,6 +6268,13 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  * and pulls field metadata from the resolved JSON Schema instead of from
  * ObjectQL.
  *
+ * An enum-typed row may carry an inline `options` list, for human labels or a
+ * deliberate subset. A row whose members cannot be spelled as option values
+ * omits `options` — the control derives the members from that JSON Schema,
+ * and their meanings go in `helpText`. An inline option `value` that fails
+ * the system-identifier grammar is refused here, at module load, and the
+ * refusal names that path as its remedy.
+ *
  * @example
  * ```ts
  * export const reportForm = defineForm({
@@ -5960,9 +6300,89 @@ export function defineForm(
   config: Omit<z.input<typeof FormViewSchema>, 'data'> & { schemaId: string },
 ): FormViewParsed {
   const { schemaId, ...rest } = config;
-  return FormViewSchema.parse({
+  const parsed = FormViewSchema.safeParse({
     ...rest,
     data: { provider: 'schema', schemaId },
+  });
+  if (parsed.success) return parsed.data;
+  // The refusal stays an `Error` with a stack, so an uncaught module-load throw
+  // prints its issues and the remedy, with the author's `defineForm(...)` call
+  // as the first frame. Two traps, both measured on zod 4.6.1: `new z.ZodError`
+  // builds a plain object (no `Error` parent, no `stack`), which node prints as
+  // `ZodError { name, message: [Getter/Setter] }`; and zod builds every
+  // `ZodRealError` with `Error.stackTraceLimit = 0`, capturing a trace only in
+  // `parse`, so `parsed.error` or a bare `new z.ZodRealError` carries no frame.
+  // The error is built from issues that already carry the remedy, so its
+  // lazily computed `message` holds it whenever it is first read.
+  const refusal = new z.ZodRealError(withOptionValueDeriveRemedy(parsed.error.issues));
+  z.core.util.captureStackTrace(refusal, defineForm);
+  throw refusal;
+}
+
+/**
+ * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
+ * option `value` carries — ruling 乙 (record 5805845085, narrowing ruling
+ * 不动 + 声明): the bound stays, an enum-typed row may still list spellable
+ * members inline, and the wall names the derive path for a row whose members
+ * cannot be spelled.
+ *
+ * The refusal itself is `SystemIdentifierSchema`'s grammar message
+ * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
+ * which the form face reuses BY REFERENCE (pinned in
+ * `form-select-option.test.ts`). That message cannot carry this remedy where it
+ * is declared: the same grammar bounds object-field options and three
+ * object-storage names, and "derive the members from the served JSON Schema"
+ * is true only on a schema-bound form. `defineForm` is exactly that door — it
+ * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
+ * appended here, to the issue that door raises, and nowhere else.
+ */
+const FORM_OPTION_VALUE_DERIVE_REMEDY =
+  'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
+  + '`value`, which is a lowercase system identifier. When this row edits a spec enum whose '
+  + 'members cannot be spelled as option values, omit `options`: the control derives the '
+  + 'members from the served JSON Schema, and their meanings go in `helpText`.';
+
+/**
+ * The two issue codes the system-identifier grammar raises on a string: the
+ * pattern (`invalid_format`) and the two-character floor (`too_small`).
+ */
+const OPTION_VALUE_GRAMMAR_CODES: ReadonlySet<string> = new Set(['invalid_format', 'too_small']);
+
+/** `…options.<index>.value` — an inline option's `value` on a form field row. */
+function isInlineOptionValuePath(path: readonly PropertyKey[]): boolean {
+  const n = path.length;
+  return n >= 3 && path[n - 1] === 'value' && typeof path[n - 2] === 'number' && path[n - 3] === 'options';
+}
+
+/**
+ * [#19678] Append {@link FORM_OPTION_VALUE_DERIVE_REMEDY} to every grammar
+ * refusal of an inline option `value` in a failed `FormViewSchema` parse.
+ *
+ * A field row is a union (bare field name | row object), so the option's issue
+ * usually sits inside an `invalid_union` issue's `errors`, with a path relative
+ * to the union's — the walk carries the prefix down so the full path is judged.
+ * Nothing is added, removed or re-coded: the verdict and the issue list are the
+ * parse's own, and only the matching messages grow the remedy sentence.
+ */
+function withOptionValueDeriveRemedy(
+  issues: readonly z.core.$ZodIssue[],
+  at: readonly PropertyKey[] = [],
+): z.core.$ZodIssue[] {
+  return issues.map((issue) => {
+    const path = [...at, ...issue.path];
+    // Spread copies keep every field the parse raised; the casts restore the
+    // discriminated union the spread widens (`errors` on the no-match and
+    // multiple-match variants of `invalid_union` are typed apart).
+    if (issue.code === 'invalid_union') {
+      return {
+        ...issue,
+        errors: issue.errors.map((branch) => withOptionValueDeriveRemedy(branch, path)),
+      } as z.core.$ZodIssue;
+    }
+    if (OPTION_VALUE_GRAMMAR_CODES.has(issue.code) && isInlineOptionValuePath(path)) {
+      return { ...issue, message: `${issue.message}. ${FORM_OPTION_VALUE_DERIVE_REMEDY}` } as z.core.$ZodIssue;
+    }
+    return issue;
   });
 }
 
@@ -5972,8 +6392,25 @@ export type ViewParsed = z.infer<typeof ViewSchema>;
 export type ViewItem = z.input<typeof ViewItemSchema>;
 /** A ViewItem record as it travels the WIRE — the authoring shape plus Studio's round-trip keys (#5074). */
 export type ViewItemWire = z.input<typeof ViewItemWireSchema>;
-/** Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095). */
-export type ViewMetadata = z.input<typeof ViewMetadataSchema>;
+/**
+ * Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095) —
+ * the union of the INPUT types of the members {@link ViewMetadataSchema}'s union runs, read off
+ * {@link VIEW_METADATA_MEMBERS} (the union's member list by construction).
+ *
+ * [#19871] Deliberately NOT `z.input<typeof ViewMetadataSchema>`. That schema is a `z.preprocess`,
+ * whose input type is `unknown`, and its union's members are cast to `z.ZodTypeAny` where the
+ * union is built — so every type derived from the schema itself is `unknown`, and this name used to
+ * type-check any body at all. `view-metadata-type.test.ts` pins that `unknown` and an undeclared
+ * key are refused here, and that a body of each member still type-checks.
+ *
+ * A static type, not the door's verdict, in both directions: the door accepts bodies this type
+ * refuses (the preprocess removes the console's row `id`s, and three members strip undeclared
+ * top-level keys), and refuses bodies it admits — the identity precondition, the members'
+ * refinements, and a body that mixes keys of different members, because TypeScript checks an
+ * object literal's keys against the union as a whole and the container member's keys are all
+ * optional. `ViewMetadataSchema` remains the only judge.
+ */
+export type ViewMetadata = z.input<(typeof VIEW_METADATA_MEMBERS)[ViewMetadataBranch]>;
 /** Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122). */
 export type ViewMetadataParsed = z.infer<typeof ViewMetadataSchema>;
 export type ViewScope = z.input<typeof ViewScopeSchema>;
@@ -6065,8 +6502,6 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
-/** Post-parse shape of {@link KanbanConfig} — defaults applied, transforms run (ADR-0122). */
-export type KanbanConfigParsed = z.infer<typeof KanbanConfigSchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;

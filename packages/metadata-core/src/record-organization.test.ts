@@ -8,12 +8,20 @@
  * approval-row writer and the automation-run recorder share ONE precedence.
  *
  * The four-limb precedence is pinned per limb, and the `sys_api_key`
- * divergence is pinned by name: `tenancy.organizationField` answers "which
- * column says who this row is ABOUT", `tenantField`/`organization_id` answers
- * "what is this object WALLED by", and the two DELIBERATELY diverge for
+ * divergence is pinned by name: `PLATFORM_STAMP_ORGANIZATION_COLUMNS` answers
+ * "which column says who this row is ABOUT", `tenantField`/`organization_id`
+ * answers "what is this object WALLED by", and the two DELIBERATELY diverge for
  * credential tables (#8287). Flattening that divergence — resolving the stamp
  * from the wall, or walling from the stamp — is the two-tables-disagree
  * pathology this promotion exists to end.
+ *
+ * ⭐ [#19054] Limb 0 used to read the authorable `tenancy.organizationField`
+ * key; protocol 18 retires that key (ADR-0049) and the divergence moves into
+ * the platform table keyed by OBJECT NAME. Two consequences these pins state
+ * rather than assume: an object outside that table gets limb 0 skipped no
+ * matter what columns it carries, and the engine-bound faces resolve limb 0
+ * from the name they were ASKED about, not from a `name` the definition may or
+ * may not echo.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -37,30 +45,54 @@ const hasFieldOf = (def: any) => (field: string) =>
   def?.fields != null && Object.prototype.hasOwnProperty.call(def.fields, field);
 
 describe('resolveRecordOrganizationField — the four-limb precedence', () => {
-  it('limb 0: a declared `tenancy.organizationField` wins over everything, the ADR-0066 opt-out included (sys_api_key)', () => {
+  it('limb 0: the platform stamp column wins over everything, the ADR-0066 opt-out included (sys_api_key)', () => {
     // The shipped divergent case: an UNWALLED credential table
     // (`enabled: false`) whose rows are still ABOUT one organization, under a
-    // column that deliberately is NOT the tenant column.
+    // column that deliberately is NOT the tenant column. Since #19054 the
+    // divergence is a platform fact keyed by object NAME — the definition
+    // declares nothing.
     const def = {
       name: 'sys_api_key',
-      tenancy: { enabled: false, organizationField: 'active_organization_id' },
+      tenancy: { enabled: false },
       fields: { id: {}, name: {}, user_id: {}, active_organization_id: {}, revoked: {} },
     };
     expect(resolveRecordOrganizationField(def, hasFieldOf(def))).toBe('active_organization_id');
   });
 
-  it('limb 0 guard (#5315): a declared organizationField naming a MISSING column falls through, never resolves to nothing', () => {
+  it('limb 0 is keyed by NAME, not by column shape: an ordinary object carrying the same column is not a stamp row (#19054)', () => {
+    // ⛔ The anti-widening pin. The retired key made "this object stamps from
+    // somewhere else" authorable; the platform table makes it a closed set. An
+    // application object that happens to carry a column by that name — or that
+    // would have declared the key before protocol 18 — takes the ordinary
+    // limbs, so no application can put a fourth spelling of "who is this row
+    // about" into the platform's mouth.
+    const lookalike = {
+      name: 'crm_lead',
+      tenancy: { enabled: true, tenantField: 'workspace_id' },
+      fields: { id: {}, workspace_id: {}, active_organization_id: {}, organization_id: {} },
+    };
+    expect(resolveRecordOrganizationField(lookalike, hasFieldOf(lookalike))).toBe('workspace_id');
+
+    const unwalledLookalike = {
+      name: 'crm_credential',
+      tenancy: { enabled: false },
+      fields: { id: {}, active_organization_id: {}, organization_id: {} },
+    };
+    expect(resolveRecordOrganizationField(unwalledLookalike, hasFieldOf(unwalledLookalike))).toBeNull();
+  });
+
+  it('limb 0 guard (#5315): a platform stamp column the object does NOT have falls through, never resolves to nothing', () => {
     // Missing column + disabled tenancy → limb 1 answers null (not the
     // phantom name, and not organization_id either).
     const def = {
       name: 'sys_api_key',
-      tenancy: { enabled: false, organizationField: 'active_organization_id' },
+      tenancy: { enabled: false },
       fields: { id: {}, organization_id: {} },
     };
     expect(resolveRecordOrganizationField(def, hasFieldOf(def))).toBeNull();
   });
 
-  it('limb 1: `tenancy.enabled === false` WITHOUT an organizationField resolves null even when an org FK exists (ADR-0066)', () => {
+  it('limb 1: `tenancy.enabled === false` on a non-stamp object resolves null even when an org FK exists (ADR-0066)', () => {
     // The sys_sso_provider shape: platform-global, keeps an optional org FK,
     // explicitly not tenant-scoped. Stamping from the FK would hide a global
     // object's platform rows from the platform admin who acted.
@@ -103,38 +135,39 @@ describe('resolveRecordOrganizationField — the four-limb precedence', () => {
  * implementation that had quietly become a second copy of the precedence.
  */
 describe('resolveRecordWallOrganizationField — limb 0 is not a limb here', () => {
-  it('the sys_api_key shape: the stamp face answers the declared column, the wall face answers NULL', () => {
-    // The ONE shipped object that declares the key, and the reason the two
-    // faces exist: `enabled: false` says nothing walls this table (#8287), so
-    // there is no organization for work launched from such a row to ACT AS,
-    // however clearly the row says who it is ABOUT.
+  it('the sys_api_key shape: the stamp face answers the platform column, the wall face answers NULL', () => {
+    // The ONE object in the platform stamp table, and the reason the two faces
+    // exist: `enabled: false` says nothing walls this table (#8287), so there
+    // is no organization for work launched from such a row to ACT AS, however
+    // clearly the row says who it is ABOUT.
     const def = {
       name: 'sys_api_key',
-      tenancy: { enabled: false, organizationField: 'active_organization_id' },
+      tenancy: { enabled: false },
       fields: { id: {}, name: {}, user_id: {}, active_organization_id: {}, revoked: {} },
     };
     expect(resolveRecordOrganizationField(def, hasFieldOf(def))).toBe('active_organization_id');
     expect(resolveRecordWallOrganizationField(def, hasFieldOf(def))).toBeNull();
   });
 
-  it('a declared organizationField on a WALLED object is still not read — the wall answers its own column', () => {
-    // The hypothetical an author could write today: the stamp key on an object
-    // that IS walled, by a different column. The stamp face honours limb 0; the
-    // wall face takes limb 2, because that is the column the row is scoped by
-    // and therefore the only one an acting identity may come from.
-    const def = {
+  it('the wall face never consults the platform stamp table, even where the object carries that column', () => {
+    // A stamp row that IS walled would be the shape where the two faces could
+    // silently converge. `sys_api_key` is not walled, so the discriminating
+    // fixture is the credential table itself seen from both sides plus the
+    // ordinary walled neighbour: the wall face must reach its own column by
+    // limbs 2/3 alone, never by the stamp table.
+    const walled = {
       name: 'ws_doc',
-      tenancy: { enabled: true, tenantField: 'workspace_id', organizationField: 'about_org_id' },
-      fields: { id: {}, workspace_id: {}, about_org_id: {}, organization_id: {} },
+      tenancy: { enabled: true, tenantField: 'workspace_id' },
+      fields: { id: {}, workspace_id: {}, active_organization_id: {}, organization_id: {} },
     };
-    expect(resolveRecordOrganizationField(def, hasFieldOf(def))).toBe('about_org_id');
-    expect(resolveRecordWallOrganizationField(def, hasFieldOf(def))).toBe('workspace_id');
+    expect(resolveRecordWallOrganizationField(walled, hasFieldOf(walled))).toBe('workspace_id');
+    expect(resolveRecordOrganizationField(walled, hasFieldOf(walled))).toBe('workspace_id');
   });
 
   it('limbs 1 to 4 are SHARED — the two faces agree everywhere limb 0 is absent', () => {
-    // The anti-drift pin. Every shape the stamp face pins above, minus the two
-    // that declare the key: the answers must be identical, so a future edit
-    // that "fixes" one body cannot leave the other behind.
+    // The anti-drift pin. Every shape the stamp face pins above, minus the ones
+    // in the platform stamp table: the answers must be identical, so a future
+    // edit that "fixes" one body cannot leave the other behind.
     const shapes = [
       { name: 'sys_sso_provider', tenancy: { enabled: false }, fields: { id: {}, organization_id: {} } },
       { name: 'ws_doc', tenancy: { enabled: true, tenantField: 'workspace_id' }, fields: { id: {}, workspace_id: {}, organization_id: {} } },
@@ -157,8 +190,13 @@ describe('createRecordWallOrganizationResolver — the sweep’s memoized face',
   it('resolves the wall column end to end, and answers null on the unwalled credential shape', () => {
     const engine = engineOf({
       crm_deal: { fields: { id: {}, organization_id: {} } },
+      // ⭐ No `name` on the definition, deliberately: the engine-bound faces
+      // resolve limb 0 from the name they were ASKED about. Several engine
+      // doubles in this monorepo return bare `{ tenancy, fields }` maps, and a
+      // stamp column that depended on whether a schema echoes its own name
+      // would be a difference no caller can see.
       sys_api_key: {
-        tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        tenancy: { enabled: false },
         fields: { id: {}, active_organization_id: {} },
       },
     });
@@ -228,8 +266,11 @@ describe('createRecordOrganizationResolver — the writers’ memoized face', ()
 
   it('pins the sys_api_key divergence end to end: the stamp column is active_organization_id, never the wall', () => {
     const engine = engineOf({
+      // Bare definition, no `name` echoed — this is the shape the three
+      // sanctioned writers' own engine doubles use, and the face must resolve
+      // limb 0 from the name it was asked about (#19054).
       sys_api_key: {
-        tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        tenancy: { enabled: false },
         fields: { id: {}, name: {}, user_id: {}, active_organization_id: {}, revoked: {} },
       },
     });
@@ -239,10 +280,29 @@ describe('createRecordOrganizationResolver — the writers’ memoized face', ()
       r.organizationOf('sys_api_key', { id: 'k1', active_organization_id: 'org_key' }),
     ).toBe('org_key');
     // A record carrying an `organization_id` VALUE anyway (defensive noise)
-    // still stamps from the DECLARED column, not the canonical spelling.
+    // still stamps from the PLATFORM column, not the canonical spelling.
     expect(
       r.organizationOf('sys_api_key', { id: 'k1', organization_id: 'org_wrong', active_organization_id: 'org_key' }),
     ).toBe('org_key');
+  });
+
+  it('⛔ the stamp table is a closed set: the same shape under any other object name takes the ordinary limbs (#19054)', () => {
+    // The control for the pin above. The engine-bound face is where limb 0 is
+    // reached with an authoritative name, so this is where "closed set" has to
+    // be stated: an object that is byte-identical to `sys_api_key` except for
+    // its name gets no stamp column at all, and the caller falls back to the
+    // acting context exactly as it does for every other unwalled object.
+    const engine = engineOf({
+      tenant_credential: {
+        tenancy: { enabled: false },
+        fields: { id: {}, name: {}, user_id: {}, active_organization_id: {}, revoked: {} },
+      },
+    });
+    const r = createRecordOrganizationResolver(engine);
+    expect(r.organizationFieldFor('tenant_credential')).toBeNull();
+    expect(
+      r.organizationOf('tenant_credential', { id: 'k1', active_organization_id: 'org_key' }),
+    ).toBeNull();
   });
 
   it('degrades to null — the acting-context fallback signal — on a getSchema-less double, a throwing getSchema, and an unknown object', () => {

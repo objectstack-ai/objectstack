@@ -57,10 +57,10 @@
  * and now that both halves answer the same, it says so per kernel too.
  *
  * WHAT EACH GROUP ACTUALLY OBSERVES — stated because the difference is the whole
- * point of this file. A, B, D and F observe ROUTE REGISTRATION: they replace
+ * point of this file. A, B, C, D and F observe ROUTE REGISTRATION: they replace
  * `rawApp.get` with a recorder, so no handler is ever installed and nothing is
- * served. That is enough to pin WHICH routes exist and, for D and F2, that none
- * does —
+ * served. That is enough to pin WHICH routes exist and, for C2, D and F2, that
+ * none does —
  * and it is blind to everything downstream of the route string. E closes that:
  * it leaves `rawApp.get` alone, so the real handlers install on the real Hono
  * app, and drives `rawApp.request(...)` to pin what actually comes BACK. E is
@@ -176,9 +176,9 @@ interface Booted {
  * Either published kernel. Both are exported from `@objectstack/core`, both give
  * their plugins a context whose `getKernel()` returns the kernel itself, and both
  * keep the loaded plugins in a `plugins` map — the three properties the block
- * under test depends on. What they do NOT share is whether `use()` validates:
- * see the header. Groups A, B, D and E run on `ObjectKernel`; group F runs on
- * `LiteKernel`.
+ * under test depends on. They used to differ on whether `use()` validates; since
+ * #16721 both do (see the header). Groups A, B, D and E run on `ObjectKernel`;
+ * group F runs on `LiteKernel`; group C runs on both.
  */
 type KernelUnderTest = ObjectKernel | LiteKernel;
 
@@ -261,12 +261,27 @@ async function attachHono(kernel: KernelUnderTest): Promise<Booted> {
  *
  * ⚠️ Nothing is installed and nothing is served under this helper — that is the
  * point of pin E, which does not use it.
+ *
+ * `beforeStart`, when given, receives the entry `use()` left in the kernel's own
+ * plugin map — the very object the block will iterate — after `init()` and
+ * before `start()`. Pin C2 is its only caller.
  */
 async function observe(
     fixture: UiPluginFixture,
     bootOn: (f: UiPluginFixture) => Promise<Booted> = boot,
+    beforeStart?: (admitted: Record<string, unknown>) => void,
 ): Promise<Observation> {
     const { kernel, honoPlugin, ctx, rawApp } = await bootOn(fixture);
+    const entry = () => (kernel as unknown as { plugins: Map<string, Record<string, unknown>> })
+        .plugins.get(fixture.name);
+
+    if (beforeStart) {
+        const admitted = entry();
+        if (admitted === undefined) {
+            throw new Error(`expected kernel.use() to admit '${fixture.name}', but kernel.plugins has no entry for it`);
+        }
+        beforeStart(admitted);
+    }
 
     const routes: string[] = [];
     const spy = vi.spyOn(rawApp, 'get').mockImplementation(((route: string) => {
@@ -280,10 +295,7 @@ async function observe(
         spy.mockRestore();
     }
 
-    const stored = (kernel as unknown as { plugins: Map<string, Record<string, unknown>> })
-        .plugins.get(fixture.name);
-
-    return { routes, stored };
+    return { routes, stored: entry() };
 }
 
 /**
@@ -359,42 +371,88 @@ describe('UI plugin auto-discovery (#16050)', () => {
     });
 
     /**
-     * C — the legacy `ui-plugin` arm. DELIBERATELY NOT WRITTEN YET.
+     * C — the retired `ui-plugin` spelling, as #15638 ruled (B+: remove).
      *
-     * `hono-plugin.ts` matches `plugin.type === 'ui' || plugin.type === 'ui-plugin'`,
-     * and the second disjunct is the subject of #15638: `ui-plugin` is not a
-     * member of `CORE_PLUGIN_TYPES`, so `PluginSchema` refuses the value.
+     * The block used to match `plugin.type === 'ui' || plugin.type === 'ui-plugin'`
+     * under a "Support legacy" comment. `ui-plugin` is not a member of
+     * `CORE_PLUGIN_TYPES`, and the ruling retires it at once, with no tolerance
+     * left in any consumer: the disjunct and its comment are deleted. What stands
+     * in their place is the contract #16049 already runs at `use()`: the generic
+     * closed-set refusal, with no message of its own for this spelling. Both
+     * halves are pinned on both published kernels:
      *
-     * ⚠️ WHICH KERNEL (#16599). This narration used to say "the boot path — which
-     * never calls `PluginSchema` — accepts it and mounts", naming no kernel. That
-     * is true of exactly one of the two, and both were measured:
+     *   - C1: a plugin DECLARING `type: 'ui-plugin'` is refused at `use()`. The
+     *     fixture is otherwise a fully declared `ui` plugin (`staticPath` and
+     *     `slug` both present), so `type` is its only fault. This READS #16049's
+     *     refusal and re-implements nothing. It is also why the deletion moved no
+     *     verdict on a declared value: before it, the same input was already
+     *     refused here and never reached the block, on either kernel.
+     *   - C2: the arm is gone, measured by behaviour rather than by reading the
+     *     source. After the contract, the only way `kernel.plugins` can hold an
+     *     entry typed `ui-plugin` is for an object the contract ADMITTED to
+     *     change its own `type` afterwards: `use()` validates, discards the
+     *     parse, and stores the object by reference (`plugin-contract.ts`). C2
+     *     does exactly that. An admitted `ui` entry is flipped to `ui-plugin`
+     *     before `start()`, and the block mounts nothing. The same flow without
+     *     the flip, in the same case, mounts pin B's four routes, so `[]` comes
+     *     from the guard and not from a harness that stopped mounting. Restoring
+     *     the deleted disjunct turns C2 red on both kernels, with the four routes
+     *     back, and leaves every other case in this file green.
      *
-     *   - `ObjectKernel.use()` REFUSES it since #16363, with
-     *     `PLUGIN_CONTRACT_VIOLATION … at 'type'` naming the closed set.
-     *   - `LiteKernel.use()` accepted it until #16721 and the block mounted
-     *     `/slug` and `/slug/*`; since #16721 it runs the same contract and
-     *     refuses it with the same envelope (core's enforcement test, group G).
-     *
-     * ⇒ #15638's arm was HALF dead when this note was first written — the same
-     * shape as the two arms #16599 measured — and is now reachable through
-     * NEITHER published kernel's `use()`. That is a reading about the tree, not
-     * the ruling: #15638 still picks between two INCOMPATIBLE pins, so writing
-     * either one now would pin a guess:
-     *
-     *   - if #15638 rules REMOVE, C becomes: a `ui-plugin` fixture is refused at
-     *     `use()` on BOTH kernels (true since #16721) and the arm is deleted,
-     *     so nothing can ever mount it;
-     *   - if #15638 rules DECLARE/CONVERT (an ADR-0087 conversion entry), C
-     *     becomes: a `ui-plugin` fixture is normalised to `ui` BEFORE the contract
-     *     runs — on both kernels — mounts `/slug` and `/slug/*` exactly like pin
-     *     B, and emits one deprecation warning.
-     *
-     * Whoever lands #15638 writes this case in that PR — the harness above takes
-     * it unchanged; only the fixture's `type`, the kernel(s) it boots on and the
-     * expectation differ. Until then the placeholder is the honest state:
-     * refused on both kernels, unpinned here on purpose.
+     * The modern `ui` arm stays pinned by B (`ObjectKernel`), E (served) and F0
+     * (`LiteKernel`).
      */
-    it.todo('C — the legacy `ui-plugin` arm behaves as #15638 rules that it should');
+    describe('C — the retired `ui-plugin` spelling: refused at use(), and not honoured by the block (#15638)', () => {
+        const LEGACY_TYPE = 'ui-plugin';
+        const KERNELS = [
+            ['ObjectKernel', boot],
+            ['LiteKernel', bootLite],
+        ] as const;
+
+        it('C1 — LiteKernel.use() and ObjectKernel.use() refuse a declared `ui-plugin` with one envelope', async () => {
+            const make = () => makeFixture({
+                name: '@os-fixture/legacy-console',
+                type: LEGACY_TYPE as unknown as UiPluginFixture['type'],
+                slug: 'console-fixture',
+            });
+
+            const lite = await refusal(bootLite(make()));
+
+            // #16049's closed-set refusal, located at the key: the stable code on
+            // the property and at the head of the message, as pins F1/F2 read it.
+            expect(lite.message).toContain('PLUGIN_CONTRACT_VIOLATION');
+            expect(lite.message).toContain("at 'type'");
+            expect((lite as Error & { code?: string }).code).toBe('PLUGIN_CONTRACT_VIOLATION');
+
+            // Parity, not resemblance: the same text behind the loader's prefix.
+            const object = await refusal(boot(make()));
+            expect(object.message).toBe(`Failed to load plugin: @os-fixture/legacy-console - ${lite.message}`);
+        });
+
+        it.each(KERNELS)('C2 — on %s, an admitted entry turned into `ui-plugin` before start() mounts nothing', async (_kernel, bootOn) => {
+            const fixture = () => makeFixture({ name: '@os-fixture/console', slug: 'console-fixture' });
+
+            // The firing control, same kernel and same fixture, no flip: the block
+            // mounts here, so the `[]` below is caused by the guard.
+            const control = await observe(fixture(), bootOn);
+            expect(control.routes).toEqual([
+                '/console-fixture',
+                '/console-fixture',
+                '/console-fixture/*',
+                '/console-fixture/*',
+            ]);
+
+            const flipped = await observe(fixture(), bootOn, (admitted) => {
+                admitted.type = LEGACY_TYPE;
+            });
+
+            // The flip landed on the entry the block iterates, and nothing else
+            // about the entry changed: `staticPath` is still the existing root.
+            expect(flipped.stored?.type).toBe(LEGACY_TYPE);
+            expect(flipped.stored?.staticPath).toBe(STATIC_ROOT);
+            expect(flipped.routes).toEqual([]);
+        });
+    });
 
     describe('D — the negative control: the harness can produce an empty result', () => {
         // Every declared plugin type EXCEPT `ui`, read off the spec's own closed set

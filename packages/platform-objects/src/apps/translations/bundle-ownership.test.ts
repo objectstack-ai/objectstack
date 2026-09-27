@@ -33,8 +33,8 @@ const OWNED_OBJECTS = new Set([
   'sys_scim_subject', 'sys_scim_user',
   // audit / messaging-adjacent (still owned here)
   'sys_notification', 'sys_attachment', 'sys_email', 'sys_email_template',
-  'sys_saved_report', 'sys_report_schedule', 'sys_job', 'sys_job_run', 'sys_job_queue',
-  'sys_import_job',
+  // (sys_saved_report / sys_report_schedule retired with the saved-report stack, #20102)
+  'sys_job', 'sys_job_run', 'sys_job_queue', 'sys_import_job',
   // metadata
   'sys_metadata', 'sys_metadata_history', 'sys_view_definition', 'sys_metadata_audit',
   // system

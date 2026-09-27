@@ -57,15 +57,27 @@ type AnyRec = Record<string, unknown>;
 /**
  * Keys whose subtree is a filter. The one place a filter is authored.
  *
- * `relatedListFilter` (#8704) is the one member that does not spell the key
- * `filter`: it sits flat on a FIELD beside its `relatedList`/`relatedListTitle`/
+ * `relatedListFilter` (#8704) sits flat on a FIELD beside its `relatedList`/`relatedListTitle`/
  * `relatedListColumns` family, so the family naming wins over the filter-key
  * convention. It carries a canonical Query-DSL `FilterCondition` (the schema
  * door already judges it at parse), and listing it here is what extends the
  * three walking rules — tokens, empty combinators, preset comparands — to the
  * new position instead of leaving a per-rule hole.
+ *
+ * `filterBy` and `lookupFilters` (#19791) are consumed RULE-ARRAY
+ * carriers that do not spell the key `filter`: a list page's always-on
+ * base filter (`interfaceConfig.filterBy`, `z.array(ViewFilterRuleSchema)`,
+ * which the console spreads into the list query beside the view's own
+ * `filter`) and a lookup field's picker filter (`lookupFilters`, lowered by the
+ * console to a Mongo `$filter` on the REFERENCED object). Both values reach
+ * the engine's `where` verbatim. Their schemas carry no preset check, so
+ * before this entry an ordering preset in either parsed green, linted green.
+ * The binding half — which object a condition on each carrier
+ * addresses — is `validate-preset-comparands.ts`'s, not this walk's.
  */
-export const FILTER_KEYS: ReadonlySet<string> = new Set(['filter', 'filters', 'runtimeFilter', 'relatedListFilter']);
+export const FILTER_KEYS: ReadonlySet<string> = new Set([
+  'filter', 'filters', 'runtimeFilter', 'relatedListFilter', 'filterBy', 'lookupFilters',
+]);
 
 /** One stack collection a caller wants walked. */
 export interface FilterSurface {

@@ -14,4 +14,4 @@ Measured on the 17.3.0 declaration, per value, through `ElementTextPropsSchema.s
 - **⛔ Nothing is retired.** `heading` and `subheading` become named refusals carrying migration hints in **release 2**, which is a separate card and is blocked on a value-level retirement mechanism that does not exist yet: `retiredKey()` and ADR-0087 D2 retire a *key*, not a *value*. Authors who want to move early can write `h2` for `heading` and `h3` for `subheading`; neither spelling stops working in this release.
 - **No renderer changes here.** `element:text`'s renderer, its designer inspector options and its i18n rows are objectui's, on the released pin, and land on objectui's side of the sequence.
 
-Generated projections follow the declaration: `api-surface-declarations/ui.txt` gains the seven members on `ElementTextPropsSchema` and on `ComponentPropsMap['element:text']`, and the `content/docs/references/ui/component.mdx` property table widens. `check:api-surface` reports nothing removed or narrowed.
+Generated projections follow the declaration: the `content/docs/references/ui/component.mdx` property table widens. `check:api-surface` reports nothing removed or narrowed.

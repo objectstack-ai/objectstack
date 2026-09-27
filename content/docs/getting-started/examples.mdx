@@ -411,9 +411,10 @@ export default defineStack({
 
 `os build` compiles that project into **one** `dist/objectstack.json` carrying a
 `packages[]` list — one entry per package, each holding that package's own
-manifest fields and the metadata it owns. `os dev` boots the same shape straight
-from source, and `GET /api/v1/packages` on a running instance lists every
-package in the artifact.
+manifest fields and the metadata it owns. Each definition is written **once**,
+in the body of the package that owns it, beside the artifact's own `manifest`.
+`os dev` boots the same shape straight from source, and `GET /api/v1/packages`
+on a running instance lists every package in the artifact.
 
 The rules worth knowing before you split a product this way:
 

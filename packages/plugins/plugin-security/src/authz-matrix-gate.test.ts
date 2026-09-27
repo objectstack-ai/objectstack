@@ -46,6 +46,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { derivePosture, POSTURE_RANK } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SecurityPlugin, hasPlatformAdminCapability } from './security-plugin.js';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { defaultPermissionSets, BETTER_AUTH_MANAGED_OBJECTS } from './objects/default-permission-sets.js';
@@ -154,7 +155,36 @@ function makeHarness(opts: {
       return services[name];
     },
   };
-  return { ctx, findOne, run: async (opCtx: any) => { await middleware(opCtx, async () => {}); return opCtx; } };
+  // [#19989] The engine's stored-row check on a by-id UPDATE, which the empty
+  // terminal stands in for: `ObjectQL.update` runs the installed
+  // `postHookWriteImageCheck` on the row it writes (here the stubbed pre-image,
+  // merged with the payload) before the statement, and a terminal that skipped
+  // it would be refused fail-closed by the middleware. Only the by-id path is
+  // modelled, through the producer's own dispatch predicate.
+  //
+  // [#20013] …and the INSERT path, because the Layer 0 tenant wall now
+  // installs the same seam on a walled insert: `ObjectQL.insert` runs it on
+  // the rows the `beforeInsert` chain produced, which here (no hooks) are the
+  // rows as sent.
+  const runByIdWriteImageCheck = async (opCtx: any) => {
+    const seam = opCtx?.postHookWriteImageCheck;
+    if (seam && opCtx.operation === 'insert') {
+      seam.honoured = true;
+      await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
+      return;
+    }
+    if (!seam || opCtx.operation !== 'update') return;
+    const dispatch = assertEngineUpdateDispatch(opCtx.data, opCtx.options);
+    if (dispatch.kind !== 'by-id') return;
+    seam.honoured = true;
+    const prior = opts.findOneImpl ? opts.findOneImpl({ where: { id: dispatch.id } }) : null;
+    await seam.evaluate(prior ? [{ ...prior, ...opCtx.data }] : []);
+  };
+  return {
+    ctx,
+    findOne,
+    run: async (opCtx: any) => { await middleware(opCtx, () => runByIdWriteImageCheck(opCtx)); return opCtx; },
+  };
 }
 
 /** Effective READ filter the engine would AND onto a `find` (the visible-row set). */

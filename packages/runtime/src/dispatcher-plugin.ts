@@ -1463,15 +1463,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // `automation` service (which lives on the project kernel,
             // not the host kernel, in ObjectOS multi-tenant mode).
             const registerAutomationRoutes = (base: string) => {
-                server!.get(`${base}/automation`, async (req: any, res: any) => {
-                    try {
-                        const result = await dispatcher.dispatch('GET', '/automation', undefined, req.query, { request: req });
-                        sendResult(result, res);
-                    } catch (err: any) {
-                        errorResponse(err, res);
-                    }
-                });
-
+                // [#19543, door ④] No `GET ${base}/automation`: the flow-list
+                // route is RETIRED (「退役，统一走 /meta/flow」), so GET is not
+                // mounted at this path at all and the host gives its standard
+                // unmatched answer — on the Hono host a `405` with
+                // `Allow: POST`, because the POST below (createFlow) keeps the
+                // path; the same answer any POST-only path gets, with no
+                // residual refusal of its own. Flows are metadata (ADR-0106);
+                // the list is `GET /api/v1/meta/flow`.
                 server!.post(`${base}/automation`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('POST', '/automation', req.body, req.query, { request: req });

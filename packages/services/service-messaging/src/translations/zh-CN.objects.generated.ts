@@ -121,6 +121,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "投递 ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the delivery channel and its recipient (computed on read)"
+      },
       notification_id: {
         label: "通知事件",
         help: "外键 → sys_notification(L2 事件)"
@@ -191,6 +195,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "偏好 ID"
       },
+      display_title: {
+        label: "Title",
+        help: "Record title: the user, the topic and the channel this toggle covers (computed on read)"
+      },
       user_id: {
         label: "用户",
         help: "接收用户 ID,'*' 表示管理员全局默认值。"
@@ -235,6 +243,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     fields: {
       id: {
         label: "订阅 ID"
+      },
+      display_title: {
+        label: "Title",
+        help: "Record title: the subscribing principal and the topic (computed on read)"
       },
       topic: {
         label: "主题",
@@ -312,6 +324,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       id: {
         label: "投递 ID",
         help: "UUID——同时作为接收方的幂等键"
+      },
+      display_title: {
+        label: "标题",
+        help: "记录标题：投递标签（如已设置）和目标 URL（读取时计算）"
       },
       source: {
         label: "来源",

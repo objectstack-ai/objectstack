@@ -718,7 +718,8 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
     // Reachability, demonstrated rather than asserted from prose: the tombstone
     // is only worth anything if it fires through `stack.connectors[]`, which is
     // the surface an author actually writes (`DeclarativeConnectorEntrySchema`
-    // is `ConnectorSchema.superRefine(…)`, so it inherits the tombstone).
+    // wraps the same private `ConnectorBaseSchema` the base export does, so it
+    // carries the tombstone).
     // No top-level `name` here: it was never a declared stack key — the strip-
     // mode schema used to swallow it, and the #8687 strict close refuses it,
     // which would have made the positive control below fail for the wrong
@@ -1196,8 +1197,12 @@ describe('ADR-0010 protection envelope (#6362)', () => {
   });
 
   it('declaring the envelope did not open the schema to arbitrary `_` keys', () => {
-    // `ConnectorSchema` is deliberately non-strict (subtypes `.extend()` it),
-    // so an unknown key is stripped rather than refused. The point of this pin
+    // `ConnectorSchema` is deliberately non-strict, so an unknown key is
+    // stripped rather than refused. (This used to say "subtypes `.extend()`
+    // it" — the export is a residue-stage PIPE since the ADR-0049
+    // `connectionTimeoutMs` retirement and `.extend()` no longer exists on it;
+    // a subtype extends `ConnectorBaseSchema` and re-wraps. The non-strictness
+    // this pin is about is the INNER object's and is unchanged.) The point
     // is the converse of the ones above: the spread adds SEVEN named keys, not
     // a passthrough — an underscore key nobody declared still does not survive.
     const parsed = ConnectorSchema.parse({

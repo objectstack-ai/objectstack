@@ -161,8 +161,8 @@
  * contract this is.
  *
  * **It writes nothing and hangs no label.** Same call `check-clause2-carriers`
- * and `check-half-states` make: a checker that hung `needs:contract-review`
- * would be issuing the review verdict, which is 自查放行. ⛔ No new label and no
+ * and `check-half-states` make: a checker that hung a review-gate label would
+ * be issuing the review verdict, which is 自查放行. ⛔ No new label and no
  * new claim-line syntax exist because of this file — #16448 forbids both, and
  * the reader it uses is the sibling's existing `Clause-②:` reader.
  *
@@ -4292,7 +4292,7 @@ function main(argv, env = process.env) {
     console.error(
       'check-widening-tells: the board is not an argument. Set PM_SWEEP_REPO — e.g. ' +
         "PM_SWEEP_REPO=objectstack-ai/objectui node scripts/pm/check-widening-tells.mjs --declaration no --diff - " +
-        '— which is the same convention `check-clause2-carriers.mjs` reads, and ⛔ never a second one.',
+        '— which is the same convention `check-half-states.mjs` reads, and ⛔ never a second one.',
     );
     return EXIT_USAGE;
   }

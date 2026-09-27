@@ -181,7 +181,7 @@ Column footer summary configuration
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional | Field type (auto-infers widget if omitted) |
-| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition) |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
@@ -199,7 +199,7 @@ Column footer summary configuration
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `87af769e9`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f8a9d0fb0596`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -271,7 +271,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
 
 ### Nested Shape: `FormField.publicPicker`
 
@@ -279,7 +279,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **displayFields** | `string[]` | optional | Fields projected into each picker result (with `id`); the visitor's search matches `contains` on the first entry. At most 5 (the route projects no more); omitted → ['name']. |
 | **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
 | **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the `reference` key on the field definition. |
 
 ### Nested Shape: `FormField.keyField`
@@ -317,7 +317,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
 
 ---
@@ -331,8 +331,8 @@ View filter rule
 | **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string` | optional | Optional description rendered under the section header. |
-| **collapsible** | `boolean` | optional (default: `false`) |  |
-| **collapsed** | `boolean` | optional (default: `false`) |  |
+| **collapsible** | `boolean` | optional (default: `false`) | Whether the section renders a disclosure control, so a reader can close it and open it again. Default `false`: a section declaring neither collapse key is always open and shows no control. ⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take the control away (ruled 2026-09-18). The renderer resolves that from the DECLARATION; parse never rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is refused on a wizard step and beside `group`; `false` is accepted in both, because it declares exactly what those surfaces already deliver. |
+| **collapsed** | `boolean` | optional (default: `false`) | Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that reopens it, and it outranks an explicit `collapsible: false` (ruled 2026-09-18; refusing the combination at the declaration, and warning on it, were both rejected — nobody can depend on a section that cannot be opened). The implication is a renderer rule, never a parse-time rewrite: `{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed `collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not collapse) and beside `group`, whose field group declares the pair. |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
@@ -346,7 +346,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional | Field type (auto-infers widget if omitted) |
-| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition) |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
@@ -364,7 +364,7 @@ View filter rule
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `87af769e9`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `f8a9d0fb0596`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -389,7 +389,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions` |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
 
 
 ---
@@ -463,8 +463,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string` | optional | Optional description rendered under the section header. |
-| **collapsible** | `boolean` | optional (default: `false`) |  |
-| **collapsed** | `boolean` | optional (default: `false`) |  |
+| **collapsible** | `boolean` | optional (default: `false`) | Whether the section renders a disclosure control, so a reader can close it and open it again. Default `false`: a section declaring neither collapse key is always open and shows no control. ⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take the control away (ruled 2026-09-18). The renderer resolves that from the DECLARATION; parse never rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is refused on a wizard step and beside `group`; `false` is accepted in both, because it declares exactly what those surfaces already deliver. |
+| **collapsed** | `boolean` | optional (default: `false`) | Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that reopens it, and it outranks an explicit `collapsible: false` (ruled 2026-09-18; refusing the combination at the declaration, and warning on it, were both rejected — nobody can depend on a section that cannot be opened). The implication is a renderer rule, never a parse-time rewrite: `{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed `collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not collapse) and beside `group`, whose field group declares the pair. |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
@@ -479,8 +479,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string` | optional | Optional description rendered under the section header. |
-| **collapsible** | `boolean` | optional (default: `false`) |  |
-| **collapsed** | `boolean` | optional (default: `false`) |  |
+| **collapsible** | `boolean` | optional (default: `false`) | Whether the section renders a disclosure control, so a reader can close it and open it again. Default `false`: a section declaring neither collapse key is always open and shows no control. ⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take the control away (ruled 2026-09-18). The renderer resolves that from the DECLARATION; parse never rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is refused on a wizard step and beside `group`; `false` is accepted in both, because it declares exactly what those surfaces already deliver. |
+| **collapsed** | `boolean` | optional (default: `false`) | Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that reopens it, and it outranks an explicit `collapsible: false` (ruled 2026-09-18; refusing the combination at the declaration, and warning on it, were both rejected — nobody can depend on a section that cannot be opened). The implication is a renderer rule, never a parse-time rewrite: `{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed `collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not collapse) and beside `group`, whose field group declares the pair. |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse (ruled 2026-08-27): unbound on the standalone form routes, where the predicate would fault open. |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
@@ -545,7 +545,6 @@ Gallery/card view configuration
 | **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
 | **titleField** | `string` | optional | Field to display as card title |
 | **visibleFields** | `string[]` | optional | Fields to display on card body |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most cards the gallery fetches and draws; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 
 ---
@@ -701,7 +700,6 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most records the board fetches across all its lanes; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 
 ---
@@ -792,8 +790,8 @@ Map view configuration
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -803,7 +801,7 @@ Map view configuration
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -817,8 +815,8 @@ Map view configuration
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
-| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
-| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view — the SUBTRACTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the `columns` projection before `fieldOrder` orders the remainder. A name `columns` never projected subtracts nothing. |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view — the ORDERING of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus `hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts LAST, after every listed one, keeping its `columns`-relative order; a name listed here that did not survive orders nothing. |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time. Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
@@ -895,8 +893,8 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | optional | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
 ### Nested Shape: `ListView.userFilters`
 
@@ -929,7 +927,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **pageSize** | `integer` | optional (default: `25`) | Number of records per page |
+| **pageSize** | `integer` | optional (default: `50`) | Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered set is larger than it, show a visible truncation signal saying what is on screen is not the whole set |
 | **pageSizeOptions** | `integer[]` | optional | Available page size options |
 
 ### Nested Shape: `ListView.kanban`
@@ -940,7 +938,6 @@ View filter rule
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most records the board fetches across all its lanes; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 ### Nested Shape: `ListView.calendar`
 
@@ -995,7 +992,6 @@ View filter rule
 | **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
 | **titleField** | `string` | optional | Field to display as card title |
 | **visibleFields** | `string[]` | optional | Fields to display on card body |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most cards the gallery fetches and draws; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 ### Nested Shape: `ListView.timeline`
 
@@ -1007,7 +1003,6 @@ View filter rule
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 ### Nested Shape: `ListView.chart`
 
@@ -1129,7 +1124,7 @@ Tab configuration for multi-tab view interface
 | **label** | `string \| Record<string, string>` | optional | Display label |
 | **icon** | `string` | optional | Tab icon name |
 | **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
 | **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
@@ -1204,8 +1199,8 @@ Tab configuration for multi-tab view interface
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -1214,7 +1209,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1228,8 +1223,8 @@ Tab configuration for multi-tab view interface
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
-| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
-| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view — the SUBTRACTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the `columns` projection before `fieldOrder` orders the remainder. A name `columns` never projected subtracts nothing. |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view — the ORDERING of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus `hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts LAST, after every listed one, keeping its `columns`-relative order; a name listed here that did not survive orders nothing. |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time. Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
@@ -1307,8 +1302,8 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | optional | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
 ### Nested Shape: `ObjectListView.selection`
 
@@ -1331,7 +1326,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **pageSize** | `integer` | optional (default: `25`) | Number of records per page |
+| **pageSize** | `integer` | optional (default: `50`) | Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered set is larger than it, show a visible truncation signal saying what is on screen is not the whole set |
 | **pageSizeOptions** | `integer[]` | optional | Available page size options |
 
 ### Nested Shape: `ObjectListView.kanban`
@@ -1342,7 +1337,6 @@ View filter rule
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most records the board fetches across all its lanes; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 ### Nested Shape: `ObjectListView.calendar`
 
@@ -1397,7 +1391,6 @@ View filter rule
 | **cardSize** | `Enum<'small' \| 'medium' \| 'large'>` | optional (default: `"medium"`) | Card size in gallery view |
 | **titleField** | `string` | optional | Field to display as card title |
 | **visibleFields** | `string[]` | optional | Fields to display on card body |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most cards the gallery fetches and draws; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 ### Nested Shape: `ObjectListView.timeline`
 
@@ -1409,7 +1402,6 @@ View filter rule
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 ### Nested Shape: `ObjectListView.chart`
 
@@ -1531,7 +1523,7 @@ Tab configuration for multi-tab view interface
 | **label** | `string \| Record<string, string>` | optional | Display label |
 | **icon** | `string` | optional | Tab icon name |
 | **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
 | **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
@@ -1603,7 +1595,7 @@ Quick-filter field configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **pageSize** | `integer` | optional (default: `25`) | Number of records per page |
+| **pageSize** | `integer` | optional (default: `50`) | Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered set is larger than it, show a visible truncation signal saying what is on screen is not the whole set |
 | **pageSizeOptions** | `integer[]` | optional | Available page size options |
 
 
@@ -1663,7 +1655,6 @@ Timeline view configuration
 | **groupByField** | `string` | optional | Field to group timeline rows. NO leading or trailing whitespace: the renderer reads this name off every row verbatim, so a padded spelling drops every row into one ungrouped band. |
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
-| **limit** | `integer` | optional (default: `100`) | Row ceiling — the most rows the timeline fetches onto its rail; default 100 when the key is absent. The renderer owes two things: bound its fetch at this number, and, when the ceiling APPLIES (the filtered set is larger than it), show a visible truncation signal saying what is on screen is not the whole set — a bounded view that looks complete is worse than an unbounded one. ⚠️ Not every view kind has a renderer that reads this key yet; which do is recorded on the declaration. |
 
 
 ---
@@ -1807,8 +1798,8 @@ Tab configuration for multi-tab view interface
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -1817,7 +1808,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1831,8 +1822,8 @@ Tab configuration for multi-tab view interface
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
-| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
-| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view — the SUBTRACTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the `columns` projection before `fieldOrder` orders the remainder. A name `columns` never projected subtracts nothing. |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view — the ORDERING of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus `hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts LAST, after every listed one, keeping its `columns`-relative order; a name listed here that did not survive orders nothing. |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time. Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
@@ -1892,8 +1883,8 @@ Tab configuration for multi-tab view interface
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -1902,7 +1893,7 @@ Tab configuration for multi-tab view interface
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1916,8 +1907,8 @@ Tab configuration for multi-tab view interface
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
-| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
-| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view — the SUBTRACTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the `columns` projection before `fieldOrder` orders the remainder. A name `columns` never projected subtracts nothing. |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view — the ORDERING of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus `hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts LAST, after every listed one, keeping its `columns`-relative order; a name listed here that did not survive orders nothing. |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time. Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
@@ -2065,7 +2056,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| … +10 more>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
 ### Allowed Values: `ViewFilterRule.operator`
 
@@ -2132,8 +2123,8 @@ This schema accepts one of the following structures:
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -2143,7 +2134,7 @@ This schema accepts one of the following structures:
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2157,8 +2148,8 @@ This schema accepts one of the following structures:
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
-| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
-| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view — the SUBTRACTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the `columns` projection before `fieldOrder` orders the remainder. A name `columns` never projected subtracts nothing. |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view — the ORDERING of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus `hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts LAST, after every listed one, keeping its `columns`-relative order; a name listed here that did not survive orders nothing. |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time. Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
@@ -2308,8 +2299,8 @@ This schema accepts one of the following structures:
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
-| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -2319,7 +2310,7 @@ This schema accepts one of the following structures:
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[]; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; summarizeField?: string; titleField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2333,8 +2324,8 @@ This schema accepts one of the following structures:
 | **rowHeight** | `Enum<'compact' \| 'short' \| 'medium' \| 'tall' \| 'extra_tall'>` | optional | Row height / density setting |
 | **grouping** | `{ fields: object[] }` | optional | Group records by one or more fields — server-side: the groups and their header numbers come from an aggregate query over the whole filtered set, rows within a group are paged (see GroupingConfigSchema) |
 | **rowColor** | `{ field: string; colors?: Record<string, string> }` | optional | Color rows based on field value |
-| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view |
-| **fieldOrder** | `string[]` | optional | Explicit field display order for this view |
+| **hiddenFields** | `string[]` | optional | Fields to hide in this specific view — the SUBTRACTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: each name listed here is removed from the `columns` projection before `fieldOrder` orders the remainder. A name `columns` never projected subtracts nothing. |
+| **fieldOrder** | `string[]` | optional | Explicit field display order for this view — the ORDERING of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: it sorts what survives `columns` minus `hiddenFields` and never adds a field. A surviving column absent from `fieldOrder` sorts LAST, after every listed one, keeping its `columns`-relative order; a name listed here that did not survive orders nothing. |
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time. Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
@@ -2515,7 +2506,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
 
 ---

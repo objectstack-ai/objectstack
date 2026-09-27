@@ -213,7 +213,17 @@ describe('[#6387] the eight measured cells are REFUSED, in this module’s own e
     // A prototype-borne key is not something an author wrote.
     const spec = Object.create({ $null: 'false' }) as Record<string, unknown>;
     spec.$eq = 'u1';
-    expect(compileScopedFilterToSql({ d: spec } as FilterCondition, ALIAS).sql).toBe('"t"."d" = ?');
+    // [#20018] This used to compile to `"t"."d" = ?`. The scope as a whole is
+    // refused now — by the shared comparand-type face, which runs after this
+    // module's own gates and reads an object whose prototype is not
+    // `Object.prototype` as a VALUE, not as an operator spec (the ObjectQL
+    // execute face refuses it the same way). What this pin is about still
+    // holds, and still discriminates: this module's gates run FIRST, so a flag
+    // gate reading the inherited key would have answered with its own sentence.
+    const err = refusalFor({ d: spec } as FilterCondition);
+    expect(err?.code).toBe('READ_SCOPE_COMPILE_FAILED');
+    expect(String(err?.message)).not.toContain('is not a boolean');
+    expect(String(err?.message)).toContain('carries a comparand the engine refuses');
   });
 });
 

@@ -127,12 +127,12 @@ export interface OpenApiConnectorConfig {
      * (ADR-0049 · #18975). Omitted ⇒ the wrapper's own defaults.
      */
     retryConfig?: RetryConfig;
-    /**
-     * Declared connect deadline (ms). Carried onto the def so `GET /connectors`
-     * reports what the author declared; ⚠️ not enforced — one `fetch` signal
-     * cannot bound the connection phase alone (`connector-fetch-policy.ts`).
-     */
-    connectionTimeoutMs?: number;
+    // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049). It was
+    // accepted here only to be carried onto the def `GET /connectors` echoes:
+    // one `fetch` signal cannot bound the connection phase alone, so it never
+    // reached `connectorFetchOptions` and never bounded a call. Echoing a
+    // deadline nobody keeps is what the retirement withdraws (mirrors
+    // connector-rest).
     /** Per-request deadline (ms) — `resilientFetch`'s per-attempt timeout. */
     requestTimeoutMs?: number;
     /** Injected fetch implementation (defaults to global `fetch`). */
@@ -239,7 +239,6 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
         // the (post-parse) Connector output type (mirrors connector-rest/mcp).
         status: 'active',
         enabled: true,
-        connectionTimeoutMs: config.connectionTimeoutMs ?? 30000,
         requestTimeoutMs: config.requestTimeoutMs ?? 30000,
         ...(config.retryConfig === undefined ? {} : { retryConfig: config.retryConfig }),
         actions,

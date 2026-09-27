@@ -261,7 +261,8 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       // `<ObjectChart drillDown>` above: FormViewSchema is also what a
       // declarative form VIEW parses, and only the react/registry tier
       // measurably reads these. Three registry inputs are deliberately NOT
-      // declared (baselined in react-declaration-parity.baseline.json):
+      // declared (accepted as registry-only by the since-retired ADR-0082 D4
+      // declaration-parity baseline):
       // `initialData` (alias spelling of `initialValues` — aliases are not
       // promoted into spec), `mobile` (internal override, not an authoring
       // surface), `navigateOnSuccess` (parked pending the action-success-

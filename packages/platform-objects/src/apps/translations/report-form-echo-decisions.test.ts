@@ -114,10 +114,12 @@
 //     with `rows`, in the rejection message, and the `order` refinement names
 //     both halves in one live sentence ("name a `rows`/`columns` dimension or a
 //     `values` measure").
-//   • ⭐ AND THE TWO VOCABULARIES ARE ASYMMETRIC, which is why the sentence has
-//     to exist: the alias table that converts them lives on the BLOCK and not
-//     on the top-level report. That asymmetry is asserted as a reading, ⛔ not
-//     repaired here — it is a spec-side edit outside this round's file surface.
+//   • ⭐ AND THE TWO VOCABULARIES ARE DISTINCT, which is why the sentence has to
+//     exist: the schema converts one into the other only in a rejection
+//     message. That alias table lives on the block AND on the top-level report.
+//     This round recorded it on the block only, as a reading it did not
+//     repair; #19822 closed the gap in the spec, and the reading is reversed in
+//     place below.
 //
 // ## ⚠️ The renderings depart from a literal mapping, and the row says why
 //
@@ -629,15 +631,17 @@ describe('#19403 round 9 — the semantic layer, asserted AT THE SCHEMA', () => 
     expect(issueMessages(order)).toContain('name a `rows`/`columns` dimension or a `values` measure');
   });
 
-  it('⚠️ A READING, ⛔ NOT A REPAIR — the alias table is on the BLOCK and not on the top-level report', () => {
-    // The same two keys, the same two target keys, one level apart: the block
-    // answers with the rename, the report answers with a bare unrecognised-key
-    // error. Recorded as a finding in this round's PR, ⛔ not fixed here — it is
-    // an edit to `packages/spec/src/ui/report.zod.ts`, outside this round's file
-    // surface, and it does not discharge any row above.
+  it('⭐ the alias table answers at BOTH levels — the top-level report renames `measures` onto `values` like the block', () => {
+    // The same key, the same target key, one level apart, and now the same
+    // answer: the block and the top-level report both refuse `measures` AND name
+    // `values` in the rejection. This pin used to record the opposite — the
+    // report answered with a bare unrecognised-key error — as a reading this
+    // round did not repair. #19822 closed that gap in
+    // `packages/spec/src/ui/report.zod.ts`, so the reading is reversed in place
+    // rather than deleted. It still discharges no row above.
     const onReport = ReportSchema.safeParse({ ...MINIMAL_REPORT, measures: ['revenue'] });
     expect(onReport.success).toBe(false);
-    expect(issueMessages(onReport)).not.toContain('Did you mean');
+    expect(issueMessages(onReport)).toContain('`measures` → `values`');
     const onBlock = ReportSchema.safeParse({
       name: 'joined_report',
       label: 'Joined',

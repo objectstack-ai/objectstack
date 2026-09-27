@@ -1,0 +1,45 @@
+{
+  "skill_name": "objectstack-data",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create `src/objects/vendor.object.ts` for our vendors: company name, contact email, a status (Active / Inactive), the API key we use to call their system, and the password for their supplier portal.",
+      "expected_output": "Emits `ObjectSchema.create({...})` with a snake_case `name`, an authored `sharingModel` (a publish with none is refused), `label` / `pluralLabel` / `icon`, `nameField`, and fields with snake_case keys and camelCase config properties: `text` (required), `email`, a `select` whose `options` carry lowercase `value`s (`active`, `inactive`), and BOTH credentials as `type: 'secret'` (encrypted at rest) — never `type: 'password'`, which is plaintext at rest on a generic object. No `namespace` or `tableName` key.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["ObjectSchema.create", "sharingModel", "type: 'secret'", "options", "nameField"],
+        "must_not_contain": ["type: 'password'", "namespace:", "vendorName"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Model invoices with line items, and let invoices be tagged with many tags where each tagging records who added it and when.",
+      "expected_output": "Line items: `invoice_line` with a `master_detail` field to `invoice`, `required: true`, `deleteBehavior: 'cascade'` (or `'restrict'` — `set_null` is refused on master_detail), `inlineEdit` on that relationship, and a `summary` roll-up field on the parent. Tagging carries attributes, so it is a junction object (`invoice_tag`) with two `lookup` fields plus `added_by` / `added_at` — not a `multiple: true` lookup (an array of ids) and not a `many_to_many` type, which does not exist.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["master_detail", "deleteBehavior", "inlineEdit", "summary", "lookup"],
+        "must_not_contain": ["many_to_many", "deleteBehavior: 'set_null'"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "On `employee`: email must be unique within each organization, `status` may only move draft → active → terminated, and a `contract_end` earlier than `contract_start` must be rejected.",
+      "expected_output": "Uniqueness is an index, not a validation type: `indexes: [{ fields: ['email'], unique: 'organization' }]` (the scope is stated; `type` / `partial` are retired). The lifecycle is one `state_machine` validation with `field: 'status'`, `transitions: { draft: ['active'], active: ['terminated'], terminated: [] }` and a `message`. The date rule is a `script` validation (inverted: fails when the expression is true) or `cross_field`, written as bare CEL over `record.` with explicit `!= null` guards.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["unique: 'organization'", "state_machine", "transitions", "record."],
+        "must_not_contain": ["type: 'unique'", "partial:"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "On `invoice`, `paid_at` should only appear — and become mandatory — once the status is `paid`, and `total` must lock after payment.",
+      "expected_output": "Declares the rules on the FIELD definitions (they belong to the data model, so every form and API write honours them): `visibleWhen: P`record.status == 'paid'``, `requiredWhen: P`record.status == 'paid'`` on `paid_at`, and `readonlyWhen: P`record.status == 'paid'`` on `total`. Bare CEL with `record.` — never brace-wrapped, never Salesforce syntax, never the removed `conditionalRequired` alias, and not in a form view.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["visibleWhen", "requiredWhen", "readonlyWhen", "record.status"],
+        "must_not_contain": ["conditionalRequired:", "{record."]
+      }
+    }
+  ]
+}

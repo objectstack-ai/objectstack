@@ -270,7 +270,7 @@ describe('#8443 · 2 · a malformed seed body still reaches its author', () => {
         const { seedApplied, body } = await publishDrafts({ malformedSeedBody: true });
 
         expect(seedApplied?.success).toBe(false);
-        expect(seedApplied?.error).toContain('[invalid_metadata]');
+        expect(seedApplied?.error).toContain('failed spec validation');
         // The author learns WHICH key — the whole reason this population may
         // not be blanked. `seeds.0.mode` is the path through the request the
         // loader parses.

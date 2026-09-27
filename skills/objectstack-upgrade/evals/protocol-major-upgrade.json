@@ -1,0 +1,45 @@
+{
+  "skill_name": "objectstack-upgrade",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "把这个项目升级到 v17。objectstack.config.ts 的 manifest 里写着 engines: { protocol: '^16' }。",
+      "expected_output": "Preflight: `--from 16` read off `manifest.engines.protocol` (the floor of the range, never guessed from the installed spec); keep `os validate > .upgrade/validate-before.txt` as the control. Mechanical: `os migrate meta --from 16 --step`, `--json`, and `--out .upgrade/migrated.stack.json` — the command rewrites nothing on disk, so port the printed `path: from → to (conversionId)` edits into the sources, one `conversionId` per commit, then replay `os migrate meta --from 17 --json` until `applied` is `[]`. Acceptance: `os validate` green, `tsc --noEmit` green, and `.upgrade/REPORT.md` with the mechanical table, decided residue, open decisions and pending per-deployment gates.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["os migrate meta --from 16", "--out", "tsc --noEmit", "REPORT.md", "applied"],
+        "must_not_contain": ["sed -i", "--from 17 --apply"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "After bumping @objectstack/spec, tsc fails: `conditionalRequired` does not exist ... [REMOVED] use `requiredWhen`. Just fix it for me.",
+      "expected_output": "Does not hand-write the rewrite: the chain already knows the rename, so it runs `os migrate meta --from <authored major>` to attribute the site to its `conversionId`, ports `requiredWhen` with the value unchanged, and confirms with `tsc --noEmit` (tombstones type the retired key as `never`). It is a decide-alone item (one target, evidence in the repo, being wrong fails a gate). Never adds a tolerant read or `??` alias so the old key keeps loading; finishes with the prose sweep for `conditionalRequired` in READMEs, comments and the project's AI conventions file.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["requiredWhen", "os migrate meta", "conversionId", "tsc --noEmit"],
+        "must_not_contain": ["??"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "The chain dropped `connectors[sap_erp].fieldMappings[].transform` = { type: 'javascript', expression: 'value / 100' }. Decide what to do with it.",
+      "expected_output": "Classifies it as R1 (intent choice): the tombstone names one live target (import-mapping `transform`, a string enum with no `javascript` member) while the real options are import mapping, an ETL step where it actually runs, or delete because the member never executed — so the choice is a business statement and the owner decides. Asks with one message carrying the site, the prescription verbatim, the options and their costs, a recommendation and what will be verified; parks the item in the report as `AWAITING DECISION` and keeps the mechanical layer moving.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["AWAITING DECISION", "owner", "never executed", "transform"],
+        "must_not_contain": ["type: 'javascript'"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "We bumped @objectstack/spec 16 → 17 and `os validate` is green, so there was nothing to upgrade, right? Production also has `sys_metadata` rows written under 16.",
+      "expected_output": "No: `validate` green is necessary, not sufficient — migration-chain-only conversions (16 → 17 has `field-required-notnull-explicit`) reject nothing at parse. Replays `os migrate meta --from 17 --json` and reads `applied` (must be `[]`). Stored rows rehydrate through `applyConversionsToStoredItem` at read time; to make it durable runs `os migrate meta --stored` (read-only) then `os migrate meta --stored --apply --yes` (`--yes` is mandatory in a non-TTY), and never hand-edits `sys_metadata`. Any per-deployment data-migration gates the run prints go into the report as pending, by name.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["applied", "--stored", "--yes", "field-required-notnull-explicit", "applyConversionsToStoredItem"],
+        "must_not_contain": ["UPDATE sys_metadata"]
+      }
+    }
+  ]
+}

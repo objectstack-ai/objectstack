@@ -9,7 +9,6 @@ import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
 import { retiredKey } from '../shared/retired-key';
-import { AssembledPackageBodySchema } from '../stack.zod';
 
 /**
  * # Package API Protocol
@@ -21,14 +20,35 @@ import { AssembledPackageBodySchema } from '../stack.zod';
  * @example Endpoints
  * ```
  * POST   /api/v1/packages                      — Install a package
- * POST   /api/v1/packages/upgrade              — Upgrade a package
- * POST   /api/v1/packages/resolve-dependencies — Resolve dependencies
- * POST   /api/v1/packages/upload               — Upload an artifact
  * GET    /api/v1/packages                      — List installed packages
  * GET    /api/v1/packages/:packageId           — Get package details
  * POST   /api/v1/packages/:packageId/rollback  — Rollback a package
  * DELETE /api/v1/packages/:packageId           — Uninstall a package
  * ```
+ *
+ * ## Five declarations of this API live one file over, on purpose
+ *
+ * The two READ responses (`ListInstalledPackagesResponseSchema`,
+ * `GetInstalledPackageResponseSchema`), the installed-row stages they are bound
+ * to (`AssembledInstalledPackageSchema`, `InstalledPackageAtEitherStageSchema`)
+ * and the `PackageApiContracts` map that names both responses are declared in
+ * `./package-api-assembled.zod.ts` and published from
+ * `@objectstack/spec/api-assembled`, not from `@objectstack/spec/api`.
+ *
+ * The reason is weight, not meaning. Four of them carry the ASSEMBLED package
+ * body (the fifth, the route map, names two of those four), which is the whole
+ * metadata vocabulary (`../stack.zod`) plus the datasource and driver-config
+ * validators behind it. While they sat in this
+ * file, every `@objectstack/spec/api` bundle linked that tree, and a browser
+ * consumer that imported two string constants from `./sortability.zod` paid
+ * for all of it: measured at about twice the gzipped bundle of the same import
+ * before the stage declarations arrived. The maintainer ruling on #18576
+ * (letter B) split the entry so the browser-facing half does not carry them.
+ *
+ * ⛔ Nothing in this file may import `../stack.zod` or anything that reaches
+ * `../data/datasource.zod`: that edge is exactly what the split removed from
+ * `@objectstack/spec/api`, and `./api-entry-graph.pin.test.ts` refuses it.
+ * A declaration that needs the assembled body goes in the sibling file.
  */
 
 // ==========================================
@@ -43,142 +63,6 @@ export const PackagePathParamsSchema = lazySchema(() => z.object({
   packageId: z.string().describe('Package identifier'),
 }));
 export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
-
-// ==========================================
-// Installed Package Rows — the two declared manifest STAGES
-// ==========================================
-
-/**
- * One installed-package row whose `manifest` is the ASSEMBLED package body —
- * the assembled-stage counterpart of {@link InstalledPackageSchema}.
- *
- * ## The stage this exists to name
- *
- * `InstalledPackageSchema.manifest` is `ManifestSchema`, the AUTHORING stage:
- * its `objects` is `z.array(z.string())`, GLOB PATTERNS naming files a
- * file-based loader should read. What a `defineStack()` host installs is the
- * ASSEMBLED body, whose `objects` are object DEFINITIONS — `ObjectQL.registerApp`
- * is handed exactly that and iterates it into `registerObject(objDef, …)`, and
- * `SchemaRegistry.installPackage` records what it was handed. So the read doors
- * serve rows the authoring declaration refuses, with a single surviving reason:
- * the manifest stage.
- *
- * That is the mismatch #14242 identified one layer down, and this declaration
- * follows its ruling rather than re-deriving one. The maintainer's decision
- * (2026-09-02, road B), quoted at `ArtifactPackageSchema` in `../stack.zod`,
- * was to «declare the assembled stage rather than widen the authoring one».
- * ⛔ Widening `ManifestSchema.objects` into a union of both spellings was road
- * C and was REJECTED by name: a union AT THE KEY makes neither stage checkable,
- * which is the tolerate-at-the-consumer shape Prime Directive #12 refuses. So
- * `ManifestSchema` is untouched here — still `strictObject`, still globs — and
- * the assembled stage gets its own name, built from `AssembledPackageBodySchema`
- * (#14242's own declaration) rather than a second transcription of it.
- *
- * The body half is deliberately typed `Record<string, unknown>`; the reason is
- * recorded at `AssembledPackageBodySchema` and is not repeated here. The RUNTIME
- * schema still carries the manifest's every field plus every collection's full
- * declaration, so a wrong-shaped body is refused exactly as it is there — with
- * the one measured exception {@link AssembledPackageRecordBodySchema} states
- * and pins.
- */
-/**
- * The assembled package body AS THE REGISTRY RECORDS IT — the same declaration,
- * with the two collections that have no JSON form left unchecked.
- *
- * ## Why this exists at all, measured rather than assumed
- *
- * `SchemaRegistry.installPackage` does not store the caller's object; it stores
- * `toRecordManifest(manifest)`, a structural JSON projection that DROPS
- * functions, class instances, `Map`, `Set` and every other exotic value. So the
- * row this API serves is JSON by construction, and two of the assembled body's
- * 55 collections cannot survive that projection in the shape they declare:
- *
- * - `functions` — a `z.function()` branch (a named callable);
- * - `hooks` — a `z.custom()` branch (a lifecycle handler).
- *
- * Those same two are the reason `AssembledPackageBodySchema` has NO JSON Schema
- * at all: `z.toJSONSchema` refuses a function and a custom type, which is also
- * why `ArtifactPackageSchema` and `ObjectStackDefinitionSchema` publish none.
- * Embedding the body verbatim in the two published response schemas below made
- * BOTH of them disappear from `json-schema/api/`, which the build's own
- * disappearance ratchet refuses and whose only other remedy is retiring two
- * published defs. `build-schemas.ts` names the remedy taken here instead:
- * «make it emit — narrow the unrepresentable member».
- *
- * ⛔ The override set is NOT hand-picked, and must never become so. It is the
- * measured set of shape members with no JSON form, pinned key-by-key in
- * `./package-api.test.ts`: a new collection with no JSON form reddens there,
- * naming itself, instead of silently unpublishing these responses again.
- *
- * ⚠️ What `unknown` costs, stated plainly: on THIS surface those two keys are
- * accepted without being checked. It is a widening from today, where both are
- * refused outright by `ManifestSchema`'s strict close while the door really can
- * serve them — so the declaration moves from wrong to incomplete, never from
- * checked to tolerant. Every other key, `objects` included, is checked at the
- * assembled stage exactly as `AssembledPackageBodySchema` declares it. The
- * ARTIFACT surface is untouched and keeps both collections fully declared.
- */
-const AssembledPackageRecordBodySchema = lazySchema(() =>
-  (AssembledPackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
-    functions: z.unknown().optional()
-      .describe('Named handler functions, as they survived the record JSON projection'),
-    hooks: z.unknown().optional()
-      .describe('Object lifecycle hooks, as they survived the record JSON projection'),
-  }).describe('One package as assembled, as the registry RECORDS it (JSON only)'));
-
-export const AssembledInstalledPackageSchema = lazySchema(() => InstalledPackageSchema.extend({
-  manifest: AssembledPackageRecordBodySchema.describe('The ASSEMBLED package body this row carries'),
-}).describe('Installed package row whose manifest is the assembled package body'));
-export type AssembledInstalledPackage = z.input<typeof AssembledInstalledPackageSchema>;
-/** Post-parse shape of {@link AssembledInstalledPackage} — defaults applied, transforms run (ADR-0122). */
-export type AssembledInstalledPackageParsed = z.infer<typeof AssembledInstalledPackageSchema>;
-
-/**
- * One installed-package row at WHICHEVER manifest stage it was installed at —
- * the element the read doors (`GET /packages`, `GET /packages/:id`) serve.
- *
- * ## Why this surface names BOTH stages, where the artifact names one
- *
- * #14242 bound the artifact's `packages[]` to the assembled stage ALONE, and
- * its stated reason is a property of that surface: «a glob in a compiled
- * artifact names files nobody will read». The installed-packages table is not
- * a compiled artifact. It is the record of what was installed, and BOTH stages
- * reach it through DECLARED doors:
- *
- * - {@link PackageInstallRequestSchema} declares `manifest: ManifestSchema` —
- *   the AUTHORING stage — and `POST /packages` hands that body straight to
- *   `SchemaRegistry.installPackage`, which stores a JSON projection of it;
- * - a `defineStack()` host reaches the same table through
- *   `ObjectQL.registerApp`, which installs the ASSEMBLED body.
- *
- * ⇒ a read contract naming only the assembled stage would refuse a row this
- * API's own install contract is declared to produce. Naming only the authoring
- * stage is the defect this declaration closes. So the row is declared as what
- * it is: one of two stages, each named by its own closed declaration.
- *
- * ## ⛔ This is a union of two whole STAGES, never a tolerant shape
- *
- * Road C's defect was a union INSIDE a key: `objects: (string | ObjectDef)[]`
- * describes no stage, and admits an array that mixes globs with definitions.
- * This union is over two complete, closed declarations, so every parse is a
- * FULL parse of one coherent stage and a body belonging to neither — a mixed
- * `objects` array among them — is refused by both branches and therefore by
- * this schema. That refusal is pinned in
- * `packages/runtime/src/domains/packages-read-delete-response-conformance.test.ts`,
- * beside the two doors, so «it accepts both» can never quietly become «it
- * accepts anything».
- *
- * ⛔ Never relax either branch to make a payload fit. A row that parses through
- * neither stage is a producer defect, and this is the declaration that has to
- * keep saying so.
- */
-export const InstalledPackageAtEitherStageSchema = lazySchema(() => z.union([
-  InstalledPackageSchema,
-  AssembledInstalledPackageSchema,
-]).describe('Installed package row at whichever manifest stage it was installed at'));
-export type InstalledPackageAtEitherStage = z.input<typeof InstalledPackageAtEitherStageSchema>;
-/** Post-parse shape of {@link InstalledPackageAtEitherStage} — defaults applied, transforms run (ADR-0122). */
-export type InstalledPackageAtEitherStageParsed = z.infer<typeof InstalledPackageAtEitherStageSchema>;
 
 // ==========================================
 // 2. List Packages (GET /api/v1/packages)
@@ -259,27 +143,8 @@ export type ListInstalledPackagesRequest = z.input<typeof ListInstalledPackagesR
 /** Post-parse shape of {@link ListInstalledPackagesRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListInstalledPackagesRequestParsed = z.infer<typeof ListInstalledPackagesRequestSchema>;
 
-/**
- * Response for listing installed packages.
- */
-export const ListInstalledPackagesResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    packages: z.array(InstalledPackageAtEitherStageSchema).describe('Installed packages'),
-    total: z.number().int().optional().describe('Total matching packages'),
-    nextCursor: z.string().optional().describe('Cursor for the next page'),
-    // The door sends a constant `false` here, and since #17667 removed the
-    // request half that is TRUE BY CONSTRUCTION rather than merely convenient:
-    // with no `limit` and no `cursor` to ask with, nothing can request a page,
-    // so there is never a next one to announce and `nextCursor` stays absent.
-    // ⛔ Do not "fix" the constant back into a computed value without first
-    // restoring a request-side way to ask for a page — a `true` nobody can act
-    // on is the same defect this card closed, pointing the other way.
-    hasMore: z.boolean().describe('Whether more packages are available — this door serves one page, so always `false`'),
-  }),
-}).describe('List installed packages response'));
-export type ListInstalledPackagesResponse = z.input<typeof ListInstalledPackagesResponseSchema>;
-/** Post-parse shape of {@link ListInstalledPackagesResponse} — defaults applied, transforms run (ADR-0122). */
-export type ListInstalledPackagesResponseParsed = z.infer<typeof ListInstalledPackagesResponseSchema>;
+// The response half, `ListInstalledPackagesResponseSchema`, is declared in
+// `./package-api-assembled.zod.ts` — its rows carry the assembled package body.
 
 // ==========================================
 // 3. Get Package (GET /api/v1/packages/:packageId)
@@ -313,15 +178,8 @@ export const GetInstalledPackageRequestSchema = lazySchema(() => PackagePathPara
 }).describe('Get installed package request'));
 export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageRequestSchema>;
 
-/**
- * Response for getting a single installed package.
- */
-export const GetInstalledPackageResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: InstalledPackageAtEitherStageSchema.describe('Installed package details'),
-}).describe('Get installed package response'));
-export type GetInstalledPackageResponse = z.input<typeof GetInstalledPackageResponseSchema>;
-/** Post-parse shape of {@link GetInstalledPackageResponse} — defaults applied, transforms run (ADR-0122). */
-export type GetInstalledPackageResponseParsed = z.infer<typeof GetInstalledPackageResponseSchema>;
+// The response half, `GetInstalledPackageResponseSchema`, is declared in
+// `./package-api-assembled.zod.ts` — its row carries the assembled package body.
 
 // ==========================================
 // 4. Install Package (POST /api/v1/packages)
@@ -351,9 +209,10 @@ export type GetInstalledPackageResponseParsed = z.infer<typeof GetInstalledPacka
  * read. That is the only stage this HTTP door is reached at: the ASSEMBLED
  * stage reaches the same table through `ObjectQL.registerApp`, never over this
  * wire. The read doors serve rows from BOTH and say so by name
- * ({@link InstalledPackageAtEitherStageSchema}); the write door serves one and
- * says so here. ⛔ Naming one stage on a surface reached at two, or two on a
- * surface reached at one, is the same defect in opposite directions.
+ * (`InstalledPackageAtEitherStageSchema`, in `./package-api-assembled.zod.ts`);
+ * the write door serves one and says so here. ⛔ Naming one stage on a surface
+ * reached at two, or two on a surface reached at one, is the same defect in
+ * opposite directions.
  *
  * @example POST /api/v1/packages
  * { manifest: {...}, platformVersion: '3.2.0', enableOnInstall: true, overwrite: true }
@@ -369,25 +228,60 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
   /**
    * Whether to enable the package immediately after install.
    *
+   * ## ⭐ THREE STATES, and absence is one of them — that is why it is
+   * `optional()` and NOT `.default(true)`
+   *
+   * - `true`  — the row is ENABLED after this install, existing or fresh.
+   * - `false` — the row is DISABLED after this install: present-but-not-active,
+   *   and the disable survives a restart.
+   * - ABSENT  — the row KEEPS ITS CURRENT LIFECYCLE STATE. No lifecycle call is
+   *   made at all, so a package an operator disabled stays disabled across an
+   *   upgrade or a re-install. A FRESH id has no state to keep and lands
+   *   ENABLED, which is the registry's own new-row value, ⛔ not a default
+   *   this declaration applies.
+   *
+   * ⭐ 「缺省 = 保持，有旗 = 设置」 — ruled in maintainer batch #157 item 5
+   * letter C and implemented at the door (`packages/runtime/src/domains/packages.ts`),
+   * which reads the raw body and makes NO lifecycle call when the key is
+   * absent. The declaration followed in batch #210 item 4 letter A.
+   *
+   * ⛔ `.default(true)` is what this key may never go back to, and the reason
+   * is mechanical rather than stylistic: a default RESOLVES absence at parse
+   * time, so a parsed request that omitted the key becomes byte-identical to
+   * one that set `true`, and the third state stops existing on the published
+   * surface while the door still honours it — 「declared ≠ enforced」 on a
+   * contract this repo does not own both ends of.
+   *
+   * ⛔ Nor may the key be made to MEAN nothing in the name of making absence
+   * visible: the `true` and `false` arms are unchanged by that ruling and are
+   * re-read as such in `package-install-one-authority.test.ts`.
+   *
    * ## ⭐ THE ONE AUTHORITY for this key, and the map to the other two
    *
    * `enableOnInstall` is declared in three published schemas. This one is the
    * authority, because it is the request contract of the door that HONOURS it:
-   * `POST /api/v1/packages` writes the registry row's `enabled` from
-   * `enableOnInstall ?? true`, through the same registry flip and durable
-   * state write `PATCH /packages/:id/disable` uses
-   * (`packages/runtime/src/domains/packages.ts`). A `false` here installs the
-   * package present-but-not-active and survives a restart; `true` and absent
-   * install it enabled, which is this declaration's default.
+   * `POST /api/v1/packages` moves the registry row through the same registry
+   * flip and durable state write `PATCH /packages/:id/enable` and
+   * `PATCH /packages/:id/disable` use.
    *
    * The other two are re-read here so a reader never has to guess which of
    * three identical-looking declarations governs:
    *
    * - `InstallPackageRequestSchema` (`src/kernel/package-registry.zod.ts`) —
    *   **a COPY of this key**, restated on the in-process protocol primitive
-   *   `ObjectStackProtocol.installPackage`. Same type, same default, same
-   *   meaning; its own implementation does not read it, and this door does not
-   *   forward it down that seam. Held to this declaration by
+   *   `ObjectStackProtocol.installPackage`. Same type, same optionality, same
+   *   meaning; its own implementation HONOURS it on the REGISTRY ROW —
+   *   `true` enables, `false` disables, an ABSENT key makes no lifecycle
+   *   call at all, the same three states this door implements
+   *   (`packages/metadata-protocol/src/protocol.ts`, the `requestedEnabled`
+   *   arms). The DURABLE half is not that seam's to write: the
+   *   disabled-package record is keyed by ENVIRONMENT, which an
+   *   `InstallPackageRequest` does not carry — which is also why this door
+   *   still does not forward the key down that seam. It calls
+   *   `installPackage({ manifest, settings })` and performs the
+   *   enable/disable flip itself, so the record that survives a restart
+   *   follows the row this door returned rather than the request's intent.
+   *   Held to this declaration by
    *   `package-install-one-authority.test.ts`, not by an import: the authority
    *   sits above `kernel/` in the module graph, so a `…Schema.shape.…`
    *   reference from there is a cycle that dies under `OS_EAGER_SCHEMAS=1`.
@@ -396,13 +290,15 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
    *   listing, its door is the control plane's `POST /api/v1/marketplace/install`,
    *   and its `enableOnInstall` is what a caller asks the marketplace channel
    *   to request on its behalf, one translation upstream of this one. It stays
-   *   a declaration of its own and says why at its own site.
+   *   a declaration of its own and says why at its own site. Its 缺省 cell moved
+   *   with the other two so the matrix stays readable as one row per state, ⛔
+   *   not because the key was folded.
    *
    * ⛔ Never unify the three silently, in either direction: two of them are
    * one commitment and the third is a different party's.
    */
-  enableOnInstall: z.boolean().default(true)
-    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: the installed row\'s `enabled` is written from this key'),
+  enableOnInstall: z.boolean().optional()
+    .describe('Whether to enable immediately after install — honoured at POST /api/v1/packages: `true` enables the installed row, `false` disables it, and ABSENT keeps the row\'s current lifecycle state (a fresh install lands enabled)'),
 
   /**
    * Opt back in to overwriting an already-installed package id.
@@ -450,16 +346,22 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *
  * ⚠️ What those two drives post is NOT covered by this branch, and saying so
  * is the point. Measured: `{ id, name: id, namespace, version: '1.0.0' }` and
- * `{ id: 'pkg-a', name: 'A' }` are both refused here (`invalid_union`) because
- * neither carries `type`, and the second carries no `version` either. They are
- * bare in FORM and incomplete in CONTENT — the form is declared, the content
- * is part of the residual below, and they are pinned as REFUSED in
+ * `{ id: 'com.example.pkg-a', name: 'A', version: '1.0.0' }` are both refused
+ * here (`invalid_union`) on `type` alone, and the door answers both `201` (the
+ * second on the `?overwrite=true` limb of its duplicate-id case). The second
+ * was repaired twice, each time by the PR that made the door parse the leg it
+ * broke: PR #19326 gave it the `version` it lacked (clause 1a below), and
+ * PR #19473 replaced its id `pkg-a`, which `MANIFEST_ID_PATTERN` refuses. The
+ * door answers that old body `400` now, so it is no part of the residual. They
+ * are bare in FORM and incomplete in CONTENT — the form is declared, the
+ * content is part of the residual below, and they are pinned as REFUSED in
  * `package-api.test.ts` rather than dressed up as green fixtures.
  *
  * ## The two branches are disjoint — but only ONE of them is closed
  *
  * Every parse is a FULL parse of ONE coherent form, the discipline
- * {@link InstalledPackageAtEitherStageSchema} records on the read side. The
+ * `InstalledPackageAtEitherStageSchema` (`./package-api-assembled.zod.ts`)
+ * records on the read side. The
  * two are disjoint by construction — `ManifestSchema` is a `strictObject`
  * with no `manifest` key, so a wrapped body can never fall through to the bare
  * branch, and a bare manifest has no `manifest` key, so it can never satisfy
@@ -482,9 +384,18 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *
  * This is a SUBSET description of the live door, deliberately. Measured
  * through `HttpDispatcher.handlePackages`, the door additionally answers `201`
- * to five classes this schema refuses:
+ * to five classes this schema refuses — class 1 in its `type` half only,
+ * since PR #19326:
  *
- * 1. a manifest missing `type` and/or `version` (both door drives above);
+ * 1. a manifest missing `type` or `version` — recorded as one class until
+ *    PR #19326, split since, because its two halves no longer answer alike:
+ *    - 1a. missing `version` — ✅ CLOSED by PR #19326, no longer residual: the
+ *      door parses `ManifestSchema.shape.version` by reference and answers
+ *      `400` / `VALIDATION_ERROR` without installing, so declaration and door
+ *      agree (door-side pin:
+ *      `packages/runtime/src/domains/packages-install-manifest-version.test.ts`);
+ *    - 1b. missing `type` — still OPEN, answered `201` (both door drives
+ *      above);
  * 2. unknown keys on either form — refused by name on the bare branch,
  *    silently dropped on the wrapped one, `201` either way;
  * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
@@ -535,13 +446,14 @@ export type PackageInstallResponse = z.input<typeof PackageInstallResponseSchema
 export type PackageInstallResponseParsed = z.infer<typeof PackageInstallResponseSchema>;
 
 // ==========================================
-// 5. Upgrade Package (POST /api/v1/packages/upgrade)
+// 5. Upgrade Package (request/response shapes — bound to no route, see `PackageApiContracts` in ./package-api-assembled.zod.ts)
 // ==========================================
 
 /**
- * Request body for upgrading a package.
+ * Request body for upgrading a package. No route accepts it — see the note in
+ * `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/upgrade
+ * @example
  * { packageId: 'com.acme.crm', targetVersion: '2.0.0', createSnapshot: true }
  */
 export const PackageUpgradeRequestSchema = lazySchema(() => z.object({
@@ -601,13 +513,14 @@ export type PackageUpgradeResponse = z.input<typeof PackageUpgradeResponseSchema
 export type PackageUpgradeResponseParsed = z.infer<typeof PackageUpgradeResponseSchema>;
 
 // ==========================================
-// 6. Resolve Dependencies (POST /api/v1/packages/resolve-dependencies)
+// 6. Resolve Dependencies (request/response shapes — bound to no route, see `PackageApiContracts` in ./package-api-assembled.zod.ts)
 // ==========================================
 
 /**
- * Request body for resolving package dependencies.
+ * Request body for resolving package dependencies. No route accepts it — see the
+ * note in `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/resolve-dependencies
+ * @example
  * { manifest: {...}, platformVersion: '3.2.0' }
  */
 export const ResolveDependenciesRequestSchema = lazySchema(() => z.object({
@@ -633,14 +546,14 @@ export type ResolveDependenciesResponse = z.input<typeof ResolveDependenciesResp
 export type ResolveDependenciesResponseParsed = z.infer<typeof ResolveDependenciesResponseSchema>;
 
 // ==========================================
-// 7. Upload Artifact (POST /api/v1/packages/upload)
+// 7. Upload Artifact (request/response shapes — bound to no route, see `PackageApiContracts` in ./package-api-assembled.zod.ts)
 // ==========================================
 
 /**
- * Request body for uploading a package artifact.
+ * Request body for uploading a package artifact. No route accepts it — see the
+ * note in `PackageApiContracts`.
  *
- * @example POST /api/v1/packages/upload
- * Content-Type: multipart/form-data
+ * @example
  * { artifact: <metadata>, file: <binary> }
  */
 export const UploadArtifactRequestSchema = lazySchema(() => z.object({
@@ -790,66 +703,3 @@ export const PackageApiErrorCode = z.enum([
   'upload_failed',
 ]);
 export type PackageApiErrorCode = z.input<typeof PackageApiErrorCode>;
-
-// ==========================================
-// 11. Package API Contract Registry
-// ==========================================
-
-/**
- * Standard Package API contracts map.
- * Used for generating SDKs, documentation, and route registration.
- */
-export const PackageApiContracts = {
-  listPackages: {
-    method: 'GET' as const,
-    path: '/api/v1/packages',
-    input: ListInstalledPackagesRequestSchema,
-    output: ListInstalledPackagesResponseSchema,
-  },
-  getPackage: {
-    method: 'GET' as const,
-    path: '/api/v1/packages/:packageId',
-    input: GetInstalledPackageRequestSchema,
-    output: GetInstalledPackageResponseSchema,
-  },
-  // `installPackage` REBOUND (#18058) — it named `/api/v1/packages/install`,
-  // a path the composed runtime mounts nowhere (the dispatcher answers
-  // `handled=false`; `packages/rest` mounts only `/packages/publish`). The
-  // serving install door is the bare `POST /api/v1/packages`, and its body is
-  // declared at BOTH the forms it accepts — see `PackageInstallBodySchema`.
-  installPackage: {
-    method: 'POST' as const,
-    path: '/api/v1/packages',
-    input: PackageInstallBodySchema,
-    output: PackageInstallResponseSchema,
-  },
-  upgradePackage: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/upgrade',
-    input: PackageUpgradeRequestSchema,
-    output: PackageUpgradeResponseSchema,
-  },
-  resolveDependencies: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/resolve-dependencies',
-    input: ResolveDependenciesRequestSchema,
-    output: ResolveDependenciesResponseSchema,
-  },
-  uploadArtifact: {
-    method: 'POST' as const,
-    path: '/api/v1/packages/upload',
-    input: UploadArtifactRequestSchema,
-    output: UploadArtifactResponseSchema,
-  },
-  // `rollbackPackage` RETIRED (#12038 3A) — it bound the version-rollback
-  // schemas to the live `/api/v1/packages/:packageId/rollback` path, which
-  // actually serves the ADR-0067 COMMIT rollback (`rollbackToPackageCommit`).
-  // The live route's true contract is `RollbackToPackageCommitResponseSchema`
-  // (`./package-lifecycle.zod`), named by its route-ledger row.
-  uninstallPackage: {
-    method: 'DELETE' as const,
-    path: '/api/v1/packages/:packageId',
-    input: UninstallPackageApiRequestSchema,
-    output: UninstallPackageApiResponseSchema,
-  },
-};

@@ -147,10 +147,11 @@ export function assertListComparandShapes(
  *
  * WHY AT THIS SEAM AND NOT ONLY AT INGRESS: #7095 had to add
  * `assertOrderByIsMaterializable` inside this package because a saved report's
- * `query.orderBy` is forwarded verbatim into `engine.find` and never passes the
- * REST door. Filters travel the SAME path — `plugin-reports`' `executeReport`
- * calls `this.engine.find(report.object_name, { where: q.filter, … })` — so an
- * ingress-only fix would have left the author-reachable half open. This gate
+ * `query.orderBy` was forwarded verbatim into `engine.find` and never passed the
+ * REST door. Filters traveled the SAME path — the saved-report executor (the
+ * stack was retired in #20102) handed `q.filter` to the engine's `find` as its
+ * `where`, and a flow node's `config.filter` still does — so an ingress-only fix
+ * would have left the author-reachable half open. This gate
  * runs inside `lowerWhereFilterArray`, the one seam EVERY caller-supplied
  * `where` passes through (`find` / `findOne` / `count` / `aggregate` / `update`
  * / `delete`), which is what makes a new verb unable to miss it by omission.

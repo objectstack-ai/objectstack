@@ -45,7 +45,7 @@ const HONOURED_STATE_STRATEGIES = ['memory', 'none'] as const;
  */
 const RETIRED_STATE_STRATEGY_GUIDANCE =
   "'disk' and 'distributed' were removed from HotReloadConfig.stateStrategy in "
-  + '@objectstack/spec 18 (ADR-0049 enforce-or-remove) — neither was ever '
+  + '@objectstack/spec 17.3.0 (ADR-0049 enforce-or-remove) — neither was ever '
   + "implemented. Both wrote to the same in-memory Map as 'memory' and reported it "
   + 'only at debug level, so a host that asked for durable or cluster-replicated '
   + 'state got process-local memory and no error. '
@@ -113,7 +113,7 @@ const RETIRED_HOT_RELOAD_KEYS: ReadonlyArray<readonly [string, string]> = [
   [
     'distributedConfig',
     "'distributedConfig' was removed from "
-    + 'HotReloadConfig in @objectstack/spec 18 (ADR-0049 '
+    + 'HotReloadConfig in @objectstack/spec 17.3.0 (ADR-0049 '
     + 'enforce-or-remove) — nothing ever read it. A provider, endpoints, a key '
     + 'prefix, a TTL and a replication factor could all be declared and no '
     + "connection was ever opened. It left with the stateStrategy: 'distributed' "
@@ -122,7 +122,7 @@ const RETIRED_HOT_RELOAD_KEYS: ReadonlyArray<readonly [string, string]> = [
   ],
   [
     'watchPatterns',
-    "'watchPatterns' was removed from HotReloadConfig in @objectstack/spec 18 "
+    "'watchPatterns' was removed from HotReloadConfig in @objectstack/spec 17.3.0 "
     + '(ADR-0049 enforce-or-remove) — nothing ever read it. Its only two '
     + 'uses were log lines: no watcher was ever constructed from it, so an author '
     + 'could declare a glob and no file change ever triggered a reload. File '
@@ -340,7 +340,7 @@ export class HotReloadManager {
       + '`HotReloadManager.scheduleReload(pluginName, reloadFn)` when a file '
       + 'changes — that is the debounced integration point this class does '
       + 'implement. `HotReloadConfig.watchPatterns` was removed in '
-      + '@objectstack/spec 18 for the same reason; declare your globs where '
+      + '@objectstack/spec 17.3.0 for the same reason; declare your globs where '
       + 'your watcher reads them.'
     );
   }

@@ -36,7 +36,7 @@ monitor.registerPlugin('my-plugin', {
   successThreshold: 1,       // Mark healthy after 1 success
 });
 // The monitor REPORTS; it does not act. `autoRestart`, `maxRestartAttempts`
-// and `restartBackoff` were removed in @objectstack/spec 18 (ADR-0049) because
+// and `restartBackoff` were removed in @objectstack/spec 17.3.0 (ADR-0049) because
 // nothing ever restarted a plugin — poll the two calls below instead and act
 // at the level that owns the plugin's lifetime.
 
@@ -78,7 +78,7 @@ hotReload.registerPlugin('my-plugin', {
 });
 
 // File watching is the host's job: `watchPatterns` was removed in
-// @objectstack/spec 18 (ADR-0049) because no watcher was ever constructed. Run
+// @objectstack/spec 17.3.0 (ADR-0049) because no watcher was ever constructed. Run
 // your own watcher, declare your globs where it reads them, and call
 // `hotReload.scheduleReload('my-plugin', reloadFn)` when a change matches —
 // that is the debounced integration point this class does implement.

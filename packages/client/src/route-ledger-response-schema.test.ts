@@ -4,7 +4,8 @@
  * `responseSchema` resolution guard (#5791, first step of #3877).
  *
  * WHAT THE FIELD IS. Every route ledger's entry type now carries an optional
- * `responseSchema` — the NAME of the `@objectstack/spec/api` export declaring
+ * `responseSchema` — the NAME of the `@objectstack/spec/api` (or, since
+ * #18576, `@objectstack/spec/api-assembled`) export declaring
  * that route's response payload. #3877 measured the hole it opens onto: of 237
  * ledgered routes, 215 are `sdk` surface and **zero** carried any schema
  * reference, so for ~90% of the mounted surface the problem was never
@@ -17,7 +18,8 @@
  * rots the same way with no edit at all. That is the "declared but nobody
  * verifies" surface #3877 exists to remove, so the field could not land without
  * the resolver that refuses it. Each name is looked up in the LIVE
- * `@objectstack/spec/api` export namespace and required to be a real zod
+ * `@objectstack/spec/api` + `@objectstack/spec/api-assembled` export namespaces
+ * and required to be a real zod
  * schema, exercised rather than duck-typed.
  *
  * WHY HERE, of all packages. The five ledgers are five independent declarations
@@ -41,6 +43,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as specApi from '@objectstack/spec/api';
+import * as specApiAssembled from '@objectstack/spec/api-assembled';
 import { ROUTE_LEDGER } from '../../runtime/src/route-ledger';
 import { REST_ROUTE_LEDGER } from '../../rest/src/rest-route-ledger';
 import { STORAGE_ROUTE_LEDGER } from '../../services/service-storage/src/storage-route-ledger';
@@ -68,7 +71,18 @@ function declaredRows(): Array<{ ledger: string; route: string; responseSchema: 
   );
 }
 
-const exportsOfSpecApi = specApi as unknown as Record<string, unknown>;
+/**
+ * The API protocol's exports, across BOTH entries that publish it. Since the
+ * #18576 ruling (letter B) the declarations whose payload embeds the assembled
+ * package body — the two package READ responses among them — ship from
+ * `@objectstack/spec/api-assembled` instead of `@objectstack/spec/api`, so a
+ * ledger row naming one of them resolves there. The two entries share no name
+ * (pinned below), so the union cannot hide which one answered.
+ */
+const exportsOfSpecApi = {
+  ...(specApi as unknown as Record<string, unknown>),
+  ...(specApiAssembled as unknown as Record<string, unknown>),
+} as Record<string, unknown>;
 
 /**
  * The resolver under test, extracted so the negative control below can drive
@@ -84,7 +98,7 @@ const exportsOfSpecApi = specApi as unknown as Record<string, unknown>;
 function resolutionFailure(name: string): string | undefined {
   if (name.trim() === '') return 'is empty';
   if (!Object.prototype.hasOwnProperty.call(exportsOfSpecApi, name)) {
-    return 'is not an export of `@objectstack/spec/api`';
+    return 'is not an export of `@objectstack/spec/api` or `@objectstack/spec/api-assembled`';
   }
   const candidate = exportsOfSpecApi[name] as { safeParse?: (v: unknown) => unknown };
   if (typeof candidate?.safeParse !== 'function') return 'is exported but is not a zod schema';
@@ -94,7 +108,7 @@ function resolutionFailure(name: string): string | undefined {
 }
 
 describe('[#5791] every ledgered `responseSchema` names a real spec schema', () => {
-  it('resolves each declared name against the live `@objectstack/spec/api` exports', () => {
+  it('resolves each declared name against the live `@objectstack/spec/api` / `/api-assembled` exports', () => {
     const broken = declaredRows()
       .map(({ ledger, route, responseSchema }) => {
         const why = resolutionFailure(responseSchema);
@@ -105,7 +119,7 @@ describe('[#5791] every ledgered `responseSchema` names a real spec schema', () 
     expect(
       broken,
       'Ledger rows whose `responseSchema` does not resolve to a zod schema exported from '
-        + '`@objectstack/spec/api`. Fix the name, or drop the field — an unresolvable '
+        + '`@objectstack/spec/api` or `@objectstack/spec/api-assembled`. Fix the name, or drop the field — an unresolvable '
         + 'declaration is worse than none (#3877).',
     ).toEqual([]);
   });
@@ -128,7 +142,7 @@ describe('[#5791] every ledgered `responseSchema` names a real spec schema', () 
     // The failure path, driven. Each case is a way a hand-written name goes
     // wrong in review, and none of them is caught by `string`.
     expect(resolutionFailure('GetDiscoverResponseSchema')).toBe(
-      'is not an export of `@objectstack/spec/api`',
+      'is not an export of `@objectstack/spec/api` or `@objectstack/spec/api-assembled`',
     ); // one letter short of a real export
     expect(resolutionFailure('')).toBe('is empty');
     expect(resolutionFailure('WELL_KNOWN_CAPABILITY_KEYS')).toBe(
@@ -137,6 +151,14 @@ describe('[#5791] every ledgered `responseSchema` names a real spec schema', () 
     // …and the positive control, so the rejections above are not a resolver
     // that rejects everything.
     expect(resolutionFailure('DiscoverySchema')).toBeUndefined();
+    // …and one from the sibling entry, so the union really reaches it.
+    expect(resolutionFailure('ListInstalledPackagesResponseSchema')).toBeUndefined();
+  });
+
+  it('the two API entries share no export name, so the union is unambiguous', () => {
+    const shared = Object.keys(specApiAssembled).filter((name) =>
+      Object.prototype.hasOwnProperty.call(specApi, name));
+    expect(shared, 'a name exported by both API entries').toEqual([]);
   });
 
   it('the two #5791 landing rows are the discovery pair, in two different ledgers', () => {

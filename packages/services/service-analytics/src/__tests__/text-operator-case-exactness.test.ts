@@ -104,6 +104,14 @@
  * Escaping (#5567) is unchanged for every `LIKE` arm; the GLOB arm brings its
  * OWN escaped character class (`*`, `?`, `[`), which is why the second fixture
  * below exists.
+ *
+ * [#20025] Since the SQLite arm took `driver-sql`'s U+0000-safe constructs,
+ * `GLOB` compiles only `$startsWith`; `$contains` / `$notContains` /
+ * `$icontains` compile to `instr()` and `$endsWith` to a BLOB byte suffix, all
+ * byte-wise and so just as case-exact, and all with nothing to escape. The
+ * compiled-text pins below name the construct per operator
+ * (`SQLITE_CONSTRUCT`); the U+0000 rows, and their parity with the driver on
+ * better-sqlite3 and sql.js, live in `text-match-sqlite-nul.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -140,6 +148,26 @@ const NAME_CASE_EXACT = FILTER_TEXT_CASES.filter(
     return CASE_EXACT_OPS.has(op);
   },
 );
+
+/**
+ * [#20025] The construct the SQLite arm emits for each case-EXACT operator —
+ * `driver-sql`'s table since #19999 / #20024: `GLOB` for `$startsWith` (these
+ * comparands hold no U+0000), `instr()` for the `contains` pair, the BLOB byte
+ * suffix for `$endsWith`. Asserted per operator, which is tighter than the
+ * single `/GLOB/` these pins carried while every shape compiled to it.
+ */
+const SQLITE_CONSTRUCT: Readonly<Record<string, RegExp>> = {
+  $startsWith: / GLOB \$\d+/,
+  $contains: /instr\([^)]*, \$\d+\) > 0/,
+  $notContains: /NOT \(instr\([^)]*, \$\d+\) > 0\)/,
+  $endsWith: /coalesce\(substr\(CAST\([^)]* AS BLOB\), -length\(CAST\(\$\d+ AS BLOB\)\)\), CAST\([^)]* AS BLOB\)\) = CAST\(\$\d+ AS BLOB\)/,
+};
+
+/** {@link SQLITE_CONSTRUCT}'s entry for a one-field, one-operator filter. */
+const sqliteConstructFor = (filter: unknown): RegExp => {
+  const predicate = Object.values(filter as Record<string, Record<string, unknown>>)[0];
+  return SQLITE_CONSTRUCT[Object.keys(predicate)[0]];
+};
 
 const CUBE: Cube = {
   name: 'texts',
@@ -251,21 +279,30 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
     ).toEqual({ sql: '"t"."name" LIKE ? ESCAPE ?', params: ['%acme%', '\\'] });
   });
 
-  it('sqlite compiles GLOB — one bound value, no ESCAPE clause', async () => {
+  it('sqlite compiles GLOB for `$startsWith`, instr() / a BLOB suffix for the rest — no ESCAPE clause', async () => {
+    // [#20025] `glob()` cuts the pattern AND the stored value at their first
+    // U+0000, so `GLOB` serves only `starts` with a comparand free of U+0000
+    // (`driver-sql`'s table since #19999 / #20024). The case exactness this
+    // test is about is unchanged: `instr()` and the BLOB comparison are
+    // byte-wise, and `text-match-sqlite-nul.test.ts` owns the U+0000 rows.
     const out = await nativeSql({ name: { $contains: 'acme' } }, 'sqlite');
-    expect(out.sql).toContain('WHERE name GLOB $1');
-    expect(out.sql).not.toMatch(/ESCAPE/);
-    expect(out.params).toEqual(['*acme*']);
+    expect(out.sql).toContain('WHERE instr(name, $1) > 0');
+    expect(out.sql).not.toMatch(/ESCAPE| LIKE /);
+    expect(out.params).toEqual(['acme']);
     expect(compileScopedFilterToSql({ name: { $contains: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' }))
-      .toEqual({ sql: '"t"."name" GLOB ?', params: ['*acme*'] });
+      .toEqual({ sql: 'instr("t"."name", ?) > 0', params: ['acme'] });
     // `$notContains` keeps the read scope's NULL-safe wrapper around the
     // negated construct — the polarity moved, the #5298 rule did not.
     expect(compileScopedFilterToSql({ name: { $notContains: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' }))
-      .toEqual({ sql: '("t"."name" IS NULL OR "t"."name" NOT GLOB ?)', params: ['*acme*'] });
+      .toEqual({ sql: '("t"."name" IS NULL OR NOT (instr("t"."name", ?) > 0))', params: ['acme'] });
     const starts = await nativeSql({ name: { $startsWith: 'ACME' } }, 'sqlite');
+    expect(starts.sql).toContain('WHERE name GLOB $1');
     expect(starts.params).toEqual(['ACME*']);
     const ends = await nativeSql({ name: { $endsWith: 'corp' } }, 'sqlite');
-    expect(ends.params).toEqual(['*corp']);
+    expect(ends.sql).toContain(
+      'WHERE coalesce(substr(CAST(name AS BLOB), -length(CAST($1 AS BLOB))), CAST(name AS BLOB)) = CAST($2 AS BLOB)',
+    );
+    expect(ends.params).toEqual(['corp', 'corp']);
   });
 
   it('mysql compiles LIKE over CAST(… AS BINARY) — TEXT ONLY, NOT MEASURED on a server', async () => {
@@ -303,7 +340,8 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
       const FOLD_PER_DIALECT: Record<string, RegExp> = {
         undefined: /REPLACE\(name, 'A', 'a'\)/,
         postgres: /translate\(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/,
-        sqlite: /lower\(name\) GLOB lower\(\$1\)/,
+        // [#20025] `instr()` since the SQLite arm left `GLOB` for `contains`.
+        sqlite: /instr\(lower\(name\), lower\(\$1\)\) > 0/,
         mysql: /REPLACE\(CAST\(name AS BINARY\), 'A', 'a'\)/,
       };
       expect(icontains.sql, String(dialect)).toMatch(FOLD_PER_DIALECT[String(dialect)]);
@@ -390,7 +428,8 @@ describe('[#15684] the three compilers, EXECUTED on a real SQLite engine', () =>
         getReadScope: (object: string) => (object === 'rows' ? (c.filter as FilterCondition) : null),
       } as DatasetScopedStrategyContext;
       const { sql, params } = await new NativeSQLStrategy().generateSql(query(undefined), scoped);
-      expect(sql, c.name).toMatch(/GLOB/);
+      expect(sql, c.name).toMatch(sqliteConstructFor(c.filter));
+      expect(sql, c.name).not.toMatch(/ LIKE /);
       expect(run(sql, params), c.name).toEqual([...c.expected]);
     }
   });
@@ -404,10 +443,11 @@ describe('[#15684] the three compilers, EXECUTED on a real SQLite engine', () =>
       } as DatasetScopedStrategyContext;
       const echo = await new ObjectQLStrategy().generateSql(query(c.filter), echoCtx);
       const native = await new NativeSQLStrategy().generateSql(query(c.filter), sqliteCtx);
-      expect(echo.sql, c.name).toMatch(/GLOB/);
+      expect(echo.sql, c.name).toMatch(sqliteConstructFor(c.filter));
       expect(echo.sql, c.name).not.toMatch(/ LIKE /);
       // Same predicate, same bound pattern: an echo that prints LIKE while the
-      // engine runs GLOB is the #5333 failure this render block exists to stop.
+      // engine runs the SQLite construct is the #5333 failure this render
+      // block exists to stop.
       expect(echo.params, c.name).toEqual(native.params);
       expect(run(echo.sql, echo.params), `echo of ${c.name}`).toEqual([...c.expected]);
     }

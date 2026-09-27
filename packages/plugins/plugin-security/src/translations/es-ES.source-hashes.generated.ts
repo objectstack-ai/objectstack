@@ -30,5 +30,11 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_permission_set.fields.drift_status.options.overlay_shadow": "7371472481b55b52",
   "objects.sys_permission_set.fields.drift_status.options.provenance_skip": "fdd5f01e69fa0245",
   "objects.sys_position._validations.reserved_identity_name.message": "a23aa7c06745cc95",
+  "objects.sys_position_permission_set.fields.display_title.help": "b99cbdc42ee68f06",
+  "objects.sys_position_permission_set.fields.display_title.label": "70f7aadecce647a5",
+  "objects.sys_user_permission_set.fields.display_title.help": "ee7ef063488cd6c3",
+  "objects.sys_user_permission_set.fields.display_title.label": "70f7aadecce647a5",
   "objects.sys_user_position._validations.reserved_identity_position.message": "f35df6c1ef1493b0",
+  "objects.sys_user_position.fields.display_title.help": "39b5571b48e7d800",
+  "objects.sys_user_position.fields.display_title.label": "70f7aadecce647a5",
 };

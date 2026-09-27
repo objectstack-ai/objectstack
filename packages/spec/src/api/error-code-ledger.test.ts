@@ -260,6 +260,31 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(ERROR_CODE_LEDGER['@objectstack/objectql']).toContain('NAMESPACE_CONFLICT');
   });
 
+  it('lists the plugin-security class-field stamps under their stamping package (#19441)', () => {
+    // Provenance, not identity: each of these codes was already registered by
+    // another package, and `@objectstack/plugin-security` stamps it too, as a
+    // class field (`readonly code = '…'`) — the spelling the provenance gate
+    // declares itself blind to, so this suite is what holds the rows.
+    const stamps: Record<string, keyof typeof ERROR_CODE_LEDGER> = {
+      INVALID_STATE: '@objectstack/rest',          // PermissionSetOverlayStateError, 409
+      NOT_FOUND: '@objectstack/rest',              // PermissionSetNotFoundError, 404
+      NOT_OVERRIDABLE: '@objectstack/metadata-protocol', // PackagedPermissionSet{Locked,ProvenanceUnknown}Error, 403
+    };
+    for (const [code, firstOwner] of Object.entries(stamps)) {
+      expect(ERROR_CODE_LEDGER['@objectstack/plugin-security'], `${code} listed under plugin-security`)
+        .toContain(code);
+      expect(ERROR_CODE_LEDGER[firstOwner], `${code} still listed under ${firstOwner}`).toContain(code);
+      expect(ErrorCode.parse(code)).toBe(code);
+    }
+    // The fact the exempting comment in `packaged-permission-set-lock.ts` had
+    // backwards: NOT_OVERRIDABLE is an extension code, not a standard member —
+    // so "no ledger entry is minted" never followed. Control leg: the same
+    // membership test answers true for a standard member.
+    const standard = new Set<string>(StandardErrorCode.options);
+    expect(standard.has('NOT_OVERRIDABLE')).toBe(false);
+    expect(standard.has('PERMISSION_DENIED')).toBe(true);
+  });
+
   it('rejects unregistered, lowercase, and numeric codes', () => {
     expect(() => ErrorCode.parse('TOTALLY_MADE_UP_CODE')).toThrow();
     expect(() => ErrorCode.parse('validation_error')).toThrow(); // pre-ADR-0112 dialect

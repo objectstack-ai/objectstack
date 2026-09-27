@@ -38,7 +38,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SqliteWasmDriver } from './index.js';
 
 interface WireBearingError extends Error {
@@ -122,8 +122,11 @@ describe('[#5702] driver-sqlite-wasm — $icontains and the retired $regex, on s
   });
 
   it('REFUSES the retired $regex, in the ADR-0112 envelope, naming $icontains', async () => {
+    // [#20020] Marked 'author', as a read-scope merge boundary marks a caller's
+    // own predicate: the inherited `SqlDriver` refusal names the operator and
+    // its replacement only then (the #8220 contract).
     const err = await driver
-      .find('txt', { where: { name: { $regex: 'ac.*' } } }, BYPASS)
+      .find('txt', { where: markFilterSubtreeProvenance({ name: { $regex: 'ac.*' } }, 'author') }, BYPASS)
       .then(() => null, (e: unknown) => e as WireBearingError);
     expect(err).toBeInstanceOf(Error);
     expect(err!.code).toBe('INVALID_FILTER');
@@ -156,8 +159,11 @@ describe('[#5702] driver-sqlite-wasm — $icontains and the retired $regex, on s
     for (const testCase of FILTER_TEXT_CASES) {
       it(testCase.name, async () => {
         if (testCase.expectRejection) {
+          // [#20020] A shallow COPY marked 'author' — see the case above; the
+          // shared case constant itself is never marked.
+          const where = markFilterSubtreeProvenance({ ...testCase.filter }, 'author');
           const err = await driver
-            .find('txt', { where: testCase.filter }, BYPASS)
+            .find('txt', { where }, BYPASS)
             .then(() => null, (e: unknown) => e as WireBearingError);
           expect(err, 'the case-set requires this filter REFUSED, not answered').toBeInstanceOf(Error);
           expect(err!.code).toBe(testCase.code);

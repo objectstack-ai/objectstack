@@ -54,7 +54,7 @@ export type { ResilientFetchOptions } from '../shared/resilient-fetch';
  * floors its attempt count at 1, so a connector still makes its one call and
  * never retries — ONE owner for that floor, not a second one in this mapping.
  *
- * ## ⚠️ `connectionTimeoutMs` is deliberately NOT mapped here
+ * ## ⚠️ `connectionTimeoutMs` was never mapped here, and is now RETIRED
  *
  * Measured at the fetch site rather than assumed: a connector's outbound call is
  * a WHATWG `fetch`, whose only cancellation surface is one `AbortSignal`
@@ -64,11 +64,15 @@ export type { ResilientFetchOptions } from '../shared/resilient-fetch';
  * connected upstream that the author meant to allow via a large
  * `requestTimeoutMs`, i.e. it would break the very promise it claims to keep.
  * (Node's undici exposes `connectTimeout` through a custom dispatcher, but that
- * is Node-only and a new subsystem underneath every connector.) So the key
- * stays unenforced and `packages/spec/liveness/connector.json` keeps it `dead`
- * with that reason. ⛔ Do not "fix" this by aliasing it onto `timeoutMs`: two
- * keys that silently mean one thing is the declared-not-enforced shape this
- * mapping exists to remove.
+ * is Node-only and a new subsystem underneath every connector.)
+ *
+ * That measurement is what made this an ADR-0049 removal rather than an
+ * implementation: the key is gone from `ConnectorSchema` (a `retiredKey()`
+ * tombstone) and from `ConnectorProviderContext`, so the absent row above is no
+ * longer a declared-but-unmapped key — there is nothing left to map. ⛔ Do not
+ * "restore" it by aliasing a connect deadline onto `timeoutMs`: two keys that
+ * silently mean one thing is the declared-not-enforced shape this mapping
+ * exists to remove, and it is the shape the retirement just closed.
  */
 
 /** The slice of a {@link Connector} this mapping reads. */

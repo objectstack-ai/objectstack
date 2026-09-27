@@ -65,8 +65,8 @@ the platform's own counters stop being wrong for it.
 ## TypeScript Usage
 
 ```typescript
-import { FlowFunctionEffectSchema } from '@objectstack/spec/automation';
-import type { FlowFunctionEffect } from '@objectstack/spec/automation';
+import { FlowFunctionEffectSchema, FlowFunctionLoweredDeclarationSchema } from '@objectstack/spec/automation';
+import type { FlowFunctionEffect, FlowFunctionLoweredDeclaration } from '@objectstack/spec/automation';
 
 // Validate data
 const result = FlowFunctionEffectSchema.parse(data);
@@ -82,6 +82,20 @@ What a script-node function does to data: 'pure' (computes and returns — the c
 
 * `pure`
 * `writes`
+
+
+---
+
+## FlowFunctionLoweredDeclaration
+
+A lowered `functions` declaration: what the function declared about itself, with its callable replaced by a handler ref
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **handler** | `string` | ✅ | The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module |
+| **effect** | `Enum<'pure' \| 'writes'>` | optional (default: `"pure"`) | What the function does to data — omit for the pure default |
 
 
 ---

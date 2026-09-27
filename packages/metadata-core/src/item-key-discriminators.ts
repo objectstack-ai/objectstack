@@ -4,11 +4,19 @@
  * [#7730 / #7774] i18n bundles — metadata types whose IDENTITY is a pair.
  *
  * Most metadata types are identified by `name` alone. `email_template`
- * declares otherwise: `EmailTemplateDefinitionSchema` states that "multiple
- * rows with the same `name` but different `locale` form an i18n bundle; the
- * service picks the best match for the recipient's locale, falling back to
- * `en-US`" (`packages/spec/src/system/email-template.zod.ts`), and its header
- * says a template "is resolved by `(name, locale)`".
+ * declares otherwise: `EmailTemplateDefinitionSchema`
+ * (`packages/spec/src/system/email-template.zod.ts`) documents its `locale`
+ * key as the second half of the bundle key — rows that share one `name` form
+ * an i18n bundle, one row per locale tag — and its header says a template
+ * "is resolved by `(name, locale)`".
+ *
+ * That resolution is exact. `SendTemplateInput.template` in
+ * `packages/spec/src/contracts/email-service.ts` rules out any best match and
+ * any language-subtag folding, and `SendTemplateInput.locale` there is the
+ * ladder of record: the named tag matched exactly, then the literal `en-US`,
+ * then — only for a call that named no locale, and only when the bundle has
+ * no `en-US` row — the bundle's lowest locale tag. Both are cited rather than
+ * quoted, so a rewording on the spec side cannot strand a copy here.
  *
  * Every layer that keys metadata by `name` therefore has to agree on ONE
  * answer to "what else is part of this type's identity?", or a bundle survives

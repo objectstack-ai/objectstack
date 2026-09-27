@@ -36,8 +36,8 @@ import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@
 // two backends cannot describe the accepted set differently.
 import { ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE } from '@objectstack/spec/data';
 // [#7536] The `$like` pattern language's shared gate, so this driver refuses
-// the same malformed patterns as every other face.
-import { hasDanglingLikeEscape } from '@objectstack/spec/data';
+// the same malformed patterns as every other face. [#20041] The U+0000 gate too.
+import { hasDanglingLikeEscape, hasNulInLikePattern } from '@objectstack/spec/data';
 // [#16178] The canonical bucket-key vocabulary, quoted rather than hand-listed —
 // the refusal below names the accepted set from its one definition.
 import { BUCKET_GRANULARITIES } from '@objectstack/core';
@@ -926,6 +926,12 @@ function assertFieldConstraintShape(
       if (hasDanglingLikeEscape(spec[op] as string)) {
         throw danglingLikeEscapeError(field, op, spec[op] as string, `${path}.${op}`);
       }
+      // [#20041] This face ANSWERS such a pattern correctly; the SQLite faces
+      // cut it at the U+0000. Refused here too, so the accept set is one
+      // contract rather than one per backend.
+      if (hasNulInLikePattern(spec[op] as string)) {
+        throw nulLikePatternError(field, op, spec[op] as string, `${path}.${op}`);
+      }
     }
   }
   // [#5702] The `$options`-without-`$regex` companion check that stood here is
@@ -995,6 +1001,32 @@ export function danglingLikeEscapeError(
       `backslash (${JSON.stringify(pattern)}). A backslash escapes the character after it, so a ` +
       `trailing one escapes nothing and the backends disagree about what it means. Write ` +
       `"\\\\\\\\" to match a literal backslash, or drop the trailing one.`,
+  );
+}
+
+/**
+ * [#20041] A `$like` / `$ilike` pattern holding U+0000 (NUL).
+ *
+ * This driver could answer it — `likePatternToRegexSource` reads every
+ * character — and did, correctly. It is refused anyway because the SQLite faces
+ * cannot: their `GLOB` reads a pattern only up to its first U+0000 and answered
+ * a different question, with no NUL-safe primitive to compile to instead. An
+ * in-memory double that answers a filter production refuses would hide exactly
+ * that difference from an app's tests. `hasNulInLikePattern` is the spec's
+ * shared test, so every face refuses the SAME patterns, and the text is
+ * `driver-sql`'s author text word for word.
+ */
+export function nulLikePatternError(
+  field: string,
+  op: string,
+  pattern: string,
+  path = 'filter',
+): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" at ${path} has a pattern holding the NUL character ` +
+      `U+0000 (${JSON.stringify(pattern)}). SQLite reads a pattern only up to its first NUL, so ` +
+      `such a pattern would match a different set of rows there than on the other backends, and ` +
+      `no escape makes the character portable. Remove it from the pattern.`,
   );
 }
 

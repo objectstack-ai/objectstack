@@ -45,6 +45,7 @@ import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
+import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
 // [ADR-0130 D1] The ONE derivation of the key a package is installed under
@@ -1362,6 +1363,74 @@ function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
     if (projected !== NOT_RECORD_DATA) out[key] = projected;
   }
   return out as ObjectStackManifest;
+}
+
+/**
+ * Rewrite a BARE callable `functions` map entry into the declared form
+ * (`{ handler, effect }`) before {@link toRecordManifest} projects the body.
+ *
+ * ## The under-report this closes
+ *
+ * `functions` accepts two authored spellings, and the projection treats them
+ * unequally through no fault of its own:
+ *
+ * - `{ sweepProjectHealth: { handler: fn, effect: 'writes' } }` — the value is
+ *   a plain object, so it survives with its callable dropped: `{ effect:
+ *   'writes' }`. The function is still REPORTED, minus what cannot serialise.
+ * - `{ summarizeCompletedTask: fn }` — the value IS the callable, so the whole
+ *   ENTRY is dropped, key and all. The function vanishes from the record.
+ *
+ * `examples/app-showcase` ships one of each, so `GET /packages` reported ONE
+ * function for a package declaring TWO. A machine-readable read door that
+ * under-reports is a defect independent of how its rows are declared.
+ *
+ * ## Why it is fixed HERE and not in the projection
+ *
+ * {@link toRecordManifest}'s rule is STRUCTURAL — 「a live object reached the
+ * record」, ⛔ never a key denylist — and teaching it that a function found
+ * under `functions.<name>` means something other than a function found
+ * anywhere else would overturn exactly that. So the repair is at the assembly
+ * boundary instead: the two spellings are made structurally EQUAL before the
+ * projection runs, and the projection then leaves `{ effect }` for both.
+ *
+ * ⛔ No ref is minted. `packages/cli`'s `lowerCallables` mints refs with
+ * `uniqueName(base, taken)` and dedupes by function IDENTITY, so a ref minted
+ * here would not be guaranteed equal to the one `objectstack build` mints — a
+ * record could then assert a handler that resolves in no sibling module. An
+ * ABSENT `handler` on a record is the honest statement 「declared here, not
+ * serialisable」, and `RecordStagePackageBodySchema` in `@objectstack/spec`
+ * declares exactly that.
+ *
+ * `effect` is the declaration schema's OWN default
+ * ({@link DEFAULT_FLOW_FUNCTION_EFFECT}, `'pure'`, which
+ * `FlowFunctionDeclarationSchema.effect` carries as `.default(…)`), ⛔ not a
+ * value invented here: the bare spelling IS that declaration written the short
+ * way, and `normalizeFlowFunctionEntry` already reads it the same way at boot.
+ * The ARRAY form needs nothing — its entries are objects that carry their own
+ * `name`, so the projection keeps them — and its `effect` is `.optional()` with
+ * no default, so nothing is written where the schema declares nothing.
+ *
+ * ⛔ The caller's manifest is never mutated: the live object is what every
+ * other read in `installPackage` uses, and a copy is returned only when an
+ * entry really needed rewriting.
+ */
+function withDeclaredFunctionEntries(manifest: ObjectStackManifest): ObjectStackManifest {
+  if (manifest === null || typeof manifest !== 'object') return manifest;
+  const functions = (manifest as { functions?: unknown }).functions;
+  if (!functions || typeof functions !== 'object' || Array.isArray(functions)) return manifest;
+
+  let rewrote = false;
+  const declared: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(functions as Record<string, unknown>)) {
+    if (typeof entry === 'function') {
+      declared[name] = { handler: entry, effect: DEFAULT_FLOW_FUNCTION_EFFECT };
+      rewrote = true;
+    } else {
+      declared[name] = entry;
+    }
+  }
+  if (!rewrote) return manifest;
+  return { ...manifest, functions: declared } as ObjectStackManifest;
 }
 
 /**
@@ -4224,7 +4293,12 @@ export class SchemaRegistry {
       // {@link toRecordManifest}. Every other read below (`manifest.id`,
       // `manifest.namespace`) deliberately keeps reading the ARGUMENT: the
       // projection is what the registry hands out, never what it decides with.
-      manifest: toRecordManifest(manifest),
+      //
+      // {@link withDeclaredFunctionEntries} runs FIRST and at this boundary
+      // only: it makes the two authored `functions` spellings structurally
+      // equal so the structural projection reports BOTH, without teaching the
+      // projection a key name.
+      manifest: toRecordManifest(withDeclaredFunctionEntries(manifest)),
       ...lifecycle,
       installedAt: now,
       updatedAt: now,

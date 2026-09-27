@@ -59,8 +59,9 @@
  * Ledger-sourced population keys with no classifying matrix row.
  *
  * MEASURED 2026-08-31 against `rest-route-ledger.ts` (94 rows / 19 families)
- * and `route-ledger.ts` (80 rows / 21 domains — 82 since the two operator
- * run-lifecycle rows landed, both under the already-classified `/automation`
+ * and `route-ledger.ts` (80 rows / 21 domains — 82 after the two operator
+ * run-lifecycle rows landed, and 81 since #19543 retired the `GET /automation`
+ * flow-list row, all three moves under the already-classified `/automation`
  * domain, so the key arithmetic below is unmoved): 40 keys minted, 6 classified
  * by rows that already pin the same surface through the probe table, 34 here.
  *
@@ -86,7 +87,6 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   // `@objectstack/rest` mounts itself, through a different registrar.
   'rest-family:rest-route-ledger.ts:packages',
   'rest-family:rest-route-ledger.ts:record-shares',
-  'rest-family:rest-route-ledger.ts:reports',
   'rest-family:rest-route-ledger.ts:search',
   'rest-family:rest-route-ledger.ts:security',
   'rest-family:rest-route-ledger.ts:security-explain',
@@ -123,6 +123,8 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
  * away; raising it is a reviewed decision, never a side effect of adding a
  * route family.
  *
- * 34 at 2026-08-31, the day the ledger population was adopted.
+ * 34 at 2026-08-31, the day the ledger population was adopted. 33 at
+ * 2026-09-25 (#20102): `rest-family:rest-route-ledger.ts:reports` left with the
+ * retired saved-report family — deleted, not classified.
  */
-export const LEDGER_POPULATION_BASELINE_MAX = 34;
+export const LEDGER_POPULATION_BASELINE_MAX = 33;

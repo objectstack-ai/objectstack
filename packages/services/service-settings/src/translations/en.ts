@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { TranslationData } from '@objectstack/spec/system';
+import type { PlatformTranslationData } from '@objectstack/spec/system';
 
 /**
  * English (en) — built-in settings manifest translations.
@@ -9,7 +9,7 @@ import type { TranslationData } from '@objectstack/spec/system';
  * Keeping them explicit here lets the resolver chain (locale → fallback → literal)
  * always have at least an English entry to fall back to.
  */
-export const en: TranslationData = {
+export const en: PlatformTranslationData = {
   settingsCommon: {
     sourceLabels: {
       env: 'Env',

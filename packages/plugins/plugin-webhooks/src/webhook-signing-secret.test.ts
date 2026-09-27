@@ -113,9 +113,17 @@ describe('webhook signing secret (#7722)', () => {
                 triggers: ['create'],
                 url: 'https://receiver.example/hook',
                 method: 'POST',
-                definition_json: JSON.stringify({ secret: SECRET, headers: { 'X-Team': 'crm' } }),
+                // Both credentials in their encrypted columns, as every current
+                // writer stores them. The legacy cleartext spelling inside
+                // `definition_json` is refused now, so it cannot carry this test.
+                signing_secret: 'secret:sec_7722_signing',
+                headers_secret: 'secret:sec_7722_headers',
+                definition_json: JSON.stringify({}),
             },
         ]);
+        // The privileged dereference the enqueuer resolves both columns with.
+        (engine as any).resolveSecretField = async (_object: string, _id: string, field: string) =>
+            field === 'signing_secret' ? SECRET : JSON.stringify({ 'X-Team': 'crm' });
         const realtime = new FakeRealtime();
         const outbox = new MemoryHttpOutbox();
         const enqueuer = new AutoEnqueuer(engine, realtime, (input) => outbox.enqueue(input));

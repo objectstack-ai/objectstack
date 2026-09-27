@@ -1,0 +1,55 @@
+{
+  "skill_name": "objectstack-automation",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Every night at 02:00, mark `subscription` records whose `renewal_date` is in the past as `lapsed`. `status` is a readonly field that only automation may change.",
+      "expected_output": "Emits a `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (FlowSchema has no top-level `schedule`; no cron tagged template), `runAs: 'system'` because a scheduled run has no trigger user and a readonly field is stripped under `runAs: 'user'`. One `update_record` node with `filter` as an ObjectQL where-map (`renewal_date: { $lt: '{TODAY()}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, nodes wired with `edges` (never `next`), ending in an `end` node.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineFlow", "type: 'schedule'", "runAs: 'system'", "update_record", "edges"],
+        "must_not_contain": ["next:", "values:", "cron`"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "When an opportunity moves into stage `closed_won`, send the account owner an inbox notification with the deal name.",
+      "expected_output": "Emits a `record_change` flow whose binding lives on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, and a bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'` so it fires only on the transition. A `notify` node with `recipients: '{record.owner_id}'`, `title` with single-brace interpolation, `channels: ['inbox']`. Reminds that `requires` must list `automation`, `triggers` and `messaging` (otherwise notify reports success with `skipped: true`).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["triggerType", "record-after-update", "previous.", "notify", "recipients", "messaging"],
+        "must_not_contain": ["trigger:", "{{"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "Build an autolaunched flow `budget_approval` on the `project` object: when `budget` increases past 100000, route to a manager for approval. The manager can approve, reject, or send the record back to the submitter for revision; after the submitter reworks and resubmits it returns to the manager for another round. Cap it at two send-backs.",
+      "expected_output": "Emits the ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a third `revise` out-edge targeting an `approval_revise` node (no config), and a resubmit edge back into the approval node typed `type: 'back'` — the only thing that legalises the cycle for `registerFlow`. The flow lives in `flows` (there is no `approvals` stack collection); the window is a node, not a re-suspend of the approval node.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'approval'", "approval_revise", "type: 'back'", "maxRevisions", "revise"],
+        "must_not_contain": ["approvals: [", "maxRevisions: 0"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "Build a guided 'new client onboarding' wizard: step 1 collects company details, step 2 asks whether a credit check is needed — if yes show a credit-check screen, otherwise skip it — then create the `account` record.",
+      "expected_output": "Because the steps BRANCH on logic, this is a `screen` flow (`type: 'screen'`), not a form-view wizard: `screen` nodes for each step, a `decision` node whose out-edges carry mutually exclusive `condition` predicates (an unguarded out-edge always runs, in parallel), a `create_record` node, explicit `variables` entries (`{ name, type, isInput, isOutput }`), and every path reaching an `end`. The flow stays `runAs: 'user'`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["screen", "decision", "condition", "create_record", "variables"],
+        "must_not_contain": ["type: 'wizard'", "next:"]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "Add a step that calls our `pricing.recalc` function to compute the discount and saves it on the quote, then posts the quote to our tax service over HTTP; if the tax call fails, route to a handler node instead of failing the run.",
+      "expected_output": "Emits a `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs`, and `outputVariable: 'recalc'`; the function is a pure compute step, so a following `update_record` persists `{recalc.discount}` via `fields`. The `http` node sets `timeoutMs`. Failure routing is an edge `{ source, target, type: 'fault' }` — a `label: 'error'` alone routes nothing.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["function:", "outputVariable", "type: 'fault'", "timeoutMs", "update_record"],
+        "must_not_contain": ["label: 'error'", "query_record"]
+      }
+    }
+  ]
+}

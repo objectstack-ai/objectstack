@@ -280,8 +280,10 @@ node (`record_change`) or by its `type`, and arming happens at registration.
 Served by the runtime dispatcher's `/automation` domain when this service occupies the
 slot (paths shown with the `/api/v1` wire prefix):
 
+There is no flow-list route here: flows are metadata (ADR-0106), so list them with
+`GET /api/v1/meta/flow`. The former `GET /api/v1/automation` list was retired.
+
 ```
-GET    /api/v1/automation                              # list flows
 POST   /api/v1/automation                              # create a flow
 GET    /api/v1/automation/actions                      # action descriptors
 GET    /api/v1/automation/connectors                   # connector descriptors

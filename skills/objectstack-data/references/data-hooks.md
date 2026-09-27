@@ -1,5 +1,11 @@
 # Data Lifecycle Hooks — Reference
 
+- [Core Concepts](#core-concepts) · [Hook Lifecycle Events](#hook-lifecycle-events) · [Before vs After Hooks](#before-vs-after-hooks)
+- [Hook Definition Schema](#hook-definition-schema) · [Key Properties Explained](#key-properties-explained)
+- [Sandboxed Hook Bodies (`body`)](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call) · [Capabilities — the complete list](#capabilities--the-complete-list) · [Sandbox restrictions](#sandbox-restrictions)
+- [Hook Context API](#hook-context-api) · [Common Patterns](#common-patterns) · [Registration Methods](#registration-methods)
+- [Best Practices](#best-practices) · [Error Handling](#error-handling) · [Testing Hooks](#testing-hooks) · [References](#references)
+
 Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
 data hooks. Covers the 8 lifecycle events, the inline `handler` and sandboxed
 `body` forms, the `HookContext` API, registration, and the canonical patterns

@@ -593,9 +593,13 @@ layout:
       fields: [name, email, phone]
     - name: advanced_settings
       label: Advanced Settings
+      collapsible: true
       collapsed: true
       fields: [api_key, webhook_url, rate_limit]
 ```
+
+`collapsed: true` implies `collapsible` — a section that starts closed always carries the disclosure
+control that reopens it — and the example writes both keys so that control is explicit on every form surface.
 
 ### 2. Contextual Actions
 

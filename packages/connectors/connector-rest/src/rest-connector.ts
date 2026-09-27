@@ -39,12 +39,12 @@ export interface RestConnectorOptions {
      * (ADR-0049 · #18975). Omitted ⇒ the wrapper's own defaults.
      */
     retryConfig?: RetryConfig;
-    /**
-     * Declared connect deadline (ms). Carried onto the def so `GET /connectors`
-     * reports what the author declared; ⚠️ not enforced — one `fetch` signal
-     * cannot bound the connection phase alone (`connector-fetch-policy.ts`).
-     */
-    connectionTimeoutMs?: number;
+    // `connectionTimeoutMs` — REMOVED with the spec key (ADR-0049). It was
+    // accepted here only to be carried onto the def `GET /connectors` echoes:
+    // one `fetch` signal cannot bound the connection phase alone, so it never
+    // reached `connectorFetchOptions` and never bounded a call. Echoing a
+    // deadline nobody keeps is what the retirement withdraws. A connect-only
+    // bound belongs to a transport that can observe the connect phase.
     /** Per-request deadline (ms) — `resilientFetch`'s per-attempt timeout. */
     requestTimeoutMs?: number;
     /** Injected for tests; defaults to the global `fetch`. */
@@ -131,7 +131,6 @@ export function createRestConnector(opts: RestConnectorOptions): RestConnectorBu
         // the (post-parse) Connector output type.
         status: 'active',
         enabled: true,
-        connectionTimeoutMs: opts.connectionTimeoutMs ?? 30000,
         requestTimeoutMs: opts.requestTimeoutMs ?? 30000,
         ...(opts.retryConfig === undefined ? {} : { retryConfig: opts.retryConfig }),
         actions: [

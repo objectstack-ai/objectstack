@@ -60,8 +60,8 @@ export const Project = ObjectSchema.create({
         { label: 'Red', value: 'red', color: '#EF4444' },
       ],
     }),
-    budget: Field.currency({ label: 'Budget', scale: 2, min: 0 }),
-    spent: Field.currency({ label: 'Spent', scale: 2, min: 0, defaultValue: 0 }),
+    budget: Field.currency({ label: 'Budget', min: 0 }),
+    spent: Field.currency({ label: 'Spent', min: 0, defaultValue: 0 }),
     budget_remaining: Field.formula({
       label: 'Budget Remaining',
       expression: cel`(record.budget == null ? 0 : record.budget) - (record.spent == null ? 0 : record.spent)`,

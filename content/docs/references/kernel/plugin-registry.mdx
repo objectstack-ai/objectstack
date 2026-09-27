@@ -51,7 +51,7 @@ const result = PluginInstallConfigSchema.parse(data);
 | **testCoverage** | `number` | optional |  |
 | **documentationScore** | `number` | optional |  |
 | **codeQuality** | `number` | optional |  |
-| **securityScan** | `{ lastScanDate?: string; vulnerabilities?: object; passed: boolean }` | optional |  |
+| **securityScan** | `never` | optional | [REMOVED] `PluginQualityMetrics.securityScan` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — the block declared a last-scan date, per-severity vulnerability counts and a `passed` verdict, and no scanner, registry, installer or UI ever produced or read one, so a plugin could publish `passed: true` with nothing at all behind it. Delete the key. There is no replacement key: plugin security scanning is not a platform capability, and the scan-result family this block mirrored was retired with it. The sibling quality metrics — `testCoverage`, `documentationScore`, `codeQuality` and `conformanceTests` — are unchanged. Audit dependencies with a tool built for it (npm audit, pnpm audit, Dependabot, the GitHub Advisory Database, OSV). |
 | **conformanceTests** | `{ protocolId: string; passed: boolean; totalTests: integer; passedTests: integer; … }[]` | optional |  |
 
 ### Nested Shape: `PluginQualityMetrics.conformanceTests[number]`
@@ -85,7 +85,7 @@ const result = PluginInstallConfigSchema.parse(data);
 | **compatibility** | `{ minObjectStackVersion?: string; maxObjectStackVersion?: string; nodeVersion?: string; platforms?: Enum<'linux' \| 'darwin' \| 'win32' \| 'browser'>[] }` | optional |  |
 | **links** | `{ homepage?: string; repository?: string; documentation?: string; bugs?: string; … }` | optional |  |
 | **media** | `{ icon?: string; logo?: string; screenshots?: string[]; video?: string }` | optional |  |
-| **quality** | `{ testCoverage?: number; documentationScore?: number; codeQuality?: number; securityScan?: object; … }` | optional |  |
+| **quality** | `{ testCoverage?: number; documentationScore?: number; codeQuality?: number; conformanceTests?: object[] }` | optional |  |
 | **statistics** | `{ downloads: integer; downloadsLastMonth: integer; activeInstallations: integer; ratings?: object; … }` | optional |  |
 | **license** | `string` | optional | SPDX license identifier |
 | **pricing** | `{ model: Enum<'free' \| 'freemium' \| 'paid' \| 'enterprise'>; price?: number; currency?: string; billingPeriod?: Enum<'one-time' \| 'monthly' \| 'yearly'> }` | optional |  |
@@ -116,6 +116,16 @@ const result = PluginInstallConfigSchema.parse(data);
 | **requires** | `{ pluginId: string; version: string; optional: boolean; reason?: string; … }[]` | optional | Required plugins and their capabilities |
 | **extensionPoints** | `{ id: string; name: string; description?: string; type: Enum<'action' \| 'hook' \| 'widget' \| 'provider' \| 'transformer' \| 'validator' \| 'decorator'>; … }[]` | optional | Points where other plugins can extend this plugin |
 | **extensions** | `{ targetPluginId: string; extensionPointId: string; implementation: string; priority: integer }[]` | optional | Extensions contributed to other plugins |
+
+### Nested Shape: `PluginRegistryEntry.quality`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **testCoverage** | `number` | optional |  |
+| **documentationScore** | `number` | optional |  |
+| **codeQuality** | `number` | optional |  |
+| **securityScan** | `never` | optional | [REMOVED] `PluginQualityMetrics.securityScan` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — the block declared a last-scan date, per-severity vulnerability counts and a `passed` verdict, and no scanner, registry, installer or UI ever produced or read one, so a plugin could publish `passed: true` with nothing at all behind it. Delete the key. There is no replacement key: plugin security scanning is not a platform capability, and the scan-result family this block mirrored was retired with it. The sibling quality metrics — `testCoverage`, `documentationScore`, `codeQuality` and `conformanceTests` — are unchanged. Audit dependencies with a tool built for it (npm audit, pnpm audit, Dependabot, the GitHub Advisory Database, OSV). |
+| **conformanceTests** | `{ protocolId: string; passed: boolean; totalTests: integer; passedTests: integer; … }[]` | optional |  |
 
 
 ---

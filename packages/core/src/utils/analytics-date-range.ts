@@ -235,10 +235,10 @@ export function resolveAnalyticsDateRangePreset(
  * Reachability: on EVERY REST analytics route a schema door parses
  * `timeDimensions` ahead of the reader. `POST /analytics/query` and
  * `/analytics/sql` parse the whole body; `POST /analytics/dataset/query` has
- * parsed its selection's shared members — `timeDimensions` included — against
- * `AnalyticsQuerySchema.pick(…)` since PR #17548, the PR that landed that door
- * for card #17058 (`rest/src/analytics-selection-door.ts`, wired ahead of the
- * executor). So every `dateRange` the union CAN refuse is refused there, with
+ * parsed its selection's shared members — `timeDimensions` included — since
+ * PR #17548, and parses the WHOLE selection against
+ * `DatasetSelectionSchema` since #17551
+ * (`rest/src/analytics-selection-door.ts`, wired ahead of the executor). So every `dateRange` the union CAN refuse is refused there, with
  * the schema's own sentence, and this constructor contributes only its
  * `.code`/`.status` to that answer.
  *

@@ -10,7 +10,7 @@ fix(runtime): mount the scoped `/api/v1/environments/:id/packages*` door, and re
 
 **The wire.** Two responses gained the key their own declared schema requires (contract review of #16628, finding F2). Both additions are **additive** — no key left either payload:
 
-- `GET /packages` now sends **`hasMore`** (`ListInstalledPackagesResponseSchema`). It is `false`: this door applies its `status` / `type` filters and returns every remaining row, reading no `limit` and no `cursor`, so there is no next page to announce.
+- `GET /packages` now sends **`hasMore`** (`ListInstalledPackagesResponseSchema`). It is `false`: this door applies its `status` / `type` / `enabled` filters and returns every remaining row, reading no `limit` and no `cursor`, so there is no next page to announce.
 - `DELETE /packages/:id` now sends **`packageId`** (`UninstallPackageApiResponseSchema`). `registryRemoved` and `persisted` stay on the wire unchanged.
 
 A client that reads only the keys it read before is unaffected; a client parsing either payload against the published schema stops being refused.

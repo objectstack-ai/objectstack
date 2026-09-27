@@ -16,16 +16,23 @@
  *
  * ## What rots here, and which check catches it
  *
- * The artefact is a SYNC of objectui's public-tier registry (generated from the
- * published `@object-ui/*` packages at the version `.objectui-sha` ships — see
- * `scripts/gen-sdui-manifest-node.mjs`). Checked-in syncs rot; the ruling's
- * words for the failure mode are 「同步一次就烂」. Offline, per-PR:
+ * The artefact is a SYNC of objectui's public-tier registry, generated from
+ * objectui's BUILT tree at the commit `.objectui-sha` pins
+ * (`.cache/objectui-<SHA12>/apps/console`, materialised by `pnpm objectui:build`
+ * — see `scripts/gen-sdui-manifest-node.mjs`, the one producer since ruling 丙 on
+ * #17735). Checked-in syncs rot; the ruling's words for the failure mode are
+ * 「同步一次就烂」. Offline, per-PR:
  *
  *   1. ABSENCE / SHAPE — the artefact exists at the repo root, parses, and
  *      carries a non-empty `components` map whose entries agree with their
  *      keys. An absent artefact silently reverts `validateJsxPages` to
  *      parse-only (`resolveSduiManifest()` degrades by design), so absence
- *      here is the loudest failure, never a skip. Same for the record file.
+ *      here is the loudest failure, never a skip. Same for the record file,
+ *      whose fields are keyed to that one producer: `source` must read
+ *      `built-tree`, and `modulesRoot` and `objectuiWorkspaceVersion` must be
+ *      present. A record from the retired npm-install route (it carried
+ *      `objectuiPackagesVersion` and no `source`) is RED here, never read as
+ *      the same claim under an older name.
  *   2. TAMPER — sha256(artefact) equals the record. The manifest is
  *      generator-owned; a hand edit is invisible to every consumer (the
  *      resolver JSON.parses whatever is there), so the hash is the only
@@ -36,39 +43,36 @@
  *      — the same moment `check-sdui-lockstep` already forces a parser parity
  *      re-verification, and the moment an objectui checkout is guaranteed to
  *      exist (the bump required one).
- *   4. VERSION ↔ PIN CORRESPONDENCE — the record's `objectuiPackagesVersion` is
- *      the version `packages/core/package.json` DECLARES at the pinned commit.
- *      Checks 1-3 reach both fields and relate neither: the version was read
- *      as a presence check only, so the record could name pin C and version V
- *      with nothing asking whether V is C's version at all (#18611). The
- *      generator's own default does not write such a record — `--objectui-version`
- *      unset reads the version off the PIN and REFUSES when the pin cannot be
- *      read — but an explicit wrong version, a hand edit, or a record written
- *      before that default was fixed still produce one, and checks 1-3 stay
+ *   4. VERSION ↔ PIN CORRESPONDENCE — the record's `objectuiWorkspaceVersion`
+ *      is the version `packages/core/package.json` DECLARES at the pinned
+ *      commit. Checks 1-3 reach both fields and relate neither: the version is
+ *      otherwise read as a presence check only, so the record could name pin C
+ *      and version V with nothing asking whether V is C's version at all
+ *      (#18611). The generator does not write such a record — it reads the
+ *      version off the built tree AT the pin, and refuses a tree whose HEAD is
+ *      not the pin — but a hand edit still produces one, and checks 1-3 stay
  *      green throughout.
  *      This is the only check here that needs an input from outside this tree,
  *      so it is the only one that can report NOT CHECKED — see below.
  *
  * ## What this deliberately does NOT do, and where that risk is held
  *
- * No per-PR regeneration: that would put an npm-registry network dependency
- * inside a required lint job — the exact shape `check-sdui-lockstep`'s header
- * declines, for the same reasons. Under an unchanged pin the published inputs
- * are immutable, so content drift per-PR is not a live axis. The residual
- * axis — this repo's OWN adapter (`manifestFromConfigs`) changing while the
- * pin stands still — is held by `packages/sdui-parser`'s lockstep gate and
- * unit suite, and by regeneration being byte-deterministic (measured: two runs
- * from the same install, identical sha256), so the remedy this gate prints
- * always converges.
+ * No per-PR regeneration: that would put an objectui clone and build (network,
+ * minutes) inside a required lint job — the shape `check-sdui-lockstep`'s
+ * header declines, for the same reasons. Under an unchanged pin the pinned
+ * commit's registry is immutable, so content drift per-PR is not a live axis.
+ * The residual axis — this repo's OWN adapter (`manifestFromConfigs`) changing
+ * while the pin stands still — is held by `packages/sdui-parser`'s lockstep
+ * gate and unit suite, and by regeneration being byte-deterministic (two runs
+ * over one built tree, identical bytes), so the remedy this gate prints always
+ * converges.
  *
- * Check 4 does NOT prove that the published `@object-ui` tarballs at that
- * version were BUILT from the pinned commit. They are not: objectui bumps its
- * version only at release, so the version a mid-release commit declares names a
- * tarball built from an earlier commit. That gap is a PRODUCER question
- * (#17735 — which mechanism writes the artefact) and is not ruled here. What
- * check 4 asserts is exactly the relation the record claims and nothing wider:
- * the two fields it carries describe ONE objectui commit. The claim printed on
- * success is kept as narrow as what ran.
+ * Check 4 relates two fields of the record; it does not re-run the producer.
+ * That the artefact describes the pinned SOURCE (rather than a tarball objectui
+ * published from an earlier commit under the same version string) is the
+ * producer's guarantee, not this gate's: the generator reads only the built
+ * tree at the pin (ruling 丙 on #17735). The claim printed on success is kept as
+ * narrow as what ran.
  *
  * Check 4's oracle is an objectui CHECKOUT, which a required lint job does not
  * have and must not clone (network in a required job — the shape declined
@@ -119,6 +123,14 @@ const OBJECTUI_SIBLING = '../objectui';
  * read, now read by the gate instead of by hand.
  */
 const OBJECTUI_VERSION_FILE = 'packages/core/package.json';
+
+/**
+ * The record's fields, keyed to the one producer (`scripts/gen-sdui-manifest-node.mjs`,
+ * which reads objectui's built tree at the pin): absence of any is RED, and so is
+ * a `source` other than `RECORD_SOURCE`.
+ */
+const RECORD_FIELDS = ['objectuiSha', 'source', 'modulesRoot', 'objectuiWorkspaceVersion', 'sha256', 'components'];
+const RECORD_SOURCE = 'built-tree';
 
 /**
  * The population this gate reads, declared for `scripts/pm/dispatch-gates.mjs`.
@@ -226,7 +238,7 @@ export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersi
   if (!existsSync(artefactPath)) {
     problems.push(
       'sdui.manifest.json is MISSING at the repo root. `resolveSduiManifest()` degrades to parse-only\n' +
-        '  silently, so this gate is the thing that notices. Regenerate: node scripts/gen-sdui-manifest-node.mjs',
+        '  silently, so this gate is the thing that notices. Regenerate: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs',
     );
     return problems; // every later check reads it
   }
@@ -264,16 +276,25 @@ export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersi
     problems.push(`scripts/sdui-manifest.record.json does not parse: ${e.message}`);
     return problems;
   }
-  for (const field of ['objectuiSha', 'objectuiPackagesVersion', 'sha256', 'components']) {
+  for (const field of RECORD_FIELDS) {
     if (record[field] === undefined) problems.push(`record is missing \`${field}\`.`);
   }
-  if (problems.length) return problems;
+  if (record.source !== undefined && record.source !== RECORD_SOURCE) {
+    problems.push(`record \`source\` is ${JSON.stringify(record.source)}, not ${JSON.stringify(RECORD_SOURCE)} — no producer in this repo writes that.`);
+  }
+  if (problems.length) {
+    problems.push(
+      '  The record is keyed to the one producer, which reads objectui\'s built tree at the pin. Regenerate:\n' +
+        '    pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs',
+    );
+    return problems;
+  }
 
   const sha256 = createHash('sha256').update(raw).digest('hex');
   if (sha256 !== record.sha256) {
     problems.push(
       `sdui.manifest.json sha256 ${sha256.slice(0, 12)}… does not match the record ${String(record.sha256).slice(0, 12)}…\n` +
-        '  The artefact is generator-owned — never hand-edit it. Regenerate: node scripts/gen-sdui-manifest-node.mjs',
+        '  The artefact is generator-owned — never hand-edit it. Regenerate: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs',
     );
   }
   if (keys.length !== record.components) {
@@ -286,10 +307,7 @@ export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersi
   }
   const pin = readFileSync(pinPath, 'utf8').trim();
 
-  // Check 4's oracle, read once. It is asked about the LIVE pin, so when the pin
-  // has moved the version it yields is the one the regeneration must install —
-  // which is what the moved-pin remedy below has always asked the operator to go
-  // and read by hand.
+  // Check 4's oracle, read once, about the LIVE pin.
   const versionLeg = readPinnedDeclaredVersion(pin, { root, objectuiRoot });
   onVersionLeg?.(versionLeg);
 
@@ -297,12 +315,9 @@ export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersi
     problems.push(
       `.objectui-sha has moved to ${pin.slice(0, 12)}… but sdui.manifest.json was generated at ${String(record.objectuiSha).slice(0, 12)}…\n` +
         '  A pin bump changes which registry the shipped console runs; the manifest must follow it (同步一次就烂 is\n' +
-        '  the failure mode this gate exists for). Regenerate against the new pin:\n' +
-        (versionLeg.status === 'resolved'
-          ? `    node scripts/gen-sdui-manifest-node.mjs --objectui-version ${versionLeg.version}\n` +
-            `  (${versionLeg.version} is what the new pin's ${OBJECTUI_VERSION_FILE} declares, read from ${versionLeg.where}.)`
-          : '    node scripts/gen-sdui-manifest-node.mjs --objectui-version {the @object-ui version the new pin ships}\n' +
-            "  (read it from the objectui checkout's packages/core/package.json — the bump already required that checkout)."),
+        '  the failure mode this gate exists for). Build objectui at the new pin, then regenerate from that tree:\n' +
+        '    pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs\n' +
+        `  (the generator reads .cache/objectui-${pin.slice(0, 12)}/apps/console — it takes no version and no path).`,
     );
     // The version leg is NOT reported on top of this one: with the pin moved,
     // the record describes a different commit by construction, so a second
@@ -311,19 +326,17 @@ export function checkTree(root, { objectuiRoot, requireObjectui = false, onVersi
   }
 
   // ── Check 4 (#18611) ────────────────────────────────────────────────────
-  if (versionLeg.status === 'resolved' && versionLeg.version !== record.objectuiPackagesVersion) {
+  if (versionLeg.status === 'resolved' && versionLeg.version !== record.objectuiWorkspaceVersion) {
     problems.push(
-      `the record's two objectui fields describe different commits: objectuiPackagesVersion is ${JSON.stringify(record.objectuiPackagesVersion)},\n` +
+      `the record's two objectui fields describe different commits: objectuiWorkspaceVersion is ${JSON.stringify(record.objectuiWorkspaceVersion)},\n` +
         `  but objectui ${pin.slice(0, 12)}… — the pin the record itself names — declares ${JSON.stringify(versionLeg.version)} in ${OBJECTUI_VERSION_FILE}\n` +
-        `  (read from ${versionLeg.where}). The manifest was generated from the published ${record.objectuiPackagesVersion} packages, so it\n` +
-        '  describes a registry this pin does not name. The generator reads this version from the PIN, never\n' +
-        '  from this record, so a disagreement came from outside that default: a version named explicitly on\n' +
-        '  some other run, a hand edit, or a record written before the default was fixed to read the pin.\n' +
-        `  Regenerate against the pin: node scripts/gen-sdui-manifest-node.mjs --objectui-version ${versionLeg.version}`,
+        `  (read from ${versionLeg.where}). The generator reads this version off the built tree AT the pin and refuses a\n` +
+        '  tree checked out anywhere else, so a disagreement came from outside it: a hand edit.\n' +
+        '  Regenerate against the pin: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs',
     );
   } else if (versionLeg.status === 'unsupported') {
     problems.push(
-      `cannot judge objectuiPackagesVersion against the pin, with an objectui checkout in hand: ${versionLeg.reason}\n` +
+      `cannot judge objectuiWorkspaceVersion against the pin, with an objectui checkout in hand: ${versionLeg.reason}\n` +
         '  An oracle that is present and cannot answer is a failure, never a skip.',
     );
   } else if (versionLeg.status === 'unreachable' && requireObjectui) {
@@ -374,6 +387,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'moved pin is RED': 1,
   'empty components is RED': 1,
   'missing record is RED': 1,
+  'a record from the retired npm-install route is RED': 1,
   'pin-declared version agreeing with the record passes': 1,
   'pin-declared version disagreeing with the record is RED': 1,
   'an unreachable objectui checkout is not a version verdict': 1,
@@ -387,7 +401,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 function selfTest() {
   const mk = (mutate, { pin = 'a'.repeat(40), version = '0.0.0-selftest' } = {}) => {
@@ -404,7 +418,9 @@ function selfTest() {
       JSON.stringify(
         {
           objectuiSha: pin,
-          objectuiPackagesVersion: version,
+          source: RECORD_SOURCE,
+          modulesRoot: `.cache/objectui-${pin.slice(0, 12)}/apps/console`,
+          objectuiWorkspaceVersion: version,
           sha256: createHash('sha256').update(raw).digest('hex'),
           components: 1,
         },
@@ -467,6 +483,14 @@ function selfTest() {
       writeFileSync(join(r, 'scripts', 'sdui-manifest.record.json'), JSON.stringify(rec));
     }), 1, blind],
     ['missing record is RED', mk((r) => rmSync(join(r, 'scripts', 'sdui-manifest.record.json'))), 1, blind],
+    // The re-keying (ruling 丙 on #17735): a record shaped by the retired npm
+    // route — `objectuiPackagesVersion`, no `source`, no `modulesRoot` — is not
+    // this producer's record under an older name, whatever its hash says.
+    ['a record from the retired npm-install route is RED', mk((r) => {
+      const p = join(r, 'scripts', 'sdui-manifest.record.json');
+      const { source, modulesRoot, objectuiWorkspaceVersion, ...rest } = JSON.parse(readFileSync(p, 'utf8'));
+      writeFileSync(p, JSON.stringify({ ...rest, objectuiPackagesVersion: objectuiWorkspaceVersion }, null, 2));
+    }), 1, blind],
 
     // ── Check 4: the version the PIN declares (#18611) ────────────────────
     //
@@ -581,7 +605,7 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    `✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, emptiness, ` +
+    `✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, emptiness, a retired-route record, ` +
       'a version the pin does not declare, and an oracle that cannot answer are RED; an absent oracle is reported, not scored).',
   );
 
@@ -619,12 +643,12 @@ if (isEntrypoint(import.meta.url)) {
     // line above be read as "fresh at the pin" in every sense.
     if (versionLeg?.status === 'resolved') {
       console.log(
-        `  @object-ui ${record.objectuiPackagesVersion} is the version objectui ${String(record.objectuiSha).slice(0, 12)}… declares ` +
+        `  @object-ui ${record.objectuiWorkspaceVersion} is the version objectui ${String(record.objectuiSha).slice(0, 12)}… declares ` +
           `in ${OBJECTUI_VERSION_FILE} (read from ${versionLeg.where}).`,
       );
     } else {
       console.log(
-        `  NOT CHECKED — objectuiPackagesVersion ${JSON.stringify(record.objectuiPackagesVersion)} was not compared with what the pin declares: ` +
+        `  NOT CHECKED — objectuiWorkspaceVersion ${JSON.stringify(record.objectuiWorkspaceVersion)} was not compared with what the pin declares: ` +
           `${versionLeg?.reason ?? 'the version leg did not run.'}\n` +
           '  Re-run with an objectui checkout (OBJECTUI_ROOT=… or a ../objectui sibling); add --require-objectui to make this gap an exit 1.',
       );

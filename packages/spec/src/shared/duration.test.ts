@@ -8,7 +8,7 @@
  * of schema and a page of reasoning — the reasoning is what these hold.
  *
  * The ISOMORPHISM family copies the `EpochMs` pattern (ADR-0122,
- * `type-alias-convention.pin.test.ts` `Iso868`): author state and parsed state
+ * `type-alias-convention.pin.test.ts` `Iso_shared_epoch__EpochMs`): author state and parsed state
  * coincide, so no `*Parsed` synonym exists, and the assertion is the type-level
  * `Eq<z.input, z.infer>` rather than a runtime claim about a value. The pin
  * file carries the same assertion as the gate's exemption registry; this one

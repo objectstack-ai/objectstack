@@ -349,20 +349,21 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
 /**
  * Source audits THIS AGGREGATE cannot run, because each needs an input handed to
  * it on the command line and this aggregate hands none over. That, and only that,
- * is the claim — ⛔ NOT that the input is unavailable here: for the entry below it
- * is TRACKED in this repo and CI feeds it to the gate on every PR (that entry's
- * `why` carries the reading).
+ * is the claim — ⛔ NOT that the input is unavailable here.
  *
  * A separate bucket from `NO_GENERATOR` because the two say different things to a
  * reader, and #4690 is what conflating them cost. `NO_GENERATOR` means "runnable
  * as it stands, deliberately not run in this aggregate — run it yourself and it
  * will answer". This one means "running it takes an input this aggregate does not
  * pass, so here is that input and who does pass it" — still runnable by hand, and
- * the `why` says with what. Sitting in the first list, `check:react-declaration-parity`
- * read as the former for the entire time it was the latter: it was wired into no
- * workflow, and a manual run without `MANIFEST` printed a `⚠` and exited 0, so no
- * path existed on which the gate could go red. Whoever read "deliberately not run"
- * reasonably assumed someone, somewhere, was running it.
+ * the `why` says with what. A gate filed in the first list while it belonged in
+ * this one read as "someone, somewhere, runs it" while running nowhere, and no
+ * path existed on which it could go red.
+ *
+ * EMPTY since ADR-0082 D4's declaration-parity ratchet (`check:react-declaration-parity`,
+ * the bucket's only entry) was retired by maintainer ruling on #17735 (2026-09-18).
+ * The bucket and its reconciliation below stay: the next gate that needs an
+ * input this aggregate does not pass is filed here, not in `NO_GENERATOR`.
  *
  * Encoding WHY in the ledger follows EXPLICIT_GENERATORS (#5807/#5358): a
  * classification that records only a name is a classification the next reader has
@@ -377,29 +378,7 @@ const EXTERNAL_INPUT_REQUIRED: ReadonlyArray<{
   input: string;
   runBy: string;
   why: string;
-}> = [
-  {
-    check: 'check:react-declaration-parity',
-    input: 'MANIFEST=<sdui.manifest.json> — objectui\'s registry-inputs dump',
-    runBy: 'scripts/gen-sdui-manifest.sh',
-    why:
-      'compares the spec schema props against the registry-declared inputs (two declarations, no renderer: #4472). ' +
-      'It reads its manifest from MANIFEST=<path> and THIS AGGREGATE PASSES NONE — that, and only that, is what ' +
-      '"cannot run here" means for this entry. The input is NOT unavailable in the repo: since #13446 a dump is ' +
-      'TRACKED at the repo root as sdui.manifest.json, and lint.yml runs the gate --strict against it on every PR ' +
-      '(MANIFEST="$PWD/sdui.manifest.json"), so the gate is neither unrun nor unrunnable — it is unrun BY THIS ' +
-      'AGGREGATE. Nor does producing one require a browser: scripts/gen-sdui-manifest-node.mjs regenerates the ' +
-      'tracked artefact under plain Node from the PUBLISHED @object-ui/* packages (the browser-only claim was ' +
-      'measured false on 2026-08-29, re-measured 2026-08-30 against published 17.6.0, and reproduced ' +
-      'byte-identically in review of #18608), and scripts/check-sdui-manifest.mjs holds artefact, record and pin ' +
-      'together. `pnpm sdui:manifest` (runBy) is the other producer, and it does NOT build objectui: it REQUIRES ' +
-      'a checkout already vendored at .cache/objectui-<sha> by `pnpm objectui:build`, exits 1 telling you to run ' +
-      'that first (gen-sdui-manifest.sh 507-516), then serves that tree with a vite dev server and dumps the ' +
-      'registry from a real browser, running this ratchet against THAT. ⚠️ The two producers read two ' +
-      'different registries — published packages vs the pinned checkout\'s source — and do not agree today (#17735). ' +
-      'Without a MANIFEST the gate exits 1 rather than skipping (#4690)',
-  },
-];
+}> = [];
 
 /**
  * Generators whose output NOTHING verifies. Recorded rather than ignored: each
@@ -856,7 +835,7 @@ export function checkGenerated(
   // "deliberately not run" invites the reader to run it AS IT STANDS, which for
   // these does not work: each needs an input on the command line that this
   // aggregate does not pass. Say what that input is and who does pass it, so the
-  // reader can run it by hand — for the entry below the input is tracked here.
+  // reader can run it by hand. Prints nothing while the bucket is empty.
   if (EXTERNAL_INPUT_REQUIRED.length) {
     io.log(`Needs an input this aggregate does not pass (${EXTERNAL_INPUT_REQUIRED.length} source audit(s)):`);
     for (const e of EXTERNAL_INPUT_REQUIRED) {

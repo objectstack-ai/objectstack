@@ -54,6 +54,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 const FIXTURE = [
   { id: '1', stage: 'won', owner: 'u1', amount: 10 },
@@ -199,7 +200,11 @@ describe('[#5134] SqlDriver compiles empty $and/$or/$not to their boolean identi
 
     for (const [name, where, position] of cases) {
       it(`${name} → 400 INVALID_FILTER naming ${position}`, async () => {
-        const err = await refusalOf(where);
+        // [#20020] Marked 'author', as a read-scope merge boundary marks a
+        // caller's own predicate: the non-list combinator refusal names its
+        // position only for a predicate the caller is known to have written
+        // (the #8220 contract); the other rows name it either way.
+        const err = await refusalOf(markFilterSubtreeProvenance(where, 'author'));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         expect(err.message).toContain(position);

@@ -71,7 +71,8 @@
 //
 // The bundled template was never the only hand-written restatement of this
 // policy. The other one is the "Complete Working Example" `package.json` fence
-// in `skills/objectstack-platform/SKILL.md` — the copy-paste manifest every
+// in `skills/objectstack-platform/references/bootstrap.md` (moved there VERBATIM
+// out of the entry SKILL.md by the #19715 split) — the copy-paste manifest every
 // agent that loads that skill reads — and no gate read it (#16767). It sat at
 // the retired `^6.0.0` longer than the bundled template did, for the ordinary
 // reason: the carrier with no reader is where the next drift lands.
@@ -160,7 +161,10 @@ export const POLICY_STAMPS = [
  */
 export const PUBLISHED_RESTATEMENTS = [
   {
-    path: 'skills/objectstack-platform/SKILL.md',
+    // The section moved verbatim out of `skills/objectstack-platform/SKILL.md`
+    // into this reference file (#19715, decision batch #213 item 1); the row
+    // follows the text, and a renamed heading still reds below.
+    path: 'skills/objectstack-platform/references/bootstrap.md',
     heading: '## Complete Working Example',
     label: '**`package.json`**:',
     fence: 'json',

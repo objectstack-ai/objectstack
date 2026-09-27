@@ -124,8 +124,8 @@ echo "== the teardown AGENTS.md itself prescribes: the port is one YOU picked ==
 expect allow 'kill $(lsof -ti tcp:38421)'
 expect allow 'kill $(lsof -ti tcp:3000) 2>/dev/null'
 
-echo "== pgrep -P / -s select by a handle the caller owns — live in two tracked scripts =="
-# scripts/publish-smoke.sh kill_tree() and scripts/gen-sdui-manifest.sh sdui_live_pids().
+echo "== pgrep -P / -s select by a handle the caller owns — legitimate teardown shapes =="
+# scripts/publish-smoke.sh kill_tree() uses -P; -s was the retired gen-sdui-manifest.sh's.
 # A rule that reddened these would be routed around within the hour.
 expect allow 'for child in $(pgrep -P "$pid"); do kill "$child"; done'
 expect allow 'pgrep -s "$leader" | xargs kill'

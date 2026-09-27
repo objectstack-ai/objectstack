@@ -185,6 +185,10 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
             ? { $parentRunId: String(parentRunId), $parentMapNode: node.id }
             : {}),
         } as AutomationContext;
+        // [#19846] The parent's `callerParamKeys` describes the PARENT's params
+        // bag, not this item's mapped inputs — dropped, so the child carries no
+        // signal and its screens infer (see `subflow-node.ts`).
+        delete childContext.callerParamKeys;
 
         const child = await engine.execute(flowName, childContext);
 

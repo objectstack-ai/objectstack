@@ -155,11 +155,11 @@ pull its build into `packages/console/`.
 Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⛔ Never hand-edit
 `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
-**Moving the pin has a second half: regenerate the committed manifest** — `node scripts/gen-sdui-manifest-node.mjs
---objectui-version {the @object-ui version the new pin ships}`; `scripts/check-sdui-manifest.mjs` reds until you do.
-ADR-0082 D4's spec↔registry declaration-parity ratchet reads that tracked artefact, so it gates **every PR**, not a
-pin bump alone. `pnpm sdui:manifest` is the separate browser dump of objectui's own registry (needs Playwright
-chromium); `objectui:bump` and `objectui:refresh` print it. Full procedure: `docs/releases-maintenance.md`.
+**Moving the pin has a second half: regenerate the committed manifest** — `pnpm objectui:build`, then
+`node scripts/gen-sdui-manifest-node.mjs`, which reads objectui's BUILT tree at the pin (never an npm install, whose
+version string names an older commit) and takes no arguments; `scripts/check-sdui-manifest.mjs` reds until you do.
+`objectui:bump` and `objectui:refresh` print the step, and the console build ships that same tracked file in
+`packages/console/dist/`. Full procedure: `docs/releases-maintenance.md`.
 
 **Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server —
 `cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
@@ -275,12 +275,12 @@ localStorage / auth gotchas.
     spent once per PR — the OWNING seat then lands it, later pushes included; the director seat requests the word as
     ONE batch of at most five rows, and the click stays the maintainer's. **Tier S** (席内达档复核落地: all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
-    current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict, `check-clause2-carriers.mjs --pair N`
-    reads 0 on its definite rows (⛔ never C5) and every check is green — the owning seat then lands it through the
-    queue; the post-merge audit is the compensating control. A PR whose only governed paths are register rows the queue
-    leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling
-    keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR, under any account** —
-    an authorized account is agent-operated too; "CI is green" carries no information about a governance change.
+    current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning
+    seat then lands it through the queue; the post-merge audit is the compensating control. A PR whose only governed
+    paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified
+    recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a
+    governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green" carries no
+    information about a governance change.
 
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
@@ -403,7 +403,8 @@ a PM dispatch sets the assignee (step 1) and posts the `Claim:` naming the dev's
 both on the dev's behalf. A dispatched executor inherits both records: it verifies that the
 newest `Claim:` names its branch (on a mismatch it stops and reports), posts no second claim —
 the dispatch's `Claim:` is its identity and its own record is the report comment — and it ⛔ never
-writes the assignee and ⛔ never yields a card it was dispatched to. Before writing code, re-read
+writes the card's assignee (the PR's assignee mirrors the card's, set by the executor at
+pr_create) and ⛔ never yields a card it was dispatched to. Before writing code, re-read
 the comments — the comments decide, not the field: a `Claim:` from another session or branch
 (other than the dispatch that sent you) means taken whatever the field says — pick another or
 ask, ⛔ never reassign; a bare assignee with no `Claim:` under it is a dispatch's step 1, not a
@@ -412,6 +413,13 @@ for itself. Release is an explicit act: whoever moves a card out of ownership cl
 and posts a `Release:` line. Findings are filed unassigned; assign at the moment you start. The
 maintainer's own work under the shared account carries no claim comment and is indistinguishable
 from a dispatch — an accepted blind spot; per-seat identities are not introduced.
+
+**Every GitHub write leaves through `scripts/pm/`, as `objectstack-fleet[bot]`, behind the shared write
+gate.** `fleet-token.mjs` mints the App token from `OS_FLEET_APP_ID` / `OS_FLEET_INSTALLATION_ID` /
+`OS_FLEET_PRIVATE_KEY`; `write-pace.mjs` serialises and spaces every write verb fleet-wide; `issue-create`,
+`label-write`, `post-stamped` and `close-cards` own their writes; `with-fleet.sh -- <command…>` runs anything
+else behind the gate (`--read` for reads). ⛔ Never a bare `curl` / `fetch` / `gh api -X POST|PATCH|PUT|DELETE`
+write; never a token in a remote URL, a `git config` value on disk or a log line. Each header is the authority.
 
 **State on your PR that you did not set belongs to another actor — ask, never "correct"
 it.** Under one shared identity every other participant's write arrives unsigned: the PM
@@ -499,8 +507,9 @@ Even inside your own worktree, operate defensively:
    (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
    so re-read it rather than recalling it); (b) the **Version Packages** PR, or any PR whose merge performs a
    release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 5,000** (`additions + deletions`,
-   generated files included) — it lands only by a human merge, which is its review record. Read the PR's file
-   list (`get_files`), **its author and its size** before you arm anything.
+   generated files included) — it lands the way a Tier H surface does: an authorized APPROVED review and then
+   the owning seat, or a human merge. Read the PR's file list (`get_files`), **its author and its size** before
+   you arm anything.
 
    **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
@@ -747,18 +756,6 @@ Principles the wrapper encodes (its own output is the authority on detail):
   name on two entries is one declaration re-exported (fine) or two declarations sharing
   a name, with accepted cases in the shrink-only, hand-edited
   `dual-source-exports.baseline.json`.
-
-**`check:react-declaration-parity` compares two DECLARATIONS, not a declaration against an
-implementation** — the props the spec zod schema declares vs the inputs the objectui
-registry config declares. A prop both sides declare and no renderer reads is, to this gate,
-perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real; just
-don't read it as proof anything renders. Its right-hand side is the **tracked repo-root
-`sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs` beside
-`scripts/sdui-manifest.record.json` and held honest in the required lint job by
-`scripts/check-sdui-manifest.mjs` — so `lint.yml` runs this gate `--strict` against it on
-every PR. It still **exits 1** with no usable manifest and `check:generated` files it
-`EXTERNAL_INPUT_REQUIRED` because that aggregate hands it none. ⛔ Do not "fix" a red by
-re-adding a skip.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.
@@ -1093,7 +1090,7 @@ Both non-handshake shapes, and how to classify and probe your own:
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
    merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a
    removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the
-   bump's `sdui:manifest` second half included — see the Frontend section). Pre-merge check for any removal or rename
+   bump's manifest regeneration included — see the Frontend section). Pre-merge check for any removal or rename
    of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the
    pinned SHA before merging.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*

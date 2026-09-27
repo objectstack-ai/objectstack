@@ -701,7 +701,7 @@ export const SysUser = ObjectSchema.create({
       maxLength: 64,
       group: 'Admin',
       description:
-        'Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2) — grant platform-admin standing with an unscoped `admin_full_access` assignment in `sys_user_permission_set`.',
+        'Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2). To grant platform-admin standing, list the user\'s verified email in `OS_PLATFORM_OWNER_EMAIL`; under the `single` tenancy posture an unscoped `admin_full_access` assignment in `sys_user_permission_set` also confers it.',
     }),
 
     banned: Field.boolean({

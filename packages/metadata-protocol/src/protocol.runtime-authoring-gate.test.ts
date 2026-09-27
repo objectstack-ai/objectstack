@@ -211,11 +211,16 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
     it('refuses an ACTIVE save of the broken approval flow with a 422', async () => {
         const { protocol, rows } = makeProtocol();
 
-        await expect(save(protocol, brokenApprovalFlow())).rejects.toThrow(/invalid_metadata/);
-
         const err = await save(protocol, brokenApprovalFlow()).catch((e: any) => e);
+        expect(err).toBeInstanceOf(Error);
+        // The token rides `code`; the message is the human sentence and opens
+        // with it — no bracketed restatement of the code in front. Asserted as
+        // the sentence that opens, the count and the `[rule]` locator, so this
+        // cannot go green by the message turning empty or generic.
         expect(err.status).toBe(422);
         expect(err.code).toBe('INVALID_METADATA');
+        expect(err.message).toMatch(/^flow\/leave_approval failed author-time validation: 1 issue — /);
+        expect(err.message).toContain('flows[0].nodes[1].config.approvers[0].value [approval-expression-invalid]');
 
         // D3 — the structured envelope Studio already renders for a Zod
         // failure, carrying the four keys an author needs to act.

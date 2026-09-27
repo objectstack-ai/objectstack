@@ -85,6 +85,17 @@ resolved lazily per bind, so adapter upgrades are always picked up. If the
 automation or job service is unavailable, the plugin logs a warning and no-ops
 rather than failing startup.
 
+### A per-kernel scheduled-work policy
+
+Nothing time-triggered arms unless `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` is
+truthy. That switch is one reading for the whole process. A host that runs
+several kernels in one process can give each kernel its own policy: pass the
+same `scheduledWorkPolicy` (a `ScheduledWorkPolicy` value or a resolver) to
+`AutomationServicePlugin`, `ScheduleTriggerPlugin` and
+`TimeRelativeTriggerPlugin`. Without it, the deployment switch decides, as
+before. A flow the policy leaves unarmed is reported with the same
+policy reason as a deployment-disabled one.
+
 ## Error isolation
 
 A flow that throws during a scheduled run is logged and swallowed — it never

@@ -1557,7 +1557,8 @@ export class MCPServerRuntime {
    * cross-request session/request-id collision and keeps each call isolated).
    * The tool set is the object-CRUD bridge plus — when the bridge can resolve
    * the framework's action mechanism — the business-action tools
-   * (`list_actions` / `run_action`), all bound to the **caller's principal**
+   * (`list_actions` / `run_action`, and `resume_run` when the bridge can
+   * resume a paused run, #15705), all bound to the **caller's principal**
    * via `bridge`; the runtime wires that bridge to the existing permission +
    * RLS path, so an external agent can never exceed the key's authority.
    *

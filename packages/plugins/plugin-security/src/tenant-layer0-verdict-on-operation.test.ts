@@ -238,6 +238,24 @@ async function boot(opts: {
   return { plugin, logger, middleware: middlewares[0] };
 }
 
+/**
+ * [#20013] The terminal every case hands the middleware, standing in for the
+ * engine's write. The engine runs an installed `postHookWriteImageCheck` on
+ * the rows it is about to store: an insert's rows (here, with no hooks, the
+ * rows as sent), and on a predicate update every matched row merged with the
+ * payload — this double stores no rows, so that is an EMPTY judgement, still a
+ * run. The Layer 0 tenant wall installs the seam on every walled write, and a
+ * terminal that skipped it would be refused fail-closed after `next()`. A read
+ * or a delete carries no seam, so this terminal does nothing for them.
+ */
+const engineTerminal = (opCtx: any) => async (): Promise<void> => {
+  const seam = opCtx.postHookWriteImageCheck;
+  if (!seam) return;
+  seam.honoured = true;
+  if (opCtx.operation === 'insert') await seam.evaluate(Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]);
+  else await seam.evaluate([]);
+};
+
 /** A predicate write — the `multi: true` shape, which carries an `ast`. */
 function sweep(object: string, operation: 'update' | 'delete', context: Record<string, unknown>) {
   const where = { status: 'open' };
@@ -299,7 +317,7 @@ describe('[#15813] the middleware records the Layer 0 verdict it composed — on
   it('`isolated`, a member with an active organization: `organization`, and the injected wall is that equality', async () => {
     const { middleware } = await boot();
     const opCtx = sweep('crm_task', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
     expect(injectedOrgWall(opCtx)).toBe('org-1');
   });
@@ -307,7 +325,7 @@ describe('[#15813] the middleware records the Layer 0 verdict it composed — on
   it('the predicate DELETE path records it too', async () => {
     const { middleware } = await boot();
     const opCtx = sweep('crm_task', 'delete', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
     expect(injectedOrgWall(opCtx)).toBe('org-1');
   });
@@ -315,7 +333,7 @@ describe('[#15813] the middleware records the Layer 0 verdict it composed — on
   it('`group`: `organizations` is the membership SET, and the injected wall is the same set', async () => {
     const { middleware } = await boot({ tenancy: { posture: 'group' } });
     const opCtx = sweep('crm_task', 'update', { ...MEMBER_CTX, accessible_org_ids: ['org-1', 'org-2'] });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organizations', organizationIds: ['org-1', 'org-2'] });
     expect(injectedOrgWall(opCtx)).toEqual({ $in: ['org-1', 'org-2'] });
   });
@@ -323,7 +341,7 @@ describe('[#15813] the middleware records the Layer 0 verdict it composed — on
   it('`group` with a repeated membership records the organization ONCE — a set, so a reader may test length === 1', async () => {
     const { middleware } = await boot({ tenancy: { posture: 'group' } });
     const opCtx = sweep('crm_task', 'update', { ...MEMBER_CTX, accessible_org_ids: ['org-1', 'org-1'] });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organizations', organizationIds: ['org-1'] });
     expect(injectedOrgWall(opCtx)).toEqual({ $in: ['org-1'] });
   });
@@ -331,7 +349,7 @@ describe('[#15813] the middleware records the Layer 0 verdict it composed — on
   it('`single`: `none` — the wall ran and contributed nothing; nothing is injected', async () => {
     const { middleware } = await boot({ tenancy: { posture: 'single' } });
     const opCtx = sweep('crm_task', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'none' });
     expect(injectedOrgWall(opCtx)).toBeUndefined();
   });
@@ -341,7 +359,7 @@ describe('[#15813] the middleware records the Layer 0 verdict it composed — on
     // places no row), so the operation reaches the wall and the wall denies.
     const { middleware } = await boot();
     const opCtx = sweep('crm_task', 'delete', { userId: 'u1', positions: [], permissions: [], posture: 'MEMBER' });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'deny' });
   });
 });
@@ -350,26 +368,26 @@ describe('[#15813] the populations the engine could never answer are answered wh
   it('the deployment\'s #12699 carve-out: an exempted object under an armed wall records `none` — the #15706 population', async () => {
     const { middleware } = await boot({ entitlement: { platformGlobalObjects: ['sys_widget_registry'] } });
     const exempted = sweep('sys_widget_registry', 'update', MEMBER_CTX);
-    await middleware(exempted, async () => {});
+    await middleware(exempted, engineTerminal(exempted));
     expect(exempted.tenantLayer0Verdict).toEqual({ kind: 'none' });
     expect(injectedOrgWall(exempted)).toBeUndefined();
     // Firing control on the same deployment: the sibling is walled and says so.
     const sibling = sweep('crm_task', 'update', MEMBER_CTX);
-    await middleware(sibling, async () => {});
+    await middleware(sibling, engineTerminal(sibling));
     expect(sibling.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
   });
 
   it('an object that opted out of tenancy (`tenancy.enabled: false`) records `none`', async () => {
     const { middleware } = await boot();
     const opCtx = sweep('sys_catalog', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'none' });
   });
 
   it('a `PLATFORM_ADMIN` rung on a PUBLIC tenant object records `organization` — the wall STANDS there (the engine answered this absent)', async () => {
     const { middleware } = await boot({ sets: [PLAIN_MEMBER, ADMIN_SET as PermissionSet] });
     const opCtx = sweep('crm_task', 'update', { ...MEMBER_CTX, permissions: [ADMIN_FULL_ACCESS], posture: 'PLATFORM_ADMIN' });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
     expect(injectedOrgWall(opCtx)).toBe('org-1');
   });
@@ -377,7 +395,7 @@ describe('[#15813] the populations the engine could never answer are answered wh
   it('a `PLATFORM_ADMIN` on a posture-permitting (private) object records `none` — the wall was crossed, so no organization is asserted', async () => {
     const { middleware } = await boot({ sets: [PLAIN_MEMBER, ADMIN_SET as PermissionSet] });
     const opCtx = sweep('crm_secret', 'update', { ...MEMBER_CTX, permissions: [ADMIN_FULL_ACCESS], posture: 'PLATFORM_ADMIN' });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'none' });
     expect(injectedOrgWall(opCtx)).toBeUndefined();
   });
@@ -386,12 +404,12 @@ describe('[#15813] the populations the engine could never answer are answered wh
     const { middleware } = await boot({ sets: [PLAIN_MEMBER, ADMIN_SET as PermissionSet, SECRET_EDITOR] });
     const { posture: _drop, ...rungless } = MEMBER_CTX;
     const admin = sweep('crm_secret', 'update', { ...rungless, permissions: [ADMIN_FULL_ACCESS] });
-    await middleware(admin, async () => {});
+    await middleware(admin, engineTerminal(admin));
     expect(admin.tenantLayer0Verdict).toEqual({ kind: 'none' });
     // Same private object, same absent rung, an explicit grant instead of the
     // platform set: the probe finds no platform capability and the wall stands.
     const member = sweep('crm_secret', 'update', { ...rungless, permissions: ['secret_editor'] });
-    await middleware(member, async () => {});
+    await middleware(member, engineTerminal(member));
     expect(member.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
   });
 });
@@ -400,7 +418,7 @@ describe('[#15813] nothing is recorded where no wall was composed — absence is
   it('a system context takes the middleware\'s first exit: no verdict member at all', async () => {
     const { middleware } = await boot();
     const opCtx = sweep('crm_task', 'update', { isSystem: true, userId: 'usr_system', tenantId: 'org-1' });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(hasVerdict(opCtx)).toBe(false);
   });
 
@@ -410,7 +428,7 @@ describe('[#15813] nothing is recorded where no wall was composed — absence is
     // The pre-image gate re-reads the row through the (fake) engine and refuses
     // a row it cannot see — irrelevant here: the assertion is about what the
     // middleware left on the context, and step 3 is never reached without an ast.
-    await middleware(opCtx, async () => {}).catch(() => undefined);
+    await middleware(opCtx, engineTerminal(opCtx)).catch(() => undefined);
     expect(hasVerdict(opCtx)).toBe(false);
   });
 
@@ -444,21 +462,21 @@ describe('[#15887] the three object shapes record their verdict HERE, not one la
     expect((SCHEMAS.shared_catalog.fields as Record<string, unknown>).organization_id).toBeDefined();
 
     const opCtx = sweep('shared_catalog', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'none' });
     expect(injectedOrgWall(opCtx)).toBeUndefined();
 
     // Firing control on the same boot: the sibling with no opt-out IS walled,
     // so `none` above is this object's verdict and not a dead middleware.
     const sibling = sweep('crm_task', 'update', MEMBER_CTX);
-    await middleware(sibling, async () => {});
+    await middleware(sibling, engineTerminal(sibling));
     expect(sibling.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
   });
 
   it('[#7835] a FEDERATED object carrying the PLATFORM\'s injected anchor records `none` — the phantom column is not a wall', async () => {
     const { middleware } = await boot();
     const opCtx = sweep('ext_customer', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'none' });
     expect(injectedOrgWall(opCtx)).toBeUndefined();
   });
@@ -468,7 +486,7 @@ describe('[#15887] the three object shapes record their verdict HERE, not one la
     // every federated object", which would delete a wall that is doing its job.
     const { middleware } = await boot();
     const opCtx = sweep('ext_ledger', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
     expect(injectedOrgWall(opCtx)).toBe('org-1');
   });
@@ -481,7 +499,7 @@ describe('[#15887] the three object shapes record their verdict HERE, not one la
     // `organization_id`, never `workspace_id`.
     const { middleware } = await boot();
     const opCtx = sweep('workspace_doc', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organization', organizationId: 'org-1' });
     expect(injectedOrgWall(opCtx)).toBe('org-1');
     expect(JSON.stringify(opCtx.ast.where)).not.toContain('workspace_id');
@@ -495,7 +513,7 @@ describe('[#15887] the three object shapes record their verdict HERE, not one la
     const { middleware } = await boot();
     expect((SCHEMAS.workspace_note.fields as Record<string, unknown>).organization_id).toBeUndefined();
     const opCtx = sweep('workspace_note', 'update', MEMBER_CTX);
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'none' });
     expect(injectedOrgWall(opCtx)).toBeUndefined();
   });
@@ -527,7 +545,7 @@ describe('[#15887 / ADR-0090 D10] the on-behalf-of INTERSECTION is recorded at t
       accessible_org_ids: CALLER_ORGS,
       onBehalfOf: { userId: DELEGATOR },
     });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
 
     // Both walls really were composed onto this one operation, in order.
     expect(injectedOrgWalls(opCtx)).toEqual([
@@ -550,7 +568,7 @@ describe('[#15887 / ADR-0090 D10] the on-behalf-of INTERSECTION is recorded at t
       delegator: { userId: DELEGATOR, memberOf: ['org-2', 'org-3', 'org-9'] },
     });
     const opCtx = sweep('crm_task', 'update', { ...MEMBER_CTX, accessible_org_ids: CALLER_ORGS });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(injectedOrgWalls(opCtx)).toEqual([{ $in: ['org-1', 'org-2', 'org-3'] }]);
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'organizations', organizationIds: CALLER_ORGS });
   });
@@ -570,7 +588,7 @@ describe('[#15887 / ADR-0090 D10] the on-behalf-of INTERSECTION is recorded at t
       accessible_org_ids: CALLER_ORGS,
       onBehalfOf: { userId: DELEGATOR },
     });
-    await middleware(opCtx, async () => {});
+    await middleware(opCtx, engineTerminal(opCtx));
     expect(opCtx.tenantLayer0Verdict).toEqual({ kind: 'deny' });
   });
 });

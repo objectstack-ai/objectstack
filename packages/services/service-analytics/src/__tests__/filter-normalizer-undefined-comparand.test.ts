@@ -90,6 +90,36 @@
  * ⛔ `read-scope-sql.ts` is the sibling door and is not touched here; its own
  * refusal landed in PR #6390 with a different envelope on purpose (500: it
  * compiles a platform artifact, this door receives caller input).
+ *
+ * ## [#20035] RE-JUDGED: the verdicts stand, the WORDING is the type face's
+ *
+ * The maintainer's ruling on #7872 (2026-08-12) puts the accepted comparand
+ * type set on the shared comparand-TYPE face (`normalizeFilterComparandTypes`,
+ * `@objectstack/spec/data`), which 「refuses everything else loudly at the
+ * compile face」 — `undefined` included, in every literal comparand position.
+ * `parseFilterAST` and the engine seam ran that face; this door's object
+ * spelling did not, so an `undefined` was refused in #6386's sentence here and
+ * in the face's sentence on the `FilterArray` spelling of the same door.
+ * #20035 runs the face on the object spelling too, after the shape face and
+ * before any node is built, so every refusal below keeps its verdict
+ * (`INVALID_FILTER` / 400, never compiled) and now reads in the face's
+ * single-sourced sentence at the face's path (`where.d.$gt` rather than
+ * `"d".$gt`). Two consequences are recorded where they land:
+ *
+ * - The face runs BEFORE the #5146 rewrite, so the rewrite block below now
+ *   pins that the author's own `$not` is judged, not the rewritten one.
+ * - The face judges `$null` / `$exists` as literal comparands (its operator
+ *   split, reconciled against `FieldOperatorsSchema` by the face's own test),
+ *   so `{$null: undefined}` is refused rather than read as `set`. The boolean
+ *   DOMAIN question for an ACCEPTED value (#5347 / #5369 / #6387) is not
+ *   touched: `{$null: 'false'}` still lowers as before. [#20040] It does not
+ *   any more: the door refuses every non-boolean flag before any node is
+ *   built, and the case below that pinned the old reading is re-judged.
+ *
+ * `assertDefinedComparands` (#6386) stays as `fieldLeaves`' invariant and still
+ * answers the positions the face does not judge — an `undefined` inside an
+ * array comparand, or under an operator outside the vocabulary — pinned in
+ * `where-type-face-refusal.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -123,43 +153,43 @@ const MEASURED: Array<{ name: string; where: unknown; path: string; wasReadAs: s
   {
     name: '① a single-key where — the whole filter disappeared',
     where: { d: undefined },
-    path: '"d"',
+    path: 'where.d',
     wasReadAs: 'null — no predicate at all, so the query ran UNFILTERED',
   },
   {
     name: '② one conjunct of several — that conjunct disappeared',
     where: { stage: 'won', d: undefined },
-    path: '"d"',
+    path: 'where.d',
     wasReadAs: "only `stage equals 'won'` survived",
   },
   {
     name: '③ inside a $not — a predicate GREW from the discarded leaf',
     where: { $not: { d: undefined } },
-    path: '"d"',
+    path: 'where.$not.d',
     wasReadAs: 'NOT (d set) — i.e. `d IS NULL`, which the author never wrote',
   },
   {
     name: '④ $eq — a value comparison, not $eq: null’s null predicate',
     where: { d: { $eq: undefined } },
-    path: '"d".$eq',
+    path: 'where.d.$eq',
     wasReadAs: 'd equals [null]',
   },
   {
     name: '⑤ $gt — an ordering comparison against NULL, UNKNOWN for every row',
     where: { d: { $gt: undefined } },
-    path: '"d".$gt',
+    path: 'where.d.$gt',
     wasReadAs: 'd gt [null]',
   },
   {
     name: '⑥ a member of a $in list',
     where: { d: { $in: [undefined] } },
-    path: '"d".$in[0]',
+    path: 'where.d.$in[0]',
     wasReadAs: 'd in [null]',
   },
   {
     name: '⑦ $ne — the null-safe guard wrapped a comparison against NULL',
     where: { d: { $ne: undefined } },
-    path: '"d".$ne',
+    path: 'where.d.$ne',
     wasReadAs: 'd notSet OR d notEquals [null]',
   },
 ];
@@ -167,52 +197,57 @@ const MEASURED: Array<{ name: string; where: unknown; path: string; wasReadAs: s
 /**
  * Comparand positions beyond the issue's seven, measured in the same round.
  *
- * Two of them are where this gate deliberately diverges from `read-scope-sql`'s
- * twin, and in both cases because THIS module accepts the enclosing shape that
- * one refuses outright — so a "comparand is undefined" answer is the truest
- * thing to say here and would have been a mislabel there.
+ * One of them (the nested relation) is where this gate deliberately diverges
+ * from `read-scope-sql`'s twin, because THIS module accepts the enclosing shape
+ * that one refuses outright — so a "comparand is undefined" answer is the
+ * truest thing to say here and would have been a mislabel there.
+ *
+ * [#19888] There used to be a second: a member of the BARE-ARRAY implicit `$in`,
+ * `{d: [1, undefined]}` → `"d"[1]`. Ruling 乙 (#19757) refuses a list in the
+ * equality slot, so that enclosing shape is no longer accepted: the list is
+ * refused as a whole before this gate runs, as the twin always did, and the row
+ * moved to `where-equality-slot-list-refusal.test.ts` ("a list is diagnosed as
+ * the list, not by one of its members").
+ *
+ * [#20010] And a third: a `$between` bound, `{d: {$between: [undefined, 5]}}`
+ * → `"d".$between[0]`. The door now hands every field entry to the shared
+ * comparand-shape face before this gate runs, and the face's 2026-09-20
+ * endpoint ruling (#19071) names this exact spelling: "`''` and `undefined`
+ * are refused, naming the blank side (MIN / MAX and the index)". So the bound
+ * is still refused, INVALID_FILTER / 400, but in the face's words, which are
+ * the words the FilterArray spelling already got; the row moved to
+ * `where-face-arms-refusal.test.ts`. Every other position below keeps this
+ * gate's sentence: the shape face judges `undefined` only as a range endpoint.
  */
 const BEYOND_THE_TABLE: Array<{ name: string; where: unknown; path: string; wasReadAs: string }> = [
   {
-    name: 'a member of the BARE-ARRAY implicit $in (twin refuses the array itself)',
-    where: { d: [1, undefined] },
-    path: '"d"[1]',
-    wasReadAs: 'd in [1, null]',
-  },
-  {
-    name: "a $between bound — lowered to the leaf's comparand",
-    where: { d: { $between: [undefined, 5] } },
-    path: '"d".$between[0]',
-    wasReadAs: 'd gte [null] AND d lte [5]',
-  },
-  {
     name: 'a member of a $nin list',
     where: { d: { $nin: [undefined] } },
-    path: '"d".$nin[0]',
+    path: 'where.d.$nin[0]',
     wasReadAs: 'd notSet OR d notIn [null]',
   },
   {
     name: 'the LIKE family, whose comparand the spec declares a string',
     where: { d: { $contains: undefined } },
-    path: '"d".$contains',
+    path: 'where.d.$contains',
     wasReadAs: "d contains [null] — LIKE '%null%' since #5526",
   },
   {
     name: 'a NESTED relation, refused on the DOTTED member (twin refuses nesting itself)',
     where: { profile: { verified: undefined } },
-    path: '"profile.verified"',
+    path: 'where.profile.verified',
     wasReadAs: 'profile.verified equals [null]',
   },
   {
     name: 'a branch of a $and',
     where: { $and: [{ d: undefined }] },
-    path: '"d"',
+    path: 'where.$and[0].d',
     wasReadAs: 'null — the branch reduced to TRUE and the $and to nothing',
   },
   {
     name: 'ONE branch of a $or — TRUE absorbed the whole disjunction (#5325)',
     where: { $or: [{ d: undefined }, { stage: 1 }] },
-    path: '"d"',
+    path: 'where.$or[0].d',
     wasReadAs: 'null — the surviving `stage` branch was absorbed too, so EVERY row',
   },
 ];
@@ -237,38 +272,20 @@ const NULL_CONTROL: Array<{ name: string; where: unknown; tree: unknown }> = [
     where: { d: { $ne: null } },
     tree: { kind: 'leaf', member: 'd', operator: 'set', values: [] },
   },
-  {
-    name: '{$gt: null} → a real comparison binding NULL (#5526)',
-    where: { d: { $gt: null } },
-    tree: { kind: 'leaf', member: 'd', operator: 'gt', values: [null] },
-  },
-  {
-    name: '{$in: [null]} → a list member, not a predicate',
-    where: { d: { $in: [null] } },
-    tree: { kind: 'leaf', member: 'd', operator: 'in', values: [null] },
-  },
-  {
-    name: '{$nin: [null]} → null-safe guarded (#5298)',
-    where: { d: { $nin: [null] } },
-    tree: {
-      kind: 'or',
-      children: [
-        { kind: 'leaf', member: 'd', operator: 'notSet', values: [] },
-        { kind: 'leaf', member: 'd', operator: 'notIn', values: [null] },
-      ],
-    },
-  },
-  {
-    name: '{$between: [null, 5]} → lowered to two bounds',
-    where: { d: { $between: [null, 5] } },
-    tree: {
-      kind: 'and',
-      children: [
-        { kind: 'leaf', member: 'd', operator: 'gte', values: [null] },
-        { kind: 'leaf', member: 'd', operator: 'lte', values: [5] },
-      ],
-    },
-  },
+  // [#20010] RE-JUDGED. Four rows stood here: `{$gt: null}` → `gt [null]`
+  // (#5526's by-construction reading), `{$in: [null]}` → `in [null]`,
+  // `{$nin: [null]}` → the #5298-guarded `notIn [null]`, and
+  // `{$between: [null, 5]}` → `gte [null] AND lte [5]`. Each is a position the
+  // shared comparand-shape face refuses by ruling, for every driver: the null
+  // list member and the null `$between` endpoint by the 2026-08-31 ruling
+  // (#13357), the null ordering comparand by the 2026-09-01 ruling (#14080) —
+  // a position the face's docblock records #5332's landing had called one
+  // "no ruling covers", so #5526's reading of it was a consequence of deleting
+  // an encoder, never a ruling of this door's. The door now runs that
+  // face, so each shape is refused whole (INVALID_FILTER / 400, in the face's
+  // words, `where-face-arms-refusal.test.ts`) and is no longer an accepted
+  // position for this group to hold still. What the group protects is
+  // unchanged: none of the four is refused as an UNDEFINED comparand.
   {
     name: "{$contains: null} → LIKE '%null%' (#5526)",
     where: { d: { $contains: null } },
@@ -294,11 +311,12 @@ const NULL_CONTROL: Array<{ name: string; where: unknown; tree: unknown }> = [
     where: { $not: { d: { $ne: null } } },
     tree: { kind: 'not', child: { kind: 'leaf', member: 'd', operator: 'set', values: [] } },
   },
-  {
-    name: '{d: [1, null]} → a bare-array $in carrying null',
-    where: { d: [1, null] },
-    tree: { kind: 'leaf', member: 'd', operator: 'in', values: [1, null] },
-  },
+  // [#19888] RE-JUDGED. A row `{d: [1, null]} → d in [1, null]` stood here: a
+  // bare-array implicit `$in` carrying null. Ruling 乙 (#19757) refuses a list in
+  // the equality slot, so that shape is refused whole (INVALID_FILTER / 400,
+  // `where-equality-slot-list-refusal.test.ts`) and is no longer an accepted
+  // position for this group to hold still. A null member of a list keeps its
+  // accepted spelling, `{$in: [null]}`, two rows above.
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,7 +326,11 @@ describe('[#6386] the seven measured readings are now ONE refusal', () => {
     it(`refuses ${c.name} (was: ${c.wasReadAs})`, () => {
       const err = refusalFor(c.where);
       expect(err, 'compiled instead of refusing — the #3650 widening is back').toBeInstanceOf(Error);
-      expect(String(err?.message)).toContain(`comparand at ${c.path} is undefined`);
+      // [#20035] RE-JUDGED: the verdict stands; the sentence and the path are
+      // the shared type face's (#7872: 「refuses everything else loudly at the
+      // compile face」), the ones the FilterArray spelling already got. It
+      // used to read `[analytics] comparand at "d".$gt is undefined`.
+      expect(String(err?.message).startsWith(`Filter comparand at ${c.path} is undefined.`)).toBe(true);
       // The envelope every refusal in this module carries since #5352, and the
       // one #6050 chose for this shape: caller input, so 400.
       expect(err?.code).toBe('INVALID_FILTER');
@@ -316,14 +338,16 @@ describe('[#6386] the seven measured readings are now ONE refusal', () => {
     });
   }
 
-  it('says ONE thing, differing only in `path` and the field it repairs (#5240)', () => {
-    // Erase the two things that legitimately vary — the position and the field
-    // name the repair hints quote — and every message must be the same string.
-    // Two variables rather than one: unlike `read-scope-sql`'s twin, this
-    // wording PRESCRIBES (`{ "d": null }`), so the field appears outside the
-    // path as well.
+  it('says ONE thing, differing only in `path` (#5240)', () => {
+    // Erase what legitimately varies and every message must be the same string.
+    // [#20035] RE-JUDGED: ONE variable now, not two. #6386's sentence
+    // prescribed `{ "d": null }`, so the field appeared outside the path; the
+    // shared type face's sentence (#7872) prescribes the null predicate by
+    // complete spellings and names the position only in its path, so the path
+    // is the one thing left to erase. The #5240 property this case protects is
+    // unchanged — and is now true across both spellings of the door, not only
+    // across this door's own positions.
     const generic = [...MEASURED, ...BEYOND_THE_TABLE].map((c) => {
-      const field = c.path.replace(/^"/, '').replace(/".*$/, '');
       const err = refusalFor(c.where);
       // ⚠️ Load-bearing, and measured: without it this case is VACUOUSLY green
       // whenever nothing throws — every row maps to the same `"undefined"`
@@ -331,30 +355,33 @@ describe('[#6386] the seven measured readings are now ONE refusal', () => {
       // "one wording". Removing the gate turned all 14 rows silent and this
       // case stayed green until the guard was added.
       expect(err, `${c.name} did not refuse — the wording check would pass on nothing`).toBeInstanceOf(Error);
-      return String(err?.message)
-        .replace(`comparand at ${c.path} is`, 'comparand at <path> is')
-        // `split`/`join` rather than `replaceAll` — this package's tsconfig `lib`
-        // predates ES2021, and a new tsc error here would widen a shrink-only
-        // ledger (`check:type-check-debt`).
-        .split(`"${field}"`).join('"<field>"');
+      return String(err?.message).replace(`comparand at ${c.path} is`, 'comparand at <path> is');
     });
     expect(new Set(generic).size, `expected one wording, got:\n${[...new Set(generic)].join('\n\n')}`).toBe(1);
   });
 
-  it('names the two repairs and the producer to fix, not just the refusal', () => {
+  it('names the repairs and why the value is unreadable, not just the refusal', () => {
+    // [#20035] RE-JUDGED. This pinned #6386's door-local prescription — the two
+    // spellings `{ "d": null }` / `{ "d": { "$null": true } }`, the two
+    // consequences this door used to have, and "The producer to fix is whoever
+    // BUILT this where". The door now answers in the shared type face's
+    // single-sourced sentence (#7872, 2026-08-12: 「refuses everything else
+    // loudly at the compile face」), which every other face of the platform
+    // already gave for this input, including this door's FilterArray spelling.
+    // What the case protects survives in the face's words: the repairs are
+    // named, and so is the reason no reading of `undefined` is safe. Its
+    // prescription is position-safe by design — the complete null-predicate
+    // spellings, never "write null", which at an ordering slot or a list
+    // member lands in a refusal one face over (the 2026-08-31 and 2026-09-01
+    // rulings).
     const message = String(refusalFor({ d: undefined })?.message);
-    // The author's two legitimate spellings…
-    expect(message).toContain('{ "d": null }');
-    expect(message).toContain('{ "d": { "$null": true } }');
-    expect(message).toContain('omit the key entirely');
-    // …both consequences it used to have, since this door has two…
-    expect(message).toContain('the key was dropped outright');
-    expect(message).toContain('became a comparison against null');
-    // …and where the fix belongs. Unlike the sibling read-scope door, the
-    // producer here IS the caller, so the message must not send them to an
-    // admin-authored policy.
-    expect(message).toContain('The producer to fix is whoever BUILT this where');
-    expect(message).toContain('undefined cannot cross JSON');
+    expect(message).toContain('Write the null predicate — {"$eq": null} / {"$ne": null} — or omit the key.');
+    expect(message).toContain('cannot be told apart from an omitted key');
+    expect(message).toContain('OPPOSITE things');
+    expect(message).toContain('The filter was NOT applied');
+    // One sentence, not two: nothing of #6386's door-local wording survives.
+    expect(message).not.toContain('[analytics]');
+    expect(message).not.toContain('whoever BUILT');
   });
 });
 
@@ -394,35 +421,43 @@ describe('[#6386] the #5146 rewrite cannot swallow the leaf — the gate side is
     {
       name: "`requireValue` — pushes {k: {$null: false}}, {k: spec}; spec kept by reference",
       where: { $not: { d: undefined } },
-      path: '"d"',
+      path: 'where.$not.d',
     },
     {
       name: '`requireValue` via an operator spec',
       where: { $not: { d: { $eq: undefined } } },
-      path: '"d".$eq',
+      path: 'where.$not.d.$eq',
     },
     {
       name: '`allowNull` — pushes {$or: [{k: {$null: true}}, {k: spec}]} ($ne’s polarity)',
       where: { $not: { d: { $ne: undefined } } },
-      path: '"d".$ne',
+      path: 'where.$not.d.$ne',
     },
     {
       name: 'the nested-relation recursion, which guards the DOTTED member',
       where: { $not: { profile: { verified: undefined } } },
-      path: '"profile.verified"',
+      path: 'where.$not.profile.verified',
     },
     {
       name: 'a list member inside a negation',
       where: { $not: { d: { $in: [undefined] } } },
-      path: '"d".$in[0]',
+      path: 'where.$not.d.$in[0]',
     },
   ];
 
+  // [#20035] RE-JUDGED. The shared type face (#7872) now answers first, on the
+  // author's OWN condition, before `nullSafeNegationOperand` rewrites anything:
+  // `lowerAnalyticsWhere` runs it ahead of `buildNode`. So the refusal names
+  // the `$not` path the author wrote (`where.$not.d`) — the question "can the
+  // rewrite swallow the leaf before the gate sees it" is answered upstream of
+  // the rewrite for every row here. Each row still refuses, which is what the
+  // block protects; `assertDefinedComparands` downstream of the rewrite stays
+  // `fieldLeaves`' invariant.
   for (const c of REWRITE_PATHS) {
     it(`throws rather than changing shape: ${c.name}`, () => {
       const err = refusalFor(c.where);
       expect(err, 'the rewrite swallowed the leaf and the gate blessed the new shape').toBeInstanceOf(Error);
-      expect(String(err?.message)).toContain(`comparand at ${c.path} is undefined`);
+      expect(String(err?.message).startsWith(`Filter comparand at ${c.path} is undefined.`)).toBe(true);
     });
   }
 
@@ -431,26 +466,61 @@ describe('[#6386] the #5146 rewrite cannot swallow the leaf — the gate side is
     // `operatorIsNullTotal`, which for an `undefined` comparand is false on every
     // operator this gate sweeps ($eq/$ne compare `value === null`; $in/$nin need
     // an empty array). So the only field specs reaching 'none' while holding an
-    // `undefined` are the `$null` / `$exists` flags — deliberately not swept, and
-    // asserted below to compile exactly as before.
-    expect(refusalFor({ $not: { d: { $null: undefined } } })).toBeUndefined();
-    expect(treeFor({ $not: { d: { $null: undefined } } })).toEqual({
-      kind: 'not',
-      child: { kind: 'leaf', member: 'd', operator: 'set', values: [] },
-    });
+    // `undefined` are the `$null` / `$exists` flags, which #6386 did not sweep.
+    //
+    // [#20035] RE-JUDGED. That last shape used to compile to `NOT (d set)`. The
+    // shared type face (#7872: 「refuses everything else loudly at the compile
+    // face」) judges the `$null` / `$exists` comparand as a literal and refuses
+    // `undefined` there, and the door now runs it before the rewrite. So no
+    // field spec holding an `undefined` reaches ANY disposition from this door:
+    // the reason there is no `none` case is now stronger than the one above.
+    const err = refusalFor({ $not: { d: { $null: undefined } } });
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err?.status).toBe(400);
+    expect(String(err?.message).startsWith('Filter comparand at where.$not.d.$null is undefined.')).toBe(true);
   });
 });
 
 describe('[#6386] what the sweep deliberately leaves alone', () => {
-  it('$null / $exists carry a declared BOOLEAN flag, not a comparand', () => {
+  it('$null / $exists: an undefined flag is refused by the type face; a non-boolean accepted type is refused by the door (#20040)', () => {
     // Same call as `read-scope-sql`'s twin. ⚠️ The two modules read the flag
-    // DIFFERENTLY — identity here, truthiness there — so this module answers
-    // `{$null: undefined}` with `set` while that one answers `IS NOT NULL` by a
-    // different route. Which reading is right is the boolean-DOMAIN question
-    // (#5347 / #5369, measured on the sibling door as #6387); refusing it here as
-    // an "undefined comparand" would decide it sideways and mislabel a flag.
-    expect(treeFor({ d: { $null: undefined } })).toEqual({ kind: 'leaf', member: 'd', operator: 'set', values: [] });
-    expect(treeFor({ d: { $exists: undefined } })).toEqual({ kind: 'leaf', member: 'd', operator: 'set', values: [] });
+    // DIFFERENTLY — identity here, truthiness there. Which reading is right for
+    // a non-boolean value is the boolean-DOMAIN question (#5347 / #5369,
+    // measured on the sibling door as #6387), and #6386 did not sweep the flag
+    // so as not to decide it sideways.
+    //
+    // [#20035] RE-JUDGED. This case pinned `{$null: undefined}` → `set`. That
+    // is no longer the door's answer, and not by this door's decision: the
+    // shared type face (#7872, 2026-08-12: 「refuses everything else loudly at
+    // the compile face」) lists `$null` and `$exists` among the operators whose
+    // comparand is a LITERAL, and refuses `undefined` there — the engine seam
+    // has answered `{$null: undefined}` that way since #7872, and the door now
+    // runs the same face. The domain question is still not decided here: the
+    // face accepts every value of the six types, so an accepted non-boolean flag
+    // keeps this module's identity reading, unchanged.
+    //
+    // [#20040] RE-JUDGED, the second half. The two lines that closed this case
+    // pinned `{$null: 'false'}` and `{$exists: 'yes'}` → `set` (IS NOT NULL):
+    // the identity reading of an ACCEPTED non-boolean flag, which this file
+    // kept deliberately undecided. #20040 decided it the way #5347 / #5369
+    // decided it for every backend, and #6387 for the sibling door: a
+    // non-boolean flag is REFUSED, because the backends read one in opposite
+    // directions and `'false'` is truthy. The door now refuses it before any
+    // node is built, in its `INVALID_FILTER` / 400 envelope, so the two cells
+    // are asserted as refusals below. The `undefined` half is unchanged: it is
+    // still the type face's refusal, in the face's sentence.
+    for (const op of ['$null', '$exists'] as const) {
+      const err = refusalFor({ d: { [op]: undefined } });
+      expect(err?.code, op).toBe('INVALID_FILTER');
+      expect(err?.status, op).toBe(400);
+      expect(String(err?.message).startsWith(`Filter comparand at where.d.${op} is undefined.`), op).toBe(true);
+    }
+    for (const [op, value] of [['$null', 'false'], ['$exists', 'yes']] as const) {
+      const err = refusalFor({ d: { [op]: value } });
+      expect(err?.code, op).toBe('INVALID_FILTER');
+      expect(err?.status, op).toBe(400);
+      expect(String(err?.message), op).toContain(`Operator "${op}" on field "d" requires a boolean comparand`);
+    }
   });
 
   it('a combinator with an undefined value gets its own, truer refusal', () => {

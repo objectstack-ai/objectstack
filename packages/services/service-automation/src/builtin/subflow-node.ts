@@ -105,6 +105,11 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
             }
           : {}),
       } as AutomationContext;
+      // [#19846] `callerParamKeys` names keys of the PARENT's params bag, and
+      // `params` was just replaced by this node's mapped inputs — inherited, a
+      // child screen would judge its own bag against the parent caller's list.
+      // Dropped, so the child carries no signal and its screens infer.
+      delete childContext.callerParamKeys;
 
       const child = await engine.execute(flowName, childContext);
 

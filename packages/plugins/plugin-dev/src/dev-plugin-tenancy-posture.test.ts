@@ -20,26 +20,70 @@
 // service "is the wall up?" would be circular.
 //
 // ── What is observed, and why it is honest ──────────────────────────────────
-// `@objectstack/organizations` is open core since ADR-0132 and IS a member of
-// this workspace, but ADR-0132's entitlement boundary forbids any framework
-// package declaring it (`no-framework-dependents.pin.test.ts`), so it is
-// genuinely unresolvable from `plugin-dev`: the dynamic import genuinely fails
-// and the real catch branch runs. That makes the emitted warning a faithful
-// witness for "the multi-org branch was ENTERED": under the bug there is no
-// warning at all, because the `if` was never taken. The assertions therefore
-// key on branch ENTRY, not on a successfully mounted plugin — the latter is
-// unobservable in open-source CI, and pretending otherwise would need a fake
-// enterprise package, i.e. stubbing the very thing under test.
+// The assertions key on branch ENTRY, read off the warning the absent-package
+// path emits: under the bug there is no warning at all, because the `if` was
+// never taken. They deliberately do NOT key on a successfully mounted plugin —
+// that is unobservable in open-source CI, and pretending otherwise would need a
+// fake enterprise package, i.e. stubbing the very thing under test.
+//
+// `@objectstack/organizations` is SIMULATED absent here, by the same throwing
+// factory the twelve OTHER packages in the block below get. That is a change: this file used to let
+// the REAL dynamic import fail, which it does — ADR-0132's entitlement boundary
+// forbids any framework package declaring the name
+// (`no-framework-dependents.pin.test.ts`), so it is genuinely unresolvable from
+// `plugin-dev`. What the real failure bought was honesty about the ABSENCE.
+// What it cost was a real, uncached module resolution inside the CLOCKED WINDOW
+// of five of the six cases below — and the absence is not this file's subject.
+// Its subject is WHICH KNOB decides branch entry.
+//
+// Measured on this tree, three readings, because the first guess was wrong:
+//   • the failing resolution is NOT cached — 200 consecutive attempts from this
+//     file's own runner, p50 1.157ms, max 8.037ms, none of them free;
+//   • it is NOT served by the vitest main process, so it is not the transform
+//     queue the `#3060` note below names: with that process blocked by ~45s of
+//     real transforms these cases still ran in 2–12ms. The cost is the WORKER's
+//     own resolver walking `node_modules` and raising ERR_MODULE_NOT_FOUND;
+//   • that walk has a load-sensitive tail — the same 200 attempts under
+//     filesystem contention keep p50 at 0.839ms but take max from 8.0ms to
+//     28.2ms.
+//
+// So each walled case drew from an unbounded, machine-load-dependent
+// distribution, and a 5000ms per-test budget bounded the DRAW rather than any
+// work this file is about. Under a parallel shard it timed out on a case that
+// asserts a back-compat env-var reading.
+//
+// Scaled repro — same command and same filesystem contention on both sides,
+// with the per-test budget scaled DOWN to 25ms rather than the load scaled up,
+// N=10 runs each side: 6 of 10 runs failed before this change, 1 of 10 after.
+// The CASE-level reading is what names the construct: all 10 timeouts before
+// landed on a WALLED case and none on the single-org case; after, the single
+// remaining timeout WAS the single-org case — which resolves nothing and runs
+// three `init()`s, i.e. the scaled harness's own CPU floor at a 25ms budget,
+// not this construct. ⛔ Do not read that residual as a reason to reach for the
+// budget: at the 5000ms CI actually uses, the whole window is now pure
+// in-process CPU measured at 1–9ms.
+//
+// ⛔ Nothing about the absence is given up by the SUITE, only by this file: the
+// real, unmocked resolution failure is still the signal in
+// `dev-plugin-tenancy-failfast.test.ts`, whose subject IS the absent-package
+// path, and the boundary that makes the package absent is pinned mechanically
+// by `no-framework-dependents.pin.test.ts`. A mock that stopped matching
+// reality would therefore redden there, not go unnoticed here.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// #3060 — the same treatment the sibling suite uses: init() dynamically imports
+// #3060 — the same treatment the sibling suites use: init() dynamically imports
 // ~10 real workspace packages, whose vite transforms alone can blow the test
 // timeout under a parallel `pnpm test`. Each factory throws the shape an absent
 // package produces, so the graceful-degradation branches run for real with zero
-// module resolution on the hot path. `@objectstack/organizations` is
-// deliberately NOT listed: it is really absent, and its real failure is the
-// signal this file reads.
+// module resolution on the hot path.
+//
+// `@objectstack/organizations` is listed HERE TOO, and the header above is the
+// argument for why it may be: keeping it off this list left one real resolution
+// per walled case in the clocked window, which is the only thing in that window
+// whose cost is a function of what else the machine is doing. "Zero module
+// resolution on the hot path" is what this block has always claimed; now it is
+// true.
 vi.mock('@objectstack/objectql', () => { throw Object.assign(new Error("Cannot find package '@objectstack/objectql'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/runtime', () => { throw Object.assign(new Error("Cannot find package '@objectstack/runtime'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/driver-memory', () => { throw Object.assign(new Error("Cannot find package '@objectstack/driver-memory'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
@@ -52,6 +96,7 @@ vi.mock('@objectstack/plugin-hono-server', () => { throw Object.assign(new Error
 vi.mock('@objectstack/rest', () => { throw Object.assign(new Error("Cannot find package '@objectstack/rest'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/setup', () => { throw Object.assign(new Error("Cannot find package '@objectstack/setup'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/account', () => { throw Object.assign(new Error("Cannot find package '@objectstack/account'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
+vi.mock('@objectstack/organizations', () => { throw Object.assign(new Error("Cannot find package '@objectstack/organizations'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 
 import { DevPlugin } from './dev-plugin';
 

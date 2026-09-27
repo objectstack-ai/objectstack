@@ -48,6 +48,19 @@
  * (`$icontains: 42` is refused per-operator) are `FILTER_TEXT_CASES`'; storage
  * forms are `TEMPORAL_CASES`'. The same one-axis bar the sibling tables set.
  *
+ * [#19757] One row family sits on that line and lives HERE: an ARRAY as an
+ * EQUALITY comparand (implicit `{ field: [...] }`, or `$eq`). An array is
+ * none of the six accepted types, and the row is the direct sibling of "a
+ * plain object in a scalar slot" below — the same question, "is this ONE
+ * comparable value", one JS type over. It is ANSWERED by the comparand-SHAPE
+ * door (`assertListComparandShapes`, ruled 2026-09-23), which runs inside
+ * `parseFilterAST` before the type door does; a `door-refusal` row asks only
+ * that `parseFilterAST` refuse before any driver runs, which is the whole of
+ * what the ruling promises every driver, and this is the one table every
+ * driver suite already runs through that door. `driver-mongodb` was the backend
+ * that ANSWERED the shape; the nested row is the one `driver-sql` answered with
+ * a 500 rather than its 400.
+ *
  * @see https://github.com/objectstack-ai/objectstack/issues/7872 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/7956 (the matrix)
  */
@@ -254,6 +267,32 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
     mustMention: ['a plain object', ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE],
     note: 'The SQL family already refused this ("cannot be bound"); the door makes the answer uniform '
       + 'instead of deep-equality-on-two-drivers, refusal-on-three.',
+  },
+  {
+    name: 'an ARRAY in the implicit-equality slot is refused (#19757)',
+    filter: () => ({ label: ['alpha'] as unknown as string }),
+    verdict: 'door-refusal',
+    code: 'INVALID_FILTER',
+    mustMention: ['at where.label.', '{"$in": […]}', '{"$contains": "…"}'],
+    note: 'Ruled 2026-09-23: refused at the shared face for every driver at once. Before it, the SQL '
+      + 'family and driver-memory refused it, formula excluded every row, and driver-mongodb ANSWERED '
+      + 'it with MongoDB\'s array equality (a stored array equal to the list, or holding it as an element).',
+  },
+  {
+    name: 'an ARRAY under $eq is refused (#19757)',
+    filter: () => ({ label: { $eq: ['alpha'] as unknown as string } }),
+    verdict: 'door-refusal',
+    code: 'INVALID_FILTER',
+    mustMention: ['Operator "$eq"', 'at where.label.$eq.', '{"$in": […]}'],
+  },
+  {
+    name: 'an ARRAY in the equality slot is refused nested in $or too (#19757)',
+    filter: () => ({ $or: [{ qty: 100 }, { label: ['alpha'] as unknown as string }] }),
+    verdict: 'door-refusal',
+    code: 'INVALID_FILTER',
+    mustMention: ['at where.$or[1].label.'],
+    note: 'The nested form is the cell driver-sql answered with a 500 DATABASE_ERROR (SQLite could not '
+      + 'bind the list) where its top-level twin got the 400 — the door now answers both alike.',
   },
   {
     name: 'a bigint beyond ±2^53 is refused — precision loss must not answer silently',

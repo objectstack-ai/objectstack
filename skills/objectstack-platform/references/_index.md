@@ -18,7 +18,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/kernel/plugin-loading.zod.ts` — Plugin Loading Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin.zod.ts` — Exports: PluginContextSchema, PluginSchema
 - `node_modules/@objectstack/spec/src/kernel/service-registry.zod.ts` — Service Registry Protocol
-- `node_modules/@objectstack/spec/src/stack.zod.ts` — Exports: DatasourceMappingRuleSchema, ArtifactPackageEntrySchema, AssembledPackageBodySchema, ArtifactPackageSchema, ObjectStackDefinitionSchema
+- `node_modules/@objectstack/spec/src/stack.zod.ts` — Exports: DatasourceMappingRuleSchema, ArtifactPackageEntrySchema, AssembledPackageBodySchema, ArtifactStagePackageBodySchema, RecordStagePackageBodySchema
 
 ## Transitive dependencies
 

@@ -77,13 +77,13 @@ const RESTART_REPLACEMENT =
   + 'supervisor restart the process. The monitor reports; it does not act.';
 
 const AUTO_RESTART_RETIRED =
-  '`PluginHealthCheck.autoRestart` was removed in @objectstack/spec 18 '
+  '`PluginHealthCheck.autoRestart` was removed in @objectstack/spec 17.3.0 '
   + '(ADR-0049 enforce-or-remove) — it never restarted a plugin.'
   + RESTART_NOT_IMPLEMENTED
   + ' Delete the key. ' + RESTART_REPLACEMENT;
 
 const MAX_RESTART_ATTEMPTS_RETIRED =
-  '`PluginHealthCheck.maxRestartAttempts` was removed in @objectstack/spec 18 '
+  '`PluginHealthCheck.maxRestartAttempts` was removed in @objectstack/spec 17.3.0 '
   + '(ADR-0049 enforce-or-remove) — it capped a restart that never '
   + 'happened.' + RESTART_NOT_IMPLEMENTED
   + ' The cap counted destroy calls, so raising it only scheduled further '
@@ -91,7 +91,7 @@ const MAX_RESTART_ATTEMPTS_RETIRED =
   + RESTART_REPLACEMENT;
 
 const RESTART_BACKOFF_RETIRED =
-  '`PluginHealthCheck.restartBackoff` was removed in @objectstack/spec 18 '
+  '`PluginHealthCheck.restartBackoff` was removed in @objectstack/spec 17.3.0 '
   + '(ADR-0049 enforce-or-remove) — it delayed a restart that never '
   + 'happened.' + RESTART_NOT_IMPLEMENTED
   + ' The chosen strategy only moved when the destroy landed. Delete the key. '
@@ -289,7 +289,7 @@ export const PluginHealthReportSchema = lazySchema(() => z.object({
  */
 const HOT_RELOAD_STATE_STRATEGY_RETIRED =
   "`HotReloadConfig.stateStrategy: 'disk'` and `HotReloadConfig.stateStrategy: "
-  + "'distributed'` were removed in @objectstack/spec 18 (ADR-0049 "
+  + "'distributed'` were removed in @objectstack/spec 17.3.0 (ADR-0049 "
   + 'enforce-or-remove) — neither was ever implemented. Both switch arms in '
   + "`PluginStateManager.saveState` wrote to the SAME in-memory Map as 'memory' "
   + "(the in-source comments said 'memory fallback'), and the only trace was a "
@@ -304,7 +304,7 @@ const HOT_RELOAD_STATE_STRATEGY_RETIRED =
   + 'implementation first, the declaration with it.';
 
 /**
- * Prescription for the watch-placeholder key retired in 18 (#12428).
+ * Prescription for the watch-placeholder key retired in 17.3.0 (#12428).
  *
  * Carries NO `os migrate meta --from 17` sentence, for exactly the reason
  * `HOT_RELOAD_STATE_STRATEGY_RETIRED` above does not: that command replays the
@@ -318,7 +318,7 @@ const HOT_RELOAD_STATE_STRATEGY_RETIRED =
  * scope by construction rather than by exemption.
  */
 const HOT_RELOAD_WATCH_PATTERNS_RETIRED =
-  '`HotReloadConfig.watchPatterns` was removed in @objectstack/spec 18 '
+  '`HotReloadConfig.watchPatterns` was removed in @objectstack/spec 17.3.0 '
   + '(ADR-0049 enforce-or-remove) — nothing ever read it. Its only two '
   + 'uses were log lines in `HotReloadManager`, and one of them announced '
   + "'File watching started' at INFO level while no watcher was ever "

@@ -60,7 +60,7 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   'sms',
   'sharing',
   'pinyin-search',
-  'reports',
+  // `reports` was RETIRED (#20102) — see RETIRED_PLATFORM_CAPABILITY_GUIDANCE.
   'approvals',
   'settings',
   'webhooks',
@@ -72,6 +72,33 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   'ai-seat',
   'governance',
 ]);
+
+/**
+ * Tokens that WERE platform capabilities and have been retired, each mapped to
+ * the prescription an author who still declares it is shown.
+ *
+ * A retired token is outside {@link PLATFORM_CAPABILITY_TOKENS}, so `defineStack`
+ * refuses it like any unknown token — but "check for a typo" is the wrong
+ * answer for a word that used to be right, and it leaves the author (very often
+ * a model repeating an older example) with no idea what replaced it. A row here
+ * turns that refusal into the retirement notice. Keys are DISJOINT from
+ * {@link PLATFORM_CAPABILITY_TOKENS} — pinned in `reports-capability-retirement.test.ts`
+ * — so a token can never be both declared and retired.
+ *
+ * Declaring a retired token is refused, never tolerated: there is no provider
+ * to mount, so accepting it would be a capability the runtime does not deliver
+ * (Prime Directive #10). The ADR-0087 record of each retirement is its D3
+ * semantic entry (`packages/spec/src/migrations/entries/semantic/`).
+ */
+export const RETIRED_PLATFORM_CAPABILITY_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
+  reports:
+    "requires: 'reports' was removed in @objectstack/spec 17.5.0 — the capability mounted the "
+    + 'saved-report stack (persisted raw object queries rendered as CSV / JSON / HTML and '
+    + 'e-mailed on a schedule), which had no consumer and was retired whole. Delete the token. '
+    + 'A report is `report` metadata (`ReportSchema`: dimensions and measures over a dataset, '
+    + 'served by the analytics service that every server mounts); a saved ad-hoc object query '
+    + 'is a ListView on that object.',
+});
 
 /**
  * True when the token is part of the platform capability vocabulary. There is
@@ -181,7 +208,6 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     sms: { package: '@objectstack/service-sms', edition: 'open' },
     sharing: { package: '@objectstack/plugin-sharing', edition: 'open' },
     'pinyin-search': { package: '@objectstack/plugin-pinyin-search', edition: 'open' },
-    reports: { package: '@objectstack/plugin-reports', edition: 'open' },
     approvals: { package: '@objectstack/plugin-approvals', edition: 'open' },
     settings: { package: '@objectstack/service-settings', edition: 'open' },
     webhooks: { package: '@objectstack/plugin-webhooks', edition: 'open' },

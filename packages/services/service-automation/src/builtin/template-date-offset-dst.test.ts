@@ -53,9 +53,46 @@
  * larger question (#14852 explicitly does not propose it). The bare
  * `{TODAY()}` resolves to the UTC day, and the controls below hold it there in
  * every zone; this file only makes the offset branch AGREE with the bare one.
+ *
+ * ## Why the clocked window is kept empty of setup (#19768)
+ *
+ * Every case here is SYNCHRONOUS and performs no I/O, no module resolution and
+ * no `await`. A synchronous body cannot be interrupted by the per-test budget's
+ * own timer, so vitest's verdict on it is a POST-HOC `performance.now()`
+ * comparison taken when the body returns (`runWithTimeout`, @vitest/runner
+ * 4.1.11). On this file "Test timed out in 5000ms" can therefore only ever mean
+ * "the wall clock advanced 5s while this body ran" -- never "the test waited
+ * for something".
+ *
+ * Measured on one container, per case: the whole `at()` window is 0.15-0.38ms
+ * cold, 2.34ms for the first case, which also pays the JIT. Against a 5000ms
+ * budget that is ~13,000x of headroom, so no construct in this file explains
+ * the CI timeout that filed the card. A whole-process stall does, and one of
+ * that shape reproduces here: under six concurrent `find node_modules -type f`
+ * loops, an operation whose median is 0.005ms drew 4.058ms -- an 800x stretch
+ * of a window that touches no filesystem at all.
+ *
+ * A stall cannot be repaired from inside a test file. What can be, and is, is
+ * the size of the exposed window: the budget should be spent on the calendar
+ * arithmetic and on nothing else.
+ *
+ *   - The fake `Date` is installed ONCE for the file, not once per `at()`.
+ *     Install + uninstall measured 0.07-0.25ms per pair, about 57% of the warm
+ *     window; the aggregate cases below call `at()` 11-14 times each, so that
+ *     pair was the dominant cost of this file's heaviest windows.
+ *   - Every zone the file enters is entered ONCE at module load, before any
+ *     clocked window exists. First use of a zone costs ~0.011ms more than a
+ *     repeat at the median (warm code, 30 zones) and carries a tail the repeat
+ *     does not (max 0.679ms vs 0.024ms). Small -- but it is LOADING, and a
+ *     clocked window measures behaviour, never loading.
+ *
+ * NOTE what is deliberately NOT done: the budget is not raised, no case is
+ * skipped, quarantined or made flaky-tolerant, and no retry is configured. The
+ * work needs a fraction of a millisecond, so a bigger number would record a
+ * property of the machine as if it were a property of this test.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { interpolateString } from './template.js';
 
 const ctx = {} as any;
@@ -66,17 +103,54 @@ function tpl(expr: string, vars: Record<string, unknown> = {}): unknown {
 
 const REAL_TZ = process.env.TZ;
 
+/**
+ * Put the process back on the timezone it started on. `at()` calls this in a
+ * `finally`, so a failing assertion leaves no mutated `TZ` behind, and the last
+ * fence in this file asserts the invariant directly.
+ */
+function restoreTz(): void {
+    if (REAL_TZ === undefined) delete process.env.TZ;
+    else process.env.TZ = REAL_TZ;
+}
+
+/**
+ * Enter every zone this file uses ONCE here, at module load, so that no clocked
+ * window is ever the FIRST user of a zone (see the header). A LOCAL-calendar
+ * read is what forces the zone to be resolved -- `toISOString()` alone is UTC
+ * and would warm nothing.
+ */
+function warmZoneData(zones: readonly string[]): void {
+    for (const zone of zones) {
+        process.env.TZ = zone;
+        const probe = new Date('2026-06-15T12:00:00Z');
+        probe.setDate(probe.getDate() + 1);
+    }
+    restoreTz();
+}
+
+/**
+ * The fake `Date` belongs to the FILE, not to a case: installing and removing
+ * it inside `at()` put 11-14 install/uninstall pairs inside the aggregate
+ * cases' clocked windows and bought nothing, since every case in this file
+ * wants exactly the same fake. `setSystemTime` stays per case -- it is the part
+ * that carries the cell's instant.
+ */
+beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+});
+
+afterAll(() => {
+    vi.useRealTimers();
+});
+
 /** Run `fn` with the process on `zone` and the clock frozen at `instant`. */
 function at<T>(zone: string, instant: string, fn: () => T): T {
     process.env.TZ = zone;
-    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(instant));
     try {
         return fn();
     } finally {
-        vi.useRealTimers();
-        if (REAL_TZ === undefined) delete process.env.TZ;
-        else process.env.TZ = REAL_TZ;
+        restoreTz();
     }
 }
 
@@ -130,6 +204,11 @@ const DST_CELLS: Cell[] = [
     { zone: 'Pacific/Chatham',     instant: '2026-09-26T00:30:00Z', offset:  1, local: 'Sat 2026-09-26 13:15 +1245', kind: 'spring-forward' },
     { zone: 'America/Santiago',    instant: '2026-09-06T00:30:00Z', offset:  1, local: 'Sat 2026-09-05 20:30 -04',  kind: 'spring-forward' },
 ];
+
+/** The fence zones below that do NOT observe DST -- named here so the module-load warm-up covers them too. */
+const NON_DST_FENCE_ZONES = ['UTC', 'Asia/Shanghai', 'Asia/Kolkata', 'Australia/Perth'];
+
+warmZoneData([...new Set(DST_CELLS.map((c) => c.zone)), ...NON_DST_FENCE_ZONES]);
 
 const label = (c: Cell) => `${c.zone} @ ${c.instant} (${c.local}) {TODAY() ${c.offset > 0 ? '+' : '-'} ${Math.abs(c.offset)}}`;
 
@@ -213,7 +292,7 @@ describe('#14852 fences — the bare forms and the non-DST zones are untouched',
     });
 
     it('zones that do not observe DST are unaffected — both spellings already agreed there', () => {
-        for (const zone of ['UTC', 'Asia/Shanghai', 'Asia/Kolkata', 'Australia/Perth']) {
+        for (const zone of NON_DST_FENCE_ZONES) {
             for (const instant of ['2026-03-08T00:30:00Z', '2026-10-31T23:30:00Z', '2026-06-15T12:00:00Z']) {
                 at(zone, instant, () => {
                     expect(mixedCalendarSpelling(instant, 1), `${zone} @ ${instant}`).toBe(utcDayShift(instant, 1));

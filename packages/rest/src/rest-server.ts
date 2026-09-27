@@ -31,6 +31,9 @@ import {
     // `@objectstack/types` because the producer is a PLUGIN and rest cannot
     // import one.
     strandedDecisionDetails,
+    // [#20061] The thrown `VALIDATION_FAILED` + `fields[]` shape every catch in
+    // this file already maps to `400` — see `readDeclaredQueryNumber` below.
+    validationFailure,
 } from '@objectstack/types';
 import {
     allowPerfDisclosure,
@@ -97,8 +100,11 @@ import {
     BatchEndpointsConfigSchema,
     RouteGenerationConfigSchema,
 } from '@objectstack/spec/api';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
+// [#20061 / #20062] The DECLARED request schemas two query-reading doors parse
+// their numeric parameters through — see `readDeclaredQueryNumber` below.
+import { ListImportJobsRequestSchema, HistoryMetaItemRequestSchema } from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
 // being smuggled past it with `as any` (see `TransportScopedMetaRequest`).
@@ -149,6 +155,7 @@ import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, unrecognisedMetaTypeRefusal }
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -305,7 +312,7 @@ import { runImport } from './import-runner.js';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
-// [#17058] The `POST …/analytics/dataset/query` door parse — the half of the
+// [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
 // analytics family this route never had. See the module header for the
 // measurement that decides its shape.
 import { datasetSelectionRefusal } from './analytics-selection-door.js';
@@ -407,6 +414,74 @@ interface ApiAccessOpts {
  * with the same closure, so the app being filtered is a per-call fact.
  */
 type NavServabilityGate = (objectName: string, entry: any, appName: string) => boolean;
+
+/**
+ * [ADR-0046 §6.7] One request's docs-audience view of one caller — THE
+ * resolution behind every audience-gated docs answer this server gives: the
+ * `/meta/doc` list, the `/meta/doc/:name` read, the `/meta/book/:name/tree`
+ * read and the app-nav `doc` arm ({@link NavDocAudienceGate}). Built by
+ * `resolveDocsAudience` from the environment's books; every verdict below is a
+ * `@objectstack/spec/system` helper asked with this caller, so the four answers
+ * cannot drift apart — there is no second resolver to drift.
+ */
+interface DocsAudience {
+    /** The caller as the audience helpers see it (holdings resolved only when a `{ permissionSet }` book exists). */
+    readonly caller: AudienceCaller;
+    /**
+     * The fast path: an authenticated caller and no `{ permissionSet }` book
+     * anywhere, so every doc's effective audience (`org` / `public`) admits
+     * them and no doc corpus is needed to say so.
+     */
+    readonly allReadable: boolean;
+    /** The book `name` names: a declared book, else the implicit per-package book (§6.4). */
+    bookNamed(name: string): Book & { _packageId?: string };
+    /** Whether the book's OWN audience admits this caller — the gate on the whole tree. */
+    admitsBook(book: Book): boolean;
+    /**
+     * The per-doc predicate over `corpus`: the doc's effective audience (the
+     * union over the books claiming it; unclaimed or absent from the corpus →
+     * `org`) admits this caller. Build it once per corpus and ask it per doc —
+     * building it resolves every book against the whole corpus.
+     */
+    docReader(corpus: ResolverDoc[]): (docName: unknown) => boolean;
+    /**
+     * `book` resolved over `docs`, narrowed to the entries this caller may read
+     * — exactly the body `GET /meta/book/:name/tree` serves once the book's own
+     * audience has admitted the caller. `canRead` is a {@link docReader} over
+     * the same `docs` when the caller already holds one.
+     */
+    readableTree(
+        book: Book & { _packageId?: string },
+        docs: ResolverDoc[],
+        canRead?: (docName: unknown) => boolean,
+    ): ResolvedBook;
+    /**
+     * The book's PAGES this caller may read: the docs `book` claims over
+     * `docs` (`resolveBookClaimedDocs` — the membership `resolveDocAudiences`
+     * itself uses) that pass the per-doc predicate. The tree's synthetic
+     * *Uncategorized* group is not among them: the spec defines those orphans
+     * as a rendering convenience, "not an authored membership claim".
+     */
+    readablePages(
+        book: Book & { _packageId?: string },
+        docs: ResolverDoc[],
+        canRead?: (docName: unknown) => boolean,
+    ): string[];
+}
+
+/**
+ * [#19790] The docs-audience gate handed to `filterAppForUser`: given a
+ * `type: 'doc'` nav entry, answer whether the caller may read what it opens.
+ * `true` = serve the entry. Built once per request from ONE
+ * {@link DocsAudience}, so it serves the whole app list the way
+ * {@link NavServabilityGate} does.
+ *
+ * Unlike that gate and the ADR-0057 D10 service gate, the arm it feeds FAILS
+ * CLOSED: this is an authorization boundary (the entry names a book or doc the
+ * caller may not read), so an absent gate prunes every `doc` entry rather than
+ * serving it.
+ */
+type NavDocAudienceGate = (entry: any) => boolean;
 
 /**
  * [#15416] The operation to NAME in a `method-not-allowed` refusal.
@@ -646,6 +721,96 @@ export const DATA_EXPORT_PARAMS: readonly string[] = [
 export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
     'q', 'query', 'objects', 'limit', 'perObject',
 ];
+
+/**
+ * [#20062] The reading of a ROW-COUNT query parameter on a door whose request
+ * has no declared schema (`GET /data/:object/export`, `GET /search`): a whole
+ * number, and nothing about range. Range stays each door's own business — the
+ * export route's `Math.max(1, …)` floor and 50000 cap, `searchAll`'s `[1, 100]`
+ * clamp — because neither card this closes takes a position on bounds; it only
+ * refuses a value the door cannot read as a count at all. The same rule
+ * `@objectstack/runtime`'s `parseIntegerParam` applies without `bounds`, which
+ * this package cannot import (runtime depends on rest).
+ */
+const UNDECLARED_ROW_COUNT_PARAM = z.number().int().optional();
+
+/**
+ * [#20061 / #20062] Read ONE numeric query parameter against the door's own
+ * declared schema for it, and refuse — never substitute — what that schema
+ * refuses.
+ *
+ * The defect this closes is the bare coercion: `Number(q.limit)` does not
+ * fail, it INVENTS a value and the door serves it. Measured on four published
+ * doors, each answering `200`: `GET /data/import/jobs` turned `?limit=0` into
+ * its 50-row default and clamped `?limit=500` to 200 against a declaration of
+ * `min(1).max(200)`; `GET /data/:object/export` turned `?limit=abc` into a
+ * ONE-row export; `GET /meta/:type/:name/history` dropped it and returned the
+ * whole change log; `GET /search` handed `NaN` to `searchAll`, whose overall
+ * cap then never triggered.
+ *
+ * ## How a query string meets a `z.number()` declaration
+ *
+ * A query string carries no types, so the declared schema cannot parse it
+ * directly — and `Number()` alone is the defect. The one coercion made here is
+ * the faithful one: a non-blank string whose `Number()` is not `NaN` is parsed
+ * AS that number (`'50'` → 50, `'1.5'` → 1.5, `'Infinity'` → Infinity), and
+ * everything else — `'abc'`, a blank string, a structured value — is handed to
+ * the schema AS IT CAME, so the declaration refuses it by type rather than
+ * after `Number()` has already invented a `0` or a `NaN` for it. The schema,
+ * not this function, decides what is legal: `int()`, `min()` / `max()` and
+ * zod's own refusal of non-finite numbers all apply exactly as declared, and an
+ * absent parameter meets the schema's own `.default()` / `.optional()`.
+ *
+ * ## The empty string — the one per-door judgement
+ *
+ * `?limit=` is present-but-empty, and what it means is decided from what the
+ * door answered for it before, exactly as `parseEnumParam` (runtime
+ * `query-param.ts`) decides the same spelling: where the old answer already
+ * WAS the absent answer (import jobs' `Number('') || 50`, search's falsy
+ * guard), it stays absent (`emptyIsAbsent: true`) so a defensible answer does
+ * not become a new `400`; where the old answer was an invented `0` — a
+ * one-row export, a zero-event history — refusing it strictly improves on it.
+ *
+ * ## The refusal
+ *
+ * THROWN as `validationFailure` (`@objectstack/types`), never written here:
+ * every door that calls this already sends its catch through
+ * `handleRouteError` / `mapDataError`, which answer `400` with the data
+ * surface's `VALIDATION_FAILED` + `fields[]` envelope — the same shape the
+ * declared-schema body doors in this file answer. `fields[].code` comes from
+ * `zodIssuesToFields`, so it is the ADR-0114 D3 catalog member for the failed
+ * constraint (`invalid_type`, `min_value`, `max_value`), with `field` naming
+ * the parameter.
+ *
+ * Call it AFTER `refuseRepeatedQueryParams` has run for `param`: that gate
+ * refuses a repeated occurrence and unwraps a one-element array, so what
+ * reaches this function is a single string or nothing.
+ */
+function readDeclaredQueryNumber(
+    queryParams: Record<string, unknown> | undefined,
+    param: string,
+    declared: z.ZodType<number | undefined>,
+    opts: { readonly emptyIsAbsent: boolean },
+): number | undefined {
+    const raw = queryParams?.[param];
+    let input: unknown = raw;
+    if (raw === undefined || raw === null || (raw === '' && opts.emptyIsAbsent)) {
+        input = undefined;
+    } else if (typeof raw === 'string' && raw.trim() !== '') {
+        const coerced = Number(raw);
+        if (!Number.isNaN(coerced)) input = coerced;
+    }
+    const parsed = declared.safeParse(input);
+    if (parsed.success) return parsed.data;
+    const fields = zodIssuesToFields(
+        parsed.error.issues.map((issue) => ({ ...issue, path: [param, ...issue.path] })),
+        { [param]: input },
+    );
+    throw validationFailure(
+        `Invalid \`${param}\` query parameter: ${fields[0]?.message ?? 'not a readable number'}`,
+        fields,
+    );
+}
 
 /**
  * [#16674] Which `services.*` slot each `routes.*` key is the address OF.
@@ -1534,6 +1699,67 @@ function sendMetaItemAbsent(res: any): void {
 }
 
 /**
+ * [#20156] What the per-caller read gate of `GET /meta/:type/:name` answers for
+ * ONE document — see {@link RestServer.metaItemReadGate}, the one place it is
+ * decided.
+ *
+ *  - `serve` — send `document`: the input, or the input minus what this
+ *    caller may not read (the app nav filter, the dashboard widget gate).
+ *  - `refuse` — send nothing of the document; `send` writes the refusal the
+ *    plain read gives this caller (its status, its code, its emitter).
+ */
+type MetaReadVerdict =
+    | { kind: 'serve'; document: any }
+    | { kind: 'refuse'; send: (res: any) => void };
+
+/**
+ * [#20156] How a door runs {@link RestServer.metaItemReadGate}.
+ */
+interface MetaReadGatePolicy {
+    /**
+     * `all` — every gate the plain read runs, the ones that answer per
+     * DEPLOYMENT included (ADR-0057 D10 `requiresService` on an app, its nav
+     * entries and a dashboard's widgets; #7912 object servability). The
+     * doors that serve the document a client RENDERS: the plain read and
+     * `/published`.
+     *
+     * `per-caller` — only the gates whose verdict depends on who asks. The
+     * doors that serve STORED versions — the layered view, `/diff`,
+     * `/history`, `/audit`. A per-deployment gate withholds nothing from the
+     * caller, and applied to a stored version it reports the store wrongly (a
+     * widget whose service is merely off here reads as never authored — and
+     * Studio's designer, which loads the layered view and saves what it
+     * loaded, would delete it).
+     */
+    arms: 'all' | 'per-caller';
+    /**
+     * The `app` arm (the unpublished gate, `requiredPermissions`, the
+     * docs-audience entry arm).
+     *
+     * `gate` — the plain read's app answer: its refusal, or the pruned app.
+     *
+     * `pending-decision` — an app the plain read refuses WHOLE (an app-level
+     * `requiredPermissions` the caller lacks → `403`; an unpublished app to a
+     * non-builder → the absence answer, ADR-0045 §3) is refused exactly as the
+     * plain read refuses it. An app it would serve only in PART (entries
+     * withheld) is served as STORED, unpruned, exactly as before this gate.
+     * ⚠️ That second half is a DECLARED EXEMPTION, not a verdict: what the
+     * layered view (`/layers`, `?layers=`) and `/diff` owe a caller who may see
+     * part of an app is a new permission boundary, and the maintainer's to
+     * decide (decision anchor #20156). Both ways of pulling those cells to the
+     * plain read's answer draw one: pruning a stored version the designer
+     * saves back deletes the withheld entries, and refusing it locks out an
+     * author — a platform admin included, whose capability list carries no
+     * wildcard and meets no admin exemption in
+     * {@link filterAppForUserWithReason} — who lacks one entry's permission.
+     * The census in `meta-alternate-door-read-gates.test.ts` pins exactly those
+     * partial cells to the pre-gate answer under that anchor, so they stay loud
+     * until ruled, and holds every whole-refusal cell to the plain read's.
+     */
+    app: 'gate' | 'pending-decision';
+}
+
+/**
  * RestServer
  * 
  * Provides automatic REST API endpoint generation for ObjectStack.
@@ -1634,7 +1860,6 @@ export class RestServer {
     private tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private emailServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private sharingServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
-    private reportsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private approvalsServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private sharingRulesServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private i18nServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
@@ -1681,7 +1906,16 @@ export class RestServer {
         objectQLProvider?: (environmentId?: string) => Promise<any | undefined>,
         emailServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         sharingServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
-        reportsServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        /**
+         * RETIRED slot (#20102) — this position carried the saved-report
+         * service provider, whose `/reports` routes were retired with the
+         * saved-report stack. The slot is kept, typed `undefined`, because
+         * every later parameter is positional: removing it would silently
+         * re-bind each argument after it (the #15256 hazard) at every call
+         * site that passes one. Pass `undefined`; passing a provider is a
+         * compile error.
+         */
+        _retiredReportsServiceProvider?: undefined,
         approvalsServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         sharingRulesServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
         i18nServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
@@ -1708,7 +1942,6 @@ export class RestServer {
         this.objectQLProvider = objectQLProvider;
         this.emailServiceProvider = emailServiceProvider;
         this.sharingServiceProvider = sharingServiceProvider;
-        this.reportsServiceProvider = reportsServiceProvider;
         this.approvalsServiceProvider = approvalsServiceProvider;
         this.sharingRulesServiceProvider = sharingRulesServiceProvider;
         this.i18nServiceProvider = i18nServiceProvider;
@@ -2717,16 +2950,166 @@ export class RestServer {
         return [];
     }
 
-    /** Fetch every book of the environment, shaped for the audience resolver. */
-    private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
+    /** Shape a book list for the audience resolver: `_packageId` provenance also as `packageId`. */
+    private static audienceBooksOf(raw: unknown): any[] {
+        return RestServer.metaItemsArray(raw).map((b: any) =>
+            b && typeof b === 'object' ? { ...b, packageId: b._packageId } : b,
+        );
+    }
+
+    /**
+     * The doc header the audience resolver reads — name, the placement keys a
+     * book rule matches on, and provenance. Nothing rendered: a doc's label
+     * orders a group, but never decides which book claims it.
+     */
+    private static docCorpusOf(list: readonly any[]): ResolverDoc[] {
+        return list
+            .filter((d: any) => d && typeof d === 'object')
+            .map((d: any) => ({
+                name: d.name,
+                group: d.group,
+                tags: d.tags,
+                order: d.order,
+                packageId: d._packageId,
+            }));
+    }
+
+    /**
+     * A `getMetaItems` list read that REPORTS a thrown read as `{ fault }`
+     * rather than swallowing it. The two docs-audience reads below go through
+     * here so each caller chooses HOW an unreadable gate input fails closed —
+     * never whether: the doc reads hand the fault to the caller
+     * ({@link fetchAudienceBooks}, the `/meta/doc/:name` corpus read), and the
+     * app-nav gate prunes every `doc` entry of one response
+     * ({@link resolveNavDocAudience}). ⛔ No caller reads a fault as an empty
+     * list: an empty book list is "no gated book anywhere" and an empty corpus
+     * is "every doc unclaimed, so `org`" — both GRANT.
+     */
+    private static async readMetaList(
+        p: RestProtocol,
+        request: TransportScopedMetaRequest<GetMetaItemsRequest>,
+    ): Promise<{ items: any[] } | { fault: unknown }> {
+        return p.getMetaItems(request).then(
+            (raw: unknown) => ({ items: RestServer.metaItemsArray(raw) }),
+            (fault: unknown) => ({ fault }),
+        );
+    }
+
+    /** Every book of the environment, audience-shaped; `{ fault }` when the read throws. */
+    private async readAudienceBooks(
+        p: RestProtocol,
+        environmentId: string | undefined,
+    ): Promise<{ items: any[] } | { fault: unknown }> {
         const booksRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
             type: 'book',
             ...(environmentId ? { environmentId } : {}),
         };
-        const raw = await p.getMetaItems(booksRequest).catch(() => []);
-        return RestServer.metaItemsArray(raw).map((b: any) =>
-            b && typeof b === 'object' ? { ...b, packageId: b._packageId } : b,
-        );
+        const read = await RestServer.readMetaList(p, booksRequest);
+        return 'fault' in read ? read : { items: RestServer.audienceBooksOf(read.items) };
+    }
+
+    /** Every doc of the environment as the resolver's corpus; `{ fault }` when the read throws. */
+    private async readDocCorpus(
+        p: RestProtocol,
+        environmentId: string | undefined,
+    ): Promise<{ items: ResolverDoc[] } | { fault: unknown }> {
+        const docCorpusRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
+            type: 'doc',
+            ...(environmentId ? { environmentId } : {}),
+        };
+        const read = await RestServer.readMetaList(p, docCorpusRequest);
+        return 'fault' in read ? read : { items: RestServer.docCorpusOf(read.items) };
+    }
+
+    /**
+     * Fetch every book of the environment, shaped for the audience resolver,
+     * for the `/meta/doc` list and `/meta/doc/:name` reads. A read that throws
+     * THROWS its own fault (ADR-0046 §6.7, fail closed per ADR-0049).
+     *
+     * It used to answer `[]`, and `[]` is not "unknown" to the resolver — it
+     * is "no `{ permissionSet }` book anywhere", which puts an authenticated
+     * caller on the fast path where every doc is readable. So a store fault
+     * on this read served a set-gated doc, body and all, to a non-holder and
+     * listed it for them. The books are an input to the audience decision; a
+     * decision whose input could not be read is not made.
+     *
+     * Rethrown, not mapped to a deny: the fault reaches the route's
+     * `handleRouteError`, so these reads answer a book-read fault exactly as
+     * `GET /meta/book/:name/tree` — whose book read has always propagated —
+     * and as the `/meta/doc` list's own doc read do (`503
+     * SERVICE_UNAVAILABLE` for `metadata-protocol`'s store fault). One fault,
+     * one answer across the docs doors, and an outage never reads as an
+     * authorization verdict (a 403 would tell a holder they hold nothing) nor
+     * as an empty list (every doc pruned is "this environment has no docs").
+     * The app-nav gate reads {@link readAudienceBooks} directly because a nav
+     * response is a composite: it drops the `doc` entries and serves the rest.
+     */
+    private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
+        const read = await this.readAudienceBooks(p, environmentId);
+        if ('fault' in read) throw read.fault;
+        return read.items;
+    }
+
+    /**
+     * [ADR-0046 §6.7] Build THE {@link DocsAudience} for this request's caller
+     * over `books` (audience-shaped, {@link audienceBooksOf}).
+     *
+     * Every audience-gated docs answer goes through here — the `/meta/doc`
+     * list, `/meta/doc/:name`, `/meta/book/:name/tree` and the app-nav `doc`
+     * arm — so "may this caller read it" has one implementation, spelled in the
+     * spec's own helpers (`audienceAllows`, `resolveDocAudiences`,
+     * `docAudienceAllows`, `resolveBookTree`, `deriveImplicitPackageBook`).
+     *
+     * Holdings are resolved only when a `{ permissionSet }` book exists, and
+     * unresolvable holdings deny those audiences ({@link resolveAudienceCaller},
+     * fail closed per ADR-0049). The fast path is the doc list's own: with no
+     * such book, an authenticated caller reads every doc, so `docReader` needs
+     * no corpus and `readableTree` filters nothing.
+     */
+    private async resolveDocsAudience(
+        environmentId: string | undefined,
+        req: any,
+        books: readonly any[],
+    ): Promise<DocsAudience> {
+        const {
+            audienceAllows, docAudienceAllows, resolveDocAudiences, resolveBookTree, resolveBookClaimedDocs,
+            deriveImplicitPackageBook,
+        } = await import('@objectstack/spec/system');
+        const gated = RestServer.anyPermissionSetAudience(books);
+        const caller = await this.resolveAudienceCaller(environmentId, req, { needPermissionSets: gated });
+        const allReadable = caller.authenticated && !gated;
+        const docReader = (corpus: ResolverDoc[]): ((docName: unknown) => boolean) => {
+            if (allReadable) return () => true;
+            const audiences = resolveDocAudiences(books as any, corpus);
+            return (docName: unknown) => docAudienceAllows(audiences.get(docName as string), caller);
+        };
+        return {
+            caller,
+            allReadable,
+            bookNamed: (name: string) =>
+                books.find((b: any) => b && b.name === name) ?? deriveImplicitPackageBook(name, name),
+            admitsBook: (book: Book) => audienceAllows(book?.audience, caller),
+            docReader,
+            readableTree: (book, docs, canRead) => {
+                const tree = resolveBookTree(book, docs, book._packageId);
+                // The fast path serves the tree whole — no entry can fail an
+                // audience every doc passes, and the empty-group drop below is
+                // part of the narrowing, not of the tree.
+                if (allReadable) return tree;
+                const read = canRead ?? docReader(docs);
+                tree.groups = tree.groups
+                    .map((g) => ({
+                        ...g,
+                        entries: g.entries.filter((e) => !e.doc || read(e.doc)),
+                    }))
+                    .filter((g) => g.entries.some((e) => e.doc || e.href));
+                return tree;
+            },
+            readablePages: (book, docs, canRead) => {
+                const read = canRead ?? docReader(docs);
+                return [...resolveBookClaimedDocs(book, docs, book._packageId)].filter((name) => read(name));
+            },
+        };
     }
 
     /** Heavy path behind `resolveExecCtx` — resolve identity + RBAC/RLS + localization. */
@@ -3145,6 +3528,9 @@ export class RestServer {
      *   so reading the JSON defeated it.
      * - [#7912] SERVABILITY: drops a `type: 'object'` entry whose destination
      *   object could not answer a `list` for anyone — see `servabilityGate`.
+     * - [#19790] DOCS AUDIENCE (ADR-0046 §6.7): drops a `type: 'doc'` entry the
+     *   caller may not read — see `docAudienceGate`. Fails CLOSED, unlike the
+     *   two gates above: no gate means every `doc` entry is dropped.
      *
      * NOT gated here: `visible` (CEL) at any level, and `requiresObject` — both
      * are still evaluated client-side only. That asymmetry is deliberate and
@@ -3180,8 +3566,9 @@ export class RestServer {
         sysPerms: Set<string>,
         serviceGate?: (name: string) => boolean,
         servabilityGate?: NavServabilityGate,
+        docAudienceGate?: NavDocAudienceGate,
     ): any | null {
-        return this.filterAppForUserWithReason(item, sysPerms, serviceGate, servabilityGate).app;
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate, servabilityGate, docAudienceGate).app;
     }
 
     /**
@@ -3233,6 +3620,7 @@ export class RestServer {
         sysPerms: Set<string>,
         serviceGate?: (name: string) => boolean,
         servabilityGate?: NavServabilityGate,
+        docAudienceGate?: NavDocAudienceGate,
     ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
         if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
@@ -3274,6 +3662,23 @@ export class RestServer {
                 const req = Array.isArray(e.requiredPermissions) ? e.requiredPermissions : [];
                 if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) continue;
                 if (typeof e.requiresService === 'string' && serviceGate && serviceGate(e.requiresService) === false) continue;
+                // [#19790] DOCS AUDIENCE — the rule `DocNavItemSchema` declares
+                // and, until this arm, only a renderer honoured: a `doc` entry
+                // naming a doc the caller may not read, or a book with no page
+                // they may read, is not served. Left in the body, the entry's
+                // label and its book / doc names reached every member of the
+                // app however the book was gated, and reading the JSON
+                // defeated whatever the shell pruned (the #4722 lesson again).
+                //
+                // The verdict is the docs reads' own — `docAudienceGate` is one
+                // `DocsAudience` built by the caller, the same resolution
+                // `/meta/doc` and `/meta/book/:name/tree` answer from — and the
+                // arm FAILS CLOSED where its neighbours fail open: no gate, no
+                // `doc` entry. Like every entry-level arm here it is a bare
+                // `continue` with no reason attached; `withheld` reports only
+                // why a whole APP was withheld, and an app this arm empties is
+                // still served, exactly as one emptied by `requiredPermissions`.
+                if (e.type === 'doc' && (!docAudienceGate || !docAudienceGate(e))) continue;
                 // [#7912] SERVABILITY — the gate this filter had no vocabulary
                 // for. A `type: 'object'` entry names its destination in
                 // `objectName`; the object's own `enable` block decides whether
@@ -3424,6 +3829,314 @@ export class RestServer {
     }
 
     /**
+     * [#20156] THE read gate of one `/meta/:type/:name` document, for the plain
+     * read and every door beside it.
+     *
+     * ## Why one spelling
+     *
+     * The plain read ran these gates inline, and the doors that serve the same
+     * document — the layered view (`/layers` and the deprecated `?layers=`),
+     * `/published`, `/history`, `/audit`, `/diff` — ran none of them. So a
+     * member the plain read refuses `403` read a `{ permissionSet }`-gated doc's
+     * body from three of those doors, an anonymous caller read any doc or book
+     * through `?layers=true`, and an app's `requiredPermissions` entries reached
+     * every member. The by-name app route's own rule — it "must not serve a nav
+     * entry the list route prunes, or reading the single-app JSON defeats the
+     * filter" — held for one door out of seven (the layered view and `/diff`
+     * still serve an app the caller may see only in PART as stored, pending a
+     * decision: `MetaReadGatePolicy.app`). Each
+     * door now asks THIS function, so a gate added here reaches all of them,
+     * and the census in
+     * `meta-alternate-door-read-gates.test.ts` — its door list read off the
+     * route table — fails a door that does not ask.
+     *
+     * ## The gates, per type (unchanged from the plain read they came out of)
+     *
+     *  - `app` — {@link filterAppForUserWithReason}, for an authenticated
+     *    caller. `permission` → `403 PERMISSION_DENIED` (#8013, the one
+     *    withheld reason the ruling lets report itself); `unpublished` and
+     *    `service` → the absence answer ({@link sendMetaItemAbsent}, ADR-0045
+     *    §3: an unpublished app is externally unobservable). [#7912] The
+     *    servability gate and [#19790] the docs-audience entry arm ride along.
+     *    ⚠️ Under `app: 'pending-decision'` — the layered view and `/diff` —
+     *    an app the plain read refuses WHOLE is refused the same way, and one
+     *    it would serve only in PART is served as stored, unpruned: see
+     *    `MetaReadGatePolicy.app` for the decision it waits on.
+     *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser}. A
+     *    per-DEPLOYMENT gate (which optional services are registered), never
+     *    per-caller, so `arms: 'per-caller'` skips it.
+     *  - `book` — ADR-0046 §6.7, the book's own audience.
+     *  - `doc` — ADR-0046 §6.7, the EFFECTIVE audience (union over the books
+     *    that claim it, unclaimed → `org`). [#20129] Both gate inputs fail
+     *    CLOSED by throwing: a book-read fault throws in
+     *    {@link fetchAudienceBooks}, a corpus-read fault below — read as `[]`
+     *    it made the doc unclaimed, i.e. `org`, and served it to every member.
+     *    Refused `401 UNAUTHENTICATED` anonymous, `403 PERMISSION_DENIED`
+     *    otherwise; holdings that cannot be resolved deny (ADR-0049).
+     *
+     * One audience resolution, the docs reads' own ({@link resolveDocsAudience}),
+     * for every door — ⛔ no second resolver. NOT here: the ADR-0106 object mask,
+     * which each exit already threads as a posture resolved before its fetch
+     * (D2/D3's `fetch → mask → send`), and which the doors now apply too.
+     *
+     * ## Shape
+     *
+     * Returns a judge for this request, and resolves each type's inputs ONCE,
+     * on the first document judged — the layered view judges three, `/diff`
+     * up to three, and they share one books read, one corpus read, one
+     * holdings resolution. `documents` is every document the answer may judge,
+     * so the app arm's nav probes see all of them at once. `null`/`undefined`
+     * is served as given: absence is each door's own answer.
+     */
+    private metaItemReadGate(
+        environmentId: string | undefined,
+        req: any,
+        p: RestProtocol,
+        metaType: string,
+        name: string,
+        documents: readonly any[],
+        policy: MetaReadGatePolicy,
+    ): (document: any) => Promise<MetaReadVerdict> {
+        const serve = (document: any): MetaReadVerdict => ({ kind: 'serve', document });
+        const refuse = (send: (res: any) => void): MetaReadVerdict => ({ kind: 'refuse', send });
+        const docsAudienceRefusal = (caller: AudienceCaller) => (res: any): void => {
+            if (!caller.authenticated) {
+                sendDeclaredFault(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
+            } else {
+                sendDeclaredFault(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
+            }
+        };
+
+        if (metaType === 'app') {
+            type AppGateInputs = {
+                sysPerms: Set<string>;
+                serviceGate?: (n: string) => boolean;
+                servabilityGate?: NavServabilityGate;
+                docAudienceGate?: NavDocAudienceGate;
+            };
+            let inputs: Promise<AppGateInputs | null> | undefined;
+            const resolveInputs = (): Promise<AppGateInputs | null> => (inputs ??= (async () => {
+                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+                if (!ctx?.userId) return null;
+                const sysPerms = new Set<string>(
+                    Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
+                );
+                let serviceGate: ((n: string) => boolean) | undefined;
+                let servabilityGate: NavServabilityGate | undefined;
+                if (policy.arms === 'all') {
+                    const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [...documents]);
+                    serviceGate = registered ? (n: string) => registered.has(n) : undefined;
+                    // [#7912] Same gate as the list route — the by-name route
+                    // must not serve a nav entry the list route prunes, or
+                    // reading the single-app JSON defeats the filter (the
+                    // #4722 lesson, one gate over).
+                    servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
+                }
+                // [#19790] And the same docs-audience gate, for the same reason:
+                // a `doc` entry the list route prunes must not come back here.
+                // Not resolved under `pending-decision`: it only prunes ENTRIES,
+                // and that arm serves the stored app unpruned (see below), so
+                // its reads would decide nothing.
+                const docAudienceGate = policy.app === 'gate'
+                    ? await this.resolveNavDocAudience(p, environmentId, req, documents)
+                    : undefined;
+                return { sysPerms, serviceGate, servabilityGate, docAudienceGate };
+            })());
+            return async (document) => {
+                if (document == null) return serve(document);
+                const gateInputs = await resolveInputs();
+                if (!gateInputs) return serve(document);
+                const gated = this.filterAppForUserWithReason(
+                    document, gateInputs.sysPerms, gateInputs.serviceGate,
+                    gateInputs.servabilityGate, gateInputs.docAudienceGate);
+                if (gated.app == null) {
+                    // [#8013] A PERMISSION denial is reported as one —
+                    // everything else keeps answering absence. See
+                    // {@link filterAppForUserWithReason} for why only this one
+                    // of the three gates converts, and why the reason comes
+                    // from the branch that fired rather than from `null`.
+                    //
+                    // The ADR-0112 STANDARD catalog code, written through the
+                    // shared `sendError` (`@objectstack/types`) — the declared
+                    // envelope `{ success: false, error: { code, message } }`,
+                    // so the console reads `body.error.code` (objectui#4252
+                    // branches on exactly this `code`).
+                    if (gated.withheld === 'permission') {
+                        return refuse((res) => sendEnvelopeError(
+                            res, 403, 'PERMISSION_DENIED',
+                            `You do not have permission to open the '${name}' app.`,
+                        ));
+                    }
+                    // [#18066] Through the shared emitter, so this arm and the
+                    // nothing-behind-the-name arm are byte-identical by
+                    // construction (ADR-0045 §3).
+                    return refuse(sendMetaItemAbsent);
+                }
+                // ⚠️ A DECLARED EXEMPTION, pending the maintainer's decision
+                // (anchor #20156) — see `MetaReadGatePolicy.app`. An app the
+                // plain read refuses WHOLE was refused above, exactly as the
+                // plain read refuses it; one it would serve only in PART is
+                // served as STORED, unpruned, exactly as before this gate.
+                return serve(policy.app === 'pending-decision' ? document : gated.app);
+            };
+        }
+
+        if (metaType === 'dashboard') {
+            if (policy.arms !== 'all') return async (document) => serve(document);
+            // ADR-0057 D10: gate dashboard widgets by `requiresService` (mirrors
+            // the app-nav gate above) so the console never renders a tile bound
+            // to an absent optional service. [#5881] On the DEFAULT path since
+            // the plain read's cache exclusion — see the `isDashboardType`
+            // comment there.
+            return async (document) => {
+                if (document == null) return serve(document);
+                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+                const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, [document]);
+                const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
+                return serve(serviceGate ? this.filterDashboardForUser(document, serviceGate) : document);
+            };
+        }
+
+        if (metaType === 'book') {
+            // The book's own audience — holdings resolved only when THIS book
+            // is set-gated, so one resolution per document judged.
+            return async (document) => {
+                if (document == null) return serve(document);
+                const audience = await this.resolveDocsAudience(environmentId, req, [document]);
+                return audience.admitsBook(document) ? serve(document) : refuse(docsAudienceRefusal(audience.caller));
+            };
+        }
+
+        if (metaType === 'doc') {
+            // A doc's effective audience reads its NAME against the books that
+            // claim it — never its body — so the verdict is the same for every
+            // version of it, and the inputs are resolved once.
+            let reader: Promise<{ caller: AudienceCaller; canRead: (docName: unknown) => boolean }> | undefined;
+            const resolveReader = () => (reader ??= (async () => {
+                const books = await this.fetchAudienceBooks(p, environmentId);
+                const audience = await this.resolveDocsAudience(environmentId, req, books);
+                // No gated book anywhere → org suffices.
+                if (audience.allReadable) return { caller: audience.caller, canRead: () => true };
+                const read = await this.readDocCorpus(p, environmentId);
+                if ('fault' in read) throw read.fault;
+                return { caller: audience.caller, canRead: audience.docReader(read.items) };
+            })());
+            return async (document) => {
+                if (document == null) return serve(document);
+                // [#5563] `audience` is read off the DOCUMENT, never an
+                // envelope — an envelope's name-less shape would grant everyone.
+                const { caller, canRead } = await resolveReader();
+                return canRead(document?.name) ? serve(document) : refuse(docsAudienceRefusal(caller));
+            };
+        }
+
+        return async (document) => serve(document);
+    }
+
+    /**
+     * [#20156] The CURRENT document of `:type/:name`, fetched the way the plain
+     * read's uncached arm fetches it — same request shape, same org partition
+     * ({@link organizationIdForMetaRead} over the folded type) — for a door that
+     * serves no document of its own (`/history` and `/audit` serve events,
+     * `/diff` a comparison) and so judges the item the plain read would judge.
+     * `undefined` when nothing is behind the name.
+     */
+    private async fetchCurrentMetaDocument(
+        environmentId: string | undefined,
+        req: any,
+        p: RestProtocol,
+    ): Promise<any | undefined> {
+        const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        const organizationId = organizationIdForMetaRead(
+            // [folded-type commit 26f3588fb] (the original card no longer
+            // resolves) FOLDED, not raw — see the PUT door's org-scope comment.
+            canonicalMetaUrlType(req.params.type), ctx?.tenantId,
+        );
+        const currentRequest: GetMetaItemRequest = {
+            type: req.params.type,
+            name: req.params.name,
+            ...(organizationId ? { organizationId } : {}),
+        };
+        const envelope = await p.getMetaItem(currentRequest) as Record<string, any>;
+        return envelope?.item ?? undefined;
+    }
+
+    /**
+     * [#20156] The refusal an EVENT door (`/history`, `/audit`) owes: the plain
+     * read's, when the plain read would refuse this caller the item whole.
+     * Events carry no body, so there is nothing to prune — a caller the plain
+     * read serves (whole or in part) is served the events, and an item with no
+     * current document has no gate to answer (its events are served as before).
+     *
+     * Only the types {@link metaItemReadGate} judges per caller are fetched at
+     * all, so every other type's door is untouched: no extra read, no new
+     * failure mode. Answers the refusal to send, or `undefined` to go on.
+     */
+    private async eventDoorRefusal(
+        environmentId: string | undefined,
+        req: any,
+        p: RestProtocol,
+    ): Promise<((res: any) => void) | undefined> {
+        const metaType = RestServer.metaTypeSingular(req.params.type);
+        const policy: MetaReadGatePolicy = { arms: 'per-caller', app: 'gate' };
+        if (!RestServer.gatesPerCaller(metaType)) return undefined;
+        const current = await this.fetchCurrentMetaDocument(environmentId, req, p);
+        if (current == null) return undefined;
+        const verdict = await this.metaItemReadGate(
+            environmentId, req, p, metaType, req.params.name, [current], policy,
+        )(current);
+        return verdict.kind === 'refuse' ? verdict.send : undefined;
+    }
+
+    /**
+     * [#20156] The two versions a `diffMetaItem` answer compares, rebuilt over
+     * the CURRENT document so {@link metaItemReadGate} can judge each side.
+     *
+     * The answer is top-level (`diffShallow`): every key that differs arrives
+     * with its whole value on the side(s) that carry it — `added` on `to`,
+     * `removed` on `from`, `changed` on both — and every key it does NOT report
+     * is equal on the two sides. Those are taken from the current document,
+     * which is exact whenever `to` is the current version (the default), and
+     * otherwise the plain read's own inputs: a gate input a version shares with
+     * the other side is judged at its current value. A diff discloses both
+     * sides, so both are judged, and the current document beside them.
+     */
+    private static diffSides(
+        current: Record<string, any>,
+        diff: any,
+    ): { from: Record<string, any>; to: Record<string, any> } {
+        const from: Record<string, any> = { ...current };
+        const to: Record<string, any> = { ...current };
+        const entries = (bucket: unknown): any[] => (Array.isArray(bucket) ? bucket : []);
+        for (const e of entries(diff?.added)) { if (typeof e?.path === 'string') { to[e.path] = e.value; delete from[e.path]; } }
+        for (const e of entries(diff?.removed)) { if (typeof e?.path === 'string') { from[e.path] = e.value; delete to[e.path]; } }
+        for (const e of entries(diff?.changed)) { if (typeof e?.path === 'string') { from[e.path] = e.from; to[e.path] = e.to; } }
+        return { from, to };
+    }
+
+    /**
+     * [#20156] Does {@link metaItemReadGate} judge this type per caller? The
+     * question a door serving no document of its own asks before it fetches the
+     * current one — a type the answer is no for costs that door no extra read
+     * and no new failure mode. `dashboard` is never judged per caller (its gate
+     * answers per deployment). `app` always is: even its `pending-decision` arm
+     * answers the plain read's refusal of an app refused WHOLE.
+     */
+    private static gatesPerCaller(metaType: string): boolean {
+        return metaType === 'book' || metaType === 'doc' || metaType === 'app';
+    }
+
+    /**
+     * [#20156] The policy of the doors that serve STORED versions for authoring
+     * — the layered view (`/layers`, `?layers=`) and `/diff`. One constant, so
+     * the two cannot come to disagree about the pending `app` cells.
+     */
+    private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = Object.freeze({
+        arms: 'per-caller',
+        app: 'pending-decision',
+    });
+
+    /**
      * Probe which `requiresService` capability gates referenced anywhere in
      * `items` are actually registered in the runtime kernel. Returns `null`
      * when the kernel can't be probed — callers then SKIP service gating
@@ -3553,6 +4266,168 @@ export class RestServer {
             }
             return false;
         };
+    }
+
+    /**
+     * [#19790] Build the docs-audience nav gate for one request: may THIS
+     * caller read what a `type: 'doc'` nav entry opens (ADR-0046 §6.7, the rule
+     * `DocNavItemSchema` declares).
+     *
+     * ## One resolution, not a second one
+     *
+     * Every verdict comes from the {@link DocsAudience} that `/meta/doc`,
+     * `/meta/doc/:name` and `/meta/book/:name/tree` answer from, built over the
+     * same env-wide books the doc reads use and a doc corpus read the way
+     * `/meta/doc/:name` reads it. Per entry shape:
+     *
+     *  - **`doc` alone** — served iff the doc's effective audience admits the
+     *    caller: `docAudienceAllows` over `resolveDocAudiences`, the answer
+     *    `/meta/doc/:name` gives.
+     *  - **`book` alone** — the book the name names (a declared book, else the
+     *    implicit per-package book, §6.4 — the tree read's own lookup) must
+     *    admit the caller by its own audience (the tree read's 401/403), and at
+     *    least one of its PAGES must be readable: a doc the book claims
+     *    (`resolveBookClaimedDocs`, the membership `resolveDocAudiences` uses)
+     *    whose effective audience admits the caller. Not "any entry of the
+     *    tree": `resolveBookTree` appends every doc the book does NOT claim as
+     *    a synthetic *Uncategorized* group, so over an env-wide corpus nearly
+     *    every book's tree holds some readable doc, and the rule would never
+     *    fire. The spec calls those orphans "not an authored membership
+     *    claim"; external `href` links are not pages either.
+     *  - **`book` + `doc`** — served iff BOTH hold: the book's own audience
+     *    admits the caller AND the doc is readable. A doc can be readable while
+     *    the book is not (its effective audience is the UNION over every book
+     *    claiming it, `docAudienceAllows`), but the entry opens that page in
+     *    that book's context, whose tree read answers 401/403 — and the entry
+     *    itself names the gated book. So it is dropped; it does not fall back
+     *    to the page alone.
+     *  - **neither** — dropped. The spec refuses the shape; this filter reads
+     *    untyped stored documents, and an entry with no target has nothing a
+     *    caller could read.
+     *
+     * Existence is `docs/nav-target`'s question, answered at `os build`, and
+     * this gate asks only the resolver's. So a `doc` naming a doc absent from
+     * the corpus is SERVED — the resolver's own default for a doc it has no
+     * entry for is `org` (`docAudienceAllows`), so an authenticated caller may
+     * read it, and there is no gated audience behind a name that resolves to
+     * nothing. A `book` naming no declared book is judged as the implicit book
+     * of a package by that name — what the tree read serves for it — so when no
+     * doc resolves into it, it has no readable page and is NOT served: "no
+     * readable page" is the book rule's own wording.
+     *
+     * ## Fails CLOSED, and says so
+     *
+     * The arm this feeds treats an absent gate as "drop every `doc` entry", and
+     * so does this builder when a read it needs THROWS: the books read (an
+     * empty list there reads as "no gated book anywhere") or the doc corpus
+     * read (an empty corpus reads every doc as unclaimed, i.e. `org`). Either
+     * empty would serve a `{ permissionSet }`-gated entry to every member, so
+     * here a thrown read drops the `doc` entries of this one response and logs
+     * the fault — the rest of the navigation is served. The doc reads close
+     * the same two faults by handing them to their caller instead
+     * ({@link fetchAudienceBooks}): each serves one doc or one doc list, so
+     * there is no rest to serve. Unresolvable permission-set HOLDINGS
+     * already deny inside {@link resolveAudienceCaller} (ADR-0049).
+     *
+     * ## Cost, per `/meta/app` request (measured by this card's tests)
+     *
+     * Nothing, when no app in `apps` carries a `doc` entry: a walk over the nav
+     * trees, and no read at all. Otherwise, ONCE per request whatever the app
+     * count — the same shape as {@link resolveNavServability}:
+     *
+     *  - one `book` list read;
+     *  - one permission-set resolution, only when some book is set-gated
+     *    (the execution context itself is memoised per request);
+     *  - one `doc` list read, only when the fast path does not decide (a
+     *    set-gated book exists) or some entry is `book` alone (its page count
+     *    needs the corpus);
+     *  - off the fast path, one `resolveDocAudiences` pass (a `resolveBookTree`
+     *    per book over the whole corpus) shared by every entry.
+     *
+     * Per entry: a `doc` is one map lookup; a `book` alone is one
+     * `resolveBookClaimedDocs` of that book over the corpus (one
+     * `resolveBookTree`: every doc visited once per group rule) plus one
+     * lookup per claimed page. ⛔ No cache — nothing outlives the request.
+     */
+    private async resolveNavDocAudience(
+        p: RestProtocol,
+        environmentId: string | undefined,
+        req: any,
+        apps: readonly any[],
+    ): Promise<NavDocAudienceGate | undefined> {
+        const entries = RestServer.docNavEntries(apps);
+        // Nothing to judge — and the arm drops a `doc` entry this walk missed,
+        // so a walk that ever falls behind `filterNav` fails closed, not open.
+        if (entries.length === 0) return undefined;
+
+        const failClosed = (what: string, fault: unknown): NavDocAudienceGate => {
+            logWarn(
+                `[REST] app-nav docs-audience gate: the ${what} read failed — failing CLOSED: every ` +
+                    "`type: 'doc'` navigation entry is left out of this response, because whether the " +
+                    'caller may read what it names could not be established. The rest of the navigation ' +
+                    'is served.',
+                (fault as Error)?.message ?? fault,
+            );
+            return () => false;
+        };
+
+        const books = await this.readAudienceBooks(p, environmentId);
+        if ('fault' in books) return failClosed('book', books.fault);
+        const audience = await this.resolveDocsAudience(environmentId, req, books.items);
+
+        const bookAlone = (e: any): boolean =>
+            RestServer.navTarget(e.book) !== undefined && RestServer.navTarget(e.doc) === undefined;
+        let corpus: ResolverDoc[] = [];
+        if (!audience.allReadable || entries.some(bookAlone)) {
+            const read = await this.readDocCorpus(p, environmentId);
+            if ('fault' in read) return failClosed('doc', read.fault);
+            corpus = read.items;
+        }
+        // Built ONCE for every entry of every app in this response.
+        const canRead = audience.docReader(corpus);
+
+        return (entry: any): boolean => {
+            const bookName = RestServer.navTarget(entry?.book);
+            const docName = RestServer.navTarget(entry?.doc);
+            if (bookName === undefined && docName === undefined) return false;
+            if (bookName !== undefined) {
+                const book = audience.bookNamed(bookName);
+                if (!audience.admitsBook(book)) return false;
+                if (docName === undefined) return audience.readablePages(book, corpus, canRead).length > 0;
+            }
+            return canRead(docName);
+        };
+    }
+
+    /** A `doc` nav entry's `book` / `doc` target, when it names one. */
+    private static navTarget(value: unknown): string | undefined {
+        return typeof value === 'string' && value.length > 0 ? value : undefined;
+    }
+
+    /**
+     * Every `type: 'doc'` entry in these apps, in every tree `filterNav` walks —
+     * top-level `navigation`, `areas[].navigation`, and `children` at any depth.
+     */
+    private static docNavEntries(apps: readonly any[]): any[] {
+        const found: any[] = [];
+        const walk = (entries: unknown): void => {
+            if (!Array.isArray(entries)) return;
+            for (const e of entries) {
+                if (!e || typeof e !== 'object') continue;
+                if (e.type === 'doc') found.push(e);
+                walk(e.children);
+            }
+        };
+        for (const app of apps) {
+            if (!app || typeof app !== 'object') continue;
+            walk(app.navigation);
+            if (Array.isArray(app.areas)) {
+                for (const area of app.areas) {
+                    if (area && typeof area === 'object') walk(area.navigation);
+                }
+            }
+        }
+        return found;
     }
 
     /**
@@ -3879,6 +4754,34 @@ export class RestServer {
             ...(layeredOrganizationId ? { organizationId: layeredOrganizationId } : {}),
         };
         const layered = await p.getMetaItemLayered(layeredRequest);
+        // [#20156] The per-caller read gate, on EVERY layer. This view used to
+        // run none of the plain read's gates, so a member the plain read refuses
+        // `crm_admin_runbook` read its body here — and an anonymous caller read
+        // any doc or book through the deprecated `?layers=true`, which sits on
+        // the publicly-reachable book/doc route. Each present layer is judged,
+        // `effective` first (it is what the plain read serves, so its refusal is
+        // the plain read's own), then `code` and `overlay`: a layer the caller
+        // may not read is not served beside one they may. `per-caller` because
+        // these are STORED versions, loaded by Studio's designer and saved
+        // back; an app the caller may see only in PART is `pending-decision`
+        // — see `MetaReadGatePolicy.app`.
+        {
+            const metaType = RestServer.metaTypeSingular(req.params.type);
+            const present = (['effective', 'code', 'overlay'] as const)
+                .map((layer) => (layered as any)?.[layer])
+                .filter((document) => document != null);
+            const judge = this.metaItemReadGate(
+                environmentId, req, p, metaType, req.params.name, present,
+                RestServer.STORED_VERSION_DOOR_POLICY,
+            );
+            for (const document of present) {
+                const verdict = await judge(document);
+                if (verdict.kind === 'refuse') {
+                    verdict.send(res);
+                    return;
+                }
+            }
+        }
         // [ADR-0106 D5(4)] The layered view is a schema-bearing exit —
         // `code`, `overlay` and `effective` are each a full object schema.
         // Both entry points (the canonical `/layers` path and the deprecated
@@ -4420,14 +5323,16 @@ export class RestServer {
             // `/forms/:slug` and `/forms/:slug/submit` paths can't be
             // shadowed by a literal object named "forms".
             this.registerFormEndpoints(bp);
-            // Capability routes (sharing rules, reports, approvals) live at
+            // Capability routes (sharing rules, approvals) live at
             // the top of the API surface (`/api/v1/{capability}/...`) rather
             // than under `/data/`, so they don't collide with the greedy
             // CRUD `/:object` matcher and don't pretend to be records on a
             // single object.
             this.registerSharingEndpoints(bp);
             this.registerSharingRuleEndpoints(bp);
-            this.registerReportsEndpoints(bp);
+            // The saved-report `/reports` family was retired (#20102): no
+            // route answers there, so every path under it is the standard
+            // unmounted-route 404.
             this.registerApprovalsEndpoints(bp);
             this.registerAnalyticsEndpoints(bp);
             this.registerSecurityEndpoints(bp);
@@ -5962,8 +6867,13 @@ export class RestServer {
                                     // object metadata is a per-request fact, not
                                     // a per-app one.
                                     const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
+                                    // [#19790] Likewise once for the whole list:
+                                    // books, holdings and the doc corpus are
+                                    // per-request facts about this caller.
+                                    const docAudienceGate = await this.resolveNavDocAudience(p, environmentId, req, list);
                                     const filtered = list
-                                        .map((it: any) => this.filterAppForUser(it, sysPerms, serviceGate, servabilityGate))
+                                        .map((it: any) => this.filterAppForUser(
+                                            it, sysPerms, serviceGate, servabilityGate, docAudienceGate))
                                         .filter((it: any) => it != null);
                                     visible = Array.isArray(raw)
                                         ? filtered
@@ -6104,12 +7014,9 @@ export class RestServer {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
-                                const { audienceAllows } = await import('@objectstack/spec/system');
-                                const caller = await this.resolveAudienceCaller(environmentId, req, {
-                                    needPermissionSets: RestServer.anyPermissionSetAudience(list),
-                                });
+                                const audience = await this.resolveDocsAudience(environmentId, req, list);
                                 const filtered = list.filter((b: any) =>
-                                    b && typeof b === 'object' && audienceAllows((b as any).audience, caller));
+                                    b && typeof b === 'object' && audience.admitsBook(b));
                                 visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
                             }
                         }
@@ -6123,35 +7030,22 @@ export class RestServer {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
-                                const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
-                                    await import('@objectstack/spec/system');
+                                // [#20129] A book-read fault THROWS here and the
+                                // list is not served — never filtered against an
+                                // empty book list, which clears every doc for an
+                                // authenticated caller ({@link fetchAudienceBooks}).
                                 const books = await this.fetchAudienceBooks(p, environmentId);
-                                const caller = await this.resolveAudienceCaller(environmentId, req, {
-                                    needPermissionSets: RestServer.anyPermissionSetAudience(books),
-                                });
+                                const audience = await this.resolveDocsAudience(environmentId, req, books);
                                 let filtered: any[];
-                                if (caller.authenticated && !RestServer.anyPermissionSetAudience(books)) {
+                                if (audience.allReadable) {
                                     // Fast path: with no gated book anywhere, every
                                     // effective audience admits an authenticated caller.
                                     filtered = list;
                                 } else {
-                                    const corpus = list
-                                        .filter((d: any) => d && typeof d === 'object')
-                                        .map((d: any) => ({
-                                            name: d.name,
-                                            group: d.group,
-                                            tags: d.tags,
-                                            order: d.order,
-                                            packageId: d._packageId,
-                                        }));
-                                    const audiences = resolveDocAudiences(books as any, corpus);
-                                    filtered = list.filter((d: any) => {
-                                        if (!d || typeof d !== 'object') return false;
-                                        const eff = audiences.get(d.name);
-                                        return eff
-                                            ? docAudienceAllows(eff, caller)
-                                            : audienceAllows('org', caller);
-                                    });
+                                    // The corpus is the listed docs themselves.
+                                    const canRead = audience.docReader(RestServer.docCorpusOf(list));
+                                    filtered = list.filter((d: any) =>
+                                        !!d && typeof d === 'object' && canRead(d.name));
                                 }
                                 visible = Array.isArray(raw) ? filtered : { ...(raw as any), items: filtered };
                             }
@@ -6491,8 +7385,7 @@ export class RestServer {
                         // [#6877] One package scopes the book lookup.
                         if (refuseRepeatedQueryParams(req, res, ['package'])) return;
                         const packageId = req.query?.package || undefined;
-                        const { resolveBookTree, deriveImplicitPackageBook, audienceAllows, resolveDocAudiences, docAudienceAllows, resolveDocLocale } =
-                            await import('@objectstack/spec/system');
+                        const { resolveDocLocale } = await import('@objectstack/spec/system');
 
                         const norm = (raw: any): any[] =>
                             Array.isArray(raw) ? raw : (raw && Array.isArray(raw.items) ? raw.items : []);
@@ -6503,22 +7396,19 @@ export class RestServer {
                             ...(environmentId ? { environmentId } : {}),
                         };
                         const books = norm(await prot.getMetaItems(booksRequest));
-                        let book = books.find((b: any) => b && b.name === req.params.name);
-                        if (!book) {
-                            // Unknown name → the implicit per-package book (§6.4).
-                            book = deriveImplicitPackageBook(req.params.name, req.params.name);
-                        }
+                        // [#19790] The same `DocsAudience` the doc reads and the
+                        // app-nav `doc` arm use — one resolution, four doors.
+                        const audience = await this.resolveDocsAudience(
+                            environmentId, req, RestServer.audienceBooksOf(books));
+                        const caller = audience.caller;
+                        // Unknown name → the implicit per-package book (§6.4).
+                        const book = audience.bookNamed(req.params.name);
 
                         // §6.7 — the book's audience gates the whole tree:
                         // anonymous → `public` only; `{ permissionSet }` →
                         // the caller must hold the named set (fail closed
                         // when holdings cannot be resolved, ADR-0049).
-                        const audienceBooks = books.map((b: any) =>
-                            b && typeof b === 'object' ? { ...b, packageId: b._packageId } : b);
-                        const caller = await this.resolveAudienceCaller(environmentId, req, {
-                            needPermissionSets: RestServer.anyPermissionSetAudience([book, ...audienceBooks]),
-                        });
-                        if (!audienceAllows((book as any).audience, caller)) {
+                        if (!audience.admitsBook(book)) {
                             if (!caller.authenticated) {
                                 sendDeclaredFault(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
                             } else {
@@ -6544,8 +7434,6 @@ export class RestServer {
                                 packageId: d._packageId,
                             }));
 
-                        const tree = resolveBookTree(book as any, docs, (book as any)._packageId);
-
                         // §6.7 — the tree's ENTRIES are additionally filtered by
                         // each doc's effective audience (union over claiming
                         // books, unclaimed → org), so an anonymous reader of a
@@ -6553,19 +7441,7 @@ export class RestServer {
                         // fetch, and gated-only docs stay out of non-holders'
                         // trees. The book gate above passed, so this only ever
                         // narrows further for anonymous / non-holder callers.
-                        const gatedTreePossible = !caller.authenticated
-                            || RestServer.anyPermissionSetAudience(audienceBooks);
-                        if (gatedTreePossible) {
-                            const audiences = resolveDocAudiences(audienceBooks as any, docs);
-                            tree.groups = tree.groups
-                                .map((g: any) => ({
-                                    ...g,
-                                    entries: g.entries.filter((e: any) =>
-                                        !e.doc || docAudienceAllows(audiences.get(e.doc), caller)),
-                                }))
-                                .filter((g: any) => g.entries.some((e: any) => e.doc || e.href));
-                        }
-                        res.json(tree);
+                        res.json(audience.readableTree(book, docs));
                     } catch (error: any) {
                         handleRouteError(res, error);
                     }
@@ -6719,12 +7595,14 @@ export class RestServer {
                         // tidying — it is the stated security invariant above,
                         // and it now reads the normalized `metaType`.
                         //
-                        // The predicate is ONE named value shared with the §6.7
-                        // gate in the uncached branch (`isAudienceGatedType`),
-                        // so "which types bypass the cache" and "which types
-                        // are audience-gated" can no longer drift apart: the
-                        // bypass exists only to make that gate reachable, and a
-                        // future third gated type joins both sites at once.
+                        // The bypass exists only to make the per-caller gate in
+                        // the uncached branch reachable ({@link metaItemReadGate},
+                        // whose `book` / `doc` arm is the §6.7 gate). [#20156]
+                        // A type that gate judges and this exclusion misses is
+                        // served ungated from the cache: the census in
+                        // `meta-alternate-door-read-gates.test.ts` drives this
+                        // read with a cached protocol method present, so that
+                        // miss reddens its plain-read row.
                         //
                         // [#5881] `dashboard` bypasses it too, and the reason is
                         // NOT the one above — worth writing down, because the
@@ -6766,9 +7644,8 @@ export class RestServer {
                         // that stood at the end of this condition had exactly
                         // that hole; #6241 closed it.
                         const isDashboardType = metaType === 'dashboard';
-                        // ADR-0046 §6.7 — the two audience-gated types. Read by
-                        // the cache exclusion here AND by the gate itself in
-                        // the uncached branch below; one predicate, two sites.
+                        // ADR-0046 §6.7 — the two audience-gated types, excluded
+                        // from the cache so {@link metaItemReadGate} judges them.
                         const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
                         // [#9454] ONE org resolution for BOTH arms of the fork
                         // below, computed ABOVE it on purpose. `view` takes the
@@ -6970,8 +7847,8 @@ export class RestServer {
                             //
                             // Ordered BEFORE every gate below, and that ordering
                             // is the security half of this change rather than a
-                            // style choice. The three gates under it all read
-                            // `&& visible`, so they are reached only by a
+                            // style choice. The gate under it judges only a
+                            // `visible` document, so it is reached only by a
                             // document that EXISTS; a name that resolves to
                             // nothing can never enter the app gate and can
                             // therefore never be converted into the `403
@@ -6997,155 +7874,33 @@ export class RestServer {
                                 sendMetaItemAbsent(res);
                                 return;
                             }
-                            // Same per-user RBAC filtering as the list endpoint:
-                            // for `app` items, drop entirely (404) when the user
-                            // lacks the app's `requiredPermissions`, and strip
-                            // forbidden nav entries from the returned schema.
-                            if (isAppType && visible) {
-                                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                                if (ctx?.userId) {
-                                    const sysPerms = new Set<string>(
-                                        Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
-                                    );
-                                    const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
-                                    const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    // [#7912] Same gate as the list route — the
-                                    // by-name route must not serve a nav entry
-                                    // the list route prunes, or reading the
-                                    // single-app JSON defeats the filter (the
-                                    // #4722 lesson, one gate over).
-                                    const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
-                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate, servabilityGate);
-                                    visible = gated.app;
-                                    if (visible == null) {
-                                        // [#8013] A PERMISSION denial is reported as
-                                        // one — everything else keeps answering
-                                        // absence. See
-                                        // {@link filterAppForUserWithReason} for why
-                                        // only this one of the three gates converts,
-                                        // and why the reason comes from the branch
-                                        // that fired rather than from `null`.
-                                        //
-                                        // The condition is generic, so it takes the
-                                        // ADR-0112 STANDARD catalog code rather than
-                                        // a bespoke synonym — 403 `PERMISSION_DENIED`,
-                                        // which is also what
-                                        // `standardErrorCodeForHttpStatus(403)`
-                                        // answers. objectui#4252 branches on exactly
-                                        // this `code`.
-                                        //
-                                        // Written through the shared `sendError`
-                                        // (`@objectstack/types`), aliased to mark the
-                                        // envelope dialect — see the note at the import
-                                        // (#9098 removed the name collision that used
-                                        // to be the alias's reason).
-                                        // That builder emits the DECLARED envelope
-                                        // `{ success: false, error: { code, message } }`,
-                                        // so the console reads `body.error.code` — the
-                                        // same accessor as the absence answer below,
-                                        // rather than a second dialect to special-case.
-                                        if (gated.withheld === 'permission') {
-                                            sendEnvelopeError(
-                                                res,
-                                                403,
-                                                'PERMISSION_DENIED',
-                                                `You do not have permission to open the '${req.params.name}' app.`,
-                                            );
-                                            return;
-                                        }
-                                        // [#18066] Through the shared emitter, so
-                                        // this arm and the nothing-behind-the-name
-                                        // arm above it are byte-identical by
-                                        // construction — see
-                                        // {@link sendMetaItemAbsent} for why that
-                                        // is the ADR-0045 §3 property and not
-                                        // housekeeping.
-                                        sendMetaItemAbsent(res);
-                                        return;
-                                    }
-                                }
-                            }
-
-                            // ADR-0057 D10: gate dashboard widgets by `requiresService`
-                            // (mirrors the app-nav gate above) so the console never
-                            // renders a tile bound to an absent optional service.
+                            // [#20156] THE per-caller read gate — the one every
+                            // door beside this read asks too. The per-type gates
+                            // this block used to spell inline (the app nav filter,
+                            // the ADR-0057 D10 dashboard widget gate, the
+                            // ADR-0046 §6.7 docs audience) now live in
+                            // {@link metaItemReadGate}, with their history, so a
+                            // door cannot serve this document past a gate this
+                            // read applies. This read runs every arm and serves a
+                            // partly-withheld app PRUNED — the answer the census
+                            // in `meta-alternate-door-read-gates.test.ts` holds
+                            // each door to, less the partly-withheld app cells it
+                            // declares pending a decision (see
+                            // `MetaReadGatePolicy.app`).
                             //
-                            // [#5881] This is now on the DEFAULT path. It reads as
-                            // ordinary code either way, which is exactly why the
-                            // defect was invisible: `enableCache` defaults to true
-                            // and `dashboard` was not excluded above, so every
-                            // default deployment took the cached branch and this
-                            // gate ran only where an operator had turned the cache
-                            // off. Declared, tested, and never executed in
-                            // production — the exclusion above is what makes the
-                            // ADR's "the server is the authoritative gate" true
-                            // rather than merely written down.
-                            if (isDashboardType && visible) {
-                                const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                                const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, [visible]);
-                                const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                if (serviceGate) visible = this.filterDashboardForUser(visible, serviceGate);
+                            // [plural-spelling commit 83a3b1f2e] (the original
+                            // card no longer resolves) Judged on the NORMALIZED
+                            // `metaType`, like every gate here: `/meta/books/:name`
+                            // is the canonical plural spelling (Prime Directive #3).
+                            const verdict = await this.metaItemReadGate(
+                                environmentId, req, p, metaType, req.params.name, [visible],
+                                { arms: 'all', app: 'gate' },
+                            )(visible);
+                            if (verdict.kind === 'refuse') {
+                                verdict.send(res);
+                                return;
                             }
-
-                            // ADR-0046 §6.7 — audience gate on single-item reads.
-                            // A `book` is gated by its own audience; a `doc` by its
-                            // EFFECTIVE audience (union over the books that claim
-                            // it, unclaimed → org). 401 for anonymous, 403 for an
-                            // authenticated non-holder; fail closed when holdings
-                            // cannot be resolved (ADR-0049).
-                            if (isAudienceGatedType && visible) {
-                                const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
-                                    await import('@objectstack/spec/system');
-                                // The document under audience test. [#5563] This
-                                // used to unwrap an envelope-or-document here;
-                                // `visible` is always the document now, so the
-                                // name is all that is left — and it is worth
-                                // keeping, because `audience` is read off the
-                                // DOCUMENT and reading it off an envelope would
-                                // silently grant everyone (`undefined` audience).
-                                const target = visible;
-                                let caller: { authenticated: boolean; permissionSets?: string[] };
-                                let allowed: boolean;
-                                if (metaType === 'book') {
-                                    caller = await this.resolveAudienceCaller(environmentId, req, {
-                                        needPermissionSets: RestServer.anyPermissionSetAudience([target]),
-                                    });
-                                    allowed = audienceAllows(target?.audience, caller);
-                                } else {
-                                    const books = await this.fetchAudienceBooks(p, environmentId);
-                                    caller = await this.resolveAudienceCaller(environmentId, req, {
-                                        needPermissionSets: RestServer.anyPermissionSetAudience(books),
-                                    });
-                                    if (caller.authenticated && !RestServer.anyPermissionSetAudience(books)) {
-                                        allowed = true; // no gated book anywhere → org suffices
-                                    } else {
-                                        const docCorpusRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                                            type: 'doc',
-                                            ...(environmentId ? { environmentId } : {}),
-                                        };
-                                        const corpus = RestServer.metaItemsArray(
-                                            await p.getMetaItems(docCorpusRequest).catch(() => []))
-                                            .filter((d: any) => d && typeof d === 'object')
-                                            .map((d: any) => ({
-                                                name: d.name,
-                                                group: d.group,
-                                                tags: d.tags,
-                                                order: d.order,
-                                                packageId: d._packageId,
-                                            }));
-                                        const audiences = resolveDocAudiences(books as any, corpus);
-                                        allowed = docAudienceAllows(audiences.get(target?.name), caller);
-                                    }
-                                }
-                                if (!allowed) {
-                                    if (!caller.authenticated) {
-                                        sendDeclaredFault(res, { code: 'UNAUTHENTICATED', message: 'This documentation requires sign-in', status: 401 });
-                                    } else {
-                                        sendDeclaredFault(res, { code: 'PERMISSION_DENIED', message: 'This documentation is limited to holders of a permission set you do not have', status: 403 });
-                                    }
-                                    return;
-                                }
-                            }
+                            visible = verdict.document;
 
                             // ADR-0046 i18n: collapse the doc to the request
                             // locale (label/description/content) and drop the
@@ -7706,9 +8461,28 @@ export class RestServer {
                     const sinceSeq = req.query?.sinceSeq !== undefined
                         ? Number(req.query.sinceSeq)
                         : undefined;
-                    const limit = req.query?.limit !== undefined
-                        ? Number(req.query.limit)
-                        : undefined;
+                    // [#20062] `limit` is parsed through its DECLARATION
+                    // (`HistoryMetaItemRequestSchema.limit`, `z.number().optional()`),
+                    // not coerced: `?limit=abc` used to be `NaN`, dropped by the
+                    // spread below, and answered with the WHOLE change log; `?limit=`
+                    // became `Number('')` = 0, a zero-event answer. Both are refused
+                    // now. The declaration carries no `int()` and no bounds, so any
+                    // finite number is still forwarded exactly as before.
+                    const limit = readDeclaredQueryNumber(req.query, 'limit',
+                        HistoryMetaItemRequestSchema.shape.limit, { emptyIsAbsent: false });
+                    // [#20156] The plain read's refusal, where it refuses this
+                    // caller the item whole: a change log of a doc the caller
+                    // may not read, or of an app they may not open, discloses
+                    // who changed it, when and why — and an unpublished app's
+                    // log contradicts ADR-0045 §3's "externally unobservable".
+                    // See {@link eventDoorRefusal}.
+                    {
+                        const refusal = await this.eventDoorRefusal(environmentId, req, p);
+                        if (refusal) {
+                            refusal(res);
+                            return;
+                        }
+                    }
                     // [#13406] STATE THE ORG PARTITION. `sys_metadata_history`
                     // is a per-org log — `SysMetadataRepository.history()`
                     // filters `organization_id = this.organizationId` by strict
@@ -7792,7 +8566,9 @@ export class RestServer {
                         ...(environmentId ? { environmentId } : {}),
                         ...(historyOrganizationId ? { organizationId: historyOrganizationId } : {}),
                         ...(sinceSeq !== undefined && Number.isFinite(sinceSeq) ? { sinceSeq } : {}),
-                        ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+                        // Already finite or absent — the declared parse above refuses
+                        // anything else, so no `Number.isFinite` drop is left here.
+                        ...(limit !== undefined ? { limit } : {}),
                     };
                     const result = await p.historyMetaItem(historyRequest);
                     res.json(result);
@@ -7877,6 +8653,17 @@ export class RestServer {
                     const limit = req.query?.limit !== undefined
                         ? Number(req.query.limit)
                         : undefined;
+                    // [#20156] The history twin's gate, for the same reason: the
+                    // audit trail of an item the plain read refuses this caller
+                    // is refused with the plain read's answer. See
+                    // {@link eventDoorRefusal}.
+                    {
+                        const refusal = await this.eventDoorRefusal(environmentId, req, p);
+                        if (refusal) {
+                            refusal(res);
+                            return;
+                        }
+                    }
                     // [#8747] SCOPE THE READ. Without an organization this
                     // route returned every tenant's audit rows for a
                     // `(type, name)` — measured, not inferred — and it carries
@@ -8282,6 +9069,34 @@ export class RestServer {
                     if (refuseRepeatedQueryParams(req, res, ['from', 'fromVersion', 'to', 'toVersion'])) return;
                     const fromVersion = parseV(req.query?.from ?? req.query?.fromVersion);
                     const toVersion = parseV(req.query?.to ?? req.query?.toVersion);
+                    // [#20156] A diff discloses BOTH versions' values — for a
+                    // doc its `content`, for an app its `navigation`, for an
+                    // object its `fields` — so it owes the plain read's
+                    // per-caller answer for each side. Resolved in the plain
+                    // read's order: the ADR-0106 mask posture BEFORE any fetch
+                    // (D2/D3), then the current document, which a type the gate
+                    // judges here must have — the plain read answers its
+                    // absence, and there is no gate input to judge the versions
+                    // against.
+                    const diffMetaType = RestServer.metaTypeSingular(req.params.type);
+                    let diffMaskPosture: ObjectSchemaMaskPosture;
+                    try {
+                        diffMaskPosture = await (await this.resolveObjectMasker(environmentId, req, diffMetaType))(req.params.name);
+                    } catch (maskError: any) {
+                        if (maskError instanceof ObjectSchemaMaskEvaluationError) {
+                            sendFieldVisibilityFault(res, req.params.name);
+                            return;
+                        }
+                        throw maskError;
+                    }
+                    const diffGated = RestServer.gatesPerCaller(diffMetaType);
+                    const diffCurrent = diffGated
+                        ? await this.fetchCurrentMetaDocument(environmentId, req, p)
+                        : undefined;
+                    if (diffGated && diffCurrent == null) {
+                        sendMetaItemAbsent(res);
+                        return;
+                    }
                     // [#13406] STATE THE ORG PARTITION — the history twin's
                     // omission, on the door that reads the SAME table. See the
                     // history door above for why the predicate is
@@ -8324,7 +9139,59 @@ export class RestServer {
                         ...(fromVersion !== undefined ? { fromVersion } : {}),
                         ...(toVersion !== undefined ? { toVersion } : {}),
                     });
-                    res.json(result);
+                    // [#20156] Judge the current document and both sides, with
+                    // ONE judge (one books read, one holdings resolution): a
+                    // side the caller may not read is not served beside one
+                    // they may. `per-caller`, the stored-version doors' policy —
+                    // see `MetaReadGatePolicy`.
+                    if (diffGated) {
+                        const { from, to } = RestServer.diffSides(diffCurrent, result);
+                        const judge = this.metaItemReadGate(
+                            environmentId, req, p, diffMetaType, req.params.name, [diffCurrent, from, to],
+                            RestServer.STORED_VERSION_DOOR_POLICY,
+                        );
+                        for (const side of [diffCurrent, from, to]) {
+                            const verdict = await judge(side);
+                            if (verdict.kind === 'refuse') {
+                                verdict.send(res);
+                                return;
+                            }
+                        }
+                    }
+                    // [ADR-0106 D5(4)] The object mask on the one key it
+                    // projects, `fields`, in every bucket and on both sides —
+                    // the redaction precedent one frame down (the stored bodies
+                    // are compared raw, the EMITTED values are the projected
+                    // ones), so a field the caller may not read is not served
+                    // as a diff value either.
+                    let served: any = result;
+                    if (diffMaskPosture.kind === 'project' && result && typeof result === 'object') {
+                        let faulted = false;
+                        const maskFields = (value: unknown): unknown => {
+                            if (faulted || !value || typeof value !== 'object' || Array.isArray(value)) return value;
+                            const masked = this.maskObjectDocument(res, diffMaskPosture, req.params.name, { fields: value });
+                            if (!masked) { faulted = true; return value; }
+                            return (masked.document as { fields: unknown }).fields;
+                        };
+                        const onFields = (e: any, keys: readonly string[]) =>
+                            (e && e.path === 'fields'
+                                ? { ...e, ...Object.fromEntries(keys.map((k) => [k, maskFields(e[k])])) }
+                                : e);
+                        const bucket = (list: unknown, keys: readonly string[]) =>
+                            (Array.isArray(list) ? list.map((e) => onFields(e, keys)) : list);
+                        served = {
+                            ...(result as Record<string, unknown>),
+                            added: bucket((result as any).added, ['value']),
+                            removed: bucket((result as any).removed, ['value']),
+                            changed: bucket((result as any).changed, ['from', 'to']),
+                        };
+                        // `maskObjectDocument` already answered the ADR-0106 D6
+                        // 5xx: a side projected to NO fields is never served.
+                        if (faulted) return;
+                    } else if (diffMaskPosture.kind === 'undetermined') {
+                        res.header('Cache-Control', 'private, no-store');
+                    }
+                    res.json(served);
                 } catch (error: any) {
                     handleRouteError(res, error);
                 }
@@ -8585,10 +9452,63 @@ export class RestServer {
                         // protocol `resolveProtocol` hands back, not from the
                         // request payload (`getMetaItemLayered` declares no
                         // `environmentId` member).
+                        // [#20156] This door serves ONE document, the same
+                        // representation the plain read serves — so it answers
+                        // exactly what the plain read answers this caller: every
+                        // gate arm (`all`), a partly-withheld app PRUNED, and the
+                        // ADR-0106 object mask, its posture resolved BEFORE the
+                        // fetch (D2/D3's `fetch → mask → send`). It ran none of
+                        // them, so a member the plain read refuses
+                        // `crm_admin_runbook` read its body here, and an object's
+                        // unreadable fields were served whole. Both exits below
+                        // send through `servePublished`.
+                        const publishedMetaType = RestServer.metaTypeSingular(type);
+                        let publishedMaskPosture: ObjectSchemaMaskPosture;
+                        try {
+                            publishedMaskPosture = await (await this.resolveObjectMasker(environmentId, req, publishedMetaType))(name);
+                        } catch (maskError: any) {
+                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
+                                sendFieldVisibilityFault(res, name);
+                                return;
+                            }
+                            throw maskError;
+                        }
                         let publishedProtocol: any;
                         try {
                             publishedProtocol = await this.resolveProtocol(environmentId, req);
                         } catch { /* fall through to the code/package snapshot below */ }
+                        const servePublished = async (document: any): Promise<void> => {
+                            // The gate reads the protocol for its inputs (books,
+                            // the doc corpus, the object registry). The swallowed
+                            // resolution above is a fall-through for the SNAPSHOT;
+                            // a gate input is never read as absent, so a type the
+                            // gate judges resolves it again and lets it throw.
+                            const gateProtocol: RestProtocol = publishedProtocol
+                                ?? await this.resolveProtocol(environmentId, req);
+                            const verdict = await this.metaItemReadGate(
+                                environmentId, req, gateProtocol, publishedMetaType, name, [document],
+                                { arms: 'all', app: 'gate' },
+                            )(document);
+                            if (verdict.kind === 'refuse') {
+                                verdict.send(res);
+                                return;
+                            }
+                            let served = verdict.document;
+                            if (publishedMaskPosture.kind === 'project') {
+                                const masked = this.maskObjectDocument(res, publishedMaskPosture, name, served);
+                                if (!masked) return;
+                                served = masked.document;
+                            } else if (publishedMaskPosture.kind === 'undetermined') {
+                                res.header('Cache-Control', 'private, no-store');
+                            }
+                            res.json(served);
+                        };
+                        // [#20156] The overlay found is SERVED outside the
+                        // `try` below: that `catch` classifies a failed overlay
+                        // READ, and a gate fault raised while serving must reach
+                        // `handleRouteError` as itself — never fall through to
+                        // the snapshot as though no overlay existed.
+                        let publishedOverlay: unknown;
                         if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
                             try {
                                 const publishedCtx = await this.resolveExecCtx(environmentId, req)
@@ -8601,8 +9521,7 @@ export class RestServer {
                                         : {}),
                                 });
                                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                                    res.json(layered.overlay);
-                                    return;
+                                    publishedOverlay = layered.overlay;
                                 }
                             } catch (overlayError: any) {
                                 // [#5532] The overlay read is NOT blanket-swallowed,
@@ -8625,6 +9544,10 @@ export class RestServer {
                                 // code-published path newly fail closed.
                                 if (typeof overlayError?.status === 'number') throw overlayError;
                             }
+                        }
+                        if (publishedOverlay !== undefined) {
+                            await servePublished(publishedOverlay);
+                            return;
                         }
 
                         const svc = await this.resolveMetadataService(environmentId, req);
@@ -8666,7 +9589,7 @@ export class RestServer {
                             });
                             return;
                         }
-                        res.json(data);
+                        await servePublished(data);
                     } catch (error: any) {
                         handleRouteError(res, error);
                     }
@@ -9711,8 +10634,15 @@ export class RestServer {
                     const filter: Record<string, any> = {};
                     if (typeof q.object === 'string' && q.object) filter.object_name = q.object;
                     if (typeof q.status === 'string' && q.status) filter.status = q.status;
-                    const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
-                    const offset = Math.max(0, Number(q.offset) || 0);
+                    // [#20061] Parsed through the DECLARED `ListImportJobsRequestSchema`
+                    // (limit `int().min(1).max(200).default(50)`, offset
+                    // `int().min(0).default(0)`) rather than clamped: `?limit=0` used to
+                    // answer the 50-row default and `?limit=500` 200 rows, both `200`.
+                    // Absent and empty keep the declared defaults, as they always did.
+                    const limit = readDeclaredQueryNumber(q, 'limit',
+                        ListImportJobsRequestSchema.shape.limit, { emptyIsAbsent: true });
+                    const offset = readDeclaredQueryNumber(q, 'offset',
+                        ListImportJobsRequestSchema.shape.offset, { emptyIsAbsent: true });
                     const jobsListRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: IMPORT_JOB_OBJECT,
                         // [#16337] Canonical QueryAST, not the wire dialect this
@@ -9838,7 +10768,14 @@ export class RestServer {
                     // heavier than a bare value dump, so cap it well below HARD_CAP;
                     // above this the export still succeeds, just without colours.
                     const STYLE_ROW_CAP = 10_000;
-                    const requestedLimit = q.limit != null ? Math.max(1, Number(q.limit) || 0) : 10_000;
+                    // [#20062] Read, not coerced: `?limit=abc` (and `?limit=`) used to
+                    // become `Number(…) || 0` → `Math.max(1, 0)` → a ONE-row export
+                    // answered `200`. No request schema is declared for this door, so
+                    // the reading is "a whole number"; the floor and the cap below
+                    // are this door's own and are unchanged.
+                    const limitParam = readDeclaredQueryNumber(q, 'limit',
+                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: false });
+                    const requestedLimit = limitParam !== undefined ? Math.max(1, limitParam) : 10_000;
                     const limit = Math.min(requestedLimit, HARD_CAP);
                     const chunkSize = Math.min(MAX_CHUNK, Math.max(50, q.page != null ? Number(q.page) || 500 : 500));
                     // Colour cells only for xlsx within the style cap; decided up
@@ -10240,10 +11177,18 @@ export class RestServer {
                     const objects = typeof objectsParam === 'string'
                         ? objectsParam.split(',').map((s: string) => s.trim()).filter(Boolean)
                         : Array.isArray(objectsParam) ? objectsParam : undefined;
+                    // [#20062] Read, not coerced: `?limit=abc` used to reach
+                    // `searchAll` as `NaN`, and `hits.length >= NaN` is never true,
+                    // so the overall cap was silently gone. No request schema is
+                    // declared for this door, so the reading is "a whole number";
+                    // `searchAll`'s own `[1, 100]` clamp is unchanged, and an empty
+                    // `?limit=` stays absent as the old falsy guard had it.
+                    const limit = readDeclaredQueryNumber(req.query, 'limit',
+                        UNDECLARED_ROW_COUNT_PARAM, { emptyIsAbsent: true });
                     const result = await searchAll.call(p, {
                         q,
                         objects,
-                        limit: req.query?.limit ? Number(req.query.limit) : undefined,
+                        limit,
                         perObject: req.query?.perObject ? Number(req.query.perObject) : undefined,
                         ...(context ? { context } : {}),
                     });
@@ -11131,7 +12076,7 @@ export class RestServer {
                         });
                     }
 
-                    // [#17058] …and every OTHER member of `selection` had no
+                    // [PR #17548] …and every OTHER member of `selection` had no
                     // door at all, so a malformed one travelled into
                     // `dataset-executor` and was answered by whatever the face
                     // behind it happened to do with it — while the sibling
@@ -11139,13 +12084,18 @@ export class RestServer {
                     // identical failure to a 400 at the entry. One family, two
                     // postures, decided by which door the client knocked on.
                     //
-                    // The parse is a PROJECTION, never the siblings' schema:
-                    // `selection` is a `DatasetSelection`, which is NOT the
-                    // `AnalyticsQuery` the siblings parse — it carries no
-                    // `cube` and has four members of its own, so the sibling
-                    // schema would 400 every real dashboard widget.
-                    // {@link datasetSelectionRefusal} carries that measurement
-                    // and the reason those four are deliberately left out.
+                    // [#17551, ruled] The parse is the WHOLE selection, against
+                    // `DatasetSelectionSchema` — the one declaration of this
+                    // wire shape, authored in `packages/spec` beside the
+                    // sibling routes' own request body. ⛔ Never the siblings'
+                    // schema: `selection` is a `DatasetSelection`, which
+                    // carries no `cube` and has four members of its own, so
+                    // `AnalyticsQueryRequestSchema` would 400 every real
+                    // dashboard widget. PR #17548 could only door the seven
+                    // members whose declarations coincided; the four that were
+                    // left — `runtimeFilter`, `dateGranularity`, `compareTo`,
+                    // `totals` — are what this closes. {@link datasetSelectionRefusal}
+                    // carries both measurements.
                     //
                     // Validation-only: the caller's `selection` is what reaches
                     // `queryDataset` below, never a parse output.
@@ -12634,346 +13584,6 @@ export class RestServer {
                 } catch (err: any) { handleError(err, res, 'INTERNAL'); }
             },
             metadata: { summary: 'Discard a stale environment overlay shadowing a package-declared permission set (ADR-0094)', tags: ['security'] },
-        });
-    }
-
-    /**
-     * Register saved-report + scheduled-digest endpoints (M11.C16).
-     *
-     * Surfaces `IReportService` over HTTP so the UI can build,
-     * run, and schedule reports without dropping to ObjectQL. Routes
-     * live at the top of the API surface (alongside `/approvals` and
-     * `/sharing`) — reports are a tenant-wide capability, not a record
-     * on a specific CRUD object:
-     *
-     *   GET    {basePath}/reports?object=&ownerId=
-     *   POST   {basePath}/reports
-     *   GET    {basePath}/reports/:id
-     *   DELETE {basePath}/reports/:id
-     *   POST   {basePath}/reports/:id/run
-     *   POST   {basePath}/reports/:id/schedule
-     *   GET    {basePath}/reports/:id/schedules
-     *   DELETE {basePath}/reports/schedules/:scheduleId
-     *
-     * All routes return 501 when `reportsServiceProvider` is unset so
-     * a deployment without `@objectstack/plugin-reports` fails cleanly.
-     */
-    private registerReportsEndpoints(basePath: string): void {
-        // Reports live at the top of the API surface (e.g. `/api/v1/reports`)
-        // rather than under `/data/`, because a report is a first-class
-        // capability whose definition is tenant-wide (not a record on a
-        // particular object).
-        const dataPath = basePath;
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        const resolveService = async (environmentId?: string) => {
-            if (!this.reportsServiceProvider) return undefined;
-            try { return await this.reportsServiceProvider(environmentId); }
-            catch { return undefined; }
-        };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Reports service is not configured on this deployment',
-        });
-        // [#11926] The door states the contract for `POST /reports` below.
-        // `IReportService.saveReport` takes a `SaveReportInput`
-        // (`packages/spec/src/contracts/report-service.ts`), on which `name`,
-        // `object` and `query` are all REQUIRED — but an HTTP body is untyped,
-        // so forwarding it unchecked handed the service a value merely CLAIMED
-        // to be a `SaveReportInput`. That left the requirement for every
-        // implementation to re-derive privately: the bundled
-        // `@objectstack/plugin-reports` does re-derive it, a third-party one
-        // need not, and a caller could not tell which one it was talking to.
-        // Refusing here makes the contract true for every implementation, in
-        // the same envelope `handleValidation` already produces (400 /
-        // VALIDATION_FAILED, ADR-0112).
-        // It THROWS rather than writing a response, and that is the design, not
-        // a detour: `handleValidation` below is this surface's single place for
-        // building a VALIDATION_FAILED body. Writing a second one here would
-        // make one route answer the same refusal in two different envelopes —
-        // and would add a non-conforming body to the `check:route-envelope`
-        // ratchet, which only ticks down. Raised before `saveReport` is called,
-        // so the door refuses rather than the service.
-        const assertSaveReportInput = (body: any): void => {
-            const missing = (['name', 'object', 'query'] as const)
-                .filter((field) => body?.[field] === undefined || body?.[field] === null);
-            if (missing.length > 0) {
-                throw new Error(
-                    `VALIDATION_FAILED: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`,
-                );
-            }
-            // `query` is a `ReportQuery` envelope — never a scalar and never a
-            // list. A string here is the shape an authoring mistake actually
-            // takes, and it reaches storage as a stringified scalar otherwise.
-            if (typeof body.query !== 'object' || Array.isArray(body.query)) {
-                throw new Error('VALIDATION_FAILED: query must be a ReportQuery object');
-            }
-        };
-        const handleValidation = (res: any, err: any): boolean => {
-            const msg = String(err?.message ?? err ?? '');
-            if (msg.startsWith('VALIDATION_FAILED')) {
-                res.status(400).json({
-                    code: 'VALIDATION_FAILED',
-                    error: msg.replace(/^VALIDATION_FAILED:\s*/, ''),
-                });
-                return true;
-            }
-            if (msg.startsWith('REPORT_NOT_FOUND')) {
-                res.status(404).json({ code: 'REPORT_NOT_FOUND', error: msg });
-                return true;
-            }
-            return false;
-        };
-
-        // GET — list reports.
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/reports`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    // [#6877] Straight passthrough — both reached `listReports`
-                    // as arrays.
-                    if (refuseRepeatedQueryParams(req, res, ['object', 'ownerId'])) return;
-                    const q = req.query ?? {};
-                    const rows = await svc.listReports({ object: q.object, ownerId: q.ownerId }, context ?? {});
-                    res.json({ data: rows });
-                } catch (error: any) {
-                    logError('[REST] List reports error:', error);
-                    res.status(500).json({ code: 'REPORTS_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'List saved reports', tags: ['reports'] },
-        });
-
-        // POST — save (upsert) a report.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/reports`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    try {
-                        // AFTER the 501 on purpose: "no reports service is
-                        // mounted" is a deployment fact and outranks anything
-                        // about the body. Inside the try so the refusal reaches
-                        // `handleValidation` like any other VALIDATION_FAILED.
-                        assertSaveReportInput(req.body ?? {});
-                        const row = await svc.saveReport(req.body ?? {}, context ?? {});
-                        res.status(201).json(row);
-                    } catch (err: any) {
-                        if (handleValidation(res, err)) return;
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Save report error:', error);
-                    res.status(500).json({ code: 'REPORT_SAVE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Create or update a saved report', tags: ['reports'] },
-        });
-
-        // GET — single report.
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/reports/:id`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const row = await svc.getReport(req.params.id, context ?? {});
-                    if (!row) {
-                        res.status(404).json({ code: 'REPORT_NOT_FOUND', error: `Report ${req.params.id} not found` });
-                        return;
-                    }
-                    res.json(row);
-                } catch (error: any) {
-                    logError('[REST] Get report error:', error);
-                    res.status(500).json({ code: 'REPORT_GET_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Get a saved report by id', tags: ['reports'] },
-        });
-
-        // DELETE — drop report + cascade schedules.
-        this.routeManager.register({
-            method: 'DELETE',
-            path: `${dataPath}/reports/:id`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    // [#7523] Deny-as-404, with the two deny arms collapsed onto ONE
-                    // response. `deleteReport()` is silently idempotent for an id that
-                    // does not exist but throws REPORT_NOT_FOUND for a report the
-                    // caller does not own — two shapes that used to reach the caller
-                    // as 204-vs-500 and let an authenticated prober read another
-                    // owner's report ids straight off the status code. Splitting them
-                    // 204-vs-404 would only re-dress the same oracle, so both arms are
-                    // answered here, before the delete fires, by the one call the
-                    // surface already keeps blind to the difference: `getReport()`
-                    // returns null for an unknown id AND for another owner's id
-                    // alike (#2980). The response is emitted by `handleValidation`
-                    // from a synthesised REPORT_NOT_FOUND, i.e. the exact code path
-                    // the thrown arm takes below — one emitter, so status and body
-                    // cannot drift apart.
-                    const visible = await svc.getReport(req.params.id, context ?? {});
-                    if (!visible) {
-                        handleValidation(res, new Error(`REPORT_NOT_FOUND: ${req.params.id}`));
-                        return;
-                    }
-                    await svc.deleteReport(req.params.id, context ?? {});
-                    res.status(204).end();
-                } catch (error: any) {
-                    // REPORT_NOT_FOUND → 404, VALIDATION_FAILED → 400. Reached only
-                    // when an IReportService gates in `deleteReport()` without also
-                    // blinding `getReport()`; routing it through the same helper keeps
-                    // that implementation's arms indistinguishable too.
-                    if (handleValidation(res, error)) return;
-                    logError('[REST] Delete report error:', error);
-                    res.status(500).json({ code: 'REPORT_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Delete a saved report (cascades schedules)', tags: ['reports'] },
-        });
-
-        // POST — execute a report by id.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/reports/:id/run`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    try {
-                        const result = await svc.run(req.params.id, context ?? {});
-                        res.json(result);
-                    } catch (err: any) {
-                        if (handleValidation(res, err)) return;
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Run report error:', error);
-                    res.status(500).json({ code: 'REPORT_RUN_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Execute a saved report and return rendered output', tags: ['reports'] },
-        });
-
-        // POST — schedule a report.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/reports/:id/schedule`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const body = req.body ?? {};
-                    try {
-                        const row = await svc.scheduleReport({
-                            reportId: req.params.id,
-                            recipients: body.recipients ?? [],
-                            name: body.name,
-                            intervalMinutes: body.intervalMinutes ?? body.interval_minutes,
-                            cronExpression: body.cronExpression ?? body.cron_expression,
-                            timezone: body.timezone,
-                            format: body.format,
-                            subjectTemplate: body.subjectTemplate ?? body.subject_template,
-                            ownerId: body.ownerId ?? body.owner_id,
-                            active: body.active,
-                        }, context ?? {});
-                        res.status(201).json(row);
-                    } catch (err: any) {
-                        if (handleValidation(res, err)) return;
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Schedule report error:', error);
-                    res.status(500).json({ code: 'REPORT_SCHEDULE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Create a recurring email schedule for a report', tags: ['reports'] },
-        });
-
-        // GET — list schedules for a report.
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/reports/:id/schedules`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const rows = await svc.listSchedules({ reportId: req.params.id }, context ?? {});
-                    res.json({ data: rows });
-                } catch (error: any) {
-                    logError('[REST] List schedules error:', error);
-                    res.status(500).json({ code: 'SCHEDULES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'List schedules for a report', tags: ['reports'] },
-        });
-
-        // DELETE — drop a schedule.
-        this.routeManager.register({
-            method: 'DELETE',
-            path: `${dataPath}/reports/schedules/:scheduleId`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    // [#7603] Both deny arms — an unknown scheduleId and another
-                    // owner's — reach the caller as the one 404 emitted by the
-                    // single `handleValidation` call below, because
-                    // `unscheduleReport` is contracted to throw the SAME
-                    // `REPORT_NOT_FOUND: <scheduleId>` for both, before the delete
-                    // fires. It used to resolve silently for the unknown id, which
-                    // landed here as a 204 and let a prober read another owner's
-                    // schedule ids off the status code (#7523's oracle, in the
-                    // 404-vs-204 costume its card warned about).
-                    //
-                    // Unlike the sibling `DELETE /reports/:id`, this route cannot
-                    // pre-empt the two arms itself: that one collapses them with
-                    // `getReport()`, already blind to the difference (#2980),
-                    // whereas the caller here presents a scheduleId and
-                    // `IReportService` exposes no by-id schedule read to be blind
-                    // with — `listSchedules` is keyed by reportId. So the blinding
-                    // is the service's obligation (stated on the contract), and the
-                    // route's job is to keep ONE emitter for whatever it throws.
-                    await svc.unscheduleReport(req.params.scheduleId, context ?? {});
-                    res.status(204).end();
-                } catch (error: any) {
-                    if (handleValidation(res, error)) return; // REPORT_NOT_FOUND → 404 (deny-as-404, anti-enumeration)
-                    logError('[REST] Unschedule report error:', error);
-                    res.status(500).json({ code: 'SCHEDULE_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Delete a report schedule by id', tags: ['reports'] },
         });
     }
 

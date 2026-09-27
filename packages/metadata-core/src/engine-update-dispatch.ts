@@ -625,7 +625,12 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // inherits the refusal rather than each one re-deriving it.
   { what: 'a SCALAR data.id beside an $in where.id and multi:true — refused; the row SET and the declared bulk intent were BOTH silently dropped (#11230 reverses the remaining half of the #5748 pin)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'reject' },
   { what: 'a SCALAR data.id beside an $in where.id, no multi — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } } }, expect: 'reject' },
-  { what: 'a SCALAR data.id beside an ARRAY where.id — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: ['a', 'b'] } }, expect: 'reject' },
+  // [#19757] A 'SCALAR data.id beside an ARRAY where.id' row sat here. The
+  // shared comparand-shape face now refuses an ARRAY in the equality slot at
+  // the engine's lowering seam, BEFORE this dispatch runs (ruled 2026-09-23),
+  // so the real engine answers it with the face's INVALID_FILTER / 400 and no
+  // #11230 verdict for it is observable. Retired, not re-spelled: the two `$in`
+  // rows above carry the #11230 "declared non-scalar where.id" refusal.
   { what: 'a SCALAR data.id beside a NULL where.id — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: null } }, expect: 'reject' },
   // [#11230] The boundary that does NOT move: a FALSY scalar `where.id` IS a
   // scalar, so it is not this refusal's shape at all and keeps the #11142
@@ -653,7 +658,12 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   //    by hand tends to accept, and a running server answers 500 to.
   { what: 'predicate on a non-id column, no multi', data: { title: 'x' }, options: { where: { tenant: 't1' } }, expect: 'reject' },
   { what: '$in over ids, no multi (an operator object is NOT an id)', data: { title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } } }, expect: 'reject' },
-  { what: 'array id, no multi', data: { title: 'x' }, options: { where: { id: ['a', 'b'] } }, expect: 'reject' },
+  // [#19757] An 'array id, no multi' row (`where: { id: ['a', 'b'] }`) sat
+  // here — retired for the reason the #11230 block above gives: the shared
+  // face refuses that input before this dispatch runs. The `$in` row above
+  // keeps the "a non-scalar is not an id" coverage; `scalarUpdateId`'s own
+  // array pin stays, and a double bound to this predicate still refuses an
+  // array id with the dispatch sentence (no double runs the face).
   { what: 'null id, no multi', data: { title: 'x' }, options: { where: { id: null } }, expect: 'reject' },
   { what: 'falsy scalar where.id (0), no multi', data: { title: 'x' }, options: { where: { id: 0 } }, expect: 'reject' },
   { what: 'empty where, no multi', data: { title: 'x' }, options: { where: {} }, expect: 'reject' },

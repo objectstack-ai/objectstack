@@ -753,7 +753,7 @@ logged as `Plugin restarted`, marked `recovering`, and kept under periodic
 checks it went on passing from the grave: the default check when no
 `checkMethod` resolves is `plugin-loaded`, which a destroyed object satisfies
 forever. So the terminal report on a torn-down plugin was `healthy`. The three
-keys were removed in `@objectstack/spec` 18 under ADR-0049 enforce-or-remove;
+keys were removed in `@objectstack/spec` 17.3.0 under ADR-0049 enforce-or-remove;
 `PluginHealthMonitor.registerPlugin` refuses a config that still carries one.
 
 At the default `successThreshold: 1` none of this is observable: the first

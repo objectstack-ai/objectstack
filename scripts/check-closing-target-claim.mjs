@@ -48,11 +48,10 @@
  *     behaviourally equal to the two workflow spellings. A FOURTH spelling here
  *     would be the one nobody remembers when the grammar next moves.
  *   - the claim predicate is `h46ClaimNamesBranch`, which is itself
- *     `CLAIM_COMMENT_MARKER` plus `claimedBranches` — the same pair
- *     check-clause2-carriers reads. ⭐ "Import, never restate."
+ *     `CLAIM_COMMENT_MARKER` plus `claimedBranches`. ⭐ "Import, never restate."
  *   - the classification of everything that is NOT a claim on this branch is
- *     `claimGovernance`, the three-valued reader check-clause2-carriers already
- *     uses, and the next section is why a blocking gate needs all three values.
+ *     `claimGovernance`, the three-valued reader beside it in check-half-states,
+ *     and the next section is why a blocking gate needs all three values.
  *
  * The POSITIVE predicate is deliberately H46's and not governance's, so the
  * patrol row and this gate can never disagree about the word CLAIMED. The two

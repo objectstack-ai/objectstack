@@ -3,7 +3,13 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { TimeRelativeTrigger } from './time-relative-trigger.js';
 import type { FlowDispatchClaimSurface, TimeRelativeDataEngine } from './time-relative-trigger.js';
-import type { FlowTrigger, JobServiceSurface } from './schedule-trigger.js';
+import type { FlowTrigger, JobServiceSurface, ScheduledWorkTriggerOptions } from './schedule-trigger.js';
+
+/**
+ * [#19834] Construction options for {@link TimeRelativeTriggerPlugin}. Every
+ * field is optional; `new TimeRelativeTriggerPlugin()` behaves exactly as before.
+ */
+export type TimeRelativeTriggerPluginOptions = ScheduledWorkTriggerOptions;
 
 /**
  * The slice of the automation engine this plugin needs: register a trigger on
@@ -37,6 +43,16 @@ export class TimeRelativeTriggerPlugin implements Plugin {
     type = 'standard' as const;
     version = '1.0.0';
     dependencies = ['com.objectstack.service.job', 'com.objectstack.engine.objectql'];
+
+    private readonly options: TimeRelativeTriggerPluginOptions;
+
+    /**
+     * @param options.scheduledWorkPolicy - [#19834] THIS kernel's scheduled-work
+     *   policy (a value or a resolver). Absent, the deployment default applies.
+     */
+    constructor(options: TimeRelativeTriggerPluginOptions = {}) {
+        this.options = options;
+    }
 
     async init(ctx: PluginContext): Promise<void> {
         ctx.logger.info('Time-relative trigger plugin initialized');
@@ -84,6 +100,7 @@ export class TimeRelativeTriggerPlugin implements Plugin {
                     const svc = this.resolveService<Partial<FlowDispatchClaimSurface>>(ctx, 'automation');
                     return svc && typeof svc.claim === 'function' ? (svc as FlowDispatchClaimSurface) : null;
                 },
+                { scheduledWorkPolicy: this.options.scheduledWorkPolicy },
             );
             automation.registerTrigger(trigger);
             ctx.logger.info('TimeRelativeTriggerPlugin: time-relative trigger registered');

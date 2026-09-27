@@ -165,8 +165,9 @@ Auto-seeded on boot by `plugin-security`
 | `viewer_readonly` | Per-org | Read access only | Auditors / read-only stakeholders |
 
 **Who holds `admin_full_access` is not (only) a grant row.** `PLATFORM_ADMIN`
-standing is derived at a single site from **two anchors**, and either one is
-sufficient:
+standing is derived at a single site from **two anchors**. Which of them is
+sufficient depends on the deployment's
+[tenancy posture](/docs/deployment/tenancy-modes):
 
 - **Configuration — `OS_PLATFORM_OWNER_EMAIL`.** The deployment declares its
   administrators as one email address, or a comma-separated list of them. A
@@ -177,10 +178,16 @@ sufficient:
   compared trimmed and lower-cased, so `Ada@Example.com` and `ada@example.com`
   are one administrator, not two half-matches. Nothing is stored and nothing is
   granted — the answer is recomputed from configuration on every resolution.
+  This anchor is read under every posture.
 - **An unscoped `admin_full_access` grant row** — a `sys_user_permission_set`
-  row with `organization_id = NULL`, the original anchor. It still confers
-  standing, and it is **deprecated**: a deployment resolving through it logs a
-  pointer, once per process, at the configuration line that re-anchors it.
+  row with `organization_id = NULL`, the original anchor. It confers standing
+  under the `single` posture only. Under the walled postures (`group` /
+  `isolated`) the row is no longer an anchor: the set it names still grants
+  what any held set grants, but it confers no `PLATFORM_ADMIN` standing, and
+  nothing is logged about it per request. If a walled deployment holding such a
+  row ends up with no usable configured administrator, the boot log says it has
+  zero platform administrators, names the account that holds the row, and points
+  at `OS_PLATFORM_OWNER_EMAIL` as the way to restore that account's standing.
 
 Which anchor a fresh deployment gets depends on its
 [tenancy posture](/docs/deployment/tenancy-modes). Under `single` the first

@@ -27,6 +27,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SqliteWasmDriver } from './index.js';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -74,10 +75,20 @@ describe('[#5347/#5348] driver-sqlite-wasm inherits the out-of-contract filter r
       ['$where inside $or', { $or: [{ $where: 'x' }] }, '$where'],
     ] as Array<[string, unknown, string]>) {
       it(`refuses ${label} with the base class's envelope`, async () => {
-        const err = await refusalOf(where);
+        // [#20039] The key and its position are the predicate's detail, named
+        // on the wire only for a `where` the caller is known to have written
+        // (the #8220 contract, inherited from `SqlDriver` like the refusal
+        // itself). Author-written (a shallow copy of the shared case) gets the
+        // full text; unmarked gets the class statement only.
+        const err = await refusalOf(markFilterSubtreeProvenance({ ...(where as object) }, 'author'));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         expect(err.message).toContain(`Unsupported filter combinator "${key}"`);
+        const withheld = await refusalOf(where);
+        expect(withheld.code).toBe('INVALID_FILTER');
+        expect(withheld.status).toBe(400);
+        expect(withheld.message).toContain('not a declared combinator');
+        expect(withheld.message).not.toContain(`"${key}"`);
       });
     }
 

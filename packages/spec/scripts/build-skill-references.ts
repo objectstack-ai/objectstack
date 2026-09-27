@@ -34,6 +34,7 @@ import {
   checkCoreEntryShape,
   checkSingleOwner,
   checkTransitiveAllowlist,
+  publishedPointers,
   stripInternalIssueIds,
 } from './lib/skill-map-guards';
 
@@ -411,13 +412,11 @@ function main() {
   ];
   let totalSkills = 0;
 
-  // The allowlist guard needs each package's closure, so the closures are
-  // resolved once, up front, and reused by the emit loop below.
-  const closures: Record<string, string[]> = {};
-  for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {
-    closures[skillName] = resolveAll(coreFiles).files;
-  }
-  problems.push(...checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, closures));
+  // The allowlist guard asks whether each declared row exists on disk, never
+  // whether the closure reaches it — see TRANSITIVE_ALLOWLIST for why a row is
+  // a declaration and not a filter.
+  const existsInSpecSrc = (rel: string): boolean => fs.existsSync(path.resolve(SPEC_SRC, rel));
+  problems.push(...checkTransitiveAllowlist(SKILL_MAP, TRANSITIVE_ALLOWLIST, existsInSpecSrc));
 
   for (const [skillName, coreFiles] of Object.entries(SKILL_MAP)) {
     const skillDir = path.resolve(SKILLS_DIR, skillName);
@@ -431,15 +430,11 @@ function main() {
     for (const m of missing) problems.push(`${skillName} → ${m} (no such file under packages/spec/src)`);
 
     // A package that declares a transitive allowlist publishes its core files
-    // plus exactly those pointers; one that declares none publishes the whole
-    // closure, as before. See TRANSITIVE_ALLOWLIST for why the constraint is a
-    // hand-authored list and not a rule over the import graph.
-    const allowed = TRANSITIVE_ALLOWLIST[skillName];
-    const coreSet = new Set(coreFiles);
-    const allFiles =
-      allowed === undefined
-        ? resolved
-        : resolved.filter((f) => coreSet.has(f) || allowed.includes(f));
+    // plus exactly those declared pointers, each on existence rather than on
+    // reachability; one that declares none publishes the whole closure, as
+    // before. See TRANSITIVE_ALLOWLIST for why the constraint is a hand-authored
+    // list and not a rule over the import graph.
+    const allFiles = publishedPointers(coreFiles, resolved, TRANSITIVE_ALLOWLIST[skillName], existsInSpecSrc);
     console.log(`   ${coreFiles.length} core + ${allFiles.length - coreFiles.length} deps`);
 
     const refsDir = path.resolve(skillDir, 'references');

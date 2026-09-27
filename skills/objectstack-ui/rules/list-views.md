@@ -1,5 +1,11 @@
 # List, Kanban & Gantt Views
 
+- [Configuring a List View](#configuring-a-list-view) · [The `defineView` container](#the-defineview-container-viewts-file-shape) · [Data Source](#data-source-data)
+- [Columns](#columns) · [Column Features](#column-features) · [Filtering](#filtering) · [Sorting](#sorting)
+- [End-User Quick Filters](#end-user-quick-filters-userfilters-adr-0047) · [Toolbar Search](#toolbar-search-searchablefields-adr-0061)
+- [Configuring Kanban Views](#configuring-kanban-views)
+- [Configuring Gantt Views](#configuring-gantt-views)
+
 ## Configuring a List View
 
 ### The `defineView` container (`*.view.ts` file shape)

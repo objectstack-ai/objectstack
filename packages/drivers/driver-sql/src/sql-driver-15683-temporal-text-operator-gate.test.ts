@@ -246,14 +246,18 @@ describe('[#15683] the per-dialect construct, compiled', () => {
           // No pattern operator, and no temporal presentation wrapper either:
           // the gate runs BEFORE both emitters, so nothing is built over the
           // column at all.
-          expect(sql, `${op} over ${probe.field}`).not.toMatch(/LIKE|GLOB|lower\(|translate\(|CAST\(|strftime|datetime\(/);
+          // [#20024] `instr(` is the SQLite substring construct now (`contains`).
+          expect(sql, `${op} over ${probe.field}`).not.toMatch(
+            /LIKE|GLOB|instr\(|lower\(|translate\(|CAST\(|strftime|datetime\(/,
+          );
         }
         const not = d.compileWhere({ [probe.field]: { $notContains: probe.hit } } as FilterCondition);
         expect(not, `$notContains over ${probe.field}`).toMatch(/where 1 = 1/);
-        expect(not, `$notContains over ${probe.field}`).not.toMatch(/LIKE|GLOB|IS NULL/);
+        expect(not, `$notContains over ${probe.field}`).not.toMatch(/LIKE|GLOB|instr\(|IS NULL/);
       }
-      // …and the text column beside them still compiles a real pattern match.
-      expect(d.compileWhere({ label: { $contains: '2026' } })).toMatch(/LIKE|GLOB/);
+      // …and the text column beside them still compiles a real substring match
+      // (`LIKE` on Postgres / MySQL, `instr()` on SQLite since #20024).
+      expect(d.compileWhere({ label: { $contains: '2026' } })).toMatch(/LIKE|GLOB|instr\(/);
     });
   }
 

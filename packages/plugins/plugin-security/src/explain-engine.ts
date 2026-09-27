@@ -190,6 +190,24 @@ function isDenyAll(filter: unknown): boolean {
   return isDenyAllSentinel(filter) || isRlsDenySentinel(filter);
 }
 
+/**
+ * A dependency call that REJECTED, kept apart from every value it could have
+ * resolved to.
+ *
+ * The engine calls the functions enforcement calls, and enforcement runs them
+ * un-caught: when one rejects, the request being explained FAILS. Folding that
+ * rejection into an answer — `null` read as "no filter", `undefined` read as
+ * "no gate wired", `{ kind: 'none' }` read as "no delegation" — explains a
+ * request that fails as one that succeeds. {@link settle} hands back this
+ * sentinel instead; each site reports its layer `not_evaluated` and its
+ * verdict fail-closed, and never as an admission.
+ */
+const DEPENDENCY_FAULT: unique symbol = Symbol('explain.dependency-fault');
+
+function settle<T>(call: Promise<T>): Promise<T | typeof DEPENDENCY_FAULT> {
+  return call.then((value) => value, () => DEPENDENCY_FAULT);
+}
+
 /** Explain-operation → engine-operation (the middleware's vocabulary). */
 const EXPLAIN_TO_ENGINE_OP: Record<ExplainOperation, string> = {
   read: 'find',
@@ -854,16 +872,25 @@ async function applyRecordAttribution(
     return matchesFilterCondition(record as Record<string, unknown>, filter as any);
   };
 
-  const layered = deps.computeLayeredRlsFilter
-    ? await deps.computeLayeredRlsFilter(sets, object, engineOp, context).catch(() => ({ layer0: null, layer1: null }))
+  // The composition enforcement runs before the query: when it throws, neither
+  // layer answered, so neither may read as "contributes nothing".
+  const layeredOrFault = deps.computeLayeredRlsFilter
+    ? await settle(deps.computeLayeredRlsFilter(sets, object, engineOp, context))
     : undefined;
+  const layeredFault = layeredOrFault === DEPENDENCY_FAULT;
+  const layered = layeredOrFault === DEPENDENCY_FAULT ? undefined : layeredOrFault;
   const layer0 = layered?.layer0;
   const layer1 = layered?.layer1;
+  const layeredFaultDetail = (layerName: string): string =>
+    `${layerName} could not be evaluated: the row-level security composition threw, and enforcement ` +
+    'fails the request on the same call — so the record is reported NOT visible (fail closed), never admitted.';
 
   // ── Layer 0: tenant_isolation (prepended as the always-first layer) ──────
   let tenantRecord: ExplainRecordAttribution;
   if (!recordExists) {
     tenantRecord = { outcome: 'not_evaluated', rules: [], detail: 'Record not found under a system read — filtered, deleted, or never existed.' };
+  } else if (layeredFault) {
+    tenantRecord = { outcome: 'not_evaluated', rules: [], detail: layeredFaultDetail('Layer 0 (the tenant wall)') };
   } else if (layered === undefined) {
     tenantRecord = { outcome: 'not_evaluated', rules: [], detail: 'Tenant layer split is unavailable on this engine build.' };
   } else if (layer0 == null) {
@@ -954,20 +981,45 @@ async function applyRecordAttribution(
       effect: recipMatchesUser ? 'admits' : 'neutral',
     };
   });
-  const sharingFilter = deps.sharingReadFilter && recordExists
-    ? await deps.sharingReadFilter(object, context).catch(() => null)
+  // A rejected read filter is not a `null` one: the matcher reads `null` as
+  // "no filter" and admits the row, while the find it explains fails.
+  const sharingFilterOrFault = deps.sharingReadFilter && recordExists
+    ? await settle(deps.sharingReadFilter(object, context))
     : undefined;
+  const readFilterFault = sharingFilterOrFault === DEPENDENCY_FAULT;
+  const sharingFilter = sharingFilterOrFault === DEPENDENCY_FAULT ? undefined : sharingFilterOrFault;
   const sharingMatches = sharingFilter === undefined ? undefined : matches(sharingFilter);
   // Write ops: the by-construction verdict is the sharing service's own gate.
   // [ADR-0111 D3] delete has its own narrower gate (an edit share does not
   // confer delete), so a `delete` explanation consults canDelete, not canEdit.
   const writeGate = engineOp === 'delete' ? deps.canDeleteRecord : deps.canEditRecord;
-  const canEdit = !isRead && writeGate && recordExists
-    ? await writeGate(object, recordId, context).catch(() => undefined)
+  // A rejected gate is not an absent one: "no gate wired" hands the verdict to
+  // ownership and read shares, while the by-id write it explains fails.
+  const canEditOrFault = !isRead && writeGate && recordExists
+    ? await settle(writeGate(object, recordId, context))
     : undefined;
+  const writeGateFault = canEditOrFault === DEPENDENCY_FAULT;
+  const canEdit = canEditOrFault === DEPENDENCY_FAULT ? undefined : canEditOrFault;
+  // The sharing call THIS operation's row verdict rests on: the read filter for
+  // a read (the sharing middleware ANDs it into every find), the per-record gate
+  // for a write (the middleware gates every by-id write on it). Either one
+  // rejecting fails the request whatever the OWD, so it is judged before the
+  // baseline is.
+  const sharingFaultDetail = isRead
+    ? (readFilterFault
+        ? "The sharing service's read filter could not be evaluated: it threw, and the find fails on the same " +
+          'call — so the record is reported NOT visible (fail closed), never admitted.'
+        : undefined)
+    : (writeGateFault
+        ? `The sharing service's per-record ${engineOp === 'delete' ? 'delete' : 'update'} gate could not be ` +
+          'evaluated: it threw, and the by-id write fails on the same call — so the record is reported NOT ' +
+          'writable (fail closed), never admitted.'
+        : undefined);
   const anyShareAdmits = shareRules.some((r) => r.effect === 'admits');
   let sharingOutcome: ExplainRecordAttribution['outcome'];
   if (!recordExists) {
+    sharingOutcome = 'not_evaluated';
+  } else if (sharingFaultDetail) {
     sharingOutcome = 'not_evaluated';
   } else if (owd.effect !== 'private') {
     sharingOutcome = 'not_evaluated'; // baseline already grants the rows sharing would add
@@ -984,10 +1036,13 @@ async function applyRecordAttribution(
   if (sharingLayer) {
     sharingLayer.record = {
       outcome: sharingOutcome,
-      rowFilter: sharingFilter === undefined ? undefined : sharingFilter,
-      matchesRecord: sharingMatches,
+      // A faulted layer publishes no predicate and no match: neither is the
+      // judgement behind a `not_evaluated` outcome.
+      rowFilter: sharingFaultDetail || sharingFilter === undefined ? undefined : sharingFilter,
+      matchesRecord: sharingFaultDetail ? undefined : sharingMatches,
       rules: shareRules,
-      detail: !recordExists
+      // A fault is only ever recorded against an existing record.
+      detail: sharingFaultDetail ?? (!recordExists
         ? 'Record not found; sharing not evaluated.'
         : owd.effect !== 'private'
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
@@ -1008,7 +1063,7 @@ async function applyRecordAttribution(
               : `${shareRules.length} share(s) attached; none grants the caller access to this record.` +
                 (vamaEffective
                   ? ` Superseded by the View/Modify All Data bypass [${vamaSets.join(', ')}] — see the vama_bypass layer.`
-                  : ''),
+                  : '')),
     };
   }
 
@@ -1036,6 +1091,8 @@ async function applyRecordAttribution(
   if (rlsLayer) {
     if (!recordExists) {
       rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: 'Record not found; business RLS not evaluated.' };
+    } else if (layeredFault) {
+      rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: layeredFaultDetail('Business RLS') };
     } else if (layered === undefined) {
       rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: 'Business RLS split is unavailable on this engine build.' };
     } else if (layer1 == null) {
@@ -1094,6 +1151,10 @@ async function applyRecordAttribution(
   else if (!recordExists) { visible = false; decidedBy = undefined; }
   else if (tenantExcluded) { visible = false; decidedBy = 'tenant_isolation'; }
   else if (rlsExcluded) { visible = false; decidedBy = 'rls'; }
+  // A dependency that threw decides by failing the request, in the order the
+  // pipeline calls it: the RLS composition runs before the sharing middleware.
+  else if (layeredFault) { visible = false; decidedBy = 'rls'; }
+  else if (sharingFaultDetail) { visible = false; decidedBy = 'sharing'; }
   else if (!businessRowAdmits) { visible = false; decidedBy = owd.effect === 'private' ? 'sharing' : 'owd_baseline'; }
   else {
     visible = true;
@@ -1135,12 +1196,17 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   let delegatorSets: PermissionSet[] | null = null;
   let delegatorContextForRls: any = null;
   let delegatorMissing = false;
+  // The delegator's grants could not be READ — the resolution threw. The
+  // middleware resolves the delegator un-caught, so the request fails: a
+  // fail-closed denial like a missing delegator, never "no delegation", which
+  // would let the agent's own grants decide alone.
+  let delegatorUnresolved = false;
   let delegatorNames: string[] = [];
   if (context?.onBehalfOf?.userId) {
-    const del = await resolveDelegatorContext(deps.ql, context).catch(
-      () => ({ kind: 'none' }) as DelegatorResolution,
-    );
-    if (del.kind === 'missing') {
+    const del = await settle(resolveDelegatorContext(deps.ql, context));
+    if (del === DEPENDENCY_FAULT) {
+      delegatorUnresolved = true;
+    } else if (del.kind === 'missing') {
       delegatorMissing = true;
     } else if (del.kind === 'resolved') {
       delegatorContextForRls = del.context;
@@ -1172,14 +1238,16 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     delegatedPositions.find((d) => d.name === name);
   layers.push({
     layer: 'principal',
-    verdict: delegatorMissing ? 'denies' : 'neutral',
+    verdict: delegatorMissing || delegatorUnresolved ? 'denies' : 'neutral',
     detail:
       `Principal ${context?.userId ?? '(anonymous)'} holds position(s) [${positions.join(', ') || 'none'}] ` +
       `resolving to permission set(s) [${setNames.join(', ') || 'none'}] (union-merged, most-permissive).` +
       (context?.onBehalfOf?.userId
         ? delegatorMissing
           ? ` Acting on behalf of ${context.onBehalfOf.userId}, who no longer exists — D10 fails CLOSED (access denied).`
-          : ` Acting on behalf of ${context.onBehalfOf.userId} — effective access is the D10 INTERSECTION with the delegator's set(s) [${delegatorNames.join(', ') || 'none'}].`
+          : delegatorUnresolved
+            ? ` Acting on behalf of ${context.onBehalfOf.userId}, whose grants could not be resolved (the lookup threw) — D10 fails CLOSED (access denied).`
+            : ` Acting on behalf of ${context.onBehalfOf.userId} — effective access is the D10 INTERSECTION with the delegator's set(s) [${delegatorNames.join(', ') || 'none'}].`
         : '') +
       (delegatedPositions.length > 0
         ? ` ${delegatedPositions.length} position(s) held via delegation (ADR-0091 D3): [${delegatedPositions
@@ -1295,7 +1363,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   // that layer's grant is computed FROM, and reporting the real cause beats a
   // misleading "no set grants it" when the sets were never the problem.
   const postureUnresolved = secMeta.unresolved === true;
-  const crudAllowed = agentCrud && delegatorCrud && !delegatorMissing && !postureUnresolved;
+  const crudAllowed = agentCrud && delegatorCrud && !delegatorMissing && !delegatorUnresolved && !postureUnresolved;
   const granting = postureUnresolved
     ? []
     : sets
@@ -1314,10 +1382,12 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
         ? unresolvedPostureExplainDetail(object, secMeta.unresolvedCause ?? 'unknown')
         : delegatorMissing
           ? `Delegator no longer exists — D10 fails closed (access denied).`
-          : agentCrud && !delegatorCrud
-            ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
-            : `No resolved permission set grants ${operation} on '${object}'` +
-              (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
+          : delegatorUnresolved
+            ? `The delegator's grants could not be resolved — D10 fails closed (access denied).`
+            : agentCrud && !delegatorCrud
+              ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
+              : `No resolved permission set grants ${operation} on '${object}'` +
+                (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
     contributors: granting.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),
   });
 

@@ -1,59 +1,50 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17058] The door parse for `POST {basePath}/analytics/dataset/query`'s
- * `selection` — the half of the analytics family this route never had.
+ * The door parse for `POST {basePath}/analytics/dataset/query`'s `selection`.
  *
- * ## The gap
+ * ## The gap, and the two rounds that closed it
  *
- * `/analytics/query` and `/analytics/sql` Zod-parse their body at the entry
- * (`runtime/src/domains/analytics.ts` → `assertAnalyticsQueryBody`) and lift a
- * malformed member to a 400 before the service is reached. The dataset route
- * checked only that `selection.measures` was a non-empty array, so every other
- * member travelled into `dataset-executor` unrefused and was answered by
+ * ⚠️ The first round is cited by its PULL REQUEST throughout this file. The card
+ * it closed is no longer on this board — `check:issue-citations` classes that
+ * number `allocated-but-absent`, and deleted-vs-transferred is NOT MEASURED —
+ * so PR #17548 is the live record, and its own body names the card it closed.
+ *
+ * [PR #17548] `/analytics/query` and `/analytics/sql` Zod-parse their body at the
+ * entry (`runtime/src/domains/analytics.ts` → `assertAnalyticsQueryBody`) and
+ * lift a malformed member to a 400 before the service is reached. The dataset
+ * route checked only that `selection.measures` was a non-empty array, so every
+ * other member travelled into `dataset-executor` unrefused and was answered by
  * whatever the face behind it happened to do with it. That is the same door,
  * one family, two postures — the inconsistency a client cannot predict.
  *
- * ## Why this is a PROJECTION and not a reuse of the siblings' schema
+ * That PR's own answer was PARTIAL and said so: `DatasetSelection` had no Zod
+ * schema anywhere in the repo, so this module parsed a PROJECTION — the seven
+ * members whose declarations coincide with `AnalyticsQuery`'s — and
+ * deliberately projected the four dataset-only members (`runtimeFilter`,
+ * `dateGranularity`, `compareTo`, `totals`) AWAY. Reusing the siblings' schema
+ * for the whole selection was ⛔ not available and that was measured rather
+ * than assumed: `AnalyticsQueryRequestSchema` requires `cube` (a dataset
+ * selection carries none — the dataset is addressed by `body.dataset` /
+ * `body.datasetName`) and is `.strict()`, so a legal selection failed it on
+ * `cube` **plus** all four members above, which would have 400'd every real
+ * dashboard widget.
  *
- * ⚠️ Measured before writing a line, because the card left it open: **the
- * dataset route's `selection` is NOT the sibling routes' shape.** It is
- * `DatasetSelection` (`spec/contracts/analytics-service.ts`), and against
- * `AnalyticsQueryRequestSchema` a perfectly legal selection fails twice over —
- * the sibling schema requires `cube` (a dataset selection never carries one:
- * the dataset is addressed by `body.dataset` / `body.datasetName`) and it is
- * `.strict()`, so `runtimeFilter`, `dateGranularity`, `compareTo` and `totals`
- * are all rejected as unrecognized keys. ⛔ Reusing it would refuse every real
- * dashboard widget — a far worse defect than the one being fixed.
+ * [#17551, ruled — decision batch #204 item 3, letter A] The missing half is
+ * now declared where it belongs: `DatasetSelectionSchema`
+ * (`@objectstack/spec/api`, beside the `AnalyticsQueryRequestSchema` the
+ * sibling routes parse) is the ONE declaration of this wire shape, and
+ * `@objectstack/spec/contracts` re-exports its type rather than carrying a
+ * second interface. So this module parses the **whole** selection against it,
+ * and the projection is gone.
  *
- * What IS shared is member-by-member, and it is most of the shape. Seven of
- * `DatasetSelection`'s eleven members declare exactly the type the
- * `AnalyticsQuery` member of the same name declares:
+ * ⛔ Assembling the missing members out of spec-exported parts HERE was
+ * refused by name in that ruling: it is exactly the second declaration of a
+ * spec-owned wire shape Prime Directive #12 exists to prevent. This module
+ * owns the ENVELOPE — which refusal shape a failure lands in, and how a field
+ * path is spelled against the request body — and owns no part of the contract.
  *
- * | member | `DatasetSelection` | `AnalyticsQuery` |
- * |:---|:---|:---|
- * | `dimensions` | `string[]?` | `string[]?` |
- * | `measures` | `string[]` | `string[]` |
- * | `timeDimensions` | `AnalyticsQuery['timeDimensions']` — declared BY REFERENCE | itself |
- * | `order` | `Record<string, 'asc' \| 'desc'>?` | same |
- * | `limit` / `offset` | `number?` | same |
- * | `timezone` | `string?` | same |
- *
- * So parsing those seven against `AnalyticsQuerySchema.pick(…)` enforces the
- * contract `DatasetSelection` already declares — a pull-back onto published
- * text, never a narrowing past it. The four dataset-only members
- * (`runtimeFilter`, `dateGranularity`, `compareTo`, `totals`) are PROJECTED
- * AWAY before the parse, deliberately: `.pick()` carries `.strict()` through,
- * so handing the raw selection to the picked schema would reject them.
- *
- * ⚠️ Those four therefore still have no door. `DatasetSelection` is a
- * TypeScript interface with no Zod schema anywhere in the repo, and authoring
- * one belongs in `packages/spec` beside the interface (Prime Directive #1),
- * not here in a consumer — a second declaration of a spec-owned wire shape is
- * the dialect Prime Directive #12 exists to prevent. Filed separately; this
- * module is deliberately the derivable half.
- *
- * ## The refusal shapes, and why the date-range code is not spelled here
+ * ## The refusal shapes
  *
  * Two answers, matching the family:
  *
@@ -75,6 +66,13 @@
  * keep one wording, which a second spelling quietly ends. That constructor's
  * own TSDoc names this route as the caller it was waiting for.
  *
+ * The same convention governs the newly-doored members, and it is why no
+ * sentence about them is written here either: an unrecognised `compareTo.kind`
+ * answers {@link datasetCompareKindRefusalMessage}, the builder
+ * `service-analytics`'s `shiftRange` also raises for the in-process caller that
+ * never posted a body, and every unknown-key refusal is the schema's own
+ * `strictObject` prescription.
+ *
  * The `message` is built the way the sibling builds it — `<field>: <message>`
  * joined — over `fieldsFromZodIssues` (`@objectstack/types`), which is
  * `zodIssuesToFields`, the one ADR-0114 D3 mapper, plus the two things every
@@ -82,12 +80,16 @@
  * of the date-range union's own arm RESTATEMENT, so an arity refusal reaches
  * the wire with ONE wording rather than the prescription followed by zod's
  * `Too small: expected array to have >=2 items`. That collapse lives in the one
- * mapper both analytics doors share, ⛔ never as a second copy here — which is
- * why this door reads the wrapper rather than the raw D3 function. (The rename
- * is inert here: the projection is always an object built from declared members
- * only, so no issue of this parse lands at the root.) Field paths are prefixed
- * `selection.` because they are reported against the REQUEST body, where the
- * parsed object sits one level down.
+ * mapper both analytics doors share, ⛔ never as a second copy here.
+ *
+ * ⚠️ The root rename is LIVE here since #17551 and was inert before it. The
+ * projection was an object this module built out of declared members only, so
+ * no issue of that parse could land at the root; the full selection is
+ * `.strict()`, and an unrecognized-keys issue lands at exactly the root. The
+ * mapper spells that position `(body)`, which is true for the sibling routes —
+ * their body IS the query — and false here, where the parsed object sits under
+ * `selection`. So the root is re-spelled `selection` and every deeper path is
+ * prefixed `selection.`, because both are reported against the REQUEST body.
  *
  * Validation-only: the caller's `selection` is forwarded to the service
  * untouched, never the parse output — the rule `assertAnalyticsQueryBody`
@@ -98,29 +100,6 @@
 import { fieldsFromZodIssues } from '@objectstack/types';
 import { analyticsDateRangeUnrecognizedError } from '@objectstack/core';
 
-/**
- * The `DatasetSelection` members whose declared type IS the `AnalyticsQuery`
- * member of the same name — the projection this door parses.
- *
- * ⛔ Adding a member here is a claim about the two declarations agreeing:
- * check `DatasetSelection` in `spec/contracts/analytics-service.ts` against
- * `AnalyticsQuerySchema` in `spec/data/analytics.zod.ts` first. A member that
- * only LOOKS alike (`runtimeFilter` vs `where` — same `FilterCondition`, a
- * different key on each side) does not belong: this list is what makes the
- * parse a pull-back rather than a new contract. `.pick()` is type-checked
- * against the schema, so a member that leaves `AnalyticsQuery` fails the
- * build here rather than silently dropping out of coverage.
- */
-export const SELECTION_MEMBERS_SHARED_WITH_ANALYTICS_QUERY = [
-    'dimensions',
-    'measures',
-    'timeDimensions',
-    'order',
-    'limit',
-    'offset',
-    'timezone',
-] as const;
-
 /** A door refusal, ready for `res.status(...).json(...)`. */
 export interface DatasetSelectionRefusal {
     status: number;
@@ -128,51 +107,36 @@ export interface DatasetSelectionRefusal {
 }
 
 /**
- * Built on first use and memoised — `@objectstack/spec/data` stays off this
+ * Built on first use and memoised — `@objectstack/spec/api` stays off this
  * module's init path, the same lazy `await import` the analytics route already
  * performs for `DatasetSchema`.
  */
-let sharedSelectionSchema: { safeParse(input: unknown): any } | undefined;
+let selectionSchema: { safeParse(input: unknown): any } | undefined;
 
-async function getSharedSelectionSchema(): Promise<{ safeParse(input: unknown): any }> {
-    if (!sharedSelectionSchema) {
-        const { AnalyticsQuerySchema } = await import('@objectstack/spec/data');
-        sharedSelectionSchema = (AnalyticsQuerySchema as any).pick({
-            dimensions: true,
-            measures: true,
-            timeDimensions: true,
-            order: true,
-            limit: true,
-            offset: true,
-            timezone: true,
-        });
+async function getSelectionSchema(): Promise<{ safeParse(input: unknown): any }> {
+    if (!selectionSchema) {
+        const { DatasetSelectionSchema } = await import('@objectstack/spec/api');
+        selectionSchema = DatasetSelectionSchema as unknown as { safeParse(input: unknown): any };
     }
-    return sharedSelectionSchema!;
+    return selectionSchema!;
 }
 
 /**
- * Parse the shared members of a dataset `selection` and describe the refusal,
- * or `undefined` when the selection passes.
+ * Parse a dataset `selection` and describe the refusal, or `undefined` when the
+ * selection passes.
  *
  * A non-object `selection` answers `undefined`: the route's own check ahead of
  * this one (`selection.measures` must be a non-empty array) already owns that
  * case and answers it with a message naming the member, which is the better
- * sentence for by far the most common mistake. This function is about the
- * members that had no door at all.
+ * sentence for by far the most common mistake.
  */
 export async function datasetSelectionRefusal(
     selection: unknown,
 ): Promise<DatasetSelectionRefusal | undefined> {
     if (!selection || typeof selection !== 'object' || Array.isArray(selection)) return undefined;
 
-    const source = selection as Record<string, unknown>;
-    const projection: Record<string, unknown> = {};
-    for (const member of SELECTION_MEMBERS_SHARED_WITH_ANALYTICS_QUERY) {
-        if (member in source) projection[member] = source[member];
-    }
-
-    const schema = await getSharedSelectionSchema();
-    const parsed = schema.safeParse(projection);
+    const schema = await getSelectionSchema();
+    const parsed = schema.safeParse(selection);
     if (parsed.success) return undefined;
 
     const issues: Array<{
@@ -181,9 +145,12 @@ export async function datasetSelectionRefusal(
         message: string;
         input?: unknown;
     }> = parsed.error.issues;
-    const fields = fieldsFromZodIssues(issues, projection).map((entry) => ({
+    const fields = fieldsFromZodIssues(issues, selection).map((entry) => ({
         ...entry,
-        field: `selection.${entry.field}`,
+        // `(body)` is the mapper's name for the ROOT, correct on the sibling
+        // routes whose body IS the parsed object and wrong here, where it sits
+        // one level down under `selection`.
+        field: entry.field === '(body)' ? 'selection' : `selection.${entry.field}`,
     }));
     const message = `Invalid dataset selection: ${fields
         .map((f) => `${f.field}: ${f.message}`)
