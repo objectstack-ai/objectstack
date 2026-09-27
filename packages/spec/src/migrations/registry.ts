@@ -6558,6 +6558,34 @@ const step18: MigrationStep = {
         + 'deliberately UNCHANGED and must be verified as such: nothing ever parsed or read these '
         + 'shapes, so removing them removes no behaviour.',
     },
+    // Maintainer decision batch #118 item 2 (ADR-0049 enforce-or-remove) — the D3
+    // entry of the `chart-config-aria-removed` family (ruling B on #17152: one D3
+    // entry per retirement family, even when D2 is lossless). Registered keys:
+    // `ui/ChartConfig:aria` and `ui/ReportChart:aria`, over three authored sites.
+    // The strip changes nothing a screen reader hears; the accessible name the
+    // author wrote was never announced, and moving it is the author's edit.
+    {
+      id: 'chart-config-aria-retired',
+      surface: 'dashboard.widgets[].chartConfig.aria / report.chart.aria / report.blocks[].chart.aria — '
+        + 'the ARIA block on a chart config',
+      replacement: 'The sibling `description`, which the chart renderer lowers onto the chart graphic '
+        + 'as its accessible name (`role="img"` with an aria-label). One accessibility vocabulary per '
+        + 'chart node.',
+      reason: 'The D2 conversion `chart-config-aria-removed` deletes `aria` from every dashboard widget '
+        + 'chart config, report chart and report block chart, and the delete is lossless: no chart '
+        + 'renderer on either face ever applied the block, so the ARIA attributes it declared never '
+        + 'reached the DOM. The residue is accessibility work the author did that no user benefited '
+        + 'from. An author who wrote `aria.label` for a chart believed screen-reader users heard that '
+        + 'name; they heard the `description` if one was set, and nothing specific if not. The strip '
+        + 'deletes the label text along with the key, and only the author can say whether that text '
+        + 'should become the chart\'s `description` — a field that other readers of the chart may also '
+        + 'show — or whether the existing description already says it.',
+      acceptanceCriteria: 'No chart config on a dashboard widget, a report or a report block carries '
+        + '`aria`; the parse refuses it. Every chart that had carried an `aria.label` has a '
+        + '`description` conveying what that label was meant to announce, or the author has confirmed '
+        + 'the existing description does. With a screen reader, focusing the chart graphic announces '
+        + 'the description as its name.',
+    },
     {
       id: 'cli-command-contribution-retired',
       surface:
@@ -11020,6 +11048,62 @@ const step18: MigrationStep = {
         + 'that carries only live keys (`{ mode: \'drawer\', size: \'lg\' }`) parses byte-for-byte '
         + 'as it did before.',
     },
+    // #17063 (maintainer ruling, decision batch #107 item 1) — the D3 entry of the
+    // `view-page-mount-removed` family (ruling B on #17152: one D3 entry per
+    // retirement family, even when D2 is lossless). Registered keys:
+    // `ui/ListView:pageName` and `ui/ObjectListView:pageName`, plus the `'page'`
+    // value of the list-view `type` enum. The strip lands every view on what it
+    // already drew — an empty grid — which is exactly why it cannot be the end of
+    // the migration.
+    {
+      id: 'list-view-page-mount-retired',
+      surface: 'view.list / view.listViews.* — the list-view type page and its pageName binding',
+      replacement: 'Publish the page and give the app a navigation item for it — '
+        + '`{ type: \'page\', pageName: \'<page_name>\' }` under the app `navigation`, the page mount '
+        + 'that has always rendered. Keep the list view only if it should draw rows of its object, as '
+        + 'a `grid` or one of its siblings.',
+      reason: 'The D2 conversion `view-page-mount-removed` deletes `type: \'page\'` (the schema default '
+        + 'then parses the view as `grid`) and `pageName` from every view payload in `stack.views[]`, '
+        + 'in all three persisted spellings, and the delete is lossless in pixels: no renderer ever '
+        + 'routed the page member, so a page view has always drawn an empty grid, and it still does. '
+        + 'The author wanted a PAGE in front of users at that place in the app, and the view never '
+        + 'showed it. Whether to reach the page through a navigation item, and whether the now-plain '
+        + 'grid view should exist at all, are the author\'s decisions. One boundary is theirs by '
+        + 'construction: a page mount declared under `objects[].listViews` is reached by no '
+        + 'conversion, so it is refused at its own door until edited by hand.',
+      acceptanceCriteria: 'No list view in `stack.views[]` or in any object `listViews` map declares '
+        + '`type: \'page\'` or `pageName`; the parse refuses both by name. For each view that did: the '
+        + 'page it named is reachable from the app navigation and renders when opened, and the list '
+        + 'view either draws rows of its object or has been deleted. No navigation entry points at a '
+        + 'view that now renders an empty grid by accident.',
+    },
+    // #17053 (objectui#8221 decision batch #77, option B: one sort orthography
+    // platform-wide) — the D3 entry of the `list-view-sort-string-clause-to-array`
+    // family (ruling B on #17152: one D3 entry per retirement family, even when D2
+    // is lossless). The rewrite is lossless for every clause in the grammar it
+    // knows; the clauses it cannot lower, and the collection it cannot reach, are
+    // the author's.
+    {
+      id: 'list-view-sort-string-clause-retired',
+      surface: 'view.list.sort / view.listViews.*.sort — the bare string sort clause',
+      replacement: 'The structured array, `sort: [{ field, order }]`, with `order` written out — a bare '
+        + 'field name meant ascending — and one entry per key of a comma-separated clause, in the same '
+        + 'order.',
+      reason: 'The D2 conversion `list-view-sort-string-clause-to-array` rewrites a string clause in the '
+        + 'grammar the wire normalizer splits on — `\'created_at desc\'`, a bare field name, a '
+        + 'comma-separated list — into the array, losslessly, across every view payload in '
+        + '`stack.views[]`. Two cases are deliberately left for the author. A string that does NOT '
+        + 'parse as that grammar — above all the leading-minus dialect, `\'-created_at\'` — is left '
+        + 'alone and refused at the door, because guessing a direction would invent an ordering the '
+        + 'author never wrote. And a clause under `objects[].listViews` is reached by no conversion, '
+        + 'so it is refused at its own door until rewritten by hand. The clause was minted by the '
+        + 'schema and refused by the renderer that lowers it into a query, so a view carrying one may '
+        + 'already have been failing to load; which order the author meant is theirs to state.',
+      acceptanceCriteria: 'No list view in `stack.views[]` or in any object `listViews` map carries a '
+        + 'string `sort`; the parse refuses one with the rewrite prescription. Every rewritten array '
+        + 'names fields that exist on the view\'s object with the direction the author intends, and '
+        + 'the view loads — rather than failing at the renderer — with its rows in that order.',
+    },
     {
       id: 'logging-durations-unit-in-key',
       surface: 'HttpDestinationConfig `batch.flushInterval` / `retry.initialDelay` / `timeout` and '
@@ -11809,6 +11893,36 @@ const step18: MigrationStep = {
         + 'the flag, the author has either accepted creating records through the object\'s create '
         + 'action, or moved that board to a host that renders the `kanban-ui` block with `onQuickAdd` '
         + 'supplied — where clicking a column\'s add control creates a record in that column.',
+    },
+    // #19054 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18) — the D3
+    // entry of the `object-tenancy-organization-field-removed` family (ruling B on
+    // #17152: one D3 entry per retirement family, even when D2 is lossless). This
+    // is the family the pre-ruling rationale said had "no semantic residue". The
+    // delete changes no stamp; what it leaves is an author who asked for a
+    // divergence and should know they never got it.
+    {
+      id: 'object-tenancy-organization-field-retired',
+      surface: 'object.tenancy.organizationField — the column a platform row is stamped from, as '
+        + 'distinct from the column the object is walled by',
+      replacement: '`tenancy.tenantField` — one column that both walls the object and stamps its '
+        + 'platform rows. The stamp-only divergence is a platform-internal fact now, kept for the '
+        + 'platform\'s own credential table.',
+      reason: 'The D2 conversion `object-tenancy-organization-field-removed` deletes the key from every '
+        + 'object\'s `tenancy` block in author sources and on stored object rows, and the delete is '
+        + 'lossless: the key\'s only readers were three platform-row writers, pinned by name to '
+        + 'platform tables, so an application that declared it was never read. The judgment is what '
+        + 'the declaration was for. An author who set `organizationField` to a column other than '
+        + '`tenantField` asked for platform rows (audit stamps, approval rows, automation-run records) '
+        + 'to carry a different organization column than the one walling the data — and never got '
+        + 'it. If the object\'s real tenant column is not `organization_id`, the fix is '
+        + '`tenancy.tenantField`, which moves the wall as well as the stamp; whether moving the wall '
+        + 'is correct for that object is a data-isolation decision only its author can make.',
+      acceptanceCriteria: 'No object declares `tenancy.organizationField`; the `tenancy` block refuses '
+        + 'it with the prescription. Every object whose tenant column is not `organization_id` '
+        + 'declares that column as `tenancy.tenantField`. A record created by a user of one '
+        + 'organization is stored with that organization in the tenant column, a user of another '
+        + 'organization cannot read it, and the audit stamp on the change names the same '
+        + 'organization.',
     },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
@@ -15423,6 +15537,36 @@ const step18: MigrationStep = {
         + 'array is the case to read closest: its two corrected spellings — value: "won" on '
         + 'equals, and operator: "in" with value: ["won"] — select the same rows, so the result '
         + 'set cannot tell you which the metadata meant, and only the author knows.',
+    },
+    // #20085 (ADR-0049 enforce-or-remove; triage direction 「retire both keys」) —
+    // the D3 entry of the `view-item-owner-hidden-removed` family (ruling B on
+    // #17152: one D3 entry per retirement family, even when D2 is lossless).
+    // Registered keys: `owner` / `hidden` on `ui/ViewItem` and on the wire member
+    // `ui/ViewItemWire`. The delete changes no render and no listing; what it
+    // leaves is a visibility belief — views marked private or hidden were listed
+    // to everyone who could read the object.
+    {
+      id: 'view-item-owner-hidden-retired',
+      surface: 'view.owner / view.hidden on the view item record — the per-user owner and the '
+        + 'switcher-hidden flag',
+      replacement: '(removed — no per-user view scope and no switcher filter exists.) A view is listed '
+        + 'to everyone who can read its object. A view that must not be listed is deleted; per-user '
+        + 'view scoping is a parked direction, not a shipped mechanism.',
+      reason: 'The D2 conversion `view-item-owner-hidden-removed` deletes both keys from every view '
+        + 'item RECORD — in `views` (stack sources and stored rows) and in the assembled-manifest view '
+        + 'item channel (package export, environment artifacts) — and the delete is lossless: both '
+        + 'switcher read paths filter on the view kind and object and sort on `order`, so '
+        + '`hidden: true` hid nothing and no scope ever read `owner`. The judgment is about exposure. '
+        + 'A view an author marked as one user\'s, or hid from the switcher, has always been listed to '
+        + 'every user who can read the object — its name, its columns, its filters and its sort. '
+        + 'Whether anything in such a view was meant to stay private, and whether it should now be '
+        + 'deleted rather than kept, is the author\'s call. A flattened view overlay keeps its own '
+        + '`owner` and `hidden`: those live on a different door that this retirement does not touch.',
+      acceptanceCriteria: 'No view item record in `views` or in an assembled artifact carries `owner` or '
+        + '`hidden`; the parse refuses both by name, and an artifact assembled before the upgrade '
+        + 'registers without a refusal over them. For every view that had carried either key, the '
+        + 'author has confirmed that everything it shows may be listed to all readers of its object, '
+        + 'or has deleted it. The view switcher lists the same views as before the upgrade.',
     },
     // The door half of ruling A on objectui#10380 (#20051). A write-time narrowing
     // of the flattened view overlays: the stored rows it newly refuses are read and
