@@ -10528,6 +10528,43 @@ const step18: MigrationStep = {
         + 'and must be verified as such: nothing ever parsed or read these shapes, so removing '
         + 'them removes no behaviour.',
     },
+    {
+      id: 'inline-grid-column-currency-scale-refused',
+      surface: 'object.fields.<name>.inlineColumns[].scale on an inline grid column that declares '
+        + '`type: \'currency\'` — any declared value, `scale: 0` included, computed or not. `scale` on a '
+        + '`number` column, and on a column that declares no `type`, is untouched',
+      replacement: 'no `scale` on a currency inline grid column. DELETE the key — that is the whole '
+        + 'migration: a currency amount\'s decimal places are its currency\'s, not a column setting. The '
+        + 'currency\'s ISO 4217 minor unit decides how the cell displays the amount and the width a '
+        + 'computed amount is rounded to. ⛔ Nothing replaces the key: do not re-declare its value under '
+        + 'any other key.',
+      reason:
+        'Maintainer ruling 5791803339 (batch #215 item 1, letter B) retired `scale` from the '
+        + '`currency` field type, and ruling 5805782503 (batch #218 item 2, letter 乙 — a currency\'s '
+        + 'ISO 4217 minor unit decides its display) worded the remedy. Neither reached the inline grid '
+        + 'column, the strict mirror of the console grid\'s column, which still offered per-column '
+        + 'decimals on a `currency` column; triage read the column as inherited from both rulings, so '
+        + '`InlineGridColumnSchema` now refuses the key on a column declaring `type: \'currency\'` at '
+        + 'parse, with the field refusal\'s first sentence and remedy. ⛔ No alias and no grace window, '
+        + 'per ruling B. NOT mechanically converted, deliberately, for the reason the field entry '
+        + '`field-currency-scale-refused` gives: a conversion that dropped the key would accept it on '
+        + 'every load, which is the grace window the ruling refused; the refusal names the key and its '
+        + 'one-line fix instead. The same change rewords the column\'s `prefix` description: it replaces '
+        + 'the resolved currency\'s symbol and has no default (the grid no longer falls back to a fixed '
+        + 'yen sign). Reach: only a DECLARED column `type` is judged — a column that declares none takes '
+        + 'its type from the child field when the console hydrates it, which the column schema cannot '
+        + 'see. Population measured at the change, on origin/main 1c8b320a89: one authored '
+        + '`inlineColumns` block in the tree (the showcase invoice, seven identity-only columns, none '
+        + 'declaring `type` or `scale`), no platform object, skill, documentation example or JSON fixture '
+        + 'declaring an inline grid column at all, and one test fixture carrying `scale: 2` on a currency '
+        + 'column, re-judged in the same change. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria:
+        'Every field in the stack parses: an `ObjectSchema` parse and `objectstack validate` report no '
+        + 'issue on an `inlineColumns[].scale` path of a column declaring `type: \'currency\'`. A '
+        + 'currency column that carried `scale` no longer declares it, and a diff of the column shows '
+        + 'that one line deleted and no key added. `number` columns, and columns declaring no `type`, '
+        + 'keep their `scale`; a column\'s `prefix` is still accepted on a currency column.',
+    },
     // #14478 (maintainer ruling B: a duration key carries its unit in its NAME) —
     // the D3 entry of the `job-timeout-to-timeout-ms` family (ruling B on #17152:
     // one D3 entry per retirement family, even when D2 is lossless). The job half
@@ -15567,6 +15604,48 @@ const step18: MigrationStep = {
         + 'registers without a refusal over them. For every view that had carried either key, the '
         + 'author has confirmed that everything it shows may be listed to all readers of its object, '
         + 'or has deleted it. The view switcher lists the same views as before the upgrade.',
+    },
+    // #20186, route C-prime (seat answers 5855433719 / 5855548706). A write-time
+    // re-routing of the flattened view overlays: each member judges only the
+    // `viewKind` it names. The stored rows it newly refuses are read and served
+    // exactly as before and fail only on their next save, which is why this is a
+    // semantic entry and not a conversion — which value a refused key meant is a
+    // fact only its author holds.
+    {
+      id: 'view-overlay-judged-by-viewkind-arm',
+      surface:
+        'A flattened `view` overlay saved through the metadata write door (`PUT /api/v1/meta/view/:name`, the '
+        + 'Studio / MCP save) whose `viewKind` names one family while the body was judged by the other: a '
+        + 'column-less `viewKind: "list"` body, which only the form overlay member used to accept (its list keys '
+        + '`sort`, `searchableFields`, `timeline`, `sharing` and the rest stripped unread), and a `viewKind: "form"` '
+        + 'body carrying list `columns`, which only the list overlay member used to accept.',
+      replacement:
+        'Each overlay is judged by the member its `viewKind` names. A column-less list overlay is a patch on the '
+        + 'view it shadows and carries list keys the list view schema accepts: a `sort` array of `{ field, order }` '
+        + '(the bare string clause was retired in 17.5.0), no `timeline.metaFields` (the timeline block has no such '
+        + 'key), an array `searchableFields`, and the list `sharing` block (`{ type, lockedBy }`), not the form '
+        + 'public-link block. A column-less list overlay names no `type`; one that does is a full inline config and '
+        + 'lists its `columns`. A form overlay\'s `columns` is its body-column count (an integer); a field list '
+        + 'means the body is a list view (`viewKind: "list"`) or belongs in `sections: [{ fields }]`.',
+      reason:
+        'Both overlay members shared one `viewKind: list | form` enum. The list member required `columns`, so it '
+        + 'refused the column-less list patch the console writes on every toolbar save (the ruled patch-only '
+        + 'storage shape, maintainer ruling: 「`persistViewPatch` 只存 patch,不存 merged base」); the '
+        + 'union then tried the form member, which requires no list key and strips every one, and accepted it — '
+        + 'so a retired `sort` string or a `timeline.metaFields` the list schema refuses by name was saved with '
+        + '`success: true` and stored as sent. Measured on `origin/main` @ `4df101c3` and again at `ce70876e` '
+        + '(after the `options`-bag door landed) through the real save. Ruled route C-prime: each member admits one `viewKind`, the list '
+        + 'member judges a column-less patch (`columns` optional there only; the authoring list view keeps it '
+        + 'required), and a column-less body that names a `type` stays refused at `columns`. Not convertible: '
+        + 'whether a refused value was a typo or a stale capability is the author\'s call.',
+      acceptanceCriteria:
+        'Every stored flattened `view` overlay saves again unchanged. A row that does not is refused '
+        + '`422 INVALID_METADATA` on its next save, with the issue located at the refused key (`sort`, `timeline`, '
+        + '`searchableFields`, `sharing`, `columns`) and carrying that key\'s own message — for a column-less list '
+        + 'overlay naming a `type`, the prescription at `columns`; for a field list on a form overlay, the '
+        + 'body-column-count prescription at `columns`. Nothing is rewritten on read and nothing is refused on '
+        + 'read: a row that fails is served exactly as stored until it is saved. Verify by re-saving each stored '
+        + 'flattened overlay (a GET then a PUT of the same body) and reading a `200`.',
     },
     // The door half of ruling A on objectui#10380 (#20051). A write-time narrowing
     // of the flattened view overlays: the stored rows it newly refuses are read and
