@@ -103,7 +103,10 @@ export function registerLogicNodes(engine: AutomationEngine, ctx: PluginContext)
         // The exception is scoped to the shape the ledger declares, which is the
         // whole of what makes it safe:
         //   • `assignments: { <var>: <value> }` — the canonical map, the one
-        //     slot the ledger names, the one place an envelope is an expression;
+        //     slot the ledger names on THIS node type, the one place in it an
+        //     envelope is an expression (the ledger's other `value` slot is the
+        //     CRUD `fields` map, #19938 — `crud-nodes.ts` evaluates it through
+        //     the same `engine.evaluateValueEnvelope` call);
         //   • `assignments: [{ variable, value }]` (legacy array) and the bare
         //     `{ <var>: <value> }` config (no wrapper) — NOT declared, so an
         //     envelope-shaped object there is the literal object it always was.

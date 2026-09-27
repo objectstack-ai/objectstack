@@ -1,0 +1,8 @@
+{
+  "file": "packages/rest/src/meta-item-read-gate.ts",
+  "adrs": [
+    "ADR-0045",
+    "ADR-0046"
+  ],
+  "invariant": "This module is THE per-caller read gate of one `/meta/:type/:name` document, and BOTH transports that serve that read ask it: `RestServer` and the runtime dispatcher's `/meta` domain (the only answer on a host that mounts just the `${prefix}/*` catch-all). ADR-0046 §6.7 — a doc or book is served only to a caller its audience admits (a doc's EFFECTIVE audience is the union over the books that claim it; unresolvable holdings DENY, and an unreadable books or doc-corpus read is a fault, never an empty list that grants). ADR-0045 §3 — `filterAppForUserWithReason` IS the publish gate: an unpublished app is externally unobservable (the transport's own absence answer, never a 403) and only a builder receives it; it judges `_unpublished`, never `hidden`. A gate is added HERE, never in one transport's adapter: a gate in one transport and not the other is the defect this module closed, and porting these rules into `packages/runtime` would be the second audience resolver ruling 5793362670 item 1 forbids."
+}
