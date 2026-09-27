@@ -106,9 +106,21 @@
 //
 // The pages on disk are the source of truth -- they are the thing a reader can
 // actually open. Each page also has to declare its own accessor
-// (`title: services.<name>` matching its filename), which is checked first: it
-// is the premise the other three comparisons rest on, so a page that lies about
-// its own name must go red here rather than silently redefine the expected set.
+// (`navTitle: services.<name>` matching its filename, in the page's leading
+// frontmatter block), which is checked first: it is the premise the other three
+// comparisons rest on, so a page that lies about its own name must go red here
+// rather than silently redefine the expected set.
+//
+// Why `navTitle` and not `title`: the docs site reads a page's `title` for the
+// search-facing surfaces (the SERP title, the h1, JSON-LD, `llms.txt`, the OG
+// card), and the site-wide title rule lengthens it to a search-intent phrase
+// (`services.audit — the audit log service API`). `navTitle` is the label the
+// page tree shows (`apps/docs/lib/nav-title.ts`), so on these pages it is the
+// bare accessor -- the one string that names the page by its key. The premise
+// did not loosen when it moved: a page with no `navTitle`, or one that does not
+// equal `services.<name>`, is red exactly as a wrong `title` used to be, and the
+// `title` is not read at all -- a page that still says `title: services.sms`
+// and declares no `navTitle` is red too.
 //
 // Order is enforced too, not just membership. The chapter list currently
 // follows `meta.json`'s `pages` order exactly, and that convention is the only
@@ -268,8 +280,24 @@ const REGISTER_RE = /register(?:Service|ServiceFactory)\s*(?:<[^>]*>)?\s*\(\s*['
 // ---------------------------------------------------------------------------
 // Derivation
 
-/** Accessor names from the pages that exist, plus each page's declared title,
- *  its declared registry slot and its declared stability label. */
+/** The leading frontmatter block of a page, or `null` when it has none. Only this
+ *  block is read for `navTitle`: a `navTitle:` line in the body is prose. */
+export function frontmatterOf(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  return m ? m[1] : null;
+}
+
+/** One YAML scalar as written on a `key: value` line: a single layer of matching
+ *  quotes is YAML syntax, not part of the value, so `"services.sms"` and
+ *  `services.sms` declare the same accessor. */
+function yamlScalar(raw) {
+  const v = raw.trim();
+  return v.length >= 2 && (v[0] === '"' || v[0] === "'") && v.at(-1) === v[0] ? v.slice(1, -1) : v;
+}
+
+/** Accessor names from the pages that exist, plus each page's declared
+ *  `navTitle` (the accessor premise), its declared registry slot and its
+ *  declared stability label. */
 export function readPages(chapterDir) {
   return readdirSync(chapterDir)
     .filter((f) => f.endsWith(PAGE_SUFFIX))
@@ -277,10 +305,12 @@ export function readPages(chapterDir) {
     .map((file) => {
       const name = file.slice(0, -PAGE_SUFFIX.length);
       const text = readFileSync(join(chapterDir, file), 'utf8');
-      const m = /^title:\s*(.+?)\s*$/m.exec(text);
+      const fm = frontmatterOf(text);
+      const m = fm === null ? null : /^navTitle:[ \t]*(.*)$/m.exec(fm);
+      const navTitle = m && yamlScalar(m[1]) !== '' ? yamlScalar(m[1]) : null;
       const slot = /^-\s+\*\*Registry slot:\*\*\s+`([^`]+)`/m.exec(text);
       const stability = /^-\s+\*\*Stability:\*\*\s+`([^`]+)`/m.exec(text);
-      return { name, file, title: m ? m[1] : null, slot: slot ? slot[1] : null, stability: stability ? stability[1] : null };
+      return { name, file, navTitle, slot: slot ? slot[1] : null, stability: stability ? stability[1] : null };
     });
 }
 
@@ -415,11 +445,14 @@ export function check({ pages, metaOrder, chapterList, kernelTable, registeredSl
   const findings = [];
   const add = (where, msg) => findings.push({ where, msg });
 
-  // 0. The premise: every page declares the accessor its filename claims.
+  // 0. The premise: every page declares, as its `navTitle`, the accessor its
+  //    filename claims. The `title` is the search-facing string and is not read.
   for (const p of pages) {
     const want = `services.${p.name}`;
-    if (p.title !== want) {
-      add(`${CHAPTER_DIR}/${p.file}`, `frontmatter title is ${p.title === null ? '(absent)' : `"${p.title}"`}, expected "${want}" to match the filename`);
+    if (p.navTitle === null) {
+      add(`${CHAPTER_DIR}/${p.file}`, `frontmatter declares no navTitle, expected "${want}" to match the filename -- add \`navTitle: ${want}\` to the page's leading frontmatter block (the accessor is the page's navigation label; its \`title\` stays free for the search-facing wording)`);
+    } else if (p.navTitle !== want) {
+      add(`${CHAPTER_DIR}/${p.file}`, `frontmatter navTitle is "${p.navTitle}", expected "${want}" to match the filename -- set \`navTitle: ${want}\`, or rename the page if the accessor really changed`);
     }
   }
   // A page that lies about its own name makes every set below meaningless.
@@ -725,6 +758,7 @@ const SELF_TEST_VERDICT = 'check-runtime-services-index self-test reached its ve
 const SELF_TEST_BATTERIES = Object.freeze({
   'The clean tree is silent': 2,
   'Each limb observed FAILING': 8,
+  'The accessor premise lives in navTitle': 7,
   'Check 5: declared registry slot vs the real registry (#9630)': 6,
   'Check 6: the stability matrix vs the pages on disk (#9684)': 3,
   'Check 7: a WRONG row, not just a missing one (#9684)': 4,
@@ -735,7 +769,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -798,7 +832,12 @@ function selfTest() {
     const defaultSourceRows = names.map((n) => ({ label: SOURCE_LABEL[n] ?? n, path: REAL_PATH }));
     const writeTree = ({
       pages = names, meta = names, list = names, table = names,
-      titleFor = (n) => `services.${n}`, hrefFor = (n) => `${n}-service`, slot = slotFor,
+      // The search-facing `title` is deliberately LONG and not the accessor: the
+      // premise reads `navTitle`, so every green below is also a green with a
+      // long title. `navTitleFor` returning null omits the key.
+      titleFor = (n) => `services.${n} — the ${n} service API`, navTitleFor = (n) => `services.${n}`,
+      body = () => '',
+      hrefFor = (n) => `${n}-service`, slot = slotFor,
       // #9684: the page bullet is the source of truth; each table repeats it.
       // The table defaults READ the page's label, so a fixture only has to say
       // where it wants them to disagree.
@@ -819,7 +858,8 @@ function selfTest() {
         const bullet = declared === null ? '' : `\n- **Registry slot:** \`${declared}\` — resolve with \`ctx.getService('${declared}')\`.\n`;
         const label = stability(n);
         const stabilityBullet = label === null ? '' : `\n- **Stability:** \`${label}\`\n`;
-        writeFileSync(join(chapter, `${n}${PAGE_SUFFIX}`), `---\ntitle: ${titleFor(n)}\n---\n${stabilityBullet}${bullet}`);
+        const nav = navTitleFor(n);
+        writeFileSync(join(chapter, `${n}${PAGE_SUFFIX}`), `---\ntitle: ${titleFor(n)}\n${nav === null ? '' : `navTitle: ${nav}\n`}---\n${stabilityBullet}${bullet}${body(n)}`);
       }
       if (versioning) {
         writeFileSync(
@@ -872,9 +912,44 @@ function selfTest() {
     assert(findingsFor({ list: ['data', 'sms', 'email'] }).some((f) => f.msg.includes('does not follow meta.json')), 'a chapter list in the wrong order is caught (membership alone would pass)');
     assert(findingsFor({ hrefFor: (n) => (n === 'sms' ? 'sms-svc' : `${n}-service`) }).some((f) => f.msg.includes('links to "sms-svc"')), 'a kernel table row whose href does not match its accessor is caught');
 
-    const lying = findingsFor({ titleFor: (n) => (n === 'sms' ? 'services.text' : `services.${n}`) });
-    assert(lying.some((f) => f.msg.includes('expected "services.sms"')), 'a page whose title contradicts its filename is caught');
-    assert(lying.every((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`)), 'the title premise short-circuits: no set comparison runs over a page that lies about its name');
+    const lying = findingsFor({ navTitleFor: (n) => (n === 'sms' ? 'services.text' : `services.${n}`) });
+    assert(lying.some((f) => f.msg.includes('expected "services.sms"')), 'a page whose navTitle contradicts its filename is caught');
+    assert(lying.every((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`)), 'the accessor premise short-circuits: no set comparison runs over a page that lies about its name');
+
+    // ── The accessor premise lives in navTitle, and did not loosen moving there ─
+    battery('The accessor premise lives in navTitle');
+    const absent = findingsFor({ navTitleFor: (n) => (n === 'sms' ? null : `services.${n}`) });
+    assert(
+      absent.length === 1 && absent[0].where.endsWith(`sms${PAGE_SUFFIX}`) && absent[0].msg.includes('declares no navTitle'),
+      `a page with NO navTitle is red, against that page alone -- got ${JSON.stringify(absent)}`,
+    );
+    assert(absent.some((f) => f.msg.includes('add `navTitle: services.sms`')), 'the absent-navTitle finding names the fix, spelled for that page');
+    const wrong = findingsFor({ navTitleFor: (n) => (n === 'sms' ? 'SMS Service' : `services.${n}`) });
+    assert(
+      wrong.length === 1 && wrong[0].msg.includes('navTitle is "SMS Service"') && wrong[0].msg.includes('set `navTitle: services.sms`'),
+      `a page whose navTitle is not its accessor is red and names the fix -- got ${JSON.stringify(wrong)}`,
+    );
+    // The title is NOT the premise any more: the old spelling alone is red.
+    assert(
+      findingsFor({ titleFor: (n) => `services.${n}`, navTitleFor: (n) => (n === 'sms' ? null : `services.${n}`) }).some((f) => f.msg.includes('declares no navTitle')),
+      'a page carrying the old `title: services.NAME` but no navTitle is still red -- the title is not read',
+    );
+    assert(
+      findingsFor({ titleFor: (n) => `services.${n} — a deliberately long, search-intent page title` }).length === 0,
+      'right navTitle with a long, non-accessor title is green',
+    );
+    assert(
+      findingsFor({ navTitleFor: (n) => (n === 'sms' ? '"services.sms"' : `services.${n}`) }).length === 0,
+      'a quoted navTitle is the same YAML scalar and is accepted',
+    );
+    assert(
+      findingsFor({ navTitleFor: (n) => (n === 'sms' ? null : `services.${n}`), body: (n) => (n === 'sms' ? '\nnavTitle: services.sms\n' : '') }).some((f) => f.msg.includes('declares no navTitle')),
+      'a navTitle line in the page BODY is prose, not the frontmatter key -- still red',
+    );
+    assert(
+      findingsFor({ navTitleFor: (n) => (n === 'sms' ? '' : `services.${n}`) }).some((f) => f.msg.includes('declares no navTitle')),
+      'a blank navTitle is treated as absent, not as a declared empty accessor',
+    );
 
     // ── Check 5: declared registry slot vs the real registry (#9630) ────────
     // The defect itself: a page documenting an accessor that resolves to nothing.
@@ -1173,7 +1248,7 @@ function selfTest() {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, canonical-source rows (page-less row, page with no row, prose label, duplicate, missing path, and never read as a stability claim), label VOCABULARY (undefined label named with its allowed set and reported only against the page, every defined label accepted, the two legends drifting apart from EACH OTHER while every label they name is still in the enum, a legend widening it alone, legend order, section scoping past a decoy in each file, and a missing legend refused), empty tree, missing versioning.mdx, empty Source-of-Truth list -- observed FAILING and observed silent.`);
+  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, navTitle accessor premise (absent, wrong, old title-only spelling, body-only line, blank -- all red; long title and quoted value green), registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, canonical-source rows (page-less row, page with no row, prose label, duplicate, missing path, and never read as a stability claim), label VOCABULARY (undefined label named with its allowed set and reported only against the page, every defined label accepted, the two legends drifting apart from EACH OTHER while every label they name is still in the enum, a legend widening it alone, legend order, section scoping past a decoy in each file, and a missing legend refused), empty tree, missing versioning.mdx, empty Source-of-Truth list -- observed FAILING and observed silent.`);
 
   return SELF_TEST_VERDICT;
 }
