@@ -329,14 +329,14 @@ describe('§5 an unknown TOP-LEVEL key on the wrapped form is refused by name, a
     // when the declaration is re-opened, because both would then accept, so it
     // could not tell a closed branch from a strip-mode one. The ruling decided
     // the direction (decision batch #227 item 3, letter A), so the direction is
-    // what is pinned — and each case also reads the declaration's verdict on
-    // the same body, so a red here names which of the two moved.
+    // what is pinned. Each refusal case reads the declaration's verdict on the
+    // same body too, AFTER the door's answer, so a regression reddens the door
+    // assertion first and the trailing read names whether the declaration moved.
 
     it('a MISSPELLED option — `enabledOnInstall: false` — is refused naming the key, ⛔ never installed ENABLED', async () => {
         const { registry, install } = door();
         const m = manifest('toplevel.misspelled');
         const body = { manifest: m, enabledOnInstall: false };
-        expect(PackageInstallBodySchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
         const r = await install(body);
 
         expectRefused(r);
@@ -348,18 +348,20 @@ describe('§5 an unknown TOP-LEVEL key on the wrapped form is refused by name, a
         // declared option the refusal offers in its place.
         expect(messageOf(r)).toContain('`enabledOnInstall`');
         expect(messageOf(r)).toContain('`enableOnInstall`');
+        // Read LAST, so the door's own answer is what a regression turns red first.
+        expect(PackageInstallBodySchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
     });
 
     it('a PRIVATE key — `_source` — is refused naming the key, and nothing installs', async () => {
         const { registry, install } = door();
         const m = manifest('toplevel.private');
         const body = { manifest: m, _source: 'studio' };
-        expect(PackageInstallBodySchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
         const r = await install(body);
 
         expectRefused(r);
         expect(registry.getPackage(m.id)).toBeUndefined();
         expect(messageOf(r)).toContain('`_source`');
+        expect(PackageInstallBodySchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
     });
 
     it('control — the same body with the option spelled as declared installs, DISABLED as asked', async () => {
