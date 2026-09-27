@@ -1054,6 +1054,9 @@ const ICONTAINS_DESCRIPTION =
 const LIKE_DESCRIPTION =
   'Whole-string pattern match with CALLER-bound wildcards: "%" matches any '
     + 'sequence (including empty), "_" matches exactly one character, and a '
+    + 'character is one Unicode code point — an emoji or any other character '
+    + 'outside the Basic Multilingual Plane is ONE "_", never two, as SQL LIKE '
+    + 'counts it. A '
     + 'backslash escapes the character after it ("\\%", "\\_", "\\\\") so it '
     + 'matches literally. The pattern must cover the WHOLE value — a pattern '
     + 'with no wildcards is an exact comparison, NOT a substring search; write '
@@ -1278,11 +1281,13 @@ export function hasNulInLikePattern(pattern: string): boolean {
  * the reason {@link foldAsciiCase} gives: a translation written per package
  * agrees with the spec on the day it is typed and never again.
  *
- * The pattern language, translated element by element:
+ * The pattern language, translated element by element — and a "character"
+ * throughout is one Unicode code point, never one UTF-16 code unit:
  *
- * - `%` → `[\s\S]*` — any sequence, including empty and including newlines
- *   (SQL `LIKE` has no "dot-all" concept; `%` crosses line boundaries).
- * - `_` → `[\s\S]` — exactly one character, any character.
+ * - `%` → `[\s\S]*` — any sequence of code points, including empty and
+ *   including newlines (SQL `LIKE` has no "dot-all" concept; `%` crosses line
+ *   boundaries).
+ * - `_` → `[\s\S]` — exactly one code point, any code point.
  * - `\x` → the character `x`, literally, whatever `x` is — this is how a
  *   caller matches a literal `%`, `_` or `\`. (Postgres and MySQL read an
  *   escaped ordinary character the same way.)
@@ -1293,6 +1298,27 @@ export function hasNulInLikePattern(pattern: string): boolean {
  *   Unicode, which is the #4706 Q1 = A boundary violation).
  * - the whole source is anchored `^…$`: `LIKE` matches the WHOLE value, so a
  *   wildcard-free pattern is an exact comparison, not a substring search.
+ *
+ * ## [#20143] The source means this ONLY under the `u` flag
+ *
+ * A source carries no flags, and without `u` a JavaScript `RegExp` reads its
+ * input one UTF-16 code unit at a time: `[\s\S]` is then ONE HALF of an emoji,
+ * so `_` missed a stored `😀`, `__` matched it, and `a_b` missed `a😀b`. The
+ * SQLite faces compile `_` to GLOB's `?` ({@link likePatternToGlobPattern}),
+ * which counts code points — the reading SQL gives `_` — so the same REST
+ * filter answered two row sets by driver. Compiled with `u`,
+ * `[\s\S]` is one code point and `[\s\S]*` never splits one.
+ * {@link likePatternToRegExp} is that compilation — the one every JS face
+ * takes, so no face chooses its own flags; ⛔ never hand this source to
+ * `new RegExp` without `u`.
+ *
+ * The `u` flag is strict about escapes, and this translation stays inside it:
+ * the only characters it ever escapes are the regex syntax characters and `/`
+ * (`\ ^ $ . * + ? ( ) [ ] { } |` and `/`), exactly the identity escapes `u`
+ * accepts. Every other character — every other ASCII punctuation mark included
+ * — is emitted bare, where `u` reads it as itself. A character outside the
+ * BMP, escaped or not, is emitted as its whole surrogate pair, which `u` reads
+ * as the one code point it is.
  *
  * Throws a plain `Error` on a dangling trailing escape — gate with
  * {@link hasDanglingLikeEscape} first to refuse in your own envelope; the
@@ -1340,12 +1366,31 @@ export function likePatternToRegexSource(pattern: string, foldAscii = false): st
 }
 
 /**
+ * [#20143] A `$like`/`$ilike` pattern as a compiled `RegExp` — the
+ * {@link likePatternToRegexSource} translation under the `u` flag, the one
+ * compilation in which `_` is one code point (see that function's
+ * `u`-flag section). Every JS face that hands a pattern to an engine takes this
+ * rather than calling `new RegExp` itself: `driver-memory`'s mingo query path
+ * on both of its doors, and {@link matchesLikePattern}. Owning the flag here
+ * is what keeps a face from compiling the source without it.
+ *
+ * No `i` flag, ever — the `$ilike` fold is ASCII-only and lives in the source
+ * (`foldAscii`), for the reason {@link asciiCaseInsensitiveRegexSource} gives.
+ * Throws on a dangling trailing escape, exactly like the source translation —
+ * gate with {@link hasDanglingLikeEscape}.
+ */
+export function likePatternToRegExp(pattern: string, foldAscii = false): RegExp {
+  return new RegExp(likePatternToRegexSource(pattern, foldAscii), 'u');
+}
+
+/**
  * [#7536] Does `value` match the `$like`/`$ilike` `pattern`? The predicate for
- * every face that holds both strings in JS — the {@link likePatternToRegexSource}
- * translation, evaluated. `foldAscii` selects the `$ilike` fold (ASCII only).
+ * every face that holds both strings in JS — {@link likePatternToRegExp},
+ * evaluated, so `_` is one code point here as on every SQL face (#20143).
+ * `foldAscii` selects the `$ilike` fold (ASCII only).
  */
 export function matchesLikePattern(value: string, pattern: string, foldAscii = false): boolean {
-  return new RegExp(likePatternToRegexSource(pattern, foldAscii)).test(value);
+  return likePatternToRegExp(pattern, foldAscii).test(value);
 }
 
 /**
@@ -1387,7 +1432,7 @@ export function matchesLikePattern(value: string, pattern: string, foldAscii = f
  * | LIKE | GLOB | note |
  * |---|---|---|
  * | `%` | `*` | any sequence, including empty |
- * | `_` | `?` | exactly one character |
+ * | `_` | `?` | exactly one character — one code point, the reading {@link likePatternToRegExp} gives the JS faces |
  * | `\x` | `x`, escaped | the caller's literal, whatever `x` is |
  * | `*` `?` `[` | `[*]` `[?]` `[[]` | GLOB's OWN metacharacters, which are ORDINARY characters to LIKE — this is the direction a hand-written escape forgets, and forgetting it is the `%`-matches-every-row bypass (#5567) wearing GLOB's clothes |
  * | `]` | `]` | needs no escape: every `[` above becomes a class that closes itself, so no unclosed class survives for a later `]` to terminate |
