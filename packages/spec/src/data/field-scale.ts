@@ -56,15 +56,26 @@
  * the ruling's own instruction each takes its own card with its readings rather
  * than a guessed default here:
  *
- * - `number` — the faces deliberately DISAGREE, and one of them load-bearingly.
- *   The cell renderer resolves absence to "no fixed width" (minimum 0 digits,
- *   maximum 20) while the grid summary footer and the metric widget resolve it
- *   to `0`; and the display-grouping policy keys on the very distinction a
- *   default would erase — a DECLARED `scale: 0` marks a discrete integer (a
- *   year, a fiscal period, an ordinal) and is rendered ungrouped, while an
- *   absent `scale` means "decimals unknown" and keeps its separators. Declaring
- *   `number ⇒ 0` would print every undeclared number field ungrouped: `2026`
- *   where the platform shows `2,026`.
+ * - `number` — ruled since, and not by a row here either: an absent `scale` on
+ *   a `number` field means NO fixed width — the value's natural precision —
+ *   and that is the platform's declared answer, ⛔ not an open question
+ *   (maintainer ruling 5791809146, batch 215 item 2, letter A′, 「215 同意」).
+ *   The census that sent it to its own card found the faces disagreeing: the
+ *   cell renderer resolved absence to "no fixed width" (minimum 0 digits,
+ *   maximum 20) while the grid summary footer and the metric widget resolved
+ *   it to `0`. The ruling makes the cell's answer the protocol's: those two
+ *   faces drop their private `?? 0` and read the width through
+ *   {@link resolveFieldScale}, and a computed result over a no-fixed-width
+ *   column rounds to the widest decimal count among the values that entered
+ *   it — derived from the data, ⛔ never a constant. That consumer half is
+ *   objectui#9843. Grouping is not this key's to decide:
+ *   `FieldSchema.useGrouping` decides, and the renderer's interim heuristic
+ *   for an absent `useGrouping` reads the DECLARED `scale` only — a declared
+ *   `scale: 0` marks a discrete integer (a year, a fiscal period, an ordinal)
+ *   and renders ungrouped — never a resolved width, so no answer from this
+ *   module moves a thousands separator. A `0` row stays refused: as a width it
+ *   would cut every undeclared number to an integer, and batch 194 refused
+ *   `number ⇒ 0` by name for printing `2026` where the platform shows `2,026`.
  * - `currency` — ruled since, and not by a row here: `scale` is RETIRED from
  *   the `currency` type (#19629, ruling 5791803339 letter B) and refused at
  *   parse, so a currency field declares no `scale` for this table to default.
@@ -81,8 +92,9 @@
  *   inline grid COLUMN's rounding of a computed result, not to a field's
  *   display width.
  *
- * ⛔ Neither reading is an argument for a `0` row: `number` still awaits its
- * own ruling, and `currency` no longer has a declaration to resolve.
+ * ⛔ Neither reading is an argument for a `0` row: `number`'s absent value is
+ * ruled to be no fixed width, and `currency` no longer has a declaration to
+ * resolve.
  *
  * ## Why the table is not exported
  *
