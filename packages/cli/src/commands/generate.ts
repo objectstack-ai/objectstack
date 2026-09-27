@@ -46,8 +46,12 @@ import {
   // the charset the schema declares.
   ObjectSchema,
 } from '@objectstack/spec/data';
+// #20197 — the namespace-prefix gate's own verdict, IMPORTED for the reason
+// the block above gives: `objectNameFor` asks it rather than restating it.
+import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
+import { readProjectNamespace } from '../utils/project-namespace.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
 
@@ -68,11 +72,34 @@ import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
  * refused at generation time rather than written to a name nothing globs, and
  * `generate-file-name-registry-parity.test.ts` turns that runtime refusal into
  * a CI failure so nobody meets it as a user.
+ *
+ * ## The object machine name carries the package namespace
+ *
+ * Every OBJECT name a scaffold writes, whether the object's own `name` or a
+ * binding to one (`object`, `objectName`), goes through {@link objectNameFor}.
+ * In a project whose manifest declares a `namespace`, that is
+ * `${namespace}_${name}`, which is the name `defineStack`'s namespace-prefix
+ * gate demands. `namesObject` says which generators write one, so that
+ * `runMetadataGeneration` reads the manifest only for those.
+ * `generate-object-namespace-prefix.test.ts` pins both the prefix and the
+ * flag against the templates.
+ *
+ * Only object names are prefixed. The scaffold's own `name` on a view, an
+ * action, a flow, a dashboard, an app or a skill is not judged against the
+ * namespace by any gate `os validate` runs, so it stays the name the author
+ * typed.
  */
 const GENERATORS: Record<string, {
   description: string;
   defaultDir: string;
-  generate: (name: string) => string;
+  /** Whether the scaffold writes an object machine name (see above). */
+  namesObject: boolean;
+  /**
+   * @param name      the name the author passed, already past the charset gate
+   * @param namespace the project's `manifest.namespace`; omitted for a project
+   *                  that declares none, which is the gate's own "no prefix owed"
+   */
+  generate: (name: string, namespace?: string) => string;
 }> = {
   object: {
     description: 'Business data object',
@@ -102,14 +129,20 @@ const GENERATORS: Record<string, {
      * default export because the barrel line below re-exports `default` for
      * every generator. `scaffold-object-declaration-shape.test.ts` pins both
      * doors to one shape, so neither can move alone.
+     *
+     * The `name` is {@link objectNameFor}'s: in a namespaced project it carries
+     * the `${namespace}_` prefix the namespace-prefix gate demands, the way
+     * the `os init` template's own object does. The binding and the filename
+     * stay derived from the name the author typed.
      */
-    generate: (name: string) => `import { ObjectSchema } from '@objectstack/spec/data';
+    namesObject: true,
+    generate: (name: string, namespace?: string) => `import { ObjectSchema } from '@objectstack/spec/data';
 
 /**
  * ${toTitleCase(name)} Object
  */
 const ${toCamelCase(name)} = ObjectSchema.create({
-  name: '${toSnakeCase(name)}',
+  name: '${objectNameFor(name, namespace)}',
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
   fields: {
@@ -156,9 +189,12 @@ export default ${toCamelCase(name)};
      *
      * The object binding is `object` — the key `getViewsByObject()` reads and
      * the one a stack-level `views: [...]` entry needs to say which object its
-     * views belong to. `objectName` is the spelling on the QUERY surface.
+     * views belong to. `objectName` is the spelling on the QUERY surface. It
+     * names the object `os g object NAME` writes, prefix included, so the two
+     * scaffolds compose.
      */
-    generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
+    namesObject: true,
+    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Views
@@ -166,7 +202,7 @@ export default ${toCamelCase(name)};
 const ${toCamelCase(name)}Views: UI.View = {
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
-  object: '${toSnakeCase(name)}',
+  object: '${objectNameFor(name, namespace)}',
   list: {
     type: 'grid',
     columns: [
@@ -199,8 +235,13 @@ export default ${toCamelCase(name)}Views;
      * `target` is REQUIRED for every type but `script`, enforced by
      * `ActionSchema`'s own refinement, so this cannot drift back to an action
      * bound to nothing.
+     *
+     * `objectName` is an object name, so it carries the namespace prefix;
+     * `defineStack` refuses one that names no declared object. `target` names
+     * a FLOW, whose name no gate prefixes, so it does not.
      */
-    generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
+    namesObject: true,
+    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Action
@@ -209,7 +250,7 @@ const ${toCamelCase(name)}Action: UI.Action = {
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
   type: 'flow',
-  objectName: '${toSnakeCase(name)}',
+  objectName: '${objectNameFor(name, namespace)}',
   target: '${toSnakeCase(name)}_flow',
 };
 
@@ -242,8 +283,13 @@ export default ${toCamelCase(name)}Action;
      * `status` stays `'draft'`: the scaffold fixes the SHAPE and leaves the
      * arming decision to the author (`os validate` says so — draft flows do
      * fire, so declare `'active'` to arm deliberately).
+     *
+     * The start node's `objectName` carries the namespace prefix: a trigger
+     * bound to an object the stack does not define never fires, and
+     * `validate-flow-trigger-readiness` reports it.
      */
-    generate: (name: string) => `import * as Automation from '@objectstack/spec/automation';
+    namesObject: true,
+    generate: (name: string, namespace?: string) => `import * as Automation from '@objectstack/spec/automation';
 
 /**
  * ${toTitleCase(name)} Flow
@@ -265,7 +311,7 @@ const ${toCamelCase(name)}Flow: Automation.Flow = {
       //               token ('write' is create OR update, in one flow)
       //   condition   optional bare-CEL gate, e.g. 'record.amount >= 500'
       config: {
-        objectName: '${toSnakeCase(name)}',
+        objectName: '${objectNameFor(name, namespace)}',
         triggerType: 'record-after-write',
       },
     },
@@ -287,6 +333,7 @@ export default ${toCamelCase(name)}Flow;
   dashboard: {
     description: 'Analytics dashboard',
     defaultDir: 'src/dashboards',
+    namesObject: false,
     generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
@@ -315,10 +362,12 @@ export default ${toCamelCase(name)}Dashboard;
      * It scaffolds one real entry rather than an empty array, because the
      * entry shape is the thing an author copies to add the second one — and
      * because an app with no navigation renders a shell with nothing in it.
-     * The entry points at the object `os g object NAME` writes, so the two
-     * scaffolds compose.
+     * The entry points at the object `os g object NAME` writes, prefix
+     * included, so the two scaffolds compose: `defineStack` refuses a nav
+     * `objectName` that names no declared object.
      */
-    generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
+    namesObject: true,
+    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} App
@@ -331,7 +380,7 @@ const ${toCamelCase(name)}App: UI.App = {
       id: '${toSnakeCase(name)}_nav',
       type: 'object',
       label: '${toTitleCase(name)}s',
-      objectName: '${toSnakeCase(name)}',
+      objectName: '${objectNameFor(name, namespace)}',
     },
   ],
 };
@@ -363,6 +412,7 @@ export default ${toCamelCase(name)}App;
      * (#12075), not restated here. The override is gone and the rule is the
      * harness default.
      */
+    namesObject: false,
     generate: (name: string) => `import { defineSkill } from '@objectstack/spec/ai';
 
 /**
@@ -430,11 +480,13 @@ export default ${toCamelCase(name)}Skill;
 export const GENERATOR_SCAFFOLD_TARGETS: readonly {
   type: string;
   defaultDir: string;
-  generate: (name: string) => string;
+  namesObject: boolean;
+  generate: (name: string, namespace?: string) => string;
 }[] =
   Object.entries(GENERATORS).map(([type, gen]) => ({
     type,
     defaultDir: gen.defaultDir,
+    namesObject: gen.namesObject,
     generate: gen.generate,
   }));
 
@@ -504,6 +556,35 @@ function toTitleCase(str: string): string {
 
 function toSnakeCase(str: string): string {
   return str.replace(/[-]/g, '_').replace(/[A-Z]/g, c => `_${c.toLowerCase()}`).replace(/^_/, '');
+}
+
+/**
+ * The OBJECT machine name a scaffold writes for `name` in a project whose
+ * manifest declares `namespace`: the name as typed when the namespace-prefix
+ * gate already accepts it, `${namespace}_${name}` otherwise.
+ *
+ * The verdict is `validateObjectNamespacePrefix`'s, the function `defineStack`
+ * and the runtime publish gate both call, so "is this name compliant?" has one
+ * answer in the tree. It is the same derivation the external object-draft
+ * door applies to the names it derives (`applyNamespacePrefix` in
+ * `service-datasource`), and it has the same two consequences:
+ *
+ *  - a name that already carries the prefix is used as written, never
+ *    doubled: `os g object my_app_order_line` under namespace `my_app` writes
+ *    `my_app_order_line`, not `my_app_my_app_order_line`;
+ *  - a platform-reserved `sys_*` name, which the gate exempts, is not
+ *    prefixed either.
+ *
+ * With no namespace the gate is skipped, so the name is written as typed.
+ * A name the gate refuses even after prefixing (the legacy `NS__SHORT` form)
+ * is refused by `runMetadataGeneration` before anything is written.
+ */
+function objectNameFor(name: string, namespace?: string): string {
+  const shortName = toSnakeCase(name);
+  if (!namespace) return shortName;
+  return validateObjectNamespacePrefix(shortName, namespace) === null
+    ? shortName
+    : `${namespace}_${shortName}`;
 }
 
 /**
@@ -907,7 +988,9 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         '  It refuses instead of folding your name into one that fits, so the name you',
       ));
       console.log(chalk.dim(
-        '  write and the name that lands in the file are always the same string.',
+        // #20197: "always the same string" stopped being true for an object
+        // name in a namespaced project, which gains the manifest's prefix.
+        '  write lands in the file unchanged (a namespaced project only prefixes an object name).',
       ));
       console.log(chalk.dim(
         // ⛔ The examples are deliberately NOT built from what the author
@@ -921,6 +1004,62 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       ));
       console.log('');
       process.exit(1);
+    }
+
+    // The project's `manifest.namespace`, read only for a generator that
+    // writes an object machine name (#20197) — see `objectNameFor`.
+    //
+    // BELOW the charset gate, because the prefix is a derivation and the
+    // #16726 position puts every derivation after that gate. ABOVE the render,
+    // the parse check and the dry-run branch, so a preview shows the object
+    // name that would land.
+    let namespace: string | undefined;
+    if (generator.namesObject) {
+      const project = await readProjectNamespace();
+      if (project.kind === 'load-failed') {
+        // ⛔ REFUSE rather than write the name as typed. An unreadable
+        // manifest is not a manifest with no namespace: guessing "none" is
+        // exactly the output `os validate` refused before this change.
+        printError(
+          `Refusing to generate — ${path.basename(project.configPath)} did not load, so its manifest.namespace is unknown`,
+        );
+        console.log('');
+        for (const line of project.message.split('\n')) {
+          console.log(chalk.dim(`  ${line}`));
+        }
+        console.log('');
+        console.log(chalk.dim(
+          `  \`${CLI_ALIAS} g ${type}\` writes an object name, and in a project whose manifest declares`,
+        ));
+        console.log(chalk.dim(
+          '  a namespace that name must carry the namespace prefix. Nothing was written.',
+        ));
+        console.log(chalk.dim(
+          `  Make the config load (\`${CLI_ALIAS} validate\` reports why it does not), then run this again.`,
+        ));
+        console.log('');
+        process.exit(1);
+      }
+      if (project.kind === 'loaded') namespace = project.namespace;
+    }
+
+    const objectName = generator.namesObject ? objectNameFor(name, namespace) : undefined;
+    if (objectName !== undefined && namespace) {
+      // Prefixing answers the one refusal it can answer — a missing prefix.
+      // A name the gate still refuses after it (the legacy `NS__SHORT` form)
+      // is refused here, in the gate's own words, instead of being written for
+      // `os validate` to refuse.
+      const residual = validateObjectNamespacePrefix(objectName, namespace);
+      if (residual) {
+        printError(`Refusing to generate — \`${name}\` does not make an object name the namespace-prefix rule accepts`);
+        console.log('');
+        console.log(`  ${chalk.dim('Name:')} ${chalk.white(name)}`);
+        console.log(`  ${chalk.dim('Rule:')} ${chalk.white(residual)}`);
+        console.log('');
+        console.log(chalk.dim('  Nothing was written.'));
+        console.log('');
+        process.exit(1);
+      }
     }
 
     const dir = flags.dir || generator.defaultDir;
@@ -958,6 +1097,13 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
 
     console.log(`  ${chalk.dim('Type:')}  ${chalk.cyan(type)} — ${generator.description}`);
     console.log(`  ${chalk.dim('Name:')}  ${chalk.white(name)}`);
+    if (objectName !== undefined && namespace) {
+      // Said out loud: in a namespaced project the object name that lands is
+      // not the string the author typed, so it is never left to be discovered.
+      console.log(
+        `  ${chalk.dim('Object:')} ${chalk.white(objectName)} ${chalk.dim(`(manifest.namespace '${namespace}')`)}`,
+      );
+    }
     console.log(`  ${chalk.dim('File:')}  ${chalk.white(path.join(dir, fileName))}`);
     console.log('');
 
@@ -966,7 +1112,7 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     // files one name reaches (#16541), and rendering them at the single point
     // where the name has finished being derived is what lets one refusal cover
     // all 14 emission sites across all 7 generators instead of 14 patches.
-    const content = generator.generate(name);
+    const content = generator.generate(name, namespace);
     const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
 
     // ⛔ REFUSE rather than rewrite (#16541).
@@ -3134,7 +3280,9 @@ export default class Generate extends Command {
   static override aliases = ['g'];
 
   static override args = {
-    type: Args.string({ description: 'Metadata type to generate (object, view, action, flow, dashboard, app)', required: true }),
+    // Derived from `GENERATORS`, never typed out: the hand-kept list named six
+    // types and left out `skill`, which the command accepts.
+    type: Args.string({ description: `Metadata type to generate (${Object.keys(GENERATORS).join(', ')})`, required: true }),
     // ⛔ NOT "use kebab-case" any more (#16726): a name outside the charset
     // spec declares for an object `name` is refused at the door, and
     // kebab-case is outside it. What this string advertises and what the

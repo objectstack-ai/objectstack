@@ -5,7 +5,7 @@ import { z } from 'zod';
 // Service method interfaces use z.function() instead of z.any() for type safety.
 // Generic data fields use z.unknown() for type safety.
 import { lazySchema } from '../shared/lazy-schema';
-import { SEMVER_SHAPED_VERSION_PATTERN } from './version-grammar';
+import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
 export const PluginContextSchema = lazySchema(() => z.object({
   ql: z.object({
     object: z.function().describe('Get object handle for method chaining'),
@@ -175,45 +175,47 @@ export const PluginSchema = lazySchema(() => z.object({
   slug: z.string().regex(/^[a-z0-9-_]+$/).optional().describe('URL path segment (Required for type="ui")'),
   default: z.boolean().optional().describe('Serve at root path (Only one "ui" plugin can be default)'),
   
-  // #16365 — the grammar SemVer 2.0.0 actually defines, prerelease and build
-  // metadata included, which is what `describe('Semantic Version')` has said
-  // without qualification all along. The regex it replaces, `/^\d+\.\d+\.\d+$/`,
-  // refused `1.0.0-alpha.1` and `1.0.0+20230101` — a declaration refusing part
-  // of what it declared.
+  // The canon for "the version of a package or plugin" is SemVer 2.0.0, and
+  // this key references the one declaration that carries it:
+  // `SEMVER_2_0_0_VERSION_PATTERN` (`kernel/version-grammar.ts`). Read that
+  // file's header before changing this line — a carrier that restates the
+  // grammar instead of referencing it is the defect this key already had once.
   //
-  // ⭐ This key and `PluginLoader.isSemverShapedVersion`
-  // (`packages/core/src/plugin-loader.ts`) reference ONE exported declaration,
-  // `SEMVER_SHAPED_VERSION_PATTERN` (`kernel/version-grammar.ts`); each used to
-  // spell the grammar out and the two were held equal character for character by
-  // hand. It is not a third grammar invented here: that check is the one the
-  // boot path has always run, so adopting it made the two declarations converge
-  // EXACTLY — which is what let `assertPluginContract` drop the `version`
-  // exclusion it carried as a stopgap, and is why nothing that loads today is
-  // refused now.
+  // ## The history this line records, because it is load-bearing
   //
-  // ⚠️ MEASURED, not assumed, in both directions. It is a strict SUPERSET of the
-  // regex it replaces (same three-segment core, two OPTIONAL suffix groups), so
-  // the accept set only grows. It is ALSO wider than SemVer 2.0.0 itself, in a
-  // fringe this change neither introduces nor widens: leading zeroes in the
-  // numeric core (`01.1.1`) were accepted by BOTH spellings before this change
-  // and are accepted by both after it, and the loader additionally accepts the
-  // degenerate identifier forms SemVer forbids (`1.0.0-alpha..1`, `1.0.0-0123`,
-  // `1.0.0+.`). Tightening to the official SemVer 2.0.0 regex would therefore
-  // have NARROWED this key — refusing `01.1.1`, which it accepts today — which
-  // is the one thing the #16365 ruling forbids.
+  // #16365 widened the key from `/^\d+\.\d+\.\d+$/` — which refused
+  // `1.0.0-alpha.1` and `1.0.0+20230101`, a declaration refusing part of what
+  // it declared — to the boot path's own grammar, so that
+  // `PluginSchema.version` and `PluginLoader` converged exactly and
+  // `assertPluginContract` could drop the `version` exclusion it carried as a
+  // stopgap. That ruling was widen-never-narrow: nothing that loads today may
+  // stop loading.
   //
-  // #17070 — so the DESCRIPTION moved instead, and the regex did not. With the
-  // accept set frozen by #16365's ruling, the only side of the declared/enforced
-  // pair still free to move is the claim, and `'Semantic Version'` — bare, with
-  // no qualifier — was the false half: it named a standard this key does not
-  // implement. The describe() below states the grammar actually enforced, in the
-  // shape `ManifestSchema.version` already uses (`kernel/manifest.zod.ts`, whose
-  // TSDoc spells `(major.minor.patch)` rather than leaning on the word SemVer),
-  // so an author reading it can predict the verdict on their own string. The
-  // eight forbidden forms are pinned as ACCEPTED in `plugin.test.ts` — stated
-  // and enforced, not narrated — and `PluginLoader`'s predicate was renamed
-  // `isSemverShapedVersion` in the same change, for the same reason.
-  version: z.string().regex(SEMVER_SHAPED_VERSION_PATTERN).optional().describe('Version: major.minor.patch, with an optional -prerelease and an optional +build suffix. Looser than SemVer 2.0.0 — leading zeroes (01.1.1) and empty identifiers (1.0.0-alpha..1) are accepted.'),
+  // The grammar it adopted was wider than SemVer 2.0.0 in a fringe of eight
+  // strings — leading zeroes in the numeric core (`01.1.1`, §2), leading-zero
+  // and empty prerelease identifiers (`1.0.0-0123`, `1.0.0-alpha..1`, §9), and
+  // empty build metadata (`1.0.0+.`, §10). #17070 could not remove them under
+  // that freeze, so it moved the CLAIM instead: the describe() stopped naming a
+  // standard the key did not implement, and the eight were pinned as ACCEPTED
+  // in `plugin.test.ts` and `plugin-loader.test.ts`.
+  //
+  // ## What changed, and why it does not reverse #16365
+  //
+  // The maintainer ruled the canon: one grammar for this concept across all ten
+  // carriers, and that grammar is SemVer 2.0.0. The ruling narrows this key on
+  // the eight degenerate forms above and on NOTHING else — ⭐ every valid
+  // prerelease and every build suffix the boot path accepts today is still
+  // accepted, which is the property #16365 protected, honoured rather than
+  // overturned. What the eight have in common is that no ordering exists for
+  // them: `dependency-resolver.ts` (`@objectstack/core`) can place none of them
+  // in a precedence order, so admitting them produced versions that could be
+  // published and never compared.
+  //
+  // The two pins moved with the ruling and now assert the eight as REFUSED,
+  // beside the prerelease and build forms they have always accepted. The
+  // describe() below names the standard again, and this time the key implements
+  // it.
+  version: z.string().regex(SEMVER_2_0_0_VERSION_PATTERN).optional().describe('Version (SemVer 2.0.0 — major.minor.patch with an optional -prerelease and an optional +build suffix; e.g. 1.2.3, 2.0.0-beta.1, 1.0.0-rc.1+exp.sha.5114f85)'),
   description: z.string().optional(),
   author: z.string().optional(),
   homepage: z.string().url().optional(),

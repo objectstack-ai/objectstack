@@ -5,7 +5,7 @@ import type { Logger } from '@objectstack/spec/contracts';
 import { parseSignature } from './security/plugin-artifact-signature.js';
 import { serviceNotRegisteredError } from './service-not-registered.js';
 import { assertPluginContract } from './plugin-contract.js';
-import { SEMVER_SHAPED_VERSION_PATTERN } from '@objectstack/spec/kernel';
+import { SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
 
 /**
  * Service Lifecycle Types
@@ -406,7 +406,7 @@ export class PluginLoader {
             throw new Error('Plugin init function is required');
         }
         
-        if (!this.isSemverShapedVersion(plugin.version)) {
+        if (!this.isSemverVersion(plugin.version)) {
             throw new Error(`Invalid semantic version: ${plugin.version}`);
         }
     }
@@ -431,7 +431,7 @@ export class PluginLoader {
      *
      * ⭐ Those structural checks no longer DISAGREE with the schema, which for
      * `version` they used to. #16365 gave `PluginSchema.version` the grammar
-     * {@link isSemverShapedVersion} implements, character for character, and
+     * {@link isSemverVersion} implements, character for character, and
      * `plugin-contract.ts` dropped the `version` exclusion it carried while the
      * two spellings differed. Both now judge `version` by the same regex, so
      * this method and the one above it can only agree on that key; the
@@ -451,7 +451,7 @@ export class PluginLoader {
         // In a real implementation, this would check against kernel version
         const version = plugin.version;
         
-        if (!this.isSemverShapedVersion(version)) {
+        if (!this.isSemverVersion(version)) {
             return {
                 compatible: false,
                 pluginVersion: version,
@@ -466,43 +466,47 @@ export class PluginLoader {
     }
 
     /**
-     * Does `version` have the SHAPE this loader accepts — `major.minor.patch`
-     * with an optional `-prerelease` and an optional `+build` suffix?
+     * Is `version` a valid SemVer 2.0.0 string — `major.minor.patch` with an
+     * optional `-prerelease` and an optional `+build` suffix?
      *
-     * ⛔ This is NOT a SemVer 2.0.0 conformance check, and was renamed off that
-     * claim in #17070 precisely so the next caller does not read it as one. The
-     * grammar below is a strict SUPERSET of SemVer 2.0.0: it accepts every
-     * SemVer-valid string — there is no gap in that direction — and ADDITIONALLY
-     * accepts eight forms SemVer 2.0.0 forbids:
+     * ⭐ This IS a SemVer 2.0.0 conformance check, and the name says so
+     * truthfully for the first time. It was `isValidSemanticVersion` over a
+     * wider grammar, renamed to `isSemverShapedVersion` in #17070 because a
+     * predicate named for a standard it did not implement gets misused by the
+     * next caller whatever its docblock says; the maintainer's canon ruling then
+     * made the grammar match the name instead of the other way round.
+     *
+     * ⭐ It and `PluginSchema.version` (`@objectstack/spec`,
+     * `kernel/plugin.zod.ts`) reference ONE declaration — the exported
+     * `SEMVER_2_0_0_VERSION_PATTERN` (`@objectstack/spec/kernel`) — so the
+     * convergence #16365 created cannot be undone by editing one side. Each used
+     * to spell the grammar out and the two were held equal character for
+     * character by hand; `plugin-loader.test.ts` asserts the resulting accept
+     * set rather than narrating it.
+     *
+     * ⚠️ What this stopped accepting, and why it does not reverse #16365. The
+     * grammar was a strict superset of the standard, by eight strings:
      *
      * - leading zeroes in the numeric core (§2) — `01.1.1`, `1.01.1`, `1.1.01`
      * - leading-zero / empty prerelease identifiers (§9) — `1.0.0-0123`,
      *   `1.0.0-alpha..1`, `1.0.0-alpha..`, `1.0.0-.`
      * - degenerate build metadata (§10) — `1.0.0+.`
      *
-     * ⭐ Those eight are accepted DELIBERATELY and are pinned as accepted in
-     * `plugin-loader.test.ts`. `01.1.1` predates every card here — the original
-     * `/^\d+\.\d+\.\d+$/` admitted it too, because `\d+` always has — and
-     * #16365's ruling (widen, never narrow: nothing that loads today stops
-     * loading) froze the accept set. So #17070 moved the CLAIM instead of the
-     * grammar: the grammar below is byte-for-byte what it has been, and this
-     * method's name and this docblock are what changed.
+     * Those eight, and nothing else, are refused now; `plugin-loader.test.ts`
+     * pins them as refused and pins every valid prerelease and build form as
+     * still accepted. #16365's ruling was that nothing which loads today may
+     * stop loading, and the canon ruling read that as its subject — no valid
+     * prerelease the loader accepts is refused here. The eight have no ordering:
+     * `dependency-resolver.ts` can place none of them in a precedence order, so
+     * a plugin versioned that way could load and never be compared against its
+     * own successor.
      *
-     * ⚠️ Need real SemVer 2.0.0 conformance — ordering, precedence, or a
-     * standards-compliant verdict? This is not that predicate; do not reach for
-     * it. `dependency-resolver.ts` parses and COMPARES versions and is the
-     * module to extend.
-     *
-     * ⭐ This predicate and `PluginSchema.version` (`@objectstack/spec`,
-     * `kernel/plugin.zod.ts`) reference ONE declaration — the exported
-     * `SEMVER_SHAPED_VERSION_PATTERN` (`@objectstack/spec/kernel`) — so the
-     * convergence #16365 created can no longer be undone by editing one side.
-     * Each used to spell the grammar out and the two were held equal character
-     * for character by hand; `plugin-loader.test.ts` asserts the resulting
-     * accept set rather than narrating it.
+     * ⚠️ Shape is still all this decides. For ordering or precedence,
+     * `dependency-resolver.ts` parses and COMPARES versions and is the module to
+     * extend.
      */
-    private isSemverShapedVersion(version: string): boolean {
-        return SEMVER_SHAPED_VERSION_PATTERN.test(version);
+    private isSemverVersion(version: string): boolean {
+        return SEMVER_2_0_0_VERSION_PATTERN.test(version);
     }
 
     private async verifyPluginSignature(plugin: PluginMetadata): Promise<void> {

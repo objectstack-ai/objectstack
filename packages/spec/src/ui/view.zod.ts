@@ -4731,11 +4731,15 @@ export const ViewItemNameSchema = z
  *
  * - `package`  — shipped from `*.view.ts` source / an installed package.
  *                Not deletable (reinstall restores it); customisable via an
- *                override layer; hideable from the switcher.
+ *                override layer.
  * - `shared`   — authored at runtime, visible org-wide. Creating one is gated
  *                by the `view.manageShared` capability.
- * - `personal` — authored at runtime, scoped to `owner`. Any user with read
- *                access to the object may create one.
+ * - `personal` — the per-user layer. Per-user view scoping is a PARKED
+ *                direction (ADR-0017, amended 2026-09-04), not a shipped
+ *                mechanism: the item-level `owner` key that was to name the
+ *                user was retired with `hidden` (ADR-0049 — see
+ *                {@link VIEW_ITEM_OWNER_RETIRED}), so nothing restricts a
+ *                `personal` item to one user today.
  *
  * Named `scope` (not `provenance`) to avoid colliding with the loader-set
  * `_provenance` envelope field, which tracks a different axis
@@ -4749,6 +4753,43 @@ export const ViewScopeSchema = z
 export const ViewKindSchema = z
   .enum(['list', 'form'])
   .describe('Whether `config` is a ListView (list family) or a FormView.');
+
+/**
+ * [#20085] Prescriptions for the view item's two retired identity keys —
+ * ADR-0049 enforce-or-remove, triage direction 「retire both keys」.
+ *
+ * Both were declared on {@link viewItemBaseShape}, accepted by the strict
+ * authoring door and by the wire member `saveMetaItem` validates, stored
+ * verbatim — and read by nothing. Measured before removal, with lit controls:
+ * no writer and no reader of either view-item key in this framework, in
+ * objectui at its pin and at `main`, or in cloud; both switcher read paths
+ * (`GET /meta/view?object=` in `rest-server.ts`, `getViewsByObject` in
+ * `metadata-manager.ts`) filter on `viewKind` + `object` and sort on `order`,
+ * never on `hidden`, and nothing ever scoped a view by `owner`. So an author —
+ * very often an AI — who wrote `hidden: true` or `owner: '…'` got a clean save
+ * and no effect, and a view marked as one user's was shown to everyone: the
+ * `owner` half is a visibility claim, the security shape ADR-0049 is about.
+ *
+ * Declared ABOVE {@link viewItemBaseShape} on purpose: under
+ * `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module init in file
+ * order, and a `const` below its first eager reader is a TDZ error (the
+ * `strict-object.ts` docblock carries the measured incident).
+ */
+const VIEW_ITEM_OWNER_RETIRED =
+  '`view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the '
+  + 'user a `personal` view item belonged to, and nothing ever read it: the view switcher '
+  + '(`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a '
+  + 'view marked as one user\'s was listed for every user who can read the object. Delete the key. '
+  + 'Nothing restricts a view item to one user today — per-user view scoping is a parked direction '
+  + '(ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const VIEW_ITEM_HIDDEN_RETIRED =
+  '`view.hidden` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it promised to '
+  + 'hide a view item from the switcher, and nothing ever read it: `GET /meta/view?object=` and the '
+  + 'console\'s view switcher list every item bound to the object, `hidden: true` included. Delete the key; '
+  + 'to take a view out of the switcher, delete the view item itself (or stop shipping it from source). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Fields shared by every independent view item, regardless of kind. Returned
@@ -4778,14 +4819,28 @@ function viewItemBaseShape() {
     scope: ViewScopeSchema.optional().describe(
       'Identity layer (defaults to `package` for source-loaded views).',
     ),
-    owner: z
-      .string()
-      .optional()
-      .describe('Owner user id — set when `scope` is `personal`.'),
-    hidden: z
-      .boolean()
-      .optional()
-      .describe('Hidden from the switcher (per-user / per-org declutter).'),
+    /**
+     * [#20085] RETIRED — see {@link VIEW_ITEM_OWNER_RETIRED} /
+     * {@link VIEW_ITEM_HIDDEN_RETIRED} for what was measured.
+     *
+     * Tombstoned HERE, on the shared shape, rather than deleted with a
+     * `guidance` entry on {@link VIEW_ITEM_SURFACE}: this shape feeds TWO doors.
+     * The strict authoring door ({@link ViewItemSchema}) would refuse a bare
+     * deletion, but the wire member ({@link ViewItemWireSchema}, `.strip()`,
+     * member 1 of the union `saveMetaItem` validates) would STRIP it in silence
+     * (ADR-0104) — the very no-effect save this retirement exists to end. One
+     * `retiredKey()` here reaches both, which is the derive-by-reference rule
+     * {@link viewItemArmShape} exists for: `tsc` types the key `never` on
+     * `defineViewItem`'s input, and every parse raises the prescription.
+     *
+     * ⚠️ The flattened-overlay members declare their OWN `owner` / `hidden`
+     * (`flattenedViewOverlayFields()`) — a different door, a lean
+     * personalization PUT with no `config`, and deliberately untouched here.
+     * The D2 conversion `view-item-owner-hidden-removed` is scoped to the
+     * record spelling for the same reason.
+     */
+    owner: retiredKey(VIEW_ITEM_OWNER_RETIRED),
+    hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
     /**
      * Package author protection block — same envelope as {@link ViewSchema};
      * the loader translates it into the private `_lock` envelope.
@@ -5434,6 +5489,101 @@ const ViewContainerWireSchema = lazySchema(() =>
 );
 
 /**
+ * [#20051] The per-kind blocks of the list-view shape, keyed by kind — the
+ * vocabulary of the legacy `options` bag below, each judged KEY BY KEY.
+ *
+ * Derived, never hand-listed: a kind is a value of the shape's own `type` enum
+ * that ALSO names a block on the shape (`grid` names none), and each entry is
+ * the very schema the direct spelling is judged by — the same strict key set,
+ * the same per-key schemas, the same unknown-key message — with every key made
+ * optional (`.partial()`). So a new kind with a new block is judged under
+ * `options` in the same edit, and `options.timeline` can never be judged by
+ * anything but `timeline`'s schema.
+ *
+ * Why `.partial()` and not the block as-is (measured, not preferred): the
+ * renderer reads `options.KIND` as an UNDERLAY of the top-level block, merged
+ * per key with the top-level block winning (objectui `ListView`: kanban,
+ * calendar, gallery, timeline, gantt and map spread `options.KIND` first and
+ * `KIND` last). A legacy bag that carries only the keys the top-level block
+ * does not restate (`kanban: { groupByField }` beside `options.kanban:
+ * { titleField }`) is therefore legal config — objectui pins exactly that
+ * population (`ObjectView.namedViewProtocolKeys-8980.test.tsx`, "the merge is
+ * per-key, not wholesale") — and judging it with the block's REQUIRED keys
+ * would refuse it for a key it never meant to carry. What the ruling asks is
+ * kept whole: an out-of-contract key is refused by name, and a value the key's
+ * own schema refuses is refused at that key. Required-ness belongs to the
+ * block the renderer builds, not to one layer of it.
+ *
+ * `.partial()` throws on an object that carries refinements (zod 4), which is
+ * the loud answer this derivation wants: a kind block that grows a cross-key
+ * check forces a decision about how that check reads on a partial underlay,
+ * instead of silently losing it.
+ */
+function listViewKindBlocks(): Record<string, z.ZodTypeAny> {
+  const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
+  const blocks: Record<string, z.ZodTypeAny> = {};
+  for (const kind of overlayTypeValues(ListViewShapeSchema)) {
+    const block = shape[kind] as unknown as { unwrap?: () => { partial: () => z.ZodTypeAny } } | undefined;
+    if (block?.unwrap) blocks[kind] = block.unwrap().partial().optional();
+  }
+  return blocks;
+}
+
+/**
+ * [#20051] The legacy `options` bag on a flattened LIST overlay, judged.
+ *
+ * The renderer still reads `options.KIND` beside the top-level `KIND` block
+ * (objectui's `ListView` merges the two per key, and its interface page
+ * forwards a stored view's `options` whole), so a stored bag is live config.
+ * Before this schema the overlay member's top-level `.strip()` dropped the bag
+ * from the parse without looking inside it, `saveMetaItem` stored the request
+ * body as sent, and the interface page rendered it: `options.timeline.metaFields`
+ * saved `200` while `timeline.metaFields` was refused `unrecognized_keys`.
+ *
+ * Ruled direction A (objectui#10380, maintainer 「其他同意」): each
+ * `options.KIND` is judged by the kind's own strict schema, so an out-of-contract
+ * key is refused by NAME, with the same code and the same surface text as the
+ * direct spelling — only the path gains the `options` prefix. Key by key: see
+ * {@link listViewKindBlocks} for why the block's required keys are not asked of
+ * an underlay. The bag itself is closed too: it carries per-kind blocks and
+ * nothing else, so `options.foo` is refused rather than dropped (ruled out:
+ * refusing the bag WHOLE, which would break the legacy `options.map` path
+ * objectui pins).
+ *
+ * Declared on the list overlay member ONLY — never on the authoring shape (the
+ * bag is a legacy wire spelling, not something to teach an author), and the
+ * form overlay pins it absent ({@link FORM_OVERLAY_OPTIONS_REFUSED}).
+ */
+const ListViewOverlayOptionsSchema = lazySchema(() => strictObject({
+  surface: 'this legacy `options` bag',
+  history:
+    'Until this bag was judged at the view write door it was dropped from the parse unread and '
+    + 'stored as sent, so a key its own block refuses still reached the rendered view.',
+  guidance: {
+    grid: 'A grid has no per-kind block: its settings (`columns`, `sort`, `filter`, …) are top-level keys of the view itself. Remove `options.grid`.',
+  },
+}, listViewKindBlocks()).describe(
+  'Legacy per-kind nesting (`options.kanban`, `options.timeline`, …) a stored list overlay may carry. '
+  + 'Each block is judged key by key by the same schema as the top-level block of that kind, which wins '
+  + 'per key where both set one; prefer the top-level spelling.',
+));
+
+/**
+ * [#20051] The refusal the flattened FORM overlay gives an `options` bag.
+ *
+ * `options` is list-view vocabulary, so a body carrying it is a list overlay —
+ * the same structural-guard reasoning as `config` / `list` / `form` pinned
+ * absent in {@link flattenedViewOverlayFields}. Without this pin the form
+ * member, which `.strip()`s and requires no list key, would ACCEPT a list
+ * overlay the list member refused over its `options` bag (a column-less,
+ * type-less personalization body reaches it), and the bag would be stored
+ * unjudged after all.
+ */
+const FORM_OVERLAY_OPTIONS_REFUSED =
+  'A form view carries no `options` bag: `options.kanban`, `options.timeline` and the other per-kind blocks '
+  + 'belong to a list view. Remove `options`, or save this body as a list view (`viewKind: "list"` with its `columns`).';
+
+/**
  * [#6391] Member 3 of {@link ViewMetadataSchema} — a flattened runtime LIST
  * overlay: an inline `ListView` config at the top level plus the optional
  * identity/round-trip fields a personalization PUT carries. Published as
@@ -5451,6 +5601,10 @@ const ViewContainerWireSchema = lazySchema(() =>
  * [#7741] `object` + `viewKind` are required on this arm (and its form
  * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
  * measured serving filter that decides exactly this pair.
+ *
+ * [#20051] …and `options` is DECLARED here, judged by
+ * {@link ListViewOverlayOptionsSchema}: `.strip()` re-opens the top level for
+ * round-trip keys, and a bag the renderer reads is not one of those.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
@@ -5461,7 +5615,10 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // author reaches, so it is the last place the refusals may go missing.
   // `viewDoorsCarryingObjectLevelChecks` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
-  ListViewShapeSchema.extend(flattenedViewOverlayFields()).strip()
+  ListViewShapeSchema.extend({
+    ...flattenedViewOverlayFields(),
+    options: ListViewOverlayOptionsSchema.optional(),
+  }).strip()
     .superRefine(checkListViewCalendarVisualization),
 );
 
@@ -5471,9 +5628,15 @@ const ListViewOverlayWireSchema = lazySchema(() =>
  * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}; the
  * list member is tried first, and a flattened form (no required `columns`,
  * disjoint `type` enum) then matches here.
+ *
+ * [#20051] `options` is pinned ABSENT here — see
+ * {@link FORM_OVERLAY_OPTIONS_REFUSED} for the fall-through it closes.
  */
 const FormViewOverlayWireSchema = lazySchema(() =>
-  FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
+  FormViewSchema.extend({
+    ...flattenedViewOverlayFields(),
+    options: z.undefined({ error: () => FORM_OVERLAY_OPTIONS_REFUSED }).optional(),
+  }).strip(),
 );
 
 /**
