@@ -20,10 +20,12 @@
  *
  * ## What this file pins
  *
- * 1. The direct and the `options`-wrapped spelling of one block get the SAME
- *    refusal — same issues, same codes, same messages — and only the path
- *    gains the `options` prefix. Asserted for every kind the bag declares, so
- *    no kind is judged by anything but its own block.
+ * 1. An out-of-contract key gets the SAME refusal in both spellings — same
+ *    code, same keys, same message — and only the path gains the `options`
+ *    prefix; a value a key's own schema refuses is refused at that key too.
+ *    Asserted for every kind the bag declares, so no kind is judged by
+ *    anything but its own block. The underlay is judged KEY BY KEY: a partial
+ *    bag (the per-key merge population objectui pins) parses.
  * 2. The bag is closed: `options.foo` is refused by name, not dropped.
  * 3. A legal `options.KIND` still parses and round-trips — including the
  *    legacy `options.map` bag objectui pins
@@ -102,16 +104,28 @@ describe('[#20051] a direct and an `options`-wrapped out-of-contract key get the
   });
 
   it.each(['calendar', 'chart', 'gallery', 'gantt', 'kanban', 'map', 'timeline', 'tree'])(
-    '`options.%s` is judged by `%s`\'s own schema — identical issues, prefixed path',
+    '`options.%s` refuses an out-of-contract key with `%s`\'s own refusal — same code, keys and message',
     (kind) => {
       const block = { zz_not_a_key: 1 };
-      const direct = under(listOverlayIssues(overlay({ [kind]: block })), [kind]);
+      const unknownKey = (issues: ReturnType<typeof under>) => issues.filter((i) => i.code === 'unrecognized_keys');
+      const direct = unknownKey(under(listOverlayIssues(overlay({ [kind]: block })), [kind]));
       const wrapped = under(listOverlayIssues(overlay({ options: { [kind]: block } })), ['options', kind]);
-      expect(wrapped.length, `no issue under options.${kind}`).toBeGreaterThan(0);
+      expect(direct).toHaveLength(1);
+      // The ONLY complaint about the wrapped block is the unknown key — the
+      // underlay is judged key by key, so the block's required keys are not
+      // asked of it (see the per-key case below).
       expect(wrapped).toEqual(direct);
-      expect(wrapped.some((i) => i.code === 'unrecognized_keys' && i.keys?.includes('zz_not_a_key'))).toBe(true);
+      expect(wrapped[0]!.keys).toEqual(['zz_not_a_key']);
     },
   );
+
+  it('a value the key\'s own schema refuses is refused at the same key under `options`', () => {
+    // `map.zoom` is `min(1).max(20)`: the key-level schema travels with the key.
+    const direct = under(listOverlayIssues(overlay({ map: { zoom: 99 } })), ['map']);
+    const wrapped = under(listOverlayIssues(overlay({ options: { map: { zoom: 99 } } })), ['options', 'map']);
+    expect(wrapped).toEqual(direct);
+    expect(wrapped.map((i) => i.path)).toEqual(['zoom']);
+  });
 
   it('the union refuses both spellings — the verdict, not only the diagnosis', () => {
     const timeline = { startDateField: 'created_at', titleField: 'name', metaFields: ['region'] };
@@ -161,6 +175,25 @@ describe('[#20051] a legal `options.KIND` still parses and round-trips', () => {
     expect(out).toEqual(options);
     // …and re-parsing the parse output is a fixed point.
     expect(ViewMetadataSchema.safeParse((parsed as { data: unknown }).data)).toMatchObject({ success: true });
+  });
+
+  it('a PARTIAL underlay parses — the per-key merge population objectui pins', () => {
+    // objectui `ObjectView.namedViewProtocolKeys-8980.test.tsx`: "a key the
+    // canonical block does NOT restate survives from the legacy nesting — the
+    // merge is per-key, not wholesale". `kanban.groupByField` and
+    // `kanban.columns` are REQUIRED on the top-level block; the underlay here
+    // carries only the key the top-level block leaves to it.
+    const body = overlay({
+      type: 'kanban',
+      kanban: { groupByField: 'status', columns: ['name'] },
+      options: { kanban: { titleField: 'subject' } },
+    });
+    const parsed = ViewMetadataSchema.safeParse(body);
+    expect(parsed.success, JSON.stringify(!parsed.success && parsed.error.issues)).toBe(true);
+    // …while the SAME partial block written directly is still refused for the
+    // required keys it omits: the top-level block is the one the renderer
+    // completes, the underlay is not.
+    expect(ViewMetadataSchema.safeParse(overlay({ type: 'kanban', kanban: { titleField: 'subject' } })).success).toBe(false);
   });
 
   it('CONTROL: an overlay with no `options` parses exactly as before, with no `options` key', () => {

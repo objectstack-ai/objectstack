@@ -5430,19 +5430,41 @@ const ViewContainerWireSchema = lazySchema(() =>
 
 /**
  * [#20051] The per-kind blocks of the list-view shape, keyed by kind — the
- * vocabulary of the legacy `options` bag below.
+ * vocabulary of the legacy `options` bag below, each judged KEY BY KEY.
  *
  * Derived, never hand-listed: a kind is a value of the shape's own `type` enum
- * that ALSO names a block on the shape (`grid` names none), and the block is
- * the very schema the direct spelling is judged by, taken by reference. So a
- * new kind with a new block is judged under `options` in the same edit, and
- * `options.timeline` can never be judged by anything but `timeline`'s schema.
+ * that ALSO names a block on the shape (`grid` names none), and each entry is
+ * the very schema the direct spelling is judged by — the same strict key set,
+ * the same per-key schemas, the same unknown-key message — with every key made
+ * optional (`.partial()`). So a new kind with a new block is judged under
+ * `options` in the same edit, and `options.timeline` can never be judged by
+ * anything but `timeline`'s schema.
+ *
+ * Why `.partial()` and not the block as-is (measured, not preferred): the
+ * renderer reads `options.KIND` as an UNDERLAY of the top-level block, merged
+ * per key with the top-level block winning (objectui `ListView`: kanban,
+ * calendar, gallery, timeline, gantt and map spread `options.KIND` first and
+ * `KIND` last). A legacy bag that carries only the keys the top-level block
+ * does not restate (`kanban: { groupByField }` beside `options.kanban:
+ * { titleField }`) is therefore legal config — objectui pins exactly that
+ * population (`ObjectView.namedViewProtocolKeys-8980.test.tsx`, "the merge is
+ * per-key, not wholesale") — and judging it with the block's REQUIRED keys
+ * would refuse it for a key it never meant to carry. What the ruling asks is
+ * kept whole: an out-of-contract key is refused by name, and a value the key's
+ * own schema refuses is refused at that key. Required-ness belongs to the
+ * block the renderer builds, not to one layer of it.
+ *
+ * `.partial()` throws on an object that carries refinements (zod 4), which is
+ * the loud answer this derivation wants: a kind block that grows a cross-key
+ * check forces a decision about how that check reads on a partial underlay,
+ * instead of silently losing it.
  */
 function listViewKindBlocks(): Record<string, z.ZodTypeAny> {
   const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
   const blocks: Record<string, z.ZodTypeAny> = {};
   for (const kind of overlayTypeValues(ListViewShapeSchema)) {
-    if (shape[kind]) blocks[kind] = shape[kind];
+    const block = shape[kind] as unknown as { unwrap?: () => { partial: () => z.ZodTypeAny } } | undefined;
+    if (block?.unwrap) blocks[kind] = block.unwrap().partial().optional();
   }
   return blocks;
 }
@@ -5461,10 +5483,12 @@ function listViewKindBlocks(): Record<string, z.ZodTypeAny> {
  * Ruled direction A (objectui#10380, maintainer 「其他同意」): each
  * `options.KIND` is judged by the kind's own strict schema, so an out-of-contract
  * key is refused by NAME, with the same code and the same surface text as the
- * direct spelling — only the path gains the `options` prefix. The bag itself is
- * closed too: it carries per-kind blocks and nothing else, so `options.foo` is
- * refused rather than dropped (ruled out: refusing the bag WHOLE, which would
- * break the legacy `options.map` path objectui pins).
+ * direct spelling — only the path gains the `options` prefix. Key by key: see
+ * {@link listViewKindBlocks} for why the block's required keys are not asked of
+ * an underlay. The bag itself is closed too: it carries per-kind blocks and
+ * nothing else, so `options.foo` is refused rather than dropped (ruled out:
+ * refusing the bag WHOLE, which would break the legacy `options.map` path
+ * objectui pins).
  *
  * Declared on the list overlay member ONLY — never on the authoring shape (the
  * bag is a legacy wire spelling, not something to teach an author), and the
@@ -5480,7 +5504,8 @@ const ListViewOverlayOptionsSchema = lazySchema(() => strictObject({
   },
 }, listViewKindBlocks()).describe(
   'Legacy per-kind nesting (`options.kanban`, `options.timeline`, …) a stored list overlay may carry. '
-  + 'Each block is judged by the same schema as the top-level block of that kind; prefer the top-level spelling.',
+  + 'Each block is judged key by key by the same schema as the top-level block of that kind, which wins '
+  + 'per key where both set one; prefer the top-level spelling.',
 ));
 
 /**
