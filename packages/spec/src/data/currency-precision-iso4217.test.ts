@@ -347,8 +347,9 @@ describe('the CLDR digit table — kept for the `iso_4217_currency` value domain
  *  1. `tsc`. The key is off `CurrencyConfig`'s input type, so every object
  *     literal that writes it in a typed position fails to compile — the
  *     `@ts-expect-error` in the object-door case above holds that from this
- *     side, and the three `examples/app-showcase` objects that wrote the key
- *     were found by the example's own `typecheck`, not by grep.
+ *     side, and the example's own `typecheck` refuses the key where the three
+ *     `examples/app-showcase` objects used to write it (measured on this
+ *     retirement by putting it back in one: TS2353 at that line).
  *  2. The parse door. `CurrencyConfigSchema` is a closed `strictObject`, so an
  *     authored key that reaches any parse — `objectstack validate`, the
  *     metadata-protocol publish gate, `defineStack` — is refused with the
