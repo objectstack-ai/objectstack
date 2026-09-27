@@ -16,4 +16,4 @@ Types only. No schema, no parse and no export moves: every runtime accept set is
 
 The types are the members' declared shapes, not the schemas' verdicts. Each schema still accepts some bodies its type refuses (the preprocess folds and strips) and still refuses some bodies its type admits (refinements are not types), so the schema remains the only judge.
 
-`JoinedReportBlock` is not changed by this release. It is still `unknown`.
+`JoinedReportBlock` is not changed by this change, and still resolves to `unknown`.
