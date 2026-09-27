@@ -10617,6 +10617,12 @@ function legacyFilterToRuleArray(value: unknown): FilterMapping | undefined {
  *
  * Answers with the shape it found, spelled for the TODO that names why the
  * node's filters were left as stored, or `undefined` for an object-bound node.
+ *
+ * ⚠️ A fact about the RENDERER AT THE PIN, not about the protocol — and the TODO
+ * says so in those terms. objectui#10767 taught the inline-row matcher the rule
+ * array upstream, but the `.objectui-sha` pin this decline was measured at does
+ * not carry it, so the decline stands. Retiring it is owed once the pin moves
+ * past that fix, as its own change — never assumed from the upstream merge.
  */
 function rendersInlineRows(properties: unknown): string | undefined {
   if (!isDict(properties)) return undefined;
@@ -10745,9 +10751,9 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         if ('declined' in mapping) {
           declined = mapping.declined;
         } else if (inline) {
-          declined = `sits on a block whose rows are inline (${inline}): its renderer matches this `
-            + 'filter against those rows in the record dialect, where a rule array would exclude '
-            + 'every row, so no rewrite here is lossless';
+          declined = `sits on a block whose rows are inline (${inline}), and the objectui renderer `
+            + 'this release pins cannot match a rule array against inline rows — it would exclude '
+            + 'every row — so no rewrite here is lossless yet';
         } else {
           emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
           return { ...holder, [key]: mapping.rules };

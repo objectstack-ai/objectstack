@@ -328,6 +328,8 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
       ]);
       for (const todo of todos) {
         expect(todo.reason).toContain(`sits on a block whose rows are inline ${named}`);
+        // A renderer limit at the objectui pin, said as one — not a protocol fact.
+        expect(todo.reason).toContain('the objectui renderer this release pins cannot match a rule array');
         expect(todo.reason).toContain(`the \`${type}\` block`);
       }
       const frozen = structuredClone(before);
