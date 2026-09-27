@@ -17982,7 +17982,7 @@ function selfTest() {
     '        run: node scripts/check-issue-citations.mjs --census',
   ].join('\n');
   const localEnvSource = [
-    "export const ROOT_DIR_WATCH_HINTS = ['packages/**'];",
+    "export const SURFACES = ['packages/**'];",
     '',
     '// dispatch-gates: local-env GITHUB_TOKEN OS_GATE_MERGE_GROUP_BASE_SHA -- the bare diff run reads a public board and falls back to the merge base',
     '',
