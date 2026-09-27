@@ -245,6 +245,90 @@ export function foundSuitesLine(count: number): string {
   return `Found ${count} test suites.`;
 }
 
+/**
+ * Parse the `--tags` value: a comma-separated list of tag names, trimmed and
+ * de-duplicated in the order given.
+ *
+ * An empty entry (`--tags smoke,`, `--tags ""`) is refused rather than dropped.
+ * Dropping it would turn a typo into a narrower selection than the one asked
+ * for, and nothing in the run would say so.
+ */
+export function parseTagsFlag(raw: string): string[] {
+  const tags = raw.split(',').map((tag) => tag.trim());
+  if (tags.some((tag) => tag.length === 0)) {
+    throw new Error(
+      `--tags "${raw}" contains an empty tag name. ` +
+        'Pass one or more tag names separated by commas, e.g. --tags smoke,critical.',
+    );
+  }
+  return [...new Set(tags)];
+}
+
+/** One suite after tag selection. */
+export interface TagSelection {
+  /** The suite with only the selected scenarios, in their authored order. */
+  suite: QA.TestSuite;
+  /** How many of the suite's scenarios the selection left out. */
+  deselected: number;
+  /** The requested tags at least one selected scenario carries. */
+  matchedTags: string[];
+}
+
+/**
+ * Select a suite's scenarios by `TestScenario.tags`.
+ *
+ * ANY-OF: a scenario is selected when it carries at least one of `tags`, so
+ * `--tags smoke,critical` runs everything tagged smoke OR critical. That is
+ * the reading of a comma list in Odoo's `--test-tags` and in Cucumber's
+ * comma form, and the everyday use of Playwright's `--grep @smoke|@critical`:
+ * name the sets you want and get their union. Matching is exact and
+ * case-sensitive — a tag is a name the author chose, not a pattern. An
+ * expression language (Cucumber tag expressions, pytest `-m`) is a grammar to
+ * specify and report errors against, which no suite has yet needed.
+ *
+ * `tags` undefined — the flag was not passed — selects every scenario: the
+ * unfiltered run is the default and does not consult `tags` at all. With the
+ * flag, an untagged scenario is never selected.
+ */
+export function selectScenariosByTags(suite: QA.TestSuite, tags: readonly string[] | undefined): TagSelection {
+  if (tags === undefined) return { suite, deselected: 0, matchedTags: [] };
+  const matched = new Set<string>();
+  const scenarios = suite.scenarios.filter((scenario) => {
+    const hits = (scenario.tags ?? []).filter((tag) => tags.includes(tag));
+    for (const tag of hits) matched.add(tag);
+    return hits.length > 0;
+  });
+  return {
+    suite: { ...suite, scenarios },
+    deselected: suite.scenarios.length - scenarios.length,
+    matchedTags: tags.filter((tag) => matched.has(tag)),
+  };
+}
+
+/**
+ * The suite heading: the `name` the author gave the suite, then the file it was
+ * loaded from — the name is what a person recognises, the file is where to go
+ * and fix it.
+ */
+export function suiteHeading(suiteName: string, file: string): string {
+  return `📄 Running suite: ${suiteName} (${path.basename(file)})`;
+}
+
+/**
+ * A scenario's report label: its `name`, then its `id` in brackets. When an
+ * author made the two identical, the id is printed once.
+ */
+export function scenarioLabel(result: Pick<CoreQA.TestResult, 'scenarioId' | 'scenarioName'>): string {
+  return result.scenarioName === result.scenarioId
+    ? result.scenarioId
+    : `${result.scenarioName} [${result.scenarioId}]`;
+}
+
+/** The selection line printed above the summary whenever `--tags` is given. */
+export function tagSelectionLine(selected: number, deselected: number, tags: readonly string[]): string {
+  return `--tags ${tags.join(',')} selected ${selected} of ${selected + deselected} scenarios; ${deselected} deselected (not run, not counted as passed).`;
+}
+
 export default class Test extends Command {
   /**
    * The empty-match posture is stated in the help text on purpose (#7848).
@@ -263,7 +347,13 @@ export default class Test extends Command {
     '"Found 0 test suites." and exits 0, so a repository that legitimately ships no ' +
     'suites does not fail CI. Pass --fail-on-empty for the strict reading, where a ' +
     'pattern that has stopped matching (a renamed directory, a moved suite) fails the ' +
-    'step instead of reporting success forever.';
+    'step instead of reporting success forever.\n' +
+    '--tags selects scenarios by their "tags": pass a comma-separated list and a ' +
+    'scenario runs when it carries AT LEAST ONE of the listed tags (any-of; exact, ' +
+    'case-sensitive). Untagged scenarios are left out whenever --tags is given. Left-out ' +
+    'scenarios are counted as deselected — never run and never counted as passed. A ' +
+    'selection that matches no scenario exits 0 like an empty pattern, and 1 under ' +
+    '--fail-on-empty.';
 
   static override args = {
     files: Args.string({ description: 'Glob pattern for test files (e.g. "qa/*.test.json")', required: false, default: 'qa/*.test.json' }),
@@ -273,9 +363,19 @@ export default class Test extends Command {
     url: Flags.string({ description: 'Target base URL', default: 'http://localhost:3000' }),
     token: Flags.string({ description: 'Authentication token' }),
     'fail-on-empty': Flags.boolean({
-      description: 'Exit non-zero when the pattern matches no test suite (default: matching nothing exits 0)',
+      description:
+        'Exit non-zero when the pattern matches no test suite, or --tags matches no scenario (default: both exit 0)',
       default: false,
     }),
+    // A custom flag so a malformed list is refused while the invocation is
+    // parsed — the same channel, and exit status, as any other bad argument —
+    // before a suite is loaded or the server is contacted.
+    tags: Flags.custom<string[]>({
+      description:
+        'Run only scenarios carrying at least one of these comma-separated tags (e.g. "smoke,critical"); the rest are deselected',
+      helpValue: 'TAG[,TAG...]',
+      parse: async (input) => parseTagsFlag(input),
+    })(),
   };
 
   async run(): Promise<void> {
@@ -309,22 +409,36 @@ export default class Test extends Command {
     console.log(foundSuitesLine(testFiles.length));
 
     // 3. Run Tests
+    const tags = flags.tags;
     let totalPassed = 0;
     let totalFailed = 0;
+    let totalSelected = 0;
+    let totalDeselected = 0;
+    const matchedTags = new Set<string>();
 
     for (const file of testFiles) {
-        console.log(`\n📄 Running suite: ${chalk.bold(path.basename(file))}`);
-
         // Load and validate FIRST, and report a refusal on its own terms: a file
         // the schema rejects never had a chance to run, so folding it into the
         // run-failure branch below would report it as if the server had said no.
-        let suite: QA.TestSuite;
+        let loaded: QA.TestSuite;
         try {
-            suite = loadTestSuite(file);
+            loaded = loadTestSuite(file);
         } catch (e) {
+            // No suite name to print — the file is all there is.
+            console.log(`\n📄 Running suite: ${chalk.bold(path.basename(file))}`);
             console.error(chalk.red(e instanceof Error ? e.message : String(e)));
             totalFailed++; // Count suite failure
             continue;
+        }
+
+        console.log(`\n${chalk.bold(suiteHeading(loaded.name, file))}`);
+
+        const { suite, deselected, matchedTags: matchedHere } = selectScenariosByTags(loaded, tags);
+        totalSelected += suite.scenarios.length;
+        totalDeselected += deselected;
+        for (const tag of matchedHere) matchedTags.add(tag);
+        if (deselected > 0) {
+            console.log(chalk.dim(`  ${deselected} of ${loaded.scenarios.length} scenarios deselected by --tags`));
         }
 
         try {
@@ -332,8 +446,12 @@ export default class Test extends Command {
 
             for (const result of results) {
                 const icon = result.passed ? '✅' : '❌';
-                console.log(`  ${icon} Scenario: ${result.scenarioId} (${result.duration}ms)`);
+                console.log(`  ${icon} Scenario: ${scenarioLabel(result)} (${result.duration}ms)`);
                 if (!result.passed) {
+                   // What the scenario was checking, in the author's words — the
+                   // first thing a reader of a red run needs and the one thing
+                   // the suite file alone used to hold.
+                   if (result.description) console.log(chalk.dim(`     ${result.description}`));
                    console.error(chalk.red(`     Error: ${result.error}`));
                    result.steps.forEach(step => {
                        if (!step.passed) {
@@ -355,9 +473,30 @@ export default class Test extends Command {
 
     // 4. Summary
     console.log(chalk.dim(`\n-------------------------------------`));
+    if (tags) {
+        console.log(tagSelectionLine(totalSelected, totalDeselected, tags));
+        // A tag nothing carries is a typo or a renamed tag. It narrows the run
+        // without failing it, so it is named rather than left to be noticed.
+        const unmatched = tags.filter((tag) => !matchedTags.has(tag));
+        if (unmatched.length > 0 && totalSelected > 0) {
+            console.warn(chalk.yellow(`--tags: no scenario in the loaded suites carries ${unmatched.map((t) => `"${t}"`).join(', ')}.`));
+        }
+    }
     if (totalFailed > 0) {
         console.log(chalk.red(`FAILED: ${totalFailed} scenarios failed. ${totalPassed} passed.`));
         process.exit(1);
+    } else if (tags && totalSelected === 0) {
+        // The --tags twin of the empty pattern above, and the same posture: a
+        // run that executed nothing is not a failure by default, and is one
+        // under --fail-on-empty — a renamed tag in a CI step otherwise reports
+        // success forever.
+        console.warn(chalk.yellow(`No scenario matched --tags ${tags.join(',')}.`));
+        if (flags['fail-on-empty']) {
+            console.error(chalk.red(`--fail-on-empty: a run whose --tags selected no scenario is a failed run.`));
+            process.exit(1);
+        }
+        console.log(chalk.dim(`Exiting 0 — a selection that matches nothing is not a failure. Pass --fail-on-empty to make it one.`));
+        process.exit(0);
     } else {
         console.log(chalk.green(`SUCCESS: All ${totalPassed} scenarios passed.`));
         process.exit(0);
