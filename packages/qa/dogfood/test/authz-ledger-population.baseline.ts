@@ -59,8 +59,9 @@
  * Ledger-sourced population keys with no classifying matrix row.
  *
  * MEASURED 2026-08-31 against `rest-route-ledger.ts` (94 rows / 19 families)
- * and `route-ledger.ts` (80 rows / 21 domains — 82 since the two operator
- * run-lifecycle rows landed, both under the already-classified `/automation`
+ * and `route-ledger.ts` (80 rows / 21 domains — 82 after the two operator
+ * run-lifecycle rows landed, and 81 since #19543 retired the `GET /automation`
+ * flow-list row, all three moves under the already-classified `/automation`
  * domain, so the key arithmetic below is unmoved): 40 keys minted, 6 classified
  * by rows that already pin the same surface through the probe table, 34 here.
  *

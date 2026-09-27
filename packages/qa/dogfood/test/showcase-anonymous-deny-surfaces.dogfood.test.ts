@@ -453,9 +453,13 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'anonymous flow trigger must be 401').toBe(401);
   });
 
-  it('anonymous GET /automation is denied (401) — the flow inventory stays private', async () => {
-    const r = await anon('GET', '/automation');
-    expect(r.status, 'anonymous flow listing must be 401').toBe(401);
+  // [#19543] Probed at `GET /automation/_status` — the flow inventory's
+  // surviving read. Door ④ retired the `GET /automation` flow list (the list is
+  // `GET /meta/flow`), so that path no longer reaches this domain at all: the
+  // host answers its method mismatch before any gate runs.
+  it('anonymous GET /automation/_status is denied (401) — the flow inventory stays private', async () => {
+    const r = await anon('GET', '/automation/_status');
+    expect(r.status, 'anonymous flow-inventory read must be 401').toBe(401);
   });
 
   it('anonymous DELETE /automation/:name is denied (401) — the destructive one', async () => {
@@ -464,8 +468,8 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   });
 
   it('an authenticated caller reaches the domain, which answers 501 — not 401', async () => {
-    const r = await stack.apiAs(memberToken, 'GET', '/automation');
-    expect(r.status, 'authenticated flow listing must clear the auth gate').not.toBe(401);
+    const r = await stack.apiAs(memberToken, 'GET', '/automation/_status');
+    expect(r.status, 'authenticated flow-inventory read must clear the auth gate').not.toBe(401);
     // The domain's OWN answer on a stack with no automation service. Asserting
     // it (rather than only `.not.toBe(401)`) is what proves the anonymous 401
     // above is produced by the gate and not by the domain: drop the gate and
@@ -523,7 +527,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     const dispatcher = await Promise.all([
       anon('POST', ACTION, { params: {} }).then((r) => r.json()),
       anon('POST', `/automation/${FLOW}/trigger`, {}).then((r) => r.json()),
-      anon('GET', '/automation').then((r) => r.json()),
+      anon('GET', '/automation/_status').then((r) => r.json()),
       anon('DELETE', `/automation/${FLOW}`).then((r) => r.json()),
       anon('GET', '/packages').then((r) => r.json()),
       anon('POST', '/packages/anon-probe-pkg/discard-drafts', {}).then((r) => r.json()),
@@ -613,7 +617,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     { seam: `GET ${OBJ}`, owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', OBJ) },
     { seam: 'POST /actions/:object/:action/:id', owner: 'runtime domains/actions.ts', family: 'dispatcher-wrapper', call: () => anon('POST', ACTION, { params: {} }) },
     { seam: 'POST /automation/:name/trigger', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('POST', `/automation/${FLOW}/trigger`, {}) },
-    { seam: 'GET /automation', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('GET', '/automation') },
+    { seam: 'GET /automation/_status', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('GET', '/automation/_status') },
     { seam: 'DELETE /automation/:name', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('DELETE', `/automation/${FLOW}`) },
   ];
 
@@ -644,7 +648,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
 
   it('`ANONYMOUS_DENY_BODY` is the REST seam body, and NOT the dispatcher one (#5632)', async () => {
     const flat = await anon('GET', '/meta').then((r) => r.json());
-    const wrapped = await anon('GET', '/automation').then((r) => r.json());
+    const wrapped = await anon('GET', '/automation/_status').then((r) => r.json());
 
     // The narrowed docstring's positive claim, on the wire: the exported
     // constant IS what the REST seam writes, whole.

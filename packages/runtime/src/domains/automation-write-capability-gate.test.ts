@@ -457,11 +457,11 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
             expect(h.resume).toHaveBeenCalled();
         });
 
-        it('the reads are untouched — GET / and GET /:name', async () => {
+        it('the reads are untouched — GET /:name', async () => {
+            // [#19543] `GET /` used to be the second read here; the flow list is
+            // retired (flows are listed through `GET /meta/flow`), so the one
+            // definition read this domain still serves is the single flow.
             const h = boot();
-
-            const list = await h.dispatcher.handleAutomation('', 'GET', undefined, UNENTITLED(), undefined);
-            expect(statusOf(list.response)).toBe(200);
 
             const detail = await h.dispatcher.handleAutomation(`/${FLOW}`, 'GET', undefined, UNENTITLED(), undefined);
             expect(statusOf(detail.response)).toBe(200);
