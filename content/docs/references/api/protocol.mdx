@@ -1920,7 +1920,7 @@ Install package request
 | **id** | `string` | ✅ | Unique package identifier — must match reverse-domain notation (e.g. com.acme.crm) |
 | **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
 | **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
-| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **version** | `string` | ✅ | Package version (SemVer 2.0.0 — e.g. 1.2.3, 2.0.0-beta.1, 1.0.0+20230101) |
 | **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
 | **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
 | **name** | `string` | ✅ | Human-readable package name |

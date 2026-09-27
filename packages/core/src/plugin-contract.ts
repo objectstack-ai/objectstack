@@ -43,8 +43,8 @@ import type { Plugin } from './types.js';
  * - `staticPath` — a non-string.
  * - `slug` — a non-string, or not matching `/^[a-z0-9-_]+$/`.
  * - `default` — a non-boolean.
- * - `version` — a non-string, or a string outside the SemVer 2.0.0 grammar
- *   `/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/`.
+ * - `version` — a non-string, or a string outside SemVer 2.0.0
+ *   (`SEMVER_2_0_0_VERSION_PATTERN`, `@objectstack/spec/kernel`).
  * - `description` — a non-string.
  * - `author` — a non-string; an object such as `{ name }` is refused.
  * - `homepage` — a non-string, or a string that is not a URL.
@@ -124,19 +124,27 @@ import type { Plugin } from './types.js';
  * This function used to filter `version` issues out. It did so because the two
  * declarations disagreed: `PluginSchema.version` was `/^\d+\.\d+\.\d+$/` and
  * refused the prerelease and build-metadata forms SemVer 2.0.0 defines, while
- * `PluginLoader.isSemverShapedVersion` — the check the loader has always run —
- * implemented the full grammar and accepted them. Enforcing the narrow spelling
+ * `PluginLoader`'s own predicate — the check the loader has always run —
+ * implemented a wider grammar and accepted them. Enforcing the narrow spelling
  * would have RETIRED a pinned capability under a card that ruled on `type`, so
  * the disagreement was declared here rather than performed.
  *
  * #16365 settled it in `packages/spec`, the direction its triage ruled: the
- * SPEC widened. `PluginSchema.version` now carries the loader's grammar
- * character for character, so the filter had nothing left to filter and is
- * gone. ⭐ The widening is a strict SUPERSET of the regex it replaced, so
- * admitting `version` to this function's reach refused NOTHING that loaded
- * before — the direct measurement is that the three versions group E and group
- * G pin (`1.0.0-alpha.1`, `1.0.0+20230101`, `0.0.0-fixture`) still load, on
- * both kernels, with the filter removed.
+ * SPEC widened. `PluginSchema.version` took the loader's grammar character for
+ * character, so the filter had nothing left to filter and is gone. ⭐ That
+ * widening was a strict SUPERSET of the regex it replaced, so admitting
+ * `version` to this function's reach refused NOTHING that loaded before — the
+ * direct measurement is that the three versions group E and group G pin
+ * (`1.0.0-alpha.1`, `1.0.0+20230101`, `0.0.0-fixture`) still load, on both
+ * kernels, with the filter removed.
+ *
+ * Both sides then moved together again, and still cannot drift: the canon for
+ * this concept is SemVer 2.0.0, and schema and loader reference the one
+ * exported `SEMVER_2_0_0_VERSION_PATTERN`. That move narrowed the pair on the
+ * eight degenerate strings the standard forbids — leading zeroes in the numeric
+ * core, empty and leading-zero identifiers, empty build metadata — and on
+ * nothing else, so the three pins above still load and the widen-never-narrow
+ * property #16365 protected (no valid prerelease refused) is intact.
  *
  * What did NOT converge, deliberately: the loader's STRUCTURAL checks. On
  * `ObjectKernel`, `validatePluginStructure` judges `version` before this

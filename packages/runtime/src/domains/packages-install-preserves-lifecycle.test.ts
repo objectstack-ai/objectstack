@@ -265,7 +265,12 @@ describe('#18877 — 「有旗 = 设置」: a PRESENT flag sets the state in bot
     it('⛔ the BARE body form still sets nothing — no schema declares the key there', async () => {
         // `PackageInstallBodySchema`'s bare branch is `ManifestSchema`, a strict
         // close with no `enableOnInstall` key. Honouring it here would enforce
-        // something no schema declares, so a bare body is always 「缺省」.
+        // something no schema declares.
+        //
+        // [#19328] The door now parses the whole body, so this body is REFUSED
+        // (`400`) instead of installed with the key ignored. What this case
+        // exists for is unchanged and still asserted: the operator's disable
+        // stands, in the registry and on disk — the bare key set nothing.
         const id = 'com.acme.setflag.bare';
         const ns = 'setflagbare';
 
@@ -277,8 +282,9 @@ describe('#18877 — 「有旗 = 设置」: a PRESENT flag sets the state in bot
             '', 'POST', { ...manifest(id, ns), enableOnInstall: true }, { overwrite: 'true' }, PKG_ADMIN(),
         );
 
-        expect(forced.response?.status).toBe(201);
-        expect(forced.response?.body?.data?.enabled, 'the bare key is not read, so this install asked for nothing').toBe(false);
+        expect(forced.response?.status).toBe(400);
+        expect(forced.response?.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(boot.registry.getPackage(id)?.enabled, 'the bare key set nothing — the operator\'s disable stands').toBe(false);
         expect(persistedDisabled().has(id)).toBe(true);
     });
 });

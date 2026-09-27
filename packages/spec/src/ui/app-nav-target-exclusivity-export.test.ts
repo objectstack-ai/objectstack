@@ -1,8 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16714] `objectNavTargetExclusivity` is EXPORTED, and the export IS the
- * check the navigation door runs — the spec half of the objectui mirror gap.
+ * `objectNavTargetExclusivity` is EXPORTED, and the export IS the check the
+ * navigation door runs — the spec half of the objectui mirror gap. Decided
+ * and landed in commit 4cfc93b802 (PR #16862 is a convenience link beside
+ * that sha, not the citation): export the guard so a mirror chains the
+ * schema's own rule, state no precedence order in the `filters` docblock,
+ * and move no schema's accept set.
  *
  * Why: objectui's `NavigationItemSchema` is hand-written (not `.shape`-derived,
  * so the #16489 mechanism does not reach it) and its own `superRefine` checks
@@ -240,8 +244,9 @@ describe('the mount — the union branch carries the check, the exported ObjectN
     expect(vectorOf(runExport, matrix)).not.toBe(vectorOf(() => [], matrix));
   });
 
-  it('ObjectNavItemSchema carries no object-level check — the export moved no accept set (#16714 ruling)', () => {
-    // Deliberate non-change: which schema mounts the check is a separate
+  it('ObjectNavItemSchema carries no object-level check — the export deliberately moved no accept set', () => {
+    // Deliberate non-change, decided with the export itself (commit
+    // 4cfc93b802): which schema mounts the check is a separate
     // question from whether a mirror can chain it, and it is NOT decided by
     // this export. A later ruling that mounts the guard on the exported
     // schema flips this pin on purpose; until then every fixture on the
