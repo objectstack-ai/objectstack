@@ -297,8 +297,8 @@ describe('object-graph — packagesOf (#20206, ruling A on #15293 `5634034754`)'
   // `packages` is declared `z.array(ArtifactPackageSchema).optional()` — array
   // or absent, never map-or-array like `objects`/`sections`/`tabs`. A PRESENT
   // non-array `packages` ({}, 0, 'x', a keyed object) is malformed, not
-  // absent, and every reader refuses it. This is the ONE reader the four
-  // `packages/lint` call sites now share, replacing four private copies of
+  // absent, and every reader refuses it. This is the ONE reader the five
+  // `packages/lint` call sites now share, replacing five private copies of
   // `recordsOf(stack.packages)`.
 
   it('CONTROL — an array is read exactly as `recordsOf` read it: iterated, junk dropped', () => {

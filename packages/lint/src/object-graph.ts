@@ -225,9 +225,8 @@ export type StackPackagesError = Error & { code: string; status: number };
 
 /**
  * Every entry of `stack.packages` — the release artifact's package list
- * (ADR-0130 D4) — read the way {@link resolveArtifactPackageOrder}
- * (`@objectstack/core`) reads it, ⛔ NOT the way {@link recordsOf} reads
- * `objects` / `sections` / `tabs`.
+ * (ADR-0130 D4) — read on `packages/lint`'s own terms, ⛔ NOT the way
+ * {@link recordsOf} reads `objects` / `sections` / `tabs`.
  *
  * `packages` is declared `z.array(ArtifactPackageSchema).optional()`
  * (`ObjectStackDefinitionSchema`, `@objectstack/spec`) — array-or-absent,
@@ -242,22 +241,27 @@ export type StackPackagesError = Error & { code: string; status: number };
  * - **Absent** (`undefined` ONLY) → `[]`. A single-package artifact
  *   contributes nothing here — this answers "what does `packages[]` add",
  *   never "what does this stack provide". `null` is malformed, per ruling
- *   `5805260775` on #19926.
+ *   `5805260775` on #19926 — for `null` specifically, that disagrees with
+ *   {@link resolveArtifactPackageOrder} (`@objectstack/core`), which on
+ *   `main` still reads `null` as absent; the two readers align once #19926
+ *   (PR #20228) lands.
  * - **An array** → iterated, non-record members dropped — unchanged from
- *   what every one of these four call sites did through `recordsOf` before
+ *   what every one of these five call sites did through `recordsOf` before
  *   this function existed.
  * - **Anything else present, `null` included** → refused, once, here —
- *   replacing four copies of the same read across
- *   `validate-object-references.ts` and `validate-translation-references.ts`
- *   (#20206).
+ *   replacing five copies of the same read across
+ *   `validate-object-references.ts`, `validate-translation-references.ts`
+ *   and `validate-mapping-target-fields.ts` (#20206).
  *
  * ⛔ Do not fold this into `recordsOf` itself (#20206's card): that reader
  * stays the shared map-or-array reader its other callers need.
  *
  * @throws A {@link StackPackagesError} — `code: 'INVALID_ARTIFACT_PACKAGES'`,
- *   `status: 422`, the SAME registered code `resolveArtifactPackageOrder`
- *   raises for the identical defect on the assembled artifact — never a new
- *   one.
+ *   `status: 422` — for a present non-array `packages` OTHER than `null`,
+ *   the SAME registered code {@link resolveArtifactPackageOrder} already
+ *   raises for the identical defect on the assembled artifact; for `null`,
+ *   only once #19926 (PR #20228) lands does core raise it too. Never a new
+ *   code, either way.
  */
 export function packagesOf(stack: unknown): AnyRec[] {
   const declared = (stack as { packages?: unknown } | null | undefined)?.packages;
@@ -270,8 +274,9 @@ export function packagesOf(stack: unknown): AnyRec[] {
     'A stack\'s `packages` must be an array of package entries (ADR-0130 D4, '
     + '`ArtifactPackageSchema`), but this stack carries `packages` of type '
     // `typeof null` is `'object'`, which would name a `{}` the author never
-    // wrote; `null` is named as itself (matching `resolveArtifactPackageOrder`
-    // in `@objectstack/core`).
+    // wrote; `null` is named as itself here — the naming #19926 (PR #20228)
+    // gives `resolveArtifactPackageOrder` once it lands, adopted early by
+    // this reader.
     + `${declared === null ? 'null' : typeof declared}. Omit the key entirely for a `
     + 'single-package stack — `manifest` is retained, not replaced.',
   ) as StackPackagesError;

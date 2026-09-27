@@ -1359,16 +1359,21 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/lint': [
     // [#20206] `packagesOf` (`object-graph.ts`) refuses a present non-array
-    // `stack.packages` ({}, 0, 'x', a keyed object, `null`) with the SAME
-    // registered code `@objectstack/core`'s `resolveArtifactPackageOrder`
-    // raises for the identical defect on an assembled artifact (ruling A on
-    // #15293 `5634034754`; the `null` leg is ruling A on #19926 `5805260775`)
-    // — deliberately reused, never minted, so an author sees one code
-    // regardless of which reader catches the malformed shape first. `door:
-    // 'none'`, the #16449 reading: `packages/lint`'s rules are pure
-    // `(stack) => Finding[]` functions called from `os validate` / `os lint`
-    // / `os build` (`packages/cli`), never through an HTTP boundary — the
-    // same posture `@objectstack/spec`'s own `STACK_*` rows above record.
+    // `stack.packages` ({}, 0, 'x', a keyed object, `null`) — for every shape
+    // OTHER than `null`, with the SAME registered code `@objectstack/core`'s
+    // `resolveArtifactPackageOrder` already raises for the identical defect
+    // on an assembled artifact (ruling A on #15293 `5634034754`). For `null`
+    // (ruling A on #19926 `5805260775`), core still reads it as absent on
+    // `main`; core raises this code for `null` too only once #19926 (PR
+    // #20228) lands — deliberately reused either way, never minted, so an
+    // author sees one code regardless of which reader catches the malformed
+    // shape first. `door: 'none'`, the #16449 reading: `packages/lint`'s
+    // rules are pure `(stack) => Finding[]` functions, reachable only from
+    // `os lint` (`packages/cli`) — `os validate` / `os build` refuse a
+    // malformed `packages` earlier, at `ObjectStackDefinitionSchema.safeParse`,
+    // before these rules ever run — never through an HTTP boundary either
+    // way, the same posture `@objectstack/spec`'s own `STACK_*` rows above
+    // record.
     'INVALID_ARTIFACT_PACKAGES',
   ],
 } as const satisfies Record<string, readonly string[]>;
