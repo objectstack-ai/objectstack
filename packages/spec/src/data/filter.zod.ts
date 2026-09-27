@@ -1742,7 +1742,7 @@ function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
  *   with no `$` key. The drivers' flag checks stop at the same place. The
  *   analytics `where` door does descend a nested relation (it flattens one to a
  *   dotted member), so those positions belong to the analytics carriers' own
- *   walk (`refuseNestedRelationComparands`, `../ui/dataset.zod.ts`), which
+ *   walk (`refuseNestedRelationComparands`, `../ui/analytics-carrier-filter.ts`), which
  *   asks the same function — never to this shared walk, which every other
  *   carrier reads.
  *

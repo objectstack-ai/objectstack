@@ -10,7 +10,7 @@
  *   `$and` / `$or` / `$not` member — the shared comparand face's reach, which
  *   every schema carrying a `FilterCondition` gets;
  * - the analytics carriers' nested-relation walk
- *   (`refuseNestedRelationComparands`, `../ui/dataset.zod.ts`), over the
+ *   (`refuseNestedRelationComparands`, `../ui/analytics-carrier-filter.ts`), over the
  *   entries INSIDE a nested-relation condition, which the analytics `where`
  *   door flattens to dotted members and judges like any other entry.
  *
