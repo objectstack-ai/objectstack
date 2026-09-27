@@ -6,6 +6,7 @@
  * Tier S pull request lands on, and the copyable record they read.
  *
  *   node scripts/pm/record-recognisers.mjs --template   # the record, copyable; no network
+ *   node scripts/pm/record-recognisers.mjs --brief-template   # the reviewer's brief, read-only shape built in; no network
  *   node scripts/pm/record-recognisers.mjs --self-test  # offline, no network
  *   node scripts/pm/record-recognisers.mjs --help       # this usage; no network
  *
@@ -20,10 +21,12 @@
  *   locateReviewOfRecord     the record on this head, on the PR thread or its card
  *   deliveredCardNumber      which card thread a pull request's record may sit on
  *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it
+ *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
  *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
+ *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
  *
  * Every definition below was MOVED, names unchanged, out of
  * `check-clause2-carriers.mjs` at the ruling's last step, which deleted the
@@ -78,7 +81,7 @@ import {
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
 // declared tier and a served one differ unnoticed (#17915).
-import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
+import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME } from './dispatch-gates.mjs';
 // How an unreadable `Served-tier:` line is quoted back — the declaration
 // line's own quoting helper, one spelling for both.
 import { quoteLine } from './clause2-line.mjs';
@@ -389,8 +392,13 @@ export function servedStampsHold(stamps) {
  * DECLARATION plus its `N/N` stamp control, and both survive the rename.
  *
  * ⛔ Still EXACT: this is the one accepted token, no family and no prefix floor.
+ *
+ * Declared beside the constant it names, in `dispatch-gates.mjs`, and
+ * RE-EXPORTED here: the claim reader there compares a claim's `model:` value
+ * against the same token, and two spellings of one name in two files is the
+ * drift this file refuses one family over.
  */
-export const CONTRACT_REVIEW_TIER_NAME = 'CONTRACT_REVIEW_TIER';
+export { CONTRACT_REVIEW_TIER_NAME };
 
 /**
  * The id form of a model name -- the word claude, a hyphen, a model word.
@@ -462,6 +470,62 @@ export function readServedTier(text) {
   return { state: 'missing', stamps: null };
 }
 
+/**
+ * The `Local-runs:` key line -- the FOURTH provenance fact a verdict declares
+ * about itself: whether the round that rendered it ran anything locally.
+ *
+ * ⭐ The rule it makes visible is the review's read-only shape (the skill's
+ * contract-review reference: only the diff and the card are read, the check
+ * conclusions come from the head's check-runs, and the derived gate families
+ * are ⛔ never re-run locally). Measured on one shift: hand-written briefs
+ * told reviewers to open worktrees and re-run pins, ablations and type checks,
+ * at 250k to 430k tokens per review, and no line on any record showed it. The
+ * line carries `none` -- the shape held -- or `probe — REASON`, naming the ONE
+ * local run the rule was broken for and why; a probe with no reason names no
+ * deviation and is unreadable.
+ *
+ * ⛔ ABSENT IS NOT RE-JUDGED. Records written before this line existed carry no
+ * line, and they are landed records: a reader that refused them would re-open
+ * three PASS verdicts over a line nobody had been asked to write. So `missing`
+ * STANDS, `read` stands, and only a line that is present and cannot be graded
+ * refuses -- the one direction in which a new line can be added to a record
+ * without re-judging the corpus.
+ *
+ * ⛔ The key is read anywhere in the comment, on its own line, for the reason
+ * `Served-tier:` is: refusing a correct record over its position is the
+ * false-positive direction.
+ */
+const LOCAL_RUNS_LINE = keyLineRegex('Local-runs');
+
+/** `probe`, a separator (an em dash, a hyphen pair, a hyphen or a colon), then the reason -- which must be there. */
+const LOCAL_RUNS_PROBE = /^probe\b[ \t]*(?:—|--|-|:)?[ \t]*(.*)$/i;
+
+/**
+ * What one comment declares about its local runs.
+ *
+ * @returns {{ state: 'missing' }
+ *          | { state: 'unreadable', line: string }
+ *          | { state: 'read', value: 'none', reason: null }
+ *          | { state: 'read', value: 'probe', reason: string }}
+ */
+export function readLocalRuns(text) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const m = LOCAL_RUNS_LINE.exec(line);
+    if (!m) continue;
+    const rest = stripValueDecoration(m[1]).replace(/(?:[ \t]|\*\*|`)+$/, '');
+    if (/^none$/i.test(rest)) return { state: 'read', value: 'none', reason: null };
+    const probe = LOCAL_RUNS_PROBE.exec(rest);
+    if (probe && probe[1].trim().length > 0) return { state: 'read', value: 'probe', reason: probe[1].trim() };
+    return { state: 'unreadable', line: quoteLine(line) };
+  }
+  return { state: 'missing' };
+}
+
+/** Does the `Local-runs:` reading STAND? Missing stands (not re-judged); read stands; unreadable does not. */
+export function localRunsStand(reading) {
+  return reading?.state === 'missing' || reading?.state === 'read';
+}
+
 // ---------------------------------------------------------------------------
 // The record TEMPLATE — the one machine-read artefact with nothing to copy (#18042)
 // ---------------------------------------------------------------------------
@@ -528,6 +592,7 @@ export function contractReviewRecordLines(values = {}) {
     '',
     `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``,
     `Head-sha: \`${headSha}\``,
+    'Local-runs: none',
     '',
     '### ① Derived judgments',
     '',
@@ -694,6 +759,10 @@ export function contractReviewTemplateLines(values = {}) {
     '                    at-tier/total stamp control may precede it — 75/75, then the constant.',
     '  · Head-sha        the head you reviewed, 7 to 40 hex in a span of ITS OWN; a span holding',
     '                    the key as well is not a sha, and the record then names no head.',
+    '  · Local-runs      `none` — the read-only shape held (the diff, the card and the head\'s check-runs;',
+    '                    nothing built, run or re-run locally); or `probe — REASON`, naming the ONE local run',
+    '                    the rule was broken for. A record without the line predates it and is not re-judged;',
+    '                    a line present that reads neither is refused before the write.',
     '  · Implemented-by  the identity that produced the diff, read off the implementation claim:',
     "                    a mode:subagent dev's BRANCH, a mode:remote dev's session id.",
     '  · Reviewed-by     the session that RENDERS or ADOPTS the verdict — a session only. Prose',
@@ -704,6 +773,71 @@ export function contractReviewTemplateLines(values = {}) {
     '  ⛔ And keep angle brackets out of what you paste: the body sanitizer eats tag-shaped',
     '     fragments, backticked ones included, so a field spelled that way is stored short and',
     '     read as absent.',
+  ];
+}
+
+/** Where the brief's copyable region starts and ends. */
+export const BRIEF_TEMPLATE_FENCE_START = '----- copy from here; replace the four placeholders -----';
+export const BRIEF_TEMPLATE_FENCE_END = '----- to here -----';
+
+/** The placeholders the printed brief ships with — the four slots a seat fills. */
+export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
+  pr: 'PR-NUMBER',
+  card: 'CARD-NUMBER',
+  headSha: RECORD_TEMPLATE_PLACEHOLDERS.headSha,
+  scratchpad: 'SCRATCHPAD',
+});
+
+/**
+ * What `--brief-template` prints: the brief a seat hands its contract reviewer,
+ * with the review's READ-ONLY shape built in.
+ *
+ * ⭐ Why a template and not the rule: `references/contract-review.md` states
+ * the shape in one line (only the diff and the card are read; the check
+ * conclusions come from the head's check-runs; the derived gate families are
+ * ⛔ never re-run locally), and a seat writing the brief by hand dropped it —
+ * measured on one shift, reviewers were told to open worktrees and re-run
+ * pins, ablations and type checks, at 250k to 430k tokens per review. A brief
+ * that carries the ⛔ lines cannot drop them by omission, and the record it
+ * asks for carries `Local-runs:`, so a deviation from the shape is written
+ * down where `readLocalRuns` reads it.
+ *
+ * ⭐ Adversarial by construction, as the rule asks (「简报写成对抗性」): the
+ * inputs are the card, the PR and the check-runs — ⛔ not the dispatch order and
+ * ⛔ not the dispatching seat's conclusions. The record's own template is named
+ * rather than restated, so the two cannot drift.
+ */
+export function contractReviewBriefLines(values = {}) {
+  const { pr, card, headSha, scratchpad } = { ...BRIEF_TEMPLATE_PLACEHOLDERS, ...values };
+  return [
+    'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
+    "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
+    '',
+    BRIEF_TEMPLATE_FENCE_START,
+    `## Contract review brief — PR #${pr} @ \`${headSha}\` (card #${card})`,
+    '',
+    `You review at \`${CONTRACT_REVIEW_TIER_NAME}\`. Render ONE \`## Contract review\` record on this head — its shape is`,
+    '`node scripts/pm/record-recognisers.mjs --template` — with a PASS or FAIL verdict, and post it as ONE comment',
+    `on ${REVIEW_OF_RECORD_LOCATION}.`,
+    '',
+    'Inputs — these and nothing else:',
+    `  · card #${card}: its body and EVERY comment (rulings and earlier records included)`,
+    `  · PR #${pr}: its body, its file list, and the net diff against \`main\` at \`${headSha}\``,
+    `  · the check-runs on \`${headSha}\`: their conclusions ARE the gate verdicts`,
+    "⛔ Not the dispatch order, ⛔ not the dispatching seat's own conclusions — this brief is adversarial by design.",
+    '',
+    '⛔ READ-ONLY. No worktree, no checkout, no build, no test run, no gate re-run, no ablation: the check-runs',
+    '   on the head already answered every derived gate family, and a local run costs more than it returns.',
+    "   If ONE probe is unavoidable, the record's `Local-runs:` line says `probe — REASON`; otherwise `none`.",
+    `   Scratch space is \`${scratchpad}/pr-${pr}/\` alone; nothing there you did not write this round is read.`,
+    '',
+    "Judge, in the record's own sections:",
+    '  ① Derived judgments — every accept-set and public-surface change the diff implies, each named right or wrong.',
+    '  ② Semver level — the changeset (or `skip-changeset`) matches what the diff publishes, and the `Clause-②:` line.',
+    '  ③ Boundary flags — every dev flag and every `open_questions` entry answered, or escalated.',
+    "Sign `Implemented-by:` with the dev's branch and `Reviewed-by:` with your session id — the value is the FIRST",
+    'thing after each colon.',
+    BRIEF_TEMPLATE_FENCE_END,
   ];
 }
 
@@ -847,11 +981,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 19,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
+  'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
+  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1074,6 +1210,26 @@ export async function selfTest() {
   t('…and the delta is read ONCE PER HEAD against `merge-base BASE head`, ⛔ never once per path', GIT_SEEN.includes(`merge-base ${BASE} ${HEAD_9AF9}`) && GIT_SEEN.includes(`diff -z --name-only mb-${NEW_HEAD} ${NEW_HEAD}`), GIT_SEEN.slice(-4).join(' | '));
   t('⛔ (iv) a run naming NO base ref cannot tell main\'s carry-over from a hand edit — UNREADABLE, ⛔ never clean', (() => { const r = regenCarry(withGit(GIT(CARRY_OVER), { baseRef: null })); return r.state === 'unreadable' && r.gaps.some((g) => g.includes('base ref')); })());
 
+  // -- the `Local-runs:` reading ---------------------------------------------
+  //
+  // Judged when present, and ONLY then: the three landed PASS records of the
+  // day this line was added carry no line, and a reader that refused them
+  // would re-open verdicts over a line nobody had been asked to write.
+  battery('the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged');
+  const LR = (value) => `## Contract review\n\nServed-tier: \`${CONTRACT_REVIEW_TIER_NAME}\`\nLocal-runs: ${value}\n\n**VERDICT: PASS**`;
+  t('⭐ `none` reads, and stands', readLocalRuns(LR('none')).value === 'none' && localRunsStand(readLocalRuns(LR('none'))));
+  t('⭐ `probe — REASON` reads as a probe carrying its reason, and stands', (() => { const r = readLocalRuns(LR('probe — re-ran the one pin the check-run log truncated')); return r.value === 'probe' && r.reason === 're-ran the one pin the check-run log truncated' && localRunsStand(r); })());
+  t('⛔ ABSENT stands and is NOT re-judged — the landed records carry no line', readLocalRuns(RECORD_ON_9AF9.body).state === 'missing' && localRunsStand(readLocalRuns(RECORD_ON_9AF9.body)));
+  t('⛔ a probe with NO reason names no deviation — unreadable, and does not stand', readLocalRuns(LR('probe')).state === 'unreadable' && !localRunsStand(readLocalRuns(LR('probe'))) && readLocalRuns(LR('probe —')).state === 'unreadable');
+  t('⛔ any other word is unreadable, never a reading — the two values are the closed set', readLocalRuns(LR('yes')).state === 'unreadable' && readLocalRuns(LR('re-ran everything')).state === 'unreadable' && !localRunsStand(readLocalRuns(LR('yes'))));
+  t('⛔ an EMPTY value is started-and-unreadable, not missing', readLocalRuns(LR('')).state === 'unreadable');
+  t('decoration reads: a backticked `none`, a bulleted bolded key, a blockquoted line', readLocalRuns(LR('`none`')).value === 'none' && readLocalRuns('- **Local-runs:** none').value === 'none' && readLocalRuns('> Local-runs: `probe — one pin`').value === 'probe');
+  t('the separator is any of the four spellings, and the reason is what follows it', ['probe — r', 'probe -- r', 'probe - r', 'probe: r'].every((v) => readLocalRuns(LR(v)).reason === 'r'));
+  t('the value compares case-insensitively — `None` and `PROBE` read', readLocalRuns(LR('None')).value === 'none' && readLocalRuns(LR('PROBE — r')).value === 'probe');
+  t('the unreadable line is quoted back through the shared quoting helper, key included', readLocalRuns(LR('maybe')).line.includes('Local-runs') && readLocalRuns(LR('maybe')).line.includes('maybe'));
+  t('the key is ONE regex, built by the one key-line convention — never a second spelling', LOCAL_RUNS_LINE.source === keyLineRegex('Local-runs').source);
+  t('prose naming the key mid-sentence is not the line — the declaration is line-initial', readLocalRuns('the Local-runs: line goes here').state === 'missing');
+
   // -- #18042: the copyable record TEMPLATE ----------------------------------
   //
   // `references/contract-review.md` DESCRIBES the record in prose and once
@@ -1102,6 +1258,8 @@ export async function selfTest() {
   t('the stamp control the rule line traded away survives HERE, where the author copies from', says(TPL_TEXT, '75/75'));
   t('⛔ no angle bracket anywhere in the output — the body sanitizer eats tag-shaped placeholders', !TPL_TEXT.includes('<') && !TPL_TEXT.includes('>'));
   t('⛔ nor an unfilled MENU in the record — one value per slot, never a `yes|no` shape', !TPL_RECORD.includes('|'));
+  t('⭐ the record carries `Local-runs: none` — the read-only shape, declared where the reader reads it', TPL_RECORD.includes('Local-runs: none') && readLocalRuns(TPL_RECORD).value === 'none' && localRunsStand(readLocalRuns(TPL_TEXT)));
+  t('…and the notes explain both values and that an absent line is not re-judged', says(TPL_TEXT, 'probe — REASON') && says(TPL_TEXT, 'not re-judged'));
   t('the printed location is the ONE thread set\'s own words', says(TPL_TEXT, `ONE comment on ${REVIEW_OF_RECORD_LOCATION};`));
   // The branch placeholder is ASSEMBLED in the module body so the derivation
   // does not read it as a dead path population. This pin spells the printed
@@ -1116,6 +1274,29 @@ export async function selfTest() {
   const refused = cli(['--pair', '13910']);
   t('⛔ an argument this file does not honour is REFUSED with the usage, exit 1 — never a silent 0', refused.status === 1 && says(refused.stderr, 'usage: node scripts/pm/record-recognisers.mjs') && says(refused.stderr, '--pair 13910'), `status ${refused.status}`);
   t('`--help` prints the same usage on stdout and exits 0', (() => { const h = cli(['--help']); return h.status === 0 && h.stdout === `${usageLines().join('\n')}\n`; })());
+
+  // -- the reviewer BRIEF template -------------------------------------------
+  //
+  // The read-only shape lives in one rule line, and a hand-written brief
+  // dropped it for a whole shift. A brief printed from the file that reads the
+  // record cannot drop it, and it names the record's template instead of
+  // restating it.
+  battery('the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed');
+  const BRIEF_TEXT = contractReviewBriefLines().join('\n');
+  const BRIEF_BODY = BRIEF_TEXT.slice(BRIEF_TEXT.indexOf(BRIEF_TEMPLATE_FENCE_START) + BRIEF_TEMPLATE_FENCE_START.length, BRIEF_TEXT.indexOf(BRIEF_TEMPLATE_FENCE_END));
+  t('⭐ the brief carries the READ-ONLY rule in the ⛔ form: no worktree, no build, no test run, no gate re-run, no ablation', says(BRIEF_BODY, '⛔ READ-ONLY') && ['No worktree', 'no checkout', 'no build', 'no test run', 'no gate re-run', 'no ablation'].every((s) => says(BRIEF_BODY, s)));
+  t('…and says the check-runs on the head ARE the gate verdicts', says(BRIEF_BODY, 'check-runs') && says(BRIEF_BODY, 'ARE the gate verdicts'));
+  t('…and is adversarial: not the dispatch order, not the dispatching seat\'s conclusions', says(BRIEF_BODY, 'Not the dispatch order') && says(BRIEF_BODY, "dispatching seat's own conclusions"));
+  t('…and names the record\'s `Local-runs:` line with both values, so a deviation is written where `readLocalRuns` reads it', says(BRIEF_BODY, 'Local-runs:') && says(BRIEF_BODY, 'probe — REASON') && says(BRIEF_BODY, '`none`'));
+  t('…and points at `--template` for the record rather than restating it, and at the ONE thread set for where it lands', says(BRIEF_BODY, 'record-recognisers.mjs --template') && says(BRIEF_BODY, REVIEW_OF_RECORD_LOCATION));
+  t('…and scopes scratch to the PR-named directory, reading nothing not written this round', says(BRIEF_BODY, '/pr-') && says(BRIEF_BODY, 'did not write this round'));
+  t('the tier is named by the constant\'s NAME — and no model identifier anywhere in the output', says(BRIEF_BODY, CONTRACT_REVIEW_TIER_NAME) && !isModelIdentifierToken(BRIEF_TEXT));
+  t('⛔ no angle bracket anywhere in the output — the body sanitizer eats tag-shaped placeholders', !BRIEF_TEXT.includes('<') && !BRIEF_TEXT.includes('>'));
+  t('the four placeholders are all in the fenced region, and are words, not digits a reader could mistake for a real number', Object.values(BRIEF_TEMPLATE_PLACEHOLDERS).every((p) => BRIEF_BODY.includes(p)) && !/#\d/.test(BRIEF_BODY));
+  t('filled in, the placeholders are gone and the values are there', (() => { const b = contractReviewBriefLines({ pr: 20254, card: 20188, headSha: 'a'.repeat(40), scratchpad: '/tmp/s' }).join('\n'); return b.includes('PR #20254') && b.includes('card #20188') && b.includes('/tmp/s/pr-20254/') && !b.includes('PR-NUMBER') && !b.includes('CARD-NUMBER'); })());
+  const printedBrief = cli(['--brief-template']);
+  t('⭐ `--brief-template` prints exactly `contractReviewBriefLines()` and exits 0', printedBrief.status === 0 && printedBrief.stdout === `${contractReviewBriefLines().join('\n')}\n`, `status ${printedBrief.status} ${String(printedBrief.stderr).split('\n')[0]}`);
+  t('…and the usage names it', usageLines().join('\n').includes('--brief-template'));
 
   // -- #18701: ONE thread set -- what the template STATES, the guard READS -----
   //
@@ -1251,7 +1432,9 @@ export async function selfTest() {
       + 'of its own; the `Served-tier:` reading — at tier, below, missing, unreadable, the identifier refused by '
       + 'value and by shape, the stamp control and the measured continuation spelling; the pure-regeneration '
       + 'carry decided on committed trees in every direction; the copyable template driven back through the '
-      + 'locator and printed by `--template`; and the ONE thread set, driven through the queue guard itself).',
+      + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
+      + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; and the ONE '
+      + 'thread set, driven through the queue guard itself).',
   );
 
   selfTestReachedVerdict = true;
@@ -1264,14 +1447,15 @@ export async function selfTest() {
 // ---------------------------------------------------------------------------
 
 /**
- * The usage text. Three flags and nothing else: this file judges no pull
+ * The usage text. Four flags and nothing else: this file judges no pull
  * request from the command line — the queue guard does that, in the merge group.
  */
 export function usageLines() {
   return [
-    'usage: node scripts/pm/record-recognisers.mjs [--template] [--self-test] [--help]',
+    'usage: node scripts/pm/record-recognisers.mjs [--template] [--brief-template] [--self-test] [--help]',
     '',
     '  --template   print the copyable contract-review record and exit 0 -- no board is read',
+    "  --brief-template   print the copyable reviewer's brief, read-only shape built in, and exit 0 -- no board is read",
     "  --self-test  run this file's own battery, offline -- no board is read",
     '  --help, -h   print this text and exit 0',
     '',
@@ -1307,6 +1491,9 @@ if (isEntrypoint(import.meta.url)) {
     );
   } else if (argv.length === 1 && argv[0] === '--template') {
     for (const line of contractReviewTemplateLines()) console.log(line);
+    process.exit(0);
+  } else if (argv.length === 1 && argv[0] === '--brief-template') {
+    for (const line of contractReviewBriefLines()) console.log(line);
     process.exit(0);
   } else if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
     for (const line of usageLines()) console.log(line);

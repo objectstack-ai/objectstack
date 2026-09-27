@@ -85,18 +85,23 @@
  *
  * ## Scope — three boundaries, each ruled rather than chosen here
  *
- * - **Non-empty strings only.** The empty-string cell stays its own card by
- *   ruling ("B and C scope to non-empty strings and must not decide it in
- *   passing"); measured, `$gte ""` binds as `''` and returns every non-null row
- *   — 51 of 51, not the 38 the card's table records, which is a transcription
- *   error its own prose corrects.
+ * - **Non-empty strings only, among strings.** The empty-string cell stays its
+ *   own card by ruling ("B and C scope to non-empty strings and must not decide
+ *   it in passing"); measured, `$gte ""` binds as `''` and returns every
+ *   non-null row — 51 of 51, not the 38 the card's table records, which is a
+ *   transcription error its own prose corrects.
  * - **`{placeholder}` strings are stepped around**, not judged. This gate runs
  *   BEFORE `resolveWhereTokens` (which is where it must run — the refusal has
  *   to precede the driver), so judging one would refuse `{30_days_ago}`, the
  *   platform's own correct spelling. Unknown tokens keep their existing loud
  *   refusal one layer down.
- * - **Non-string comparands are not judged.** A number is epoch milliseconds
- *   and a `Date` is an instant; both are read correctly today.
+ * - **Non-string comparands are not judged, save one class.** A number is
+ *   epoch milliseconds and a `Date` is an instant; the `datetime` and `time`
+ *   rules read both. [#20240] On a `date` field, one whose UTC calendar day
+ *   falls in a year below 0 or above 9999 has no `YYYY-MM-DD` form, so it is
+ *   refused here in its own words (below); every other number and `Date` is
+ *   read as before. The #8690 ruling scoped THAT change to strings; it did not
+ *   rule non-strings out of this door.
  *
  * @see `@objectstack/core`'s `temporal-comparand.ts` — the value-half predicate,
  *   shared with the analytics raw-SQL decline so one rule cannot exist twice.
@@ -114,7 +119,11 @@ import { invalidFilterError } from './filter-comparand-shape.js';
 export interface UninterpretableTemporalComparand {
   field: string;
   kind: TemporalComparandKind;
-  value: string;
+  /**
+   * A non-empty string — or [#20240], on a `date` field, a number or `Date`
+   * whose UTC year falls outside 0..9999.
+   */
+  value: unknown;
   /** The `where.…` key path the offending comparand sits at. */
   path: string;
 }
@@ -233,12 +242,14 @@ function judgeComparand(
 ): UninterpretableTemporalComparand | null {
   if (isFieldReference(value)) return null;
   if (!isUninterpretableTemporalComparand(kind, value)) return null;
-  return { field, kind, value: value as string, path };
+  return { field, kind, value, path };
 }
 
 /** A short, bounded rendering — the comparand came off the wire (#5869's bound). */
-function preview(value: string): string {
-  const text = JSON.stringify(value);
+function preview(value: unknown): string {
+  const text = value instanceof Date
+    ? `Date ${Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString()}`
+    : typeof value === 'string' ? JSON.stringify(value) : String(value);
   return text.length > 60 ? `${text.slice(0, 59)}…` : text;
 }
 
@@ -262,6 +273,15 @@ const REMEDY: Record<TemporalComparandKind, string> = {
 };
 
 /**
+ * [#20240] The remedy for a number or `Date` on a `date` field whose day has no
+ * four-digit year: the caller holds an instant, so name the forms that carry
+ * one the field can compare.
+ */
+const DATE_YEAR_REMEDY =
+  'Write a "YYYY-MM-DD" calendar day, or an epoch-millisecond number or Date whose UTC '
+  + 'calendar day falls in a four-digit year.';
+
+/**
  * Refuse every comparand a declared temporal field's storage rule cannot read.
  *
  * Runs on the CALLER's own `where`, before the middleware chain composes
@@ -278,6 +298,21 @@ export function assertTemporalComparandsInterpretable(
 ): void {
   const hit = findUninterpretableTemporalComparand(schema, where);
   if (!hit) return;
+  // [#20240] A number or `Date` is judged on a `date` field for one reason
+  // only — its day's year has no four-digit spelling — so it gets words that
+  // say so. It does not compare false for every row as junk does: its text
+  // orders as no day does, so it answers the WRONG rows (or, on PostgreSQL, a
+  // database error).
+  if (typeof hit.value !== 'string') {
+    throw invalidFilterError(
+      `${operation}('${object}'): filter on '${hit.field}' compares a declared date field against `
+      + `${preview(hit.value)} at ${hit.path}, an instant whose UTC calendar day falls outside the `
+      + 'years 0000 to 9999, the only years a "YYYY-MM-DD" day can spell, so it is not a date value '
+      + 'this platform can interpret. It would reach the driver in a form that does not sort as a '
+      + 'day and answer the wrong rows, or a database error. The filter was NOT applied. '
+      + DATE_YEAR_REMEDY,
+    );
+  }
   throw invalidFilterError(
     `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} `
     + `field against ${preview(hit.value)} at ${hit.path}, which is not a ${hit.kind} value `

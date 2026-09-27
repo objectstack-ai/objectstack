@@ -122,8 +122,9 @@ describe('Row-Level Security (RLS) Protocol', () => {
     });
 
     it('priority is RETIRED: absent parses clean, authored rejects with the prescription', () => {
-      // Removed by the 2026-07-30 #3896 security audit: policies OR-combine
-      // (most permissive wins), so the promised "conflict resolution" cannot
+      // Removed by the 2026-07-30 #3896 security audit: no outcome depends on
+      // an order (reads OR-combine; a write's check is chosen per operation,
+      // then OR-combined), so the promised "conflict resolution" cannot
       // exist and nothing ever read the key. The tombstone keeps the removal
       // audible instead of silently stripping an authored value.
       const policy = {
@@ -724,5 +725,72 @@ describe('RowLevelSecurityPolicySchema.using — the published description (#676
   it('does not re-close the set with a fixed count of forms', () => {
     expect(description).not.toMatch(/\bfour\b/i);
     expect(description).not.toMatch(/\b(one|two|three|four|five)\s+(compiler-supported\s+)?forms\b/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The "at least one of using / check" refusal tells each operation what it
+// takes, and every prescription it gives is one the schema accepts.
+//
+// The message used to say "For SELECT/UPDATE/DELETE operations, provide
+// "using"". False for `update`: a policy that declares only `check` is legal
+// and enforced (the showcase's `invoice_owner_immutable` is one). It also
+// said an insert takes "check" and nothing else, while a USING-only `insert`
+// policy is accepted and its `using` IS the insert check when no applicable
+// policy declares one. The pins hold the message's claims to the schema's own
+// answers: each operation is named, and each clause the message offers for
+// it parses on that operation.
+// ---------------------------------------------------------------------------
+describe('RowLevelSecurityPolicySchema — the "at least one" refusal', () => {
+  const base = { name: 'p', object: 'account' };
+  const PREDICATE = "status != 'archived'";
+  const HEAD = 'At least one of "using" or "check" must be specified.';
+
+  const refusalOf = (operation: string) => {
+    const result = RowLevelSecurityPolicySchema.safeParse({ ...base, operation });
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].path).toEqual([]);
+    return issues[0].message;
+  };
+
+  const parses = (policy: Record<string, unknown>) =>
+    RowLevelSecurityPolicySchema.safeParse({ ...base, ...policy }).success;
+
+  it('keeps its head and names every operation, for every operation', () => {
+    for (const operation of ['select', 'insert', 'update', 'delete', 'all']) {
+      const message = refusalOf(operation);
+      expect(message.startsWith(HEAD), operation).toBe(true);
+      for (const named of ['select', 'insert', 'update', 'delete', 'all']) {
+        expect(message, `${operation}: names \`${named}\``).toContain(`\`${named}\``);
+      }
+      expect(message).not.toContain('For SELECT/UPDATE/DELETE operations, provide "using"');
+    }
+  });
+
+  it('select / delete take "using", and that prescription parses', () => {
+    expect(refusalOf('select')).toContain('A `select` or `delete` policy takes "using"');
+    for (const operation of ['select', 'delete']) {
+      expect(parses({ operation, using: PREDICATE }), operation).toBe(true);
+    }
+  });
+
+  it('insert takes "check", or "using" alone as its stand-in check; both parse', () => {
+    const message = refusalOf('insert');
+    expect(message).toContain('An `insert` policy takes "check"');
+    expect(message).toContain('a "using" alone is that check when no applicable insert policy declares one');
+    expect(parses({ operation: 'insert', check: PREDICATE })).toBe(true);
+    expect(parses({ operation: 'insert', using: PREDICATE })).toBe(true);
+  });
+
+  it('update / all take either or both: a check-only update policy is accepted', () => {
+    expect(refusalOf('update')).toContain('An `update` or `all` policy takes either or both');
+    for (const operation of ['update', 'all']) {
+      expect(parses({ operation, check: PREDICATE }), `${operation} check-only`).toBe(true);
+      expect(parses({ operation, using: PREDICATE }), `${operation} using-only`).toBe(true);
+      expect(parses({ operation, using: PREDICATE, check: PREDICATE }), `${operation} both`).toBe(true);
+    }
   });
 });
