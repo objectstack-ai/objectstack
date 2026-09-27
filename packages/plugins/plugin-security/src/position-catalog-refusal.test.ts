@@ -374,6 +374,57 @@ describe('every non-system write that stores a new position name is judged', () 
 });
 
 // ---------------------------------------------------------------------------
+// A position that is not a string is judged by the text it is stored as
+// ---------------------------------------------------------------------------
+
+describe('a non-string position is judged by the text it would be stored as', () => {
+  // The engine's `text` validation refuses none of these, and the write stores
+  // each one as text with 201, so they are this refusal's to judge.
+
+  it('insert: a number, a boolean, an object and an array are refused 400, reference_not_found at their stored text', async () => {
+    const h = await boot();
+    for (const [position, text] of [
+      [123, '123'],
+      [true, 'true'],
+      [{}, '{}'],
+      // Judged as its JSON text, never as String(['qa_auditor']) === 'qa_auditor',
+      // which would accept an array naming a real position that resolves nothing.
+      [['qa_auditor'], '["qa_auditor"]'],
+    ] as const) {
+      const env = envelopeOf(await refusalOf(() => h.engine.insert(
+        'sys_user_position', { user_id: 'u_ns', position }, { context: ADMIN } as any,
+      )));
+      expect([env.code, env.status], text).toEqual(['VALIDATION_FAILED', 400]);
+      expect(env.fields, text).toHaveLength(1);
+      expect(env.fields[0], text).toMatchObject({ field: 'position', code: 'reference_not_found', value: text });
+      expect(env.fields[0].message, text).toBe(positionNotInCatalogMessage(text));
+    }
+    expect(await assignmentsOf(h, 'u_ns')).toHaveLength(0);
+  });
+
+  it('update by id: a numeric and a boolean position are refused 400; the stored row is untouched', async () => {
+    const h = await boot();
+    await h.engine.insert('sys_user_position', { id: 'ups', user_id: 'u_nsu', position: 'qa_auditor' }, { context: ADMIN } as any);
+    for (const [position, text] of [[123, '123'], [true, 'true']] as const) {
+      const env = envelopeOf(await refusalOf(() => h.engine.update(
+        'sys_user_position', { id: 'ups', position }, { context: ADMIN } as any,
+      )));
+      expect([env.code, env.status], text).toEqual(['VALIDATION_FAILED', 400]);
+      expect(env.fields[0], text).toMatchObject({ field: 'position', code: 'reference_not_found', value: text });
+    }
+    expect((await assignmentsOf(h, 'u_nsu'))[0]?.position).toBe('qa_auditor');
+  });
+
+  it("update by id: 123 echoed over a stored '123' is an unchanged value, not judged", async () => {
+    const h = await boot();
+    // A row written where it is not judged (a system write), whose text names no catalog row.
+    await h.engine.insert('sys_user_position', { id: 'upe', user_id: 'u_echo', position: '123' }, { context: SYS } as any);
+    await h.engine.update('sys_user_position', { id: 'upe', position: 123, reason: 'echoed' }, { context: ADMIN } as any);
+    expect((await assignmentsOf(h, 'u_echo'))[0]).toMatchObject({ reason: 'echoed' });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Scope: what it does NOT judge, pinned so the stand-down stays deliberate
 // ---------------------------------------------------------------------------
 
@@ -540,12 +591,16 @@ describe("walled posture, two organizations — the predicate reads the WRITER's
     const env = envelopeOf(await refusalOf(() => h.engine.insert(
       'sys_user_position', { user_id: 'u_wc', position: 'pos_b_only' }, { context: ORG_A_ADMIN } as any,
     )));
+    expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(env.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found' });
     expect(env.fields[0].message).toBe(positionNotInCatalogMessage('pos_b_only'));
     expect(env.fields[0].message).not.toContain('qa_b_only');
     // … while its own organization's row is named.
     const own = envelopeOf(await refusalOf(() => h.engine.insert(
       'sys_user_position', { user_id: 'u_wc', position: 'pos_a_own' }, { context: ORG_A_ADMIN } as any,
     )));
+    expect([own.code, own.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(own.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found' });
     expect(own.fields[0].message).toBe(positionNotInCatalogMessage('pos_a_own', 'qa_a_own'));
   });
 });

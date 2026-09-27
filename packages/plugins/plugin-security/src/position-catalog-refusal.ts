@@ -62,10 +62,13 @@
  *
  * ## Which writes it judges
  *
- * - a non-system INSERT, one row or a batch — every row's `position`;
+ * - a non-system INSERT, one row or a batch — every row's `position`,
+ *   whatever its JSON type (see the stand-downs below for the text it is
+ *   judged as);
  * - a non-system UPDATE whose payload carries `position`: by id, only when the
- *   value differs from the one the row already stores (a form that echoes an
- *   unchanged value back is not writing a new name); by predicate
+ *   value's text differs from the one the row already stores (a form that
+ *   echoes an unchanged value back — `123` over a stored `'123'` included — is
+ *   not writing a new name); by predicate
  *   (`multi: true`), always, because the value lands on every matched row.
  *
  * It stands down, deliberately, on:
@@ -77,9 +80,14 @@
  *   refusal there would turn every authored assignment seed into a failed boot
  *   that succeeds on the second one. It also covers invitation acceptance and
  *   the platform's own bootstraps;
- * - a value the engine answers itself: not a string, empty, or longer than the
- *   column (`required` / `invalid_type` / `max_length`, one condition, one
- *   code);
+ * - a value the engine answers itself: `null` or a blank string (`required`),
+ *   or one whose `String()` form is longer than the column (`max_length`).
+ *   Nothing else is the engine's: its `text` validation reads `String(value)`
+ *   and refuses no number, boolean, object or array, and the write stores it
+ *   as text with `201` (measured over SQLite: `123`, `true`, `{}` and `['x']`
+ *   all stored). So those are judged by the text they are stored as — a
+ *   scalar by `String(value)`, an object or array by its JSON — and refused
+ *   like any name no catalog row carries;
  * - an update the engine refuses on its own dispatch predicate.
  *
  * ## Where it runs
@@ -187,9 +195,59 @@ function rowsOf(data: unknown): any[] {
   return [];
 }
 
-/** A value this refusal judges: a non-blank string within the column's bound. */
-function isJudgedValue(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== '' && value.length <= POSITION_MAX_LENGTH;
+/**
+ * The text a `position` value is stored as, and so the name it is judged by: a
+ * string as itself, a number, bigint or boolean as `String(value)`, an object
+ * or array as its JSON text — the form a `text` column stores it in (`{}`,
+ * `["x"]`), never `String(['x'])`, which reads `'x'` and would accept an array
+ * naming a real position that then resolves nothing. `undefined` for a value
+ * that is no JSON value at all.
+ */
+function stringForm(value: unknown): string | undefined {
+  switch (typeof value) {
+    case 'string':
+      return value;
+    case 'number':
+    case 'bigint':
+    case 'boolean':
+      return String(value);
+    case 'object': {
+      if (value === null) return undefined;
+      try {
+        const json = JSON.stringify(value);
+        if (typeof json === 'string') return json;
+      } catch {
+        // not JSON-serialisable: fall back to the engine's own reading below
+      }
+      try {
+        return String(value);
+      } catch {
+        return undefined;
+      }
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The name this refusal judges a `position` value by, or `undefined` for a
+ * value the engine answers itself: `null` and a blank string (`required`), and
+ * a value whose `String()` form is longer than the column (`max_length`, which
+ * the engine reads on `String(value)` for every type). Every other value is
+ * judged, strings or not (module note, "Which writes it judges").
+ */
+function judgedName(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  let engineForm: string;
+  try {
+    engineForm = String(value);
+  } catch {
+    return undefined;
+  }
+  if (engineForm.length > POSITION_MAX_LENGTH) return undefined;
+  return stringForm(value);
 }
 
 /**
@@ -200,7 +258,8 @@ function isJudgedValue(value: unknown): value is string {
 export async function writtenPositionNames(ql: any, opCtx: any): Promise<string[]> {
   const out: string[] = [];
   const add = (value: unknown) => {
-    if (isJudgedValue(value) && !out.includes(value)) out.push(value);
+    const name = judgedName(value);
+    if (name !== undefined && !out.includes(name)) out.push(name);
   };
 
   if (opCtx?.operation === 'insert') {
@@ -213,7 +272,8 @@ export async function writtenPositionNames(ql: any, opCtx: any): Promise<string[
   if (!data || typeof data !== 'object' || Array.isArray(data)) return out;
   if (!Object.prototype.hasOwnProperty.call(data, POSITION_FIELD)) return out;
   const next = (data as Record<string, unknown>)[POSITION_FIELD];
-  if (!isJudgedValue(next)) return out;
+  const nextName = judgedName(next);
+  if (nextName === undefined) return out;
 
   let route: ReturnType<typeof resolveEngineUpdateDispatch>;
   try {
@@ -236,7 +296,8 @@ export async function writtenPositionNames(ql: any, opCtx: any): Promise<string[
     prev = null;
   }
   if (!prev) return out;
-  if (prev[POSITION_FIELD] === next) return out;
+  // Compared as stored text, so `123` echoed over a stored `'123'` is unchanged.
+  if (stringForm(prev[POSITION_FIELD]) === nextName) return out;
   add(next);
   return out;
 }
