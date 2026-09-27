@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 207,
-    "droppedRefinementSites": 577,
+    "droppedRefinementSites": 565,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -68,7 +68,6 @@
         "manifest.objects.element",
         "manifest.objects.element.fieldGroups",
         "manifest.objects.element.fields.out.valueType",
-        "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.lifecycle",
         "manifest.pages.element",
         "manifest.pages.element.slots.header.options[0].in.type",
@@ -165,7 +164,6 @@
         "data.options[1].manifest.objects.element",
         "data.options[1].manifest.objects.element.fieldGroups",
         "data.options[1].manifest.objects.element.fields.out.valueType",
-        "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.pages.element",
         "data.options[1].manifest.pages.element.slots.header.options[0].in.type",
@@ -247,7 +245,6 @@
         "options[1].manifest.objects.element",
         "options[1].manifest.objects.element.fieldGroups",
         "options[1].manifest.objects.element.fields.out.valueType",
-        "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.pages.element",
         "options[1].manifest.pages.element.slots.header.options[0].in.type",
@@ -290,7 +287,6 @@
         "data.packages.element.options[1].manifest.objects.element",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
-        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.pages.element",
         "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out",
@@ -329,7 +325,6 @@
         "data.actions.element.in.params.element.in",
         "data.fieldGroups",
         "data.fields.out.valueType",
-        "data.fields.out.valueType.currencyConfig",
         "data.fields.out.valueType.relatedListFilter.lazy",
         "data.lifecycle",
         "data.listViews.valueType",
@@ -614,7 +609,6 @@
     "data/Field": {
       "sites": [
         "",
-        "currencyConfig",
         "relatedListFilter.lazy"
       ]
     },
@@ -702,7 +696,6 @@
         "actions.element.in.params.element.in",
         "fieldGroups",
         "fields.out.valueType",
-        "fields.out.valueType.currencyConfig",
         "fields.out.valueType.relatedListFilter.lazy",
         "lifecycle",
         "listViews.valueType",
@@ -718,7 +711,6 @@
       "sites": [
         "",
         "fields.valueType",
-        "fields.valueType.currencyConfig",
         "fields.valueType.relatedListFilter.lazy"
       ]
     },
@@ -949,7 +941,6 @@
     "system/AddFieldOperation": {
       "sites": [
         "field",
-        "field.currencyConfig",
         "field.relatedListFilter.lazy"
       ]
     },
@@ -971,7 +962,6 @@
     "system/ChangeSet": {
       "sites": [
         "operations.element.options[0].field",
-        "operations.element.options[0].field.currencyConfig",
         "operations.element.options[0].field.relatedListFilter.lazy",
         "operations.element.options[3].object",
         "operations.element.options[3].object.actions.element.in",
@@ -995,7 +985,6 @@
         "object.actions.element.in.params.element.in",
         "object.fieldGroups",
         "object.fields.out.valueType",
-        "object.fields.out.valueType.currencyConfig",
         "object.fields.out.valueType.relatedListFilter.lazy",
         "object.lifecycle",
         "object.listViews.valueType",
@@ -1030,7 +1019,6 @@
     "system/MigrationOperation": {
       "sites": [
         "options[0].field",
-        "options[0].field.currencyConfig",
         "options[0].field.relatedListFilter.lazy",
         "options[3].object",
         "options[3].object.actions.element.in",
