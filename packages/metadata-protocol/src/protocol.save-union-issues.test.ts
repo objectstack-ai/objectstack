@@ -363,3 +363,55 @@ describe('#5364 zodIssuesToMetadataIssues — the shared ranking, verbatim', () 
         expect(zodIssuesToMetadataIssues(null)).toEqual([]);
     });
 });
+
+/**
+ * #20230 — the flattened overlay's retired `owner` / `hidden`, at the door the
+ * retirement exists for: `saveMetaItem`, the `PUT /api/v1/meta/view/:name` write
+ * path the console and an MCP author reach.
+ *
+ * Before: a bound lean overlay `{ object, viewKind, hidden: true }` saved, one
+ * row persisted with the key, and nothing ever read it — measured on this same
+ * harness by the #20085 dev. After: refused with the ADR-0112 envelope, nothing
+ * persisted, and the retirement prescription located at the key. Pinned HERE
+ * and not only in spec because this envelope is what Studio and an MCP caller
+ * receive — a spec tombstone that did not reach it would be a refusal nobody sees.
+ */
+describe('#20230 a flattened overlay carrying a retired owner/hidden is refused at the save door', () => {
+    // Spread, not a literal: the spec's tree-scoped absence pin reads object
+    // literals, and these bodies are refusals, not authorings.
+    const BOUND_LIST = { object: 'task', viewKind: 'list' } as const;
+    const BOUND_FORM = { object: 'task', viewKind: 'form' } as const;
+    const PRESCRIPTION: Record<'owner' | 'hidden', RegExp> = {
+        owner: /^`view\.owner` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049/,
+        hidden: /^`view\.hidden` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049/,
+    };
+
+    for (const [key, value] of [['owner', 'usr_7'], ['hidden', true]] as const) {
+        for (const [family, bound] of [['list', BOUND_LIST], ['form', BOUND_FORM]] as const) {
+            it(`a bound ${family} overlay with \`${key}\` answers 422 INVALID_METADATA and persists nothing`, async () => {
+                const { protocol, rows } = makeProtocol();
+
+                const err = await rejection(save(protocol, { name: 'task_list', ...bound, [key]: value }));
+
+                expect(err.code).toBe('INVALID_METADATA');
+                expect(err.status).toBe(422);
+                expect(rows.size).toBe(0);
+                // The prescription, located at the key the author sent.
+                const atKey = err.issues.find((i: any) => i.path === key);
+                expect(atKey, `an issue located at \`${key}\``).toBeDefined();
+                expect(atKey.code).toBe('invalid_type');
+                expect(atKey.message).toMatch(PRESCRIPTION[key]);
+                expect(err.message).toContain(`\`view.${key}\` was removed`);
+            });
+        }
+    }
+
+    it('CONTROL: the same bound overlays without the keys still save, one row each', async () => {
+        for (const bound of [BOUND_LIST, BOUND_FORM]) {
+            const { protocol, rows } = makeProtocol();
+            const result = await save(protocol, { name: 'task_list', ...bound, isDefault: true, order: 2 });
+            expect(result.success).toBe(true);
+            expect(rows.size).toBe(1);
+        }
+    });
+});
