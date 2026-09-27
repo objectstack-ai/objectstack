@@ -5686,7 +5686,9 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
   const count = optional.unwrap();
   const withPrescription = count.clone({
     ...count._zod.def,
-    error: (issue) => (Array.isArray(issue.input) ? FORM_OVERLAY_COLUMNS_IS_A_COUNT : undefined),
+    // The def's issue type is `never` for a number's own map; the runtime hands
+    // it the raw issue, whose `input` is what this reads.
+    error: (issue: { input?: unknown }) => (Array.isArray(issue.input) ? FORM_OVERLAY_COLUMNS_IS_A_COUNT : undefined),
   });
   const description = optional.description;
   return description ? withPrescription.optional().describe(description) : withPrescription.optional();
