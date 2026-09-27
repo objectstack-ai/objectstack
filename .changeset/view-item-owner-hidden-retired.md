@@ -60,11 +60,13 @@ parse, with a prescription, instead of being saved with no effect.
   byte-identical on this retirement, and that reading is expected on this route.
 - **No deprecation window**, per the project's startup-stage posture.
 
-⛔ **Untouched: the flattened-overlay members' own `owner` / `hidden`.** Those
-two members of the `view` door (a lean personalization PUT carrying no `config`)
-declare the same names on a different door, which this change does not touch. A
-`{ object, viewKind, hidden: true }` overlay still parses. The conversion leaves
-overlays alone for the same reason.
+**The flattened-overlay members' own `owner` / `hidden` are a separate entry.**
+Those two members of the `view` door (a lean personalization PUT carrying no
+`config`) declare the same names on a different door, which this change does not
+touch, and this conversion leaves overlays alone. They are retired in this same
+release by their own changeset and their own conversion,
+`view-overlay-owner-hidden-removed`, with the same prescription texts — so after
+this release a `{ object, viewKind, hidden: true }` overlay is refused too.
 
 ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec`
 is published, so this is breaking for consumers no telemetry was consulted for.
