@@ -64,6 +64,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { artifactPackages } from './artifact-packages.js';
+import { declaredPackageEntries } from './stack-collections.js';
 
 export interface DocTranslationItem {
   label?: string;
@@ -380,10 +381,14 @@ export interface PackageDocSet {
  *
  * A directory that matches none, or more than one, is not attributed — it is
  * reported, by {@link sweepPackageDocsDirectories}.
+ *
+ * An absent `packages` answers `[]`. A present non-array one (`{}`, `0`, `'x'`)
+ * is refused with the resolver's `INVALID_ARTIFACT_PACKAGES` through
+ * {@link declaredPackageEntries}; it is never read as "no packages" (#19925).
+ * `null` gets whatever the resolver answers for it; see that function.
  */
 export function docsPackageRefs(packages: unknown): DocsPackageRef[] {
-  if (!Array.isArray(packages)) return [];
-  return artifactPackages({ packages }).map(({ index, id, body }) => {
+  return artifactPackages({ packages: declaredPackageEntries(packages) }).map(({ index, id, body }) => {
     const directoryNames = new Set<string>();
     if (typeof body.id === 'string' && body.id !== '') {
       directoryNames.add(body.id);
@@ -1158,10 +1163,16 @@ function claimedDocs(items: readonly DocItem[]): { has: (doc: DocItem) => boolea
   };
 }
 
-/** The `docs` a `packages[]` entry already carries in its own assembled body. */
+/**
+ * The `docs` a `packages[]` entry already carries in its own assembled body.
+ *
+ * `packages` is judged by {@link declaredPackageEntries}, so a present
+ * non-array value goes to the resolver rather than being read as an entry with
+ * no docs.
+ */
 function bodyDocsOf(packages: unknown, index: number): DocItem[] {
-  if (!Array.isArray(packages)) return [];
-  const body = (packages[index] as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;
+  const entry = declaredPackageEntries(packages)[index];
+  const body = (entry as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;
   const docs = body?.docs;
   return Array.isArray(docs) ? (docs as DocItem[]) : [];
 }
@@ -1358,12 +1369,20 @@ export function collectAndLintDocs(
  * Returns the ARGUMENT ITSELF when nothing is added, so an artifact with no
  * per-package docs is not merely equal to the one built before this landed —
  * it is the same object, serialized from the same references.
+ *
+ * `packages` is judged FIRST, by {@link declaredPackageEntries}. An absent one
+ * comes back as it came in. A present non-array one (`{}`, `0`, `'x'`) is
+ * refused, because handing it back unchanged would carry it into the artifact
+ * as if it held no packages (#19925). `null` gets whatever the resolver
+ * answers for it: today that is the absent answer, so `null` comes back as it
+ * came in.
  */
 export function attachPackageDocs(packages: unknown, sets: readonly PackageDocSet[]): unknown {
-  if (!Array.isArray(packages) || sets.length === 0) return packages;
+  const entries = declaredPackageEntries(packages);
+  if (entries.length === 0 || sets.length === 0) return packages;
   const byIndex = new Map(sets.map((set) => [set.index, set]));
   let changed = false;
-  const out = packages.map((entry, index) => {
+  const out = entries.map((entry, index) => {
     const set = byIndex.get(index);
     if (!set || set.docs.length === 0) return entry;
     const body = (entry as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;

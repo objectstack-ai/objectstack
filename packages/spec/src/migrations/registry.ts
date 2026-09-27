@@ -10203,6 +10203,43 @@ const step18: MigrationStep = {
         + 'them removes no behaviour.',
     },
     {
+      id: 'inline-grid-column-currency-scale-refused',
+      surface: 'object.fields.<name>.inlineColumns[].scale on an inline grid column that declares '
+        + '`type: \'currency\'` — any declared value, `scale: 0` included, computed or not. `scale` on a '
+        + '`number` column, and on a column that declares no `type`, is untouched',
+      replacement: 'no `scale` on a currency inline grid column. DELETE the key — that is the whole '
+        + 'migration: a currency amount\'s decimal places are its currency\'s, not a column setting. The '
+        + 'currency\'s ISO 4217 minor unit decides how the cell displays the amount and the width a '
+        + 'computed amount is rounded to. ⛔ Nothing replaces the key: do not re-declare its value under '
+        + 'any other key.',
+      reason:
+        'Maintainer ruling 5791803339 (batch #215 item 1, letter B) retired `scale` from the '
+        + '`currency` field type, and ruling 5805782503 (batch #218 item 2, letter 乙 — a currency\'s '
+        + 'ISO 4217 minor unit decides its display) worded the remedy. Neither reached the inline grid '
+        + 'column, the strict mirror of the console grid\'s column, which still offered per-column '
+        + 'decimals on a `currency` column; triage read the column as inherited from both rulings, so '
+        + '`InlineGridColumnSchema` now refuses the key on a column declaring `type: \'currency\'` at '
+        + 'parse, with the field refusal\'s first sentence and remedy. ⛔ No alias and no grace window, '
+        + 'per ruling B. NOT mechanically converted, deliberately, for the reason the field entry '
+        + '`field-currency-scale-refused` gives: a conversion that dropped the key would accept it on '
+        + 'every load, which is the grace window the ruling refused; the refusal names the key and its '
+        + 'one-line fix instead. The same change rewords the column\'s `prefix` description: it replaces '
+        + 'the resolved currency\'s symbol and has no default (the grid no longer falls back to a fixed '
+        + 'yen sign). Reach: only a DECLARED column `type` is judged — a column that declares none takes '
+        + 'its type from the child field when the console hydrates it, which the column schema cannot '
+        + 'see. Population measured at the change, on origin/main 1c8b320a89: one authored '
+        + '`inlineColumns` block in the tree (the showcase invoice, seven identity-only columns, none '
+        + 'declaring `type` or `scale`), no platform object, skill, documentation example or JSON fixture '
+        + 'declaring an inline grid column at all, and one test fixture carrying `scale: 2` on a currency '
+        + 'column, re-judged in the same change. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria:
+        'Every field in the stack parses: an `ObjectSchema` parse and `objectstack validate` report no '
+        + 'issue on an `inlineColumns[].scale` path of a column declaring `type: \'currency\'`. A '
+        + 'currency column that carried `scale` no longer declares it, and a diff of the column shows '
+        + 'that one line deleted and no key added. `number` columns, and columns declaring no `type`, '
+        + 'keep their `scale`; a column\'s `prefix` is still accepted on a currency column.',
+    },
+    {
       id: 'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
       surface: 'CompatibilityMatrixEntry.estimatedMigrationTime, the migration effort estimate whose '
         + 'unit lived only in a source JSDoc (kernel/plugin-versioning.zod.ts)',

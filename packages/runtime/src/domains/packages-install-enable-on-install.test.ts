@@ -33,7 +33,8 @@
  * - The BARE body form carries no options, so an `enableOnInstall` spelled
  *   there is NOT honoured — `ManifestSchema`'s strict close refuses that key by
  *   name, and honouring what no schema declares is the same defect pointing the
- *   other way.
+ *   other way. [#19328] Since the door parses the whole body it is REFUSED
+ *   outright (`400`, nothing installed) rather than installed-and-ignored.
  *
  * ## Two things this harness gets right on purpose
  *
@@ -160,14 +161,22 @@ describe('#18058 — the install door honours `enableOnInstall`', () => {
         expect(persistedDisabled().has('com.acme.absent')).toBe(false);
     });
 
-    it('the BARE body form does NOT honour the key — no schema declares it there', async () => {
+    it('the BARE body form does NOT honour the key — no schema declares it there, so it is refused', async () => {
         // `PackageInstallBodySchema`'s bare branch is `ManifestSchema`, a strict
         // close with no `enableOnInstall` key: this body parses through NEITHER
         // declared form. The door must not act on it.
+        //
+        // [#19328] REPLACED, not re-spelled. This case used to assert `201` and
+        // an ENABLED row: the key ignored, the package installed anyway, and
+        // `enableOnInstall` stored as a manifest key. That was the one standing
+        // pin on the card's row 4, and it pinned the branch the whole-body
+        // parse removes. The reading it existed for — 「the door must not act on
+        // it」 — is kept and made stronger: nothing installs at all.
         const result = await install(dispatcher, { ...manifest('com.acme.bare', 'bare'), enableOnInstall: false });
 
-        expect(result.response?.status).toBe(201);
-        expect(result.response?.body?.data?.enabled).toBe(true);
+        expect(result.response?.status).toBe(400);
+        expect(result.response?.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(registry.getPackage('com.acme.bare'), 'refused, so nothing was installed').toBeUndefined();
         expect(persistedDisabled().has('com.acme.bare')).toBe(false);
     });
 });
