@@ -52,9 +52,9 @@ export const entry: SemanticMigration = {
     + 'save door (the `report` entry of the metadata type registry, answered as '
     + '`INVALID_METADATA` with status 422). A block `chart` is refused as an unrecognized key '
     + 'on that block with the upgrade prescription; a container `chart` on a joined report is '
-    + 'one `custom` issue at `chart`. (1) No joined report carries a `chart` at either level: '
-    + 'run `os migrate meta --from 17` to list the mechanical strips for existing sources, and '
-    + 'the stored-row seams replay the same strip for rows at rest. (2) For every joined report '
+    + 'one `custom` issue at `chart`. (1) No joined report carries a `chart` at either level: the '
+    + 'D2 strip covers existing sources on a chain replay, and the stored-row seams replay it for '
+    + 'rows already at rest. (2) For every joined report '
     + 'that carried one, decide whether the chart was wanted; if it was, a non-joined report '
     + 'now binds that slice\'s dataset and carries the chart, and its `xAxis` / `yAxis` resolve '
     + '(`validate-chart-bindings` checks them there). (3) Check the rendered joined report: it '
@@ -62,5 +62,6 @@ export const entry: SemanticMigration = {
     + '`chart` parses byte-identically to before, and every non-joined report is untouched. '
     + 'Census at the time of the change: zero joined reports with a chart in this repo\'s '
     + 'example apps and in the hotcrm reference app, against a lit control (non-joined reports '
-    + 'carrying a chart: one and five).',
+    + 'carrying a chart: one and five). '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
 };
