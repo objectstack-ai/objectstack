@@ -136,6 +136,7 @@ const dirs = { wired: '', noRequires: '', triggersOnly: '', preFix: '', bare: ''
 const before: Record<string, Record<string, string>> = {};
 const runs: Record<string, Run> = {};
 let wiredAfterRefusal: Record<string, string>;
+let actionFileAfterRefusal: boolean;
 let noRequiresAfterRefusal: Record<string, string>;
 
 beforeAll(async () => {
@@ -162,6 +163,7 @@ beforeAll(async () => {
   // what each refusal was measured against.
   runs.actionNoObject = await runCli(['g', 'action', 'approve'], dirs.wired);
   wiredAfterRefusal = tree(dirs.wired);
+  actionFileAfterRefusal = existsSync(join(dirs.wired, 'src', 'actions', 'approve.action.ts'));
   runs.flowNoRequires = await runCli(['g', 'flow', 'order_line'], dirs.noRequires);
   noRequiresAfterRefusal = tree(dirs.noRequires);
 
@@ -183,7 +185,7 @@ describe('[#20215] refused: the write would stop a loading config from loading',
   it('an action bound to an object nobody declared: exit 1, the tree byte-identical', () => {
     expect(runs.actionNoObject.code, out(runs.actionNoObject)).toBe(1);
     expect(wiredAfterRefusal).toEqual(before.wired);
-    expect(existsSync(join(dirs.wired, 'src', 'actions', 'approve.action.ts'))).toBe(false);
+    expect(actionFileAfterRefusal).toBe(false);
     // The subject is named: the object the action binds to.
     expect(runs.actionNoObject.stdout).toContain(`${NS}_approve`);
     expect(runs.actionNoObject.stdout).not.toContain('Created');

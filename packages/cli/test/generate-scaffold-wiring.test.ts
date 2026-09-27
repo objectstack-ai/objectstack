@@ -225,7 +225,9 @@ describe('[#20215] the reach reader and the lines it prints', () => {
     expect(stackCarries({ views: [{ name: 'a' }] }, 'views', 'a')).toBe(true);
     expect(stackCarries({ views: [{ name: 'a' }] }, 'views', 'b')).toBe(false);
     expect(stackCarries({ flows: { a: { label: 'A' } } }, 'flows', 'a')).toBe(true);
-    expect(stackCarries({ packages: [{ manifest: { id: 'p' }, apps: [{ name: 'a' }] }] }, 'apps', 'a')).toBe(true);
+    const app = { name: 'crm_app', label: 'CRM' };
+    const pkg = { manifest: { id: 'com.example.p', version: '1.0.0', type: 'app', name: 'p', apps: [app] } };
+    expect(stackCarries({ packages: [pkg] }, 'apps', 'crm_app')).toBe(true);
     expect(stackCarries({}, 'apps', 'a')).toBe(false);
   });
 
