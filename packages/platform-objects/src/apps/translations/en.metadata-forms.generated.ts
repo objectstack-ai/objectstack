@@ -1666,9 +1666,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "blocks.type": {
         label: "Block Type"
       },
-      "blocks.chart": {
-        label: "Chart"
-      },
       "blocks.dataset": {
         label: "Dataset"
       },

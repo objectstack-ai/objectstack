@@ -41,15 +41,15 @@
 // walks it (`walkMetadataForms` / `walkFormField` in
 // `packages/cli/src/utils/i18n-extract.ts`): every section's `label` and
 // `description`, then every field it declares, recursively, with the same
-// dot-path accumulation and the same section-name normalisation. 45 `en` string
-// leaves — 8 from the four sections, 37 from the 26 field rows — and the
+// dot-path accumulation and the same section-name normalisation. 44 `en` string
+// leaves — 8 from the four sections, 36 from the 25 field rows — and the
 // catalog and the form are asserted equal in BOTH directions, so a field added
 // to the form tomorrow joins this population without anybody editing a list.
 //
 // ⭐ THIS IS THE FIRST LEDGER OF THIS CARD WHOSE POPULATION REACHES SECTION
 // LEAVES. Round 8's walked `object.fields` only. The card's own body records
 // `report.sections.*` as a population NOTHING covers — "⚠️ A population NOTHING
-// covers … 承接者:无". This walk covers it: 8 of the 45 leaves are section
+// covers … 承接者:无". This walk covers it: 8 of the 44 leaves are section
 // leaves, asserted by count and by name.
 //
 // ## The controls — one outward, two inward, one dark
@@ -62,9 +62,9 @@
 //       the sibling semantic-layer panel, 37 leaves, 0 echoing — is excluded
 //       too, and that exclusion is asserted rather than trusted precisely
 //       because a wrong sweep of it would NOT go red.
-//   (2) INWARD, AUTHORED. 39 of this population's own 45 leaves come back
+//   (2) INWARD, AUTHORED. 38 of this population's own 44 leaves come back
 //       NON-echoing in all three locales, in the same walk. A hand-list of six
-//       echoes can only ever produce positives; this derivation produces 39
+//       echoes can only ever produce positives; this derivation produces 38
 //       negatives from the same predicate in the same run.
 //   (3) ⭐⭐ INWARD, THE TWIN. `report.fields['blocks.runtimeFilter']` is IN the
 //       population, carries the IDENTICAL English string as
@@ -72,7 +72,13 @@
 //       locales. One schema key, one rendering — the word is COPIED and the
 //       copy is asserted, so the two positions can only move together.
 //   (4) DARK. Fed the `en` catalog in place of a translated one, the same walk
-//       must flag all 45; and the echo predicate must flag all 6 rows.
+//       must flag all 44; and the echo predicate must flag all 6 rows.
+//
+// (#20161 took one field row out of `reportForm` — the joined-block `chart`
+// input, whose key left `JoinedReportBlockSchema` because nothing ever drew a
+// block chart. That row was an AUTHORED, non-echoing `label` leaf in all three
+// locales, so the population went 45 → 44, the field leaves 37 → 36 and the
+// inward negatives 39 → 38, and none of the six decided rows moved.)
 //
 // ## ⚠️⚠️ The phantom-translation trap — and why this family is the SHARP case
 //
@@ -835,9 +841,9 @@ describe('#19403 round 9 — the population, DERIVED from `reportForm`', () => {
     // `report.sections.*` is written into #19403's body as a population NOTHING
     // covers — 「承接者:无」. This walk covers it, and the count is asserted so
     // a walk that quietly stopped at `fields` would go red.
-    expect(PANEL_LEAVES.length).toBe(45);
+    expect(PANEL_LEAVES.length).toBe(44);
     expect(PANEL_LEAVES.filter((l) => l.kind === 'section').length).toBe(8);
-    expect(PANEL_LEAVES.filter((l) => l.kind === 'field').length).toBe(37);
+    expect(PANEL_LEAVES.filter((l) => l.kind === 'field').length).toBe(36);
     expect(
       PANEL_LEAVES.some((l) => l.kind === 'section' && l.path === 'dataset_binding' && l.prop === 'description'),
       'the section description this round decides is not in the population',
@@ -894,13 +900,13 @@ describe('#19403 round 9 — the population, DERIVED from `reportForm`', () => {
     );
   });
 
-  it('⭐ DARK, INWARD — 39 of this population\'s own 45 leaves come back NON-ECHOING', () => {
+  it('⭐ DARK, INWARD — 38 of this population\'s own 44 leaves come back NON-ECHOING', () => {
     // A hand-list of six echoes can only ever produce positives. This derivation
-    // produces 39 negatives from the same predicate in the same run, including
+    // produces 38 negatives from the same predicate in the same run, including
     // the twin `blocks.runtimeFilter` the runtimeFilter row is copied from.
     const decided = new Set(DECISIONS.map(idOf));
     const negatives = PANEL_LEAVES.filter((l) => !decided.has(idOf(l)));
-    expect(negatives.length).toBe(39);
+    expect(negatives.length).toBe(38);
     for (const leaf of negatives) {
       for (const [locale, forms] of TRANSLATED_LOCALES) {
         expect(catalogLeaf(forms, leaf), `${locale} ${idOf(leaf)} is an echo, not a control`).not.toBe(leaf.en);

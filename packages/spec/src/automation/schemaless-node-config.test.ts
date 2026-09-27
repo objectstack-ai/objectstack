@@ -9,7 +9,9 @@
  * guard. `decision` is the exception — it stays export-only (nothing parses it
  * at run time), so its pins below bind the authoring doors only: `tsc`, the
  * published JSON Schema and a direct parse. Its `mode` key is declared ahead of
- * the engine change that reads it (#15429).
+ * the engine change that reads it (#15429), and is refused beside a non-empty
+ * `conditions` list (ruling 5856786357 on #20168) — a refinement, so of those
+ * doors it binds the direct parse and is declared dropped in the JSON Schema.
  *
  * The structural assertions at the bottom guard the downstream walkers that a
  * union-shaped contract would have broken, which is why #4343 converged the
@@ -25,6 +27,7 @@ import { objectStackErrorMap } from '../shared/error-map.zod.js';
 import {
   DecisionConditionSchema,
   DecisionConfigSchema,
+  SCHEMALESS_NODE_CONFIG_SCHEMAS,
   ScriptConfigSchema,
   SubflowConfigSchema,
   getSchemalessNodeConfigJsonSchemas,
@@ -244,11 +247,8 @@ describe('DecisionConfigSchema.mode (#15429 item 2 — the contract half, declar
     expect('mode' in omitted, 'an omitted mode must not come back as a parsed default').toBe(false);
     expect(DecisionConfigSchema.parse({ mode: 'exclusive' })).toEqual({ mode: 'exclusive' });
     expect(DecisionConfigSchema.parse({ mode: 'inclusive' })).toEqual({ mode: 'inclusive' });
-    // …and alongside a branch list, which the key does not forbid.
-    expect(DecisionConfigSchema.parse({
-      mode: 'exclusive',
-      conditions: [{ label: 'big', expression: 'amount > 100000' }],
-    })).toEqual({ mode: 'exclusive', conditions: [{ label: 'big', expression: 'amount > 100000' }] });
+    // Beside a NON-EMPTY branch list the key is refused (ruling 5856786357 on
+    // #20168) — pinned in the describe block below, with its controls.
   });
 
   it('types the key as the closed pair at the tsc door', () => {
@@ -300,6 +300,132 @@ describe('DecisionConfigSchema.mode (#15429 item 2 — the contract half, declar
     for (const combinator of ['anyOf', 'oneOf', 'allOf']) {
       expect(json[combinator], `top-level ${combinator} would blind the authorable-surface walk`).toBeUndefined();
     }
+  });
+});
+
+/**
+ * Ruling 5856786357 on #20168 (letter A): `mode` belongs to the edge-branched
+ * decision alone, so a decision declaring a NON-EMPTY `conditions` list AND
+ * `mode` is refused at `mode`, with the ruled prescription — delete `mode`
+ * (the list is first-match on its own), or move the branches onto the
+ * out-edges, delete `conditions`, and keep `mode`.
+ *
+ * Key-vs-value note: the rule judges the KEY beside a non-empty list, whatever
+ * member it names, so every refusal below is a full `safeParse` failure
+ * located at `mode`, and every control a full `safeParse` success that
+ * round-trips — never mere absence of one issue code.
+ */
+describe('DecisionConfigSchema — `mode` beside a non-empty `conditions` list is refused', () => {
+  const BRANCH = { label: 'big', expression: 'amount > 100000' } as const;
+  const BRANCHES = [BRANCH, { label: 'small', expression: 'amount <= 100000' }] as const;
+
+  /**
+   * The ruled prescription on the message: the wording is the contract here
+   * (the ruling names both ways out and #15429's acceptance list carries it),
+   * so the first sentence is read verbatim and each remedy is required.
+   */
+  function expectRuledRefusal(message: string, mode: 'exclusive' | 'inclusive'): void {
+    expect(message.startsWith(
+      `\`mode: '${mode}'\` is not valid on a decision that declares a \`conditions\` list — `
+      + '`mode` belongs to the edge-branched decision alone.',
+    )).toBe(true);
+    expect(message).toContain('A `conditions` list is first-match on its own');
+    expect(message, 'remedy 1: drop mode').toContain('Either delete `mode` and keep the list');
+    expect(message, 'remedy 2: branches onto the edges, keep mode')
+      .toContain('move the branches onto the out-edges');
+    expect(message).toContain('delete `conditions`, and keep `mode`');
+    expect(message, 'a prescription an author is shown carries no tracker number').not.toMatch(/#\d{3,5}/);
+  }
+
+  type Issue = { code: string; path: PropertyKey[]; message: string };
+  const issuesOf = (result: { success: boolean; error?: { issues: ReadonlyArray<Issue> } }): ReadonlyArray<Issue> =>
+    (result.success ? [] : result.error!.issues);
+
+  it.each(['inclusive', 'exclusive'] as const)(
+    'refuses `mode: %j` beside a one-entry list — one custom issue at [mode], with the ruled prescription',
+    (mode) => {
+      const result = DecisionConfigSchema.safeParse({ conditions: [BRANCH], mode });
+      expect(result.success).toBe(false);
+      const issues = issuesOf(result);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.path).toEqual(['mode']);
+      expectRuledRefusal(issues[0]!.message, mode);
+    },
+  );
+
+  it.each(['inclusive', 'exclusive'] as const)('refuses `mode: %j` beside a multi-entry list alike', (mode) => {
+    const issues = issuesOf(DecisionConfigSchema.safeParse({ mode, conditions: BRANCHES }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['mode']]]);
+    expectRuledRefusal(issues[0]!.message, mode);
+  });
+
+  it('is the same refusal through `SCHEMALESS_NODE_CONFIG_SCHEMAS.decision` — the handle a registration-time reader looks up by node type', () => {
+    // #15429's registration reader and metadata-protocol's reference walk both
+    // reach this contract by node type rather than by its export name, so the
+    // pin is taken through that door too.
+    const issues = issuesOf(SCHEMALESS_NODE_CONFIG_SCHEMAS.decision.safeParse({ conditions: [BRANCH], mode: 'inclusive' }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['mode']]]);
+    expectRuledRefusal(issues[0]!.message, 'inclusive');
+  });
+
+  it('keeps its prescription under the ObjectStack error map a validator may pass per parse', () => {
+    const result = DecisionConfigSchema.safeParse({ conditions: [BRANCH], mode: 'inclusive' }, { error: objectStackErrorMap });
+    const issues = issuesOf(result);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.path).toEqual(['mode']);
+    expectRuledRefusal(issues[0]!.message, 'inclusive');
+  });
+
+  it('a mode OUTSIDE the closed pair beside a list gets the value refusal first — one issue, never both', () => {
+    // The enum refusal is a base-type issue, so the object's refinement does
+    // not run over it: the author fixes the value, then meets this rule.
+    const issues = issuesOf(DecisionConfigSchema.safeParse({ conditions: [BRANCH], mode: 'all' }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('invalid_value');
+    expect(issues[0]!.path).toEqual(['mode']);
+    expect(issues[0]!.message).toContain("`mode: 'all'` is not a decision mode");
+  });
+
+  describe('CONTROLS — what the refusal must leave alone', () => {
+    it.each(['inclusive', 'exclusive'] as const)('accepts `mode: %j` beside an EMPTY list, and it round-trips', (mode) => {
+      const result = DecisionConfigSchema.safeParse({ conditions: [], mode });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ conditions: [], mode });
+      expect(DecisionConfigSchema.parse(result.data)).toEqual(result.data);
+    });
+
+    it.each(['inclusive', 'exclusive'] as const)('accepts `mode: %j` with `conditions` absent, and it round-trips', (mode) => {
+      const result = DecisionConfigSchema.safeParse({ mode });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ mode });
+      expect('conditions' in result.data!).toBe(false);
+      expect(DecisionConfigSchema.parse(result.data)).toEqual(result.data);
+    });
+
+    it('accepts a non-empty list with NO mode, and it round-trips', () => {
+      for (const conditions of [[BRANCH], BRANCHES]) {
+        const result = DecisionConfigSchema.safeParse({ conditions });
+        expect(result.success, JSON.stringify(conditions)).toBe(true);
+        expect(result.data).toEqual({ conditions });
+        expect('mode' in result.data!).toBe(false);
+        expect(DecisionConfigSchema.parse(result.data)).toEqual(result.data);
+      }
+    });
+
+    it('following either remedy parses', () => {
+      const refused: Record<string, unknown> = { conditions: [...BRANCHES], mode: 'inclusive' };
+      expect(DecisionConfigSchema.safeParse(refused).success).toBe(false);
+      // Remedy 1 — delete `mode`, keep the list.
+      const listOnly = { ...refused };
+      delete listOnly.mode;
+      expect(DecisionConfigSchema.parse(listOnly)).toEqual({ conditions: BRANCHES });
+      // Remedy 2 — the branches move onto the out-edges (outside this config),
+      // `conditions` is deleted, and `mode` stays.
+      const modeOnly = { ...refused };
+      delete modeOnly.conditions;
+      expect(DecisionConfigSchema.parse(modeOnly)).toEqual({ mode: 'inclusive' });
+    });
   });
 });
 
