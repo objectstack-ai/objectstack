@@ -93,6 +93,13 @@
 // the same class (date/date, datetime/datetime)", the offset column numeric —
 // against each aggregated column's class, read statically off the query and
 // the object's declaration. See {@link aggregatedRowColumnClasses}.
+//
+// [#20148] In the per-aggregation `filter`, a `{ $field }` names a field the
+// object declares and an `addDays` pair follows that same class rule, judged
+// against the object's declared fields and refused in the words `where` gets
+// for the same comparison ({@link assertAggregationFilterReferencesAreDeclared}).
+// And on both positions a `Date` bound is compared as an instant
+// ({@link instantsOf}), as the same bound in a `where` is.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -121,6 +128,10 @@ import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 // of one vocabulary, and it reads the fold from the spec for the same reason it
 // reads the retirement prescriptions from there: one rule, one definition.
 import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+// [#20148] The spec's reading of a `Date` against stored text for a TYPE-BLIND
+// evaluator — the lift `@objectstack/formula` applies to the same pairing — so a
+// `Date` bound here compares the way the same bound in a `where` does.
+import { utcInstantMs } from '@objectstack/spec/data';
 // [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
 // `filter-comparand-shape.ts` rather than re-declared here — see the note on
 // {@link invalidFilterError} and on {@link unknownOperator} below.
@@ -508,29 +519,45 @@ function assertOffsetPairIsTemporal(
   path: string,
   classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
 ): void {
+  const reason = offsetPairViolation(field, reference, classes);
+  if (reason !== undefined) throw offsetPairError(field, op, String(reference.$field), path, reason);
+}
+
+/**
+ * [#20148] The rule {@link assertOffsetPairIsTemporal} applies, returned as the
+ * reason a pair breaks it (`driver-sql`'s sentence for the same pair on
+ * `where`, with "is stored as" read as "is"), or `undefined` when it holds.
+ * One rule, two positions: `having` judges it against the aggregated row's
+ * classes and names the columns; the per-aggregation `filter` judges it against
+ * the object's declared fields and withholds them
+ * ({@link assertAggregationFilterReferencesAreDeclared}).
+ */
+function offsetPairViolation(
+  field: string,
+  reference: Record<string, unknown>,
+  classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+): string | undefined {
   const ref = String(reference.$field);
   const refClass = classes.get(ref);
   const targetClass = classes.get(field);
   if (refClass !== undefined && targetClass !== undefined && refClass !== targetClass) {
-    throw offsetPairError(field, op, ref, path,
-      `"${field}" is ${targetClass} but "${ref}" is ${refClass}, and a cross-class comparison answers `
+    return `"${field}" is ${targetClass} but "${ref}" is ${refClass}, and a cross-class comparison answers `
       + `differently in SQL (storage-class ordering) than in memory (JS coercion) — compare same-class `
-      + `columns.`);
+      + `columns.`;
   }
   if (refClass !== undefined && refClass !== 'date' && refClass !== 'datetime') {
-    throw offsetPairError(field, op, ref, path,
-      `addDays adds whole days to a date or datetime column, and "${ref}" is ${refClass} — an offset `
-      + `has no meaning on it.`);
+    return `addDays adds whole days to a date or datetime column, and "${ref}" is ${refClass} — an offset `
+      + `has no meaning on it.`;
   }
   const offset = reference.addDays;
-  if (!isFieldReferenceShape(offset)) return;
+  if (!isFieldReferenceShape(offset)) return undefined;
   const offsetRef = String(offset.$field);
   const offsetClass = classes.get(offsetRef);
   if (offsetClass !== undefined && offsetClass !== 'numeric') {
-    throw offsetPairError(field, op, ref, path,
-      `the addDays offset "${offsetRef}" (${offsetClass}) is not a numeric column, and a day offset `
-      + `must be a number of days.`);
+    return `the addDays offset "${offsetRef}" (${offsetClass}) is not a numeric column, and a day offset `
+      + `must be a number of days.`;
   }
+  return undefined;
 }
 
 /**
@@ -738,17 +765,167 @@ export function assertHavingIsEvaluable(
  * `ObjectQL.aggregate` calls this in its per-aggregation loop, after the
  * shared doors `where` also takes there and the comparand-TYPE door, and
  * before `getDriver`, the middleware chain and the fallback that evaluates the
- * filter. What it refuses is exactly {@link assertHavingIsEvaluable}'s list
- * minus the name check: the filter reads the object's RAW columns, whose names
- * the engine does not judge on `where` either (its registry-less tolerance —
- * see `assertFilterIsMaterializable`), so a `{ $field }` here is judged for its
- * position and its declaration, never for its name.
+ * filter. The walk refuses exactly {@link assertHavingIsEvaluable}'s list
+ * minus the name checks: the filter reads the object's RAW columns, not the
+ * aggregated row's, so a KEY is not judged here (the REST door refuses an
+ * unknown one, as it does in `where`) and a `{ $field }` is judged by the walk
+ * for its position and its declaration only.
+ *
+ * [#20148] Its NAME, and an `addDays` pair's classes, are judged after the
+ * walk when the caller hands over the object's declaration — the two
+ * cross-field rules `where` gets from `driver-sql`'s compiler, against the
+ * object's DECLARED fields: a `{ $field }` (and an `addDays` offset's nested
+ * `{ $field }`) names a field the object declares, and an `addDays` pair
+ * follows the class rule `FieldReferenceSchema.addDays` declares
+ * ({@link offsetPairViolation}). Measured on the base through
+ * `engine.aggregate` and `POST /data/:object/query`, on driver-memory and
+ * driver-sql, each such filter counted no row (every row under `$ne`, a
+ * `$not`, or a `$or` branch that held), while the same comparison in `where`
+ * is refused on driver-sql. After the walk on purpose — the order `having`'s
+ * key check takes (#20123): an author meets an operator's refusal first, and
+ * fixing it does not reveal one they could have been told about already.
+ * {@link assertAggregationFilterReferencesAreDeclared} carries the words.
  *
  * Read-only.
  */
-export function assertAggregationFilterIsEvaluable(filter: unknown, index: number): void {
+export function assertAggregationFilterIsEvaluable(
+  filter: unknown,
+  index: number,
+  declared?: AggregationFilterDeclaration,
+): void {
   const clause = aggregationFilterClause(index);
   assertNodeIsEvaluable(filter, clause.root, { clause });
+  if (declared) assertAggregationFilterReferencesAreDeclared(filter, clause.root, declared);
+}
+
+/**
+ * [#20148] What the per-aggregation `filter`'s reference rules judge against:
+ * the object's declared field map, the object's name for the server-side
+ * diagnostic, and where that diagnostic goes.
+ */
+export interface AggregationFilterDeclaration {
+  /** The object the filter reads — named in the server-side diagnostic only. */
+  object: string;
+  /**
+   * The object's declared field map. Not a usable map (absent, an array,
+   * empty) ⇒ nothing is judged: a registry-less host must not invent a verdict
+   * about a declaration it cannot see, the direction every declared-type door
+   * of the engine takes.
+   */
+  fields: unknown;
+  /**
+   * Handed the full diagnostic — the half the refusal withholds — just before
+   * the refusal is thrown, so the host puts it in its server log.
+   */
+  reportWithheld: (diagnostic: string) => void;
+}
+
+/**
+ * [#20148] The names a per-aggregation reference may take: every declared
+ * field, plus the columns every row carries whether or not the map lists them
+ * — the set the REST door's unknown-field gate reads (`resolveQueryFields`).
+ */
+function declaredReferenceNames(fields: Record<string, unknown>): ReadonlySet<string> {
+  return new Set([...Object.keys(fields), 'id', 'created_at', 'updated_at']);
+}
+
+/**
+ * [#20148] A `{ $field }` in a per-aggregation filter that `where`'s
+ * cross-field rules refuse — a referent the object does not declare, or an
+ * `addDays` pair the offset has no meaning on.
+ *
+ * The WORDS follow `where`'s. `driver-sql` refuses the same comparison in a
+ * `where` with the fields, the operator and the specific reason withheld from
+ * the message and written to the server log — its disclosure posture for every
+ * cross-field refusal — so this refusal withholds exactly those and hands the
+ * diagnostic to the host's log instead. What stays is the refusal's identity
+ * (`INVALID_FILTER` / 400), WHICH aggregation carries the reference (a position
+ * in the query, not in the predicate), and the capability boundary — none of
+ * them derived from what the filter names.
+ */
+function withheldAggregationReferenceError(root: string): Error {
+  return invalidFilterError(
+    `A { "$field" } reference in \`${root}\` cannot be evaluated here. In a per-aggregation filter a `
+    + `reference compares one field of the object against another: it must name a field the object `
+    + `declares, and an addDays offset applies only between two date fields or two datetime fields, `
+    + `read from an integer or a numeric field. Evaluated anyway, the comparison would have been `
+    + `answered silently — no row counted, or every row under a negation — a count indistinguishable `
+    + `from a real one. The fields, the operator this filter used and the specific reason are `
+    + `withheld from the message, as they are for the same comparison in a \`where\`; the full `
+    + `diagnostic is in the server log.`,
+  );
+}
+
+/**
+ * [#20148] Judge every scalar-comparison `{ $field }` reference in one
+ * per-aggregation filter against the object's declaration — the same
+ * traversal {@link assertNodeIsEvaluable} takes, which has already run: `$and`
+ * / `$or` / `$not` are descended, every other `$` key has been refused there,
+ * and a reference is judged only as the whole comparand of the six scalar
+ * comparisons, the one position that walk lets it stand.
+ *
+ * In `driver-sql`'s order: the referent is declared, an offset column is
+ * declared, then the `addDays` pair rule. A filter KEY the object does not
+ * declare (or a formula) has no class here, so the same-class half of the pair
+ * rule does not judge it.
+ */
+function assertAggregationFilterReferencesAreDeclared(
+  filter: unknown,
+  root: string,
+  declared: AggregationFilterDeclaration,
+): void {
+  const { fields } = declared;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return;
+  const map = fields as Record<string, unknown>;
+  if (Object.keys(map).length === 0) return;
+  const names = declaredReferenceNames(map);
+  const classes = new Map<string, AggregatedColumnClass | undefined>(
+    [...names].map((name) => [name, declaredFieldClass(map, name)]),
+  );
+  const refuse = (field: string, op: string, path: string, ref: string, reason: string): never => {
+    declared.reportWithheld(
+      `Operator "${op}" on field "${field}" at ${path} compares against another field `
+      + `({ "$field": "${ref}" }), which cannot be evaluated here: ${reason}`,
+    );
+    throw withheldAggregationReferenceError(root);
+  };
+  const walk = (cond: unknown, path: string): void => {
+    if (!cond || typeof cond !== 'object') return;
+    for (const [key, value] of Object.entries(cond)) {
+      const here = `${path}.${key}`;
+      if (key === '$and' || key === '$or') {
+        const branches = Array.isArray(value) ? value : [value];
+        branches.forEach((c, i) => walk(c, `${here}[${i}]`));
+        continue;
+      }
+      if (key === '$not') {
+        walk(value, here);
+        continue;
+      }
+      if (key.startsWith('$')) continue;
+      if (typeof value !== 'object' || value === null || value instanceof Date || Array.isArray(value)) continue;
+      for (const [op, target] of Object.entries(value)) {
+        if (!REFERENCE_COMPARISON_OPERATORS.has(op) || !isFieldReferenceShape(target)) continue;
+        const at = `${here}.${op}`;
+        const ref = String(target.$field);
+        if (!names.has(ref)) {
+          refuse(key, op, at, ref,
+            `"${ref}" is not a declared field of "${declared.object}" — only declared fields can be referenced.`);
+        }
+        const offset = target.addDays;
+        if (isFieldReferenceShape(offset) && !names.has(String(offset.$field))) {
+          refuse(key, op, at, ref,
+            `the addDays offset "${String(offset.$field)}" is not a declared field of "${declared.object}" — `
+            + `only declared fields can be referenced.`);
+        }
+        if (offset !== undefined) {
+          const reason = offsetPairViolation(key, target, classes);
+          if (reason !== undefined) refuse(key, op, at, ref, reason);
+        }
+      }
+    }
+  };
+  walk(filter, root);
 }
 
 /**
@@ -973,6 +1150,55 @@ export function matchesAggregationFilter(
   return matchesHaving(row, filter, clause.root, clause);
 }
 
+/**
+ * [#20148] The two operands as UTC instants — when one of them is a `Date` and
+ * both denote an instant — else `null`, and the comparison runs exactly as it
+ * always did.
+ *
+ * A `Date` bound met the stored text of a datetime column (canonical UTC ISO on
+ * every driver, ADR-0053 D-B) and JS compared the two by coercion: `<` and
+ * friends read the `Date` as its epoch and the ISO string as `NaN`, and `==`
+ * read the `Date` as its `toString()`. So
+ * `{ opened_at: { $gt: new Date('2026-02-01') } }` counted NO row in a
+ * per-aggregation `filter` (and kept no group in `having`), `$ne` / `$nin`
+ * counted every row, and a `$between` of two `Date`s kept every row — while the
+ * same bound in a `where` answered 4 of 6 on driver-memory and driver-sql
+ * alike, each driver reading it by the column's storage rule. This walker is
+ * TYPE-BLIND (it holds a flat row, no declaration), so it reads the pair the
+ * way the spec defines for a type-blind evaluator — {@link utcInstantMs}, the
+ * lift `@objectstack/formula`'s evaluator applies to the same pairing: a
+ * `Date`, epoch milliseconds, a bare `YYYY-MM-DD` (its UTC midnight) or an
+ * ISO / zone-naive timestamp. Anything else — a wall-clock `time` value, junk,
+ * an Invalid Date — is not an instant, and the pair is left to the comparison
+ * below, unchanged.
+ */
+function instantsOf(value: unknown, target: unknown): readonly [number, number] | null {
+  if (!(value instanceof Date) && !(target instanceof Date)) return null;
+  const a = utcInstantMs(value);
+  const b = utcInstantMs(target);
+  return a === null || b === null ? null : [a, b];
+}
+
+/** [#20148] Equality: the instants when a `Date` is in the pair, else the walker's loose `==`. */
+function comparandEquals(value: unknown, target: unknown): boolean {
+  const instants = instantsOf(value, target);
+  return instants ? instants[0] === instants[1] : value == target;
+}
+
+/** [#20148] An ordering: the instants when a `Date` is in the pair, else the operands as they are. */
+function ordered(value: unknown, target: unknown, compare: (a: any, b: any) => boolean): boolean {
+  const instants = instantsOf(value, target);
+  return instants ? compare(instants[0], instants[1]) : compare(value, target);
+}
+
+/** [#20148] List membership: `includes` as before, or a `Date` member naming the same instant. */
+function listHolds(list: readonly unknown[], value: unknown): boolean {
+  return list.includes(value) || list.some((member) => {
+    const instants = instantsOf(value, member);
+    return instants !== null && instants[0] === instants[1];
+  });
+}
+
 /** One column's condition — implicit equality or an operator object. */
 function checkCondition(
   value: any,
@@ -983,14 +1209,15 @@ function checkCondition(
   row: Record<string, any> = {},
 ): boolean {
   // Implicit equality (primitives, null, Date, array exact-match) — loose `==`
-  // to mirror the Filter Protocol's memory evaluation.
+  // to mirror the Filter Protocol's memory evaluation. [#20148] A `Date` bound
+  // is compared as an instant ({@link instantsOf}).
   if (
     typeof condition !== 'object'
     || condition === null
     || condition instanceof Date
     || Array.isArray(condition)
   ) {
-    return value == condition;
+    return comparandEquals(value, condition);
   }
 
   const keys = Object.keys(condition);
@@ -1027,18 +1254,22 @@ function checkCondition(
       if (!compareWithReference(row, value, op, target)) return false;
       continue;
     }
+    // [#20148] The comparison and list arms read a `Date` bound — or a `Date`
+    // value — as an instant ({@link instantsOf}); every other pair compares
+    // exactly as before.
     switch (op) {
-      case '$eq': if (value != target) return false; break;
-      case '$ne': if (value == target) return false; break;
-      case '$gt': if (!(value > target)) return false; break;
-      case '$gte': if (!(value >= target)) return false; break;
-      case '$lt': if (!(value < target)) return false; break;
-      case '$lte': if (!(value <= target)) return false; break;
+      case '$eq': if (!comparandEquals(value, target)) return false; break;
+      case '$ne': if (comparandEquals(value, target)) return false; break;
+      case '$gt': if (!ordered(value, target, (a, b) => a > b)) return false; break;
+      case '$gte': if (!ordered(value, target, (a, b) => a >= b)) return false; break;
+      case '$lt': if (!ordered(value, target, (a, b) => a < b)) return false; break;
+      case '$lte': if (!ordered(value, target, (a, b) => a <= b)) return false; break;
       case '$between':
-        if (Array.isArray(target) && (value < target[0] || value > target[1])) return false;
+        if (Array.isArray(target)
+          && (ordered(value, target[0], (a, b) => a < b) || ordered(value, target[1], (a, b) => a > b))) return false;
         break;
-      case '$in': if (!Array.isArray(target) || !target.includes(value)) return false; break;
-      case '$nin': if (Array.isArray(target) && target.includes(value)) return false; break;
+      case '$in': if (!Array.isArray(target) || !listHolds(target, value)) return false; break;
+      case '$nin': if (Array.isArray(target) && listHolds(target, value)) return false; break;
       case '$exists': {
         const exists = value !== undefined && value !== null;
         if (exists !== !!target) return false;

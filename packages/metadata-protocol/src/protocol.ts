@@ -10509,6 +10509,19 @@ export class ObjectStackProtocolImplementation implements
      * it answered `null`/`0` while looking like a served query. `count` with
      * no field (or the explicit `'*'` sentinel) is the one legitimate
      * field-less form and passes.
+     *
+     * [#20148] …and the KEYS inside each entry's `filter` (the per-aggregation
+     * filter, `AggregationNodeSchema.filter`), judged by the very gate the
+     * explicit `where` takes ({@link assertFilterFieldsExist}): the same field
+     * set, the same `unknown` > `dotted` > virtual ladder, the same
+     * `INVALID_FIELD` / 400, with the caller's own position as the parameter
+     * (`aggregations[1].filter`). Measured on the base through `POST
+     * /data/:object/query` on driver-memory and driver-sql: `{ nope: 1 }` in
+     * one aggregation's filter answered 200 with that count 0 (every count
+     * under `$ne`, a `$not`, or a `$or` branch that held), while the same key
+     * in `where` answered this 400. Run after the entry and field checks
+     * above, so an entry the spec cannot read keeps its shape verdict, and an
+     * unknown aggregated field keeps its own.
      */
     private assertAggregationFieldsExist(object: string, aggregations: unknown): void {
         if (aggregations === undefined || aggregations === null) return;
@@ -10597,7 +10610,15 @@ export class ObjectStackProtocolImplementation implements
         const gate = this.resolveQueryFields(object);
         if (!gate) return;
         const unknown = fieldsToCheck.filter((f) => !gate.known.has(f));
-        if (unknown.length === 0) return;
+        if (unknown.length === 0) {
+            // [#20148] The filter keys, entry by entry, through `where`'s own
+            // gate — see this method's doc. A filter that is not a plain object
+            // names no key here and is left to the engine's shape gate.
+            aggregations.forEach((entry, i) => {
+                this.assertFilterFieldsExist(object, entry.filter, `aggregations[${i}].filter`);
+            });
+            return;
+        }
         const first = unknown[0];
         const dottedHint = first.includes('.') && gate.known.has(first.split('.')[0])
             ? " Aggregation runs over this object's own columns; a related record's column cannot "
