@@ -3516,8 +3516,9 @@ export class RestServer {
      * The whole admission is this verdict: the save door refuses on nothing
      * else about the CALLER before `saveMetaItem` (whose own refusals judge the
      * item and the scope, the same for every admitted caller). `rawType` is
-     * the URL segment, folded here at the boundary ([#10340]) so the verdict
-     * and the door's scope decision read one spelling; the organization is the
+     * the URL segment, folded here at the boundary ([folded-type commit
+     * 26f3588fb] — see the PUT door's org-scope comment) so the verdict and
+     * the door's scope decision read one spelling; the organization is the
      * context's `tenantId`, the very value `organizationIdForMetaWrite`
      * threads.
      */
