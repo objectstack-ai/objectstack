@@ -27,6 +27,8 @@ carrying their own `type === 'secret'` / `'password'` arms. No behaviour
 change: the masked-on-read answer is identical for every `FieldType` ×
 `managedBy` cell, pinned by a table test.
 
+`@objectstack/spec`: `ObjectSchema.create()`'s author-time warning for a `password` field on a non-auth object now reads its `managedBy` exemption from `isMaskedOnReadFieldType` instead of hard-coding `'better-auth'`, so it follows the declaration; which objects and fields warn is unchanged.
+
 A client that renders credential fields (show the mask, offer no copy) should
 derive its set from `isMaskedOnReadFieldType` rather than keep its own list,
 so the server's mask and the client's cannot drift apart.

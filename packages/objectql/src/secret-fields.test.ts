@@ -679,9 +679,10 @@ describe('objectql aggregate() rejects credential fields (ADR-0100 / #3171)', ()
  *    this red and be read.
  *  - **The agreement.** For every cell, the runtime collectors and the spec
  *    predicate give the same answer. This is what goes red when the runtime
- *    grows its own copy again (a `def.type === …` arm) instead of deriving:
- *    the renderer derives from the spec too, so a runtime-only answer is a
- *    field masked by the server and drawn in clear by the client.
+ *    grows its own copy again (a `def.type === …` arm) instead of deriving.
+ *    objectui keeps an interim copy until its re-bind card points it at the
+ *    same declaration; from then on a runtime-only answer is a field masked
+ *    by the server and drawn in clear by the client.
  */
 describe('[#20141] masked-on-read: every FieldType × managedBy cell, derived from the spec declaration', () => {
   const FIELD_TYPES: readonly string[] = FieldType.options;

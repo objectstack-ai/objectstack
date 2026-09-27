@@ -164,10 +164,12 @@ export class EmptyCredentialWriteError extends Error {
  * types are masked, and which `managedBy` buckets exempt which type, is declared
  * once in `@objectstack/spec/data` (`MASKED_ON_READ_FIELD_TYPES`, read through
  * `isMaskedOnReadFieldType`), and this collector asks that predicate per field.
- * objectui's renderer derives from the same declaration, so the server's mask
+ * objectui keeps its interim `MASKED_FIELD_TYPES` copy until its own re-bind
+ * card lands; after that it reads this same declaration, and the server's mask
  * and the client's cannot drift apart. ⛔ Do not add a `def.type === …` arm
- * here: a type masked here and not in the declaration is drawn in clear by the
- * renderer. Change the declaration instead; the table test in
+ * here: a type masked here and not in the declaration is a second copy, and
+ * once the renderer derives it is a field masked by the server and drawn in
+ * clear by the client. Change the declaration instead; the table test in
  * `secret-fields.test.ts` pins every `FieldType × managedBy` answer.
  *
  * The better-auth exemption is deliberate: the auth subsystem reads its identity

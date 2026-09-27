@@ -28,7 +28,10 @@
  * which must not draw a masked value in clear or offer to copy it). A type
  * added to one copy and not the other is masked by the server and drawn in
  * clear by the client, or the reverse. `spec` is the contract both already
- * depend on, so the fact is declared here and both derive from it.
+ * depend on, so the fact is declared here. objectql's collectors and
+ * `ObjectSchema.create()`'s `password` warning derive from it now; objectui
+ * keeps its interim `MASKED_FIELD_TYPES` until its own re-bind card lands, and
+ * that card points it at {@link isMaskedOnReadFieldType}.
  *
  * # Shape — a per-type rule, read through one predicate
  *
