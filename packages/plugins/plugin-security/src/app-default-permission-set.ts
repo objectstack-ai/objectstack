@@ -172,8 +172,9 @@ export function appDefaultPermissionSetName(permissions: unknown): string | unde
  * ⛔ This reader has no `packages` guard of its own. Which `packages` values
  * are absent and which are refused is answered by `resolveArtifactPackageOrder`
  * alone. The rule is stated once, beside `AssembledPackageBodySchema`
- * (`@objectstack/spec`, `stack.zod.ts`). A private `undefined` / `null` check
- * here would be a second spelling of that answer.
+ * (`@objectstack/spec`, `stack.zod.ts`). A private `undefined` check here
+ * would be a second spelling of that answer. So `packages: null` is refused
+ * here exactly when the resolver refuses it, with its envelope.
  *
  * ## One thing it deliberately does NOT do
  *

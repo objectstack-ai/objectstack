@@ -443,7 +443,9 @@ export async function prepareImportRequest(
         // Apply the named mapping's fieldMapping pipeline (rename + transforms;
         // strict projection — only mapped targets reach the write path). Inline
         // `mapping` was empty in this branch, so rows still carry raw headers.
-        const applied = applyMappingToRows(rows, mappingArtifact);
+        // [#20149] The same definition tells it which targets are declared
+        // parts of a compound field, assembled into one value per row.
+        const applied = applyMappingToRows(rows, mappingArtifact, { objectSchema: schema, trimWhitespace, nullValues });
         if (!applied.ok) return applied;
         rows = applied.rows;
     }

@@ -1253,17 +1253,20 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  *   branch, where the artifact itself is the one package body.
  * - **An array**: N package entries, each gated by {@link ArtifactPackageSchema}.
  *
- * Any other value, such as `{}`, `0` or `'x'`, is neither reading. It is
- * malformed and REFUSED; it is never read as absent. `resolveArtifactPackageOrder`
+ * Any other value, such as `null`, `{}`, `0` or `'x'`, is neither reading. It
+ * is malformed and REFUSED; it is never read as absent. `resolveArtifactPackageOrder`
  * (`@objectstack/core`) raises the refusal as `INVALID_ARTIFACT_PACKAGES`
  * (ADR-0112, `status: 422`). A reader that fell through to the artifact's
  * top level instead would answer questions about an artifact the loader
  * refuses. One reader would then boot what another refuses, which is the
  * split this rule closes.
  *
- * ⚠️ `null` is the one value this rule does not settle. The schema's
- * `.optional()` refuses it, while the readers treat it as absent. That
- * disagreement is recorded, not decided, here.
+ * `null` is named first on purpose: ABSENT means `undefined` and nothing
+ * else. The key's `.optional()` admits `undefined`, not `null`, so this schema
+ * refuses `null` (`invalid_type`), `composeStacks` refuses it with two or more
+ * inputs (`STACK_SCHEMA_INVALID`), and every reader refuses it with the
+ * resolver's envelope. The readers once treated it as absent; they were
+ * aligned to this declaration (#19926, ruling A), and ⛔ never the reverse.
  */
 /*
  * ANNOTATED, not inferred — and annotated with a STRUCTURAL type, not a named
