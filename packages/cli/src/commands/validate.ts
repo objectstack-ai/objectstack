@@ -19,7 +19,7 @@ import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 // `os compile` — ⛔ the loop is not re-written here; see that module's header.
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
-import { resolveSduiManifest } from '../utils/sdui-manifest.js';
+import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import {
@@ -151,6 +151,14 @@ export default class Validate extends Command {
     // reason the line above it gives: the #11727 residue pin asserts that
     // nothing rides in build's `warnings` that validate does not also report.
     let permissionSetCollisionWarnings: PermissionSetNameCollisionDiagnostic[] = [];
+    // [#20113] The JSX gate's parse-level notice: empty, or ONE `info` record
+    // saying `kind:'html'` pages were checked at parse level only because no
+    // SDUI component manifest resolved, and where one was looked for. Same
+    // class as the two members above it — reports, never refuses, and is NOT
+    // in the `warnings` list `--strict` reads (see step 3), so the exit status
+    // of a project without a manifest is unchanged on both faces. `os compile`
+    // computes the identical record, so the residue pin keeps holding.
+    let jsxGateNotices: ReturnType<typeof resolveJsxGateManifest>['notices'] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -167,6 +175,8 @@ export default class Validate extends Command {
       ...navGroupWarnings,
       // [#18024] APPENDED for the same reason, one member later.
       ...permissionSetCollisionWarnings,
+      // [#20113] APPENDED for the same reason, one member later again.
+      ...jsxGateNotices,
     ];
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -346,10 +356,28 @@ export default class Validate extends Command {
       //    stats below nor the `--json` payload. A stack that still carries
       //    its collections is returned by identity, so every single-package
       //    project is unaffected by construction.
+      //
+      //    [#20113] The SDUI manifest is resolved ONCE, and both rule runs below
+      //    are handed the same answer. Its pages are counted over EVERY stack
+      //    the JSX gate is handed — the union fold AND each package body the
+      //    per-package pass judges — so html pages carried only in `packages[]`
+      //    count beside a top-level `pages` key the fold keeps.
+      //    With `kind:'html'` pages to check and no manifest, the gate runs at
+      //    parse level and SAYS so — here, at its step, so the line shows on
+      //    the failing paths below too, and in `warningsSoFar()` for `--json`.
+      //    It stays out of the `warnings` list `--strict` reads, exactly like
+      //    the navigation and permission-set advisories: a project with no
+      //    manifest of its own has no remedy but to author one, so promoting
+      //    this to a failure under `--strict` would break every such project.
+      //    A project manifest that exists but cannot be used is REFUSED
+      //    instead (thrown, already reported on stderr; the catch-all exits 1).
+      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
+      jsxGateNotices = [...jsxGate.notices];
+      if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const findings = runAuthoringRules('validate', {
         normalized: authoringRuleUnionStack(normalized as Record<string, unknown>),
         parsed: authoringRuleUnionStack(result.data as Record<string, unknown>),
-        sduiManifest: resolveSduiManifest(),
+        sduiManifest: jsxGate.sduiManifest,
         // [#16546] Same ref set `os build` / `os lint` compute — keeps this
         // door's hook write-set findings at the same `path` as the other two.
         loweredHookRefs: lowering.loweredHookRefs,
@@ -433,7 +461,7 @@ export default class Validate extends Command {
           command: 'validate',
           parsed: result.data as Record<string, unknown>,
           unionFindings: findings,
-          sduiManifest: resolveSduiManifest(),
+          sduiManifest: jsxGate.sduiManifest,
           // [#16546] The same ref set the union run above was handed, so a
           // per-package hook write-set finding reports at the same `path` the
           // other two doors report it at.
@@ -722,6 +750,13 @@ export default class Validate extends Command {
           // for a config whose only advisories are conversion notices — the
           // same divergence one collection narrower. `protocolVersionGap` stays
           // out on both faces; it is never gated by `--strict` (see below).
+          //
+          // [#20113] The difference runs the other way too, and that half is
+          // deliberate: the navigation-contribution and permission-set
+          // advisories (#14553, #18024) and the JSX gate's parse-level notice
+          // ride the payload's `warnings` but not this list, so none of them
+          // is gated by `--strict` on either face — each has its own text
+          // block rather than a `⚠` line in the one below.
           //
           // `valid: true` beside a 1 is not a contradiction, it is the text
           // face verbatim: that path prints "Validation passed" and THEN fails
