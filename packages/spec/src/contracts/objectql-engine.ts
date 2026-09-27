@@ -55,6 +55,7 @@ import type { IDataEngine } from './data-engine';
 import type { IDataDriver } from './data-driver';
 import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
 import type { ServiceObject } from '../data/object.zod';
+import type { BaseEngineOptions, EngineQueryOptions } from '../data/data-engine.zod';
 
 /**
  * The engine's schema-registry view — the members reached through the
@@ -174,6 +175,41 @@ export interface EngineTransactionInfo {
 }
 
 /**
+ * Options for {@link IObjectQLEngine.judgeFilter} (#20157).
+ */
+export interface EngineFilterJudgementOptions {
+    /**
+     * The verb the caller will run the filter under. The engine's filter
+     * refusals name the verb they were raised on (`aggregate('deal'): …`), so
+     * the judge needs it to return the exact message that verb's execution
+     * would raise. Every verb admits `where` through the same doors in the
+     * same order, so this changes the message prefix only, never the verdict.
+     * Defaults to `'find'`.
+     */
+    operation?: 'find' | 'findOne' | 'count' | 'aggregate' | 'update' | 'delete';
+    /**
+     * The execution context the filter would run with. Filter placeholders
+     * (`{current_user_id}`, `{current_org_id}`, date macros) are resolved
+     * against it exactly as execution resolves them. A placeholder whose value
+     * this context does not carry is REFUSED (`FILTER_TOKEN_UNRESOLVED`), the
+     * answer execution gives the same context; the judge never resolves a
+     * placeholder to `null`.
+     */
+    context?: BaseEngineOptions['context'];
+}
+
+/**
+ * The verdict of {@link IObjectQLEngine.judgeFilter} (#20157).
+ *
+ * `ok: false` carries the diagnostic execution would raise for the same filter
+ * on the same object: the same `code`, `status` and `message`. The message is
+ * the refusing door's own text, so it names fields, operators and comparands.
+ */
+export type EngineFilterJudgement =
+    | { ok: true }
+    | { ok: false; code: string; status: number; message: string };
+
+/**
  * The full ObjectQL engine, as the `objectql` slot's consumers use it.
  *
  * Members beyond {@link IDataEngine} are REQUIRED, not optional: `ObjectQL`
@@ -184,6 +220,10 @@ export interface EngineTransactionInfo {
  * system does not replace; marking members optional here would only turn every
  * guarded call into a `possibly undefined` error and push code back toward the
  * `any` this contract exists to remove.
+ *
+ * One member is optional by ruling, not by this default: {@link judgeFilter}
+ * (#19995 ruling C). Its callers must work with an engine that lacks it, so the
+ * optional mark states that requirement in the type.
  */
 export interface IObjectQLEngine extends IDataEngine {
     // ── Schema access ────────────────────────────────────────────────────
@@ -226,6 +266,47 @@ export interface IObjectQLEngine extends IDataEngine {
     getObject(name: string): ServiceObject | undefined;
     /** The schema registry — see {@link EngineSchemaRegistryView}. */
     readonly registry: EngineSchemaRegistryView;
+
+    // ── Filter admission (judge-only, #20157) ─────────────────────────────
+    /**
+     * Judge whether `where` can run against `objectName`, without running it.
+     *
+     * The engine answers the way execution would answer. The engine's own
+     * `where` admission runs: every door the verbs run, in their order, through
+     * the same functions. It stops before any driver is resolved or called.
+     * `{ ok: true }` means execution would admit the filter at the same point.
+     * `{ ok: false, … }` carries the `code`, `status` and `message` execution
+     * would have raised.
+     *
+     * - **Nothing executes.** No driver, no hook, no middleware, no read. The
+     *   member is synchronous, so a door that needs I/O cannot join it
+     *   without a contract change.
+     * - **What it judges is the engine's own admission.** Refusals that sit
+     *   below it are not judged: driver refusals, hooks, and the predicates
+     *   middleware composes after admission (RLS, sharing, tenant scope).
+     *   The judge sees the object's declared field map from the registry. For
+     *   an object the registry does not know, the field-map doors answer
+     *   nothing and the schema-free doors still judge, as at execution.
+     * - **The verdict is not redacted.** `message` is the refusing door's own
+     *   text. A caller judging a filter whose content it must not disclose
+     *   (a read-scope policy, the #5367 ruling) withholds the message itself.
+     *
+     * Why it exists (#19995 ruling C): a caller that composes a policy scope
+     * into a query must learn whether the scope can run before it composes.
+     * Otherwise the refusal comes back mixed with the caller's own `where`,
+     * attributed to the caller. The engine is the single judge of that
+     * question, so the caller asks the engine rather than copying its doors.
+     * The same member serves authoring-time admission (ADR-0058 D2).
+     *
+     * OPTIONAL by that ruling: a caller holding an engine without it keeps
+     * its existing behaviour, so it probes before calling
+     * (`typeof ql.judgeFilter === 'function'`).
+     */
+    judgeFilter?(
+        objectName: string,
+        where: EngineQueryOptions['where'],
+        options?: EngineFilterJudgementOptions,
+    ): EngineFilterJudgement;
 
     // ── Actions ──────────────────────────────────────────────────────────
     registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void;
