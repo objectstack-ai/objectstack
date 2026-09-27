@@ -42,6 +42,7 @@ import {
   normalizeFilterOperator,
   type ViewFilterOperator,
 } from '../ui/view.zod.js';
+import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
 
 /**
  * Flow callout node type rename (protocol 11.0).
@@ -10318,6 +10319,17 @@ const objectTenancyOrganizationFieldRemoved: MetadataConversion = {
  * forever over two keys that never had an effect. It also lets
  * `os migrate meta --from 17` list the mechanical edits for existing sources.
  *
+ * **Two collections, because a ViewItem record travels in two.** `views` is the
+ * stack collection and the stored-row seam's `{ views: [row] }` wrapping.
+ * `viewItems` ({@link ASSEMBLED_VIEW_ITEMS_KEY}) is the assembled-manifest
+ * channel — package export and environment artifacts carry tenant-authored
+ * standalone ViewItems there, `applyArtifactForwardConversions` replays the
+ * chain over it, and the registration loop then parses each entry against
+ * `AssembledViewArtifactSchema`, whose ViewItem member carries these tombstones.
+ * Walking `views` alone would leave an artifact assembled before this release
+ * refused at registration (`INVALID_METADATA`, 422) over two keys that never
+ * had an effect.
+ *
  * ⚠️ Scoped to the ViewItem RECORD spelling — `viewKind` names the family and
  * `config` holds the payload, the discriminator {@link mapViewPayloads} uses for
  * its case 1 — and deliberately NOT walked through `mapViewPayloads`, whose
@@ -10339,14 +10351,30 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
     + 'and stored verbatim, read by nothing: no view switcher ever filtered on `hidden`, and no '
     + 'per-user scope ever read `owner`, so a view marked as one user\'s was listed for everyone)',
   apply(stack, emit) {
-    return mapCollection(stack, 'views', (view, path) => {
+    const stripFromRecord = (view: Dict, path: string): Dict => {
       const kind = view.viewKind;
       if ((kind !== 'list' && kind !== 'form') || !isDict(view.config)) return view;
       return stripKeys(view, ['owner', 'hidden'], emit, path);
-    });
+    };
+    return mapCollection(
+      mapCollection(stack, 'views', stripFromRecord),
+      ASSEMBLED_VIEW_ITEMS_KEY,
+      stripFromRecord,
+    );
   },
   fixture: {
     before: {
+      // The assembled-manifest channel: a standalone record a package export
+      // carried before this release.
+      viewItems: [
+        {
+          name: 'crm_lead.escalations',
+          object: 'crm_lead',
+          viewKind: 'list',
+          hidden: false,
+          config: { type: 'grid', columns: ['name'] },
+        },
+      ],
       views: [
         // A record carrying both keys: both go, and the live identity keys
         // beside them (`scope`, `label`) are untouched.
@@ -10368,6 +10396,14 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
       ],
     },
     after: {
+      viewItems: [
+        {
+          name: 'crm_lead.escalations',
+          object: 'crm_lead',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['name'] },
+        },
+      ],
       views: [
         {
           name: 'crm_lead.my_hot_leads',
@@ -10381,8 +10417,9 @@ const viewItemOwnerHiddenRemoved: MetadataConversion = {
         { name: 'crm_lead.pipeline', object: 'crm_lead', viewKind: 'list', hidden: true },
       ],
     },
-    // `stripKeys` emits one notice per KEY removed: two keys on one record.
-    expectedNotices: 2,
+    // `stripKeys` emits one notice per KEY removed: two on the `views` record,
+    // one on the `viewItems` record.
+    expectedNotices: 3,
   },
 };
 
