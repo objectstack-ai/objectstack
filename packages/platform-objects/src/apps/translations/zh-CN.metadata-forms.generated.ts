@@ -891,37 +891,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "用户筛选器",
         helpText: "快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设"
       },
-      tabs: {
-        label: "标签页",
-        helpText: "视图内筛选标签页——每个标签页应用各自的筛选规则"
-      },
-      "tabs.name": {
-        label: "名称"
-      },
-      "tabs.label": {
-        label: "显示名称"
-      },
-      "tabs.icon": {
-        label: "图标"
-      },
-      "tabs.view": {
-        label: "列表视图"
-      },
-      "tabs.filter": {
-        label: "筛选"
-      },
-      "tabs.order": {
-        label: "显示顺序"
-      },
-      "tabs.pinned": {
-        label: "固定"
-      },
-      "tabs.isDefault": {
-        label: "默认标签页"
-      },
-      "tabs.visible": {
-        label: "可见"
-      },
       appearance: {
         label: "外观",
         helpText: "allowedVisualizations：允许用户切换的渲染器"

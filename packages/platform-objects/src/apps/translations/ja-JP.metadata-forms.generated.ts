@@ -891,37 +891,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ユーザーフィルター",
         helpText: "クイックフィルターバー：要素スタイル（dropdown / tabs / toggle）+ 公開フィールドまたはタブプリセット"
       },
-      tabs: {
-        label: "タブ",
-        helpText: "ビュー内フィルタータブ——各タブが独自のフィルタールールを適用"
-      },
-      "tabs.name": {
-        label: "名前"
-      },
-      "tabs.label": {
-        label: "表示名"
-      },
-      "tabs.icon": {
-        label: "アイコン"
-      },
-      "tabs.view": {
-        label: "リストビュー"
-      },
-      "tabs.filter": {
-        label: "フィルター"
-      },
-      "tabs.order": {
-        label: "表示順"
-      },
-      "tabs.pinned": {
-        label: "固定"
-      },
-      "tabs.isDefault": {
-        label: "既定のタブ"
-      },
-      "tabs.visible": {
-        label: "表示"
-      },
       appearance: {
         label: "外観",
         helpText: "allowedVisualizations：ユーザーが切り替え可能なレンダラー"
