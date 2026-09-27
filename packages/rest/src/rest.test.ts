@@ -3579,7 +3579,7 @@ describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
   it('resolveRegisteredServices probes only referenced services and reports presence', async () => {
     const rest: any = make();
     const kernel = { getServiceAsync: async (n: string) => { if (n === 'org-scoping') return {}; throw new Error('not registered'); } };
-    const reg = await resolveRegisteredServices(rest.serviceProbeFor(kernel), [app()]);
+    const reg = (await resolveRegisteredServices(rest.serviceProbeFor(kernel), [app()]))!;
     expect(reg.has('org-scoping')).toBe(true);
     expect(reg.size).toBe(1);
   });
@@ -3622,7 +3622,7 @@ describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
         ],
       }],
     };
-    const reg = await resolveRegisteredServices(rest.serviceProbeFor(kernel), [areaApp]);
+    const reg = (await resolveRegisteredServices(rest.serviceProbeFor(kernel), [areaApp]))!;
     expect(reg.has('org-scoping')).toBe(true);
     expect(reg.has('nope')).toBe(false);
 
@@ -3847,7 +3847,7 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
   it('resolveRegisteredServices discovers requiresService declared on widgets', async () => {
     const rest: any = make();
     const kernel = { getServiceAsync: async (n: string) => { if (n === 'org-scoping') return {}; throw new Error('absent'); } };
-    const reg = await resolveRegisteredServices(rest.serviceProbeFor(kernel), [dash()]);
+    const reg = (await resolveRegisteredServices(rest.serviceProbeFor(kernel), [dash()]))!;
     expect(reg.has('org-scoping')).toBe(true);
   });
 });

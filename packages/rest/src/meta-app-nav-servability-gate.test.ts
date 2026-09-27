@@ -77,7 +77,7 @@ const ids = (a: any): string[] => (a?.navigation ?? []).map((e: any) => e.id);
 const areaIds = (a: any, i: number): string[] => (a?.areas?.[i]?.navigation ?? []).map((e: any) => e.id);
 
 /** Resolve the gate the way the `/meta` routes do. */
-async function gateOf(rest: any, items?: unknown[]) {
+async function gateOf(rest: any, items?: unknown[]): Promise<any> {
     const p = createMockProtocol(items);
     return resolveNavServability({ ...rest.metaListSource(p, undefined), navPruneLogged: rest.navPruneLogged });
 }
@@ -173,8 +173,7 @@ describe('[#7912] nav servability — what it deliberately does NOT judge', () =
     });
 
     it('fail-open: with no gate resolved, nothing is pruned (prior behaviour)', async () => {
-        const rest = make();
-        const app = { name: 'setup', navigation: [{ id: 'nav_jwks', type: 'object', objectName: 'sys_jwks' }] };
+        const app ={ name: 'setup', navigation: [{ id: 'nav_jwks', type: 'object', objectName: 'sys_jwks' }] };
         expect(ids(filterAppForUser(app, new Set<string>()))).toEqual(['nav_jwks']);
     });
 
