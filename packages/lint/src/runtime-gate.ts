@@ -56,6 +56,7 @@ import {
   type AuthoringRuleContext,
 } from './authoring-rules.js';
 import { isSystemObject } from './validate-security-posture.js';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 
 type AnyRec = Record<string, unknown>;
 
@@ -885,6 +886,14 @@ export function runRuntimeAuthoringRules(args: {
   packageScope?: RuntimePackageScope;
   /** ADR-0080 SDUI manifest, when the host has one. */
   sduiManifest?: unknown;
+  /**
+   * [#20158] The host engine's judge-only filter admission
+   * (`IObjectQLEngine.judgeFilter`), bound to that engine — handed to the rules
+   * as `AuthoringRuleContext.judgeFilter`. The host probes for it
+   * (`typeof engine.judgeFilter === 'function'`); omitted, the rules that read
+   * it skip the engine's judgement and answer as they did without it.
+   */
+  judgeFilter?: IObjectQLEngine['judgeFilter'];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -908,7 +917,11 @@ export function runRuntimeAuthoringRules(args: {
   // reference-integrity suite) which per-write snapshot it is judging, so it
   // can dispatch its MEMBERS as this gate dispatches entries. CLI callers
   // never set it; see `AuthoringRuleContext`.
-  const ctx: AuthoringRuleContext = { sduiManifest: args.sduiManifest, runtimeWriteType: args.type };
+  const ctx: AuthoringRuleContext = {
+    sduiManifest: args.sduiManifest,
+    runtimeWriteType: args.type,
+    judgeFilter: args.judgeFilter,
+  };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
   const added = runRules(rules, snapshots.candidate, ctx)
     .filter((f) => !before.has(fingerprint(f)))

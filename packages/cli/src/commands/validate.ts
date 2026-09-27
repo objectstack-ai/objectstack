@@ -18,6 +18,7 @@ import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 // [#18677] The per-package half of the author-time rule run, shared with
 // `os compile` — ⛔ the loop is not re-written here; see that module's header.
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
+import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
@@ -374,13 +375,20 @@ export default class Validate extends Command {
       const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
+      const parsedUnion = authoringRuleUnionStack(result.data as Record<string, unknown>);
+      // [#20158] The engine's own filter admission over this stack's objects —
+      // built lazily, driverless; see `utils/authoring-filter-judge.ts`. ONE
+      // judge for the union run and the per-package pass below, because the
+      // runtime judges every package's policies against one registry.
+      const judgeFilter = stackFilterJudge(parsedUnion);
       const findings = runAuthoringRules('validate', {
         normalized: authoringRuleUnionStack(normalized as Record<string, unknown>),
-        parsed: authoringRuleUnionStack(result.data as Record<string, unknown>),
+        parsed: parsedUnion,
         sduiManifest: jsxGate.sduiManifest,
         // [#16546] Same ref set `os build` / `os lint` compute — keeps this
         // door's hook write-set findings at the same `path` as the other two.
         loweredHookRefs: lowering.loweredHookRefs,
+        judgeFilter,
       });
       const { errors: ruleErrors, advisories } = splitBySeverity(findings);
       ruleAdvisories = advisories;
@@ -466,6 +474,7 @@ export default class Validate extends Command {
           // per-package hook write-set finding reports at the same `path` the
           // other two doors report it at.
           loweredHookRefs: lowering.loweredHookRefs,
+          judgeFilter,
         });
         ruleAdvisories = [...ruleAdvisories, ...perPackage.advisories];
         if (perPackage.errors.length > 0) {

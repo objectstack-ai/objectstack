@@ -137,7 +137,7 @@ const result = DecisionConditionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **conditions** | `{ label: string; expression: string }[]` | optional | Ordered decision branches (first true expression wins; omit to branch purely on edge conditions) |
-| **mode** | `Enum<'exclusive' \| 'inclusive'>` | optional | Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: 'exclusive' = only the first, in the order the edges are declared (what an omitted mode means); 'inclusive' = every one that holds. Declared ahead of the engine change that reads it: until that lands, an edge-branched decision takes every out-edge whose condition holds, whatever this says. A conditions list is first-match on its own. |
+| **mode** | `Enum<'exclusive' \| 'inclusive'>` | optional | Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: 'exclusive' = only the first, in the order the edges are declared (what an omitted mode means); 'inclusive' = every one that holds. Declared ahead of the engine change that reads it: until that lands, an edge-branched decision takes every out-edge whose condition holds, whatever this says. Refused beside a non-empty conditions list, which is first-match on its own: delete mode there, or move the branches onto the out-edges, delete conditions, and keep mode. |
 
 ### Nested Shape: `DecisionConfig.conditions[number]`
 

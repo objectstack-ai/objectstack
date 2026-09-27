@@ -220,6 +220,68 @@ export function recordsOf(v: unknown): AnyRec[] {
   return [];
 }
 
+/** The shape a thrown {@link packagesOf} refusal carries (ADR-0112 envelope). */
+export type StackPackagesError = Error & { code: string; status: number };
+
+/**
+ * Every entry of `stack.packages` — the release artifact's package list
+ * (ADR-0130 D4) — read on `packages/lint`'s own terms, ⛔ NOT the way
+ * {@link recordsOf} reads `objects` / `sections` / `tabs`.
+ *
+ * `packages` is declared `z.array(ArtifactPackageSchema).optional()`
+ * (`ObjectStackDefinitionSchema`, `@objectstack/spec`) — array-or-absent,
+ * never map-or-array. Ruling A on #15293 (`5634034754`): a `packages` that is
+ * PRESENT but not an array (`{}`, `0`, `'x'`, or a keyed object) is
+ * **malformed, not absent**, and every reader refuses it — `recordsOf` cannot
+ * be that reader, because for its OTHER callers a plain object legitimately
+ * IS the map form (see the note above this function). `packages` has no map
+ * form at all, so this is a second, narrower reader rather than a branch on
+ * the first one.
+ *
+ * - **Absent** (`undefined` ONLY) → `[]`. A single-package artifact
+ *   contributes nothing here — this answers "what does `packages[]` add",
+ *   never "what does this stack provide". `null` is malformed, per ruling
+ *   `5805260775` on #19926 — `null` is refused here exactly as
+ *   {@link resolveArtifactPackageOrder} (`@objectstack/core`) refuses it,
+ *   same code and status, since #19926 (PR #20228, `a9fb83ef06`).
+ * - **An array** → iterated, non-record members dropped — unchanged from
+ *   what every one of these five call sites did through `recordsOf` before
+ *   this function existed.
+ * - **Anything else present, `null` included** → refused, once, here —
+ *   replacing five copies of the same read across
+ *   `validate-object-references.ts`, `validate-translation-references.ts`
+ *   and `validate-mapping-target-fields.ts` (#20206).
+ *
+ * ⛔ Do not fold this into `recordsOf` itself (#20206's card): that reader
+ * stays the shared map-or-array reader its other callers need.
+ *
+ * @throws A {@link StackPackagesError} — `code: 'INVALID_ARTIFACT_PACKAGES'`,
+ *   `status: 422` — for a present non-array `packages` OTHER than `null`,
+ *   the SAME registered code {@link resolveArtifactPackageOrder} already
+ *   raises for the identical defect on the assembled artifact; core raises
+ *   the same code for `null` too (#19926). Never a new code, either way.
+ */
+export function packagesOf(stack: unknown): AnyRec[] {
+  const declared = (stack as { packages?: unknown } | null | undefined)?.packages;
+  // ⛔ `undefined` ONLY. `null` is present, not absent — ruling `5805260775`
+  // on #19926 — so it falls to the refusal below with every other non-array
+  // value.
+  if (declared === undefined) return [];
+  if (Array.isArray(declared)) return declared.filter(isRec);
+  const err = new Error(
+    'A stack\'s `packages` must be an array of package entries (ADR-0130 D4, '
+    + '`ArtifactPackageSchema`), but this stack carries `packages` of type '
+    // `typeof null` is `'object'`, which would name a `{}` the author never
+    // wrote; `null` is named as itself here — the same naming
+    // `resolveArtifactPackageOrder` uses (`null` named as `null`).
+    + `${declared === null ? 'null' : typeof declared}. Omit the key entirely for a `
+    + 'single-package stack — `manifest` is retained, not replaced.',
+  ) as StackPackagesError;
+  err.code = 'INVALID_ARTIFACT_PACKAGES';
+  err.status = 422;
+  throw err;
+}
+
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
