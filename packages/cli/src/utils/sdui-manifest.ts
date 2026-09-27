@@ -36,9 +36,17 @@
  *                   TypeError while `{ oops` passed it silently — one rule now
  *                   covers both, with the file and the reason named.
  *
- * Both the notice and the refusal fire only when the stack has a page the JSX
+ * Both the notice and the refusal fire only when the run has a page the JSX
  * gate actually checks. With none, the manifest is read by nothing, so a
  * missing or broken one degrades nothing and silence is the true answer.
+ *
+ * "The run" is EVERY stack the gate is handed, not the union fold alone
+ * ({@link jsxGateStacks}). The fold keeps any collection the top level already
+ * carries, `pages: []` included, while the per-package pass still hands each
+ * `packages[]` body to the gate with the same manifest. Counting the fold alone
+ * read 0 for a top-level `pages` key beside package-carried html pages, so that
+ * layout got no notice and a broken manifest passed at exit 0: the silent
+ * degradation this module exists to end, one layout over (#20113 round 1).
  *
  * ⛔ The console leg's FAILURE semantics are deliberately unchanged: the
  * specifier below resolves to nothing today (the console's `exports` map does
@@ -52,7 +60,9 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import chalk from 'chalk';
 import type { AuthoringFinding } from '@objectstack/lint';
+import { artifactPackages, packageBodyAsStack } from './artifact-packages.js';
 import { printErrorToStderr, printInfo } from './format.js';
+import { authoringRuleUnionStack } from './stack-collections.js';
 
 /** The file the project provides, looked for in the working directory. */
 export const PROJECT_SDUI_MANIFEST_FILE = 'sdui.manifest.json';
@@ -146,30 +156,69 @@ export function resolveSduiManifest(cwd: string = process.cwd()): SduiManifestRe
 }
 
 /**
- * How many pages the JSX gate checks AGAINST a manifest: `kind: 'html'` (and
- * its deprecated alias `'jsx'`) with a non-empty `source`, over the collection
- * authored either as an array or as a name-keyed map.
+ * Every stack the JSX gate is handed in one run of `os validate` / `os build` /
+ * `os lint`, from the stack the command parsed: the union run's
+ * `authoringRuleUnionStack()` fold, then each `packages[]` body as the
+ * per-package pass judges it — read through that pass's OWN enumeration
+ * (`artifactPackages` + `packageBodyAsStack`), ⛔ never a second walk of
+ * `packages[]`, so the two cannot disagree about which bodies are judged.
+ *
+ * Handed an already-folded stack it answers the same: the fold keeps
+ * `packages`, and re-folding a folded stack returns it by identity.
+ */
+export function jsxGateStacks(stack: AnyRec): AnyRec[] {
+  return [
+    authoringRuleUnionStack(stack),
+    ...artifactPackages(stack).map((pkg) => packageBodyAsStack(pkg.body, stack.packages)),
+  ];
+}
+
+/**
+ * The pages one stack's JSX gate checks AGAINST a manifest: `kind: 'html'`
+ * (and its deprecated alias `'jsx'`) with a non-empty `source`, over the
+ * collection authored either as an array or as a name-keyed map — each keyed
+ * by the name the gate reports it under (`page "NAME"`; a map entry's key when
+ * the entry carries no `name`), or by the record itself when it has neither.
  *
  * The kind set is `validateJsxPages`'s own (`packages/lint/src/
  * validate-jsx-pages.ts`), and the empty-source pages are left out because the
  * gate refuses those with `jsx-page-empty-source` before a manifest is ever
  * consulted. `sdui-manifest.test.ts` holds the two equal by driving the real
  * rule, so a kind the gate starts or stops checking reds there.
- *
- * Hand it the stack the gate judges — the `authoringRuleUnionStack()` fold —
- * so a page that lives only in `packages[]` is counted.
  */
-export function countJsxGatePages(stack: AnyRec): number {
+function checkedPageKeys(stack: AnyRec): unknown[] {
   const pages = stack.pages;
-  const entries: unknown[] = Array.isArray(pages) ? pages : isRecord(pages) ? Object.values(pages) : [];
-  let count = 0;
-  for (const page of entries) {
+  const entries: Array<[string | undefined, unknown]> = Array.isArray(pages)
+    ? pages.map((page): [undefined, unknown] => [undefined, page])
+    : isRecord(pages)
+      ? Object.entries(pages)
+      : [];
+  const keys: unknown[] = [];
+  for (const [mapKey, page] of entries) {
     if (!isRecord(page)) continue;
     if (page.kind !== 'html' && page.kind !== 'jsx') continue;
     if (typeof page.source !== 'string' || page.source.trim() === '') continue;
-    count++;
+    const name = typeof page.name === 'string' && page.name !== '' ? page.name : mapKey;
+    keys.push(name === undefined ? page : `page:${name}`);
   }
-  return count;
+  return keys;
+}
+
+/**
+ * How many DISTINCT pages the JSX gate checks against a manifest across every
+ * stack it is handed ({@link jsxGateStacks}). Distinct by page name, because a
+ * page reaches the gate twice whenever both runs see it: the fold copies an
+ * absent `pages` in from the bodies, and an additive artifact's top-level
+ * `pages` already IS the union of them. ⚠️ So two packages each shipping a
+ * page under the SAME name count once — a name collision, not a layout this
+ * count is the place to judge.
+ */
+export function countJsxGatePages(stack: AnyRec): number {
+  const seen = new Set<unknown>();
+  for (const judged of jsxGateStacks(stack)) {
+    for (const key of checkedPageKeys(judged)) seen.add(key);
+  }
+  return seen.size;
 }
 
 /**
@@ -207,9 +256,12 @@ export interface JsxGateManifest {
 
 /**
  * The one decision the three authoring commands share about the manifest,
- * made once per run over the stack the JSX gate judges. Throws
- * {@link SduiManifestRefusalError} for an `unusable` project manifest when
- * there is a page to check; see the header for the three outcomes.
+ * made once per run. `stack` is the stack the command parsed; the pages
+ * counted are those of every stack the gate is handed ({@link jsxGateStacks}),
+ * so a page carried only inside `packages[]` counts whatever the top level
+ * holds. Throws {@link SduiManifestRefusalError} for an `unusable` project
+ * manifest when there is a page to check; see the header for the three
+ * outcomes.
  */
 export function resolveJsxGateManifest(
   stack: AnyRec,

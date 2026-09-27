@@ -357,8 +357,11 @@ export default class Validate extends Command {
       //    its collections is returned by identity, so every single-package
       //    project is unaffected by construction.
       //
-      //    [#20113] The SDUI manifest is resolved ONCE, over the stack the JSX
-      //    gate judges, and both rule runs below are handed the same answer.
+      //    [#20113] The SDUI manifest is resolved ONCE, and both rule runs below
+      //    are handed the same answer. Its pages are counted over EVERY stack
+      //    the JSX gate is handed — the union fold AND each package body the
+      //    per-package pass judges — so html pages carried only in `packages[]`
+      //    count beside a top-level `pages` key the fold keeps.
       //    With `kind:'html'` pages to check and no manifest, the gate runs at
       //    parse level and SAYS so — here, at its step, so the line shows on
       //    the failing paths below too, and in `warningsSoFar()` for `--json`.
@@ -368,7 +371,7 @@ export default class Validate extends Command {
       //    this to a failure under `--strict` would break every such project.
       //    A project manifest that exists but cannot be used is REFUSED
       //    instead (thrown, already reported on stderr; the catch-all exits 1).
-      const jsxGate = resolveJsxGateManifest(authoringRuleUnionStack(result.data as Record<string, unknown>));
+      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const findings = runAuthoringRules('validate', {

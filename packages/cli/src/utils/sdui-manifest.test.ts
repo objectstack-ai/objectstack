@@ -4,8 +4,9 @@
  * The SDUI manifest resolver and the one decision the three authoring commands
  * share about it (#20113). The command-level faces — text and `--json` of `os
  * validate` / `os build` / `os lint`, and their exit statuses — are pinned by
- * `test/jsx-gate-manifest-notice.test.ts`; this file holds the logic those
- * faces all read.
+ * `test/jsx-gate-manifest-notice.e2e.test.ts`, which runs NIGHTLY (it spawns
+ * the CLI). This file is the per-PR guard, so every rule those faces read is
+ * pinned HERE too — the package-carried layout included.
  *
  * ⛔ Anchors, not prose: the notice is found by its `rule` id and asserted on
  * the DATA it must carry (the page count and every place looked), never on the
@@ -23,16 +24,38 @@ import {
   PROJECT_SDUI_MANIFEST_FILE,
   SduiManifestRefusalError,
   countJsxGatePages,
+  jsxGateStacks,
   printJsxGateNotices,
   resolveJsxGateManifest,
   resolveSduiManifest,
   type SduiManifestResolution,
 } from './sdui-manifest.js';
+import { artifactPackages, packageBodyAsStack, runPerPackageAuthoringRules } from './artifact-packages.js';
+import { authoringRuleUnionStack } from './stack-collections.js';
 import { errorCodeFields, isReportedError } from './format.js';
 
 const MANIFEST = { components: { div: { type: 'div', inputs: [{ name: 'children', type: 'slot' }] } } };
 const HTML_STACK = { pages: [{ name: 'landing', kind: 'html', source: '<div>hi</div>' }] };
 const NO_PAGES_STACK = { objects: [{ name: 'ticket' }] };
+
+/** A `kind: 'html'` page the gate checks against a manifest. */
+const html = (name: string) => ({ name, label: name, kind: 'html', source: '<div>hi</div>' });
+/** An ADR-0130 D4 package entry, complete enough for the fold to resolve it. */
+const pkg = (id: string, pages: unknown[]) => ({
+  manifest: { id, name: id.replace(/\W/g, '_'), version: '1.0.0', type: 'app', pages },
+});
+/**
+ * The round-1 layout: the top level carries a `pages` key — so the union fold
+ * keeps it and folds nothing in — while the html pages live only inside
+ * `packages[]`, where the per-package pass still hands them to the gate.
+ */
+const PACKAGE_CARRIED: Record<string, Record<string, unknown>> = {
+  'top-level `pages: []`': { pages: [], packages: [pkg('com.x.site', [html('site_landing')])] },
+  'a top-level kind:full page': {
+    pages: [{ name: 'home', label: 'Home', kind: 'full', regions: [] }],
+    packages: [pkg('com.x.site', [html('site_landing')])],
+  },
+};
 
 const ABSENT: SduiManifestResolution = {
   status: 'absent',
@@ -136,6 +159,59 @@ describe('countJsxGatePages — the pages the JSX gate checks against a manifest
   });
 });
 
+describe('countJsxGatePages — every stack the gate is handed, not the union fold alone', () => {
+  const EMPTY_MANIFEST = { components: {} };
+
+  it.each(Object.entries(PACKAGE_CARRIED))(
+    '%s beside package-carried html pages: the per-package pass judges them, the fold alone judges none',
+    (_label, stack) => {
+      // WHY the fold alone undercounts: it keeps the top-level `pages` key, so
+      // the union run's gate sees no html page at all…
+      expect(validateJsxPages(authoringRuleUnionStack(stack), { manifest: EMPTY_MANIFEST as never })).toEqual([]);
+      // …while the REAL per-package pass hands the package body to the gate —
+      // with a manifest declaring nothing, the page's `div` is flagged there.
+      const perPackage = runPerPackageAuthoringRules({
+        command: 'validate',
+        parsed: stack,
+        unionFindings: [],
+        sduiManifest: EMPTY_MANIFEST,
+      }).findings.filter((f) => f.rule.startsWith('jsx-'));
+      expect(perPackage.length).toBeGreaterThan(0);
+      expect(perPackage.every((f) => f.where.includes('site_landing'))).toBe(true);
+      // So the count follows what is judged: one page.
+      expect(countJsxGatePages(stack)).toBe(1);
+    },
+  );
+
+  it('jsxGateStacks is the fold plus the per-package pass’s OWN enumeration of the bodies', () => {
+    const stack = PACKAGE_CARRIED['top-level `pages: []`'];
+    expect(jsxGateStacks(stack)).toEqual([
+      authoringRuleUnionStack(stack),
+      ...artifactPackages(stack).map((p) => packageBodyAsStack(p.body, stack.packages)),
+    ]);
+    expect(jsxGateStacks(HTML_STACK)).toEqual([HTML_STACK]);
+  });
+
+  it('no double count where both runs see a page: option B (the fold copies the bodies in)', () => {
+    const optionB = { packages: [pkg('com.x.a', [html('a_one')]), pkg('com.x.b', [html('b_one'), html('b_two')])] };
+    expect(jsxGateStacks(optionB)).toHaveLength(3);
+    expect(countJsxGatePages(optionB)).toBe(3);
+  });
+
+  it('no double count where both runs see a page: additive (the top level already IS the union)', () => {
+    const additive = {
+      pages: [html('a_one'), html('b_one')],
+      packages: [pkg('com.x.a', [html('a_one')]), pkg('com.x.b', [html('b_one')])],
+    };
+    expect(countJsxGatePages(additive)).toBe(2);
+  });
+
+  it('an already-folded stack answers the same as the stack it was folded from', () => {
+    const optionB = { packages: [pkg('com.x.a', [html('a_one')])] };
+    expect(countJsxGatePages(authoringRuleUnionStack(optionB))).toBe(countJsxGatePages(optionB));
+  });
+});
+
 describe('resolveJsxGateManifest — one decision, three commands', () => {
   let errSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
@@ -166,6 +242,24 @@ describe('resolveJsxGateManifest — one decision, three commands', () => {
     for (const place of (ABSENT as { lookedAt: readonly string[] }).lookedAt) expect(n.message).toContain(place);
     expect(n.hint).toContain('/proj/sdui.manifest.json');
   });
+
+  it.each(Object.entries(PACKAGE_CARRIED))(
+    'absent, %s beside package-carried html pages: the notice, counting the package page',
+    (_label, stack) => {
+      const r = resolveJsxGateManifest(stack, ABSENT);
+      expect(r.sduiManifest).toBeUndefined();
+      expect(r.notices).toHaveLength(1);
+      expect(r.notices[0]).toMatchObject({ severity: 'info', rule: JSX_PARSE_LEVEL_ONLY_RULE });
+      expect(r.notices[0].message).toMatch(/^1 /);
+    },
+  );
+
+  it.each(Object.entries(PACKAGE_CARRIED))(
+    'unusable, %s beside package-carried html pages: refused, not waved through',
+    (_label, stack) => {
+      expect(() => resolveJsxGateManifest(stack, UNUSABLE)).toThrow(SduiManifestRefusalError);
+    },
+  );
 
   it('absent with nothing to check: silence is the true answer', () => {
     expect(resolveJsxGateManifest(NO_PAGES_STACK, ABSENT)).toEqual({ sduiManifest: undefined, notices: [] });

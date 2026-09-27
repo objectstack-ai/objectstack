@@ -19,9 +19,19 @@
  *   - no `kind:'html'` pages → no notice (control);
  *   - a project manifest that exists but is not valid JSON → refused, exit 1,
  *     the file named on stderr and in the `--json` envelope's `error`; and with
- *     no page to check, NOT refused (it is read by nothing).
+ *     no page to check, NOT refused (it is read by nothing);
+ *   - [round 1] the PACKAGE-CARRIED layout — a top-level `pages` key (`[]`, or
+ *     a `kind: 'full'` page) beside html pages that live only in `packages[]`:
+ *     the union fold keeps the top-level key, but the per-package pass still
+ *     hands those pages to the gate, so the notice (counting them) and the
+ *     refusal both fire there too, on all three commands.
  *
  * The notice is found by its rule id — an anchor — never by its prose.
+ *
+ * ⭐ NIGHTLY by name (`.e2e`): it spawns the CLI, like its conversion-notice
+ * siblings, and `vitest.config.ts`'s nightly-tiers section moves that class
+ * out of the per-PR run. Every rule pinned here is ALSO pinned at unit level in
+ * `src/utils/sdui-manifest.test.ts`, which is the per-PR guard.
  *
  * Runs the CLI through `bin/run-dev.js`, the SOURCE entry, as the sibling
  * conversion-notice pins do, so the three command files and
@@ -76,9 +86,16 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
   }
 }
 
-/** The notice records a payload carries, from whichever existing channel the command publishes. */
+/**
+ * The notice records a payload carries, from BOTH existing channels — `warnings`
+ * (validate/build records) and `issues` (lint) — so a payload carrying the two
+ * would be read whole, not half. (`os lint`'s `warnings` is a count, not a list.)
+ */
 function noticesIn(payload: Record<string, unknown>): Array<Record<string, unknown>> {
-  const channel = Array.isArray(payload.warnings) ? payload.warnings : Array.isArray(payload.issues) ? payload.issues : [];
+  const channel = [
+    ...(Array.isArray(payload.warnings) ? payload.warnings : []),
+    ...(Array.isArray(payload.issues) ? payload.issues : []),
+  ];
   return (channel as unknown[]).filter(
     (x): x is Record<string, unknown> => typeof x === 'object' && x !== null && (x as { rule?: unknown }).rule === RULE,
   );
@@ -108,11 +125,56 @@ export default {
 `;
 }
 
+/**
+ * The round-1 layout: `top` is the top-level `pages` value the union fold KEEPS
+ * (so it folds nothing in), and the one html page lives only inside the
+ * package body the per-package pass judges.
+ */
+function packageCarried(top: string): string {
+  return `
+export default {
+  manifest: { id: 'com.example.jxg', name: 'jxg', version: '1.0.0', type: 'app', namespace: 'jxg', engines: { protocol: '^17' } },
+  pages: ${top},
+  packages: [
+    {
+      manifest: {
+        id: 'com.example.jxg.site', name: 'jxg_site', version: '1.0.0', type: 'app', namespace: 'jxg',
+        pages: [{ name: 'jxg_site_landing', label: 'Landing', kind: 'html', source: '<div>hi</div>' }],
+      },
+    },
+  ],
+  apps: [{ name: 'jxg_app', label: 'JXG', navigation: [{ id: 'nav_ticket', type: 'object', label: 'Tickets', objectName: 'jxg_ticket' }] }],
+  objects: [
+    { name: 'jxg_ticket', label: 'Ticket', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } },
+  ],
+};
+`;
+}
+const TOP_EMPTY = '[]';
+const TOP_FULL = "[{ name: 'jxg_home', label: 'Home', kind: 'full', regions: [] }]";
+
 /** Declares exactly the one component the fixture page uses. */
 const MANIFEST = JSON.stringify({ components: { div: { type: 'div', inputs: [{ name: 'children', type: 'slot' }] } } });
 const MALFORMED = '{ "components": [ oops';
 
-type Fixture = 'noManifest' | 'withManifest' | 'litControl' | 'noPages' | 'malformed' | 'noPagesMalformed';
+type Fixture =
+  | 'noManifest'
+  | 'withManifest'
+  | 'litControl'
+  | 'noPages'
+  | 'malformed'
+  | 'noPagesMalformed'
+  | 'pkgTopEmpty'
+  | 'pkgTopFull'
+  | 'pkgTopEmptyMalformed'
+  | 'pkgTopFullMalformed';
+
+/** The package-carried fixtures, by layout, as the `it.each` rows below read them. */
+const PACKAGE_LAYOUTS = [
+  ['top-level `pages: []`', 'pkgTopEmpty', 'pkgTopEmptyMalformed'],
+  ['a top-level kind:full page', 'pkgTopFull', 'pkgTopFullMalformed'],
+] as const;
+const COMMANDS = ['validate', 'build', 'lint'] as const;
 
 const FIXTURES: Record<Fixture, { config: string; manifest?: string }> = {
   noManifest: { config: stack('<div>hi</div>') },
@@ -122,6 +184,10 @@ const FIXTURES: Record<Fixture, { config: string; manifest?: string }> = {
   noPages: { config: stack(null) },
   malformed: { config: stack('<div>hi</div>'), manifest: MALFORMED },
   noPagesMalformed: { config: stack(null), manifest: MALFORMED },
+  pkgTopEmpty: { config: packageCarried(TOP_EMPTY) },
+  pkgTopFull: { config: packageCarried(TOP_FULL) },
+  pkgTopEmptyMalformed: { config: packageCarried(TOP_EMPTY), manifest: MALFORMED },
+  pkgTopFullMalformed: { config: packageCarried(TOP_FULL), manifest: MALFORMED },
 };
 
 /** Every spawn this file reads, keyed `fixture|args`. */
@@ -144,6 +210,12 @@ const PLAN: ReadonlyArray<readonly [Fixture, readonly string[]]> = [
   ['malformed', ['build', '--json']],
   ['malformed', ['lint', '--json']],
   ['noPagesMalformed', ['validate', '--json']],
+  ...PACKAGE_LAYOUTS.flatMap(([, notice, malformed]) =>
+    COMMANDS.flatMap((command) => [
+      [notice, [command, '--json']] as const,
+      [malformed, [command, '--json']] as const,
+    ]),
+  ),
 ];
 
 const key = (fixture: Fixture, args: readonly string[]) => `${fixture}|${args.join(' ')}`;
@@ -278,5 +350,28 @@ describe('a project manifest that is present but unusable — refused, never deg
     const r = run('noPagesMalformed', 'validate', '--json');
     expect(r.code, r.stdout + r.stderr).toBe(0);
     expect(r.stderr).toBe('');
+  });
+});
+
+describe('[round 1] html pages carried only in packages[], beside a top-level pages key', () => {
+  const rows = PACKAGE_LAYOUTS.flatMap(([layout, notice, malformed]) =>
+    COMMANDS.map((command) => [layout, command, notice, malformed] as const),
+  );
+
+  it.each(rows)('%s — os %s: the notice, counting the package page, exit 0', (_layout, command, notice) => {
+    const r = run(notice, command, '--json');
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const notices = noticesIn(payloadOf(r, `${notice} ${command}`));
+    expect(notices).toHaveLength(1);
+    // The corrected count: the one page the per-package pass judges.
+    expect(String(notices[0].message)).toMatch(/^(pages: )?1 /);
+  });
+
+  it.each(rows)('%s — os %s: a malformed manifest is refused, exit 1', (_layout, command, _notice, malformed) => {
+    const r = run(malformed, command, '--json');
+    expect(r.code, r.stdout + r.stderr).toBe(1);
+    const manifestPath = join(dirs[malformed], 'sdui.manifest.json');
+    expect(String(payloadOf(r, `${malformed} ${command}`).error)).toContain(manifestPath);
+    expect(r.stderr).toContain(manifestPath);
   });
 });

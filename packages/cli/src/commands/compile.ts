@@ -406,14 +406,15 @@ export default class Compile extends Command {
       //     a finding spanning packages, which is exactly what an empty input
       //     silently stops reporting.
       //
-      //     [#20113] The SDUI manifest is resolved ONCE, over the stack the JSX
-      //     gate judges, and both rule runs are handed the same answer — see
-      //     `validate.ts` step 3 for the three outcomes. Printed here, at the
+      //     [#20113] The SDUI manifest is resolved ONCE, and both rule runs are
+      //     handed the same answer; its pages are counted over the union fold
+      //     AND each package body the pass below judges — see `validate.ts`
+      //     step 3 for the three outcomes. Printed here, at the
       //     gate's step, so the parse-level notice shows on the failing paths
       //     too; it never changes this command's exit status. A project
       //     manifest that exists but cannot be used is refused instead
       //     (already reported on stderr; the catch-all exits 1).
-      const jsxGate = resolveJsxGateManifest(authoringRuleUnionStack(result.data as Record<string, unknown>));
+      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const findings = runAuthoringRules('build', {

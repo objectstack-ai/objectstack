@@ -957,8 +957,9 @@ export default class Lint extends Command {
           printWarning(formatConversionNotice(n));
         }
       }
-      // [#20113] The SDUI manifest, resolved once over the stack `lintConfig`
-      // folds to — see `validate.ts` step 3 for the three outcomes. With
+      // [#20113] The SDUI manifest, resolved once; its pages are counted over
+      // the fold `lintConfig` judges AND each package body its per-package
+      // pass judges — see `validate.ts` step 3 for the three outcomes. With
       // `kind:'html'` pages to check and no manifest, the JSX gate runs at
       // parse level and the run SAYS so: one `info` finding, graded
       // `suggestion` by the one mapping, so it rides `issues` and the counts
@@ -967,7 +968,7 @@ export default class Lint extends Command {
       // reaches that function without a manifest and must not score a notice
       // about the filesystem. A project manifest that exists but cannot be
       // used is refused instead (already reported on stderr; exit 1).
-      const jsxGate = resolveJsxGateManifest(authoringRuleUnionStack(normalized as Record<string, unknown>));
+      const jsxGate = resolveJsxGateManifest(normalized as Record<string, unknown>);
       const issues = lintConfig(normalized, { sduiManifest: jsxGate.sduiManifest });
       issues.push(...jsxGate.notices.map(authoringFindingToLintIssue));
 
