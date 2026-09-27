@@ -378,6 +378,10 @@ describe('[#19995, ruling C] a read scope the engine refuses is refused by the a
         [REF]: { name: ['Gold Corp', 'Silver Ltd'] },
       });
       assertWithheldServerFault(labelGuarded.refusal, 'name');
+      const labelPlaceholder = await outcome(() => service.queryDataset(dataset, LABEL_SORT, MEMBER), {
+        [REF]: { name: '{restricted_label_token}' },
+      });
+      assertWithheldServerFault(labelPlaceholder.refusal, 'restricted_label_token');
     });
 
     it('a "data" engine without judgeFilter: the engine’s 400 as before, and the plugin warns once', async () => {
