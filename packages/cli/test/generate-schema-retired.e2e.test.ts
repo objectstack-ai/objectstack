@@ -165,6 +165,10 @@ describe('[#19098] the generators that were not retired still work', () => {
   it('`os g object … --dry-run` still previews a typed object file', () => {
     expect(survivor.code).toBe(0);
     expect(survivor.stdout).toContain('Dry run');
-    expect(survivor.stdout).toContain("import * as Data from '@objectstack/spec/data'");
+    expect(survivor.stdout).toContain('src/objects/customer.object.ts');
+    // The import line, not a spelling of it: the template's binding changed
+    // once already (a namespace import became `{ ObjectSchema }`), and the
+    // control asks only that a typed object file is still previewed.
+    expect(survivor.stdout).toContain("from '@objectstack/spec/data'");
   });
 });
