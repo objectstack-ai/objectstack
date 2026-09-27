@@ -75,12 +75,15 @@ export const MIGRATION_SUPPORT_FLOOR = 16;
 /**
  * Protocol 17 step.
  *
- * Mechanical, and mechanical only: the three deprecated aliases that a schema
- * transform used to fold into a canonical key and drop from the parsed output
- * (`action.execute`, `field.conditionalRequired`, `agent.knowledge.topics`) are
- * removed from the spec. Each is a pure key rename with an unchanged value, so
- * the whole break replays losslessly — there is no semantic residue and the
- * `semantic` list is deliberately empty.
+ * Mechanical: the three deprecated aliases that a schema transform used to
+ * fold into a canonical key and drop from the parsed output (`action.execute`,
+ * `field.conditionalRequired`, `agent.knowledge.topics`) are removed from the
+ * spec. Each is a pure key rename with an unchanged value, so each replays
+ * losslessly as a D2 conversion. None of the three carries a D3 entry: this
+ * step shipped before every retirement family was required to carry one
+ * (`SemanticMigration`, `./types.ts`), and it was not back-filled when that
+ * rule landed. The step's `semantic` list is NOT empty — its later retirements
+ * carry their D3 entries in the generated region below.
  *
  * The three conversions are `retiredFromLoadPath` from the day they land: 17
  * gives the aliases no acceptance window at all, and each schema tombstones its
@@ -5250,9 +5253,11 @@ const step18: MigrationStep = {
     + '`PLATFORM_STAMP_ORGANIZATION_COLUMNS` in `@objectstack/metadata-core`, keyed by object '
     + 'name and read by the stamp face alone, so audit stamping, the approval-row writer and '
     + 'the automation-run recorder keep their behaviour with no authorable input. The '
-    + 'conversion is a lossless delete and there is no semantic residue — an application '
-    + 'whose tenant column genuinely is not `organization_id` declares `tenancy.tenantField`, '
-    + 'which both walls the object and stamps its platform rows. '
+    + 'conversion is a lossless delete, and a lossless delete still leaves the author a '
+    + 'judgment, which the family\'s D3 entry `object-tenancy-organization-field-retired` '
+    + 'carries — an application whose tenant column genuinely is not `organization_id` '
+    + 'declares `tenancy.tenantField`, which both walls the object and stamps its platform '
+    + 'rows. '
     + 'It also retires `connector.connectionTimeoutMs` (ADR-0049 enforce-or-remove; '
     + 'maintainer ruling 2026-09-22, letter A — the narrower SECOND decision the key was '
     + 'owed after the ruling that made its nine ledger siblings live deliberately left this '
@@ -15408,13 +15413,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `cacheTtlSeconds`; the value is unchanged and the key stays GET-only.
     // Tombstoned with `retiredKey()` — the shape is not `.strict()`, so a bare
     // deletion would strip the old key in silence, and the unknown-key error could
-    // not carry the rename. This is the ONE key of this card's twelve that gets a
-    // D2 CONVERSION rather than a semantic entry: `apis:` is a stack collection
-    // (`stack.zod.ts` — `apis: z.array(ApiEndpointSchema)`) and an `api` is a
-    // registered metadata kind stored as a row, so the conversion chain has a seam
-    // that sees it. `api-endpoint-cache-ttl-to-cache-ttl-seconds` rewrites it,
-    // retired from the load path (no alias window). Registered under 18 for the
-    // launch-window reason its neighbours state.
+    // not carry the rename. This is the ONE key of this card's twelve that also
+    // gets a D2 CONVERSION: `apis:` is a stack collection (`stack.zod.ts` —
+    // `apis: z.array(ApiEndpointSchema)`) and an `api` is a registered metadata
+    // kind stored as a row, so the conversion chain has a seam that sees it.
+    // `api-endpoint-cache-ttl-to-cache-ttl-seconds` rewrites it, retired from the
+    // load path (no alias window); the family's D3 entry is
+    // `api-endpoint-cache-ttl-unit-in-key`, because a rename that keeps the value
+    // cannot say whether the value was ever in seconds. Registered under 18 for
+    // the launch-window reason its neighbours state.
     'api/ApiEndpoint:cacheTtl',
     // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
     // executing the #14369 liveness census (15 `dead` rows across the `crud` /

@@ -273,8 +273,9 @@ const closeMarker = (kind: Kind, major: number) => `    // </os-generated ${kind
  * self-test drives it without touching the tree.
  *
  * A region present in the file with no entries on disk is emitted EMPTY rather
- * than removed — a major whose semantic residue is genuinely nil (protocol 14)
- * is a real state, and the marker is where its first entry will land.
+ * than removed — an empty region is a real state (a freshly opened step, or
+ * protocol 14's, whose step carried no D3 entry before every retirement family
+ * was required to carry one), and the marker is where its first entry will land.
  */
 export function renderRegistry(source: string, byKind: Record<Kind, Entry[]>): { text: string; errors: string[] } {
   const errors: string[] = [];

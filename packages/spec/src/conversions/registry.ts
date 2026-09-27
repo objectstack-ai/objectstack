@@ -3457,7 +3457,7 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  * rows. So the stored value converges here rather than each reader learning to
  * accept both.
  *
- * ## Why D2 and not D3
+ * ## Why the data repair is D2
  *
  * There is a concrete stored value with a lossless, behaviour-preserving
  * rewrite, which is the D2 test exactly. `mongo` and `mongodb` resolve to the
@@ -3465,6 +3465,12 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  * cannot change where any data lives — contrast
  * {@link datasourceConfigDriverKeyAliases}, whose scope guard exists because
  * rewriting a sqlite `path:` WOULD have moved a database.
+ *
+ * Losslessness decides only that the data repair is D2. It does not decide
+ * whether the family ALSO owes a D3 entry — every retirement family does
+ * (`SemanticMigration`, `migrations/types.ts`). This one converts into
+ * protocol 17, whose step shipped before that rule and was not back-filled,
+ * so it has none.
  *
  * ## Why it stays on the LIVE load path
  *
@@ -9303,10 +9309,13 @@ const jobTimeoutToTimeoutMs: MetadataConversion = {
  * `apis[].cacheTtl` → `apis[].cacheTtlSeconds` (protocol 18, #15677 for #14478)
  * — the `api` half of the same rename `hookTimeoutToTimeoutMs` and
  * `jobTimeoutToTimeoutMs` document, and the ONE key of that card's twelve that
- * gets a conversion rather than a semantic entry: `apis:` is a stack collection
+ * also gets a conversion: `apis:` is a stack collection
  * (`apis: z.array(ApiEndpointSchema)`) and `api` is a registered metadata kind
  * stored as a row, so the chain has a seam that sees it. The other eleven are
- * wire payloads and construction arguments the chain never touches.
+ * wire payloads and construction arguments the chain never touches, so their
+ * D3 entries are their only channel. This key's family carries a D3 entry too,
+ * `api-endpoint-cache-ttl-unit-in-key`: the rename keeps the value, and only
+ * the author can say whether the value was ever in seconds.
  *
  * Same posture as its two siblings: retired from the load path, tombstoned at
  * the schema, replayable here. The fixture keeps `rateLimit` out of the
@@ -9792,12 +9801,14 @@ const viewPageMountRemoved: MetadataConversion = {
  * upstream and failed downstream, and the author was told off by the wrong
  * layer.
  *
- * The rewrite is lossless and wholly mechanical, which is why this is a D2
- * conversion rather than a semantic TODO: `'created_at desc'` carries exactly
- * the tuple `{ field: 'created_at', order: 'desc' }`; a bare field name meant
- * ASCENDING, so it is written out as `order: 'asc'` rather than omitted
- * (`order` is required on the entry); and the comma-separated multi-key form
- * the wire normalizer splits on becomes one entry per key, in the same order.
+ * The rewrite is lossless and wholly mechanical, which is why the data repair
+ * is a D2 conversion (the family's D3 entry,
+ * `list-view-sort-string-clause-retired`, carries the clauses this rewrite
+ * leaves alone): `'created_at desc'` carries exactly the tuple
+ * `{ field: 'created_at', order: 'desc' }`; a bare field name meant ASCENDING,
+ * so it is written out as `order: 'asc'` rather than omitted (`order` is
+ * required on the entry); and the comma-separated multi-key form the wire
+ * normalizer splits on becomes one entry per key, in the same order.
  *
  * ⚠️ A string that does NOT parse as that grammar is left ALONE and emits
  * nothing — the `'-field'` OData-ish dialect above all. That dialect belongs to
