@@ -77,7 +77,7 @@ export const AnalyticsQueryRequestSchema = lazySchema(() =>
  * `sql?`, a strict subset of what the route relays, while the wire really
  * carries `fields[].label` (measured against a real `AnalyticsService` in
  * `packages/client/src/analytics-automation-json-erasure.test.ts`),
- * `format` / `currency` / `percentScale` (the ADR-0053 / percent-scale
+ * `format` / `currency` / `percentScale` (the currency / percent-scale
  * renderer chains) and `totals` (the ADR-0021 marginal-aggregate channel).
  *
  * The reasoning is #6442's, recorded on `AnalyticsMetadataResponseSchema`
@@ -110,8 +110,10 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
         .describe('Display format hint (e.g. measure `format` like "$0,0", "0.0%").'),
       currency: z.string().optional().describe(
         'Resolved ISO 4217 code for a MONETARY measure (explicit measure '
-        + '`currency`, then source-field default, then tenant default). Absent on '
-        + 'non-monetary columns, which must never render a symbol.',
+        + '`currency`, then the source field\'s fixed currency — its '
+        + '`currencyConfig.defaultCurrency`, read only under `currencyMode: \'fixed\'` '
+        + '— then the tenant default). Absent on non-monetary columns, which must '
+        + 'never render a symbol.',
       ),
       percentScale: z.enum(['fraction', 'whole']).optional().describe(
         'The column\'s percent SCALE, when it is a percentage: `fraction` for a '

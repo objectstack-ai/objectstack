@@ -39,9 +39,58 @@ describe('temporalStorageForm — date: the UTC calendar day', () => {
     it(name, () => expect(temporalStorageForm(input, 'date')).toBe(expected));
   }
 
-  it('epoch milliseconds are not a calendar day — returned as they came', () => {
-    expect(temporalStorageForm(1769940000000, 'date')).toBe(1769940000000);
+});
+
+// [#20203] An epoch-millisecond NUMBER on a `date` column used to come back
+// unchanged, so each face compared it by its own type rules: driver-memory
+// matched no row, SQLite ordered it below every date text (6 of 6 for `$gt`)
+// and PostgreSQL refused the bind (`22008`, a 500 at REST). It is now read as
+// the `datetime` rule reads it — an instant — and takes that instant's UTC
+// calendar day, the reading a `Date` of the same value already had.
+describe('temporalStorageForm — date: an epoch-ms number is the UTC calendar day of its instant', () => {
+  const cases: ReadonlyArray<readonly [string, number, string]> = [
+    ['a time of day is dropped, never rounded', 1769940000000, '2026-02-01'], // 2026-02-01T10:00Z
+    ['a UTC midnight', 1769904000000, '2026-02-01'],
+    ['the last millisecond of a UTC day', 1769990399999, '2026-02-01'],
+    ['the epoch', 0, '1970-01-01'],
+    ['-0', -0, '1970-01-01'],
+    ['a negative number — a day before the epoch', -86400000, '1969-12-31'],
+    ['one millisecond before the epoch', -1, '1969-12-31'],
+    ['a fraction is truncated toward zero, as the Date constructor does', 1769990399999.9, '2026-02-01'],
+    ['a negative fraction truncates toward zero too', -0.5, '1970-01-01'],
+    ['the Date range maximum', 8.64e15, '275760-09-13'],
+    ['the Date range minimum', -8.64e15, '-271821-04-20'],
+  ];
+  for (const [name, input, expected] of cases) {
+    it(`${name}: ${input} → ${expected}`, () => expect(temporalStorageForm(input, 'date')).toBe(expected));
+  }
+
+  it('a number and the Date of the same value always agree', () => {
+    for (const [, input] of cases) {
+      expect(temporalStorageForm(input, 'date'), String(input)).toBe(temporalStorageForm(new Date(input), 'date'));
+    }
   });
+
+  it('…and name the calendar day of the datetime rule\'s instant for the same number', () => {
+    for (const input of [1769940000000, 1769904000000, 0, -1, -86400000, 253402300799999]) {
+      expect(temporalStorageForm(input, 'date'), String(input))
+        .toBe((temporalStorageForm(input, 'datetime') as string).slice(0, 10));
+    }
+  });
+
+  const untouched: ReadonlyArray<readonly [string, unknown]> = [
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['-Infinity', Number.NEGATIVE_INFINITY],
+    ['past the Date range', 8.64e15 + 1],
+    ['before the Date range', -8.64e15 - 1],
+    ['a bigint — not a number', 1769940000000n],
+    ['a boxed Number — not a number', Object(1769940000000)],
+    ['an epoch-ms STRING — not a leading calendar day, unchanged as before', '1769940000000'],
+  ];
+  for (const [name, input] of untouched) {
+    it(`${name} comes back unchanged`, () => expect(temporalStorageForm(input, 'date')).toBe(input));
+  }
 });
 
 describe('temporalStorageForm — time: the UTC wall clock, .fff only when non-zero', () => {

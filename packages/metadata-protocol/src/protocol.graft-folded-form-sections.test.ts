@@ -327,3 +327,86 @@ describe('graftFoldedFormSections — structural safety, no save involved', () =
         expect('sections' in grafted).toBe('sections' in parsed.data);
     });
 });
+
+/**
+ * [#20051] The view write door judges a flat list overlay's legacy `options`
+ * bag — driven through the REAL `saveMetaItem`, riding this file's pinned
+ * engine double rather than minting a second one (the double is the reason
+ * these cases live here, not the `groups` fold).
+ *
+ * Measured before the change on `origin/main` @ `8d1f7ab`, through this same
+ * harness: `options: { timeline: { metaFields: ['region'] } }` on a flat list
+ * overlay saved `success: true` and the row held the bag byte-for-byte, while
+ * the direct `timeline.metaFields` was refused. `saveMetaItem` stores the
+ * request body, not the parse output, so what the door does not judge is what
+ * reaches storage.
+ *
+ * Refusals assert the envelope (`code` + `status`) and that NO row was written.
+ */
+describe('[#20051] the save door judges a flat list overlay\'s `options` bag', () => {
+    const TIMELINE = { startDateField: 'created_at', titleField: 'name', metaFields: ['region'] };
+    const flatList = (extra: Record<string, unknown>) => ({
+        name: 'crm_lead.timeline',
+        object: 'crm_lead',
+        viewKind: 'list',
+        label: 'Timeline',
+        type: 'timeline',
+        columns: ['name'],
+        ...extra,
+    });
+
+    async function refusal(item: unknown): Promise<{ err: any; rowsWritten: number }> {
+        const { protocol, rows } = makeProtocol();
+        let err: any;
+        try {
+            await (protocol as any).saveMetaItem({ type: 'view', name: 'crm_lead.timeline', item });
+        } catch (e) { err = e; }
+        return { err, rowsWritten: Array.from(rows.values()).filter((r) => r.type === 'view').length };
+    }
+
+    it('a direct and an `options`-wrapped out-of-contract key get the same refusal, and nothing is stored', async () => {
+        const direct = await refusal(flatList({ timeline: TIMELINE }));
+        const wrapped = await refusal(flatList({ options: { timeline: TIMELINE } }));
+        for (const { err, rowsWritten } of [direct, wrapped]) {
+            expect(err?.code).toBe('INVALID_METADATA');
+            expect(err?.status).toBe(422);
+            expect(rowsWritten).toBe(0);
+        }
+        const hit = (err: any, path: string) =>
+            (err.issues as Array<{ path: string; code?: string; message: string }>)
+                .find((i) => i.path === path && i.code === 'unrecognized_keys');
+        const directHit = hit(direct.err, 'timeline');
+        const wrappedHit = hit(wrapped.err, 'options.timeline');
+        expect(directHit, JSON.stringify(direct.err.issues)).toBeDefined();
+        expect(wrappedHit, JSON.stringify(wrapped.err.issues)).toBeDefined();
+        // Refused by NAME, on the same surface text as the direct spelling.
+        expect(wrappedHit!.message).toBe(directHit!.message);
+        expect(wrappedHit!.message).toContain('`metaFields`');
+    });
+
+    it('an unknown key in the bag itself is refused by name, not dropped', async () => {
+        const { err, rowsWritten } = await refusal(flatList({ timeline: { startDateField: 'created_at', titleField: 'name' }, options: { foo: 1 } }));
+        expect(err?.code).toBe('INVALID_METADATA');
+        expect(err?.status).toBe(422);
+        expect(rowsWritten).toBe(0);
+        expect((err.issues as Array<{ path: string; message: string }>).some((i) => i.path === 'options' && i.message.includes('`foo`')))
+            .toBe(true);
+    });
+
+    it('a legal legacy `options.map` bag (the path objectui pins) saves, and the row carries it unchanged', async () => {
+        const authored = {
+            name: 'showcase_task.work_map',
+            object: 'showcase_task',
+            viewKind: 'list',
+            label: 'Work Map',
+            type: 'map',
+            columns: ['title', 'location'],
+            options: { map: { locationField: 'location', titleField: 'legacy_title' } },
+        };
+        const body = await storedViewBody('showcase_task.work_map', authored);
+        expect(body.options).toEqual(authored.options);
+        // …and the stored row passes the same door again: a GET → PUT of it is
+        // not refused by the judgement it was saved under.
+        expect((ViewMetadataSchema as any).safeParse(body).success).toBe(true);
+    });
+});

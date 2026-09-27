@@ -50,10 +50,11 @@ export const SemanticZoo = ObjectSchema.create({
     // in-browser (#2548 follow-up), not just at parse time.
     code: Field.text({ label: 'Code', group: 'basics' }),
     amount: Field.number({ label: 'Amount', group: 'money' }),
-    // Explicit ISO currency (spec channel: `currencyConfig.defaultCurrency`;
-    // a bare `currency` key is NOT on the field schema and gets stripped at
-    // parse). Without a resolvable code, renderers deliberately show a bare
-    // grouped number — never a guessed symbol.
+    // Explicit ISO currency (spec channel: `currencyConfig.defaultCurrency`,
+    // read only under `currencyMode: 'fixed'`; a bare `currency` key is NOT
+    // on the field schema and gets stripped at parse). Without a resolvable
+    // code, renderers deliberately show a bare grouped number — never a
+    // guessed symbol.
     budget: Field.currency({
       label: 'Budget',
       currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },

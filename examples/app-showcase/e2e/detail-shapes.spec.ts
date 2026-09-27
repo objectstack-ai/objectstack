@@ -122,7 +122,8 @@ test('grouped: fieldGroup sections render and Money starts collapsed', async ({ 
   await page.getByText('Money', { exact: true }).click();
   await expect(page.getByText('Budget', { exact: true })).toBeVisible();
   // objectui#2577: fieldGroups[].description renders under the expanded
-  // header, and currencyConfig.defaultCurrency drives a real $ symbol.
+  // header, and the fixed-mode currencyConfig.defaultCurrency (USD) drives a
+  // real $ symbol.
   await expect(page.getByText('Financial fields — collapsed by default.')).toBeVisible();
   await expect(page.getByText('$100,000', { exact: false }).first()).toBeVisible();
 

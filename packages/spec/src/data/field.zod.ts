@@ -480,7 +480,7 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
   currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way.'),
-  defaultCurrency: z.string().length(3).default('CNY').describe('Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR)'),
+  defaultCurrency: z.string().length(3).default('CNY').describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency.'),
   // #19992 — no `.superRefine()` / `.overwrite()` here any more. The #7918
   // ISO 4217 contradiction check and the #11423 default-materializing
   // `.overwrite()` both existed only for the removed `precision` key (see

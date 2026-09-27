@@ -175,7 +175,8 @@ describe('CurrencyValueSchema', () => {
 
 // ===========================================================================
 // #8163 — field-level `currency` is rejected with no pointer to the
-// declarable nested form (`currencyConfig.defaultCurrency`). Same
+// declarable nested form (`currencyConfig.defaultCurrency`, under
+// `currencyMode: 'fixed'` — the only mode that reads it). Same
 // `unrecognized_keys`-probing pattern as
 // `shared/visible-when-alias-guidance.test.ts`: this is prose (`guidance`),
 // not a rename (`aliases`) — the target is a NESTED key a flat rename cannot

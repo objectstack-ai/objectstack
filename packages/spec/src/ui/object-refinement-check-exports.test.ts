@@ -464,9 +464,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
   // a second, shadowing binding of the same name — a local `function checkX` inside
   // another function, say — satisfies every one of them while the door chains a
   // different function object, and if it happened to agree on the fixture matrix it
-  // would satisfy leg 2 as well. Measured on the diff that added this: four names,
-  // one declaration each — so this closes a residual hole in the pin, it does not fix
-  // a live shadowing (#16715). It must stay green.
+  // would satisfy leg 2 as well. Measured on the diff that added this (commit
+  // b37f0b1767): four names, one declaration each — so this closes a residual hole
+  // in the pin; no live shadowing existed to fix. It must stay green.
   const declarations = (src: string, name: string): number =>
     src.match(new RegExp(`^\\s*(export )?function ${name}\\b`, 'gm'))?.length ?? 0;
 
