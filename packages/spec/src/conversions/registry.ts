@@ -31,6 +31,7 @@ import { RETIRED_SUB_DAY_INTERVALS } from '../data/analytics.zod.js';
 import {
   FILTER_ARRAY_LOGIC_KEYWORDS,
   FILTER_OPERATORS,
+  LOGICAL_OPERATORS,
   isFilterAST,
   parseFilterAST,
 } from '../data/filter.zod.js';
@@ -10354,8 +10355,49 @@ function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefin
 }
 
 /**
- * The record form `{ field: value | { $op: value, … }, … }` → rules, or
- * `undefined` when any part of it has no lossless rule spelling.
+ * A legacy filter's verdict: the rule array it maps to losslessly, or — when
+ * some part of it has no lossless rule spelling — why not.
+ *
+ * `declined` completes the sentence "this filter …" and names the part that
+ * blocks the rewrite. It is what the entry's structured TODO carries
+ * (`context.reportTodo`, ADR-0087 D3: a TODO where the conversion is not
+ * lossless, never silence), so an operator reading `os migrate meta --stored`
+ * learns which site was left as stored and what the hand rewrite must decide.
+ * The verdict itself is unchanged by it: a declined filter is left exactly as
+ * stored, as it always was.
+ */
+type FilterMapping = { rules: MappedFilterRule[] } | { declined: string };
+
+/** `` `a` `` / `` `a` and `b` `` — key names as a TODO reason quotes them. */
+function quoteKeys(keys: readonly string[]): string {
+  return keys.map((key) => `\`${key}\``).join(' and ');
+}
+
+/**
+ * Why a record with top-level `$` keys is left as stored — the combinators
+ * named first, because naming them is what the ruling asks of the TODO.
+ */
+function dollarKeysReason(keys: readonly string[]): string {
+  const combinators = keys.filter((key) => (LOGICAL_OPERATORS as readonly string[]).includes(key));
+  const others = keys.filter((key) => !combinators.includes(key));
+  if (combinators.length > 0) {
+    const alsoNotFields = others.length === 0
+      ? ''
+      : ` (its top-level ${quoteKeys(others)} ${others.length === 1 ? 'is' : 'are'} not a field either)`;
+    return `carries the combinator${combinators.length === 1 ? '' : 's'} ${quoteKeys(combinators)}`
+      + `${alsoNotFields}: a rule array's rules only AND, so \`$or\` and \`$not\` have no rule `
+      + 'spelling and `$and` only the separate rules it joins, and a combinator is never flattened — '
+      + 'that would change which rows the filter selects. Decide which rows it should select, and '
+      + 'write the rules that select exactly those';
+  }
+  return `carries the top-level key${others.length === 1 ? '' : 's'} ${quoteKeys(others)}, which `
+    + `${others.length === 1 ? 'is' : 'are'} not a field — a rule names a field, so there is no rule `
+    + `spelling for ${others.length === 1 ? 'it' : 'them'}`;
+}
+
+/**
+ * The record form `{ field: value | { $op: value, … }, … }` → rules, or why
+ * some part of it has no lossless rule spelling.
  *
  * All-or-nothing on purpose: the rules AND, so converting the keys that map and
  * leaving the rest out would WIDEN what the filter selects. A top-level `$` key
@@ -10367,30 +10409,62 @@ function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefin
  * null, so that key constrains nothing today, while an `equals null` rule would
  * test IS NULL. An empty operator object is declined for the same reason — it
  * constrains nothing, and no rule says "nothing".
+ *
+ * Every top-level `$` key is judged before any field key, so the reason names
+ * the combinator even when a field key beside it would decline as well. The
+ * order moves only the reason, never the verdict: any declined part leaves the
+ * whole record as stored.
  */
-function recordFilterToRules(record: Record<string, unknown>): MappedFilterRule[] | undefined {
+function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
+  const dollarKeys = Object.keys(record).filter((key) => key.startsWith('$'));
+  if (dollarKeys.length > 0) return { declined: dollarKeysReason(dollarKeys) };
+  const equals = normalizeFilterOperator('eq') as ViewFilterOperator;
   const rules: MappedFilterRule[] = [];
   for (const [field, value] of Object.entries(record)) {
-    if (field.startsWith('$')) return undefined;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      rules.push({ field, operator: normalizeFilterOperator('eq') as ViewFilterOperator, value });
+      rules.push({ field, operator: equals, value });
       continue;
     }
-    if (!isRecordForm(value)) return undefined;
+    if (value === null) {
+      return {
+        declined: `has the key \`${field}\` set to null: the renderer skips a null-valued key, so `
+          + `today it constrains nothing, while an \`${equals}\` rule would test for null. Drop the `
+          + 'key, or write a rule that tests for null if that is what it should select',
+      };
+    }
+    if (!isRecordForm(value)) {
+      return {
+        declined: `has the key \`${field}\` set to `
+          + `${Array.isArray(value) ? 'an array' : 'a value that is neither a scalar nor an operator object'}, `
+          + `which has no lossless \`${equals}\` rule`,
+      };
+    }
     const operators = Object.entries(value);
-    if (operators.length === 0) return undefined;
+    if (operators.length === 0) {
+      return {
+        declined: `has the key \`${field}\` set to an empty operator object, which constrains `
+          + 'nothing — and no rule says "nothing". Drop the key',
+      };
+    }
     for (const [op, comparand] of operators) {
       const operator = ruleOperatorForFilterOperator(op);
-      if (!operator) return undefined;
+      if (!operator) {
+        return {
+          declined: op.startsWith('$')
+            ? `compares \`${field}\` with \`${op}\`, which has no rule operator that lowers back to it`
+            : `has the key \`${field}\` set to a nested object whose key \`${op}\` is not a filter operator`,
+        };
+      }
       rules.push({ field, operator, value: comparand });
     }
   }
-  return rules;
+  return { rules };
 }
 
 /**
  * A single-level ObjectQL AST — one comparison `[field, op, value]`, or a flat
- * list of them (implicit AND) — → rules, or `undefined`.
+ * list of them (implicit AND) — → rules, or why not; `undefined` when the
+ * value is not an AST at all, so it is not this conversion's form.
  *
  * `isFilterAST` is the recogniser (the spec's own, so an array of rule objects
  * is never mistaken for one). An `and` / `or` group, or a list nesting one, is
@@ -10401,7 +10475,7 @@ function recordFilterToRules(record: Record<string, unknown>): MappedFilterRule[
  * rule reaches too — and read back from the `$` operator it produced, so
  * neither table is copied here.
  */
-function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefined {
+function astFilterToRules(ast: readonly unknown[]): FilterMapping | undefined {
   if (!isFilterAST(ast)) return undefined;
   const isLogicKeyword = (token: unknown): boolean =>
     typeof token === 'string'
@@ -10416,11 +10490,39 @@ function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefin
   let comparisons: ReadonlyArray<readonly [string, string, ...unknown[]]>;
   if (isComparison(ast)) comparisons = [ast];
   else if (ast.every(isComparison)) comparisons = ast as ReadonlyArray<readonly [string, string, ...unknown[]]>;
-  else return undefined;
+  else {
+    // Name the groups by walking only the AST's structural positions — a logic
+    // node's children and a list's members — so a comparison's own value array
+    // is never read as a group.
+    const groups = new Set<string>();
+    const visit = (node: unknown): void => {
+      if (!Array.isArray(node) || node.length === 0) return;
+      if (isLogicKeyword(node[0])) {
+        groups.add(String(node[0]).toLowerCase());
+        node.slice(1).forEach(visit);
+      } else if (Array.isArray(node[0])) {
+        node.forEach(visit);
+      }
+    };
+    visit(ast);
+    return {
+      declined: groups.size > 0
+        ? `is a nested ObjectQL AST holding ${quoteKeys([...groups])} group${groups.size === 1 ? '' : 's'}, `
+          + 'and only a single-level AST (one comparison, or a flat list of them) has a lossless rule '
+          + 'spelling: a combinator is never flattened — that would change which rows the filter '
+          + 'selects. Decide which rows it should select, and write the rules that select exactly those'
+        : 'is an ObjectQL AST that is neither one comparison `[field, operator, value]` nor a flat '
+          + 'list of them, so it has no lossless rule spelling',
+    };
+  }
 
   const rules: MappedFilterRule[] = [];
   for (const node of comparisons) {
     const [field, op] = node;
+    const unspellable: FilterMapping = {
+      declined: `compares \`${field}\` with the AST operator \`${op}\`, which has no rule operator `
+        + 'that lowers back to it',
+    };
     let operator: ViewFilterOperator | undefined;
     const folded = normalizeFilterOperator(op);
     if ((VIEW_FILTER_OPERATORS as readonly string[]).includes(folded)) {
@@ -10430,9 +10532,9 @@ function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefin
       try {
         lowered = parseFilterAST([...node]) as Record<string, unknown> | undefined;
       } catch {
-        return undefined;
+        return unspellable;
       }
-      if (!lowered || Object.keys(lowered).length !== 1 || !(field in lowered)) return undefined;
+      if (!lowered || Object.keys(lowered).length !== 1 || !(field in lowered)) return unspellable;
       const condition = lowered[field];
       if (isRecordForm(condition)) {
         const ops = Object.keys(condition);
@@ -10441,29 +10543,39 @@ function astFilterToRules(ast: readonly unknown[]): MappedFilterRule[] | undefin
         // A bare comparand is the implicit-equality lowering of `=` / `==`.
         operator = normalizeFilterOperator('eq') as ViewFilterOperator;
       }
-      if (!operator) return undefined;
+      if (!operator) return unspellable;
     }
     rules.push(node.length === 3 ? { field, operator, value: node[2] } : { field, operator });
   }
-  return rules;
+  return { rules };
 }
 
 /**
- * The rule array a legacy `filter` value maps to losslessly, or `undefined`
- * when it is not a legacy form (already a rule array, or some other value the
- * door judges on its own) or has a part with no lossless rule spelling.
+ * The rule array a legacy `filter` value maps to losslessly, or why a legacy
+ * value has none; `undefined` when the value is not a legacy form at all
+ * (already a rule array, or some other value the door judges on its own) — the
+ * one case that is neither converted nor reported.
  *
  * The last gate is the DOOR's own: every produced rule must parse against
  * `ViewFilterRuleSchema`, so the conversion never writes a value the next save
  * refuses — a comparand shape the operator cannot take, an empty `icontains`,
  * a field-reference object. Such a filter is left exactly as stored.
  */
-function legacyFilterToRuleArray(value: unknown): MappedFilterRule[] | undefined {
-  let rules: MappedFilterRule[] | undefined;
-  if (isRecordForm(value)) rules = recordFilterToRules(value);
-  else if (Array.isArray(value)) rules = astFilterToRules(value);
-  if (!rules) return undefined;
-  return rules.every((rule) => ViewFilterRuleSchema.safeParse(rule).success) ? rules : undefined;
+function legacyFilterToRuleArray(value: unknown): FilterMapping | undefined {
+  let mapping: FilterMapping | undefined;
+  if (isRecordForm(value)) mapping = recordFilterToRules(value);
+  else if (Array.isArray(value)) mapping = astFilterToRules(value);
+  if (!mapping || 'declined' in mapping) return mapping;
+  for (const rule of mapping.rules) {
+    const parsed = ViewFilterRuleSchema.safeParse(rule);
+    if (parsed.success) continue;
+    const first = parsed.error.issues[0]?.message;
+    return {
+      declined: `would become the rule \`${JSON.stringify(rule)}\`, which this door refuses itself`
+        + (first ? ` (${first})` : ''),
+    };
+  }
+  return mapping;
 }
 
 /**
@@ -10492,13 +10604,23 @@ function legacyFilterToRuleArray(value: unknown): MappedFilterRule[] | undefined
  * (`record-source.ts`, `resolveRecordSourceConfig`) plus the bare-array
  * `data` the spec declares on the kanban, calendar and timeline blocks:
  * `data: { provider: 'value', … }`, `data: [ … ]`, and a truthy `staticData`.
+ *
+ * Answers with the shape it found, spelled for the TODO that names why the
+ * node's filters were left as stored, or `undefined` for an object-bound node.
  */
-function rendersInlineRows(properties: unknown): boolean {
-  if (!isDict(properties)) return false;
+function rendersInlineRows(properties: unknown): string | undefined {
+  if (!isDict(properties)) return undefined;
   const { data, staticData } = properties;
-  if (Array.isArray(data)) return true;
-  if (isDict(data) && data.provider === 'value') return true;
-  return Boolean(staticData);
+  if (Array.isArray(data)) return 'a `data` array';
+  if (isDict(data) && data.provider === 'value') return "`data: { provider: 'value' }`";
+  return staticData ? '`staticData`' : undefined;
+}
+
+/** How a TODO names the page component a filter sits on: its type, and its `id` when it has one. */
+function describeBlock(component: Dict): string {
+  const type = typeof component.type === 'string' ? `the \`${component.type}\` block` : 'this component';
+  const id = typeof component.id === 'string' && component.id.length > 0 ? ` \`${component.id}\`` : '';
+  return `${type}${id}`;
 }
 
 /**
@@ -10523,7 +10645,7 @@ function rendersInlineRows(properties: unknown): boolean {
  *
  * Values are carried verbatim, value placeholders and date macros included.
  *
- * ## What is left exactly as stored — `legacyFilterToRuleArray` answers `undefined`
+ * ## What is left exactly as stored — `legacyFilterToRuleArray` answers `declined`
  *
  * A record carrying `$and` / `$or` / `$not` (or any top-level `$` key), an AST
  * `and` / `or` group, an operator the rule vocabulary does not spell (`$null`,
@@ -10537,13 +10659,19 @@ function rendersInlineRows(properties: unknown): boolean {
  * and `$not` that changes which rows the page selects, which is the option the
  * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
  * does not validate) and is refused at its door on its next save, with the
- * prescription that door gives for it. ⚠️ The ruled report of these rows — a
- * structured TODO `os migrate meta --stored` prints — is NOT delivered here:
- * the conversion layer has no TODO channel, and adding one reaches past
- * `packages/spec` (the dispatcher error-vocabulary ledger in
- * `packages/runtime`, and the stored pass in `packages/metadata-protocol`,
- * whose change signal is a conversion notice and which counts a row that
- * emitted none as canonical).
+ * prescription that door gives for it.
+ *
+ * ## Every site left as stored is reported — `context.reportTodo`
+ *
+ * Ruling item 2's other half: each legacy filter this entry leaves as stored
+ * is reported as a structured TODO (ADR-0087 D3's model — conversion where
+ * lossless, a TODO otherwise), naming its path, the block it sits on, and what
+ * blocks the rewrite — the combinator by name, for a combinator.
+ * `os migrate meta --stored` lists them under their row, so an operator can
+ * answer "did it convert my row" from that output. The one value at a door
+ * that is neither converted nor reported is one that is not a legacy form at
+ * all — already a rule array, or a value the door judges on its own. Reporting
+ * changes nothing that is written: every declined site stays byte-identical.
  *
  * ## Reach
  *
@@ -10579,20 +10707,42 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
     + 'array, `staticData`) is left exactly as stored and is refused at its door on its next save (one filter '
     + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
-  apply(stack, emit) {
-    const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
-      if (!(key in holder)) return holder;
-      const value = holder[key];
-      const rules = legacyFilterToRuleArray(value);
-      if (!rules) return holder;
-      emit({ from: JSON.stringify(value), to: JSON.stringify(rules), path: `${basePath}.${key}` });
-      return { ...holder, [key]: rules };
-    };
-
+  apply(stack, emit, context) {
     return mapPageComponents(stack, (component, path) => {
       // Inline rows: every filter of this node stays as stored, the binding's
       // included. Its children are separate nodes and are judged on their own.
-      if (rendersInlineRows(component.properties)) return component;
+      const inline = rendersInlineRows(component.properties);
+      const block = describeBlock(component);
+
+      const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
+        if (!(key in holder)) return holder;
+        const value = holder[key];
+        const mapping = legacyFilterToRuleArray(value);
+        // Not a legacy form (already the rule array, or a value the door judges
+        // on its own): neither converted nor reported.
+        if (!mapping) return holder;
+        const at = `${basePath}.${key}`;
+        // The filter's own blocker first — it would decline on an object-bound
+        // block too, and it is what names the combinator — then the node's.
+        const declined = 'declined' in mapping
+          ? mapping.declined
+          : inline
+            ? `sits on a block whose rows are inline (${inline}): its renderer matches this filter `
+              + 'against those rows in the record dialect, where a rule array would exclude every '
+              + 'row, so no rewrite here is lossless'
+            : undefined;
+        if (declined !== undefined) {
+          context?.reportTodo?.({
+            path: at,
+            from: JSON.stringify(value),
+            reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged `
+              + 'and is refused at this door on its next save.',
+          });
+          return holder;
+        }
+        emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
+        return { ...holder, [key]: mapping.rules };
+      };
 
       let next = component;
 
