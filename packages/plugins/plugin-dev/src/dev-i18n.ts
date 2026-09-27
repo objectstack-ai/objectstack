@@ -109,11 +109,13 @@ const declaresTranslationArray = (body: unknown): boolean => {
  * reader to exactly the old path, and it goes red without the guard.
  *
  * ⛔ So the guard is allowed to decide ONE thing: the ABSENT branch, spelled
- * exactly as the resolver's own absent branch (`undefined` / `null`). Every
- * other value goes to the resolver, so a present non-array `packages` (`{}`,
- * `0`, `'x'`) is REFUSED as `INVALID_ARTIFACT_PACKAGES`. ⛔ Never widen it to
- * `Array.isArray`: that is the silent fall-through the rule above forbids. If
- * the resolver's absent branch ever changes, this line changes with it.
+ * exactly as the resolver's own absent branch (`undefined`, and nothing else).
+ * Every other value goes to the resolver, so a present non-array `packages`
+ * (`null`, `{}`, `0`, `'x'`) is REFUSED as `INVALID_ARTIFACT_PACKAGES`. ⛔ Never
+ * widen it to `Array.isArray`: that is the silent fall-through the rule above
+ * forbids. If the resolver's absent branch ever changes, this line changes with
+ * it — it did once, when `null` stopped being absent (#19926), and the two moved
+ * in one change.
  *
  * ## A malformed `packages[]` is refused, not skipped
  *
@@ -163,7 +165,7 @@ const declaresTranslationArray = (body: unknown): boolean => {
  *   array.
  * @throws An ADR-0112 envelope (`Error & { code, status: 422 }`) from
  *   `resolveArtifactPackageOrder` when `packages` is present but not loadable:
- *   `INVALID_ARTIFACT_PACKAGES` (not an array), `INVALID_ARTIFACT_PACKAGE_ENTRY`
+ *   `INVALID_ARTIFACT_PACKAGES` (not an array, `null` included), `INVALID_ARTIFACT_PACKAGE_ENTRY`
  *   (an entry that is not `{ manifest: … }`, a body carrying authoring-time
  *   globs where definitions belong, or a manifest with no usable id) or
  *   `DUPLICATE_ARTIFACT_PACKAGE`.
@@ -179,7 +181,7 @@ export function stackDeclaresTranslations(stack: unknown): boolean {
   if (declaresTranslationArray(stack)) return true;
 
   const packages = asBag(stack)?.packages;
-  if (packages === undefined || packages === null) return false;
+  if (packages === undefined) return false;
 
   for (const body of resolveArtifactPackageOrder(stack)) {
     if (declaresTranslationArray(body)) return true;
