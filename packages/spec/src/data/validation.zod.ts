@@ -466,7 +466,7 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
  *       type: 'script',
  *       name: 'ca_tax_id_required',
  *       message: 'California requires a valid tax ID',
- *       condition: 'record.tax_id == null || !matches(record.tax_id, "^\\d{2}-\\d{7}$")'
+ *       condition: 'record.tax_id == null || !matches(record.tax_id, "^[0-9]{2}-[0-9]{7}$")'
  *     }
  *   }
  * }

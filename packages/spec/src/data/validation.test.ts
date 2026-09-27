@@ -551,17 +551,17 @@ describe('ValidationRuleSchema (Discriminated Union)', () => {
         type: 'conditional' as const,
         name: 'nested_validation',
         message: 'Complex conditional validation',
-        when: 'country = "US"',
+        when: "record.country == 'US'",
         then: {
           type: 'conditional' as const,
           name: 'state_validation',
           message: 'State-specific validation',
-          when: 'state = "CA"',
+          when: "record.state == 'CA'",
           then: {
             type: 'script' as const,
             name: 'ca_tax',
             message: 'California requires tax ID',
-            condition: 'tax_id = null',
+            condition: 'record.tax_id == null || !matches(record.tax_id, "^[0-9]{2}-[0-9]{7}$")',
           },
         },
       };
@@ -632,12 +632,12 @@ describe('ValidationRuleSchema (Discriminated Union)', () => {
         type: 'conditional' as const,
         name: 'tax_validation',
         message: 'Tax validation',
-        when: 'is_taxable = true',
+        when: 'record.is_taxable == true',
         then: {
           type: 'script' as const,
           name: 'tax_code_required',
           message: 'Tax code is required for taxable items',
-          condition: 'tax_code = null',
+          condition: "record.tax_code == null || record.tax_code == ''",
         },
       };
 
@@ -701,18 +701,18 @@ describe('ValidationRuleSchema (Discriminated Union)', () => {
         type: 'conditional' as const,
         name: 'regional_validation',
         message: 'Regional compliance validation',
-        when: 'region = "EU"',
+        when: "record.region == 'EU'",
         then: {
           type: 'script' as const,
           name: 'gdpr_consent',
           message: 'GDPR consent required for EU customers',
-          condition: 'gdpr_consent_given = false',
+          condition: 'record.gdpr_consent_given == false',
         },
         otherwise: {
           type: 'script' as const,
           name: 'tos_acceptance',
           message: 'Terms of Service acceptance required',
-          condition: 'tos_accepted = false',
+          condition: 'record.tos_accepted == false',
         },
       };
 
@@ -724,12 +724,12 @@ describe('ValidationRuleSchema (Discriminated Union)', () => {
         type: 'conditional' as const,
         name: 'role_based_validation',
         message: 'Role-based validation',
-        when: 'user_role = "manager"',
+        when: "record.user_role == 'manager'",
         then: {
           type: 'script' as const,
           name: 'manager_approval_limit',
           message: 'Managers can approve up to $50,000',
-          condition: 'approval_amount > 50000',
+          condition: 'record.approval_amount > 50000',
         },
       };
 
