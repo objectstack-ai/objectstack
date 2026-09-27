@@ -16242,20 +16242,27 @@ export class ObjectQL implements IObjectQLEngine {
       // (having-filter.ts `compareWithReference`) on both doors below.
       assertHavingIsFilterCondition(query.having);
       assertListComparandShapes(object, 'aggregate', query.having, 'having');
+      // [#20176] The object's declaration, read once: the per-aggregation
+      // `filter` reads a temporal comparand by its column's storage rule
+      // (`applyInMemoryAggregation` below), and `having` by its aggregated
+      // column's — the rule the drivers apply to the same comparand in a
+      // `where`. Before, both positions compared it as written, so an ISO
+      // instant against a `date` field counted 1 row where the `where` twin
+      // counted 3, over REST, on driver-memory and driver-sql alike.
+      const declaredFields = (this._registry.getObject(object) as { fields?: Record<string, unknown> } | undefined)?.fields;
+      // [#20127] …and each aggregated column's class, read off the query and the
+      // object's declaration, so a `{ $field, addDays }` pair is judged by the
+      // rule `FieldReferenceSchema.addDays` declares (two temporal columns of
+      // one class) rather than answered by epoch-ms coercion. [#20176] Kept for
+      // both `applyHaving` doors below, which read a temporal column's
+      // comparands by its storage rule.
+      const havingColumnClasses = aggregatedRowColumnClasses(query.groupBy, query.aggregations, declaredFields);
       {
           const having = normalizeFilterComparandTypes(query.having, `aggregate('${object}')`, 'having');
-          // [#20127] …and each column's class, read off the query and the
-          // object's declaration, so a `{ $field, addDays }` pair is judged by
-          // the rule `FieldReferenceSchema.addDays` declares (two temporal
-          // columns of one class) rather than answered by epoch-ms coercion.
           assertHavingIsEvaluable(
               having,
               aggregatedRowColumns(query.groupBy, query.aggregations),
-              aggregatedRowColumnClasses(
-                  query.groupBy,
-                  query.aggregations,
-                  (this._registry.getObject(object) as { fields?: Record<string, unknown> } | undefined)?.fields,
-              ),
+              havingColumnClasses,
           );
           if (having !== query.having) query = { ...query, having };
       }
@@ -16359,7 +16366,7 @@ export class ObjectQL implements IObjectQLEngine {
             // capability flag, at which point this post-filter becomes the
             // fallback tier — the dateGranularity two-tier pattern.
             const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context));
-            return applyHaving(aggregated, ast.having);
+            return applyHaving(aggregated, ast.having, havingColumnClasses);
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
         // aggregate here. This guarantees `groupBy` (incl. structured items
@@ -16403,7 +16410,7 @@ export class ObjectQL implements IObjectQLEngine {
         delete rowsAst.aggregations;
         delete rowsAst.having;
         const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context));
-        return applyHaving(applyInMemoryAggregation(raw, ast, tz), ast.having);
+        return applyHaving(applyInMemoryAggregation(raw, ast, tz, declaredFields), ast.having, havingColumnClasses);
       });
 
       return opCtx.result as any[];

@@ -6,7 +6,8 @@
  * One {@link MigrationStep} per protocol major that carried a break. Each step's
  * mechanical transforms are the D2 conversions that graduated into it (referenced
  * by id, so the transform + fixture pair are never duplicated), and its
- * `semantic` list is the non-lossless residue D2 could not express.
+ * `semantic` list carries one entry per retirement family, even when a lossless
+ * D2 conversion also exists for it — D2 carries the mechanical data repair only.
  *
  * The chain is a **forever artifact**: every step back to
  * {@link MIGRATION_SUPPORT_FLOOR} stays replayable, and CI replays the full chain
@@ -8488,6 +8489,78 @@ const step18: MigrationStep = {
         + 'writes `branch`.',
     },
     {
+      id: 'export-job-family-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the export-job API family, retired whole: the twelve defs api/ExportJobStatus, '
+        + 'api/CreateExportJobRequest, api/CreateExportJobResponse, api/ExportJobProgress, '
+        + 'api/ScheduledExport, api/GetExportJobDownloadRequest, api/GetExportJobDownloadResponse, '
+        + 'api/ListExportJobsRequest, api/ExportJobSummary, api/ListExportJobsResponse, '
+        + 'api/ScheduleExportRequest and api/ScheduleExportResponse with every name '
+        + 'api/export.zod.ts exported for them from @objectstack/spec/api (the Schema consts, '
+        + 'their z.input aliases and their Parsed aliases) and the ExportApiContracts route map; '
+        + 'the IExportService contract with its six types (CreateExportJobInput, '
+        + 'CreateExportJobResult, ExportJobDownload, ListExportJobsOptions, ExportJobListResult, '
+        + 'ScheduleExportInput) from @objectstack/spec/contracts; and automation/ScheduleState '
+        + '(ScheduleStateSchema, ScheduleState, ScheduleStateParsed) from @objectstack/spec/automation',
+      replacement:
+        'nothing to re-declare for the job family — no route ever served it, so no caller holds '
+        + 'a job id, a progress body or a download link to carry over. The export the platform '
+        + 'DOES serve is the synchronous streaming door GET /api/v1/data/:object/export '
+        + '(@objectstack/rest, the SDK method data.export): it answers the file itself as CSV, '
+        + 'JSON or XLSX. ExportFormat stays published (ExportImportTemplate still references it). '
+        + 'A recurring export is a Job (system/job.zod.ts) whose handler you write, with its '
+        + 'cadence on Job.schedule.expression — the one cron slot the platform evaluates. A '
+        + 'scheduled flow declares its cadence on its start node (config.schedule), and its run '
+        + 'history is ExecutionLog / FlowRunSummary; ScheduleState had no counterpart to point at '
+        + 'because no scheduler ever kept one. The import-job family in the same module '
+        + '(ImportJob…, ListImportJobs…, ImportJobApiContracts) is served and is NOT part of this '
+        + 'retirement',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling A on #17158 (decision batch #122 item 3, '
+        + '「同意」 2026-09-12: retire the family, IExportService and ScheduleExportInput; ScheduleState '
+        + 'retired with it unless a live consumer is measured), landing route A (decision batch #221 '
+        + 'item 2, 「同意」 2026-09-24: objectui retires its side first, in objectui#10247, then this '
+        + 'retirement), and a scope note (「同意」 2026-09-25) that absorbs #19543 door ② — the '
+        + 'declared limit / cursor of the export-job list — into it. The family declared an '
+        + 'asynchronous export API, create / progress / download / list / schedule / cancel under '
+        + '/api/v1/data/export and a POST on /api/v1/data/:object/export, that NOTHING served: '
+        + '@objectstack/rest mounts no /api/v1/data/export route and only the GET on '
+        + '/api/v1/data/:object/export, IExportService recorded no evidenced provider binding, and '
+        + 'the reader census over objectstack outside packages/spec, over objectui at the pinned '
+        + 'sha (which carries objectui#10247) and over cloud main returned zero code files naming '
+        + 'any of the forty-three exported names, each beside a lit control. An AI reading the '
+        + 'contract found a complete, well-typed export-job API and wrote calls that answer 404 — '
+        + 'and after #16320 deleted its cron positions, ScheduledExport / ScheduleExportRequest '
+        + 'kept a REQUIRED schedule block that could hold no schedule, so an author who filled in '
+        + 'its timezone believed they had scheduled something. ScheduleState described the '
+        + 'runtime state of a scheduled flow that no scheduler wrote or read. Why D3 semantic and '
+        + 'not a D2 conversion: the chain walks a normalized STACK and applyConversionsToStoredItem '
+        + 'maps a metadata type onto one of its collections; none of these shapes is either — they '
+        + 'are HTTP bodies, a route map, a service interface and an unpersisted runtime record — so '
+        + 'a conversion would be a transform with no seam that ever runs, and with no carrier key '
+        + 'there is no shape on which a tombstone could sit. The #16320 cron-position deletions '
+        + 'on three of these defs registered nothing and stay unregistered; the defs themselves are '
+        + 'now the RETIRED_DEFS_BY_MAJOR[18] entries.',
+      acceptanceCriteria:
+        'No code imports any of the twelve export-job Schema consts or their type aliases from '
+        + '@objectstack/spec or @objectstack/spec/api, reads ExportApiContracts, implements or '
+        + 'imports IExportService or its six types from @objectstack/spec/contracts, or imports '
+        + 'ScheduleStateSchema / ScheduleState / ScheduleStateParsed from '
+        + '@objectstack/spec/automation: every such import is TS2305 after upgrade, and there is no '
+        + 'working replacement to point at because nothing ever served them. The thirteen defs are '
+        + 'absent from json-schema.manifest/api.json and json-schema.manifest/automation.json, from '
+        + 'the api-surface / declaration-map / export-origins shards and from the generated '
+        + 'reference docs. ExportFormat, ExportImportTemplate, the import validation shapes and '
+        + 'the whole import-job family (including ImportJobApiContracts) are unaffected. ⚠️ Runtime '
+        + 'behaviour is deliberately UNCHANGED and must be verified as such: GET '
+        + '/api/v1/data/:object/export answers exactly as before, and every request to a retired '
+        + 'path answers exactly as it always did, because nothing ever mounted one. ⚠️ Readers '
+        + 'outside objectstack, objectui and cloud are NOT MEASURED — @objectstack/spec is '
+        + 'published.',
+    },
+    {
       id: 'field-currency-scale-refused',
       surface: 'object.fields.<name>.scale on a field whose `type` is `currency` — any declared value, '
         + '`scale: 0` included; the `Field.currency` helper passes it through unchanged. `scale` on '
@@ -13585,6 +13658,60 @@ const step18: MigrationStep = {
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
     },
+    // The AUTHORING half of the turso driver's constructor refusals. The driver
+    // refuses these configurations when it is built; this entry records that the
+    // datasource contract now refuses them where they are written, together with
+    // the one combination the driver builds and then ignores. A structured TODO,
+    // not a D2 conversion: which way out an author wants — a remote database, an
+    // embedded replica on a local file, or a plain local file — is intent no
+    // artifact records.
+    {
+      id: 'turso-config-transport-mismatch-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.TursoConfig (a turso / libsql datasource.config) and the published TursoConfigSchema '
+        + 'mirror of @objectstack/driver-turso — combinations of url, syncUrl, mode and timeoutMs that '
+        + 'are now refused at parse: a remote url (libsql, https, http, wss, ws, any letter case) '
+        + 'beside syncUrl or under a forced local or replica mode; in a local or replica mode, a url '
+        + 'that is none of a file: url, :memory: or a remote url (a bare path, another scheme, '
+        + ':MEMORY:, a blank url); a replica on an in-memory url; timeoutMs beside a wss or ws url in '
+        + 'remote mode; and syncUrl under a forced remote mode. The driver mirror also refuses sync '
+        + 'with no syncUrl, as the spec contract already did',
+      replacement:
+        'the configuration the author meant, spelled the way the driver runs it. A remote database '
+        + 'is the remote url alone (drop syncUrl and sync, and drop a forced local or replica mode or '
+        + 'set it to remote). An embedded replica is a local file written as a file: url beside '
+        + 'syncUrl, for example url file:./data/replica.db with syncUrl naming the remote. A local '
+        + 'database is a file: url (file:./data/app.db, never the bare path ./data/app.db) or '
+        + ':memory: for a throwaway one. A remote database that needs timeoutMs spells its url libsql '
+        + 'or https, or drops timeoutMs. Each refusal names the key it sits on (url, syncUrl or '
+        + 'timeoutMs) and prints the spellings above',
+      reason:
+        '#19977. Each key parsed on its own, so the contract accepted configurations the turso driver '
+        + 'refuses when it is built (VALIDATION_ERROR / 400 from the constructor, since the #19893 '
+        + 'and #19976 changes) — a datasource published clean and then failed at boot or at test '
+        + 'connection. One more it builds and then ignores: syncUrl under a forced remote mode, where '
+        + 'the remote client is created without it, no sync ever runs and the sync call fails as not '
+        + 'supported while the driver reports sync as enabled (measured on the built driver). '
+        + 'Authoring now refuses exactly the constructor\'s refused set — the same predicates, a '
+        + 'scheme matched in any letter case, the url read trimmed as both datasource loaders hand it '
+        + 'over — plus that ignored key, which is the declared-but-not-enforced shape ADR-0049 does '
+        + 'not ship. Nothing the constructor accepts is refused, that key aside: a forced remote mode '
+        + 'keeps its url unjudged, as the constructor does. Stored datasource rows are not re-parsed '
+        + 'when they load, so a stored row keeps loading exactly as before (the constructor refuses '
+        + 'the first four shapes there already); what changes is that creating, testing or editing '
+        + 'its config through the datasource admin service, defineStack or os validate is refused at '
+        + 'the key. Measured on this tree at the change: no example, template, published skill or '
+        + 'hand-written doc authors a refused combination. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every turso datasource: os validate or defineStack, and a '
+        + 'save or test connection through the datasource admin service, report each refused '
+        + 'combination at config.url, config.syncUrl or config.timeoutMs with the ways out. Decide per '
+        + 'datasource whether it is a remote database, an embedded replica on a local file, or a '
+        + 'local file, and rewrite it to that spelling. Done when every turso datasource parses, the '
+        + 'driver builds from it, and a replica datasource reports a file: url beside its syncUrl.',
+    },
     {
       id: 'ui-action-undoable-unfulfillable-refused',
       surface: '`action` documents declaring `undoable: true` on a shape no runtime fulfils — '
@@ -18375,6 +18502,27 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
+    // #17158 — `api/CreateExportJobRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the request body of `POST /api/v1/data/:object/export` as an asynchronous job.
+    // That method and path are served by nothing; the served export is the
+    // synchronous `GET` on the same path.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/CreateExportJobRequest',
+    // #17158 — `api/CreateExportJobResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the `{ jobId, status, estimatedRecords, createdAt }` answer of the unserved
+    // asynchronous export-job create.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/CreateExportJobResponse',
     // #14691 — `api/CrudEndpointPattern` (the `{ method, path, summary, description }`
     // value shape of `crud.patterns`) leaves with its carrier key: its ONLY consumer
     // was `CrudEndpointsConfigSchema.patterns`, tombstoned in the same change under
@@ -18383,6 +18531,55 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `GeneratedEndpointSchema.operation` still reads it. See
     // `retired-keys/18.api__CrudEndpointsConfig__patterns.ts` for the retirement record.
     'api/CrudEndpointPattern',
+    // #17158 — `api/ExportJobProgress`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the progress body of `GET /api/v1/data/export/:jobId`, a route no package
+    // mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ExportJobProgress',
+    // #17158 — `api/ExportJobStatus`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the job-status enum (`pending` … `expired`) of the export-job API family. No
+    // job store, worker or route ever set or read one.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ExportJobStatus',
+    // #17158 — `api/ExportJobSummary`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the row shape of the unserved export-job list.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ExportJobSummary',
+    // #17158 — `api/GetExportJobDownloadRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the request of `GET /api/v1/data/export/:jobId/download`, a route no package
+    // mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/GetExportJobDownloadRequest',
+    // #17158 — `api/GetExportJobDownloadResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the presigned-link answer of `GET /api/v1/data/export/:jobId/download`, a
+    // route no package mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/GetExportJobDownloadResponse',
     // #13823 — `api/HandlerStatus` (the `implemented` / `stub` / `planned` enum)
     // left with its two carriers: `RestApiEndpoint.handlerStatus` is tombstoned
     // in this same major (`RETIRED_KEYS_BY_MAJOR[18]`) and
@@ -18393,6 +18590,27 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // objectstack, objectui (pinned sha) or cloud. See
     // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
     'api/HandlerStatus',
+    // #17158 — `api/ListExportJobsRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the query of `GET /api/v1/data/export` (`object`, `status`, `limit` default
+    // 20, `cursor`), a route no package mounts; the `limit` / `cursor` pair (#19543
+    // door ②, absorbed into #17158) had no reader to spend it.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ListExportJobsRequest',
+    // #17158 — `api/ListExportJobsResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the `{ jobs, nextCursor, hasMore }` answer of `GET /api/v1/data/export`, a
+    // route no package mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ListExportJobsResponse',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of
@@ -18506,6 +18724,49 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (`packages/runtime/src/route-ledger.ts`). See
     // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
     'api/RouteCoverageReport',
+    // #17158 — `api/ScheduleExportRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the request body of `POST /api/v1/data/export/schedules`, a route no package
+    // mounts; its `schedule` block held only `timezone` after #16320.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ScheduleExportRequest',
+    // #17158 — `api/ScheduleExportResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the answer of `POST /api/v1/data/export/schedules`, a route no package mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ScheduleExportResponse',
+    // #17158 — `api/ScheduledExport`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // a recurring export definition (`schedule`, `delivery`, `nextRunAt`). #16320
+    // had already deleted its `schedule.cronExpression`, leaving a required
+    // `schedule` block that could hold no schedule; no scheduler ever read it.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ScheduledExport',
+    // #17158 — `automation/ScheduleState`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the runtime state of a scheduled flow (`timezone`, `status`, `nextRunAt`, run
+    // counters). No scheduler ever wrote or read one, and after #16320 deleted its
+    // required cron it no longer declared a cadence. Retired with the family under
+    // ruling item 2 ("unless a live consumer is measured" — none was, in
+    // objectstack, objectui at the pin, or cloud).
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'automation/ScheduleState',
     // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
     // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the

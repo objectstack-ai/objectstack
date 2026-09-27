@@ -97,6 +97,13 @@ export * from './utils/analytics-date-range-conformance.js';
 // on each other.
 export * from './utils/temporal-comparand.js';
 
+// [#20176] …and the storage FORM that column's rule puts a value in — the one
+// rule `driver-sql` and `driver-memory` apply to a `where` comparand (and on
+// write), and `@objectstack/objectql` applies to a per-aggregation `filter` and
+// `having`, which it evaluates itself. Here because the drivers and the engine
+// do not depend on each other, and each driver used to carry its own copy.
+export * from './utils/temporal-storage-form.js';
+
 // [#12350 / ADR-0126 §4] THE activation-ledger row contract, parameterized by
 // `metadata_type`. Same reason as the two entries above: its consumers —
 // `@objectstack/objectql` (packaged actions) and
