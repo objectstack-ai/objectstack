@@ -28,6 +28,14 @@
  * the hand-written docs already used (`concepts/metadata-driven.mdx`,
  * `getting-started/quick-reference.mdx`). Nothing was added to the spec.
  *
+ * The object scaffolds have since moved off the annotation altogether: they
+ * declare through `ObjectSchema.create({ … })`, the one authorised shape for a
+ * `*.object.ts` (ruling 5644350230), whose return type is derived from the
+ * declaration it validates. This pin is unchanged by that — the other
+ * generators still annotate with namespace members (`UI.View`,
+ * `Automation.Flow`, …), and the factory's VALUE import from
+ * `@objectstack/spec/data` is exactly what this sandbox has to resolve.
+ *
  * ## ⭐ Why every existing scaffold pin was green through it
  *
  * This package already had two scaffold sweeps, and NEITHER could see this

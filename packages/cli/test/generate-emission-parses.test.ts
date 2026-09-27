@@ -11,7 +11,7 @@
  * the name went into a binding position untouched:
  *
  *     os generate object foo.bar          exit 0
- *     src/objects/foo.bar.object.ts   ->  const foo.bar: Data.ServiceObject = {
+ *     src/objects/foo.bar.object.ts   ->  const foo.bar = ObjectSchema.create({
  *     src/objects/index.ts            ->  export { default as foo.bar } from './foo.bar.object';
  *
  * One name, TWO broken files, and a command that reported success. The blast
@@ -145,7 +145,7 @@ describe('[#16541] CANARY — the card`s measured name is refused, at both emiss
     const object = ROSTER.find((t) => t.type === 'object');
     if (!object) throw new Error('the `object` generator is gone');
     const { scaffold } = emissionsFor('object', object.generate, 'foo.bar');
-    expect(scaffold.source).toContain('const foo.bar: Data.ServiceObject = {');
+    expect(scaffold.source).toContain('const foo.bar = ObjectSchema.create({');
     const failures = await findEmissionParseFailures([scaffold]);
     expect(failures).toHaveLength(1);
     expect(failures[0].diagnostics.length).toBeGreaterThan(0);
@@ -164,7 +164,7 @@ describe('[#16541] DISCRIMINATOR — the verdict comes from the compiler, not fr
     const object = ROSTER.find((t) => t.type === 'object');
     if (!object) throw new Error('the `object` generator is gone');
     const { scaffold } = emissionsFor('object', object.generate, 'class');
-    expect(scaffold.source).toContain('const class:');
+    expect(scaffold.source).toContain('const class =');
     expect(await findEmissionParseFailures([scaffold])).not.toEqual([]);
   });
 
