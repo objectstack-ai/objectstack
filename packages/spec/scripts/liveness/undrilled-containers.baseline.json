@@ -67,7 +67,6 @@
     "agent/model",
     "agent/planning",
     "agent/structuredOutput",
-    "app/branding",
     "app/contextSelectors.optionsSource",
     "book/groups.pages",
     "connector/webhooks",

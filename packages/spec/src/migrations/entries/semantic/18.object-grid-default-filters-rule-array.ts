@@ -56,9 +56,12 @@ export const entry: SemanticMigration = {
     + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
     + 'string or number this key also took, and any filter on a grid whose rows are inline '
     + '(data with provider value, or staticData), for the reason its sibling gives — and '
-    + 'RE-SAVING such a node is refused at the '
-    + 'defaultFilters path, with the same conversion table the filter door gives, computed '
-    + 'from the author\'s own keys. ADR-0049 / ADR-0087.',
+    + 'its door refuses such a value only as the component-props gate\'s advisory finding '
+    + '(os validate, os build, os lint), since a re-save through the metadata API is not '
+    + 'refused there: a record form with the message the filter door gives, a worked rewrite '
+    + 'computed from the author\'s own keys and a pointer to this entry\'s conversion table, '
+    + 'and a bare string or number or an AST tuple array with the schema\'s plain type '
+    + 'refusal. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'Every object-grid node in your pages either omits defaultFilters or carries a '
     + 'ViewFilterRule array on it. The parse of an object-grid node whose defaultFilters is '
