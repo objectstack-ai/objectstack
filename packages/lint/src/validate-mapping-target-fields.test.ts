@@ -107,9 +107,11 @@ describe('validateMappingTargetFields', () => {
   // after the ruling's own site census (`origin/main` `1c8b320`) — a fifth
   // copy of the same `recordsOf(stack.packages)` fall-through the ruling
   // closes elsewhere in this package. A PRESENT non-array `packages` is
-  // malformed, not absent; only `undefined`/`null` stay silent.
+  // malformed, not absent; only `undefined` stays silent. `null` joins this
+  // set in rework round 1 (ruling A on #19926, `5805260775`): it is present,
+  // not absent.
   it('refuses a PRESENT non-array `packages` instead of silently ignoring it', () => {
-    for (const packages of [{}, 0, 'x']) {
+    for (const packages of [{}, 0, 'x', null]) {
       expect(() => validateMappingTargetFields({
         objects: [contact],
         packages,

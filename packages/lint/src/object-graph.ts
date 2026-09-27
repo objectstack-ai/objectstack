@@ -239,16 +239,17 @@ export type StackPackagesError = Error & { code: string; status: number };
  * form at all, so this is a second, narrower reader rather than a branch on
  * the first one.
  *
- * - **Absent** (`undefined` / `null`) → `[]`. A single-package artifact
+ * - **Absent** (`undefined` ONLY) → `[]`. A single-package artifact
  *   contributes nothing here — this answers "what does `packages[]` add",
- *   never "what does this stack provide". (`null` is left exactly this way
- *   on purpose — #19926 owns that disagreement, not this function.)
+ *   never "what does this stack provide". `null` is malformed, per ruling
+ *   `5805260775` on #19926.
  * - **An array** → iterated, non-record members dropped — unchanged from
  *   what every one of these four call sites did through `recordsOf` before
  *   this function existed.
- * - **Anything else present** → refused, once, here — replacing four copies
- *   of the same read across `validate-object-references.ts` and
- *   `validate-translation-references.ts` (#20206).
+ * - **Anything else present, `null` included** → refused, once, here —
+ *   replacing four copies of the same read across
+ *   `validate-object-references.ts` and `validate-translation-references.ts`
+ *   (#20206).
  *
  * ⛔ Do not fold this into `recordsOf` itself (#20206's card): that reader
  * stays the shared map-or-array reader its other callers need.
@@ -260,13 +261,19 @@ export type StackPackagesError = Error & { code: string; status: number };
  */
 export function packagesOf(stack: unknown): AnyRec[] {
   const declared = (stack as { packages?: unknown } | null | undefined)?.packages;
-  if (declared === undefined || declared === null) return [];
+  // ⛔ `undefined` ONLY. `null` is present, not absent — ruling `5805260775`
+  // on #19926 — so it falls to the refusal below with every other non-array
+  // value.
+  if (declared === undefined) return [];
   if (Array.isArray(declared)) return declared.filter(isRec);
   const err = new Error(
     'A stack\'s `packages` must be an array of package entries (ADR-0130 D4, '
     + '`ArtifactPackageSchema`), but this stack carries `packages` of type '
-    + `${typeof declared}. Omit the key entirely for a single-package stack — `
-    + '`manifest` is retained, not replaced.',
+    // `typeof null` is `'object'`, which would name a `{}` the author never
+    // wrote; `null` is named as itself (matching `resolveArtifactPackageOrder`
+    // in `@objectstack/core`).
+    + `${declared === null ? 'null' : typeof declared}. Omit the key entirely for a `
+    + 'single-package stack — `manifest` is retained, not replaced.',
   ) as StackPackagesError;
   err.code = 'INVALID_ARTIFACT_PACKAGES';
   err.status = 422;

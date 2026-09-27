@@ -307,13 +307,9 @@ describe('object-graph — packagesOf (#20206, ruling A on #15293 `5634034754`)'
     expect(packagesOf({ packages: [null, valid, undefined, 'junk', 42, []] })).toEqual([valid]);
   });
 
-  it('an absent `packages` stays silent — `[]`, not a refusal', () => {
+  it('CONTROL — only an absent (`undefined`) `packages` stays silent — `[]`, not a refusal', () => {
     expect(packagesOf({})).toEqual([]);
     expect(packagesOf({ packages: undefined })).toEqual([]);
-  });
-
-  it('`packages: null` also stays silent here — #19926 owns that disagreement, not this reader', () => {
-    expect(packagesOf({ packages: null })).toEqual([]);
   });
 
   it.each([
@@ -330,6 +326,19 @@ describe('object-graph — packagesOf (#20206, ruling A on #15293 `5634034754`)'
     expect(() => packagesOf({ packages: shape })).toThrow(
       new RegExp(`\`packages\` of type ${typeof shape}`),
     );
+  });
+
+  // [ruling A on #19926, `5805260775`] `null` is malformed, everywhere — it is
+  // PRESENT, not absent, so it takes the same refusal as `{}`/`0`/`'x'`, not
+  // the silent branch above. `typeof null` is `'object'`, which would name a
+  // `{}` the author never wrote, so the message names `null` as itself
+  // (matching `resolveArtifactPackageOrder` in `@objectstack/core`, PR #20228).
+  it('refuses `packages: null` too — malformed, not absent (ruling `5805260775` on #19926)', () => {
+    expect(() => packagesOf({ packages: null })).toThrow(
+      expect.objectContaining({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 }),
+    );
+    expect(() => packagesOf({ packages: null })).toThrow(/`packages` of type null/);
+    expect(() => packagesOf({ packages: null })).not.toThrow(/of type object/);
   });
 });
 

@@ -543,16 +543,18 @@ describe('validateTranslationReferences — a PRESENT non-array `packages` (#202
   const oneBundle = [{ 'zh-CN': { objects: {} } }];
 
   it('refuses instead of silently treating it as absent', () => {
-    for (const packages of [{}, 0, 'x', { a: { manifest: {} } }]) {
+    for (const packages of [{}, 0, 'x', { a: { manifest: {} } }, null]) {
       expect(() => validateTranslationReferences({ objects: [], translations: oneBundle, packages })).toThrow(
         expect.objectContaining({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 }),
       );
     }
   });
 
-  it('CONTROL — an absent or `null` `packages` stays silent', () => {
+  // [ruling A on #19926, `5805260775`] `null` moved from the control above
+  // into the refusal set in rework round 1: it is present, not absent.
+  it('CONTROL — only an absent (`undefined`) `packages` stays silent', () => {
     expect(validateTranslationReferences({ objects: [], translations: oneBundle })).toEqual([]);
-    expect(validateTranslationReferences({ objects: [], translations: oneBundle, packages: null })).toEqual([]);
+    expect(validateTranslationReferences({ objects: [], translations: oneBundle, packages: undefined })).toEqual([]);
   });
 });
 
