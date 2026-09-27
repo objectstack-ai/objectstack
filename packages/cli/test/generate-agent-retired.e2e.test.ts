@@ -37,6 +37,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
@@ -147,6 +148,14 @@ describe('[#10359] the generators that were not retired still work', () => {
   it('`os g object … --dry-run` still previews a typed object file', () => {
     expect(survivor.code).toBe(0);
     expect(survivor.stdout).toContain('Dry run');
-    expect(survivor.stdout).toContain("import * as Data from '@objectstack/spec/data'");
+    // Anchored to the object template itself, not to a copied line of it: the
+    // preview prints the template's output, each line indented two spaces, and
+    // this directory has no config, so no namespace. A copied import line went
+    // stale once already, when the template moved from a namespace import to
+    // `ObjectSchema.create`; this assertion moves with the template instead.
+    const objectTemplate = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === 'object');
+    expect(objectTemplate).toBeDefined();
+    const preview = objectTemplate!.generate('customer').split('\n').map((l) => `  ${l}`).join('\n');
+    expect(survivor.stdout).toContain(preview);
   });
 });
