@@ -811,6 +811,7 @@
     "isVirtualSearchField (function)",
     "judgeImportMappingTarget (function)",
     "likePatternToGlobPattern (function)",
+    "likePatternToRegExp (function)",
     "likePatternToRegexSource (function)",
     "lintAuthoredRecordKeys (function)",
     "markFilterSubtreeProvenance (function)",

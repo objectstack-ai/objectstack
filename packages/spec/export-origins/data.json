@@ -798,6 +798,7 @@
     "isVirtualSearchField": "src/data/search-fields.ts#isVirtualSearchField (function)",
     "judgeImportMappingTarget": "src/data/import-mapping-target.ts#judgeImportMappingTarget (function)",
     "likePatternToGlobPattern": "src/data/filter.zod.ts#likePatternToGlobPattern (function)",
+    "likePatternToRegExp": "src/data/filter.zod.ts#likePatternToRegExp (function)",
     "likePatternToRegexSource": "src/data/filter.zod.ts#likePatternToRegexSource (function)",
     "lintAuthoredRecordKeys": "src/data/authoring-key-lint.ts#lintAuthoredRecordKeys (function)",
     "markFilterSubtreeProvenance": "src/data/filter-subtree-provenance.ts#markFilterSubtreeProvenance (function)",
