@@ -297,10 +297,21 @@ describe('validateObjectReferences — artifact packages[] as resolution context
     expect(findings[0].path).toBe('objects[0].fields.account.reference');
   });
 
-  it('ignores a `packages` value that is not a list of entries', () => {
-    for (const packages of [null, 42, 'core']) {
-      const findings = validateObjectReferences(perPackageStack(ORDERS_BODY, packages));
-      expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.reference']);
+  it('`packages: null` stays absent, unlike a present non-array value (#19926 owns `null`, not this rule)', () => {
+    const findings = validateObjectReferences(perPackageStack(ORDERS_BODY, null));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.reference']);
+  });
+
+  // [#20206, ruling A on #15293 `5634034754`] Was "ignores a `packages` value
+  // that is not a list of entries" — `42` and `'core'` used to fall through
+  // `recordsOf` to `[]` and be silently treated as "no packages", exactly the
+  // fall-through the ruling closes: PRESENT but not an array is malformed, not
+  // absent, and every reader refuses it.
+  it('refuses a PRESENT non-array `packages` instead of silently ignoring it', () => {
+    for (const packages of [42, 'core']) {
+      expect(() => validateObjectReferences(perPackageStack(ORDERS_BODY, packages))).toThrow(
+        expect.objectContaining({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 }),
+      );
     }
   });
 });

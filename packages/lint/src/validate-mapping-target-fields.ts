@@ -48,7 +48,7 @@
 
 import { indexImportMappingTargets, unknownImportMappingTargets } from '@objectstack/spec/data';
 
-import { listNames, recordsOf, suggestName } from './object-graph.js';
+import { listNames, packagesOf, recordsOf, suggestName } from './object-graph.js';
 
 /** A `fieldMapping[].target` that names no field of the mapping's object. */
 export const MAPPING_TARGET_FIELD_UNKNOWN = 'mapping-target-field-unknown';
@@ -92,7 +92,7 @@ function extensionFieldsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
     }
   };
   add(stack.objectExtensions);
-  for (const entry of recordsOf(stack.packages)) {
+  for (const entry of packagesOf(stack)) {
     if (isRec(entry.manifest)) add(entry.manifest.objectExtensions);
   }
   return byTarget;

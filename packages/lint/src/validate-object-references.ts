@@ -81,7 +81,7 @@ import {
 } from '@objectstack/spec/system';
 import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
-import { recordsOf, suggestName } from './object-graph.js';
+import { packagesOf, recordsOf, suggestName } from './object-graph.js';
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
@@ -162,7 +162,7 @@ function isInterpolated(target: string): boolean {
  */
 function artifactProvidedObjectNames(stack: AnyRec): string[] {
   const names: string[] = [];
-  for (const entry of recordsOf(stack.packages)) {
+  for (const entry of packagesOf(stack)) {
     const body = entry.manifest;
     if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
     for (const obj of recordsOf((body as AnyRec).objects)) {

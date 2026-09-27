@@ -103,6 +103,21 @@ describe('validateMappingTargetFields', () => {
     expect(validateMappingTargetFields(stack)).toEqual([]);
   });
 
+  // [#20206, ruling A on #15293 `5634034754`] This reader was added by #20208
+  // after the ruling's own site census (`origin/main` `1c8b320`) — a fifth
+  // copy of the same `recordsOf(stack.packages)` fall-through the ruling
+  // closes elsewhere in this package. A PRESENT non-array `packages` is
+  // malformed, not absent; only `undefined`/`null` stay silent.
+  it('refuses a PRESENT non-array `packages` instead of silently ignoring it', () => {
+    for (const packages of [{}, 0, 'x']) {
+      expect(() => validateMappingTargetFields({
+        objects: [contact],
+        packages,
+        mappings: [mapping([{ source: 'Tier', target: 'sla_tier' }])],
+      })).toThrow(expect.objectContaining({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 }));
+    }
+  });
+
   it('stays silent on a mapping whose object this stack does not define (skip 1)', () => {
     expect(validateMappingTargetFields({
       objects: [contact],
