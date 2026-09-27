@@ -63,8 +63,10 @@ toolbar toggle re-sends the row it read) saves.
   container slot) in `views` (stack sources and stored rows) and `viewItems`
   (assembled artifacts). It is disjoint from `view-item-owner-hidden-removed` by
   `config`, so no row is judged by both.
-- **D3 semantic entry `view-owner-hidden-retired`**: the family's one D3 record,
-  covering both doors.
+- **D3 semantic entry `view-overlay-owner-hidden-retired`**: the family's one D3
+  record, naming its D2 conversion. The view item record's pair is a separate
+  family with its own conversion and its own D3 entry; the two share the
+  prescription texts.
 - **`RETIRED_KEYS_BY_MAJOR[18]`**: `ui/ViewMetadata:owner`, `ui/ViewMetadata:hidden`.
   `ui/ViewMetadata` is unemitted (its `z.undefined()` guards have no JSON Schema
   form), so no build gate judges these rows and the four surface ratchets are
@@ -77,4 +79,4 @@ and production `sys_metadata` rows are not reachable from the repository. Stored
 rows are covered by the conversion above; a client that still sends either key is
 refused at its next save.
 
-<!-- adr-0087: registered view-overlay-owner-hidden-removed, view-owner-hidden-retired -->
+<!-- adr-0087: registered view-overlay-owner-hidden-removed, view-overlay-owner-hidden-retired -->

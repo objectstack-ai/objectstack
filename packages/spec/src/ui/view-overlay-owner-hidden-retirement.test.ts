@@ -24,8 +24,10 @@
  *      (the assembled-manifest channel).
  *   3. `RETIRED_KEYS_BY_MAJOR[18]` carries `ui/ViewMetadata:*` — declared, not
  *      judged: `ui/ViewMetadata` is unemitted, so no build gate sees the rows.
- *   4. The family's one D3 semantic entry, `view-owner-hidden-retired`
- *      (ruling B on #17152), covers both doors.
+ *   4. The family's one D3 semantic entry, `view-overlay-owner-hidden-retired`
+ *      (ruling B on #17152), naming its D2 conversion by id. The view item
+ *      record's pair is a separate family with its own conversion and its own
+ *      D3 entry; the two share the prescription texts, not a record.
  *
  * `defineView` is NOT an overlay door: it parses the strict container
  * (`ViewSchema`), which declares neither key and refuses an overlay-shaped
@@ -265,15 +267,19 @@ describe('overlay owner/hidden retirement — ADR-0087 registration', () => {
     expect(MIGRATIONS_BY_MAJOR[18]!.conversionIds).toContain('view-overlay-owner-hidden-removed');
   });
 
-  it('the family carries ONE D3 semantic entry covering both doors (ruling B on #17152)', () => {
-    const family = MIGRATIONS_BY_MAJOR[18]!.semantic.filter((s) => s.id === 'view-owner-hidden-retired');
+  it('the family carries ONE D3 semantic entry, and it names the family\'s D2 conversion (ruling B on #17152)', () => {
+    const semantic = MIGRATIONS_BY_MAJOR[18]!.semantic;
+    const family = semantic.filter((s) => s.id === 'view-overlay-owner-hidden-retired');
     expect(family).toHaveLength(1);
     const entry = family[0]!;
-    // Both doors named, the measured zero and the unmeasured population stated.
-    expect(entry.surface).toContain('view item record');
+    // Its door, its conversion, the measured zero and the unmeasured population.
     expect(entry.surface).toContain('flattened view overlay');
-    expect(entry.reason).toContain('Measured authors in this repository: zero');
+    expect(entry.reason).toContain('`view-overlay-owner-hidden-removed`');
+    expect(entry.reason).toContain('Measured writers in this repository and its sibling UI: zero');
     expect(entry.reason).toContain('NOT MEASURED');
     expect(entry.acceptanceCriteria.length).toBeGreaterThan(0);
+    // One family, one record: no other entry of the step claims this conversion.
+    const claimants = semantic.filter((s) => JSON.stringify(s).includes('view-overlay-owner-hidden-removed'));
+    expect(claimants.map((s) => s.id)).toEqual(['view-overlay-owner-hidden-retired']);
   });
 });
