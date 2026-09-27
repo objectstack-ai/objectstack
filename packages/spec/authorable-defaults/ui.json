@@ -82,7 +82,7 @@
     "ui/PageTabsProps:position = \"top\"",
     "ui/PageTabsProps:tabStyle = \"line\"",
     "ui/PageVariable:type = \"string\"",
-    "ui/PaginationConfig:pageSize = 25",
+    "ui/PaginationConfig:pageSize = 50",
     "ui/RecordActivityProps:enableMentions = true",
     "ui/RecordActivityProps:enableReactions = false",
     "ui/RecordActivityProps:enableThreading = false",

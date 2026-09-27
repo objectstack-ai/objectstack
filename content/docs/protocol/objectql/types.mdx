@@ -294,7 +294,7 @@ annual_revenue:
   currencyConfig:
     precision: 2
     currencyMode: fixed
-    defaultCurrency: USD
+    defaultCurrency: USD   # the field's currency under fixed
 ```
 
 **Storage:** a **bare number** — the same value shape as `number`.
@@ -305,8 +305,11 @@ annual_revenue:
 
 <Callout type="warn">
 A currency value is **not** a `{ value, currency }` object. The currency *code*
-lives once on the field definition (`currencyConfig.defaultCurrency`), not on
-every stored value. The old per-value object shape (`CurrencyValueSchema`) was
+is field configuration, never stored per value: under `currencyMode: fixed` it is
+`currencyConfig.defaultCurrency` (the field's one currency, as `fixed` pins it);
+under `dynamic`, the default, it is the tenant default currency (the
+`localization.currency` setting) and `defaultCurrency` is not the displayed
+currency. The old per-value object shape (`CurrencyValueSchema`) was
 never consumed by the validator, the driver, or import coercion and is
 deprecated in the spec.
 </Callout>

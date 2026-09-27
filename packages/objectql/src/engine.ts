@@ -16141,6 +16141,18 @@ export class ObjectQL implements IObjectQLEngine {
               // spoke on `where` alone would answer one mistake two ways within a
               // single verb.
               assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+              // [#20148] …and the TEMPORAL-comparand door, fourth here as it is
+              // fourth on `where`'s seam (#8690) — the same function, against the
+              // object's declared fields, since this filter reads the object's
+              // raw rows. A comparand a declared date / datetime / time field
+              // cannot interpret (`'not-a-date'`, the preset name
+              // `'last_30_days'`) was compared as written: no row counted, a
+              // `$between` with one such endpoint counted EVERY row, and the same
+              // bound in a `where` was refused 400 — measured on the base on
+              // driver-memory and driver-sql, through the engine and REST.
+              // Before the token resolver below, as there, so a `{placeholder}`
+              // is stepped around and resolved (or refused) a moment later.
+              assertTemporalComparandsInterpretable(object, 'aggregate', this._registry.getObject(object), aggFilter);
               // [#20122] …and the two doors `having` took at its own entry
               // (#20099), so a refusal here is the FILTER's, never the data's:
               //  1. the comparand-TYPE door `where` takes in
@@ -16155,8 +16167,23 @@ export class ObjectQL implements IObjectQLEngine {
               //     walks the filter per SOURCE row, so `{ amount: { $median: 1 } }`
               //     was a 400 on a populated table and a `200 []` on an empty one,
               //     and a `$or` whose first branch held counted every row.
+              //     [#20148] …then, against the object's DECLARED fields, the two
+              //     cross-field rules `where` gets from `driver-sql`'s compiler:
+              //     a `{ $field }` names a declared field, and an `addDays` pair
+              //     follows `FieldReferenceSchema.addDays`' class rule. Both were
+              //     answered by the fallback — no row counted — where `where` is
+              //     refused. Refused in `where`'s words for that comparison, which
+              //     withhold the fields, the operator and the reason; the
+              //     withheld half goes to this log, as the driver writes its own.
               const typed = normalizeFilterComparandTypes(aggFilter, `aggregate('${object}')`, `aggregations[${i}].filter`);
-              assertAggregationFilterIsEvaluable(typed, i);
+              assertAggregationFilterIsEvaluable(typed, i, {
+                  object,
+                  fields: (this._registry.getObject(object) as { fields?: unknown } | undefined)?.fields,
+                  reportWithheld: (diagnostic) => this.logger.warn(
+                      `aggregate('${object}'): INVALID_FILTER — refusal detail withheld from the response, as it `
+                      + `is for the same cross-field comparison in a where. Full diagnostic: ${diagnostic}`,
+                  ),
+              });
               if (typed !== aggFilter) {
                   typedAggregations ??= [...aggregations];
                   typedAggregations[i] = { ...(agg as object), filter: typed } as typeof agg;

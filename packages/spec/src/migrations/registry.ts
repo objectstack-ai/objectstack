@@ -5279,7 +5279,18 @@ const step18: MigrationStep = {
     + 'door persists the authored value and the stored-row rehydration seam is live for '
     + 'this type, both measured); and the withdrawn `ConnectorProviderContext` member, '
     + 'which is code and has no authored source to rewrite, leaves via the paired semantic '
-    + 'entry instead.',
+    + 'entry instead. '
+    + 'Finally it gives the one-filter-orthography convergence (objectui#6206) its '
+    + 'mechanical half at rest (#17321, ruling B): the D2 conversion '
+    + '`page-component-filter-record-to-rule-array` rewrites a record-form or single-level '
+    + 'AST `filter` at the converged rule-array doors — `dataSource.filter`, the '
+    + '`object-*` / `element:number` / `element:record_picker` `filter` props and '
+    + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
+    + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
+    + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
+    + 'a page selects — as it does every filter of a component whose rows are inline, which '
+    + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
+    + 'the door and taught the array; the stored-row seams and this chain replay it.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5315,6 +5326,7 @@ const step18: MigrationStep = {
     'dashboard-widget-chart-config-structure-removed',
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
+    'page-component-filter-record-to-rule-array',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -7863,15 +7875,29 @@ const step18: MigrationStep = {
         + 'array on `object-grid`) and three lint fixtures — every one rewritten to the rule array '
         + 'in the same change, and zero outside those files; this entry carries the prescription '
         + 'for authors outside the repo. '
-        + '⚠️ Metadata AT REST is deliberately NOT rewritten, and this disposition adds no D2 '
-        + 'conversion — a SemanticMigration converts nothing by its own type, and '
-        + '`os migrate meta --stored` (the pass over a deployment\'s `sys_metadata` rows) replays '
-        + 'D2 conversions only, so it has nothing to rewrite for this shape. The read path '
-        + 'does not re-validate stored rows '
-        + '(`applyConversionsToStoredItem` replays the full chain without validating, by its own '
-        + 'contract), so a stored page or block carrying the record form keeps loading unchanged '
-        + 'and is still rendered by objectui at the pinned `.objectui-sha`; what changes is that '
-        + 'RE-SAVING it is refused at the `filter` door, on its next save and not before.',
+        + 'Metadata AT REST: the mappable part of the table above is a D2 conversion, '
+        + '`page-component-filter-record-to-rule-array` (#17321, ruling B), so '
+        + '`os migrate meta --stored` (the pass over a deployment\'s `sys_metadata` rows) rewrites '
+        + 'a stored page whose `filter` is a flat record, an operator object whose operators the '
+        + 'rule vocabulary spells, several such keys, or a single-level AST tuple array, and every '
+        + 'stored-row read replays the same rewrite until it does. It is retired from the load '
+        + 'path: an author writing the record form is still refused at the `filter` door. ⚠️ A '
+        + 'filter carrying `$and` / `$or` / `$not` is left exactly as stored — the rule array '
+        + 'only ANDs, and flattening a combinator changes which rows the page selects — and so is '
+        + 'any filter with a part that has no lossless rule spelling: a `null` value (the renderer '
+        + 'skips that key, so it constrains nothing today, where a rule would test IS NULL), an '
+        + 'operator such as `$null` / `$exists` or an AST `like`, an array or object comparand in '
+        + 'equality position, or an AST `and` / `or` group. So is every filter — the binding\'s '
+        + 'included — of a component whose rows are INLINE (`data: { provider: \'value\' }`, a '
+        + '`data` array, or `staticData`): at the pinned `.objectui-sha` the `object-map`, '
+        + '`object-tree`, `object-calendar` and `object-gantt` blocks match that filter against '
+        + 'their own rows in an in-memory data source that reads the record form and excludes '
+        + 'EVERY row for a rule array, so a rewrite there would empty the block. Such a row keeps loading unchanged '
+        + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
+        + 'contract) and is refused at the `filter` door on its next save — for a combinator '
+        + 'record, a refusal that names the combinator and says why no rule spells it. '
+        + '`os migrate meta --stored` does not list these rows yet: a row the conversion leaves '
+        + 'as stored reports there as already on protocol.',
       acceptanceCriteria:
         '`ElementDataSourceSchema.safeParse({ object, filter: [{ field: \'status\', operator: '
         + '\'equals\', value: \'active\' }] })` succeeds and the parsed `filter` is the same rule '
@@ -8636,6 +8662,64 @@ const step18: MigrationStep = {
         + '`$contains` against it answers by member rather than the declared no-match. Fields '
         + 'already multi-valued by `isMultiValueField` need no change and must read back '
         + 'byte-identically.',
+    },
+    // The authoring half of ADR-0137 D2 for one shape: a field-level predicate that
+    // reads THROUGH a reference field. The runtime already refuses the writes such a
+    // predicate reaches (or, for an option, never enforces it); what moved is that
+    // `objectstack validate` now says so before deploy. No D2 conversion — see
+    // `reason`.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'field-predicate-reference-traversal-refused',
+      surface:
+        'the field-level predicates objects[].fields[].requiredWhen and objects[].fields[].readonlyWhen, '
+        + 'and a select option\'s objects[].fields[].options[].visibleWhen, whose CEL reads THROUGH a '
+        + 'reference field (a lookup, master_detail, user or tree field): record.account.tier where '
+        + 'account is such a field; likewise previous.account.tier, and parent.account.tier on a '
+        + 'master-detail line item whose master declares account. Refused wherever objects are '
+        + 'validated as authored: objectstack validate, build and lint over defineStack({ objects }) '
+        + 'sources and exported stacks',
+      replacement:
+        'the check as a `validations[]` rule of `type: \'script\'` — the one predicate the server reads one '
+        + 'hop through a reference (the related record is loaded before it runs) — whose `condition` states '
+        + 'the FAILURE. For `requiredWhen: P` on field F: P and F empty, e.g. '
+        + '`record.account.tier == \'enterprise\' && (record.po_number == null || record.po_number == \'\')`. '
+        + 'For `readonlyWhen: P` on F: P and F changed, on updates only (`events: [\'update\']`), e.g. '
+        + '`record.account.tier == \'gold\' && record.discount != previous.discount`. For an option gated by '
+        + 'P: that option picked while P does not hold — the option is then offered to everyone and refused '
+        + 'on save. Or read a column the object itself declares (denormalise the related value onto it). '
+        + 'A read through `previous` or `parent` has no hydrated seam at all, a validation rule included: '
+        + 'read a column the bound record declares instead',
+      reason:
+        'Card #20078, triage remedy A (5825661201). The field level is never hydrated: '
+        + '`rule-validator.ts` evaluates `requiredWhen` / `readonlyWhen` / an option\'s `visibleWhen` '
+        + 'against the record alone, so a reference there holds the related record\'s bare id and every '
+        + 'read through it faults, on every row. Measured on the engine before this change: a traversing '
+        + '`requiredWhen` refused every insert and every update that reached it, a traversing '
+        + '`readonlyWhen` refused every update that wrote its field (an insert is exempt), and an option '
+        + 'gated through a reference was admitted whatever the related record said (option visibility is '
+        + 'fail-open) — while `objectstack validate` passed a stack carrying all three, exit 0. ADR-0137 D2 '
+        + 'made the runtime fail closed; the defect was that authoring did not say so first (NORTH-STAR '
+        + 'priority rule 4). The same traversal inside a `validations[]` `script` rule is served (#18682) '
+        + 'and stays accepted. ⚠️ No D2 conversion, and the reason is the judgment this entry delegates: '
+        + 'moving a field predicate into a validation rule turns a condition into a FAILURE condition, '
+        + 'moves an option from hidden to offered-then-refused, and the right `events` scope depends on '
+        + 'what the author meant — none of it mechanical. Hydrating the field level instead is a '
+        + 'capability of its own and is not done here. ADR-0087, ADR-0137.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over the stack. Each such predicate is refused as '
+        + '`expression-invalid`, located at `object \'O\' · field \'F\' requiredWhen` (or `readonlyWhen`, '
+        + 'or `option \'V\' visibleWhen`), and the message names the reference path read through '
+        + '(`through record.account`) and the repair — that is the TODO\'s locator. Rewrite each per the '
+        + '`replacement` note until validate is clean. Then prove the behaviour on a running stack: a '
+        + 'write meeting the condition is refused by the new rule (`rule_violation` carrying its '
+        + '`message`), and one that does not is accepted — where before, every write reaching the field '
+        + 'predicate was refused with `could not be evaluated … write rejected`, or the option was '
+        + 'admitted unchecked. ⚠️ An object already stored in `sys_metadata` is not re-validated by this '
+        + 'change: its writes keep being refused at run time exactly as before, and that refusal names '
+        + 'the reference for a `record` read — its own locator.',
     },
     {
       id: 'field-scale-precision-integer-refused',
@@ -10842,13 +10926,17 @@ const step18: MigrationStep = {
         + 'outright — the other arm the finding offered — removes an accepted shape and needs its '
         + 'own ruling; the deprecation already stated in the description is unchanged and still '
         + 'says to prefer filter. '
-        + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion, '
-        + 'for the reason its sibling gives at length: a SemanticMigration converts nothing by '
-        + 'its own type, the stored-row pass replays D2 conversions only, and the read path does '
-        + 'not re-validate stored rows — so a stored page carrying the record form keeps loading '
-        + 'and keeps rendering as it does today. What changes is that RE-SAVING it is refused at '
-        + 'the defaultFilters path, with the same conversion table the filter door gives, '
-        + 'computed from the author\'s own keys. ADR-0049 / ADR-0087.',
+        + 'Metadata AT REST: the record form and the AST tuple array at this key are rewritten to '
+        + 'the rule array by the same D2 conversion as its sibling filter, '
+        + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
+        + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
+        + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
+        + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
+        + 'string or number this key also took, and any filter on a grid whose rows are inline '
+        + '(data with provider value, or staticData), for the reason its sibling gives — and '
+        + 'RE-SAVING such a node is refused at the '
+        + 'defaultFilters path, with the same conversion table the filter door gives, computed '
+        + 'from the author\'s own keys. ADR-0049 / ADR-0087.',
       acceptanceCriteria:
         'Every object-grid node in your pages either omits defaultFilters or carries a '
         + 'ViewFilterRule array on it. The parse of an object-grid node whose defaultFilters is '
@@ -14148,6 +14236,39 @@ const step18: MigrationStep = {
         + 'array is the case to read closest: its two corrected spellings — value: "won" on '
         + 'equals, and operator: "in" with value: ["won"] — select the same rows, so the result '
         + 'set cannot tell you which the metadata meant, and only the author knows.',
+    },
+    // The display page size a view gets when it declares none moved from 25 to 50
+    // (maintainer ruling on objectui#9853). A default move reaches every silent
+    // document with no parse error and nothing in the author's diff, so the
+    // upgrade path carries it as a TODO: only the deployment can say whether a
+    // view that never declared a page size was relying on 25.
+    {
+      id: 'view-pagination-page-size-default-50',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'ui.PaginationConfig.pageSize — an OMITTED page size on a view',
+      replacement: 'nothing, to take the platform display page size of 50. To keep the old 25 rows '
+        + 'per page on a view, write it: `pagination: { pageSize: 25 }`',
+      reason:
+        'A RULED behaviour change on a default, so there is nothing to rewrite and nothing to '
+        + 'refuse: the maintainer set the platform display page size to 50 (「9853 默认页大小改为50」, '
+        + 'objectui#9853), and the declared default of `PaginationConfigSchema.pageSize` moved '
+        + 'from 25 to 50. A `pagination` block that omits `pageSize` now parses to 50 — 50 rows '
+        + 'per page on a paged view, and a fetch ceiling of 50 on a view with no pager (kanban, '
+        + 'gallery, timeline). A view with no `pagination` block at all parses with none on either '
+        + 'side; its page size reaches it through the renderer, which is ruled to read the spec '
+        + 'default rather than keep its own number (objectui#9853 ruling C′ item 1). Not losslessly '
+        + 'convertible because the question is intent, not text: a mechanical pass that wrote '
+        + '`pageSize: 25` into every silent view would preserve the old number and defeat the '
+        + 'ruling, and one that wrote 50 would add nothing the default does not already do. Only '
+        + 'the deployment knows which silent views were relying on 25. The accept set is unchanged '
+        + '— a positive integer — and every authored `pageSize` parses exactly as before.',
+      acceptanceCriteria:
+        'An empty pagination configuration parses to a page size of 50, and a list view carrying '
+        + '`pagination: {}` parses to `pagination.pageSize` 50; an authored '
+        + '`pagination: { pageSize: 25 }` still parses to 25; `pageSize: 0`, a negative and a '
+        + 'fraction are still refused. A view that must keep 25 rows per page declares '
+        + '`pagination: { pageSize: 25 }` and shows 25 rows on its first page.',
     },
     {
       id: 'wait-node-event-config-required',
