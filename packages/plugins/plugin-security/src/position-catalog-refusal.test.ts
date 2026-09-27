@@ -295,10 +295,11 @@ describe('the accepted half — a catalog NAME, active or deactivated', () => {
     expect(await rowsReadBy(h, 'u_retired')).toBe(0);
   });
 
-  it('single posture: an organization-bound writer still reads the organization-less catalog', async () => {
-    // Every `single`-posture catalog row carries no organization. The scoped
-    // read (`{ ...context, isSystem: true }`) forwards the writer's tenant, and
-    // the driver's `organization_id IS NULL` term keeps those rows visible.
+  it('single posture: an organization-bound writer still reads organization-less catalog rows', async () => {
+    // A `single` posture seeds its declared catalog with no organization, and
+    // this fixture seeds its rows the same way. The scoped read
+    // (`{ ...context, isSystem: true }`) forwards the writer's tenant, and the
+    // driver's `organization_id IS NULL` term keeps those rows visible.
     const h = await boot();
     const orgBound = { ...ADMIN, tenantId: 'org_a' };
     const created = await h.engine.insert(

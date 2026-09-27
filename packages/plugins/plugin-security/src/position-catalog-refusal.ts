@@ -53,9 +53,12 @@
  * and answered "some other organization has this position" apart from "no one
  * has it": the cross-tenant existence oracle the engine probe (#19808) and the
  * delegated-admin gate's position-name reads (#19819, #19860) were closed
- * against. Under a `single` posture every catalog row is organization-less and
- * every writer reads the whole catalog. A writer whose context names no
- * organization reads every organization's rows, as the engine probe does.
+ * against. Under a `single` posture the declared catalog is seeded with no
+ * organization, and a position a session creates through the data door is
+ * stamped with the session's active organization — the deployment's one
+ * organization — or with none; either way every writer reads the whole
+ * catalog. A writer whose context names no organization reads every
+ * organization's rows, as the engine probe does.
  *
  * ## Which writes it judges
  *

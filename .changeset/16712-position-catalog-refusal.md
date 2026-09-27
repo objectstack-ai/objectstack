@@ -41,8 +41,9 @@ organization plus the organization-less ones — the same reach the engine gives
 its own lookup-reference check. A name that only ANOTHER organization's
 catalog carries is refused exactly like any unknown name, with the same
 envelope and the same message, so the answer says nothing about other
-organizations. On a single-organization posture every position is
-organization-less, so every writer sees the whole catalog. A writer whose
+organizations. On a single-organization deployment the declared positions
+carry no organization and any other position can only carry the one
+organization there is, so every writer sees the whole catalog. A writer whose
 context names no organization sees every organization's positions.
 
 **What did not change.**
