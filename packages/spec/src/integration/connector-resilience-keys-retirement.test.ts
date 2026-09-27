@@ -170,13 +170,13 @@ describe('connector resilience family retirement — the tombstones', () => {
       ['base', ConnectorSchema],
       ['the /meta + stack.connectors carrier', DeclarativeConnectorEntrySchema],
     ] as const) {
-      // The shape a 17.x parse produced for a three-key author literal,
-      // including the other retired default already in the stage.
-      const r = schema.safeParse({ ...WELL_FORMED, status: 'inactive', connectionTimeoutMs: 30000 });
-      expect(r.success, `${label} must accept the emitted defaults as residue`).toBe(true);
+      // The shape a 17.x parse produced for a three-key author literal. (Its
+      // other retired default is pinned by its own retirement's test, which
+      // also holds that key's spelling to that file alone.)
+      const r = schema.safeParse({ ...WELL_FORMED, status: 'inactive' });
+      expect(r.success, `${label} must accept the emitted default as residue`).toBe(true);
       if (!r.success) continue;
       expect(r.data, `${label} must STRIP status`).not.toHaveProperty('status');
-      expect(r.data, `${label} keeps stripping connectionTimeoutMs`).not.toHaveProperty('connectionTimeoutMs');
       // CONTROL: the live sibling on the same shape is untouched by the stage.
       expect(r.data.enabled, `${label} keeps the live sibling`).toBe(true);
     }
