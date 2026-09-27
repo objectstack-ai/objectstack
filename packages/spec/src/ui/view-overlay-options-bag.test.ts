@@ -15,8 +15,10 @@
  *   at `timeline`;
  * - the same key as `options.timeline.metaFields` ⇒ ACCEPTED, `options` absent
  *   from the output — and `saveMetaItem` stored the request body with the bag
- *   in it (measured through the real save, see `metadata-protocol`'s
- *   `protocol.view-overlay-options-bag.test.ts`).
+ *   in it (measured through the real save; the save-door pins live in
+ *   `metadata-protocol`'s `protocol.graft-folded-form-sections.test.ts`, whose
+ *   engine double they ride, and the `PUT /api/v1/meta/view` pins in `rest`'s
+ *   `meta-view-overlay-options-bag.test.ts`).
  *
  * ## What this file pins
  *
