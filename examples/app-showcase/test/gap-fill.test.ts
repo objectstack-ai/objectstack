@@ -36,6 +36,15 @@ describe('showcase gap fill — analytics cube', () => {
     expect(DeliveryCube.joins?.project?.name).toBe('showcase_project');
   });
 
+  it('is VISIBLE on the analytics API — it demonstrates /api/v1/analytics/*, so it cannot be hidden', () => {
+    // `public: false` hides a cube from `/analytics/meta` and refuses every
+    // query against it (service-analytics `cube-visibility.ts`). This cube is
+    // the showcase's `analyticsCubes` demonstration (src/coverage.ts), so a
+    // hidden one would demonstrate a 404. `defineCube` parses, so the omitted
+    // key reads back as the schema default.
+    expect(DeliveryCube.public).toBe(true);
+  });
+
   it('keys every join by a FOREIGN-KEY FIELD of its own base object, not by the target', () => {
     // #18612: the `joins` record KEY is what both strategies join ON — native
     // emits `ON "<base>"."<key>" = "<key>"."id"`, ObjectQL lowers `fkField: key`

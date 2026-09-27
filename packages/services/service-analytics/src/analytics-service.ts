@@ -33,6 +33,7 @@ import {
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+import { cubeNotPublicError, isCubePublic } from './cube-visibility.js';
 // The object-level read admission asked at this door, ahead of every strategy
 // — the layer the raw-SQL path could not inherit from the engine. See that
 // module's header for the request that reached the database without it.
@@ -1347,6 +1348,12 @@ export class AnalyticsService implements IAnalyticsService {
     if (!queryInput.cube) {
       throw new Error('Cube name is required in analytics query');
     }
+    // `analytics_cube.public` — first, ahead of token resolution, cube
+    // inference, admission and every strategy: a hidden cube is refused
+    // whatever else the request carries, and the refusal leaves the registry
+    // exactly as it found it. This is also the dataset door's gate —
+    // `DatasetExecutor` reaches its compiled cube through this method.
+    this.assertCubePublic(queryInput.cube);
 
     // [#12230] Expand `{current_user_id}` / date-macro placeholders at THIS
     // seam — before strategy selection — so every strategy compiles the same
@@ -1969,12 +1976,16 @@ export class AnalyticsService implements IAnalyticsService {
 
   /**
    * Get cube metadata for discovery.
+   *
+   * Only cubes the analytics API exposes are listed: a cube declared
+   * `public: false` is omitted, and asking for it by name answers `[]` — the
+   * same answer as a name no cube has (`cube-visibility.ts`).
    */
   async getMeta(cubeName?: string): Promise<CubeMeta[]> {
-    // If a fallback service is configured, merge its metadata with the registry
-    const cubes = cubeName
+    const cubes = (cubeName
       ? [this.cubeRegistry.get(cubeName)].filter(Boolean) as Cube[]
-      : this.cubeRegistry.getAll();
+      : this.cubeRegistry.getAll()
+    ).filter(isCubePublic);
 
     return cubes.map(cube => ({
       name: cube.name,
@@ -1999,6 +2010,9 @@ export class AnalyticsService implements IAnalyticsService {
     if (!queryInput.cube) {
       throw new Error('Cube name is required for SQL generation');
     }
+    // Same gate as `query()`: the dry-run door must not hand out the
+    // statement — the cube's measures, raw SQL included — of a hidden cube.
+    this.assertCubePublic(queryInput.cube);
 
     // [#12230] Same token seam as `query()` — the dry-run door must show the
     // statement that would actually run (a resolved user id in the params, or
@@ -2016,6 +2030,17 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   // ── Internal ─────────────────────────────────────────────────────
+
+  /**
+   * Refuse a query against a cube declared `public: false` (the
+   * `CUBE_NOT_FOUND` / 404 envelope — `cube-visibility.ts` says why that code).
+   * A name with no registered cube passes: it is the ad-hoc path's to infer or
+   * refuse (`assertInferableCube`), and every cube that path mints is visible.
+   */
+  private assertCubePublic(name: string): void {
+    const cube = this.cubeRegistry.get(name);
+    if (cube && !isCubePublic(cube)) throw cubeNotPublicError(name);
+  }
 
   /**
    * Ensure a cube exists for the given query and that it knows about every
@@ -2660,7 +2685,10 @@ export class AnalyticsService implements IAnalyticsService {
       sql: cubeName,
       measures,
       dimensions,
-      public: false,
+      // Visible: this cube is minted FOR the request that names it and is
+      // registered, so the next request resolves it from the registry — where
+      // a hidden verdict would refuse the very KPI path that minted it.
+      public: true,
     };
   }
 

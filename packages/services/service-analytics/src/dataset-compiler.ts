@@ -685,7 +685,10 @@ export function compileDataset(
     sql: dataset.object,
     measures,
     dimensions,
-    public: false,
+    // Visible: `queryDataset` runs the selection through `DatasetExecutor`,
+    // which reaches this cube by name through `AnalyticsService.query()` — the
+    // door that refuses a hidden cube (`cube-visibility.ts`).
+    public: true,
   };
   if (Object.keys(joins).length > 0) cube.joins = joins;
 
