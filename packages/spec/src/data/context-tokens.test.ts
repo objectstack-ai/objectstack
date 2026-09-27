@@ -7,9 +7,11 @@ import {
   CONTEXT_TOKEN_SUGGESTIONS,
   ContextTokenPlaceholderSchema,
   ContextTokenSchema,
+  RECORD_CONTEXT_TOKENS,
   classifyFilterToken,
   isContextToken,
   isKnownFilterToken,
+  isRecordContextToken,
 } from './context-tokens.zod';
 
 describe('context token contract', () => {
@@ -110,10 +112,68 @@ describe('classifyFilterToken', () => {
 
   it('every suggestion resolves to a real token', () => {
     for (const [from, to] of Object.entries(CONTEXT_TOKEN_SUGGESTIONS)) {
-      expect(isContextToken(to), `${from} → ${to}`).toBe(true);
+      expect(isContextToken(to) || isRecordContextToken(to), `${from} → ${to}`).toBe(true);
       // A suggestion key must itself be invalid, or the mapping is incoherent.
       expect(isKnownFilterToken(from), from).toBe(false);
+      expect(classifyFilterToken(`{${from}}`)?.kind, from).toBe('unknown');
     }
+  });
+});
+
+/**
+ * `{record_id}` — the record-scoped sibling vocabulary.
+ *
+ * It resolves against the SURFACE (the record a `type: 'record'` page shows),
+ * not the session, so it is its own list and its own classification kind: a
+ * caller with no record in context refuses it by name instead of calling it
+ * unknown, and a caller that resolves the session list never picks it up.
+ */
+describe('classifyFilterToken — the record-context token', () => {
+  it('recognises {record_id} and ${record_id} by name', () => {
+    expect(classifyFilterToken('{record_id}')).toEqual({ kind: 'record-context', token: 'record_id' });
+    expect(classifyFilterToken('${record_id}')).toEqual({ kind: 'record-context', token: 'record_id' });
+  });
+
+  it('is its own list, not a session context token', () => {
+    expect(RECORD_CONTEXT_TOKENS).toEqual(['record_id']);
+    expect(isRecordContextToken('record_id')).toBe(true);
+    // The session list's consumers (the client resolver, `ContextTokenSchema`,
+    // the placeholder schema) must not start treating it as a session value.
+    expect(isContextToken('record_id')).toBe(false);
+    expect((CONTEXT_TOKENS as readonly string[]).includes('record_id')).toBe(false);
+    expect(ContextTokenSchema.safeParse('record_id').success).toBe(false);
+    expect(ContextTokenPlaceholderSchema.safeParse('{record_id}').success).toBe(false);
+  });
+
+  it('is not server-resolvable, so the flow hand-off predicate excludes it', () => {
+    expect(isKnownFilterToken('record_id')).toBe(false);
+  });
+
+  it('lit control — the session tokens classify exactly as before', () => {
+    expect(classifyFilterToken('{current_user_id}')).toEqual({ kind: 'context', token: 'current_user_id' });
+    expect(classifyFilterToken('{current_org_id}')).toEqual({ kind: 'context', token: 'current_org_id' });
+    expect(isRecordContextToken('current_user_id')).toBe(false);
+  });
+
+  // Each near miss is a spelling that is right somewhere else: `{recordId}` is
+  // the URL / flow-template placeholder, `{record.id}` the flow dialect's
+  // trigger-record path.
+  it.each([
+    ['{recordid}', 'recordid'],
+    ['{recordId}', 'recordId'],
+    ['{record-id}', 'record-id'],
+    ['{record.id}', 'record.id'],
+    ['{current_record_id}', 'current_record_id'],
+  ])('%s is still refused as unknown, with {record_id} suggested', (value, token) => {
+    expect(classifyFilterToken(value)).toEqual({ kind: 'unknown', token, suggestion: 'record_id' });
+  });
+
+  it('the padded spelling is refused, not trimmed', () => {
+    expect(classifyFilterToken('{ record_id }')).toEqual({
+      kind: 'unknown',
+      token: ' record_id ',
+      suggestion: undefined,
+    });
   });
 });
 

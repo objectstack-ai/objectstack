@@ -39,6 +39,59 @@ function service(captured: { sql: string; params: unknown[] }[]) {
 const CTX = { userId: 'usr_1', tenantId: 'org_9', timezone: 'UTC' } as ExecutionContext;
 const THIS_YEAR_START = `${new Date().getUTCFullYear()}-01-01`;
 
+/**
+ * `{record_id}` — the record-context token. The dataset executor has no record
+ * in context (only a record page's renderer does), so each of its token
+ * positions refuses it by name before any SQL is compiled: the
+ * `FILTER_TOKEN_UNRESOLVED` / 400 envelope, never a bound literal and never a
+ * dropped condition.
+ */
+describe('dataset executor — {record_id} refuses by name before any SQL', () => {
+  async function refusal(run: (svc: AnalyticsService) => Promise<unknown>) {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const err = await run(service(captured)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { code?: string }).code).toBe('FILTER_TOKEN_UNRESOLVED');
+    expect((err as { status?: number }).status).toBe(400);
+    expect((err as { token?: string }).token).toBe('record_id');
+    expect(captured).toHaveLength(0);
+  }
+
+  it('in a widget runtimeFilter', async () => {
+    await refusal((svc) =>
+      svc.queryDataset(
+        dataset,
+        { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: { owner: '{record_id}' } },
+        CTX,
+      ),
+    );
+  });
+
+  it("in the dataset's own intrinsic filter", async () => {
+    const scoped = DatasetSchema.parse({ ...dataset, name: 'record_pipeline', filter: { account: '{record_id}' } });
+    await refusal((svc) => svc.queryDataset(scoped, { dimensions: ['stage'], measures: ['revenue'] }, CTX));
+  });
+
+  it('in a measure-scoped filter', async () => {
+    const scoped = DatasetSchema.parse({
+      ...dataset,
+      name: 'record_revenue',
+      measures: [{ name: 'record_revenue', aggregate: 'sum', field: 'amount', filter: { account: '{record_id}' } }],
+    });
+    await refusal((svc) => svc.queryDataset(scoped, { dimensions: ['stage'], measures: ['record_revenue'] }, CTX));
+  });
+
+  it('lit control — {current_user_id} in the same position still binds the viewer', async () => {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    await service(captured).queryDataset(
+      dataset,
+      { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: { owner: '{current_user_id}' } },
+      CTX,
+    );
+    expect(captured[0].params).toContain('usr_1');
+  });
+});
+
 describe('dataset filter placeholders (framework#3582)', () => {
   it('expands a date macro in a widget runtimeFilter into a bound date', async () => {
     const captured: { sql: string; params: unknown[] }[] = [];
