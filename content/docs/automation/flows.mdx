@@ -200,28 +200,35 @@ or missing-`required` violation (#4277). A node type that publishes no
 A value's **shape** selects its form — there is no mode key. A plain string is
 always `{token}` interpolation (a bare `a + b` is the literal text `a + b`, not
 CEL); an object that names a `dialect` is an expression envelope and must be a
-valid `cel` one — a missing, empty or non-string `source`, or a `template` /
-`cron` dialect, is refused at the variable's path. Numbers, booleans, arrays
-and plain objects are assigned as literals. A later `notify` node renders the
-variable as any other: `message: '{digest}'`, and it renders the **evaluated**
-value.
+valid `cel` one — a missing, empty, whitespace-only or non-string `source`, an
+`ast` with no `source`, or a `template` / `cron` dialect, is refused at the
+variable's path. Numbers, booleans, arrays and plain objects are assigned as
+literals. A later `notify` node renders the variable as any other:
+`message: '{digest}'`, and it renders the **evaluated** value.
+
+The same rules hold for the field values of `create_record` / `update_record`
+(below): the `assignments` map and the `fields` map are the flow's **value
+slots**, and each accepts a CEL value envelope beside `{token}` templates and
+literals. Only a slot's top-level value is judged — an object nested inside a
+JSON value or an array is data, whatever keys it carries.
 
 <Callout type="info" title="Where a malformed envelope is refused">
 
 A malformed envelope never reaches run time silently: the same refusal runs at
-`objectstack validate` (a located finding naming the variable), at the runtime
-publish gate a Studio / REST / MCP flow write goes through, and at
-`registerFlow`, which refuses to register the flow. All three ask the same two
-questions in the same order — is it a valid `cel` envelope
-(`AssignmentValueSchema`), and does its source parse as CEL
+`objectstack validate` (a located finding naming the variable or field), at the
+runtime publish gate a Studio / REST / MCP flow write goes through (a `422`),
+and at `registerFlow`, which refuses to register the flow — in every value
+slot. All three ask the same two questions in the same order — is it a valid
+`cel` envelope (`FlowValueSlotSchema`), and does its source parse as CEL
 (`validateExpression`) — so a flow that registers is a flow whose envelopes
 those two validators accept.
 
-Two shapes sit outside what either validator can judge and fault loudly at run
-time instead of assigning a value: an `ast`-only envelope (no `source` — the
-CEL engine evaluates `source`), and a whitespace-only `source`, which passes
-`min(1)` and reads as "not authored" to the validator while the engine parses
-it untrimmed. Both are tracked in [#15430].
+That includes the two shapes the persistence contract alone would accept but no
+engine can run — an `ast`-only envelope (the CEL engine evaluates `source`) and
+a whitespace-only `source` — refused at authoring since [#15430]. What remains
+for run time is an envelope that parses but cannot evaluate on the live values
+(an absent variable, say): it fails the run with its source attached, and
+nothing is assigned or written in its place.
 
 [#15430]: https://github.com/objectstack-ai/objectstack/issues/15430
 
@@ -240,6 +247,9 @@ it untrimmed. Both are tracked in [#15430].
       title: 'Follow up on {record.name}',
       assignee: '{record.owner}',
       due_date: '{TODAY() + 7}',   // braces required — without them this writes the literal text
+      // CEL value envelope — evaluated to the value written, same rules as an
+      // assignment value. `100.0`, not `100`: CEL divides two integers as integers.
+      estimate: { dialect: 'cel', source: 'round(record.amount * 0.15 * 100.0) / 100.0' },
     },
   },
 }
@@ -1785,7 +1795,16 @@ means the same thing inside braces.
 | Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, and `vars.*` |
-| Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days), and the CEL-mirrored numeric functions `round`, `floor`, `ceil`, `abs`, `min`, `max` (#11060) — `round` is **integer-only**, exactly like CEL's (there is no `round(x, 2)`); for N decimals write the CEL idiom `{round(x * 100) / 100}` (scale 2) |
+| Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days), and the CEL-mirrored numeric functions `round`, `floor`, `ceil`, `abs`, `min`, `max` (#11060) — `round` is **integer-only**, exactly like CEL's (there is no `round(x, 2)`); for N decimals write `{round(x * 100) / 100.0}` (scale 2). Keep the decimal point: in CEL `round()` returns an int and `int / int` is integer division, so `round(x * 100) / 100` drops the decimals there — `/ 100.0` is right in both dialects |
+| Field values and assignment values, as a **CEL value envelope** | **CEL** (in an envelope) | `{ dialect: 'cel', source: 'round(price * 100.0) / 100.0' }` | flow variables by name, and `vars.*` — the whole CEL stdlib (`joinNonEmpty`, …) |
+
+A value slot takes either form, chosen by shape: a string is interpolation, an
+object naming a `dialect` is a CEL envelope. The template form keeps working
+unchanged; `objectstack validate` points a template **expression** — arithmetic
+or one of the six functions inside braces — at the envelope with a warning,
+never an error. Plain references (`{record.name}`), the date macros and
+`{$User.*}` are left alone: CEL's `now()` / `today()` are timestamps, not the
+strings the macros write, and the flow's CEL scope binds no user.
 
 <Callout type="warn">
 **The failure modes to memorize:**

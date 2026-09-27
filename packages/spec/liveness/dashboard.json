@@ -162,8 +162,8 @@
         },
         "requiresService": {
           "status": "live",
-          "verifiedAt": "2026-08-28",
-          "evidence": "packages/rest/src/rest-server.ts#filterDashboardForUser (ADR-0057 D10 — the widget is stripped from the payload when the named kernel service is not registered; fail-open when the kernel cannot be probed); packages/rest/src/rest.test.ts#filterDashboardForUser (the pin: drops widgets whose gate reports the service absent, keeps them when it is present)",
+          "verifiedAt": "2026-09-27",
+          "evidence": "packages/rest/src/meta-item-read-gate.ts#filterDashboardForUser (ADR-0057 D10 — the widget is stripped from the payload when the named kernel service is not registered; fail-open when the kernel cannot be probed); packages/rest/src/rest.test.ts#filterDashboardForUser (the pin: drops widgets whose gate reports the service absent, keeps them when it is present)",
           "note": "server-side capability gate: the widget is stripped from the payload when the named kernel service is not registered (fail-open when the kernel cannot be probed). The authoritative half of the pair — read it as the counter-example to judging a widget key from the renderer repo alone. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED, both legs — `rest-server.ts:1921-1931` had rotted onto the auth-gate normalization comment in `computeExecCtx`, ~380 lines above the widget gate, and `rest.test.ts:3271-3305` onto a NAV-level case (\"ITEM level: nav entries the caller cannot satisfy are stripped\") ~600 lines above the widget suite — a different gate's tests, still in range and still plausible. Re-closed by hand against 8cb96ec41."
         },
         "actionUrl": {

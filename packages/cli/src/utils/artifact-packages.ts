@@ -44,6 +44,7 @@ import {
   splitBySeverity,
   type AuthoringCommand,
   type AuthoringFinding,
+  type AuthoringRuleContext,
 } from '@objectstack/lint';
 
 /**
@@ -267,6 +268,12 @@ export function runPerPackageAuthoringRules(run: {
   unionFindings: readonly AuthoringFinding[];
   sduiManifest?: unknown;
   loweredHookRefs?: ReadonlySet<string>;
+  /**
+   * [#20158] The engine judge the union run was handed — the SAME one, built
+   * from the union's objects, because the runtime judges every package's RLS
+   * policies against one registry (`utils/authoring-filter-judge.ts`).
+   */
+  judgeFilter?: AuthoringRuleContext['judgeFilter'];
 }): {
   /** How many package entries were walked — 0 means the pass did not run. */
   packageCount: number;
@@ -303,6 +310,7 @@ export function runPerPackageAuthoringRules(run: {
       parsed: asStack,
       sduiManifest: run.sduiManifest,
       loweredHookRefs: run.loweredHookRefs,
+      judgeFilter: run.judgeFilter,
     }).filter((f) => !alreadyReported.has(findingKey(f)));
     for (const f of pkgFindings) alreadyReported.add(findingKey(f));
     // ⛔ ONE prefixer, applied to every member of all three lists. The `where`

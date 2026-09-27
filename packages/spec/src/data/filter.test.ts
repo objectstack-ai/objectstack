@@ -669,18 +669,24 @@ describe('RangeOperatorSchema', () => {
     });
 
     /**
-     * `FilterConditionSchema` is `z.record(z.string(), z.unknown())` at every
-     * field position, so it judges no comparand at all — measured here against
-     * the ALREADY-RULED `{ $field }` endpoint (#7596), which it also lets
-     * through. That control is the point: the green below is this schema's
-     * standing shape and NOT a hole this narrowing opened, and the enforcement
-     * lives where it always did (`FieldOperatorsSchema` / the normalized AST).
+     * [#20116] `FilterConditionSchema` is `z.record(z.string(), z.unknown())` at
+     * every field position, and until #20116 it judged neither endpoint — the
+     * blank one nor the ALREADY-RULED `{ $field }` one (#7596) — while the
+     * comparand-shape face refused both on every query. Its walk now asks the
+     * face about each slot, so both are refused on save, at the endpoint, in the
+     * sentence the enforced operator slot prints for the same pair.
      */
-    it('is not judged by the loose FilterConditionSchema — and neither is the #7596 shape', () => {
-      expect(FilterConditionSchema.safeParse({ age: { $between: [18, ''] } }).success).toBe(true);
-      expect(FilterConditionSchema.safeParse({
-        age: { $between: [18, { $field: 'cap' }] },
-      }).success).toBe(true);
+    it('is refused by FilterConditionSchema too, at the endpoint, in the operator slot\'s words (#20116)', () => {
+      const blank = FilterConditionSchema.safeParse({ age: { $between: [18, ''] } });
+      expect(blank.success).toBe(false);
+      expect(issuesOf(blank).map((i) => i.path)).toEqual([['age', '$between', 1]]);
+      expect(issuesOf(blank)[0]?.message)
+        .toBe(issuesOf(FieldOperatorsSchema.safeParse({ $between: [18, ''] }))[0]?.message);
+      expect(issuesOf(blank)[0]?.message).toContain('the MAX bound');
+      const reference = FilterConditionSchema.safeParse({ age: { $between: [18, { $field: 'cap' }] } });
+      expect(reference.success).toBe(false);
+      expect(issuesOf(reference).map((i) => i.path)).toEqual([['age', '$between', 1]]);
+      expect(issuesOf(reference)[0]?.message).toContain('A { "$field": … } reference is not a valid $between endpoint at index 1');
     });
 
     it('narrows the blank endpoint and NOTHING wider — the falsy and short values stay', () => {

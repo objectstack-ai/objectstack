@@ -33,13 +33,16 @@ import {
 import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
-// `AssignmentValueSchema` (spec, #14149 — it refuses a non-`cel` dialect and the
-// `{ dialect: 'cel' }` with no `source` that `validateExpression` reads as "not
-// authored"), and the CEL rule is `validateExpression('value', …)` (formula).
-// `registerFlow` and the run-time evaluator call the SAME composition
+// `FlowValueSlotSchema` (spec, #14149; slot-neutral since #19938 — it refuses a
+// non-`cel` dialect and the `{ dialect: 'cel' }` with no `source` that
+// `validateExpression` reads as "not authored"), and the CEL rule is
+// `validateExpression('value', …)` (formula). `registerFlow` and the run-time
+// evaluator call the SAME composition
 // ({@link AutomationEngine.valueEnvelopeRefusals}), so a flow that registers can
-// never be refused at run time and vice versa.
-import { AssignmentValueSchema, ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
+// never be refused at run time and vice versa — for every value slot the ledger
+// declares (`assignment.assignments.*`, `create_record` / `update_record`
+// `fields.*`).
+import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
 // [#17322] The EVALUATED-slot rule, IMPORTED rather than re-derived. It is the
 // rule `FlowEdgeSchema.condition` already composes since #15807, so a node's
 // `config.condition` — which no schema stands in front of — is held to the same
@@ -9493,15 +9496,18 @@ export class AutomationEngine implements IAutomationService {
                 for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
                     const slotWhere =
                         `${at}node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`;
-                    // [#15137] `value` slots — the ruled `assignment.assignments.*`.
-                    // The resolver emits ONLY envelope-shaped objects for this role
-                    // (a plain string there is `{token}` interpolation, every other
-                    // literal is data), so everything that arrives here is an
-                    // author saying "this is an expression" and must be a valid
-                    // one. Same severity as a predicate — a malformed envelope
-                    // stops the flow registering — because the alternative is what
-                    // this card replaced: the envelope stored verbatim and rendered
-                    // as JSON by `notify`, with nothing said at any layer.
+                    // [#15137] `value` slots — the ruled `assignment.assignments.*`
+                    // and, since #19938, `create_record` / `update_record`
+                    // `fields.*`. The resolver emits ONLY envelope-shaped objects
+                    // for this role (a plain string there is `{token}`
+                    // interpolation, every other literal is data), so everything
+                    // that arrives here is an author saying "this is an
+                    // expression" and must be a valid one. Same severity as a
+                    // predicate — a malformed envelope stops the flow registering
+                    // — because the alternative is what these cards replaced: the
+                    // envelope stored verbatim (a variable `notify` rendered as
+                    // JSON, a record column holding the envelope object), with
+                    // nothing said at any layer.
                     if (found.entry.role === 'value') {
                         for (const refusal of this.valueEnvelopeRefusals(found.value)) {
                             failures.push(`  • ${slotWhere}: ${refusal.message}\n      source: \`${refusal.source}\``);
@@ -10562,7 +10568,8 @@ export class AutomationEngine implements IAutomationService {
      *     {@link evaluateValueEnvelope} went on to read `envelope.source` off
      *     nothing — a bare `TypeError` with no `where`, no source and no rule,
      *     the one shape in that method's sweep that failed unattributed.
-     *  1. **Shape** — `AssignmentValueSchema` (spec, #14149). It is a no-op on
+     *  1. **Shape** — `FlowValueSlotSchema` (spec, #14149; the slot-neutral
+     *     name since #19938 — `AssignmentValueSchema` is the same rule). It is a no-op on
      *     anything not `isExpressionEnvelopeShaped`, and on an envelope it
      *     requires `ExpressionSchema` narrowed to `dialect: 'cel'`: a `template`
      *     or `cron` envelope is refused, and so is `{ dialect: 'cel' }` with no
@@ -10571,9 +10578,11 @@ export class AutomationEngine implements IAutomationService {
      *  2. **CEL** — `validateExpression('value', …)` (formula), the same parse
      *     the `predicate` role gets, minus the boolean expectation.
      *
-     * Both messages lead with the published `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL`
-     * sentence, so an author meets the rule before the detail however the
-     * envelope is wrong. Neither string is re-spelled here.
+     * Both messages lead with the published `VALUE_ENVELOPE_REFUSAL` sentence
+     * (slot-neutral since #19938 — `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL` is the
+     * same string), so an author meets the rule before the detail however the
+     * envelope is wrong and whichever value slot it sits in. Neither string is
+     * re-spelled here.
      *
      * `registerFlow` turns the result into a throw and `objectstack validate`
      * into a located finding (`@objectstack/lint` composes the same two calls) —
@@ -10611,7 +10620,7 @@ export class AutomationEngine implements IAutomationService {
         if (value == null) {
             return [{
                 message:
-                    `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} no envelope was passed: the argument is `
+                    `${VALUE_ENVELOPE_REFUSAL} no envelope was passed: the argument is `
                     + `\`${value === null ? 'null' : 'undefined'}\`, so there is nothing to evaluate. An absent `
                     + 'envelope is not "not authored" — the predicate side admits absence because the condition '
                     + "field is optional, but a value slot's envelope IS the value. Write "
@@ -10621,7 +10630,7 @@ export class AutomationEngine implements IAutomationService {
         }
         const source = (value as { source?: unknown })?.source;
         const sourceText = typeof source === 'string' ? source : '';
-        const shape = AssignmentValueSchema.safeParse(value);
+        const shape = FlowValueSlotSchema.safeParse(value);
         if (!shape.success) {
             // Already prefixed with the refusal sentence by the spec's own
             // `superRefine` — re-prefixing would say it twice.
@@ -10629,7 +10638,7 @@ export class AutomationEngine implements IAutomationService {
         }
         const parsed = validateExpression('value', value as { dialect?: string; source?: string });
         return parsed.errors.map((e) => ({
-            message: `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} ${e.message}`,
+            message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`,
             source: e.source,
         }));
     }
@@ -10657,8 +10666,11 @@ export class AutomationEngine implements IAutomationService {
      * message carries the source, per §1d.
      *
      * Only slots the ledger declares reach this: `assignment`'s canonical
-     * `assignments` map. The two legacy shapes the executor still normalizes
-     * (the `assignments: [{ variable, value }]` array and the bare
+     * `assignments` map, and — since #19938 (#11182 ruling D) — the
+     * `create_record` / `update_record` `fields` map (`crud-nodes.ts`'s
+     * `resolveFieldValues`, top-level field values only). The two legacy
+     * `assignment` shapes the executor still normalizes (the
+     * `assignments: [{ variable, value }]` array and the bare
      * `{ <variable>: <value> }` config) are deliberately NOT declared, so an
      * envelope-shaped object there stays the literal object it always was.
      */
