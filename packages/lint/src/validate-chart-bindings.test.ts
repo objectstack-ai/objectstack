@@ -227,12 +227,19 @@ describe('validateChartBindings — report charts', () => {
   });
 
   it('does NOT check a joined container\'s chart either — the joined renderer never reads it', () => {
+    // The container carries a RESOLVABLE `dataset` here on purpose (the schema
+    // refuses one on a joined report; this rule reads the raw stack). Without
+    // it the container would bind nothing and return before the chart question
+    // is ever asked, so the silence below would hold with or without the
+    // joined guard — a pin that could not fail.
     const findings = validateChartBindings({
       ...baseStack(),
       reports: [
         {
           name: 'joined',
           type: 'joined',
+          dataset: 'task_metrics',
+          values: ['task_count'],
           chart: { type: 'bar', xAxis: 'ghost_dim', yAxis: 'ghost_measure' },
           blocks: [{ name: 'b1', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] }],
         },
