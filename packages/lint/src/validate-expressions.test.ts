@@ -4393,3 +4393,177 @@ describe('a blank string in a ledger predicate slot (#17493)', () => {
     });
   });
 });
+
+/**
+ * [#20078] A field-level predicate that reads THROUGH a reference field is
+ * refused at authoring, with the repair that is true for the root it reads.
+ *
+ * The field level is never hydrated (ObjectQL `rule-validator.ts`), so a
+ * reference there holds the related record's bare id and every read through it
+ * faults: since ADR-0137 D2 the two field-rule slots then REFUSE the write,
+ * and an option's `visibleWhen` — fail-open — admits the value unchecked.
+ * `packages/objectql/src/engine-field-predicate-fault.test.ts` pins that
+ * runtime half end to end; this block pins the authoring half.
+ *
+ * Every fixture goes through `specValid` — the rule is `input: 'parsed'`, and
+ * this is a verdict on a predicate's VALUE, so the stack it is asked about
+ * must be one the schema accepts outright, not merely one without an
+ * `unrecognized_keys` issue.
+ */
+describe('field-level predicates refuse a read THROUGH a reference (#20078)', () => {
+  const account = {
+    name: 'trav_account',
+    label: 'Account',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      tier: { type: 'text', label: 'Tier' },
+      region: { type: 'lookup', label: 'Region', reference: 'trav_region' },
+    },
+  };
+  const region = { name: 'trav_region', label: 'Region', fields: { code: { type: 'text', label: 'Code' } } };
+  const order = (fields: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: 'trav_order',
+    label: 'Order',
+    fields: {
+      account: { type: 'lookup', label: 'Account', reference: 'trav_account' },
+      owner: { type: 'user', label: 'Owner' },
+      status: { type: 'text', label: 'Status' },
+      ship_to: { type: 'address', label: 'Ship to' },
+      ...fields,
+    },
+    ...extra,
+  });
+  const errorsOf = (...objects: Array<Record<string, unknown>>) =>
+    validateStackExpressions(specValid({ objects: [account, region, ...objects] }))
+      .filter((i) => (i.severity ?? 'error') === 'error');
+
+  const premium = (visibleWhen: string) => ({
+    type: 'select',
+    label: 'Plan',
+    options: [{ value: 'basic', label: 'Basic' }, { value: 'premium', label: 'Premium', visibleWhen }],
+  });
+
+  describe.each([
+    {
+      slot: 'requiredWhen',
+      fields: { po_number: { type: 'text', label: 'PO', requiredWhen: "record.account.tier == 'enterprise'" } },
+      where: "object 'trav_order' · field 'po_number' requiredWhen",
+      consequence: 'REFUSES every write',
+    },
+    {
+      slot: 'readonlyWhen',
+      fields: { discount: { type: 'number', label: 'Discount', readonlyWhen: "record.account.tier == 'gold'" } },
+      where: "object 'trav_order' · field 'discount' readonlyWhen",
+      consequence: 'REFUSES every update',
+    },
+    {
+      slot: 'option visibleWhen',
+      fields: { plan: premium("record.account.tier == 'enterprise'") },
+      where: "object 'trav_order' · field 'plan' option 'premium' visibleWhen",
+      consequence: 'fail-OPEN',
+    },
+  ])('$slot reading `record.account.tier`', ({ slot, fields, where, consequence }) => {
+    it('is ONE error, located at the slot, naming the slot, the reference and the related field', () => {
+      const found = errorsOf(order(fields));
+      expect(found).toHaveLength(1);
+      expect(found[0].where).toBe(where);
+      expect(found[0].message.startsWith(`\`${slot}\` reads \`tier\` through \`record.account\`, a \`lookup\` field`))
+        .toBe(true);
+    });
+
+    it("carries this slot's consequence and the `validations[]` `script` prescription", () => {
+      const [issue] = errorsOf(order(fields));
+      expect(issue.message).toContain(consequence);
+      expect(issue.message).toContain('Express the check as a `validations[]` `script` rule');
+    });
+  });
+
+  it('names every related field read through the same reference, and one error per reference', () => {
+    const found = errorsOf(order({
+      po_number: { type: 'text', label: 'PO', requiredWhen: "record.account.tier == 'x' && record.account.name != '' && record.owner.email != ''" },
+    }));
+    expect(found.map((i) => i.message.slice(0, i.message.indexOf(', a `')))).toEqual([
+      '`requiredWhen` reads `name`, `tier` through `record.account`',
+      // `user` is a reference type too — its target is fixed by the type.
+      '`requiredWhen` reads `email` through `record.owner`',
+    ]);
+  });
+
+  it('refuses the null-safe spellings too — they read through the reference all the same', () => {
+    for (const source of ["has(record.account.tier)", "record.account['tier'] == 'x'"]) {
+      const found = errorsOf(order({ po_number: { type: 'text', label: 'PO', requiredWhen: source } }));
+      expect(found, source).toHaveLength(1);
+      expect(found[0].message, source).toContain('through `record.account`');
+    }
+  });
+
+  it('`previous` — refused, and NOT sent to a `validations[]` rule, which does not hydrate it either', () => {
+    const found = errorsOf(order({
+      discount: { type: 'number', label: 'Discount', readonlyWhen: "previous.account.tier == 'gold'" },
+    }));
+    expect(found).toHaveLength(1);
+    expect(found[0].message.startsWith('`readonlyWhen` reads `tier` through `previous.account`')).toBe(true);
+    expect(found[0].message).not.toContain('Express the check as a `validations[]`');
+    expect(found[0].message).toContain('read a column this object declares');
+  });
+
+  describe('`parent` — judged against the MASTER object, and repaired on the master', () => {
+    const line = (predicate: string) => ({
+      name: 'trav_order_line',
+      label: 'Order Line',
+      fields: {
+        trav_order: { type: 'master_detail', label: 'Order', reference: 'trav_order' },
+        qty: { type: 'number', label: 'Qty', required: true, defaultValue: 1, requiredWhen: predicate },
+      },
+    });
+
+    it('a read through a reference the master declares is refused, naming the master', () => {
+      const found = errorsOf(order({}), line("parent.account.tier == 'gold'"));
+      expect(found).toHaveLength(1);
+      expect(found[0].where).toBe("object 'trav_order_line' · field 'qty' requiredWhen");
+      expect(found[0].message.startsWith('`requiredWhen` reads `tier` through `parent.account`')).toBe(true);
+      expect(found[0].message).toContain("Read a column 'trav_order' declares");
+      expect(found[0].message).not.toContain('Express the check as a `validations[]`');
+    });
+
+    it("CONTROL — the master's own column is not a traversal", () => {
+      expect(errorsOf(order({}), line("parent.status == 'closed'"))).toHaveLength(0);
+    });
+  });
+
+  describe('CONTROLS — what this must NOT refuse', () => {
+    it.each([
+      ['an own column', "record.status == 'submitted'"],
+      ['the reference compared as a value (its id)', "record.account == 'acc_1'"],
+      ['the reference tested for empty', 'record.account != null'],
+      ['an object-valued field that is not a reference', "record.ship_to.city == 'Paris'"],
+      ['`previous` reading an own column', "previous.status == 'draft'"],
+    ])('%s — `%s` on requiredWhen, readonlyWhen and an option', (_label, source) => {
+      expect(errorsOf(order({
+        po_number: { type: 'text', label: 'PO', requiredWhen: source },
+        discount: { type: 'number', label: 'Discount', readonlyWhen: source },
+        plan: premium(source),
+      }))).toHaveLength(0);
+    });
+
+    it('`current_user` in an option — the grant check and the position test are not record traversals', () => {
+      expect(errorsOf(order({
+        plan: premium("current_user.can('trav_order', 'edit') && 'admin' in current_user.positions"),
+      }))).toHaveLength(0);
+    });
+
+    it('the SAME traversal inside a `validations[]` `script` rule passes — that seam hydrates one hop', () => {
+      expect(errorsOf(order(
+        { po_number: { type: 'text', label: 'PO' } },
+        {
+          validations: [{
+            name: 'enterprise_needs_po',
+            type: 'script',
+            message: 'Enterprise orders need a PO number',
+            condition: "record.account.tier == 'enterprise' && record.po_number == ''",
+          }],
+        },
+      ))).toHaveLength(0);
+    });
+  });
+});

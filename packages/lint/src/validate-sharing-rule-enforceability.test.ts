@@ -163,6 +163,22 @@ describe('validateSharingRuleEnforceability — conditions the runtime DOES read
   });
 });
 
+describe('validateSharingRuleEnforceability — the bare `current_user` root is unlowerable (#19959)', () => {
+  /**
+   * The CEL lowering refuses `==` / `!=` against the variable ROOT before it
+   * resolves anything, so the seeder's own call (`variables: {}`) answers
+   * `unsupported` rather than `unresolved-variable`: the shape is refused for
+   * every binding, and this rule reports the id whose fix is a respelling.
+   */
+  it.each([
+    'record.owner_id != current_user',
+    'record.owner_id == current_user',
+    '!(record.owner_id == current_user)',
+  ])('%s', (source) => {
+    expect(ids(ruleWith(source))).toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
+  });
+});
+
 // ── The predicate is the consumer's, not a model of it ───────────────
 
 describe('validateSharingRuleEnforceability — the verdict IS the seeder\'s verdict', () => {

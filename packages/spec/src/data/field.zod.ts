@@ -383,8 +383,15 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * access-control reasons the server MUST also reject writes of its value (the
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
+   *
+   * ⛔ No read THROUGH a reference field (`record.account.tier`): the predicate
+   * sees the reference's bare id, never the related record, so the read faults
+   * and the server — fail-open for an option — admits the value unchecked.
+   * `objectstack validate` refuses it (#20078); a `validations[]` `script` rule
+   * is the seam that reads one hop through a reference. `current_user` reads are
+   * not record traversals and are unaffected.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`").meta({ title: 'Visible When' }),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference.").meta({ title: 'Visible When' }),
 }));
 
 /**
@@ -1728,10 +1735,17 @@ export const FieldSchema = lazySchema(() => {
    * state live as the record changes (UX), and the server enforces
    * `requiredWhen` and ignores writes to a field whose `readonlyWhen` is TRUE
    * (so the rule can't be bypassed). e.g. `P\`record.status == 'paid'\``.
+   *
+   * ⛔ `requiredWhen` / `readonlyWhen` read the bound record's OWN columns: the
+   * field level is never hydrated, so a read THROUGH a reference field
+   * (`record.account.tier`) meets the bare id, faults on every row, and since
+   * ADR-0137 D2 refuses the write. `objectstack validate` refuses it (#20078);
+   * a `validations[]` `script` rule is the seam that reads one hop through a
+   * reference.
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
-  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
-  requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
+  readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every update that writes the field — `objectstack validate` refuses it. Put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference."),
+  requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
