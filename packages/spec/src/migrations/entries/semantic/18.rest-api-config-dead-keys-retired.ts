@@ -17,8 +17,8 @@ export const entry: SemanticMigration = {
   replacement:
     '(removed — delete each key; neither had an effect to preserve. Whether the server publishes its '
     + 'OpenAPI document and the docs viewer is `api.enableOpenApi`, the switch the mount already reads. '
-    + 'The response envelope is fixed — `BaseResponseSchema` in `@objectstack/spec/api` — and is not a '
-    + 'server-wide option, so there is no replacement for `responseFormat`.)',
+    + 'Response shapes are fixed — each route answers in the response schema `@objectstack/spec/api` '
+    + 'declares for it — and are not a server-wide option, so there is no replacement for `responseFormat`.)',
   reason:
     'The `rest_api` liveness census found every member of these two keys `dead`: `normalizeConfig` '
     + 'parsed them, applied their defaults and copied them into the REST server\'s config, and no site '
@@ -27,8 +27,9 @@ export const entry: SemanticMigration = {
     + 'turned no document off — the document\'s existence was, and is, decided by `api.enableOpenApi` at '
     + 'the mount. Enforce-or-remove (ADR-0049) resolved both to REMOVE: mainstream data APIs keep a '
     + 'fixed response envelope that no administrator toggles server-wide, a configurable envelope would '
-    + 'fork the one shape the client SDK and the served /openapi.json describe, and `documentation.enabled` '
-    + 'duplicates a switch that is already enforced. `RestApiConfigSchema` and its inline `documentation` '
+    + 'fork the declared response shapes the client SDK parses and the served /openapi.json describes, '
+    + 'and `documentation.enabled` duplicates a switch that is already enforced. `RestApiConfigSchema` '
+    + 'and its inline `documentation` '
     + 'block are non-strict `z.object()`s, so each key is a `retiredKey()` tombstone and its ledger row '
     + 'stays `dead` with a REMOVED note. No stored or built artifact carries either key, so no emitted '
     + 'default needs to be tolerated as residue: the config is a construction argument that is parsed and '
@@ -42,7 +43,8 @@ export const entry: SemanticMigration = {
     + '`RestApiConfigSchema`, instead of being accepted and ignored; `tsc` refuses the key at the '
     + 'authoring site (`never`). A host that meant "serve no OpenAPI document" sets `api.enableOpenApi: '
     + 'false` and sees `GET /openapi.json` and `GET /docs` unmounted. Every client that parses REST '
-    + 'responses reads the declared envelope. Every LIVE key of the `api` block — including `documentation`\'s '
-    + 'other members — parses byte-identically to before, and the mounted REST surface is unchanged: '
+    + 'responses reads each route\'s declared response shape. Every LIVE key of the `api` block — '
+    + 'including `documentation`\'s other members — parses byte-identically to before, and the mounted '
+    + 'REST surface is unchanged: '
     + 'neither key ever reached it.',
 };

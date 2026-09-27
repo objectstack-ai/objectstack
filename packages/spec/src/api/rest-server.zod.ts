@@ -243,9 +243,10 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * under ADR-0049 enforce-or-remove: `normalizeConfig` copied the block into
    * the server's config and no site ever read it back, so `envelope: false`
    * unwrapped no response. The removal, not the enforcement, is the call
-   * because the envelope is a fixed contract — `BaseResponseSchema`
-   * (`contract.zod.ts`) is the one shape the client SDK and the served
-   * /openapi.json describe, and mainstream data APIs keep theirs fixed too.
+   * because a response shape is a fixed contract: each route answers in the
+   * response schema this package declares for it, which is what the client
+   * SDK parses and the served /openapi.json describes — a server-wide switch
+   * would fork every one of them, and mainstream data APIs keep theirs fixed.
    * The whole container is the tombstone (the `crud.patterns` precedent): with
    * all three members retired there is no live member left to hold it open.
    * Tombstoned rather than deleted because this schema is not `.strict()`
@@ -255,9 +256,9 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
     '`api.responseFormat` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — '
     + 'nothing ever read it: `envelope`, `includeMetadata` and `includePagination` were parsed, defaulted '
     + "and copied into the REST server's config and never consulted, so `envelope: false` unwrapped no "
-    + 'response. Delete the key. The response envelope is fixed, not a server-wide option: the REST API '
-    + 'answers in the one declared envelope (`BaseResponseSchema` in `@objectstack/spec/api`), which the '
-    + 'client SDK and the served /openapi.json describe.',
+    + 'response. Delete the key. Response shapes are fixed, not a server-wide option: each route answers '
+    + 'in the response schema `@objectstack/spec/api` declares for it, which is what the client SDK parses '
+    + 'and the served /openapi.json describes, so no configuration changes them.',
   ),
 }));
 

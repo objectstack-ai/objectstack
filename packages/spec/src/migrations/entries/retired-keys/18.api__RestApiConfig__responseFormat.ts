@@ -16,6 +16,6 @@
 // `responseFormat` is retired WHOLE — `envelope`, `includeMetadata` and
 // `includePagination` were its only members and none was ever read, so there is
 // no live member left to hold the container open (the `crud.patterns`
-// precedent). The envelope is a fixed contract (`BaseResponseSchema`), not a
-// server-wide option.
+// precedent). A response shape is a fixed contract — each route's declared
+// response schema, which the client SDK parses — not a server-wide option.
 export const entry = 'api/RestApiConfig:responseFormat';
