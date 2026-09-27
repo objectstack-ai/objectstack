@@ -5385,7 +5385,17 @@ const step18: MigrationStep = {
     + 'so it is badged invalid, refused on a whole-row re-save and reported `failed` by '
     + '`os migrate meta --stored --apply` until it is deleted or given the setting its author '
     + 'meant. Its D3 record is the semantic entry '
-    + '`view-overlay-owner-hidden-retired`.',
+    + '`view-overlay-owner-hidden-retired`. '
+    + 'It also retires the RLS policy\'s `tags` (#20321, ADR-0049 enforce-or-remove; graded '
+    + 'RETIRE by the maintainer\'s criterion — no mainstream platform tags a row-level policy): '
+    + 'the key promised categorization and reporting for governance and compliance, and nothing '
+    + 'ever read it — the RLS compiler never consulted it and no preview rendered it. It is a '
+    + '`retiredKey()` tombstone on `RowLevelSecurityPolicySchema` (the `priority` posture one key '
+    + 'over), and the D2 conversion `permission-rls-tags-removed` strips it from every policy in '
+    + '`permissions[].rowLevelSecurity` as a lossless delete, so a stored permission row that '
+    + 'still carries it replays clean. It is retired from the load path, so authors are refused '
+    + 'at parse rather than rewritten. Its D3 record is the semantic entry '
+    + '`permission-rls-tags-retired`.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5425,6 +5435,7 @@ const step18: MigrationStep = {
     'view-item-owner-hidden-removed',
     'report-joined-chart-removed',
     'view-overlay-owner-hidden-removed',
+    'permission-rls-tags-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -12742,6 +12753,36 @@ const step18: MigrationStep = {
         + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
         + 'names the mechanism it actually uses instead.',
     },
+    // #20321 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `permission-rls-tags-removed` family (ruling B on #17152: one D3 entry per
+    // retirement family, even when D2 is lossless). The strip changes no access
+    // decision; what it leaves is whatever process was built on the belief that a
+    // policy's tags were read.
+    {
+      id: 'permission-rls-tags-retired',
+      surface: 'permission.rowLevelSecurity[].tags — the free-form categorization tags on a row-level '
+        + 'security policy',
+      replacement: '(removed — no mainstream platform tags a row-level policy, and nothing here ever '
+        + 'read one.) A policy is identified by its `name` and its `object`, and reported by those and '
+        + 'its predicate; its purpose belongs in `description`. Whom a policy applies to is decided by '
+        + '`positions`, never by a tag.',
+      reason: 'The D2 conversion `permission-rls-tags-removed` deletes `tags` from every row-level '
+        + 'security policy in author sources and in stored permission rows, and the delete is '
+        + 'lossless: the RLS compiler never consulted the key and nothing else acted on it — no '
+        + 'report, audit filter or review queue selected on it — so no access decision changes. '
+        + 'The judgment is about what people '
+        + 'believed. An admin who tagged a policy `gdpr` or `pci` may have expected a compliance '
+        + 'report, an audit filter or a review queue to pick it up; none ever did. An author who '
+        + 'wrote a tag such as `managers_only` may have believed it scoped the policy; it never did '
+        + '— only `positions` narrows whom a policy applies to. Any report, runbook or control that '
+        + 'relies on either belief needs another path, and choosing that path is a governance '
+        + 'decision no conversion can make.',
+      acceptanceCriteria: 'No authored or stored row-level security policy carries `tags`; the parse '
+        + 'refuses the key with the prescription. Access decisions are unchanged: every policy admits '
+        + 'and refuses exactly the rows it did before the upgrade. Every policy whose tag expressed an '
+        + 'audience has that audience in `positions`, and every compliance report, audit filter or '
+        + 'review process that assumed policy tags names the mechanism it actually uses instead.',
+    },
     {
       id: 'platform-timezone-columns-iana-domain-refused',
       surface:
@@ -18791,6 +18832,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D2 conversion `permission-allow-restore-purge-removed`, which strips the
     // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
+    // #20321 (ADR-0049 enforce-or-remove; graded RETIRE by the maintainer's
+    // criterion for declared-but-unenforced families — does a mainstream platform
+    // have the capability?). `RowLevelSecurityPolicy.tags` promised categorization
+    // and reporting for governance and compliance, and nothing ever read it: the
+    // RLS compiler never consults it, objectui's permission preview renders only
+    // the policy count and its policy editor neither seeds nor reads the key, and
+    // cloud has no reader. No mainstream platform tags a row-level policy. The
+    // policy shape is `strictObject`, but the def is reachable from the
+    // `permission` metadata root, so the route is the `retiredKey()` tombstone
+    // (the `rls.priority` posture one key over): the key stays in the walked shape
+    // as `[RETIRED]`, and authoring it is a tsc error and a parse error carrying
+    // the prescription. D2: `permission-rls-tags-removed`; D3:
+    // `permission-rls-tags-retired`.
+    'security/RowLevelSecurityPolicy:tags',
     // #15679 (stack card 4/6 of #14478) — ruling B. `AccessControlConfig.maxAge` said
     // "CORS preflight cache duration in seconds" in prose and nothing else.
     // ⚠️ This key is deliberately a RENAME and not an `externalVocabulary` marker,

@@ -39,6 +39,7 @@ describe('Row-Level Security (RLS) Protocol', () => {
       expect(result.name).toBe('tenant_isolation');
       expect(result.enabled).toBe(true); // default
       expect('priority' in result, 'retired key contributes nothing to the parsed output').toBe(false);
+      expect('tags' in result, 'retired key contributes nothing to the parsed output').toBe(false);
     });
 
     it('should validate a complete policy with all fields', () => {
@@ -55,7 +56,6 @@ describe('Row-Level Security (RLS) Protocol', () => {
         check: 'assigned_to_id IN (SELECT id FROM users WHERE manager_id = current_user.id)',
         positions: ['manager', 'director'],
         enabled: true,
-        tags: ['team_access', 'hierarchy'],
       };
 
       const result = RowLevelSecurityPolicySchema.parse(policy);
@@ -167,17 +167,24 @@ describe('Row-Level Security (RLS) Protocol', () => {
       expect(result.positions).toEqual(['sales_rep', 'sales_manager']);
     });
 
-    it('should validate tags', () => {
-      const policy = {
+    it('refuses the retired `tags` at its path, with the prescription (#20321)', () => {
+      // This case used to pin `tags` round-tripping; that branch is retired
+      // (ADR-0049 enforce-or-remove — nothing ever read a policy's tags). The
+      // full pin set, door by door, is `rls-tags-retirement.test.ts`.
+      const r = RowLevelSecurityPolicySchema.safeParse({
         name: 'gdpr_policy',
         object: 'customer',
         operation: 'select',
         using: 'country IN (SELECT country FROM gdpr_countries)',
         tags: ['compliance', 'gdpr', 'privacy'],
-      };
-
-      const result = RowLevelSecurityPolicySchema.parse(policy);
-      expect(result.tags).toEqual(['compliance', 'gdpr', 'privacy']);
+      });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const issue = r.error.issues.find((i) => i.path[0] === 'tags');
+      expect(issue, 'the refusal must name `tags`').toBeDefined();
+      expect(issue!.code).toBe('invalid_type');
+      expect(issue!.path).toEqual(['tags']);
+      expect(issue!.message).toMatch(/^`rowLevelSecurity\[\]\.tags` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049.*Delete the key\..*`positions`.*`os migrate meta --from 17`/s);
     });
   });
 
@@ -370,7 +377,6 @@ describe('Row-Level Security (RLS) Protocol', () => {
         using: 'organization_id == current_user.organization_id',
         check: 'organization_id == current_user.organization_id',
         enabled: true,
-        tags: ['multi-tenant', 'security'],
       };
 
       const result = RowLevelSecurityPolicySchema.parse(policy);
@@ -433,11 +439,15 @@ describe('Row-Level Security (RLS) Protocol', () => {
         operation: 'select',
         using: 'country IN (SELECT country FROM user_allowed_countries WHERE user_id = current_user.id)',
         enabled: true,
-        tags: ['gdpr', 'compliance', 'privacy'],
       };
 
+      // The compliance purpose is carried by the policy itself — its name, its
+      // description and its predicate — never by a tag (`tags` is retired,
+      // #20321; the refusal is pinned in the RowLevelSecurityPolicySchema block).
       const result = RowLevelSecurityPolicySchema.parse(policy);
-      expect(result.tags).toContain('gdpr');
+      expect(result.description).toContain('allowed regions');
+      expect(result.using).toContain('user_allowed_countries');
+      expect('tags' in result).toBe(false);
     });
 
     it('should support shared team records', () => {
