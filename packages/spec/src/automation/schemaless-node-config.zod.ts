@@ -64,11 +64,13 @@
  *    nothing read — and then refuses, naming the `function` it does not have,
  *    instead of logging a line and reporting success as it used to.
  *
- * `decision` stays export-only, deliberately: it may carry no `conditions` at
- * all when it branches purely on edge predicates (a plain BPMN exclusive
- * gateway), and `conditions` is its only key — so a parse would have nothing
- * left to check. Its enforcement remains the objectui reconciliation test,
- * which is what #4278 was actually about (a form authoring keys nothing reads).
+ * `decision` stays export-only: nothing parses it at run time. It may carry no
+ * `conditions` at all when it branches purely on edge predicates, its executor
+ * reads `conditions` and nothing else, and its one other key — `mode` — is
+ * declared AHEAD of the engine change that reads it (#15429; see
+ * {@link DecisionConfigSchema}). Its enforcement remains the objectui
+ * reconciliation test, which is what #4278 was actually about (a form
+ * authoring keys nothing reads).
  *
  * Undeclared aliases are NOT part of these contracts: `subflow`'s historical
  * `flow` spelling graduated into the ADR-0087 D2 conversion
@@ -184,6 +186,25 @@ const DECISION_KEY_GUIDANCE: Readonly<Record<string, string>> = {
     + 'reach for the plural `conditions` here on the strength of the spelling — declaring branches here AND on the '
     + 'edges is the double-declaration this guidance exists to stop. If the edges already carry the predicate, delete this key.',
 };
+
+/**
+ * The refusal for a `decision` `config.mode` outside the closed pair (#15429).
+ *
+ * One message for EVERY wrong value, instead of zod's bare list of members or
+ * a did-you-mean: the likely wrong values are not typos an edit distance can
+ * reach — `'all'`, `'first'`, `'first_match'`, `'parallel'`, `true` — they are
+ * the concept spelled the way another engine spells it (n8n's switch is a
+ * boolean toggle). So the prescription says what each legal member MEANS, not
+ * only how it is spelled, and what leaving the key out means.
+ */
+function decisionModePrescription(input: unknown): string {
+  const received = typeof input === 'string' ? `'${input}'` : String(JSON.stringify(input) ?? input);
+  return `\`mode: ${received}\` is not a decision mode. \`mode\` is the closed pair 'exclusive' | 'inclusive'. `
+    + "'exclusive' declares that only the FIRST out-edge whose condition holds is taken, in the order the edges "
+    + "are declared (the BPMN exclusive gateway), and is what an omitted `mode` means. 'inclusive' declares that "
+    + 'EVERY out-edge whose condition holds is taken (the BPMN inclusive gateway). Write one of the two, or omit '
+    + 'the key for exclusive.';
+}
 
 // ─── script ──────────────────────────────────────────────────────────
 
@@ -390,17 +411,54 @@ export const DecisionConditionSchema = lazySchema(() => strictObject({
 export type DecisionCondition = z.input<typeof DecisionConditionSchema>;
 
 /**
- * `decision` node config — what the executor reads.
+ * `decision` node config — what the executor reads, plus the branch `mode`
+ * declared ahead of the engine change that will read it.
  *
- * A decision may also carry no `conditions` at all and rely purely on the
- * OUT-EDGES (`edge.condition` per branch + `isDefault` on the fallback,
- * evaluated by the engine's traversal) — a plain BPMN exclusive gateway, and
- * the shape every bundled example uses. A node that declares no `conditions`
- * reports no branch at all, so nothing competes with the edges.
+ * A decision routes one of two ways (logic-nodes.ts, #4414):
+ *
+ *  - it DECLARES `conditions` → the executor takes the first entry whose
+ *    expression holds, and traversal narrows to the out-edge carrying that
+ *    entry's `label`;
+ *  - it declares none → it routes purely on its OUT-EDGES (`edge.condition`
+ *    per branch + `isDefault` on the fallback, evaluated by the engine's
+ *    traversal) — the shape every bundled example uses. A node that declares
+ *    no `conditions` reports no branch at all, so nothing competes with the
+ *    edges.
  *
  * Pick **one** mechanism per decision. Declaring `conditions` here *and*
  * per-edge `condition`s means the node picks a branch and then that branch's
  * edge re-decides — the double-declaration behind #4414.
+ *
+ * ## `mode` — one out-edge, or every out-edge whose condition holds
+ *
+ * `mode` is the author's declaration of what an edge-branched decision takes
+ * when more than one out-edge condition holds (the #15429 ruling, item 2):
+ *
+ *  - `'exclusive'` — only the FIRST, in the order the edges are declared, and
+ *    what an omitted `mode` means: the BPMN exclusive gateway, Salesforce
+ *    Flow's Decision, n8n Switch's default;
+ *  - `'inclusive'` — EVERY one that holds: the BPMN inclusive gateway, n8n
+ *    Switch's "send to all matching outputs".
+ *
+ * Taking every matching branch is the one an author must write down, so a
+ * decision whose author never considered overlapping conditions takes one
+ * branch. `mode` has no `.default()` on purpose: the parsed output stays the
+ * authored shape, and "omitted means exclusive" lives in this contract's
+ * prose and in the reader that honours it. It speaks about the out-edges — the
+ * shape the ruling addresses. A `conditions` list is ordered first-match on
+ * its own, and the ruling leaves it so.
+ *
+ * ⚠️ **Declared ahead of its enforcement, and the status quo does NOT match
+ * the default above.** The ruling's split order lands this key first, then
+ * the engine semantics together with the `os migrate meta` conversion in one
+ * change, then the docs. Until that second step lands, nothing reads `mode`,
+ * and an edge-branched decision takes EVERY out-edge whose condition holds,
+ * one after another, whatever `mode` says — the behaviour
+ * `decision-overlapping-edge-conditions.pin.test.ts` (service-automation)
+ * pins as the status quo. The engine change and the conversion that writes
+ * `mode: 'inclusive'` onto every decision relying on that behaviour land
+ * together, so no shipped flow changes behaviour silently; this paragraph is
+ * rewritten with them (#15429).
  *
  * The legacy singular `config.condition` is a structural surface the engine
  * parse-validates on every node at registration but the decision executor never
@@ -414,6 +472,23 @@ export const DecisionConfigSchema = lazySchema(() => strictObject({
   /** Ordered branches; first true expression wins, else the declared default edge. */
   conditions: z.array(DecisionConditionSchema).optional()
     .describe('Ordered decision branches (first true expression wins; omit to branch purely on edge conditions)'),
+  /**
+   * How many out-edges an edge-branched decision takes when more than one
+   * condition holds — `'exclusive'` (the first; what an omitted key means) or
+   * `'inclusive'` (every one). Not read by the engine yet: see the
+   * "Declared ahead of its enforcement" note above. Any other value is refused
+   * with {@link decisionModePrescription}.
+   */
+  mode: z.enum(['exclusive', 'inclusive'], {
+    error: (issue) => (issue.code === 'invalid_value' ? decisionModePrescription(issue.input) : undefined),
+  }).optional()
+    .describe(
+      'Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: '
+      + "'exclusive' = only the first, in the order the edges are declared (what an omitted mode means); "
+      + "'inclusive' = every one that holds. Declared ahead of the engine change that reads it: until that lands, "
+      + 'an edge-branched decision takes every out-edge whose condition holds, whatever this says. A conditions '
+      + 'list is first-match on its own.',
+    ),
 }));
 
 export type DecisionConfig = z.input<typeof DecisionConfigSchema>;
