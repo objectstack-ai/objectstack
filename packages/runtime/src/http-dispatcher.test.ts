@@ -3354,10 +3354,14 @@ describe('HttpDispatcher', () => {
         // for a flow that never ran, and the domain served it as a 200 — a
         // caller (or an agent) read "flow executed" off nothing happening.
         it('/automation — a stub slot is an empty slot, and is never called', async () => {
+            // Held as a local so the assertion below reads a typed mock — the
+            // `stubbed()` spread types its members away (the TS2339 debt this
+            // file's siblings still carry in `test-typecheck-debt.json`).
+            const getFlowRuntimeStates = vi.fn().mockReturnValue([]);
             const stub = stubbed({
                 execute: vi.fn().mockResolvedValue({ success: true, output: undefined, durationMs: 0 }),
                 trigger: vi.fn().mockResolvedValue({ success: true }),
-                getFlowRuntimeStates: vi.fn().mockReturnValue([]),
+                getFlowRuntimeStates,
                 registerFlow: vi.fn(),
             });
             serveOnly('automation', stub);
@@ -3387,7 +3391,7 @@ describe('HttpDispatcher', () => {
             }
             expect(stub.execute).not.toHaveBeenCalled();
             expect(stub.trigger).not.toHaveBeenCalled();
-            expect(stub.getFlowRuntimeStates).not.toHaveBeenCalled();
+            expect(getFlowRuntimeStates).not.toHaveBeenCalled();
             expect(stub.registerFlow).not.toHaveBeenCalled();
         });
 
