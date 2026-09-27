@@ -17,6 +17,17 @@
  *     own `listViews.<key>` (added in #4457; an object has no top-level `list`,
  *     so that tier had simply never been walked)
  *   - page components — `record:quick_actions` → `properties.actionNames[]`
+ *   - page components — `record:alert` → `properties.action.actionName` (the
+ *     banner's call-to-action) and `page:header` → `properties.actions[]` (the
+ *     header's action ids). Both renderers resolve the id against the object's
+ *     declared actions and draw NOTHING for one that resolves nowhere — the
+ *     alert keeps its banner and loses its button without a word, the header
+ *     renders one button fewer and says so only in a browser console no
+ *     author reads — so authoring time is where the refusal belongs (#20105).
+ *     Each walk is scoped to its component type, because the same key means
+ *     something else elsewhere: `element:button`'s `action` is an inline
+ *     definition, not a reference, and `actions` is declared separately on
+ *     `record:related_list`.
  *   - app navigation — `{ type: 'action', actionDef: { actionName } }`
  *   - app navigation deep-link auto-run — `{ type: 'object', runAction }`
  *     (#4848 — the declared form of the `?runAction=<name>` URL contract)
@@ -115,6 +126,13 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
      * hint for both would have to be wrong for one of them.
      */
     placement = 'with the location this surface needs',
+    /**
+     * What the author will SEE. Most surfaces draw the button and dispatch
+     * nothing; a surface that resolves the id before drawing (the alert's
+     * call-to-action, the page header) draws no button at all — one sentence
+     * for both would describe a failure the author cannot find.
+     */
+    consequence = 'The button renders and does nothing when clicked — a dead affordance the runtime cannot dispatch.',
   ) => {
     if (known.has(name)) return;
     findings.push({
@@ -124,8 +142,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
       path,
       message:
         `${surface} names action "${name}", which is defined by no action in this stack ` +
-        `(neither \`stack.actions\` nor any object's \`actions\`). The button renders and ` +
-        `does nothing when clicked — a dead affordance the runtime cannot dispatch.` +
+        `(neither \`stack.actions\` nor any object's \`actions\`). ${consequence}` +
         suggestName(name, known),
       hint:
         `Define an action named "${name}" (in \`stack.actions\` or the object's \`actions\`) ` +
@@ -231,7 +248,9 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
     }
   }
 
-  // ── Page components: record:quick_actions → properties.actionNames ──
+  // ── Page components: record:quick_actions → properties.actionNames,
+  //    record:alert → properties.action.actionName,
+  //    page:header → properties.actions[] ──
   const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
@@ -245,14 +264,61 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
     for (const { component, path } of walkPageComponents(page, `pages[${pi}]`)) {
       const props = component.properties as AnyRec | undefined;
       if (!props || typeof props !== 'object') continue;
+      const type = strName(component.type);
+      const where = `page "${pageName}" · component "${type ?? '?'}"`;
       const names = strList(props.actionNames);
       for (let ai = 0; ai < names.length; ai++) {
         check(
           names[ai],
-          `page "${pageName}" · component "${strName(component.type) ?? '?'}"`,
+          where,
           `${path}.properties.actionNames[${ai}]`,
           'Quick-actions bar',
         );
+      }
+
+      // `record:alert`'s call-to-action. The renderer resolves `actionName`
+      // against the object's declared actions and, on a miss, renders the
+      // banner WITHOUT its button — nothing is logged. It runs the resolved
+      // action by name, with no `locations` filter, so the name is the whole
+      // placement.
+      if (type === 'record:alert') {
+        const cta = props.action;
+        const ctaName =
+          cta && typeof cta === 'object' && !Array.isArray(cta)
+            ? strName((cta as AnyRec).actionName)
+            : undefined;
+        if (ctaName) {
+          check(
+            ctaName,
+            where,
+            `${path}.properties.action.actionName`,
+            'Alert call-to-action',
+            '(no `locations` entry needed — the alert renders its call-to-action by name)',
+            'The banner renders with no call-to-action button: the id resolves to nothing and the renderer drops it without a word.',
+          );
+        }
+      }
+
+      // `page:header`'s action ids. The spec's contract is ids
+      // (`z.array(z.string())`); an inline object element is a definition,
+      // refused by the spec on its own, not a reference for this rule to
+      // resolve — so only the string elements are checked, each at its
+      // AUTHORED index. The header draws an authored action only when it is
+      // placed at `record_header` or `record_more`.
+      if (type === 'page:header' && Array.isArray(props.actions)) {
+        const ids = props.actions as unknown[];
+        for (let hi = 0; hi < ids.length; hi++) {
+          const id = strName(ids[hi]);
+          if (!id) continue;
+          check(
+            id,
+            where,
+            `${path}.properties.actions[${hi}]`,
+            'Page-header actions',
+            'with `record_header` or `record_more` in its `locations` (the header draws only actions placed at one of the two)',
+            'The header draws no button for it: the id resolves to nothing and is dropped, with only a browser-console warning no author reads.',
+          );
+        }
       }
     }
   }
