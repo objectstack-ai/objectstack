@@ -45,8 +45,11 @@ are **inline** (`data: { provider: 'value', … }`, a `data` array, or `staticDa
 stored: the `object-map`, `object-tree`, `object-calendar` and `object-gantt` renderers match
 that filter against their own rows in an in-memory data source that reads the record form but
 excludes every row for a rule array, so a rewrite there would empty the block. The same filter
-on a block that queries an object converts. Such a page keeps loading and rendering unchanged and is refused at its
-`filter` door on its next save — and for a combinator record that refusal no longer renders the
+on a block that queries an object converts. Such a page keeps loading and rendering unchanged,
+and its `filter` door refuses the form: at `dataSource.filter` on the page's next save; at a
+block's `properties.filter` / `properties.defaultFilters` only as the component-props gate's
+advisory finding (`os validate`, `os build`, `os lint`) — a re-save through the metadata API is
+not refused there, measured — and for a combinator record that refusal no longer renders the
 combinator as a field (`{ field: '$or', … }`); it names the combinator and says why no rule
-spells it. `os migrate meta --stored` does not list these rows yet: a row the conversion leaves
-as stored reports there as already on protocol.
+spells it.
+`os migrate meta --stored` lists each such filter left as stored as a TODO under its row.
