@@ -355,6 +355,16 @@ enforced identically in both trees: a gated entry — with its `objectName` /
 collapses; an area *authored* empty is passed through untouched, because
 filtering reports what the caller may not see rather than tidying the metadata.
 
+The single-app reads — `GET /api/v1/meta/app/<name>` and its `/published`
+twin — serve that filtered body. The doors that serve an app's *stored*
+versions for authoring — the layered view (`/layers`) and `/diff` — never serve
+an entry `requiredPermissions` withholds from the caller either: a caller who
+may see only part of the app is refused them (`403 PERMISSION_DENIED`), because
+the designer saves back what it loads and a pruned copy would delete the
+withheld entries. A `requiresService` entry, by contrast, is shown there as
+stored: an optional service being off in this deployment withholds nothing from
+the caller, and the entry is still part of what the author edits.
+
 `visible` did **not** move server-side with them, and that asymmetry is
 deliberate: CEL is evaluated in the browser because server-side evaluation needs
 a bound `user` context the read layer does not have. So `visible` is a
