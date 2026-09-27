@@ -11,9 +11,11 @@
  *
  * The scale is answerable from METADATA, so it is answered here and carried on
  * the wire (see `AnalyticsResult.fields[].percentScale`) rather than re-guessed
- * per surface. This mirrors the ADR-0053 currency chain: a monetary measure
- * resolves its display currency from the source field's metadata instead of a
- * "$" baked into the format string.
+ * per surface. This mirrors the currency chain: a monetary measure resolves its
+ * display currency from metadata instead of a "$" baked into the format string
+ * — its own `currency`, else the source field's fixed currency
+ * (`currencyConfig.defaultCurrency`, read only under `currencyMode: 'fixed'`),
+ * else the tenant default (see `AnalyticsResult.fields[].currency`).
  */
 
 /**
