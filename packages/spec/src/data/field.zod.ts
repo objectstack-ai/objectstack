@@ -447,7 +447,7 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
     default: 2,
   }),
   currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way.'),
-  defaultCurrency: z.string().length(3).default('CNY').describe('Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR)'),
+  defaultCurrency: z.string().length(3).default('CNY').describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency.'),
 }).superRefine((config, ctx) => {
   // #7918 (maintainer ruling 2026-08-12, Option A): an AUTHORED `precision`
   // that contradicts the statically-known currency's ISO 4217 / CLDR fraction

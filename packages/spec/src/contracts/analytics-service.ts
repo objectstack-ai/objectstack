@@ -77,10 +77,16 @@ export interface AnalyticsResult {
         /** Display format hint (e.g. measure `format` like "$0,0", "0.0%"). */
         format?: string;
         /**
-         * ADR-0053 currency chain — the resolved ISO 4217 code for a MONETARY
-         * measure (explicit measure `currency` → source-field default → tenant
-         * default). Absent on non-monetary columns, which must never render a
-         * symbol.
+         * The resolved ISO 4217 code for a MONETARY measure, by the currency
+         * chain: explicit measure `currency` → the source field's FIXED
+         * currency (`currencyConfig.defaultCurrency`, read only under
+         * `currencyMode: 'fixed'` — a `dynamic` field has no currency of its
+         * own, so its `defaultCurrency` is not read) → the tenant default
+         * (`localization.currency`). The mode pair is `CurrencyConfigSchema`
+         * in `spec/data`; the amount itself stays a bare number (ADR-0104).
+         * Absent on non-monetary columns, which must never render a symbol,
+         * and when no step answers, in which case the amount renders as a
+         * plain number.
          */
         currency?: string;
         /**

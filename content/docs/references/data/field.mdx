@@ -29,7 +29,7 @@ const result = CurrencyConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **precision** | `integer` | optional (default: `2`) | Decimal precision (default: 2) |
 | **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way. |
-| **defaultCurrency** | `string` | optional (default: `"CNY"`) | Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR) |
+| **defaultCurrency** | `string` | optional (default: `"CNY"`) | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency. |
 
 
 ---
@@ -237,7 +237,7 @@ const result = CurrencyConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **precision** | `integer` | optional (default: `2`) | Decimal precision (default: 2) |
 | **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | optional (default: `"dynamic"`) | Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. Neither mode is a per-record choice: the value is a bare number either way. |
-| **defaultCurrency** | `string` | optional (default: `"CNY"`) | Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR) |
+| **defaultCurrency** | `string` | optional (default: `"CNY"`) | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency. Not read under `dynamic` (the default), where amounts display in the tenant default currency. |
 
 ### Nested Shape: `Field.maskingRule`
 
