@@ -339,8 +339,8 @@ describe('tree-scoped absence: no list-view payload inside the declared radius s
   /**
    * RESIDUE, declared and self-expiring — not exempted. Test fixtures of the
    * two author-time reference walks that still read a list view's `tabs` off
-   * RAW input (`validate-list-view-field-refs.ts#checkTabs` in `@objectstack/lint`,
-   * `computeViewReferenceDiagnostics` in `@objectstack/metadata-protocol`) and
+   * RAW input (`packages/lint/src/validate-list-view-field-refs.ts#checkTabs`,
+   * and `computeViewReferenceDiagnostics` in `@objectstack/metadata-protocol`) and
    * the CLI's negative i18n pin. Removing those walks is outside this
    * retirement's file surface and is reported as its follow-up; each entry here
    * is asserted to STILL hold an offender, so the day the follow-up deletes a
