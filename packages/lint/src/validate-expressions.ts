@@ -1035,7 +1035,7 @@ function fieldTraversalMessage(
   related: readonly string[],
   owner: string,
 ): string {
-  const named = related.map((r) => `\`${r}\``).join(', ');
+  const named = Array.from(related, (r) => `\`${r}\``).join(', ');
   // `root` + '.' is assembled with `+` so no template literal here spells a
   // member read off a receiver name the declared-key meta-test would pick up.
   const path = '`' + root + '.' + field + '`';
