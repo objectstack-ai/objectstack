@@ -49,6 +49,11 @@ describe('reference-integrity suite — membership', () => {
       // rules above it — the conscious edit this written-out list exists to
       // force, placed so the family reports top-down.
       'validateDatasetReferences',
+      // [#20150] An import mapping's targets, resolved against its object's
+      // fields through the spec verdict the import door refuses with. Placed
+      // after the dataset member: both resolve field names written on a
+      // collection other than the object itself.
+      'validateMappingTargetFields',
       'validateNavAccess',
       'validateNavTargetRefs',
       // [#17063] `validateViewPageRefs` sat HERE, beside the nav twin that asks
@@ -232,6 +237,13 @@ describe('reference-integrity suite — every member actually runs', () => {
         measures: [{ name: 'count_leads', aggregate: 'count' }],
       },
     ],
+    // validateMappingTargetFields (#20150): `budget` is not a field on
+    // crm_lead, so the import door refuses this mapping before any row, on the
+    // dry run and the commit alike. Its own collection, so no other member
+    // can go silent behind it.
+    mappings: [
+      { name: 'lead_import', targetObject: 'crm_lead', fieldMapping: [{ source: 'Budget', target: 'budget' }] },
+    ],
     reports: [
       {
         name: 'leads_by_source',
@@ -353,6 +365,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('page-field-unknown');
     expect(rules).toContain('chart-measure-unknown');
     expect(rules).toContain('dataset-field-unknown');
+    expect(rules).toContain('mapping-target-field-unknown');
     expect(rules).toContain('nav-object-ungranted');
     expect(rules).toContain('nav-object-unservable');
     expect(rules).toContain('translation-target-unknown');

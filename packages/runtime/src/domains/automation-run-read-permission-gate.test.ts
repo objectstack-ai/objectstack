@@ -327,7 +327,10 @@ describe('#7900 — /automation run-state reads require the sys_automation_run r
          * DECISION — changing any of these has to change this file too.
          */
         const AUTHENTICATED_ONLY: Array<{ path: string; why: string }> = [
-            { path: '', why: 'listFlows — flow names, not run state' },
+            // [#19543] `''` (`listFlows — flow names, not run state`) USED to be
+            // this table's first row. Door ④ retired that route — flows are
+            // listed through `GET /meta/flow`, and the domain now declines
+            // `GET /` (`handled: false`) — so there is no route left to audit.
             { path: 'approval_flow', why: 'getFlow — a flow definition, metadata-plane data' },
             { path: 'actions', why: 'getActionDescriptors — the deployment action catalog' },
             { path: '_status', why: 'getFlowRuntimeStates — per-flow enabled/bound state' },

@@ -853,7 +853,7 @@
       },
       "steps": [
         "boot showcase on the platform-default auth posture; do NOT sign in for the probe half",
-        "fire unauthenticated requests, one per mounted surface family: GET /api/v1/data/showcase_private_note (data), GET /api/v1/meta (metadata), POST /api/v1/actions/showcase_task/showcase_mark_done/anon-probe-id (dispatcher actions — deliberately a NONEXISTENT record id), GET /api/v1/automation (dispatcher automation), POST /api/v1/batch {\"operations\": []} (batch), GET /api/v1/security/explain (security-explain)",
+        "fire unauthenticated requests, one per mounted surface family: GET /api/v1/data/showcase_private_note (data), GET /api/v1/meta (metadata), POST /api/v1/actions/showcase_task/showcase_mark_done/anon-probe-id (dispatcher actions — deliberately a NONEXISTENT record id), GET /api/v1/automation/_status (dispatcher automation — the flow-inventory read; the GET /api/v1/automation flow list is retired, #19543), POST /api/v1/batch {\"operations\": []} (batch), GET /api/v1/security/explain (security-explain)",
         "capture status + full body per surface",
         "classify each 401 body into exactly ONE of the two declared envelope families (rest-flat vs dispatcher-wrapper, #5632) — no tolerant cross-family reads",
         "sign in as a member and repeat the data + meta reads to prove the gate keys on anonymity, not on the routes",
@@ -898,7 +898,7 @@
         }
       ],
       "negative": [
-        "the destructive automation case must be denied too: anonymous DELETE /api/v1/automation/showcase_reassign_wizard answers 401 and the flow remains registered afterwards (verify by an authed GET /api/v1/automation listing it) — a 200 {deleted:true} is the exact #5519 regression"
+        "the destructive automation case must be denied too: anonymous DELETE /api/v1/automation/showcase_reassign_wizard answers 401 and the flow remains registered afterwards (verify by an authed GET /api/v1/automation/showcase_reassign_wizard answering 200 — the GET /api/v1/automation flow list is retired, #19543) — a 200 {deleted:true} is the exact #5519 regression"
       ],
       "variants": [
         "data (/api/v1/data)",
