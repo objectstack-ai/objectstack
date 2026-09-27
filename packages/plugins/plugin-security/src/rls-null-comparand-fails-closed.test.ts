@@ -4,8 +4,8 @@
  * [#20212] A row-level policy whose compiled filter carries a comparand the
  * platform's shared comparand faces refuse (a `null` list member, a `null`
  * ordering bound) fails closed on BOTH clauses, through the real plugin and
- * engine, on `SqlDriver` and on `InMemoryDriver`. It answers exactly as the
- * TYPE family (a list under `==` / `!=`) already does in the same position.
+ * engine. It answers exactly as the TYPE family (a list under `==` / `!=`)
+ * already does in the same position.
  *
  * The faces run on the caller's `where` inside the engine's lowering seam,
  * before the middleware chain composes the RLS filter onto it. So the compiled
@@ -32,12 +32,19 @@
  * change and must still. The caller's OWN `where` keeps the engine's refusal
  * (`INVALID_FILTER` / 400), and the null CHECKS (`== null` / `!= null`) are not
  * refused comparands at all.
+ *
+ * Why the matrix here is `SqlDriver` alone: the refusal happens in the compile
+ * step, before any driver is asked, so no driver can answer the refused filter
+ * (`rls-compiled-comparand-faces.test.ts` pins that step on its own). The
+ * `InMemoryDriver` column above, and the same five shapes on PostgreSQL, were
+ * measured once, before and after, and are recorded on the PR. A new test
+ * consumer of `@objectstack/driver-memory` is a ledgered decision
+ * (`pnpm check:driver-memory-census`), not one this file makes.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
@@ -51,7 +58,6 @@ const DRIVERS = [
     'SqlDriver',
     () => new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
   ],
-  ['InMemoryDriver', () => new InMemoryDriver()],
 ] as const;
 
 /** The five shapes of the card: each lowers, and each is refused by a shared face. */

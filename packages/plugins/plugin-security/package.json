@@ -27,7 +27,6 @@
     "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
-    "@objectstack/driver-memory": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
