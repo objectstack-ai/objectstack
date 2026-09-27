@@ -29,7 +29,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { isUninterpretableTemporalComparand, type TemporalComparandKind } from '@objectstack/core';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, FilterCondition } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 
@@ -113,7 +113,7 @@ function query(path: Path, having: unknown, groupBy: EngineAggregateOptions['gro
   const aggregations = path === 'native'
     ? AGGREGATIONS
     : [...AGGREGATIONS, { function: 'count' as const, alias: 'fb', filter: { customer_id: { $ne: '' } } }];
-  return { groupBy, aggregations, having: having as any };
+  return { groupBy, aggregations, having: having as FilterCondition };
 }
 
 interface Refusal extends Error { code?: unknown; status?: unknown }
@@ -173,7 +173,7 @@ async function keptGroups(having: unknown, key = 'customer_id', groupBy?: Engine
 /** The same comparand in a `where` on the aggregated field — the twin. */
 async function whereTwinOf(where: Record<string, unknown>): Promise<{ err?: Refusal; reads: number }> {
   const { engine, reads } = await makeEngine('rows', ROWS);
-  const { err } = await outcome(() => engine.find(OBJECT, { where } as any));
+  const { err } = await outcome(() => engine.find(OBJECT, { where: where as FilterCondition }));
   return { err, reads: reads.find };
 }
 

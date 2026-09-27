@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, FilterCondition } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -126,7 +126,7 @@ function grouped(path: Path, having: Record<string, unknown>): EngineAggregateOp
     { function: 'sum', field: 'amount', alias: 'total' },
   ];
   if (path === 'rows') aggregations.push({ function: 'count', alias: 'fb', filter: { customer_id: { $ne: '' } } });
-  return { groupBy: ['customer_id'], aggregations, having: having as any };
+  return { groupBy: ['customer_id'], aggregations, having: having as FilterCondition };
 }
 
 const refusalOf = async (p: Promise<unknown>) =>
@@ -166,7 +166,7 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
         expect(res._json.error).toContain(column);
       }
       // The twin, at both doors: the same door, the same envelope.
-      const twin = await refusalOf(engine.find(OBJECT, { where } as any));
+      const twin = await refusalOf(engine.find(OBJECT, { where: where as FilterCondition }));
       expect(twin?.code).toBe('INVALID_FILTER');
       expect(twin?.status).toBe(400);
       const twinRes = await post({ where });
