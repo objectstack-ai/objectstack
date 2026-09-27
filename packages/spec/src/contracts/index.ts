@@ -45,7 +45,10 @@ export * from './i18n-service.js';
 // contract instead of `any`, so a call outside it is a compile error.
 export * from './core-service-contracts.js';
 
-export * from './export-service.js';
+// './export-service.js' (IExportService and its six types, including
+// ScheduleExportInput) removed (#17158): the export-job API family it served had
+// no route, no provider binding and no reader in any repo. The export that is
+// served is the synchronous `GET /api/v1/data/:object/export` door.
 export * from './email-service.js';
 export * from './sms-service.js';
 export * from './security-service.js';

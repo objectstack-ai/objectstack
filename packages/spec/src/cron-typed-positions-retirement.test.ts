@@ -3,8 +3,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ZodTypeAny } from 'zod';
 
-import { ScheduledExportSchema, ScheduleExportRequestSchema, type ScheduledExport, type ScheduleExportRequest } from './api/export.zod';
-import { ScheduleStateSchema, type ScheduleState } from './automation/execution.zod';
 import { CONVERSIONS_BY_MAJOR } from './conversions/registry';
 import {
   ConnectorSchema,
@@ -14,7 +12,7 @@ import {
   type DataSyncConfig,
 } from './integration/connector.zod';
 import { getMetadataTypeSchema } from './kernel/metadata-type-schemas';
-import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from './migrations/registry';
+import { MIGRATIONS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from './migrations/registry';
 import { CacheWarmupSchema, DistributedCacheConfigSchema, type CacheWarmup, type DistributedCacheConfig } from './system/cache.zod';
 import {
   BackupConfigSchema,
@@ -64,6 +62,18 @@ import {
 // ⇒ ⛔ Do not read these pins as "the author is never told". They pin the schema
 // layer. The author-facing loss is louder than a bare `safeParse` suggests, and
 // it is louder than the ruling comment's cost statement assumed.
+//
+// ─── [#17158] three of the seven left WITH THEIR DEFS ─────────────────────────
+//
+// `ScheduledExport.schedule.cronExpression`, `ScheduleExportRequest.schedule.cronExpression`
+// and `ScheduleState.cronExpression` sat on defs that were themselves declared
+// and unserved: the export-job API family and `ScheduleState` were retired
+// WHOLE in the same major (ADR-0049, maintainer ruling A on #17158), so those
+// three schemas no longer exist to strip anything. Their strip pins are gone
+// with them; `LEFT_WITH_THEIR_DEFS` below keeps the two facts that still
+// hold — no key-level registration was ever made for the three positions, and
+// each enclosing def is now a `RETIRED_DEFS_BY_MAJOR[18]` entry. The four
+// positions on live schemas are pinned exactly as before.
 
 const CRON = '0 6 * * MON';
 /** The envelope the old schema normalized the bare string into — dropped just the same. */
@@ -71,13 +81,6 @@ const CRON_ENVELOPE = { dialect: 'cron', source: CRON };
 
 // ── Well-formed fixtures: every required key, none of the deleted ones ──────
 
-const EXPORT_WELL_FORMED = {
-  name: 'weekly_account_export',
-  object: 'account',
-  schedule: { timezone: 'America/New_York' },
-  delivery: { method: 'email' as const, recipients: ['admin@example.com'] },
-};
-const STATE_WELL_FORMED = { id: 'sched_001', flowName: 'daily_report', createdAt: '2026-01-01T00:00:00Z' };
 const SYNC_WELL_FORMED = { strategy: 'incremental' as const, direction: 'bidirectional' as const, batchSize: 500 };
 const CONNECTOR_WELL_FORMED = { name: 'sap_erp', label: 'SAP ERP', type: 'saas' as const, syncConfig: SYNC_WELL_FORMED };
 // [#17157] was `strategy: 'scheduled'` — that enum member was itself retired one card
@@ -112,31 +115,18 @@ interface DeletedSite {
   keyPath: (string | number)[];
 }
 
+/**
+ * [#17158] The three positions whose enclosing def retired whole — the key-level
+ * spelling (never registered) and the def-level entry (now registered).
+ */
+const LEFT_WITH_THEIR_DEFS = [
+  { registered: 'api/ScheduledExport:schedule.cronExpression', def: 'api/ScheduledExport' },
+  { registered: 'api/ScheduleExportRequest:schedule.cronExpression', def: 'api/ScheduleExportRequest' },
+  { registered: 'automation/ScheduleState:cronExpression', def: 'automation/ScheduleState' },
+] as const;
+
+/** The four positions whose schemas are still published. */
 const SITES: DeletedSite[] = [
-  {
-    registered: 'api/ScheduledExport:schedule.cronExpression',
-    qualified: 'ScheduledExport.schedule.cronExpression',
-    schema: ScheduledExportSchema,
-    wellFormed: EXPORT_WELL_FORMED,
-    authored: { ...EXPORT_WELL_FORMED, schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON } },
-    keyPath: ['schedule', 'cronExpression'],
-  },
-  {
-    registered: 'api/ScheduleExportRequest:schedule.cronExpression',
-    qualified: 'ScheduleExportRequest.schedule.cronExpression',
-    schema: ScheduleExportRequestSchema,
-    wellFormed: EXPORT_WELL_FORMED,
-    authored: { ...EXPORT_WELL_FORMED, schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON } },
-    keyPath: ['schedule', 'cronExpression'],
-  },
-  {
-    registered: 'automation/ScheduleState:cronExpression',
-    qualified: 'ScheduleState.cronExpression',
-    schema: ScheduleStateSchema,
-    wellFormed: STATE_WELL_FORMED,
-    authored: { ...STATE_WELL_FORMED, cronExpression: CRON },
-    keyPath: ['cronExpression'],
-  },
   {
     registered: 'integration/DataSyncConfig:schedule',
     qualified: 'connector.syncConfig.schedule',
@@ -224,7 +214,7 @@ function readAt(doc: unknown, keyPath: (string | number)[]): { block: Record<str
   return { block: at as Record<string, unknown>, leaf: String(keyPath[keyPath.length - 1]) };
 }
 
-describe('[#16320] the seven cron-typed positions no longer exist on their schemas', () => {
+describe('[#16320] the four surviving cron-typed positions no longer exist on their schemas', () => {
   for (const site of SITES) {
     it(`\`${site.qualified}\` is gone — an authored value is accepted and STRIPPED, never materialized`, () => {
       const parsed = site.schema.safeParse(site.authored);
@@ -241,9 +231,14 @@ describe('[#16320] the seven cron-typed positions no longer exist on their schem
   }
 
   it('the envelope spelling is dropped too — both shapes the old schema accepted are gone', () => {
+    const site = (qualified: string): DeletedSite => {
+      const found = SITES.find((s) => s.qualified === qualified);
+      expect(found, `no site named ${qualified}`).toBeDefined();
+      return found!;
+    };
     const envelopeSites: Array<[DeletedSite, unknown]> = [
-      [SITES[3]!, { ...SYNC_WELL_FORMED, schedule: CRON_ENVELOPE }],
-      [SITES[0]!, { ...EXPORT_WELL_FORMED, schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON_ENVELOPE } }],
+      [site('connector.syncConfig.schedule'), { ...SYNC_WELL_FORMED, schedule: CRON_ENVELOPE }],
+      [site('CacheWarmup.schedule'), { ...WARMUP_WELL_FORMED, schedule: CRON_ENVELOPE }],
     ];
     for (const [site, authored] of envelopeSites) {
       const parsed = site.schema.safeParse(authored);
@@ -267,21 +262,9 @@ describe('[#16320] the seven cron-typed positions no longer exist on their schem
   }
 
   it('the surviving keys still materialize — the absences above are the deletions, not a dead parse', () => {
-    expect(ScheduledExportSchema.parse(EXPORT_WELL_FORMED).schedule.timezone).toBe('America/New_York');
-    expect(ScheduleExportRequestSchema.parse({ ...EXPORT_WELL_FORMED, schedule: {} }).schedule.timezone).toBe('UTC');
-    expect(ScheduleStateSchema.parse(STATE_WELL_FORMED).timezone).toBe('UTC');
     expect(DataSyncConfigSchema.parse(SYNC_WELL_FORMED).realtimeSync).toBe(false);
     expect(CacheWarmupSchema.parse(WARMUP_WELL_FORMED).concurrency).toBe(10);
     expect(BackupConfigSchema.parse(BACKUP_WELL_FORMED).verifyAfterBackup).toBe(true);
-  });
-
-  it('`ScheduleState.cronExpression` was REQUIRED — the requiredness left with the key', () => {
-    const parsed = ScheduleStateSchema.parse(STATE_WELL_FORMED);
-    expect(parsed.status).toBe('active');
-    expect(parsed.timezone).toBe('UTC');
-    // The other required keys are still required — the requiredness that left
-    // is exactly the deleted key's.
-    expect(ScheduleStateSchema.safeParse({ id: 'sched_002', createdAt: '2026-01-01T00:00:00Z' }).success).toBe(false);
   });
 });
 
@@ -328,23 +311,8 @@ describe('[#16320] the one manifest-reachable position — what an upgrading sta
   });
 });
 
-describe('[#16320] the tsc channel: the seven keys are not in their input types', () => {
+describe('[#16320] the tsc channel: the four surviving keys are not in their input types', () => {
   it('fails tsc at every authoring site', () => {
-    const sched: ScheduledExport = {
-      ...EXPORT_WELL_FORMED,
-      // @ts-expect-error — `schedule.cronExpression` was deleted; it is not a key of this type.
-      schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON },
-    };
-    const request: ScheduleExportRequest = {
-      ...EXPORT_WELL_FORMED,
-      // @ts-expect-error — the request body's twin position, deleted with it.
-      schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON },
-    };
-    const state: ScheduleState = {
-      ...STATE_WELL_FORMED,
-      // @ts-expect-error — `cronExpression` was deleted (and was required before).
-      cronExpression: CRON,
-    };
     const sync: DataSyncConfig = {
       ...SYNC_WELL_FORMED,
       // @ts-expect-error — `schedule` was deleted.
@@ -379,9 +347,6 @@ describe('[#16320] the tsc channel: the seven keys are not in their input types'
     // key, which is what keeps this case from being vacuous — and is precisely
     // why the tsc channel is the ONLY loud one the bare deletion leaves.
     for (const [schema, value, keyPath] of [
-      [ScheduledExportSchema, sched, ['schedule', 'cronExpression']],
-      [ScheduleExportRequestSchema, request, ['schedule', 'cronExpression']],
-      [ScheduleStateSchema, state, ['cronExpression']],
       [DataSyncConfigSchema, sync, ['schedule']],
       [ConnectorSchema, connector, ['syncConfig', 'schedule']],
       [CacheWarmupSchema, warmup, ['schedule']],
@@ -399,10 +364,20 @@ describe('[#16320] the tsc channel: the seven keys are not in their input types'
 });
 
 describe('[#16320] 直接删 — the ADR-0087 surfaces carry NOTHING for these seven', () => {
+  it('[#17158] the three positions that left with their defs are covered at DEF grain, not key grain', () => {
+    const retiredDefs18 = new Set(RETIRED_DEFS_BY_MAJOR[18] ?? []);
+    for (const gone of LEFT_WITH_THEIR_DEFS) {
+      expect(retiredDefs18.has(gone.def), `${gone.def} must be a RETIRED_DEFS_BY_MAJOR[18] entry`).toBe(true);
+    }
+    // Dark control — a def that was never retired reads absent.
+    expect(retiredDefs18.has('integration/DataSyncConfig')).toBe(false);
+  });
+
   const registered = new Set(Object.values(RETIRED_KEYS_BY_MAJOR).flatMap((keys) => [...keys]));
 
   it('no `RETIRED_KEYS_BY_MAJOR` entry names any of the seven, at any major', () => {
     for (const site of SITES) expect(registered.has(site.registered), site.registered).toBe(false);
+    for (const gone of LEFT_WITH_THEIR_DEFS) expect(registered.has(gone.registered), gone.registered).toBe(false);
     // Lit control — the table is populated and this reader can see it. A key
     // retired the tombstone way on the very same connector schema.
     expect(registered.has('integration/Connector:errorMapping')).toBe(true);
