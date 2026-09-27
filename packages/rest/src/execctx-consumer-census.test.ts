@@ -722,7 +722,12 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
         // form would report "0 survivors" and read exactly like a clean pass —
         // which is the precise failure that let the four sites through.
         const args = catchArguments();
-        expect(args.filter((a) => a.layout === 'inline').length).toBeGreaterThanOrEqual(16);
+        // [#20193] 16 → 14, the floor keeping its one site of slack: the inline
+        // population fell 17 → 15 when three inline sites moved into
+        // `meta-item-read-gate.ts` with the gate and one inline caller port
+        // replaced them (§2 has the arithmetic) — the population shrank, the
+        // reader did not go blind.
+        expect(args.filter((a) => a.layout === 'inline').length).toBeGreaterThanOrEqual(14);
         expect(args.filter((a) => a.layout === 'continuation').length).toBeGreaterThanOrEqual(4);
         expect(args.length).toBe(CAUGHT.length);
     });

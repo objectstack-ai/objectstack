@@ -3303,7 +3303,10 @@ export class RestServer {
     /** [#20193] The caller half of {@link metaItemReadGateSources}. */
     private metaReadAudienceSources(environmentId: string | undefined, req: any): MetaReadGateAudienceSources {
         return {
-            resolveCaller: () => this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable),
+            resolveCaller: async () => {
+                const caller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+                return caller;
+            },
             resolveSecurityService: async () => (
                 this.securityServiceProvider ? this.securityServiceProvider(environmentId) : undefined
             ),
