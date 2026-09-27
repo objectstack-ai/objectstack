@@ -371,7 +371,7 @@ describe('#20139 — GET /approvals/requests refuses a `limit` / `offset` it can
         [{ limit: ' ' }, 'limit'],         // was: 0 → a one-row page
         [{ offset: 'abc' }, 'offset'],     // was: dropped → the first page
         [{ offset: '1.5' }, 'offset'],     // was: 1.5 handed to the engine
-        [{ offset: '' }, 'offset'],        // was: 0 → paged mode (50 rows + total) the caller never asked for
+        [{ offset: '' }, 'offset'],        // was: 0 → the service's 50-row paged mode, never asked for
         [{ limit: '10', offset: 'abc' }, 'offset'], // was: page 1 served for "page N"
     ])('%j is refused naming %s and no list is read', async (query, param) => {
         const { answer, approvals } = await list(query);
