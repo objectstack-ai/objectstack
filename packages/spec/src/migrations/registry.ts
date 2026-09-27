@@ -5291,7 +5291,23 @@ const step18: MigrationStep = {
     + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
     + 'a page selects — as it does every filter of a component whose rows are inline, which '
     + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
-    + 'the door and taught the array; the stored-row seams and this chain replay it.',
+    + 'the door and taught the array; the stored-row seams and this chain replay it. '
+    + 'It also retires the view item\'s `owner` and `hidden` (#20085, ADR-0049 '
+    + 'enforce-or-remove). Both sat on the view-item identity layer, were accepted by the '
+    + 'strict authoring door and by the wire member the `view` write door validates, and were '
+    + 'stored verbatim — and nothing read either: both switcher read paths filter on '
+    + '`viewKind` + `object` and sort on `order`, so `hidden: true` hid nothing, and no '
+    + 'per-user scope ever read `owner`, so a view marked as one user\'s was listed for '
+    + 'everyone who can read the object. Per-user view scoping is a parked direction '
+    + '(ADR-0017, amended 2026-09-04), not a shipped mechanism. Both keys are `retiredKey()` '
+    + 'tombstones on the SHARED shape, because that shape also feeds the `.strip()` wire '
+    + 'member, where a bare deletion would be a silent strip. The D2 conversion '
+    + '`view-item-owner-hidden-removed` strips them from the view item RECORD spelling only, '
+    + 'as a lossless delete, in both collections a record travels in — `views` (stack sources '
+    + 'and stored rows) and the assembled-manifest `viewItems` channel (package export, '
+    + 'environment artifacts), whose registration parse would otherwise refuse an artifact '
+    + 'assembled before this release; a flattened overlay keeps its own `owner` / `hidden`, '
+    + 'which are declared on a different door this retirement does not touch.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5328,6 +5344,7 @@ const step18: MigrationStep = {
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
     'page-component-filter-record-to-rule-array',
+    'view-item-owner-hidden-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -10260,6 +10277,43 @@ const step18: MigrationStep = {
         + 'them removes no behaviour.',
     },
     {
+      id: 'inline-grid-column-currency-scale-refused',
+      surface: 'object.fields.<name>.inlineColumns[].scale on an inline grid column that declares '
+        + '`type: \'currency\'` — any declared value, `scale: 0` included, computed or not. `scale` on a '
+        + '`number` column, and on a column that declares no `type`, is untouched',
+      replacement: 'no `scale` on a currency inline grid column. DELETE the key — that is the whole '
+        + 'migration: a currency amount\'s decimal places are its currency\'s, not a column setting. The '
+        + 'currency\'s ISO 4217 minor unit decides how the cell displays the amount and the width a '
+        + 'computed amount is rounded to. ⛔ Nothing replaces the key: do not re-declare its value under '
+        + 'any other key.',
+      reason:
+        'Maintainer ruling 5791803339 (batch #215 item 1, letter B) retired `scale` from the '
+        + '`currency` field type, and ruling 5805782503 (batch #218 item 2, letter 乙 — a currency\'s '
+        + 'ISO 4217 minor unit decides its display) worded the remedy. Neither reached the inline grid '
+        + 'column, the strict mirror of the console grid\'s column, which still offered per-column '
+        + 'decimals on a `currency` column; triage read the column as inherited from both rulings, so '
+        + '`InlineGridColumnSchema` now refuses the key on a column declaring `type: \'currency\'` at '
+        + 'parse, with the field refusal\'s first sentence and remedy. ⛔ No alias and no grace window, '
+        + 'per ruling B. NOT mechanically converted, deliberately, for the reason the field entry '
+        + '`field-currency-scale-refused` gives: a conversion that dropped the key would accept it on '
+        + 'every load, which is the grace window the ruling refused; the refusal names the key and its '
+        + 'one-line fix instead. The same change rewords the column\'s `prefix` description: it replaces '
+        + 'the resolved currency\'s symbol and has no default (the grid no longer falls back to a fixed '
+        + 'yen sign). Reach: only a DECLARED column `type` is judged — a column that declares none takes '
+        + 'its type from the child field when the console hydrates it, which the column schema cannot '
+        + 'see. Population measured at the change, on origin/main 1c8b320a89: one authored '
+        + '`inlineColumns` block in the tree (the showcase invoice, seven identity-only columns, none '
+        + 'declaring `type` or `scale`), no platform object, skill, documentation example or JSON fixture '
+        + 'declaring an inline grid column at all, and one test fixture carrying `scale: 2` on a currency '
+        + 'column, re-judged in the same change. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria:
+        'Every field in the stack parses: an `ObjectSchema` parse and `objectstack validate` report no '
+        + 'issue on an `inlineColumns[].scale` path of a column declaring `type: \'currency\'`. A '
+        + 'currency column that carried `scale` no longer declares it, and a diff of the column shows '
+        + 'that one line deleted and no key added. `number` columns, and columns declaring no `type`, '
+        + 'keep their `scale`; a column\'s `prefix` is still accepted on a currency column.',
+    },
+    {
       id: 'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
       surface: 'CompatibilityMatrixEntry.estimatedMigrationTime, the migration effort estimate whose '
         + 'unit lived only in a source JSDoc (kernel/plugin-versioning.zod.ts)',
@@ -10850,6 +10904,52 @@ const step18: MigrationStep = {
         + 'addresses the old value — no installed row, no `dependencies` entry in another '
         + 'package\'s manifest, and no registry listing. If any does, the correct answer is a '
         + 'deliberate republish under the new id, not an in-place edit.',
+    },
+    // A D3 semantic TODO, not a D2 conversion, and the reason is the widening half.
+    // The mechanical part of this move is trivial in one direction — `01.1.1`
+    // becomes `1.1.1` — but the chain cannot know whether an author who wrote a
+    // leading zero meant the padded spelling of that version or a different one,
+    // and a version IS how a release is addressed: rewriting it would re-point
+    // whatever already installed the old string. The widening half needs no edit at
+    // all, which is why this entry prescribes a check rather than a rewrite.
+    {
+      id: 'manifest-version-semver-2-0-0',
+      surface: 'manifest.version — `ObjectStackManifest.version`, i.e. the `version:` key of '
+        + '`defineStack({ manifest })` and of a package manifest — and its three sibling '
+        + 'declarations `MetadataPluginManifestSchema.version` (`kernel/metadata-plugin.zod.ts`), '
+        + '`PluginRegistryEntrySchema.version` (`kernel/plugin-registry.zod.ts`) and '
+        + '`PluginMetadataSchema.version` (`kernel/plugin-validator.zod.ts`), plus the '
+        + '`PATCH /api/v1/packages/:id` door in `@objectstack/runtime`',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). ⭐ This is a WIDENING for almost every author: '
+        + 'prerelease and build suffixes are accepted for the first time, so `2.0.0-beta.1`, '
+        + '`17.0.0-rc.5`, `1.0.0+20230101` and `1.0.0-rc.1+exp.sha.5114f85` now pass a key that '
+        + 'refused all of them, and identifiers may carry either ASCII case. ⛔ The one thing '
+        + 'that stops being accepted is a leading zero in the numeric core: `01.1.1` becomes '
+        + '`1.1.1` — or a different version, if the padded form was standing in for one.',
+      reason:
+        'One concept — "the version of a package or plugin" — was judged by four different '
+        + 'grammars across ten carriers in two repositories, and the strictest of them, this '
+        + 'one, refused `2.0.0-beta.1`: the exact string a sibling declaration documented as an '
+        + 'example of itself. The contradiction was observable between doors on the same '
+        + 'resource, not merely between schema files — the build step refused a prerelease the '
+        + 'publish door accepted, while the install door parsed nothing at all. The maintainer '
+        + 'ruled one canon, and named it after the standard the repository already claimed in '
+        + "this key's own `.describe()`, in the generated reference docs, in the Studio help "
+        + 'text and in two ADRs: SemVer 2.0.0. Why the narrowing is not losslessly convertible: '
+        + 'a version is an identity. `01.1.1` and `1.1.1` are the same release to a reader and '
+        + 'different strings to every registry row, dependency declaration and installed '
+        + 'artifact that stored one of them, and which of the two an author meant is not '
+        + 'derivable from the metadata.',
+      acceptanceCriteria:
+        'Every `manifest.version` you author is a SemVer 2.0.0 string, and `defineStack` / '
+        + '`objectstack validate` / `os plugin build` report no `version` finding. The only '
+        + 'values that need touching are those with a leading zero in a numeric segment — the '
+        + 'in-repo authoring corpus measured ZERO of them, so most consumers have nothing to '
+        + 'change. For each one you do change, confirm nothing still addresses the old string: '
+        + 'no installed row, no `dependencies` range in another manifest, no registry listing. '
+        + 'Prove the widening separately and cheaply: a prerelease version that used to be '
+        + 'refused at build time now builds.',
     },
     {
       id: 'memory-persistence-placeholder-refused',
@@ -11511,6 +11611,44 @@ const step18: MigrationStep = {
         + 'or built a route from the entries, so every request answers exactly as before — the removal '
         + 'retracts a false claim, not a capability.',
     },
+    // The carrier nobody had named: a bare `z.string()` on a published schema,
+    // constraining nothing while its own siblings enforced a grammar. Its narrowing
+    // is the widest of the four by accept-set area and the least likely to be felt,
+    // because what it starts refusing is not a version at all.
+    {
+      id: 'package-manifest-version-grammar-enforced',
+      surface: 'PackageManifestSchema.version (`marketplace/package-version.zod.ts`) — the '
+        + '`version` key inside the manifest snapshot frozen into '
+        + '`sys_package_version.manifest_json` at publish time',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). This key was a bare `z.string()`, so it is the one '
+        + 'carrier where the grammar is entirely new: `latest`, `v1.0.0`, `1.0`, the empty '
+        + 'string, a trailing space and `2.0.0-beta.1extra!` were all accepted and sealed into '
+        + 'a published snapshot, and each is refused now. A dist-tag becomes the version it '
+        + 'pointed at (`latest` → `1.4.2`); a `v`-prefixed string drops the prefix (`v1.0.0` → '
+        + '`1.0.0`); a two-segment string gains its patch (`1.0` → `1.0.0`).',
+      reason:
+        'A downstream told "the spec validated it" got no validation at all from this carrier. '
+        + 'The sibling key it belongs to — `PackageVersionSchema.version`, the row this manifest '
+        + 'hangs off — enforced a grammar the whole time, so the SAME release was judged by a '
+        + 'rule in one field and by nothing in the adjacent one, and the unjudged value is the '
+        + 'one that got frozen and shipped. That is the shape Prime Directive #10 refuses: a '
+        + 'declaration advertising a constraint the runtime never applies. The canon ruling gave '
+        + 'every carrier of this concept one grammar, and a carrier with no grammar could not be '
+        + 'left out of it without keeping the hole open under a new name. Why a D3 semantic TODO '
+        + 'rather than a D2 conversion: the repairs above are one-directional guesses. `latest` '
+        + 'names whichever release was current when the snapshot was sealed, which is not '
+        + 'recoverable from the snapshot, and `1.0` may mean `1.0.0` or the newest `1.0.x` — a '
+        + 'transform that picked either would seal a different release under the same checksum.',
+      acceptanceCriteria:
+        'Every package your registry serves still installs, and `manifestJson.version` parses '
+        + 'for each one. The check is cheap and exhaustive: read `manifest_json` on each '
+        + '`sys_package_version` row and test its `version` against the grammar. A row that '
+        + 'fails was already carrying a value no other carrier would have accepted — confirm '
+        + 'what release it was meant to name before choosing the replacement, because the '
+        + 'snapshot cannot tell you, and republish rather than editing a frozen snapshot in '
+        + 'place. In this repository the measured count of such rows is zero.',
+    },
     {
       id: 'package-rollback-response-retired',
       surface:
@@ -11559,6 +11697,45 @@ const step18: MigrationStep = {
         + 'SDKs from the contract entry, and the route\'s handler emits the same '
         + 'bytes before and after — the retirement removes a false claim, not '
         + 'behaviour.',
+    },
+    // The published release row's half of the version canon. It moves in BOTH
+    // directions at once — gaining uppercase identifiers, losing the degenerate
+    // forms — which is why the prescription below has to state each separately
+    // rather than reading as one tightening.
+    {
+      id: 'package-version-row-semver-2-0-0',
+      surface: 'PackageVersionSchema.version (`marketplace/package-version.zod.ts`) — the '
+        + '`version` column of a `sys_package_version` row, and through '
+        + '`CreatePackageVersionRequestSchema.version`, which references it, the version a '
+        + 'draft release is created with',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). Two changes, opposite in direction. ⭐ WIDER: suffix '
+        + 'identifiers may now carry either ASCII case, because SemVer 2.0.0 is '
+        + 'case-preserving — `1.0.0-Beta.1` and `1.0.0+Build.5` are accepted where this key '
+        + 'used to demand lowercase, and the plugin boot path has always accepted them. ⛔ '
+        + 'NARROWER: the forms the standard forbids are refused — `01.1.1` (§2), `1.0.0-0123` '
+        + 'and `1.0.0-alpha..1` (§9), `1.0.0+.` (§10).',
+      reason:
+        "This key's own docstring advertised `2.0.0-beta.1` as an example of itself while a "
+        + 'sibling carrier of the same concept refused that exact string — the contradiction '
+        + 'the canon card was filed over. The lowercase restriction was the narrowest published '
+        + 'accept set of the four and had no standard behind it: it made a release row refuse a '
+        + 'version the runtime that loads the release accepts, so a publisher could be turned '
+        + 'away for a capitalisation the loader would never have noticed. Why the narrowing is '
+        + 'a D3 semantic TODO rather than a mechanical rewrite: a published version row is '
+        + 'immutable by contract — `manifestJson` and `checksum` freeze on transition to '
+        + '`published` — so a stored degenerate version is not edited in place at all. It is '
+        + 'republished under a version that sorts, and whether the old row should be deprecated '
+        + 'or left standing is a release decision the chain cannot make.',
+      acceptanceCriteria:
+        'Publishing and installing every release you have works unchanged. The widening needs '
+        + 'no action and can be confirmed cheaply: a mixed-case prerelease that used to be '
+        + 'refused at publish now creates a draft. For the narrowing, list your '
+        + '`sys_package_version` rows and check each `version` against the grammar — a leading '
+        + 'zero in a numeric segment, or a doubled or trailing dot in a suffix, are the only '
+        + 'shapes affected. Any row that fails stays readable and installable; what it can no '
+        + 'longer do is receive a NEW draft at that spelling, so cut the next release at a '
+        + 'version that sorts.',
     },
     {
       id: 'packages-list-pagination-retired',
@@ -12160,6 +12337,50 @@ const step18: MigrationStep = {
         + 'both barrels (`packages/core/src/security/security-scanner-retirement.pin.test.ts`), not '
         + 'by a grep: the name legitimately survives in the tombstone comments that explain the '
         + 'retirement.',
+    },
+    // The boot path's half of the version canon, and the one whose BOUND is the
+    // load-bearing fact: a widen-never-narrow ruling governs this key, and this
+    // entry narrows it on eight strings and nothing else. Registered as a D3
+    // semantic TODO rather than a D2 conversion because every one of the eight has
+    // more than one defensible repair and the chain can pick none of them: is
+    // `1.0.0-alpha..1` meant to be `1.0.0-alpha.1`, or `1.0.0-alpha`?
+    {
+      id: 'plugin-version-semver-2-0-0',
+      surface: 'plugin.version — `PluginSchema.version` (`kernel/plugin.zod.ts`), the key a '
+        + 'plugin object carries into `kernel.use()`, and the boot-path predicate that judges '
+        + 'the same string in `@objectstack/core` (`plugin-loader.ts`)',
+      replacement: 'a SemVer 2.0.0 string matching `SEMVER_2_0_0_VERSION_PATTERN` '
+        + '(`kernel/version-grammar.ts`). ⭐ Only EIGHT strings stop loading, all of them forms '
+        + 'the standard forbids: `01.1.1`, `1.01.1`, `1.1.01` (§2, a leading zero in a numeric '
+        + 'identifier — drop it); `1.0.0-0123`, `1.0.0-alpha..1`, `1.0.0-alpha..`, `1.0.0-.` '
+        + '(§9, a prerelease identifier that is empty or carries a leading zero — name it, or '
+        + 'remove the empty segment); `1.0.0+.` (§10, an empty build identifier — name it or '
+        + 'drop the `+` suffix). ⛔ Nothing else moves: every valid prerelease and build form '
+        + 'this key accepts today it still accepts, `1.0.0-alpha.1` and '
+        + '`1.0.0-rc.1+exp.sha.5114f85` included.',
+      reason:
+        'The canon ruling made one grammar serve every carrier of "the version of a package or '
+        + 'plugin", and named it after the standard: SemVer 2.0.0. This key had the widest of '
+        + 'the four accept sets, which is why it is the only one that narrows without also '
+        + 'widening. The narrowing is bounded deliberately, and the bound is what keeps the '
+        + 'earlier widen-never-narrow ruling on this path honoured rather than reversed: that '
+        + 'ruling\'s subject is what LOADS, and none of the eight is a valid prerelease. What '
+        + 'they have in common is that no precedence order exists for any of them — '
+        + '`dependency-resolver.ts` in `@objectstack/core` can place none of them in an order — '
+        + 'so a plugin versioned this way could be published and never compared against its own '
+        + 'successor, which is a worse outcome than the refusal. Why it is a D3 semantic TODO '
+        + 'and not a D2 conversion: each of the eight has several defensible repairs and the '
+        + 'metadata does not say which was meant, and a version is how a release is addressed — '
+        + 'rewriting one silently re-points whatever already resolved the old string.',
+      acceptanceCriteria:
+        'Every plugin you ship boots: `kernel.use(plugin)` resolves for each of them, on both '
+        + '`ObjectKernel` and `LiteKernel`. The only versions needing an edit are the eight '
+        + 'forms above — a `git grep` for a leading zero in a numeric segment and for a doubled '
+        + 'or trailing dot in a suffix finds them all, and the in-repo authoring corpus measured '
+        + 'ZERO producers of any of them. For each one you change, confirm nothing still '
+        + 'resolves the old string: no `dependencies` range in another manifest, no installed '
+        + 'row, no lockfile pin. ⛔ Do not repair one by widening the check back — the grammar '
+        + 'is the contract now, on nine carriers at once.',
     },
     {
       id: 'record-chatter-position-vocabulary-converged',
@@ -18606,6 +18827,56 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // carrying both — and the D2 conversion `chart-config-aria-removed` strips all
     // of them together with the dashboard site.
     'ui/ReportChart:aria',
+    // #20085 (ADR-0049 enforce-or-remove; triage direction 「retire both keys」).
+    // `ViewItem.hidden` promised to hide a view item from the switcher, and nothing
+    // ever read it: no writer and no reader of the view-item key in the framework,
+    // in objectui at its pin and at `main`, or in cloud, and both switcher read
+    // paths filter on `viewKind` + `object` only — `hidden: true` hid nothing.
+    // Tombstoned with `retiredKey()` on the shared `viewItemBaseShape()`, because
+    // that shape also feeds the `.strip()` wire member (`ui/ViewItemWire`,
+    // registered beside this row), where a bare deletion would strip in silence.
+    // The flattened-overlay members declare their own `hidden` on a different door,
+    // untouched. ⚠️ No gate below can JUDGE this row: `ui/ViewItem` is a
+    // discriminated union, whose emitted JSON Schema has no top-level
+    // `properties`, so `authorable-surface/` carries no `ui/ViewItem:*` line and
+    // check (b) never sees the tombstone — the row is declared, not checked.
+    // D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItem:hidden',
+    // #20085 (ADR-0049 enforce-or-remove; triage direction 「retire both keys」).
+    // `ViewItem.owner` named the user a `personal` view item belonged to, and
+    // nothing ever read it: no writer and no reader of the view-item key in the
+    // framework, in objectui at its pin and at `main`, or in cloud, and both
+    // switcher read paths filter on `viewKind` + `object` only — so a view marked
+    // as one user's was listed for everyone who can read the object. Per-user view
+    // scoping is a parked direction (ADR-0017, amended 2026-09-04). Tombstoned with
+    // `retiredKey()` on the shared `viewItemBaseShape()`, because that shape also
+    // feeds the `.strip()` wire member (`ui/ViewItemWire`, registered beside this
+    // row), where a bare deletion would strip in silence. ⚠️ No gate below can
+    // JUDGE this row: `ui/ViewItem` is a discriminated union, whose emitted JSON
+    // Schema has no top-level `properties`, so `authorable-surface/` carries no
+    // `ui/ViewItem:*` line and check (b) never sees the tombstone — the row is
+    // declared, not checked. D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItem:owner',
+    // #20085 — the wire carrier of `ui/ViewItem:hidden` (see that row for the
+    // measurement). `ViewItemWireSchema` is member 1 of the `view` union
+    // `saveMetaItem` validates; it is built from the same `viewItemBaseShape()`, so
+    // the one tombstone refuses the key there too instead of letting `.strip()`
+    // drop it in silence — registered under both def keys, the
+    // `integration/DeclarativeConnectorEntry:connectionTimeoutMs` precedent. Same
+    // blind spot as its sibling: a discriminated-union def emits no top-level
+    // `properties`, so no gate judges this row.
+    // D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItemWire:hidden',
+    // #20085 — the wire carrier of `ui/ViewItem:owner` (see that row for the
+    // measurement). `ViewItemWireSchema` is member 1 of the `view` union
+    // `saveMetaItem` validates; it is built from the same `viewItemBaseShape()`, so
+    // the one tombstone refuses the key there too instead of letting `.strip()`
+    // drop it in silence — registered under both def keys, the
+    // `integration/DeclarativeConnectorEntry:connectionTimeoutMs` precedent. Same
+    // blind spot as its sibling: a discriminated-union def emits no top-level
+    // `properties`, so no gate judges this row.
+    // D2: `view-item-owner-hidden-removed`.
+    'ui/ViewItemWire:owner',
     // </os-generated retired-key:18>
   ],
 };
