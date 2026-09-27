@@ -9628,6 +9628,89 @@ const step18: MigrationStep = {
         + 'door, 400 after), so re-check what the surface was supposed to show rather than '
         + 'assuming the old result set was correct.',
     },
+    // The SCHEMA door's half of every comparand refusal the query faces already
+    // give. The shared comparand-shape face and the query faces' boolean-flag checks
+    // refuse these slots on every query; this entry records that the same slots are
+    // now refused where a filter is SAVED, so a stored filter stops publishing clean
+    // and failing later for someone else. The face itself is the judge at the save
+    // door, so the two doors cannot drift apart.
+    {
+      id: 'filter-query-face-comparands-refused-at-save',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.FilterCondition — every comparand slot the query faces refuse, now refused when the '
+        + 'document is PARSED: a $null or $exists flag that is not a boolean (a string such as '
+        + '"false", null, a number); a null $gt / $gte / $lt / $lte comparand; an $in or $nin '
+        + 'comparand that is not a list, or a list holding null; a $between comparand that is not a '
+        + 'two-element list, or whose endpoint is null, blank or a { $field } reference; and an '
+        + 'array under $ne. On every schema that carries a FilterCondition: a dataset filter and a '
+        + 'dataset measure filter, a dashboard widget filter and an options-source filter, a report '
+        + 'and joined-report-block runtimeFilter, a field relatedListFilter and a rollup '
+        + 'summaryOperations filter, a solution-blueprint summary filter, an analytics query where, '
+        + 'a dataset selection runtimeFilter, a query where and having, the data-engine aggregate '
+        + 'call\'s having, an aggregation filter and a query-filter where; and, on a dataset filter '
+        + 'and a dataset measure filter only, the same slots INSIDE a nested-relation condition',
+      replacement:
+        'the spelling the refusal prescribes, which is the one the query faces already prescribe. '
+        + 'A flag is the boolean itself: $null true is "has no value", $null false is "has a value", '
+        + 'and $exists is the inverse. Absence is the null predicate, never null in an ordering or '
+        + 'list position: $eq null is "has no value", $ne null is "has a value", and "one of these '
+        + 'values OR has no value" is an $or of an $in and a $null true. A single value for $in is a '
+        + 'one-member list, or plain equality. A range is two bounds in a two-element list; a range '
+        + 'bounded on one side is a $gte or a $lte; a column-to-column range is a $gte and a $lte '
+        + 'whose comparands are { $field } references. "None of these values" is $nin, never $ne '
+        + 'with a list. The null predicate itself, a { $field } reference as a whole comparand, '
+        + 'an empty $in or $nin list and a whitespace endpoint are untouched',
+      reason:
+        'The save door narrows to exactly what the query faces already refuse (#20116, the '
+        + 'collector for its family; the $ne member is route A, the same reach and the same one '
+        + 'sentence as the equality slot of filter-equality-array-comparand-refused-at-save). The '
+        + 'shared comparand-shape face refuses on every query a null ordering comparand (ruled '
+        + '2026-09-01), a non-list $in / $nin and a malformed $between range, a null list member or '
+        + 'endpoint (ruled 2026-08-31), a blank endpoint (ruled 2026-09-20), a { $field } endpoint '
+        + '(ruled 2026-08-11) and an array under $ne (ruled 2026-09-24); every query face refuses a '
+        + 'non-boolean $null / $exists flag, because the backends read one in opposite directions. '
+        + 'Measured on origin/main af32cf9a before the change: a dataset filter, a dataset measure '
+        + 'filter, a dashboard widget filter and a report runtimeFilter each parsed GREEN for one '
+        + 'instance of every shape the surface names, while the face refused each one with '
+        + 'INVALID_FILTER / 400 and the analytics where door refused every one of them, the flags '
+        + 'included. So such a document published clean and then failed every chart built on it. '
+        + 'The save door now asks the face itself about each slot, so it refuses exactly what the '
+        + 'face refuses and passes what the face passes; the words are the face\'s, or the '
+        + 'sentence the enforced operator slot already prints for the same comparand, never the '
+        + 'face\'s location clause, which the issue\'s path carries instead. The reach is the '
+        + 'face\'s and no wider: the field entries of a condition and of every $and / $or / $not '
+        + 'member, and NOT a field spec with no $ key (a nested-relation condition), which neither '
+        + 'the face nor the drivers\' flag checks descend. The analytics where door DOES descend '
+        + 'one (it flattens the relation to dotted members and judges each), so the two dataset '
+        + 'carriers, whose own nested-relation walk already refused an equality list there '
+        + '(dataset-filter-nested-relation-equality-array-refused-at-save), now ask the same '
+        + 'judge about every slot inside a relation. ⚠️ So one position still refuses only at '
+        + 'execution: a refused shape INSIDE a nested-relation condition on a dashboard widget '
+        + 'filter or a report runtimeFilter, which reach the analytics where door too but carry '
+        + 'the shared schema\'s reach only. Metadata AT REST is not rewritten and this entry adds no D2 '
+        + 'conversion: none of these shapes has a single honest meaning (that is why each was '
+        + 'refused), and a conversion would have to pick one. The read path does not re-validate '
+        + 'stored rows, so a stored document keeps loading; re-saving it through the metadata '
+        + 'protocol (422 INVALID_METADATA), defineStack or os validate is refused at the filter\'s '
+        + 'path. Such a filter has failed every query since the runtime refusal of its shape, so '
+        + 'the refusal is a repair and not a loss. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every stored document that carries a filter: os validate '
+        + 'or defineStack, and a save through the metadata protocol, report each refused slot by '
+        + 'path with the operator, the field and the prescription, so the sweep is mechanical for '
+        + 'the carriers the surface lists. Decide per filter what it meant and write that spelling; '
+        + 'on most backends the filter had been failing every query, so re-check what the surface '
+        + 'is supposed to show rather than assuming the old rows were right. One producer was '
+        + 'measured before the change: a filter builder that writes "is empty" / "is not empty" as '
+        + 'an $in / $nin list holding null and the empty string (the Studio filter-condition widget, '
+        + 'at the console pin of that date); what it wrote is refused on its next save. ⛔ A clean '
+        + 'save is NOT a complete sweep for the one position the reason names: search dashboard '
+        + 'widget filters and report runtimeFilters for a nested-relation condition whose inner '
+        + 'field carries one of these shapes, and chart it, where the analytics where door refuses '
+        + 'with INVALID_FILTER / 400 naming the field and the path.',
+    },
     {
       id: 'filter-text-operator-declared-type-refused',
       surface: 'a STORED filter body the engine executes, where a text operator names a '
@@ -14872,6 +14955,48 @@ const step18: MigrationStep = {
         + 'array is the case to read closest: its two corrected spellings — value: "won" on '
         + 'equals, and operator: "in" with value: ["won"] — select the same rows, so the result '
         + 'set cannot tell you which the metadata meant, and only the author knows.',
+    },
+    // #20186, route C-prime (seat answers 5855433719 / 5855548706). A write-time
+    // re-routing of the flattened view overlays: each member judges only the
+    // `viewKind` it names. The stored rows it newly refuses are read and served
+    // exactly as before and fail only on their next save, which is why this is a
+    // semantic entry and not a conversion — which value a refused key meant is a
+    // fact only its author holds.
+    {
+      id: 'view-overlay-judged-by-viewkind-arm',
+      surface:
+        'A flattened `view` overlay saved through the metadata write door (`PUT /api/v1/meta/view/:name`, the '
+        + 'Studio / MCP save) whose `viewKind` names one family while the body was judged by the other: a '
+        + 'column-less `viewKind: "list"` body, which only the form overlay member used to accept (its list keys '
+        + '`sort`, `searchableFields`, `timeline`, `sharing` and the rest stripped unread), and a `viewKind: "form"` '
+        + 'body carrying list `columns`, which only the list overlay member used to accept.',
+      replacement:
+        'Each overlay is judged by the member its `viewKind` names. A column-less list overlay is a patch on the '
+        + 'view it shadows and carries list keys the list view schema accepts: a `sort` array of `{ field, order }` '
+        + '(the bare string clause was retired in 17.5.0), no `timeline.metaFields` (the timeline block has no such '
+        + 'key), an array `searchableFields`, and the list `sharing` block (`{ type, lockedBy }`), not the form '
+        + 'public-link block. A column-less list overlay names no `type`; one that does is a full inline config and '
+        + 'lists its `columns`. A form overlay\'s `columns` is its body-column count (an integer); a field list '
+        + 'means the body is a list view (`viewKind: "list"`) or belongs in `sections: [{ fields }]`.',
+      reason:
+        'Both overlay members shared one `viewKind: list | form` enum. The list member required `columns`, so it '
+        + 'refused the column-less list patch the console writes on every toolbar save (the ruled patch-only '
+        + 'storage shape, maintainer ruling: 「`persistViewPatch` 只存 patch,不存 merged base」); the '
+        + 'union then tried the form member, which requires no list key and strips every one, and accepted it — '
+        + 'so a retired `sort` string or a `timeline.metaFields` the list schema refuses by name was saved with '
+        + '`success: true` and stored as sent. Measured on `origin/main` @ `4df101c3` and again at `ce70876e` '
+        + '(after the `options`-bag door landed) through the real save. Ruled route C-prime: each member admits one `viewKind`, the list '
+        + 'member judges a column-less patch (`columns` optional there only; the authoring list view keeps it '
+        + 'required), and a column-less body that names a `type` stays refused at `columns`. Not convertible: '
+        + 'whether a refused value was a typo or a stale capability is the author\'s call.',
+      acceptanceCriteria:
+        'Every stored flattened `view` overlay saves again unchanged. A row that does not is refused '
+        + '`422 INVALID_METADATA` on its next save, with the issue located at the refused key (`sort`, `timeline`, '
+        + '`searchableFields`, `sharing`, `columns`) and carrying that key\'s own message — for a column-less list '
+        + 'overlay naming a `type`, the prescription at `columns`; for a field list on a form overlay, the '
+        + 'body-column-count prescription at `columns`. Nothing is rewritten on read and nothing is refused on '
+        + 'read: a row that fails is served exactly as stored until it is saved. Verify by re-saving each stored '
+        + 'flattened overlay (a GET then a PUT of the same body) and reading a `200`.',
     },
     // The door half of ruling A on objectui#10380 (#20051). A write-time narrowing
     // of the flattened view overlays: the stored rows it newly refuses are read and

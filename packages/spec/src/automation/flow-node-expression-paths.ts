@@ -120,12 +120,17 @@ export type FlowNodeExpressionRole =
    * `registerFlow` and `objectstack validate` by the executor-side half
    * (`service-automation` / `lint` consumers call
    * `validateExpression('value', …)` on what this ledger resolves, after
-   * `AssignmentValueSchema` has judged the envelope's shape); the same half
+   * `FlowValueSlotSchema` has judged the envelope's shape); the same half
    * evaluates the envelope at run time. That half LANDED in #15137: the
    * built-in `assignment` executor evaluates a declared envelope and assigns
    * the result. Comment-only correction — before #15137 this paragraph closed
    * by saying the executor still wrote the envelope object into the variable
    * verbatim, which the landing made false.
+   *
+   * Declared since #19938 for the `create_record` / `update_record` `fields`
+   * map too (#11182 ruling D: CEL usable in every value slot in 17.x) — where
+   * most authored value expressions live — declared and evaluated in the same
+   * change, so the slot was never declared without its executor half.
    */
   | 'value';
 
@@ -161,7 +166,7 @@ export interface FlowNodeExpressionPath {
  *
  * Also deliberately absent: config values that merely INTERPOLATE `{token}`
  * templates — `script.inputs` / `script.variables` / `subflow.input`,
- * `notify.body`, `create_record.fields.*` and so on. Those are text-with-holes,
+ * `notify.body` and so on. Those are text-with-holes,
  * the shape essentially every node config string has, already covered
  * generically (`validate-flow-template-paths`, the CLI flow linter's
  * `collectTemplateStrings`). A `flow-template` ledger entry means something
@@ -173,15 +178,18 @@ export interface FlowNodeExpressionPath {
  * A `value` entry (#14149) is listed for a third reason, not either of those:
  * the slot's authored value may be an expression *envelope* — `{ dialect:
  * 'cel', source }`, a shape no `{token}` interpolation ever produced — and only
- * that form is resolved. The `assignment` node's `assignments` map is the one
- * such slot; its `{token}` strings stay the generic text-with-holes case above.
- * It is declared through the spec Zod channel (`AssignmentConfigSchema`'s map
- * value, `.meta({ xExpression: 'value' })`, exposed to the ratchet through
- * `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` in `schemaless-node-config.zod.ts`)
- * because the node's descriptor declares the map as `additionalProperties:
- * true` with no marker; the ratchet walks an object-valued
- * `additionalProperties` as the `*` segment and maps the `value` marker to
- * this role.
+ * that form is resolved. Three maps are such slots: the `assignment` node's
+ * `assignments` (#14149) and the `create_record` / `update_record` `fields`
+ * (#19938). Their `{token}` strings stay the generic text-with-holes case
+ * above — a template in `fields.*` means exactly what it meant before the
+ * slot was declared. Each is declared through the spec Zod channel (the map
+ * value's `.meta({ xExpression: 'value' })` on `AssignmentConfigSchema` /
+ * `CreateRecordConfigSchema` / `UpdateRecordConfigSchema`, exposed to the
+ * ratchet through `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` in
+ * `schemaless-node-config.zod.ts`) because each node's descriptor declares
+ * the map as `additionalProperties: true` with no marker; the ratchet walks
+ * an object-valued `additionalProperties` as the `*` segment and maps the
+ * `value` marker to this role.
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -234,6 +242,31 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     path: 'assignments.*',
     role: 'value',
     label: 'assignment value',
+  },
+  {
+    // The CRUD write map (#19938, the contract half of #11182 ruling D): every
+    // value of `fields` — `{ <field>: <value> }`, keys authored by the flow
+    // author — is a `value` slot, the same shape and dialect rules as
+    // `assignments.*`. A plain string there stays `{token}` interpolation with
+    // its 17.x meaning unchanged; only the envelope form is new. Declared
+    // through the spec Zod channel (`CreateRecordConfigSchema`'s map value,
+    // `FlowValueSlotSchema`): the descriptor's own `fields` is
+    // `additionalProperties: true` and carries no marker, exactly like the
+    // `assignment` map above. Only the TOP-LEVEL value of each field is
+    // judged — an envelope-shaped object nested inside a JSON value is data.
+    nodeType: 'create_record',
+    path: 'fields.*',
+    role: 'value',
+    label: 'create_record field value',
+  },
+  {
+    // The same map on the update node (`UpdateRecordConfigSchema`); its
+    // `filter` map is NOT a value slot — a filter is a match condition, not a
+    // value to compute.
+    nodeType: 'update_record',
+    path: 'fields.*',
+    role: 'value',
+    label: 'update_record field value',
   },
 ];
 
@@ -339,10 +372,38 @@ export function resolveFlowNodeExpressions(
 }
 
 /**
+ * Every authored value sitting in a `value`-role slot for `nodeType` — strings
+ * and literals included, not only envelopes (#19938).
+ *
+ * {@link resolveFlowNodeExpressions} emits only the envelope form for this
+ * role, because only an envelope is an expression to CHECK. Tooling that
+ * reasons about the other form such a slot accepts — the lint's author-time
+ * hint that points a `{…}` template expression at the CEL value envelope
+ * (#11182 ruling D) — needs the strings too, located by the SAME path walk, so
+ * it can never disagree with the ledger about which positions are value slots.
+ * An absent (`undefined`) value is skipped; everything else is handed over
+ * verbatim, with its concrete path.
+ *
+ * Pure path resolution, like its sibling — no judgement about what a value
+ * says.
+ */
+export function resolveFlowNodeValueSlots(nodeType: string, config: unknown): ResolvedFlowNodeExpression[] {
+  if (config == null || typeof config !== 'object') return [];
+  const out: ResolvedFlowNodeExpression[] = [];
+  for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
+    if (entry.nodeType !== nodeType || entry.role !== 'value') continue;
+    walk(config as Record<string, unknown>, entry.path.split('.'), '', (path, value) => {
+      if (value !== undefined) out.push({ entry, path, value });
+    });
+  }
+  return out;
+}
+
+/**
  * The one sentence a refused `predicate` slot leads with (#15572) — the same
  * words however the value is wrong, so an author (or an agent reading the
  * failure) learns the rule before the detail. Mirrors
- * `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL`, the `value` role's equivalent.
+ * `VALUE_ENVELOPE_REFUSAL`, the `value` role's equivalent.
  *
  * #17493 widened the sentence rather than adding a second one: a string that is
  * blank after trimming is refused by the same rule, so the sentence names it.
@@ -378,7 +439,8 @@ export const PREDICATE_SLOT_STRING_REFUSAL =
  * ## Why this is a refusal and not a parse
  *
  * The `{ dialect, source }` envelope is the `value` role's spelling
- * (`assignment.assignments.*`, the 2026-09-02 ruling on #14149). In a predicate
+ * (`assignment.assignments.*`, the 2026-09-02 ruling on #14149; the CRUD
+ * `fields.*` since #19938). In a predicate
  * slot it was a shape NOBODY could see: the slot is declared `z.string()`, but
  * a node's `config` is an open `z.record(z.unknown())` that no Zod schema is
  * parsed against, the unknown-key walk exempts the schemaless node types
@@ -425,8 +487,8 @@ export function predicateSlotRefusal(value: unknown): { message: string; source:
     message:
       `${PREDICATE_SLOT_STRING_REFUSAL} Found ${found}. Write the predicate as bare CEL text `
       + '(e.g. `record.rating >= 4`); the `{ dialect, source }` envelope is the `value`-role spelling '
-      + '(the `assignment` node\'s `assignments` map), and in a predicate slot it is read by the evaluator '
-      + 'but by neither validator.',
+      + '(the `assignment` node\'s `assignments` map, a `create_record` / `update_record` node\'s `fields` map), '
+      + 'and in a predicate slot it is read by the evaluator but by neither validator.',
     source: typeof rawSource === 'string' ? rawSource : '',
   };
 }

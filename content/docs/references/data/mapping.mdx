@@ -28,7 +28,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **source** | `string \| string[]` | ✅ | Source column header(s) |
-| **target** | `string \| string[]` | ✅ | Target object field(s) |
+| **target** | `string \| string[]` | ✅ | Target object field(s); a declared part of a compound field is written field.part (e.g. mailing_address.street), and the parts one row maps are assembled into that field's value |
 | **transform** | `Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>` | optional (default: `"none"`) |  |
 | **params** | `{ value?: any; valueMap?: Record<string, any>; separator?: string }` | optional |  |
 
@@ -61,7 +61,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **source** | `string \| string[]` | ✅ | Source column header(s) |
-| **target** | `string \| string[]` | ✅ | Target object field(s) |
+| **target** | `string \| string[]` | ✅ | Target object field(s); a declared part of a compound field is written field.part (e.g. mailing_address.street), and the parts one row maps are assembled into that field's value |
 | **transform** | `Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>` | optional (default: `"none"`) |  |
 | **params** | `{ value?: any; valueMap?: Record<string, any>; separator?: string }` | optional |  |
 

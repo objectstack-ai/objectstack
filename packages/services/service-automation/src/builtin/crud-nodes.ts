@@ -7,6 +7,7 @@ import {
     CreateRecordConfigSchema,
     UpdateRecordConfigSchema,
     DeleteRecordConfigSchema,
+    isExpressionEnvelopeShaped,
 } from '@objectstack/spec/automation';
 import type {
     GetRecordConfigParsed,
@@ -14,7 +15,7 @@ import type {
     UpdateRecordConfigParsed,
     DeleteRecordConfigParsed,
 } from '@objectstack/spec/automation';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AutomationEngine } from '../engine.js';
@@ -150,6 +151,50 @@ function writtenRowCount(result: unknown): number {
 }
 
 /**
+ * Resolve a `create_record` / `update_record` `fields` map to the values the
+ * write carries (#11182 ruling D — the executor half of the `fields.*` value
+ * slot #19938 declares in the expression ledger).
+ *
+ * Per field, by SHAPE — the rule the ledger resolver and the spec contract
+ * (`FlowValueSlotSchema`) draw with the same predicate, imported rather than
+ * re-spelled, so "which values does the validator judge" and "which values
+ * does the executor evaluate" cannot drift apart:
+ *
+ *  - an envelope-shaped TOP-LEVEL value ({@link isExpressionEnvelopeShaped} —
+ *    a plain object naming a string `dialect`) is a CEL value envelope, and
+ *    is EVALUATED by `AutomationEngine.evaluateValueEnvelope`, the call the
+ *    `assignment` executor already makes — one evaluator, one scope
+ *    (`celScope`), one notion of malformed (`valueEnvelopeRefusals`, the call
+ *    `registerFlow` makes). A malformed envelope throws rather than degrading
+ *    to a literal; a value that faults on the live variables throws with its
+ *    source (ADR-0032 §1c/§1d). Neither is written.
+ *  - every other value goes through `interpolate()` exactly as the whole map
+ *    used to: a `{token}` string keeps its 17.x meaning byte-for-byte (ruling
+ *    D: no spelling changes meaning), and a literal — an array, a plain
+ *    object, an envelope-shaped object NESTED inside either — is data, with
+ *    its strings interpolated as before.
+ *
+ * Before this, the executor handed the whole map to `interpolate()`, which
+ * recursed into an envelope as plain data: a text or JSON column received the
+ * literal `{"dialect":"cel","source":"…"}` with the run reporting success, and
+ * a number column was refused by the data engine.
+ */
+function resolveFieldValues(
+    engine: AutomationEngine,
+    fields: Record<string, unknown> | undefined,
+    variables: VariableMap,
+    context: AutomationContext,
+): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(fields ?? {})) {
+        out[key] = isExpressionEnvelopeShaped(value)
+            ? engine.evaluateValueEnvelope(value, variables, `fields.${key}`)
+            : interpolate(value, variables, context);
+    }
+    return out;
+}
+
+/**
  * CRUD built-in nodes — `get_record` / `create_record` / `update_record` /
  * `delete_record`, wired to the runtime data layer (ObjectQL / IDataEngine).
  * Part of the platform baseline, so the core {@link AutomationServicePlugin}
@@ -157,7 +202,9 @@ function writtenRowCount(result: unknown): number {
  *
  * Each executor:
  *  1. Interpolates `{var}` / `{var.path}` / `{$User.*}` / `{NOW()}` tokens in
- *     `node.config` against the running flow's variable context.
+ *     `node.config` against the running flow's variable context — and, in the
+ *     `create_record` / `update_record` `fields` map, evaluates a CEL value
+ *     envelope to the value written ({@link resolveFieldValues}).
  *  2. Calls the resolved data engine via `ctx.getService('data')`.
  *  3. Writes the result back to the variable context under `outputVariable`
  *     (or under `<nodeId>.id` / `<nodeId>.records` by default), so downstream
@@ -291,7 +338,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const objectName = cfg.objectName;
                 if (!objectName) return refuseNode('create_record: objectName required');
 
-                const fields = interpolate(cfg.fields ?? {}, variables, context) as Record<string, unknown>;
+                // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
+                // evaluated; every other value interpolates exactly as before.
+                const fields = resolveFieldValues(engine, cfg.fields, variables, context);
                 const outputVariable = cfg.outputVariable;
 
                 const data = getData();
@@ -447,7 +496,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const filter = filterResult.filter;
                 // `fields` is the single canonical write-map key — no alias (the wrong key
                 // `fieldValues` is corrected at the authoring source + rejected by graph-lint).
-                const fields = interpolate(cfg.fields ?? {}, variables, context) as Record<string, unknown>;
+                // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
+                // evaluated; every other value interpolates exactly as before.
+                const fields = resolveFieldValues(engine, cfg.fields, variables, context);
 
                 const data = getData();
                 if (!data) {

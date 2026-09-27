@@ -107,8 +107,15 @@ describe('value-expression functions mirror the CEL stdlib 1:1 (#11060)', () => 
         expect(err.problem).toBe('arity');
         expect(err.fn).toBe('round');
         // The prescription IS the contract here: the refusal must hand the
-        // author the CEL-identical authoring pattern for N-decimal rounding.
-        expect(err.message).toContain('round(x * 100) / 100');
+        // author the N-decimal pattern that is right in BOTH dialects —
+        // `/ 100.0`, because in CEL `round()` is an int and `int / int` is
+        // integer division, so the `/ 100` spelling drops the decimals the
+        // moment it is copied into a CEL slot (#11182 ruling D point 2).
+        expect(err.message).toContain('round(x * 100) / 100.0');
+        const [c100, c1000] = [cel('round(1234.5678 * 100.0) / 100'), cel('round(1234.5678 * 100.0) / 100.0')];
+        expect(c100.ok && c1000.ok).toBe(true);
+        expect([c100.ok && c100.value, c1000.ok && c1000.value], 'the reason the decimal point is prescribed').toEqual([1234, 1234.57]);
+        expect(tpl('round(x * 100) / 100.0', { x: 1234.5678 }), 'and the template dialect agrees with it').toBe(1234.57);
         // min/max are exactly binary, like their CEL registrations.
         expect(() => tpl('min(1)', {})).toThrow(FlowExpressionFunctionError);
         expect(() => tpl('min(1, 2, 3)', {})).toThrow(FlowExpressionFunctionError);

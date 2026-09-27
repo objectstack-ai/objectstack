@@ -68,3 +68,24 @@ export type { ExportFieldMeta } from './export-format.js';
 // body fails `BaseResponseSchema` with `success is missing, must be a boolean`).
 // ⛔ A dispatcher domain takes the message and builds its own body.
 export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-multiplicity.js';
+
+// [#20193] THE per-caller read gate of one `/meta/:type/:name` document — the
+// ADR-0046 §6.7 docs audience, the app nav filter (`requiredPermissions`, the
+// ADR-0045 §3 publish gate, the docs-audience entry arm) and the ADR-0057 D10
+// service gates — published so the runtime dispatcher's `/meta` domain, the
+// only answer on a host that mounts just the `${prefix}/*` catch-all, asks the
+// SAME gate `RestServer` asks instead of a second resolver
+// (`meta-item-read-gate.ts`'s header is the authority).
+//
+// What travels is the decision and nothing transport-shaped: each caller hands
+// in its own I/O (`MetaItemReadGateSources`) and writes the DATA verdict
+// (`MetaItemReadVerdict`) on its own wire, in its own envelope — the same split
+// `repeatedQueryParamMessage` above makes.
+export { createMetaItemReadGate } from './meta-item-read-gate.js';
+export type {
+    MetaItemReadGateSources,
+    MetaItemReadRefusal,
+    MetaItemReadVerdict,
+    MetaReadGateCaller,
+    MetaReadGatePolicy,
+} from './meta-item-read-gate.js';

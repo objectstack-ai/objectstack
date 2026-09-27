@@ -293,10 +293,14 @@ describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #
       { type: 'simple', ...BOUND_FORM }],
     ['overlay.consoleFilterId', { filter: [{ id: 'row-1', field: 'name', operator: '=', value: 'x' }], ...BOUND_FORM },
       { type: 'simple', ...BOUND_FORM }],
-    ['put.isPinned', { isPinned: true, ...BOUND_LIST }, { type: 'simple', ...BOUND_LIST }],
-    ['put.sortOrder', { sortOrder: 3, ...BOUND_LIST }, { type: 'simple', ...BOUND_LIST }],
+    // [#20186] A lean `viewKind: 'list'` PUT is judged by the LIST member now,
+    // so it parses to a list (`type: 'grid'`). It used to parse to
+    // `type: 'simple'` — a FORM — because the form member was the one accepting
+    // it, with every list key stripped unread.
+    ['put.isPinned', { isPinned: true, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
+    ['put.sortOrder', { sortOrder: 3, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
     ['put.hidden', { hidden: true, ...BOUND_FORM }, { type: 'simple', hidden: true, ...BOUND_FORM }],
-    ['put.pinAndOrder', { isPinned: true, sortOrder: 3, ...BOUND_LIST }, { type: 'simple', ...BOUND_LIST }],
+    ['put.pinAndOrder', { isPinned: true, sortOrder: 3, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
   ];
 
   const REFUSED: Array<[string, unknown, string[]]> = [

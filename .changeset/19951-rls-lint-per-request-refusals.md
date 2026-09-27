@@ -14,7 +14,7 @@
 - FROM silent TO `rls-predicate-unenforceable`: `record.f in current_user`, `record.f.startsWith(current_user)`, `.endsWith(current_user)` and `.contains(current_user)`. Name the key that holds the value, for example `record.f in current_user.org_user_ids` or `record.f.startsWith(current_user.email)`.
 - FROM silent TO `rls-predicate-unenforceable`: `record.f.startsWith(current_user.org_user_ids)` (a list handed to a string method). Write `record.f in current_user.org_user_ids`, or pass a one-value key.
 
-**A `null` list member or `null` ordering bound.** The platform refuses both in every filter it is sent. The RLS layer does not run that check on its own filter, so the backend answers with its own semantics: on a SQL driver `record.f in [null]`, `!(record.f in ['a', null])` and `record.f > null` read no rows. Every analytics query over the object is refused.
+**A `null` list member or `null` ordering bound.** The platform refuses both in every filter it is sent. The RLS compiler runs that check on its own filter too (#20212) and drops the policy on every request: reads return no rows and `check` writes are refused 403.
 
 - FROM silent TO `rls-predicate-unenforceable`: `record.f in ['a', null]` and `!(record.f in ['a', null])`. Write `(record.f in ['a'] || record.f == null)`, or drop the `null` member.
 - FROM silent TO `rls-predicate-unenforceable`: `record.f in [null]`. Write `record.f == null`.
