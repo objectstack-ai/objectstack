@@ -288,11 +288,15 @@ function judgeCompiledComparands(filter: Record<string, unknown>): RlsComparandV
   } catch (thrown) {
     const { code, status } = (thrown ?? {}) as { code?: unknown; status?: unknown };
     if (!(thrown instanceof Error) || typeof code !== 'string' || typeof status !== 'number') throw thrown;
+    // The face's sentence is quoted whole (it names the operator, the field and
+    // the position); only its closing full stop is dropped, because the WARN
+    // line appends its own sentence after the detail.
     return {
       ok: false,
       detail:
         `the compiled predicate carries a comparand the platform's shared filter faces refuse (${code}), ` +
-        `so it was not handed to a driver; the face says: ${thrown.message}`,
+        'so the policy was not handed to a driver. In the face\'s own words, written for a caller\'s ' +
+        `filter: ${thrown.message.replace(/\.$/, '')}`,
     };
   }
 }
