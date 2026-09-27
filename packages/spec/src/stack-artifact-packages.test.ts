@@ -250,6 +250,21 @@ describe('ADR-0130 D4 — each `packages` entry is an OBJECT wrapping its manife
     expect(issueAt(result, ['packages'])?.code).toBe('invalid_type');
   });
 
+  it('refuses `packages: null` — `.optional()` admits `undefined`, not `null` (#19926)', () => {
+    // `null` is a present, non-array `packages`: malformed, not absent. Every
+    // reader of the key refuses it too (`INVALID_ARTIFACT_PACKAGES`); the rule
+    // is stated once, beside `AssembledPackageBodySchema`.
+    const result = parse({ ...singleManifestArtifact(), packages: null });
+
+    expect(result.success).toBe(false);
+    expect(issueAt(result, ['packages'])?.code).toBe('invalid_type');
+
+    // Control: the same artifact with `packages` absent, or explicitly
+    // `undefined`, parses — so the refusal above is about `null` alone.
+    expect(parse(singleManifestArtifact()).success).toBe(true);
+    expect(parse({ ...singleManifestArtifact(), packages: undefined }).success).toBe(true);
+  });
+
   it('refuses TODAY\'s runtime the future `{ ref, integrity }` segment — cleanly', () => {
     // ⚠️ DELIBERATE, and it is the forward half of the reservation: an older
     // runtime must refuse a newer artifact rather than mis-parse it into a
@@ -305,6 +320,36 @@ describe('ADR-0130 D4 — `packages` has a declared composition rule', () => {
       'com.example.crm',
       'com.example.crm.cpq',
     ]);
+  });
+
+  it('refuses `packages: null` on any input when composing two or more stacks (#19926)', () => {
+    // The concat pass skips `undefined` alone: `null` is malformed, not
+    // absent, and is refused with the strict parse's own envelope rather than
+    // composed as if the stack declared no packages. `strict: false` is the
+    // door that lets `null` reach composition at all — the strict parse
+    // refuses it first (the pin above).
+    const withNull = () => raw({ manifest: crmManifest, packages: null });
+    const control = () => raw({ manifest: cpqManifest, packages: [{ manifest: cpqManifest }] });
+
+    for (const stacks of [[withNull(), control()], [control(), withNull()]]) {
+      let refused: (Error & { code?: string; status?: number; issues?: { path?: unknown[] }[] }) | undefined;
+      try {
+        composeStacks(stacks);
+      } catch (err) {
+        refused = err as typeof refused;
+      }
+      expect(refused).toBeInstanceOf(Error);
+      expect(refused?.code).toBe('STACK_SCHEMA_INVALID');
+      expect(refused?.status).toBe(422);
+      expect(refused?.issues?.[0]?.path).toEqual(['packages']);
+    }
+
+    // Control: the same composition with `packages` absent on that stack
+    // composes, carrying the other stack's entries.
+    const composed = composeStacks([raw({ manifest: crmManifest }), control()]) as unknown as {
+      packages: { manifest: { id: string } }[];
+    };
+    expect(composed.packages.map((p) => p.manifest.id)).toEqual(['com.example.crm.cpq']);
   });
 
   it('does not warn about an undeclared composition rule (#5005 rule 3)', () => {
