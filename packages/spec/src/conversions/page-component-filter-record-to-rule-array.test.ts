@@ -590,7 +590,7 @@ describe('§8 the TODO channel — every site left as stored is reported (ruling
     expect(todo!.from).toBe(JSON.stringify(filter));
     expect(todo!.reason).toContain(said);
     // The tail every TODO of this entry carries: what happens to the row next.
-    expect(todo!.reason).toMatch(/Left as stored, it keeps loading unchanged and is refused at this door on its next save\.$/);
+    expect(todo!.reason).toMatch(/Left as stored, it keeps loading unchanged, but it is not the rule-array form its door declares — rewrite it by hand\.$/);
     expect(todo!.message).toContain(`at ${todo!.path} as stored`);
     expect(todo!.message).toContain(todo!.reason);
   });

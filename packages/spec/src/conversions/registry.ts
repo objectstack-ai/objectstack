@@ -10668,8 +10668,14 @@ function describeBlock(component: Dict): string {
  * rewrite is not lossless. ⛔ A combinator is never flattened into the AND list — for `$or`
  * and `$not` that changes which rows the page selects, which is the option the
  * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
- * does not validate) and is refused at its door on its next save, with the
- * prescription that door gives for it.
+ * does not validate), and its door's schema refuses the form — but WHERE that
+ * refusal lands differs by door, measured through `saveMetaItem`
+ * (`protocol.stored-migration.test.ts`): `dataSource.filter` is a declared key
+ * of the strict page-component schema, so the row's next save is refused
+ * there; `properties.filter` / `properties.defaultFilters` sit in the open
+ * `properties` bag the runtime save does not refuse by component type, so there
+ * the refusal is the component-props gate's (`@objectstack/lint`, advisory),
+ * and a re-save goes through.
  *
  * ## Every site left as stored is reported — `context.reportTodo`
  *
@@ -10715,7 +10721,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     + '`equals` rules, `{ $op: v }` → the mapped operator, AST comparisons → one rule each); a '
     + 'filter carrying `$and` / `$or` / `$not`, any part with no lossless rule spelling, or any '
     + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
-    + 'array, `staticData`) is left exactly as stored and is refused at its door on its next save (one filter '
+    + 'array, `staticData`) is left exactly as stored — reported as a TODO, which `os migrate meta '
+    + '--stored` lists — and is not the form its door declares (one filter '
     + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
   apply(stack, emit, context) {
     return mapPageComponents(stack, (component, path) => {
@@ -10748,8 +10755,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         context?.reportTodo?.({
           path: at,
           from: JSON.stringify(value),
-          reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged `
-            + 'and is refused at this door on its next save.',
+          reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged, `
+            + 'but it is not the rule-array form its door declares — rewrite it by hand.',
         });
         return holder;
       };

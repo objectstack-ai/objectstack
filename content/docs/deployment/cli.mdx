@@ -1195,6 +1195,7 @@ can produce, because both supply a live one.
 | Types with no repository write path (`agent`) | Their write path records no history and would force a draft live — a half-write is worse than leaving the row to the read path |
 | Rows that still fail the current schema after conversion | That is a genuine contract violation, not chain-owned history. The write path's rejection is correct; fix the row in Studio |
 | A flow whose rename the conflict guard refused | The old node-type token is a live name something else owns here. Rewriting would clobber that owner, so the row fails loudly naming the token — never a silent skip |
+| A site the conversion chain leaves as stored because no lossless rewrite exists — above all a page filter carrying `$and` / `$or` / `$not` | Flattening a combinator changes which rows the page selects, so it is never done. Each site is printed as a `TODO` line under its row — path, block, and what blocks the rewrite — whatever the row's outcome; a row with nothing but TODOs is reported `skipped`. It does not fail the run, since no run of this pass can clear it: rewrite each site by hand |
 
 **Flows are covered, and cost one extra plugin.** Flow-node conversions carry an
 open-namespace conflict guard that has to consult the *live* executor registry
@@ -1221,8 +1222,8 @@ something the platform can depend on. What running it buys is hygiene (cleaner
 diffs, exports and history from here on, and the recurring boot notices go
 quiet) plus one thing that was previously unobtainable: **you can assert it.**
 A run with nothing left to do exits `0`; a deployment with rows still carrying
-an old dialect exits `1`. So "my metadata is on protocol N" becomes a check
-rather than a belief.
+an old dialect this pass can convert exits `1`. So "my metadata is on protocol N"
+becomes a check rather than a belief.
 
 Note the division of labour with the default mode: `os migrate meta --from N`
 lists the edits **an author's source** needs and reads no database; `--stored`

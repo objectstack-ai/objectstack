@@ -626,3 +626,171 @@ describe('formatStoredMigrationReport (#4327)', () => {
         expect(text).toMatch(/conditionalRequired → requiredWhen/);
     });
 });
+
+describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO, not silence (#17321)', () => {
+    // Ruling item 2 (decision batch #121 item 4, B): a stored page filter
+    // carrying `$and` / `$or` / `$not` is passed through unchanged and
+    // reported as a structured TODO naming the page/block and the combinator —
+    // `os migrate meta --stored` prints the list, so the operator can answer
+    // "did it convert my row" from that output.
+    //
+    // Before the TODO lane existed, the conversion emitted NO notice for such a
+    // site, this pass reads notices as its change signal, and so a page whose
+    // only legacy filter carried a combinator was counted `canonical` —
+    // "already on protocol" about a row whose next save is refused.
+    const COMBINATOR = { $or: [{ stage: 'open' }, { stage: 'won' }] };
+    const pageRow = (name: string, components: unknown[]) => ({
+        type: 'page',
+        name,
+        metadata: { name, label: 'Pipeline', type: 'app', regions: [{ name: 'main', components }] },
+    });
+    const kanban = (filter: unknown) => ({ type: 'object-kanban', properties: { objectName: 'deal', filter } });
+    const grid = (filter: unknown) => ({ type: 'object-grid', properties: { objectName: 'deal', filter } });
+    const combinatorPage = pageRow('pipeline_board', [kanban(COMBINATOR)]);
+    const losslessPage = pageRow('open_deals', [grid({ stage: 'open' })]);
+    const mixedPage = pageRow('deal_desk', [grid({ stage: 'open' }), kanban(COMBINATOR)]);
+    const canonicalPage = pageRow('won_deals', [grid([{ field: 'stage', operator: 'equals', value: 'won' }])]);
+
+    it('a combinator-only page is listed with a TODO naming its path and the combinator — not counted canonical', async () => {
+        const { engine, tables } = makeStubEngine([combinatorPage]);
+        const before = JSON.stringify(metaRows(tables));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        expect(report.canonical).toBe(0);
+        expect(report.skipped).toBe(1);
+        expect(report.rows).toHaveLength(1);
+        const row = report.rows[0]!;
+        expect(row).toMatchObject({ type: 'page', name: 'pipeline_board', outcome: 'skipped', notices: [] });
+        expect(row.reason).toMatch(/left 1 site\(s\) of this row as stored/);
+        expect(row.todos).toHaveLength(1);
+        const todo = row.todos[0]!;
+        expect(todo.conversionId).toBe('page-component-filter-record-to-rule-array');
+        expect(todo.path).toBe('pages[0].regions[0].components[0].properties.filter');
+        expect(todo.from).toBe(JSON.stringify(COMBINATOR));
+        expect(todo.reason).toContain('the `object-kanban` block');
+        expect(todo.reason).toContain('the combinator `$or`');
+        // A TODO is reporting only: nothing written, and the filter is never flattened.
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
+
+        // The operator reads it off the rendered report: the row, the path, the combinator.
+        const text = formatStoredMigrationReport(report).join('\n');
+        expect(text).toContain('page/pipeline_board [env-wide]');
+        expect(text).toContain(`TODO page-component-filter-record-to-rule-array: ${JSON.stringify(COMBINATOR)} left as stored at pages[0].regions[0].components[0].properties.filter`);
+        expect(text).toContain('`$or`');
+        expect(text).toMatch(/☐ TODO: 1 site\(s\) in 1 row\(s\) are left as stored/);
+        // …and is never told the opposite in the same breath.
+        expect(text).not.toMatch(/already on protocol/);
+    });
+
+    it('does not flip `storedMigrationClean` — a skip class this pass has no lever for, by ruling', async () => {
+        const { engine, tables } = makeStubEngine([combinatorPage]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const preview = await protocol.migrateStoredMetadata();
+        expect(storedMigrationClean(preview)).toBe(true);
+
+        // An apply run writes nothing for it either, and says the same thing.
+        const applied = await protocol.migrateStoredMetadata({ apply: true });
+        expect(applied.rows[0]).toMatchObject({ outcome: 'skipped' });
+        expect(applied.rows[0]!.todos).toHaveLength(1);
+        expect(storedMigrationClean(applied)).toBe(true);
+        expect(historyRows(tables)).toHaveLength(0);
+    });
+
+    it('CONTROL — a losslessly folded filter produces no TODO, and its outcome is unchanged', async () => {
+        const { engine, tables } = makeStubEngine([losslessPage]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const preview = await protocol.migrateStoredMetadata();
+        expect(preview.rows).toHaveLength(1);
+        expect(preview.rows[0]).toMatchObject({ outcome: 'pending', todos: [] });
+        expect(preview.rows[0]!.notices.map((n) => n.path)).toEqual([
+            'pages[0].regions[0].components[0].properties.filter',
+        ]);
+        expect(formatStoredMigrationReport(preview).join('\n')).not.toMatch(/TODO/);
+
+        const applied = await protocol.migrateStoredMetadata({ apply: true });
+        expect(applied.rows[0]).toMatchObject({ outcome: 'rewritten', todos: [] });
+        expect(storedMigrationClean(applied)).toBe(true);
+        const stored = JSON.parse(metaRows(tables)[0]!.metadata);
+        expect(stored.regions[0].components[0].properties.filter).toEqual([
+            { field: 'stage', operator: 'equals', value: 'open' },
+        ]);
+    });
+
+    it('CONTROL — an already-canonical page is counted, never itemised, and reports no TODO', async () => {
+        const { engine } = makeStubEngine([canonicalPage]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        expect(report.canonical).toBe(1);
+        expect(report.rows).toHaveLength(0);
+        const text = formatStoredMigrationReport(report).join('\n');
+        expect(text).toMatch(/already on protocol/);
+        expect(text).not.toMatch(/TODO/);
+    });
+
+    it('one row, two filters: the lossless one converts, the combinator one is a TODO on the same row', async () => {
+        const { engine } = makeStubEngine([mixedPage]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        // The outcome is what the notice alone makes it — TODOs never move it.
+        expect(report.pending).toBe(1);
+        expect(storedMigrationClean(report)).toBe(false);
+        const row = report.rows[0]!;
+        expect(row.outcome).toBe('pending');
+        expect(row.notices.map((n) => n.path)).toEqual(['pages[0].regions[0].components[0].properties.filter']);
+        expect(row.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[1].properties.filter']);
+        expect(row.todos[0]!.reason).toContain('the combinator `$or`');
+
+        const text = formatStoredMigrationReport(report).join('\n');
+        const rowAt = text.indexOf('page/deal_desk');
+        const noticeAt = text.indexOf('page-component-filter-record-to-rule-array: {"stage":"open"} →');
+        const todoAt = text.indexOf('TODO page-component-filter-record-to-rule-array:');
+        // Both nested under the row, the conversion first.
+        expect(rowAt).toBeGreaterThanOrEqual(0);
+        expect(noticeAt).toBeGreaterThan(rowAt);
+        expect(todoAt).toBeGreaterThan(noticeAt);
+    });
+
+    it('MEASURED — the write path judges the two door kinds differently, and the TODO rides on either outcome', async () => {
+        // `properties.filter` sits in the page component's open `properties` bag:
+        // the runtime save door does not parse it by `type` (the props gate is
+        // `@objectstack/lint`'s, advisory). `dataSource.filter` is a declared key
+        // of the strict component schema, so the save door refuses it there.
+        const bindingMixed = pageRow('deal_room', [
+            grid({ stage: 'open' }),
+            { type: 'object-kanban', dataSource: { object: 'deal', filter: COMBINATOR }, properties: { objectName: 'deal' } },
+        ]);
+        const { engine, tables } = makeStubEngine([mixedPage, bindingMixed]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true });
+
+        const props = report.rows.find((r) => r.name === 'deal_desk')!;
+        expect(props.outcome).toBe('rewritten');
+        expect(props.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[1].properties.filter']);
+        const binding = report.rows.find((r) => r.name === 'deal_room')!;
+        expect(binding.outcome).toBe('failed');
+        expect(binding.todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[1].dataSource.filter']);
+
+        // The rewritten row persisted its lossless half; the combinator is byte-identical.
+        const stored = JSON.parse(metaRows(tables).find((r) => r.name === 'deal_desk')!.metadata);
+        expect(stored.regions[0].components[0].properties.filter).toEqual([
+            { field: 'stage', operator: 'equals', value: 'open' },
+        ]);
+        expect(stored.regions[0].components[1].properties.filter).toEqual(COMBINATOR);
+
+        // Re-run: what is left of the rewritten row is its TODO — skipped, never canonical.
+        const again = await protocol.migrateStoredMetadata({ apply: true, types: ['page'] });
+        const rerun = again.rows.find((r) => r.name === 'deal_desk')!;
+        expect(rerun.outcome).toBe('skipped');
+        expect(rerun.todos).toHaveLength(1);
+        expect(again.canonical).toBe(0);
+    });
+});
