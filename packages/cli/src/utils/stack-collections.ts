@@ -101,33 +101,57 @@ const asBag = (value: unknown): Bag | undefined =>
  * function spells neither the rule nor the refusal. It hands a non-array value
  * to the resolver, and the refusal the author sees is the resolver's own.
  *
- * - ABSENT (`undefined` / `null`) answers `[]`. It is spelled exactly as the
- *   resolver's own absent branch. `null` is read as absent here as in every
- *   other reader; whether it should be is a separate decision (#19926), and
- *   this function does not settle it.
+ * - The key ABSENT (`undefined`) answers `[]`. This is the only value the
+ *   function answers on its own.
  * - An array is returned BY REFERENCE and unparsed. The docs readers need
  *   entries by POSITION (`packages[i]` is where collected docs attach), and the
  *   resolver answers bodies in LOAD order, so they cannot read its result.
  *   Parsing each entry is the resolver's job on the path that registers
  *   packages ({@link packageBodies} reaches it). Adding that parse to the docs
  *   readers would widen what they refuse, and that is a separate change.
- * - Any other value goes to the resolver, which refuses it.
+ * - Every other value goes to the resolver, `null` included. A non-array is
+ *   refused there.
+ *
+ * ## `null` follows the resolver, and is never judged here
+ *
+ * Ruling A on #19926 (`5805260775`) settles `null`: it is malformed at every
+ * reader, and `resolveArtifactPackageOrder` drops its `null` branch. That core
+ * change lands separately (#19926), and until it does, the resolver still
+ * answers `null` through its ABSENT branch. So this function does not answer
+ * `null` itself. It asks the resolver and reads the answer:
+ *
+ * - The resolver's absent answer is `[artifact]`, holding the caller's own
+ *   object BY REFERENCE (ADR-0130 D4, second branch). This function recognises
+ *   that answer by IDENTITY against the object it passed in, and returns `[]`.
+ *   That is today's answer for `null`, byte for byte.
+ * - Once the resolver refuses `null`, its `INVALID_ARTIFACT_PACKAGES` reaches
+ *   every reader here, with no edit to this package.
+ *
+ * ⛔ Never add a private `null` branch here, in either direction. Answering
+ * `null` as absent here would keep the CLI reading it as absent after the
+ * resolver starts refusing it. Refusing it here would be a second copy of a
+ * rule the resolver owns.
  *
  * ⛔ Never put an `Array.isArray` in front of this function as a fall-through
  * to "no packages". That silent answer is exactly what this function removes.
  *
- * @throws The resolver's `INVALID_ARTIFACT_PACKAGES` envelope for a present
- *   non-array `packages`.
+ * @throws Whatever the resolver raises for a present non-array `packages`:
+ *   today `INVALID_ARTIFACT_PACKAGES` for every non-array except `null`.
  */
 export function declaredPackageEntries(packages: unknown): readonly unknown[] {
-  if (packages === undefined || packages === null) return [];
+  // The key is absent: there is nothing to judge.
+  if (packages === undefined) return [];
   if (Array.isArray(packages)) return packages;
-  // Present and not an array: the resolver owns the refusal.
-  resolveArtifactPackageOrder({ packages });
-  // Reached only if the resolver ever stops refusing a non-array. An empty
-  // answer here would bring back the silent fall-through, so fail loudly.
+  // Present and not an array, `null` included: the resolver decides.
+  const probe = { packages };
+  const answer = resolveArtifactPackageOrder(probe);
+  // The resolver's ABSENT answer holds the probe itself, by reference.
+  if (answer.length === 1 && answer[0] === probe) return [];
+  // Reached only if the resolver answers a non-array with anything but a
+  // refusal or its absent answer. An empty answer here would bring back the
+  // silent fall-through, so fail loudly.
   throw new Error(
-    `resolveArtifactPackageOrder accepted a \`packages\` of type ${typeof packages}; `
+    `resolveArtifactPackageOrder accepted a \`packages\` of type ${packages === null ? 'null' : typeof packages}; `
     + 'the CLI package readers cannot walk it by position.',
   );
 }
@@ -143,8 +167,9 @@ export function declaredPackageEntries(packages: unknown): readonly unknown[] {
  * an empty list for that case, and every caller below reads the top level
  * first anyway.
  *
- * A `packages` that is present but is not an array is refused through
- * {@link declaredPackageEntries}, never answered `[]`.
+ * A `packages` that is present but is not an array goes through
+ * {@link declaredPackageEntries}, which hands it to the resolver: it is refused,
+ * or, for `null` while the resolver still reads it as absent, answered `[]`.
  */
 function packageBodies(stack: unknown): Bag[] {
   if (declaredPackageEntries(asBag(stack)?.packages).length === 0) return [];

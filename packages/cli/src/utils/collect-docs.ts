@@ -385,6 +385,7 @@ export interface PackageDocSet {
  * An absent `packages` answers `[]`. A present non-array one (`{}`, `0`, `'x'`)
  * is refused with the resolver's `INVALID_ARTIFACT_PACKAGES` through
  * {@link declaredPackageEntries}; it is never read as "no packages" (#19925).
+ * `null` gets whatever the resolver answers for it; see that function.
  */
 export function docsPackageRefs(packages: unknown): DocsPackageRef[] {
   return artifactPackages({ packages: declaredPackageEntries(packages) }).map(({ index, id, body }) => {
@@ -1166,7 +1167,8 @@ function claimedDocs(items: readonly DocItem[]): { has: (doc: DocItem) => boolea
  * The `docs` a `packages[]` entry already carries in its own assembled body.
  *
  * `packages` is judged by {@link declaredPackageEntries}, so a present
- * non-array value is refused rather than read as an entry with no docs.
+ * non-array value goes to the resolver rather than being read as an entry with
+ * no docs.
  */
 function bodyDocsOf(packages: unknown, index: number): DocItem[] {
   const entry = declaredPackageEntries(packages)[index];
@@ -1369,9 +1371,11 @@ export function collectAndLintDocs(
  * it is the same object, serialized from the same references.
  *
  * `packages` is judged FIRST, by {@link declaredPackageEntries}. An absent one
- * comes back as it came in, and a present non-array one is refused. Handing it
- * back unchanged would carry it into the artifact as if it held no packages
- * (#19925).
+ * comes back as it came in. A present non-array one (`{}`, `0`, `'x'`) is
+ * refused, because handing it back unchanged would carry it into the artifact
+ * as if it held no packages (#19925). `null` gets whatever the resolver
+ * answers for it: today that is the absent answer, so `null` comes back as it
+ * came in.
  */
 export function attachPackageDocs(packages: unknown, sets: readonly PackageDocSet[]): unknown {
   const entries = declaredPackageEntries(packages);

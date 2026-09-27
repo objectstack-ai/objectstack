@@ -33,8 +33,11 @@
  * entries. The other controls are a well-formed array, which reads as before,
  * and an absent `packages`, which still reads as no packages.
  *
- * ⛔ `packages: null` is not pinned here. Every reader reads it as absent while
- * the schema refuses it, and that disagreement is its own decision (#19926).
+ * `packages: null` is pinned in `null-packages-follows-resolver.test.ts`, not
+ * here. Ruling A on #19926 (`5805260775`) makes `null` malformed at every
+ * reader, and it is refused by core's resolver, never by the CLI. So the pin
+ * there asserts that each reader answers `null` the way the resolver does. It
+ * does not assert a fixed answer.
  */
 
 import { describe, expect, it } from 'vitest';

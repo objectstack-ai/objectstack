@@ -28,10 +28,17 @@ second copy of the rule.
 
 **What is not affected.** An absent `packages` reads exactly as before, and so
 does a `packages` array. A malformed entry inside an array is still refused as
-`INVALID_ARTIFACT_PACKAGE_ENTRY`. `packages: null` is still read as absent;
-whether it should be is a separate decision. `os serve` and `os dev` refused
-this stack before the change, because the runtime's manifest service raises
-the same refusal at boot, and they still do.
+`INVALID_ARTIFACT_PACKAGE_ENTRY`. `os serve` and `os dev` refused this stack
+before the change, because the runtime's manifest service raises the same
+refusal at boot, and they still do.
+
+**`packages: null` follows core's resolver.** Ruling `5805260775` on #19926
+makes `null` malformed at every reader, and the resolver's `null` refusal is
+landing separately (#19926, PR #20228). The CLI readers do not answer `null`
+themselves; they hand it to `resolveArtifactPackageOrder` and return what it
+answers. Today that is its absent answer, so `null` still reads as no
+packages. Once the resolver refuses `null`, these commands refuse it too, with
+no change to the CLI.
 
 **If you are refused.** Omit `packages` for a single-package stack, or give it
 an array of `{ manifest: … }` entries. The refusal says the same.
