@@ -237,7 +237,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
  * {
  *   type: 'cross_field',
  *   name: 'close_date_future',
- *   condition: 'MONTH(close_date) >= MONTH(TODAY()) AND YEAR(close_date) >= YEAR(TODAY())',
+ *   condition: 'date(record.close_date) < addDays(today(), 1 - today().getDate())',
  *   fields: ['close_date'],
  *   message: 'Close Date must be in the current or a future month'
  * }
@@ -271,7 +271,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
  * {
  *   type: 'cross_field',
  *   name: 'products_required_for_won',
- *   condition: 'products = null AND stage = "closed_won"',
+ *   condition: 'isBlank(record.products) && record.stage == "closed_won"',
  *   fields: ['products', 'stage'],
  *   message: 'Opportunity must have products to be marked as Closed Won'
  * }
