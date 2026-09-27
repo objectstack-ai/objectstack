@@ -173,7 +173,8 @@ The spec ships **declarative migration artifacts per major** — `migrations/N.j
 per-surface transforms with machine-readable pre/post conditions plus a prose
 `rationale` (the one place prose is load-bearing, and it is one field, not a
 document). Two sources feed each major's step: **semantic changes** authored for that
-major (the residue D2 cannot express losslessly), and **graduated conversions** (D2
+major (one entry per retirement family, even when a lossless D2 conversion also exists
+for it; D2 carries the mechanical data repair only), and **graduated conversions** (D2
 entries retired from the load path). Together the steps form a **permanent, ordered
 chain** — the database-migration model applied to metadata source files.
 
