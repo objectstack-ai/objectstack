@@ -3586,9 +3586,8 @@ jobs:
       # exited 0; it was caught only because an unrelated gate happened to redden.
       # The file's own package suite is domain-level ("every registered dispatcher
       # domain has at least one ledger entry"), which a shorter list satisfies, and
-      # the cross-ledger guards compare against a UNION that held 26 of the then
-      # 82 rows' wire patterns from other ledgers when this gate landed (the
-      # dated reading is in the script's header). This gate holds the GENERATED
+      # the cross-ledger guards compare against a UNION that still holds 26 of the
+      # 82 rows' wire patterns from other ledgers. This gate holds the GENERATED
       # census sentence above the array to the array's real length, so a deletion
       # reds and a deliberate change shows its digits moving in the same diff.
       # Full-repo state, not diff-shaped, so it runs its real check unconditionally.
