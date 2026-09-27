@@ -500,17 +500,17 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
                         const stored = find(subject.type, subject.name);
 
                         if (pending) {
-                            // The pre-gate answer, pinned under the anchor. LOUD by
+                            // The pre-gate ANSWER, pinned under the anchor — it
+                            // passes on the pre-gate code too, by design. LOUD by
                             // construction: the entries the plain read withholds from
                             // this caller ARE in this body — the exposure the
-                            // decision waits on. The whole-app gate DID run (on
-                            // `/diff` against the current document) and did not
-                            // refuse: only the pruning is withheld.
+                            // decision waits on. That the whole-app gate still runs
+                            // on these doors is pinned by the whole-refusal cells
+                            // (`payroll`, `launchpad`), not here.
                             expect(res.statusCode).toBe(200);
                             for (const s of subject.secrets) expect(text(res)).toContain(s);
                             if (door.suffix === '/diff') {
                                 expect(res.body).toEqual(await protocol.diffMetaItem.mock.results.at(-1)?.value);
-                                expect(protocol.getMetaItem).toHaveBeenCalled();
                             } else {
                                 for (const layer of ['code', 'overlay', 'effective']) {
                                     expect(res.body?.[layer]).toEqual(stored);
