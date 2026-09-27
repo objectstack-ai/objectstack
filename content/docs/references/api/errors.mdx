@@ -40,7 +40,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +43 more>` | ✅ | Machine-readable error code |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +42 more>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
@@ -102,7 +102,6 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `PRECONDITION_REQUIRED`
 * `RATE_LIMIT_EXCEEDED`
 * `QUOTA_EXCEEDED`
-* `CONCURRENT_LIMIT_EXCEEDED`
 * `INTERNAL_ERROR`
 * `DATABASE_ERROR`
 * `TIMEOUT`
@@ -321,7 +320,6 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `PRECONDITION_REQUIRED`
 * `RATE_LIMIT_EXCEEDED`
 * `QUOTA_EXCEEDED`
-* `CONCURRENT_LIMIT_EXCEEDED`
 * `INTERNAL_ERROR`
 * `DATABASE_ERROR`
 * `TIMEOUT`

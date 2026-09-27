@@ -4731,11 +4731,15 @@ export const ViewItemNameSchema = z
  *
  * - `package`  — shipped from `*.view.ts` source / an installed package.
  *                Not deletable (reinstall restores it); customisable via an
- *                override layer; hideable from the switcher.
+ *                override layer.
  * - `shared`   — authored at runtime, visible org-wide. Creating one is gated
  *                by the `view.manageShared` capability.
- * - `personal` — authored at runtime, scoped to `owner`. Any user with read
- *                access to the object may create one.
+ * - `personal` — the per-user layer. Per-user view scoping is a PARKED
+ *                direction (ADR-0017, amended 2026-09-04), not a shipped
+ *                mechanism: the item-level `owner` key that was to name the
+ *                user was retired with `hidden` (ADR-0049 — see
+ *                {@link VIEW_ITEM_OWNER_RETIRED}), so nothing restricts a
+ *                `personal` item to one user today.
  *
  * Named `scope` (not `provenance`) to avoid colliding with the loader-set
  * `_provenance` envelope field, which tracks a different axis
@@ -4749,6 +4753,43 @@ export const ViewScopeSchema = z
 export const ViewKindSchema = z
   .enum(['list', 'form'])
   .describe('Whether `config` is a ListView (list family) or a FormView.');
+
+/**
+ * [#20085] Prescriptions for the view item's two retired identity keys —
+ * ADR-0049 enforce-or-remove, triage direction 「retire both keys」.
+ *
+ * Both were declared on {@link viewItemBaseShape}, accepted by the strict
+ * authoring door and by the wire member `saveMetaItem` validates, stored
+ * verbatim — and read by nothing. Measured before removal, with lit controls:
+ * no writer and no reader of either view-item key in this framework, in
+ * objectui at its pin and at `main`, or in cloud; both switcher read paths
+ * (`GET /meta/view?object=` in `rest-server.ts`, `getViewsByObject` in
+ * `metadata-manager.ts`) filter on `viewKind` + `object` and sort on `order`,
+ * never on `hidden`, and nothing ever scoped a view by `owner`. So an author —
+ * very often an AI — who wrote `hidden: true` or `owner: '…'` got a clean save
+ * and no effect, and a view marked as one user's was shown to everyone: the
+ * `owner` half is a visibility claim, the security shape ADR-0049 is about.
+ *
+ * Declared ABOVE {@link viewItemBaseShape} on purpose: under
+ * `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module init in file
+ * order, and a `const` below its first eager reader is a TDZ error (the
+ * `strict-object.ts` docblock carries the measured incident).
+ */
+const VIEW_ITEM_OWNER_RETIRED =
+  '`view.owner` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the '
+  + 'user a `personal` view item belonged to, and nothing ever read it: the view switcher '
+  + '(`GET /meta/view?object=`) serves every item bound to the object without looking at `owner`, so a '
+  + 'view marked as one user\'s was listed for every user who can read the object. Delete the key. '
+  + 'Nothing restricts a view item to one user today — per-user view scoping is a parked direction '
+  + '(ADR-0017), not a shipped mechanism — so a view item is visible to everyone who can read its object. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const VIEW_ITEM_HIDDEN_RETIRED =
+  '`view.hidden` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it promised to '
+  + 'hide a view item from the switcher, and nothing ever read it: `GET /meta/view?object=` and the '
+  + 'console\'s view switcher list every item bound to the object, `hidden: true` included. Delete the key; '
+  + 'to take a view out of the switcher, delete the view item itself (or stop shipping it from source). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
  * Fields shared by every independent view item, regardless of kind. Returned
@@ -4778,14 +4819,28 @@ function viewItemBaseShape() {
     scope: ViewScopeSchema.optional().describe(
       'Identity layer (defaults to `package` for source-loaded views).',
     ),
-    owner: z
-      .string()
-      .optional()
-      .describe('Owner user id — set when `scope` is `personal`.'),
-    hidden: z
-      .boolean()
-      .optional()
-      .describe('Hidden from the switcher (per-user / per-org declutter).'),
+    /**
+     * [#20085] RETIRED — see {@link VIEW_ITEM_OWNER_RETIRED} /
+     * {@link VIEW_ITEM_HIDDEN_RETIRED} for what was measured.
+     *
+     * Tombstoned HERE, on the shared shape, rather than deleted with a
+     * `guidance` entry on {@link VIEW_ITEM_SURFACE}: this shape feeds TWO doors.
+     * The strict authoring door ({@link ViewItemSchema}) would refuse a bare
+     * deletion, but the wire member ({@link ViewItemWireSchema}, `.strip()`,
+     * member 1 of the union `saveMetaItem` validates) would STRIP it in silence
+     * (ADR-0104) — the very no-effect save this retirement exists to end. One
+     * `retiredKey()` here reaches both, which is the derive-by-reference rule
+     * {@link viewItemArmShape} exists for: `tsc` types the key `never` on
+     * `defineViewItem`'s input, and every parse raises the prescription.
+     *
+     * ⚠️ The flattened-overlay members declare their OWN `owner` / `hidden`
+     * (`flattenedViewOverlayFields()`) — a different door, a lean
+     * personalization PUT with no `config`, and deliberately untouched here.
+     * The D2 conversion `view-item-owner-hidden-removed` is scoped to the
+     * record spelling for the same reason.
+     */
+    owner: retiredKey(VIEW_ITEM_OWNER_RETIRED),
+    hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
     /**
      * Package author protection block — same envelope as {@link ViewSchema};
      * the loader translates it into the private `_lock` envelope.

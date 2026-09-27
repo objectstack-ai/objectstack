@@ -70,7 +70,9 @@ import type { TemporalComparandKind } from './temporal-comparand.js';
  *   everywhere: `'…T12:00+08:00'` and `'…T04:00Z'` are one instant but sort
  *   differently as text.
  * - `date`: a `Date` → its UTC calendar day (the UTC clock, never the host's —
- *   `SqlDriver.toDateOnly` records why); a string → its leading `YYYY-MM-DD`.
+ *   `SqlDriver.toDateOnly` records why); a finite number → epoch milliseconds,
+ *   read as the `Date` of that value and so its UTC calendar day (a time of
+ *   day is dropped, never rounded); a string → its leading `YYYY-MM-DD`.
  * - `time`: a bare `HH:MM[:SS[.f…]]` in range → `HH:MM:SS`, `.fff` kept only
  *   when non-zero (fractions beyond milliseconds truncated); anything else is
  *   read as an INSTANT by the `datetime` rule and keeps its UTC time of day.
@@ -114,11 +116,17 @@ function canonicalUtcDatetime(value: unknown): unknown {
 
 function canonicalCalendarDay(value: unknown): unknown {
   if (value == null) return value;
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return value;
-    const y = value.getUTCFullYear();
-    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(value.getUTCDate()).padStart(2, '0');
+  // [#20203] A finite number is epoch milliseconds — the reading the
+  // `datetime` rule above gives it — so it names the instant `new Date(value)`
+  // names and takes that `Date`'s UTC calendar day, through the one conversion
+  // below. A number and its `Date` therefore always agree; a number the `Date`
+  // range cannot hold (past ±8.64e15), `NaN` and ±Infinity come back unchanged.
+  const instant = typeof value === 'number' && Number.isFinite(value) ? new Date(value) : value;
+  if (instant instanceof Date) {
+    if (Number.isNaN(instant.getTime())) return value;
+    const y = instant.getUTCFullYear();
+    const m = String(instant.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(instant.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
   if (typeof value === 'string') {
