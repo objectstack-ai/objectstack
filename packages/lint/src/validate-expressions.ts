@@ -78,7 +78,13 @@
  * `validate-expressions.test.ts` pins that with no tracked exceptions left.
  */
 
-import { validateExpression, collectCelRootIdentifiers, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
+import {
+  validateExpression,
+  collectCelRootIdentifiers,
+  parseCelToAst,
+  SCOPE_ROOTS,
+  analyzeRelationshipTraversals,
+} from '@objectstack/formula';
 import {
   collectFlowGraphs,
   predicateSlotRefusal,
@@ -101,7 +107,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // hand-written notion of "blank" here — that drift is what #15662 built the
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
-import { referenceCarrierOf } from '@objectstack/spec/data';
+import { referenceCarrierOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
@@ -947,6 +953,134 @@ function isBareReferenceToAny(diagnostic: string, roots: readonly string[]): boo
 }
 
 /**
+ * [#20078] The field-level predicate slots a read THROUGH a reference field is
+ * refused on: the two field-rule slots the server evaluates on a write, and a
+ * select option's own `visibleWhen`.
+ */
+type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen';
+
+/** [#20078] A root a field-level predicate binds, with the record shape it binds. */
+interface FieldTraversalHolder {
+  root: 'record' | 'previous' | 'parent';
+  /** Field name → declared type, for the object whose record this root binds. */
+  types: Readonly<Record<string, string>>;
+  /** That object's name — the prescription names it. */
+  owner: string;
+}
+
+/**
+ * [#20078] What the SERVER does with a field-level predicate that faults, per
+ * slot. Every cell is the runtime's own behaviour at `rule-validator.ts`, and
+ * `engine-field-predicate-fault.test.ts` pins each one end to end.
+ */
+const FIELD_TRAVERSAL_CONSEQUENCE: Record<FieldTraversalSlot, string> = {
+  requiredWhen:
+    'The server REFUSES every write that reaches this predicate — a requirement it cannot evaluate ' +
+    'refuses the write, naming the field and the rule (ADR-0137 D2)',
+  readonlyWhen:
+    'The server REFUSES every update that writes this field — a lock it cannot evaluate refuses the ' +
+    'write rather than dropping the value (ADR-0137 D2) — so the field can never be changed once the ' +
+    'record exists',
+  'option visibleWhen':
+    'The server evaluates an option predicate fail-OPEN: it faults on every write that picks this ' +
+    'option, the fault is logged, and the value is admitted — so the gate is never enforced',
+};
+
+/**
+ * [#20078] The refusal for a field-level predicate that reads THROUGH a
+ * reference field — `record.account.tier` on a `lookup` named `account`.
+ *
+ * ## Why it is refused, and where it is not
+ *
+ * The field level is evaluated against the record it binds and nothing else:
+ * no field-level `requiredWhen` / `readonlyWhen` and no option `visibleWhen` is
+ * hydrated (ObjectQL's `rule-validator.ts`: "the field level is not hydrated at
+ * all"). A reference field there holds the related record's bare ID, so every
+ * read through it faults — on every row, whatever the data — and the runtime
+ * can then only refuse the write (the two field-rule slots, ADR-0137 D2) or
+ * wave the value through unchecked (an option, fail-open). Hydrating the field
+ * level would be a capability of its own; until one exists, the predicate
+ * cannot mean what it says, and `objectstack validate` is where the author
+ * should hear it (NORTH-STAR priority rule 4) rather than from the first
+ * refused write in production.
+ *
+ * The ONE seam that does read one hop through a reference is a `validations[]`
+ * rule's `condition` (`checkPredicate`, #18682), which is why that is the
+ * prescription for the `record` root — and why the same traversal written
+ * there passes this pass untouched. It is NOT the prescription for `previous`
+ * (never hydrated at any seam, a validation rule's included) or `parent` (bound
+ * only for the field-rule slots, never for a validation rule), so those roots
+ * get the repair that is true for them.
+ *
+ * ## The judgment is the runtime's, not a second copy of it
+ *
+ * Which fields a source reads through is `@objectstack/formula`'s
+ * `analyzeRelationshipTraversals` — the analysis the engine itself runs
+ * (`rule-validator.ts` names a field-rule fault's reference with it, and
+ * hydrates a validation rule from it). Which fields are references is the
+ * spec's `REFERENCE_VALUE_TYPES`, the set `validateExpression`'s own
+ * traversal-conflict arm asks. An object-valued field (`record.address.city`)
+ * is not a reference and is left alone.
+ *
+ * Only DECLARED fields are judged: the injected system columns
+ * (`owner_id`, `created_by`, …) carry no type in this pass's index, so a read
+ * through one is not refused here — the safe direction, a missed finding and
+ * never a false one.
+ */
+function fieldTraversalMessage(
+  slot: FieldTraversalSlot,
+  root: FieldTraversalHolder['root'],
+  field: string,
+  fieldType: string,
+  related: readonly string[],
+  owner: string,
+): string {
+  const named = related.map((r) => `\`${r}\``).join(', ');
+  // `root` + '.' is assembled with `+` so no template literal here spells a
+  // member read off a receiver name the declared-key meta-test would pick up.
+  const path = '`' + root + '.' + field + '`';
+  const prescription = root === 'record'
+    ? `Only a \`validations[]\` rule's \`condition\` reads one hop through a reference — the related ` +
+      `record is loaded before it runs. Express the check as a \`validations[]\` \`script\` rule, or ` +
+      `read a column this object declares.` +
+      (slot === 'option visibleWhen'
+        ? ` For a choice, the rule's \`condition\` states the FAILURE — this option picked while the ` +
+          `related column disqualifies it; the option is then offered to everyone and refused on save.`
+        : '')
+    : root === 'previous'
+      ? `\`previous\` is the stored row and is never read through a reference — not here, and not in a ` +
+        `\`validations[]\` rule either — so there is no surface to move this read to. Compare ${path} ` +
+        `itself (it holds the id), or read a column this object declares.`
+      : `\`parent\` is the master-detail header as stored, so its references hold bare ids too, and no ` +
+        `\`validations[]\` rule binds \`parent\` at all. Read a column '${owner}' declares instead ` +
+        `(denormalise the value you need onto '${owner}').`;
+  return (
+    `\`${slot}\` reads ${named} through ${path}, a \`${fieldType}\` field — but a field-level predicate ` +
+    `never reads the related record: it is evaluated against the ${root === 'parent' ? 'header' : 'record'} ` +
+    `alone, where \`${field}\` holds the related record's bare id, so the read faults on every row. ` +
+    `${FIELD_TRAVERSAL_CONSEQUENCE[slot]}. ${prescription}`
+  );
+}
+
+/**
+ * [#20078] The master object of an object with exactly ONE `master_detail`
+ * relationship — the record the field level binds as `parent` — or `undefined`
+ * when there is not exactly one (the #4889 gate above owns that verdict).
+ *
+ * The literal `.reference` read stays in the argument for the #5017 receiver
+ * scan, exactly as in {@link masterDetailCount}.
+ */
+function singleMasterOf(obj: AnyRec): string | undefined {
+  const targets: string[] = [];
+  for (const [, def] of fieldEntries(obj)) {
+    if (def.type !== 'master_detail') continue;
+    const ref = referenceCarrierOf({ reference: def.reference }, 'validate-expressions singleMasterOf');
+    if (ref !== undefined && ref.trim() !== '') targets.push(ref.trim());
+  }
+  return targets.length === 1 ? targets[0] : undefined;
+}
+
+/**
  * [#17495] Why a structural condition whose SHAPE is fine is still not
  * authorable: its source is blank. The author-time twin of the gate #17322 put
  * in `AutomationEngine.registerFlow`, spelled the same way against the same
@@ -1165,6 +1299,37 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     if (!source) return null;
     const issue = fieldRuleRootIssue(slot, source);
     return issue ? { ...issue, source } : null;
+  };
+
+  /**
+   * [#20078] Refuse a field-level predicate that reads THROUGH a reference
+   * field, once per reference field per root it binds — see
+   * {@link fieldTraversalMessage} for why, and for the prescription per root.
+   */
+  const refuseFieldTraversal = (
+    where: string,
+    slot: FieldTraversalSlot,
+    raw: unknown,
+    holders: readonly FieldTraversalHolder[],
+  ): void => {
+    const source = celSourceOf(raw);
+    if (!source) return;
+    for (const { root, types, owner } of holders) {
+      // `null` when the source does not parse — the syntax pass owns that.
+      const traversals = analyzeRelationshipTraversals(source, root)?.traversals;
+      for (const [field, related] of traversals ?? []) {
+        // `typeof` rather than an own-key test: an inherited name (`constructor`)
+        // answers a function here, never a declared type string.
+        const fieldType: unknown = types[field];
+        if (typeof fieldType !== 'string' || !REFERENCE_VALUE_TYPES.has(fieldType)) continue;
+        issues.push({
+          where,
+          message: fieldTraversalMessage(slot, root, field, fieldType, [...related].sort(), owner),
+          source,
+          severity: 'error',
+        });
+      }
+    }
   };
 
   /**
@@ -1579,6 +1744,24 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // below. Computed once per object, not per field.
     const masters = masterDetailCount(obj);
 
+    // [#20078] The roots a field-level predicate binds, each with the record
+    // shape it binds: `record` / `previous` are this object's, `parent` is its
+    // single master's — judged only when that master is in the stack, since
+    // its field types come from the same index. An option binds `record` /
+    // `previous` (and the user), never `parent`.
+    const ownTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
+    const master = masters === 1 ? singleMasterOf(obj) : undefined;
+    const masterTypes = master ? fieldTypeIndex.get(master) : undefined;
+    const optionHolders: FieldTraversalHolder[] = objectName && ownTypes
+      ? [
+          { root: 'record', types: ownTypes, owner: objectName },
+          { root: 'previous', types: ownTypes, owner: objectName },
+        ]
+      : [];
+    const fieldRuleHolders: FieldTraversalHolder[] = master && masterTypes
+      ? [...optionHolders, { root: 'parent', types: masterTypes, owner: master }]
+      : optionHolders;
+
     for (const [fname, f] of fieldList) {
       // Field-level conditional rules are server-enforced (rule-validator) and
       // record-scoped — a bare ref silently fails the rule (required/readonly
@@ -1615,12 +1798,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // evaluators; neither verdict is a side effect of a shared root list.
       for (const [oi, opt] of recordsOf(f.options).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
-        check(
-          `object '${objectName}' · field '${fname}' option ${label} visibleWhen`,
-          opt.visibleWhen,
-          objectName,
-          'record',
-        );
+        const optionWhere = `object '${objectName}' · field '${fname}' option ${label} visibleWhen`;
+        check(optionWhere, opt.visibleWhen, objectName, 'record');
+        // [#20078] An option's predicate is evaluated against the record as
+        // stored — a read through a reference faults, and the server admits the
+        // value unchecked. `current_user` (and `current_user.can(…)`) is NOT a
+        // record traversal and is not judged here.
+        refuseFieldTraversal(optionWhere, 'option visibleWhen', opt.visibleWhen, optionHolders);
       }
       // [#4889] A `parent`-scoped `readonlyWhen` is a SERVER-enforced lock:
       // the write path resolves the object's master-detail header and binds it
@@ -1707,6 +1891,17 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         objectName,
         'fail-closed',
       );
+      // [#20078] The two field-rule slots the server evaluates on a write are
+      // never hydrated, so a read THROUGH a reference field faults there on
+      // every row and, since ADR-0137 D2, refuses the write. Refused here, with
+      // the seam that does read one hop (a `validations[]` rule) as the repair.
+      // Literal member reads, like the `parent` gate above, for the #5017 scan.
+      for (const [slot, raw] of [
+        ['requiredWhen', f.requiredWhen],
+        ['readonlyWhen', f.readonlyWhen],
+      ] as const) {
+        refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
+      }
       if (f.expression) {
         // `expression` is the key `FieldSchema` declares for a computed field —
         // what `Field.formula({ expression: … })` writes. This read was spelled
