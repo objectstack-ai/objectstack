@@ -173,16 +173,20 @@ function emptyFieldConstraintError(field: string, path: string): Error {
 function arrayComparandError(): Error {
   const err = new Error(
     'A single-value comparison in this filter received an array as its comparand: an array ' +
-      'under "$ne", or an array in the equality position ({ "field": [ ... ] } or "$eq"). A list ' +
-      'is not one comparable value. For "one of these values" use "$in", and for "none of these ' +
-      'values" use "$nin" — the list operators the filter protocol declares. It is refused before ' +
-      'any record is judged rather than evaluated, because this evaluator compares strictly and ' +
-      'no stored value ever equals an array: "$ne" matched EVERY record, and so did a negated ' +
-      'equality, which on a row-level write check admitted every write the check was written to ' +
-      'refuse. The field, the operator and the value are withheld from this message because the ' +
-      'filter may be an access policy the caller did not write; in a row-level policy, look for ' +
-      'a "!=" or "==" compared against a list literal or a current_user membership key, and ' +
-      'rewrite it with "in" (for example "!(record.status in [\'closed\', \'archived\'])").',
+      'under "$ne", or an array in the equality position ({ "field": [ ... ] } or "$eq"), or ' +
+      'under an ordering operator ("$gt", "$gte", "$lt", "$lte"), or as a member of an "$in" / ' +
+      '"$nin" list, or a column on either side of a { "$field" } comparison that holds a list or ' +
+      'an object. A list is not one comparable value. For "one of these values" use "$in", and ' +
+      'for "none of these values" use "$nin" — the list operators the filter protocol declares; ' +
+      'an ordering comparison takes one bound. It is refused rather than evaluated, because this ' +
+      'evaluator compares strictly and no stored value ever equals an array: "$ne" matched EVERY ' +
+      'record, and so did a negated equality or a negated "$in", which on a row-level write check ' +
+      'admitted every write the check was written to refuse, and an ordering operator compared ' +
+      'the array as a string. The field, the operator and the value are withheld from this ' +
+      'message because the filter may be an access policy the caller did not write; in a ' +
+      'row-level policy, look for a comparison against a list literal, a current_user membership ' +
+      'key, or a json or multiple field, and rewrite it with "in" (for example ' +
+      '"!(record.status in [\'closed\', \'archived\'])").',
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
@@ -190,13 +194,32 @@ function arrayComparandError(): Error {
 }
 
 /**
- * [#19886] The operators whose array comparand this face refuses: exactly the
- * two the refusal was ruled for — the equality slot and its negation. The
- * ordering operators (`$gt` / `$gte` / `$lt` / `$lte`) are deliberately NOT in
- * this list; what they do with an array is a separate question this refusal
- * does not answer.
+ * [#19886] The operators whose array comparand this face refuses: the six that
+ * compare ONE value. The equality slot and its negation were ruled first
+ * (stage 2a); [stage 2d] the four ordering operators joined them, because an
+ * ordering comparison against an array did not refuse or fail closed — it
+ * compared the array's JavaScript string form (`['m']` ordered as `'m'`), an
+ * answer no declared contract gives and no SQL backend shares.
  */
-const ARRAY_REFUSED_OPERATORS = ['$eq', '$ne'] as const;
+const ARRAY_REFUSED_OPERATORS = ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte'] as const;
+
+/**
+ * [#19886 stage 2d] The list operators, whose MEMBERS are each one comparable
+ * value. A member that is itself an array matched no record under `$in`, so
+ * `$nin` and a negated `$in` matched EVERY record — the `$ne` bypass one level
+ * down.
+ */
+const LIST_MEMBER_OPERATORS = ['$in', '$nin'] as const;
+
+/** One comparable value: not a list, and not a plain object (a `Date` is a value). */
+function isNonScalarValue(value: unknown): boolean {
+  return Array.isArray(value) || isOperatorMap(value);
+}
+
+/** A `{ $field }` reference comparand — the same test {@link resolveValue} applies. */
+function isFieldReference(raw: unknown): raw is Record<string, unknown> {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) && '$field' in (raw as Record<string, unknown>);
+}
 
 /** A plain object — an operator map rather than a comparand (`Date` is a comparand). */
 function isOperatorMap(spec: unknown): spec is Record<string, unknown> {
@@ -243,10 +266,16 @@ function assertFilterShape(node: unknown, path: string): void {
     if (isEmptyFieldConstraint(val)) throw emptyFieldConstraintError(key, here);
     // [#19886] The equality position, spelled bare: `{ field: [...] }`.
     if (Array.isArray(val)) throw arrayComparandError();
-    // [#19886] …and spelled with an operator: `$eq` / `$ne` carrying an array.
+    // [#19886] …and spelled with an operator: a one-value operator carrying an
+    // array ([stage 2d] the ordering operators included), or a list operator
+    // one of whose members is itself an array.
     if (isOperatorMap(val)) {
       for (const op of ARRAY_REFUSED_OPERATORS) {
         if (Array.isArray(val[op])) throw arrayComparandError();
+      }
+      for (const op of LIST_MEMBER_OPERATORS) {
+        const list = val[op];
+        if (Array.isArray(list) && list.some((member) => Array.isArray(member))) throw arrayComparandError();
       }
     }
   }
@@ -315,6 +344,9 @@ function evalField(record: Record<string, unknown>, field: string, spec: unknown
 }
 
 function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string, unknown>): boolean {
+  // [#19886 stage 2d] A `{ $field }` comparison whose column holds a list or an
+  // object ON THIS RECORD — either side. See {@link assertComparableReference}.
+  if (isFieldReference(raw)) assertComparableReference(actual, op, raw, record);
   const v = resolveValue(raw, record);
   // [#14104] An offset reference whose base is NULL is FALSE for every
   // operator — see {@link NO_OFFSET_BASE}. Before the switch, so `$ne`'s
@@ -420,6 +452,53 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
      */
     default: return false; // unknown operator → fail closed
   }
+}
+
+/**
+ * [#19886 stage 2d] A `{ $field }` comparison whose column holds a LIST — or an
+ * object — on the record being judged is refused with
+ * {@link arrayComparandError}, whichever side the column is on.
+ *
+ * `record.status != record.tags` lowers to `{ status: { $ne: { $field: 'tags' } } }`
+ * (the field-to-field branch of `cel-to-filter.ts`), and `tags` — a `json`
+ * column or a `multiple` lookup — holds a list on the post-image. `looseEq`
+ * never equals a list, so `$ne` matched every record and a negated `$eq` did
+ * too: measured through the real plugin-security write check on driver-sql and
+ * driver-memory, every write such a `check` was written to refuse was admitted
+ * and stored. The mirrored spelling (`record.tags != record.status`) puts the
+ * list on the constrained side and answered the same way, so both sides are
+ * judged. An ordering operator compared the list's string form instead.
+ *
+ * ## Why here, and why per record
+ *
+ * The lowering cannot see this. It knows the predicate's text, not the object's
+ * field types — the RLS field guard carries column NAMES only — so the
+ * reference lowers exactly as a legal scalar-to-scalar comparison does. This
+ * evaluator is the first place that sees the VALUES, and a value is known per
+ * record. So unlike the refusals {@link assertFilterShape} raises, which judge
+ * the authored shape and answer every record alike, this one answers the record
+ * being judged. On the write gate that record is the post-image: a write whose
+ * compared column holds a list is refused (`INVALID_FILTER` / 400) and nothing
+ * is stored. A record whose json column holds one scalar compares it, as before.
+ *
+ * It pulls the write gate toward the read side's answer: driver-sql refuses a
+ * cross-field comparison against any JSON-stored or `multiple` column, on
+ * either side, by DECLARED type (#5222, `crossFieldComparisonClass`), for the
+ * same six operators.
+ *
+ * The offset form (`{ $field, addDays }`) is judged on its BASE column, before
+ * the offset arithmetic that would otherwise turn a list into the "no
+ * deadline" sentinel — which a `$not` inverts.
+ */
+function assertComparableReference(
+  actual: unknown,
+  op: string,
+  raw: Record<string, unknown>,
+  record: Record<string, unknown>,
+): void {
+  if (!(ARRAY_REFUSED_OPERATORS as readonly string[]).includes(op)) return;
+  const referent = getPath(record, String(raw.$field));
+  if (isNonScalarValue(referent) || isNonScalarValue(actual)) throw arrayComparandError();
 }
 
 /**
