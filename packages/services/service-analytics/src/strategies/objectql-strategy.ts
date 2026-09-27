@@ -17,6 +17,7 @@ import {
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
 import {
+  assertReadScopeAdmittedByEngine,
   assertReadScopeCannotVacate,
   assertReadScopeComparandsRunnable,
   assertReadScopePlaceholdersResolvable,
@@ -676,6 +677,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // both defects logs the sentence the engine would have given; the wire
     // envelope is the same either way. Before the mark, like its siblings.
     assertReadScopePlaceholdersResolvable(scope, objectName, ctx.context);
+    // [#19995, ruling C] …and everything else the ENGINE's own admission
+    // refuses, asked of the engine itself (`IObjectQLEngine.judgeFilter`,
+    // through the host's hook) about the scope alone: the doors that read the
+    // object's field map, whose walks this package cannot run. Same verb and
+    // context as the `executeAggregate` below. Last, so a scope the guards
+    // above refuse keeps their sentence; before the mark, like them. A host
+    // that cannot answer is not judged, and keeps the guards above.
+    assertReadScopeAdmittedByEngine(scope, objectName, ctx.context, ctx as DatasetScopedStrategyContext);
     const scopeFilter = markFilterSubtreeProvenance(scope as Record<string, unknown>, 'policy');
     if (!userFilter) return scopeFilter;
     return { $and: [userFilter, scopeFilter] };
@@ -1166,6 +1175,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // [#19995] …and the placeholder half, as at `withReadScope`, with the
     // context forwarded to `executeAggregate` below.
     if (scope != null) assertReadScopePlaceholdersResolvable(scope, refObject, ctx.context);
+    // [#19995, ruling C] …and the engine's own admission, as at `withReadScope`.
+    if (scope != null) {
+      assertReadScopeAdmittedByEngine(scope, refObject, ctx.context, ctx as DatasetScopedStrategyContext);
+    }
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {
