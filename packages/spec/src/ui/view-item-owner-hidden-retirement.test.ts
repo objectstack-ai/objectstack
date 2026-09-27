@@ -63,8 +63,10 @@ const RECORD = {
   config: { type: 'grid', columns: ['name'] },
 } as const;
 
-const OWNER_PRESCRIPTION = /^`view\.owner` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049.*Delete the key\..*`os migrate meta --from 17`/s;
-const HIDDEN_PRESCRIPTION = /^`view\.hidden` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049.*Delete the key;.*`os migrate meta --from 17`/s;
+// Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
+// the key-first house convention is asserted on the issue message itself below.
+const OWNER_PRESCRIPTION = /`view\.owner` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049.*Delete the key\..*`os migrate meta --from 17`/s;
+const HIDDEN_PRESCRIPTION = /`view\.hidden` was removed in @objectstack\/spec 17\.5\.0 \(ADR-0049.*Delete the key;.*`os migrate meta --from 17`/s;
 
 const RETIRED = [
   ['owner', 'usr_7', OWNER_PRESCRIPTION],
@@ -84,6 +86,8 @@ describe('view item owner/hidden retirement — the tombstones, at every door th
       expect(issue!.code).toBe('invalid_type');
       expect(issue!.path).toEqual([key]);
       expect(issue!.message).toMatch(prescription);
+      // House convention 1: the fully-qualified key, in backticks, opens it.
+      expect(issue!.message.startsWith(`\`view.${key}\` was removed`)).toBe(true);
       // The factory authors hit parses the same schema.
       expect(() => defineViewItem({ ...RECORD, [key]: value } as never)).toThrow(prescription);
     });
@@ -283,7 +287,15 @@ describe('tree-scoped absence: no ViewItem record inside the declared radius sti
    * allowlist file (`spec-property-retirement` §4): every entry's JOB is to
    * spell the retired keys on a record.
    */
-  const EXCLUDED = new Set([THIS_FILE]);
+  const EXCLUDED = new Set([
+    // The tombstone itself — and the flattened-overlay door's own shape, whose
+    // `config: z.undefined()` guard sits beside that door's `owner` / `hidden`
+    // (schema source, not an authoring; measured as the one hit before this
+    // exclusion). Its examples live in doc comments, which the lexer skips.
+    'packages/spec/src/ui/view.zod.ts',
+    // This pin names the keys to assert their absence.
+    THIS_FILE,
+  ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement record on purpose.
     'packages/spec/src/conversions/',
