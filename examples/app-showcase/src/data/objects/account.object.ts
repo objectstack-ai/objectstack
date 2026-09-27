@@ -67,7 +67,7 @@ export const Account = ObjectSchema.create({
     annual_revenue: Field.currency({
       label: 'Annual Revenue',
       min: 0,
-      currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' },
+      currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },
     }),
     website: Field.url({ label: 'Website' }),
     hq: Field.location({ label: 'Headquarters' }),
