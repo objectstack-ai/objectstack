@@ -153,9 +153,13 @@
 // standard code with ZERO derived producer is listed in
 // `scripts/error-status-unpinned-baseline.json`; a NEW one fails the gate, and a
 // row that becomes pinned fails it too (ratchet down with `--update`).
-import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
+import {
+  readdirSync, readFileSync, writeFileSync, statSync, lstatSync, existsSync,
+  mkdtempSync, mkdirSync, rmSync, renameSync, symlinkSync, unlinkSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
-import { join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -203,11 +207,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '25 — `z.enum([...])` members: the ONE extra segment `lookup` walks, and the': 3,
   '26 — a code the DOOR TRANSLATES away is not a wire producer: derived from': 8,
   '27 — the vocabulary parse reads the enum ARRAY and stops at its bracket: an': 2,
+  '28 — the corpus walk skips an entry that VANISHED between readdir and stat,': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 28;
+const SELF_TEST_BATTERY_FLOOR = 29;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1751,7 +1756,179 @@ function selfTest() {
     JSON.stringify(plainClose) === JSON.stringify(['TIMEOUT', 'VALIDATION_ERROR']),
     JSON.stringify(plainClose));
 
-  const CASES = 60;
+  // 28 — the corpus walk skips an entry that VANISHED between readdir and stat,
+  //      and nothing else (#20225). Real files on real disk under the OS temp
+  //      dir. The seam only decides WHEN the unlink happens: after the listing
+  //      names the entry and before the walk stats it. That is the window tsup's
+  //      transient `tsup.config.bundled_<id>.mjs` hit in CI, made deterministic,
+  //      so every error below is the one the kernel really returns. The halves
+  //      that must still THROW are pinned beside the half that must not.
+  battery('28 — the corpus walk skips an entry that VANISHED between readdir and stat,');
+  const thrown = (fn) => {
+    try {
+      fn();
+      return null;
+    } catch (err) {
+      return err;
+    }
+  };
+  const walkRoot = mkdtempSync(join(tmpdir(), 'check-error-status-walk-'));
+  try {
+    const pkg = join(walkRoot, SCAN_ROOT, 'spec');
+    const bundle = join(pkg, 'tsup.config.bundled_selftest.mjs');
+    const transientTs = join(pkg, 'src', 'transient.ts');
+    const seedTree = () => {
+      rmSync(join(walkRoot, SCAN_ROOT), { recursive: true, force: true });
+      mkdirSync(join(pkg, 'src', 'deep'), { recursive: true });
+      writeFileSync(join(pkg, 'src', 'kept.ts'), 'export const KEPT = 1;\n');
+      writeFileSync(join(pkg, 'src', 'deep', 'nested.ts'), 'export const NESTED = 2;\n');
+      writeFileSync(bundle, 'export default {};\n');
+      writeFileSync(transientTs, 'export const TRANSIENT = 3;\n');
+    };
+    const PRESENT = {
+      'packages/spec/src/deep/nested.ts': 'export const NESTED = 2;\n',
+      'packages/spec/src/kept.ts': 'export const KEPT = 1;\n',
+    };
+    const corpusOf = (sources) => JSON.stringify(Object.fromEntries(sources));
+    // The churn: a listing that names `doomed` entries, which are then really
+    // unlinked before the walk stats them. `enoent` counts the stats the kernel
+    // answered ENOENT, so the positive control can prove the race was hit.
+    const churn = (doomed) => {
+      const seen = { enoent: 0 };
+      const io = {
+        readdirSync(dir) {
+          const names = readdirSync(dir);
+          for (const d of doomed) if (dirname(d) === dir && names.includes(basename(d))) unlinkSync(d);
+          return names;
+        },
+        statSync(p) {
+          try {
+            return statSync(p);
+          } catch (err) {
+            if (err?.code === 'ENOENT') seen.enoent++;
+            throw err;
+          }
+        },
+        lstatSync,
+      };
+      return { io, seen };
+    };
+
+    seedTree();
+    const churned = churn([bundle, transientTs]);
+    let churnedSources = null;
+    const churnErr = thrown(() => { churnedSources = scanSources(walkRoot, churned.io); });
+    check('28 a scan that loses tsup\'s bundle and a source-shaped file mid-walk completes',
+      churnErr === null, `${churnErr?.code} ${churnErr?.syscall} ${churnErr?.path}`);
+    check('28b POSITIVE CONTROL: the stat of both vanished entries really answered ENOENT',
+      churned.seen.enoent === 2, `enoent=${churned.seen.enoent}`);
+    check('28c every PRESENT file is still scanned, with its text, and the vanished ones are not',
+      churnedSources !== null && corpusOf(churnedSources) === JSON.stringify(PRESENT),
+      churnedSources === null ? 'no corpus' : corpusOf(churnedSources));
+
+    // Absent at the stat, back under the same name before the lstat: the entry
+    // is present, and `lstat` IS the stat of a non-symlink, so it is scanned.
+    seedTree();
+    const back = {
+      readdirSync,
+      statSync(p) {
+        if (p !== transientTs) return statSync(p);
+        unlinkSync(p);
+        try {
+          return statSync(p);
+        } finally {
+          writeFileSync(p, 'export const TRANSIENT = 3;\n');
+        }
+      },
+      lstatSync,
+    };
+    let backSources = null;
+    const backErr = thrown(() => { backSources = scanSources(walkRoot, back); });
+    check('28d an entry absent at the stat and back by the lstat is scanned as present',
+      backErr === null && backSources?.get('packages/spec/src/transient.ts') === 'export const TRANSIENT = 3;\n',
+      backErr ? `${backErr.code} ${backErr.path}` : corpusOf(backSources));
+
+    // A dangling symlink: `stat` answers ENOENT, `lstat` finds the link. The entry
+    // EXISTS, so this is a partly-read corpus and it throws.
+    seedTree();
+    symlinkSync(join(walkRoot, 'no-such-target.ts'), join(pkg, 'src', 'dangling.ts'));
+    const danglingErr = thrown(() => scanSources(walkRoot));
+    check('28e a dangling symlink still throws ENOENT from its stat, not a smaller corpus',
+      danglingErr?.code === 'ENOENT' && danglingErr?.syscall === 'stat'
+        && danglingErr?.path === join(pkg, 'src', 'dangling.ts'),
+      `${danglingErr?.code} ${danglingErr?.syscall} ${danglingErr?.path}`);
+
+    // ENOTDIR, for real: the listed directory is replaced by a FILE between the
+    // listing and the stat of its first entry.
+    seedTree();
+    const deep = join(pkg, 'src', 'deep');
+    const notDir = {
+      readdirSync(dir) {
+        const names = readdirSync(dir);
+        if (dir === deep) {
+          renameSync(deep, `${deep}.moved`);
+          writeFileSync(deep, 'not a directory');
+        }
+        return names;
+      },
+      statSync,
+      lstatSync,
+    };
+    const notDirErr = thrown(() => scanSources(walkRoot, notDir));
+    check('28f ENOTDIR still throws',
+      notDirErr?.code === 'ENOTDIR', `${notDirErr?.code} ${notDirErr?.syscall} ${notDirErr?.path}`);
+    rmSync(deep, { force: true });
+    rmSync(`${deep}.moved`, { recursive: true, force: true });
+
+    // EACCES cannot be produced for real here: root bypasses permission bits, and
+    // CI and this container both run as root. So the code is injected, on the
+    // stat and then on the confirming lstat.
+    seedTree();
+    const denied = (code) => Object.assign(new Error(`${code}: injected by --self-test`), { code });
+    const eaccesErr = thrown(() => scanSources(walkRoot, {
+      readdirSync,
+      statSync(p) {
+        if (p === join(pkg, 'src', 'kept.ts')) throw denied('EACCES');
+        return statSync(p);
+      },
+      lstatSync,
+    }));
+    check('28g a permission error on the stat still throws',
+      eaccesErr?.code === 'EACCES', `${eaccesErr?.code}`);
+    const confirmErr = thrown(() => scanSources(walkRoot, {
+      readdirSync,
+      statSync(p) {
+        if (p === join(pkg, 'src', 'kept.ts')) throw Object.assign(new Error('ENOENT: injected'), { code: 'ENOENT' });
+        return statSync(p);
+      },
+      lstatSync(p) {
+        if (p === join(pkg, 'src', 'kept.ts')) throw denied('EACCES');
+        return lstatSync(p);
+      },
+    }));
+    check('28h an ENOENT whose lstat check fails any other way still throws that error',
+      confirmErr?.code === 'EACCES', `${confirmErr?.code}`);
+
+    // A missing ROOT: no listing named it, so no rule here reaches it.
+    const bare = join(walkRoot, 'no-packages-here');
+    mkdirSync(bare);
+    const rootErr = thrown(() => scanSources(bare));
+    check('28i a missing scan ROOT still throws ENOENT naming it',
+      rootErr?.code === 'ENOENT' && rootErr?.path === join(bare, SCAN_ROOT),
+      `${rootErr?.code} ${rootErr?.syscall} ${rootErr?.path}`);
+
+    // The default seam, no churn: every source-shaped file is read, the one that
+    // vanished above included. The rule is about vanishing, never about names.
+    seedTree();
+    const plain = scanSources(walkRoot);
+    check('28j with nothing vanishing, the default walk reads every source-shaped file',
+      corpusOf(plain) === JSON.stringify({ ...PRESENT, 'packages/spec/src/transient.ts': 'export const TRANSIENT = 3;\n' }),
+      corpusOf(plain));
+  } finally {
+    rmSync(walkRoot, { recursive: true, force: true });
+  }
+
+  const CASES = 70;
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1814,7 +1991,9 @@ function selfTest() {
     + 'named a producer or a removed doc entry — never the wrong one of the two, a `z.enum([...])` member resolves '
     + 'through `NAME.enum.MEMBER` while a name that array does not list stays unresolved, and a class whose code a '
     + 'DOOR TRANSLATES away is no wire producer — reported, kept out of the unpinned census, with the arm-less '
-    + 'negative control still producing and an untranslated code untouched.',
+    + 'negative control still producing and an untranslated code untouched, and the corpus walk skips an entry that '
+    + 'VANISHED between readdir and stat (every present file still scanned) while a dangling symlink, ENOTDIR, a '
+    + 'permission error and a missing root still throw.',
   );
   selfTestReachedVerdict = true;
   process.exit(0);
@@ -1825,12 +2004,84 @@ function selfTest() {
 // The real check
 // ───────────────────────────────────────────────────────────────────────────
 
-function walk(dir, out) {
-  for (const e of readdirSync(dir)) {
+// ── The walk, and the ONE error it tolerates ──────────────────────────────
+//
+// The walk runs inside turbo, not only in the lint job:
+// `packages/spec/src/api/error-catalog-docs.test.ts` calls `deriveWireFace()`
+// from `@objectstack/spec#test:repo`, and the same turbo run builds packages.
+// tsup (through bundle-require) writes `tsup.config.bundled_<random>.mjs`
+// beside each package's config, imports it, and deletes it. An entry that
+// `readdirSync` listed can therefore be gone by the time the walk stats it,
+// and the bare `statSync` threw `ENOENT` and turned the required `Test Core`
+// red with every test passing (#20225).
+//
+// Tolerated: `ENOENT` from the stat of an entry the parent listing just named,
+// and only when an `lstat` cannot find the entry either. Then the entry
+// VANISHED and there is nothing to scan. Everything else still throws:
+//   • a missing ROOT. No listing named it, so the scan subject itself is gone;
+//   • a dangling symlink. `stat` answers `ENOENT` while `lstat` finds the link,
+//     so the entry EXISTS and the corpus would be read only in part.
+//     `check-startup-registry-verdict.mjs` pins the same case as "an error, not
+//     a smaller corpus";
+//   • `ENOTDIR`, `EACCES` and every other code.
+// A present entry is stat'ed exactly as before, so no real source file can
+// leave the corpus through this rule. It does not match on names: the next
+// transient file will have a different one. `statSync(p, { throwIfNoEntry:
+// false })` is NOT this rule. Measured on Node 22, it also answers `undefined`
+// for `ENOTDIR` and for a dangling symlink.
+//
+// Only the per-entry stat is covered. A listed directory that vanishes before
+// its own `readdirSync`, and a pushed source file that vanishes before
+// `readFileSync`, still throw. No producer of a transient directory or a
+// transient `.ts`/`.tsx` file under the scan root was found (Vite 8 writes its
+// bundled config under `node_modules/.vite-temp/`, which the walk skips).
+// Extend this rule there when one appears. Never extend it to a retry.
+
+/**
+ * The filesystem calls the walk makes, gathered into one seam. `--self-test`
+ * (battery 28) passes a copy whose calls delete an entry at an exact point
+ * between the listing and the stat. A race reproduced by timing would be a
+ * flaky self-test.
+ */
+const WALK_FS = Object.freeze({ readdirSync, statSync, lstatSync });
+
+/**
+ * `statSync(p)` for an entry the walk's own listing named, or `null` when that
+ * entry VANISHED since. The header above states the rule and what it does not
+ * cover.
+ *
+ * @param {string} p the listed entry's path
+ * @param {typeof WALK_FS} io
+ * @returns {import('node:fs').Stats | null}
+ */
+function statListedEntry(p, io) {
+  try {
+    return io.statSync(p);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+    let entry;
+    try {
+      entry = io.lstatSync(p);
+    } catch (again) {
+      if (again?.code === 'ENOENT') return null; // vanished: nothing left to scan
+      throw again;
+    }
+    // Present after all. A symlink here is dangling: the entry exists, its
+    // target does not, and skipping it would shrink the corpus, so it throws.
+    if (entry.isSymbolicLink()) throw err;
+    // Any other entry was absent at the stat and is back under the same name.
+    // For a non-symlink, `lstat` IS its `stat`, so it is scanned as present.
+    return entry;
+  }
+}
+
+function walk(dir, out, io = WALK_FS) {
+  for (const e of io.readdirSync(dir)) {
     if (SKIP_DIRS.has(e)) continue;
     const p = join(dir, e);
-    const s = statSync(p);
-    if (s.isDirectory()) walk(p, out);
+    const s = statListedEntry(p, io);
+    if (s === null) continue;
+    if (s.isDirectory()) walk(p, out, io);
     else if (/\.tsx?$/.test(e) && !/\.(test|spec|d)\.tsx?$/.test(e)) out.push(p);
   }
 }
@@ -1840,11 +2091,12 @@ function walk(dir, out) {
  * under `repoRoot`, keyed by repo-relative path.
  *
  * @param {string} repoRoot directory the scan root is resolved against
+ * @param {typeof WALK_FS} [io] the walk's filesystem seam — `--self-test` only
  * @returns {Map<string, string>} repo-relative path → source text
  */
-function scanSources(repoRoot) {
+function scanSources(repoRoot, io = WALK_FS) {
   const files = [];
-  walk(join(repoRoot, SCAN_ROOT), files);
+  walk(join(repoRoot, SCAN_ROOT), files, io);
   const sources = new Map();
   for (const f of files.sort()) sources.set(relative(repoRoot, f).replace(/\\/g, '/'), readFileSync(f, 'utf8'));
   return sources;
