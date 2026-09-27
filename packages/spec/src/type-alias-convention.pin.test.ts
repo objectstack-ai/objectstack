@@ -2369,7 +2369,11 @@ describe('ADR-0122 type-alias convention', () => {
       type: 'saas',
     });
     expect(parsedConnector.enabled).toBe(true);
-    expect(parsedConnector.status).toBe('inactive');
+    // This line read `expect(parsedConnector.status).toBe('inactive')` until
+    // ADR-0049 retired `connector.status`: the key is a tombstone now and a
+    // parse no longer emits its default. `enabled` above is the surviving
+    // defaulted key this case needs — one default supplied by the parse.
+    expect(parsedConnector).not.toHaveProperty('status');
 
     // And the flip's whole point, stated at runtime: the three keys above are
     // everything an author has to write, and the bare name is the type that
