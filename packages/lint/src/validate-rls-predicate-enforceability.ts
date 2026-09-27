@@ -1059,7 +1059,8 @@ function listHoldingConsequence(clause: 'using' | 'check'): string {
         'update or delete it scopes fails closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or ' +
         '`all` policy the same `using` is also the write check whenever no applicable policy for that ' +
         `operation declares a \`check\` (ADR-0058 D4): then ${write}.`
-    : `${write}. The policy reads as a write rule and behaves as a refusal of every write it was meant to judge.`;
+    : `${write}. The policy reads as a comparison and behaves as a refusal of every write that leaves a list ` +
+        'or an object in that column.';
 }
 
 /**
