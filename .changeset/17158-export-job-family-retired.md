@@ -12,7 +12,7 @@ A `major`-class change, recorded as `minor` under the launch-window convention. 
 
 | removed | from | what to write instead |
 | --- | --- | --- |
-| `ExportJobStatus`, `CreateExportJobRequestSchema` / `CreateExportJobResponseSchema`, `ExportJobProgressSchema` (with their types and `…Parsed` aliases) | `@objectstack/spec/api` | nothing — no route ever created or tracked an export job. To export records, call the served synchronous door `GET /api/v1/data/:object/export` (the SDK's `data.export`), which answers the file itself; its format vocabulary is `ExportFormat`, which stays. |
+| `ExportJobStatus`, `CreateExportJobRequestSchema` / `CreateExportJobResponseSchema`, `ExportJobProgressSchema` (with their types and `…Parsed` aliases) | `@objectstack/spec/api` | nothing — no route ever created or tracked an export job. To export records, call the served synchronous door `GET /api/v1/data/:object/export` (the SDK's `data.export`), which answers the file itself as CSV, JSON or XLSX. |
 | `GetExportJobDownloadRequestSchema` / `GetExportJobDownloadResponseSchema`, `ListExportJobsRequestSchema` / `ListExportJobsResponseSchema`, `ExportJobSummarySchema` (with their types and `…Parsed` aliases) | `@objectstack/spec/api` | nothing — no job ever existed to download or list. |
 | `ScheduledExportSchema`, `ScheduleExportRequestSchema` / `ScheduleExportResponseSchema` (with their types and `…Parsed` aliases) | `@objectstack/spec/api` | a `Job` (`system/job.zod.ts`) whose handler performs the export, with its cadence on `Job.schedule.expression` — the one cron slot the platform evaluates. |
 | `ExportApiContracts` | `@objectstack/spec/api` | nothing — every route it named was unserved. |

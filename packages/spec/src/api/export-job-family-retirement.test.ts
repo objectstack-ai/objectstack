@@ -90,7 +90,7 @@ const RETIRED_DEFS = [
 
 const SEMANTIC_ID = 'export-job-family-retired';
 
-/** Same-module neighbours that stay — the served import-job family and the format vocabulary. */
+/** Same-module neighbours that stay — the served import-job family, and the template shape with its format enum. */
 const MUST_SURVIVE_API = [
   'ExportFormat', 'ExportImportTemplateSchema', 'ImportJobStatus', 'ImportJobProgressSchema',
   'ListImportJobsRequestSchema', 'ListImportJobsResponseSchema', 'ImportJobApiContracts',

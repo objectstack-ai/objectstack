@@ -13,8 +13,8 @@ import { BaseResponseSchema } from './contract.zod';
  * Dynamics 365 Data Management.
  *
  * The export the platform serves is the synchronous streaming door
- * `GET /api/v1/data/:object/export`, which answers the file itself in one of
- * the `ExportFormat` formats. The asynchronous export-job API that used to be
+ * `GET /api/v1/data/:object/export`, which answers the file itself as CSV,
+ * JSON or XLSX. The asynchronous export-job API that used to be
  * declared here (export jobs, their progress / download / list shapes,
  * scheduled exports and `ExportApiContracts`) was never served by any route and
  * was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove); a recurring
@@ -59,9 +59,10 @@ export type ExportFormat = z.input<typeof ExportFormat>;
  * `export-job-family-retired` carries the prescription.
  *
  * The export that IS served is the synchronous streaming door
- * `GET /api/v1/data/:object/export` (`@objectstack/rest`), whose file format
- * vocabulary is `ExportFormat` above. A recurring export is a `Job` whose
- * handler you write (`Job.schedule.expression`, `system/job.zod.ts`).
+ * `GET /api/v1/data/:object/export` (`@objectstack/rest`), which answers CSV,
+ * JSON or XLSX (its own `format` read, not `ExportFormat` above). A recurring
+ * export is a `Job` whose handler you write (`Job.schedule.expression`,
+ * `system/job.zod.ts`).
  */
 
 // ==========================================
