@@ -19,9 +19,14 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * (`automation-api-contract-mounts.test.ts`) holds every `path` in
  * {@link AutomationApiContracts} to that mount table.
  *
+ * The flow LIST is not on this door. Flows are metadata (ADR-0106), and the
+ * governed read of them is `GET /api/v1/meta/flow` (`client.meta.getItems`);
+ * the former `GET /api/v1/automation` list route, its request/response schemas
+ * and `client.automation.list` are retired (ADR-0087 semantic entry
+ * `automation-flow-list-route-retired`).
+ *
  * @example Endpoints
  * ```
- * GET    /api/v1/automation                      — List flows
  * GET    /api/v1/automation/:name                — Get flow
  * POST   /api/v1/automation                      — Create flow
  * PUT    /api/v1/automation/:name                — Update flow
@@ -56,57 +61,20 @@ export const AutomationRunPathParamsSchema = lazySchema(() => AutomationFlowPath
 export type AutomationRunPathParams = z.input<typeof AutomationRunPathParamsSchema>;
 
 // ==========================================
-// 2. List Flows (GET /api/v1/automation)
+// 2. List Flows — RETIRED (#19543, door ④)
 // ==========================================
-
-/**
- * Query parameters for listing automation flows.
- *
- * @example GET /api/v1/automation?status=active&limit=20
- */
-export const ListFlowsRequestSchema = lazySchema(() => z.object({
-  status: z.enum(['draft', 'active', 'obsolete', 'invalid']).optional()
-    .describe('Filter by flow status'),
-  type: z.enum(['autolaunched', 'record_change', 'schedule', 'screen', 'api']).optional()
-    .describe('Filter by flow type'),
-  limit: z.number().int().min(1).max(100).default(50)
-    .describe('Maximum number of flows to return'),
-  cursor: z.string().optional()
-    .describe('Cursor for pagination'),
-}));
-export type ListFlowsRequest = z.input<typeof ListFlowsRequestSchema>;
-/** Post-parse shape of {@link ListFlowsRequest} — defaults applied, transforms run (ADR-0122). */
-export type ListFlowsRequestParsed = z.infer<typeof ListFlowsRequestSchema>;
-
-/**
- * Summary information for a flow in list results.
- */
-export const FlowSummarySchema = lazySchema(() => z.object({
-  name: z.string().describe('Flow machine name'),
-  label: z.string().describe('Flow display label'),
-  type: z.string().describe('Flow type'),
-  status: z.string().describe('Flow deployment status'),
-  version: z.number().int().describe('Flow version number'),
-  enabled: z.boolean().describe('Whether the flow is enabled for execution'),
-  nodeCount: z.number().int().optional().describe('Number of nodes in the flow'),
-  lastRunAt: z.string().datetime().optional().describe('Last execution timestamp'),
-}));
-export type FlowSummary = z.input<typeof FlowSummarySchema>;
-
-/**
- * Response for the list flows endpoint.
- */
-export const ListFlowsResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    flows: z.array(FlowSummarySchema).describe('Flow summaries'),
-    total: z.number().int().optional().describe('Total matching flows'),
-    nextCursor: z.string().optional().describe('Cursor for the next page'),
-    hasMore: z.boolean().describe('Whether more flows are available'),
-  }),
-}));
-export type ListFlowsResponse = z.input<typeof ListFlowsResponseSchema>;
-/** Post-parse shape of {@link ListFlowsResponse} — defaults applied, transforms run (ADR-0122). */
-export type ListFlowsResponseParsed = z.infer<typeof ListFlowsResponseSchema>;
+//
+// `ListFlowsRequestSchema`, `ListFlowsResponseSchema` and `FlowSummarySchema`
+// were removed with the `GET /api/v1/automation` list route (maintainer
+// ruling: 「退役，统一走 /meta/flow」). The route read none of its declared
+// request (`status` / `type` / `limit` / `cursor`) and answered bare flow
+// names with a literal `hasMore: false` where the response declared
+// `FlowSummary[]` and a `nextCursor`, and it had zero callers in this
+// repository, objectui and cloud. Flows are metadata (ADR-0106): the list is
+// `GET /api/v1/meta/flow`. Registered as whole-def removals in
+// `RETIRED_DEFS_BY_MAJOR[18]` and as the D3 semantic entry
+// `automation-flow-list-route-retired`. The section number stays vacant so the
+// sections below keep the numbers other files cite.
 
 // ==========================================
 // 3. Get Flow (GET /api/v1/automation/:name)
@@ -659,12 +627,9 @@ export type AutomationApiErrorCode = z.input<typeof AutomationApiErrorCode>;
  * Used for generating SDKs, documentation, and route registration.
  */
 export const AutomationApiContracts = {
-  listFlows: {
-    method: 'GET' as const,
-    path: '/api/v1/automation',
-    input: ListFlowsRequestSchema,
-    output: ListFlowsResponseSchema,
-  },
+  // No `listFlows` entry: the list route is retired (#19543) — flows are read
+  // through `GET /api/v1/meta/flow`. `POST /api/v1/automation` (createFlow)
+  // below is unaffected and stays at the same path.
   getFlow: {
     method: 'GET' as const,
     path: '/api/v1/automation/:name',

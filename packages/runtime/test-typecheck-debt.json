@@ -63,7 +63,6 @@
       "TS2339: Property 'chat' does not exist on type '…'.": 1,
       "TS2339: Property 'execute' does not exist on type '…'.": 1,
       "TS2339: Property 'getLocales' does not exist on type '…'.": 2,
-      "TS2339: Property 'listFlows' does not exist on type '…'.": 1,
       "TS2339: Property 'listInbox' does not exist on type '…'.": 1,
       "TS2339: Property 'provider' does not exist on type '…'.": 1,
       "TS2339: Property 'registerFlow' does not exist on type '…'.": 1,

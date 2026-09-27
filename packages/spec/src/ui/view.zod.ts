@@ -5489,6 +5489,101 @@ const ViewContainerWireSchema = lazySchema(() =>
 );
 
 /**
+ * [#20051] The per-kind blocks of the list-view shape, keyed by kind — the
+ * vocabulary of the legacy `options` bag below, each judged KEY BY KEY.
+ *
+ * Derived, never hand-listed: a kind is a value of the shape's own `type` enum
+ * that ALSO names a block on the shape (`grid` names none), and each entry is
+ * the very schema the direct spelling is judged by — the same strict key set,
+ * the same per-key schemas, the same unknown-key message — with every key made
+ * optional (`.partial()`). So a new kind with a new block is judged under
+ * `options` in the same edit, and `options.timeline` can never be judged by
+ * anything but `timeline`'s schema.
+ *
+ * Why `.partial()` and not the block as-is (measured, not preferred): the
+ * renderer reads `options.KIND` as an UNDERLAY of the top-level block, merged
+ * per key with the top-level block winning (objectui `ListView`: kanban,
+ * calendar, gallery, timeline, gantt and map spread `options.KIND` first and
+ * `KIND` last). A legacy bag that carries only the keys the top-level block
+ * does not restate (`kanban: { groupByField }` beside `options.kanban:
+ * { titleField }`) is therefore legal config — objectui pins exactly that
+ * population (`ObjectView.namedViewProtocolKeys-8980.test.tsx`, "the merge is
+ * per-key, not wholesale") — and judging it with the block's REQUIRED keys
+ * would refuse it for a key it never meant to carry. What the ruling asks is
+ * kept whole: an out-of-contract key is refused by name, and a value the key's
+ * own schema refuses is refused at that key. Required-ness belongs to the
+ * block the renderer builds, not to one layer of it.
+ *
+ * `.partial()` throws on an object that carries refinements (zod 4), which is
+ * the loud answer this derivation wants: a kind block that grows a cross-key
+ * check forces a decision about how that check reads on a partial underlay,
+ * instead of silently losing it.
+ */
+function listViewKindBlocks(): Record<string, z.ZodTypeAny> {
+  const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
+  const blocks: Record<string, z.ZodTypeAny> = {};
+  for (const kind of overlayTypeValues(ListViewShapeSchema)) {
+    const block = shape[kind] as unknown as { unwrap?: () => { partial: () => z.ZodTypeAny } } | undefined;
+    if (block?.unwrap) blocks[kind] = block.unwrap().partial().optional();
+  }
+  return blocks;
+}
+
+/**
+ * [#20051] The legacy `options` bag on a flattened LIST overlay, judged.
+ *
+ * The renderer still reads `options.KIND` beside the top-level `KIND` block
+ * (objectui's `ListView` merges the two per key, and its interface page
+ * forwards a stored view's `options` whole), so a stored bag is live config.
+ * Before this schema the overlay member's top-level `.strip()` dropped the bag
+ * from the parse without looking inside it, `saveMetaItem` stored the request
+ * body as sent, and the interface page rendered it: `options.timeline.metaFields`
+ * saved `200` while `timeline.metaFields` was refused `unrecognized_keys`.
+ *
+ * Ruled direction A (objectui#10380, maintainer 「其他同意」): each
+ * `options.KIND` is judged by the kind's own strict schema, so an out-of-contract
+ * key is refused by NAME, with the same code and the same surface text as the
+ * direct spelling — only the path gains the `options` prefix. Key by key: see
+ * {@link listViewKindBlocks} for why the block's required keys are not asked of
+ * an underlay. The bag itself is closed too: it carries per-kind blocks and
+ * nothing else, so `options.foo` is refused rather than dropped (ruled out:
+ * refusing the bag WHOLE, which would break the legacy `options.map` path
+ * objectui pins).
+ *
+ * Declared on the list overlay member ONLY — never on the authoring shape (the
+ * bag is a legacy wire spelling, not something to teach an author), and the
+ * form overlay pins it absent ({@link FORM_OVERLAY_OPTIONS_REFUSED}).
+ */
+const ListViewOverlayOptionsSchema = lazySchema(() => strictObject({
+  surface: 'this legacy `options` bag',
+  history:
+    'Until this bag was judged at the view write door it was dropped from the parse unread and '
+    + 'stored as sent, so a key its own block refuses still reached the rendered view.',
+  guidance: {
+    grid: 'A grid has no per-kind block: its settings (`columns`, `sort`, `filter`, …) are top-level keys of the view itself. Remove `options.grid`.',
+  },
+}, listViewKindBlocks()).describe(
+  'Legacy per-kind nesting (`options.kanban`, `options.timeline`, …) a stored list overlay may carry. '
+  + 'Each block is judged key by key by the same schema as the top-level block of that kind, which wins '
+  + 'per key where both set one; prefer the top-level spelling.',
+));
+
+/**
+ * [#20051] The refusal the flattened FORM overlay gives an `options` bag.
+ *
+ * `options` is list-view vocabulary, so a body carrying it is a list overlay —
+ * the same structural-guard reasoning as `config` / `list` / `form` pinned
+ * absent in {@link flattenedViewOverlayFields}. Without this pin the form
+ * member, which `.strip()`s and requires no list key, would ACCEPT a list
+ * overlay the list member refused over its `options` bag (a column-less,
+ * type-less personalization body reaches it), and the bag would be stored
+ * unjudged after all.
+ */
+const FORM_OVERLAY_OPTIONS_REFUSED =
+  'A form view carries no `options` bag: `options.kanban`, `options.timeline` and the other per-kind blocks '
+  + 'belong to a list view. Remove `options`, or save this body as a list view (`viewKind: "list"` with its `columns`).';
+
+/**
  * [#6391] Member 3 of {@link ViewMetadataSchema} — a flattened runtime LIST
  * overlay: an inline `ListView` config at the top level plus the optional
  * identity/round-trip fields a personalization PUT carries. Published as
@@ -5506,6 +5601,10 @@ const ViewContainerWireSchema = lazySchema(() =>
  * [#7741] `object` + `viewKind` are required on this arm (and its form
  * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
  * measured serving filter that decides exactly this pair.
+ *
+ * [#20051] …and `options` is DECLARED here, judged by
+ * {@link ListViewOverlayOptionsSchema}: `.strip()` re-opens the top level for
+ * round-trip keys, and a bag the renderer reads is not one of those.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
@@ -5516,7 +5615,10 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // author reaches, so it is the last place the refusals may go missing.
   // `viewDoorsCarryingObjectLevelChecks` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
-  ListViewShapeSchema.extend(flattenedViewOverlayFields()).strip()
+  ListViewShapeSchema.extend({
+    ...flattenedViewOverlayFields(),
+    options: ListViewOverlayOptionsSchema.optional(),
+  }).strip()
     .superRefine(checkListViewCalendarVisualization),
 );
 
@@ -5526,9 +5628,15 @@ const ListViewOverlayWireSchema = lazySchema(() =>
  * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}; the
  * list member is tried first, and a flattened form (no required `columns`,
  * disjoint `type` enum) then matches here.
+ *
+ * [#20051] `options` is pinned ABSENT here — see
+ * {@link FORM_OVERLAY_OPTIONS_REFUSED} for the fall-through it closes.
  */
 const FormViewOverlayWireSchema = lazySchema(() =>
-  FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
+  FormViewSchema.extend({
+    ...flattenedViewOverlayFields(),
+    options: z.undefined({ error: () => FORM_OVERLAY_OPTIONS_REFUSED }).optional(),
+  }).strip(),
 );
 
 /**
