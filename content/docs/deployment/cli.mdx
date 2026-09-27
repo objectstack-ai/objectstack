@@ -1386,20 +1386,23 @@ and the rule; it is **never** rewritten into one that fits, so the name you
 write is the name that lands in the file (`os g object order_line`, not
 `order-line`). The one addition is the namespace prefix below.
 
-**Object names carry the project's namespace.** When `objectstack.config.ts`
-declares `manifest.namespace`, every **object** name a scaffold writes starts
-with `<namespace>_`, because `os validate` refuses an object name without that
-prefix. This covers the `object` scaffold's own `name`, and the object that a
-`view`, `action`, `flow` or `app` scaffold binds to. Under
+**Object names carry the project's namespace.** When the project config
+(`objectstack.config.ts`, `.js` or `.mjs`, the same files `os validate`
+auto-detects) declares `manifest.namespace`, every **object** name a scaffold
+writes starts with `<namespace>_`, because `os validate` refuses an object name
+without that prefix. This covers the `object` scaffold's own `name`, and the
+object that a `view`, `action`, `flow` or `app` scaffold binds to. Under
 `namespace: 'my_app'`, `os g object order_line` writes
 `name: 'my_app_order_line'` into `src/objects/order_line.object.ts` and prints
 the object name. A name that already carries the prefix
-(`os g object my_app_order_line`) is written as typed, never doubled. The
-namespace is read from the loaded config, the same place `os validate` reads it
-from. If a config exists but does not load, the command refuses and writes
-nothing. Without a `namespace` (or without a config), nothing is prefixed.
-Nothing else a scaffold names (a view's, flow's or app's own `name`) is
-prefixed.
+(`os g object my_app_order_line`) is written as typed, never doubled. A
+platform-reserved `sys_*` name is exempt from the rule, so it is not prefixed
+either. A name in the legacy `<namespace>__<name>` form (`order__line`) is
+refused, because no prefix makes it one `os validate` accepts. The namespace is
+read from the loaded config, the same place `os validate` reads it from. If a
+config exists but does not load, the command refuses and writes nothing.
+Without a `namespace` (or without a config), nothing is prefixed. Nothing else a
+scaffold names (a view's, flow's or app's own `name`) is prefixed.
 
 ```bash
 os g object customer        # Generate a Customer object
@@ -1462,7 +1465,7 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 - `--dry-run` — Preview without writing files
 
 **What it does:**
-1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from `objectstack.config.ts` and prefixes the object name with it (see above)
+1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it (see above)
 2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 3. Creates or updates the barrel `index.ts` in the target directory
 4. Shows a hint to run `objectstack validate`

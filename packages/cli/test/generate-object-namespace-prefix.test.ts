@@ -238,6 +238,18 @@ describe('[#20197] the name cases around the prefix', () => {
     expect(Object.values(objectNamesWritten(a))).toEqual(Array(5).fill(PREFIXED));
     expect(defineStackRefusal(composedStack(a, NS))).toBeNull();
   });
+
+  // The two cases the gate's own verdict decides, read off the object
+  // template's output rather than re-derived here.
+  const objectTemplate = GENERATOR_SCAFFOLD_TARGETS.find((t) => t.type === 'object')!;
+
+  it('a platform-reserved `sys_*` name is exempt from the gate, so it is not prefixed', () => {
+    expect(objectTemplate.generate('sys_probe', NS)).toContain("name: 'sys_probe',");
+  });
+
+  it('a name equal to the namespace is prefixed: `my_app` has no `my_app_` prefix', () => {
+    expect(objectTemplate.generate(NS, NS)).toContain(`name: '${NS}_${NS}',`);
+  });
 });
 
 describe('[#20197] the namespace is read from the loaded config, the gate\'s own source', () => {
