@@ -5873,6 +5873,33 @@ const step18: MigrationStep = {
         + '`@objectstack/spec/api-assembled`. No metadata document, stored row or JSON Schema reference '
         + 'needs editing: the schemas and their published ids did not change.',
     },
+    // #15677 (stack card 2/6 of #14478, maintainer ruling B: a duration key
+    // carries its unit in its NAME) — the D3 entry of the
+    // `api-endpoint-cache-ttl-to-cache-ttl-seconds` family (ruling B on #17152:
+    // one D3 entry per retirement family, even when D2 is lossless). The card's
+    // other eleven keys have no conversion and carry their own D3 entries; this
+    // one has both.
+    {
+      id: 'api-endpoint-cache-ttl-unit-in-key',
+      surface: 'apis[].cacheTtl — the response-cache lifetime of a declared API endpoint',
+      replacement: '`cacheTtlSeconds` — the same lifetime, in seconds, with the unit in the key name. It '
+        + 'still applies to GET endpoints only.',
+      reason: 'The D2 conversion `api-endpoint-cache-ttl-to-cache-ttl-seconds` renames `cacheTtl` to '
+        + '`cacheTtlSeconds` in the `apis` collection and on stored endpoint rows, keeping the value, '
+        + 'and the rename is lossless: the key always meant seconds. The judgment is whether the '
+        + 'author knew that. The unit lived only in the description, on the same endpoint surface '
+        + 'where `rateLimit.windowMs` spells its unit in milliseconds, so a value written in '
+        + 'milliseconds — `cacheTtl: 60000` meant as one minute — cached responses for almost '
+        + 'seventeen hours, and the rename carries 60000 over unchanged. A cache that lives a '
+        + 'thousand times longer than intended serves stale data long after the underlying records '
+        + 'change, with no error anywhere. Only the author can say which unit each value was written '
+        + 'in.',
+      acceptanceCriteria: 'No endpoint carries `cacheTtl`; the parse refuses it with the rename. Every '
+        + '`cacheTtlSeconds` value is the cache lifetime the author intends in seconds — an endpoint '
+        + 'meant to cache for one minute reads `cacheTtlSeconds: 60`. A GET to the endpoint repeated '
+        + 'inside that window is answered from the cache, and one repeated after it reflects a record '
+        + 'changed in between.',
+    },
     {
       id: 'api-error-retry-after-unit-in-key',
       surface: 'EnhancedApiError.retryAfter (api/errors.zod.ts) — the ADR-0112 error envelope on the wire',
@@ -6895,6 +6922,41 @@ const step18: MigrationStep = {
         + 'fail tsc on upgrade; the fix is choosing a shipped driver, never '
         + 'widening a local mirror of the enum.',
     },
+    // #14676 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `connector-error-mapping-removed` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). The family is the key on
+    // both carriers (`integration/Connector:errorMapping`,
+    // `integration/DeclarativeConnectorEntry:errorMapping`) and the shape that
+    // leaves with it — `integration/ErrorMappingConfig`,
+    // `integration/ErrorMappingRule` and `integration/ConnectorErrorCategory` in
+    // RETIRED_DEFS_BY_MAJOR[18].
+    {
+      id: 'connector-error-mapping-retired',
+      surface: 'connector.errorMapping — the rules / defaultCategory / unmappedBehavior / logUnmapped '
+        + 'block and its per-rule keys, on a connector and on a stack connectors[] entry',
+      replacement: '(removed — no connector engine maps an external error through authored rules.) '
+        + 'Retry behaviour is `retryConfig`, which the outbound fetch applies. No connector-level '
+        + 'channel shows an end user a message: an error users must read is surfaced by whatever '
+        + 'handles the connector call\'s failure.',
+      reason: 'The D2 conversion `connector-error-mapping-removed` deletes the whole block from every '
+        + 'connector, stack entry and stored connector row, with one notice per connector, and the '
+        + 'delete is lossless: no provider, dispatcher or materializer ever mapped an external error '
+        + 'through the rules, so the eleven nested keys configured nothing. The judgment is about what '
+        + 'the rules were written to achieve. A rule marking an upstream code `retryable` never '
+        + 'changed a retry — if that retry matters, it belongs in `retryConfig`. A rule with a '
+        + '`userMessage` never showed that message to anyone, although the spelling matches the live '
+        + 'API-error channel and read as a user-facing refusal; if users need that text, whatever '
+        + 'handles the failed call has to surface it. `unmappedBehavior` and `logUnmapped` suppressed '
+        + 'or logged nothing. Which of these intents still matters is known only to the connector\'s '
+        + 'author.',
+      acceptanceCriteria: 'No connector and no stack connector entry carries `errorMapping`; the parse '
+        + 'refuses it, and no code imports ErrorMappingConfig, ErrorMappingRule or '
+        + 'ConnectorErrorCategory. Calls through each connector fail and retry exactly as they did '
+        + 'before the upgrade. For every rule whose intent still matters: a retry the author wanted is '
+        + 'expressed in `retryConfig` and observed on a failing upstream, and a message the author '
+        + 'wanted users to read is shown to them, by the caller that handles the failure, when the '
+        + 'upstream fails.',
+    },
     {
       id: 'connector-provider-context-connection-timeout-ms-retired',
       surface: 'ConnectorProviderContext.connectionTimeoutMs, the declared connect deadline handed '
@@ -6936,6 +6998,40 @@ const step18: MigrationStep = {
         + 'timeout on the surface. The sibling members retryConfig and requestTimeoutMs '
         + 'deliberately do NOT move, and a sweep that removed either has over-applied this entry: '
         + 'both resolve to real reads at the fetch site.',
+    },
+    // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
+    // unit in its NAME) — the D3 entry of the
+    // `connector-health-and-trigger-durations-unit-in-key` family (ruling B on
+    // #17152: one D3 entry per retirement family, even when D2 is lossless). The
+    // two keys share one authored document and one conversion, so they share one
+    // entry. Both renamed keys are still unread (the liveness ledger records each
+    // as dead, `liveness/connector.json`): the rename is an honesty fix to the
+    // declaration, and the entry says so rather than implying a live engine.
+    {
+      id: 'connector-resilience-durations-unit-in-key',
+      surface: 'connector.health.circuitBreaker.monitoringWindow and connector.triggers[].interval — '
+        + 'the two connector durations whose name carried no unit',
+      replacement: '`monitoringWindowMs` (milliseconds) and `intervalSeconds` (seconds) — rename each '
+        + 'key; both values are unchanged.',
+      reason: 'The D2 conversion `connector-health-and-trigger-durations-unit-in-key` renames both keys '
+        + 'in `connectors[]` and on stored connector rows, keeping each value, with a separate notice '
+        + 'per key so an operator sees which of its own keys moved; the rename is lossless because '
+        + 'each key always meant the unit its new name states. Two judgments remain. First, the units '
+        + 'were easy to get wrong in opposite directions: `monitoringWindow` (milliseconds) sat one '
+        + 'key below `resetTimeoutMs`, and the bare token `interval` means MILLISECONDS elsewhere in '
+        + 'this same spec while a trigger interval meant SECONDS — so a trigger written '
+        + '`interval: 60000` for one minute asked for once every sixteen hours or so, and the rename '
+        + 'keeps 60000. Second, neither key drives an engine today: no polling loop reads a trigger '
+        + 'interval, and no circuit breaker exists for connectors, so nothing reads the monitoring '
+        + 'window. An author who relied '
+        + 'on either for behaviour has not been getting it, before or after this rename.',
+      acceptanceCriteria: 'No connector carries `health.circuitBreaker.monitoringWindow` or '
+        + '`triggers[].interval`; the parse refuses both with the rename. Every `monitoringWindowMs` '
+        + 'value is the window the author intends in milliseconds and every `intervalSeconds` value '
+        + 'the cadence the author intends in seconds — a trigger meant to poll every minute reads '
+        + '`intervalSeconds: 60`. No part of the deployment\'s design depends on a connector polling '
+        + 'on that interval or tripping on that window: where it did, the author has moved that need '
+        + 'to a mechanism that runs.',
     },
     {
       id: 'cube-join-sql-and-relationship-retired',
@@ -6982,6 +7078,36 @@ const step18: MigrationStep = {
         + 'Nothing else regresses: `joins.<alias>.name` is unchanged, and it is what both the joined '
         + 'table and the per-object RLS/tenant read scope are resolved from.',
     },
+    // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
+    // retirement family, even when D2 is lossless). The unknown-keys entry
+    // `analytics-authorable-unknown-keys-refused` names the conversion only in
+    // passing; this is the family's own entry. The strip preserves observed
+    // behaviour exactly — which is the problem: the observed behaviour was an
+    // unfiltered number under a filtered name.
+    {
+      id: 'cube-metric-filters-retired',
+      surface: 'analyticsCubes[].measures.<metric>.filters — the per-metric raw-SQL filter list',
+      replacement: 'One of three filters that ARE applied: a `where` condition at query time, the '
+        + 'condition folded into the metric\'s own `sql` expression (a conditional aggregate), or an '
+        + 'ADR-0021 dataset measure with a structured `filter`.',
+      reason: 'The D2 conversion `metric-filters-removed` deletes `filters` from every cube metric, and '
+        + 'the delete is lossless in the narrow sense: neither SQL strategy ever read the key, so a '
+        + 'metric authored with `filters: [{ sql: "stage = \'closed_won\'" }]` already returned the '
+        + 'UNFILTERED aggregate under the author\'s metric name, and still does. That is exactly why the '
+        + 'strip does not finish the job. The author wrote a condition because they wanted a filtered '
+        + 'number; every dashboard, report and export reading that metric has been showing a larger '
+        + 'one. Only the author can say which of the three live mechanisms expresses the condition '
+        + 'they meant — a query-time `where` changes every query, a conditional aggregate changes the '
+        + 'metric, a dataset measure moves it to the governed layer — and whether numbers already '
+        + 'published from the unfiltered metric need to be revisited.',
+      acceptanceCriteria: 'No cube metric carries `filters`; the parse refuses the key by name. For '
+        + 'each metric that carried one, the author has either re-expressed the condition through one '
+        + 'of the three live mechanisms or decided the unfiltered aggregate is what they want — and '
+        + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
+        + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
+        + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
+    },
     {
       id: 'dashboard-header-modal-target-page-only',
       surface:
@@ -7014,6 +7140,36 @@ const step18: MigrationStep = {
         + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
         + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
         + 'page or form rather than a refusal dialog.',
+    },
+    // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
+    // unit in its NAME) — the D3 entry of the
+    // `dashboard-refresh-interval-to-refresh-interval-seconds` family (ruling B on
+    // #17152: one D3 entry per retirement family, even when D2 is lossless). The
+    // one key of that stack whose reader lives in another repository, released on
+    // its own schedule — so besides the unit check, the author owes a look at the
+    // running console.
+    {
+      id: 'dashboard-refresh-interval-unit-in-key',
+      surface: 'dashboard.refreshInterval — the auto-refresh cadence of a dashboard',
+      replacement: '`refreshIntervalSeconds` — the same cadence, in seconds, with the unit in the key '
+        + 'name. The old rename hints (`refresh`, `autoRefresh`, `pollInterval`) now point at it.',
+      reason: 'The D2 conversion `dashboard-refresh-interval-to-refresh-interval-seconds` renames '
+        + '`refreshInterval` to `refreshIntervalSeconds` in the `dashboards` collection and on stored '
+        + 'dashboard rows, keeping the value, and the rename is lossless: the key always meant seconds. '
+        + 'Two judgments remain. First, the unit: nothing in the old name said seconds, and three '
+        + 'other spellings authors reached for named no unit either, so a value written in '
+        + 'milliseconds — `refreshInterval: 30000` meant as thirty seconds — asked for a refresh about '
+        + 'every eight hours, and the rename keeps 30000. Second, the reader: the dashboard renderer ships '
+        + 'in the separately released console, and when this rename landed it still read the old '
+        + 'key, so a console that has not yet moved sees no cadence and starts no timer. A dashboard '
+        + 'that stops refreshing after the upgrade is that lag, not a wrong value — which only a look '
+        + 'at the running console can tell apart.',
+      acceptanceCriteria: 'No dashboard carries `refreshInterval`; the parse refuses it with the rename. '
+        + 'Every `refreshIntervalSeconds` value is the cadence the author intends in seconds — a '
+        + 'dashboard meant to refresh every thirty seconds reads `refreshIntervalSeconds: 30`. In the '
+        + 'console the deployment runs, an open dashboard re-queries its widgets at that cadence; '
+        + 'where it does not, the console build predates the renderer\'s move to the new key, and the '
+        + 'author has recorded that until the console is upgraded.',
     },
     // The judgement half of `dashboard-widget-chart-config-structure-removed`. The
     // D2 conversion strips the four keys mechanically; what they CARRIED cannot be
@@ -8148,6 +8304,39 @@ const step18: MigrationStep = {
         + '`schemaValid: true` in `--json`, and the run closes with the schema-valid line '
         + 'rather than the manual-changes warning',
     },
+    // #9198 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `element-input-target-variable-removed` family. Every retirement family
+    // carries one D3 entry even when a lossless D2 conversion repairs its data
+    // (ruling B on #17152, on the maintainer's #15954 authority). The strip is
+    // lossless because the key never bound anything; what it cannot do is create
+    // the binding the author meant to declare, because only the author knows which
+    // page variable an input was supposed to feed.
+    {
+      id: 'element-input-target-variable-retired',
+      surface: 'page.component.element:text_input.targetVariable / '
+        + 'page.component.element:record_picker.targetVariable — the declarative binding hint on the '
+        + 'two input elements',
+      replacement: 'Declare the binding on the page variable instead: a `variables[]` entry whose '
+        + '`source` is the input component `id`. That reverse lookup is the one binding the renderer '
+        + 'has ever honoured; the variable name is the author\'s choice, and `targetVariable` named it '
+        + 'from the wrong end.',
+      reason: 'The D2 conversion `element-input-target-variable-removed` deletes `targetVariable` from '
+        + 'every text-input and record-picker component, and the delete is lossless: no renderer, hook '
+        + 'or runtime ever read the key, so an input authored with it and without a matching '
+        + '`variables[].source` wrote nothing, with a success receipt and no diagnostic. What the delete '
+        + 'cannot do is restore the intent. An author who wrote `targetVariable: \'contact_email\'` meant '
+        + 'that input to feed that variable, and after the strip the page is exactly as unbound as it '
+        + 'always was — now without even the hint that says so. Whether the variable exists, whether '
+        + 'its `source` already names this component, and whether anything downstream (a flow input, a '
+        + 'filter, a visibility predicate) reads it are facts about the author\'s page that no '
+        + 'conversion can see, so the binding is delegated rather than invented.',
+      acceptanceCriteria: 'For every `element:text_input` and `element:record_picker` component that '
+        + 'carried `targetVariable`: either the page declares a variable whose `source` equals the '
+        + 'component `id`, or the author has decided the input needs no binding. With the binding '
+        + 'declared, typing into the input (or picking a record) and then reading the variable — from '
+        + 'whatever consumes it on the page — returns the value entered. No component authors '
+        + '`targetVariable`; the parse refuses it by name.',
+    },
     {
       id: 'element-number-filter-rule-array',
       surface:
@@ -8754,6 +8943,39 @@ const step18: MigrationStep = {
         + '`max_scale`; `number` / `percent` / `rating` / `slider` fields keep their `scale` and '
         + 'still refuse over-scale writes.',
     },
+    // #9227 — the D3 entry of the `field-column-lists-canonicalized` family (ruling
+    // B on #17152: one D3 entry per retirement family, even when D2 repairs the
+    // data). The conversion respells and folds every entry it can resolve; it
+    // deliberately leaves the two shapes it cannot resolve for the parse to refuse,
+    // and the related-list fold drops decoration keys by design. Both halves are
+    // the author's to finish.
+    {
+      id: 'field-inline-and-related-list-columns-closed',
+      surface: 'field.inlineColumns[] and field.relatedListColumns[] on lookup and master_detail '
+        + 'fields — the two column lists that used to accept any object',
+      replacement: '`inlineColumns` entries are strict, name-keyed columns — `{ name, label?, type?, … }`, '
+        + 'where `{ name }` alone hydrates the rest from the child object field. `relatedListColumns` '
+        + 'entries are child field-name strings.',
+      reason: 'The D2 conversion `field-column-lists-canonicalized` rewrites what it can resolve without '
+        + 'guessing: an inline column spelled `{ field: \'x\' }` becomes `{ name: \'x\' }` with every other '
+        + 'key kept, and a related-list column object folds to its identity string. Two things remain '
+        + 'the author\'s. First, the conversion leaves alone, on purpose, an inline entry that carries '
+        + 'BOTH `field` and `name` (rewriting a live key on the strength of a stale one would guess) '
+        + 'and a related-list object with no resolvable identity (a conversion must not invent data) — '
+        + 'those now fail the parse and only the author knows which column was meant. Second, the fold '
+        + 'DROPS a related-list object\'s decoration keys — a label, a width — because no object '
+        + 'spelling rendered reliably on that list; the author decides whether a label they wrote there '
+        + 'belongs on the child field itself instead. Both lists used to accept any object, so a '
+        + 'mis-keyed column published clean and drew blank cells: a column that was blank before this '
+        + 'release was usually one of these, and the author should confirm it now names a real child '
+        + 'field.',
+      acceptanceCriteria: 'The object parses: no `inlineColumns` entry carries `field`, and every '
+        + '`relatedListColumns` entry is a string. Every inline column `name` and every related-list '
+        + 'string names a field that exists on the child object, and the inline grid and the related '
+        + 'list render a value — not a blank cell — in each column for a record that has one. Any label '
+        + 'that the fold dropped from a related-list column is either no longer wanted or now lives on '
+        + 'the child field definition, where the list reads it from.',
+    },
     {
       id: 'field-master-detail-set-null-refused',
       surface: "object field `deleteBehavior: 'set_null'` authored on a `master_detail` field",
@@ -8990,6 +9212,34 @@ const step18: MigrationStep = {
         + 'admitted unchecked. ⚠️ An object already stored in `sys_metadata` is not re-validated by this '
         + 'change: its writes keep being refused at run time exactly as before, and that refusal names '
         + 'the reference for a `record` read — its own locator.',
+    },
+    // #13700 (ui#6837 half 1) — the D3 entry of the `field-reference-to-alias`
+    // family (ruling B on #17152: one D3 entry per retirement family, even when D2
+    // is lossless). The rename is lossless for every row it can decide; it leaves
+    // the one row it cannot decide, and it cannot reach code.
+    {
+      id: 'field-reference-to-spelling-retired',
+      surface: 'field.reference_to — the legacy runtime spelling of a lookup or master_detail target, '
+        + 'on object fields and object-extension fields',
+      replacement: '`reference` — the one spelling the field schema has ever accepted, and the one the '
+        + 'wire serves.',
+      reason: 'The D2 conversion `field-reference-to-alias` renames `reference_to` to `reference` in '
+        + 'author sources and on every stored-row rehydration, so the wire only ever carries '
+        + '`reference`; for a row with only the legacy spelling the rename is lossless. Two things are '
+        + 'left. First, a row carrying BOTH spellings with DIFFERENT targets is left untouched, on '
+        + 'purpose: the loader will not pick a target for the author, so that field keeps failing its '
+        + 'parse until someone decides which object it points at. Second, code is out of reach: a '
+        + 'plugin, script, custom renderer or external client that read `reference_to` off served '
+        + 'field metadata worked only because a stored row happened to carry the legacy spelling, and '
+        + 'it now reads nothing — the frontend fallback that tolerated the spelling is scheduled to '
+        + 'go, after which a missed reader degrades a lookup to a picker with no target. The camelCase '
+        + '`referenceTo` is a different surface (resolved action params) and is not part of this '
+        + 'family.',
+      acceptanceCriteria: 'No object or object-extension field carries `reference_to` in source or at '
+        + 'rest — every stored field serves `reference`. Each field that had carried both spellings '
+        + 'names one target, chosen by the author. No code outside the metadata reads `reference_to` '
+        + 'from a field definition. Every lookup and master_detail field opens a picker scoped to the '
+        + 'object its `reference` names, and saving a selection stores that object\'s record id.',
     },
     {
       id: 'field-scale-precision-integer-refused',
@@ -9841,6 +10091,33 @@ const step18: MigrationStep = {
         + 'predicate parses and registers byte-identically to before, and a non-string in these '
         + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
     },
+    // #12868 (maintainer-ruled narrowing on the objectui#6263 analysis) — the D3
+    // entry of the `form-view-option-default-removed` family (ruling B on #17152:
+    // one D3 entry per retirement family, even when D2 is lossless). The strip
+    // changes no form; the prescribed replacement changes MORE than one form, and
+    // that difference is the author's call.
+    {
+      id: 'form-view-option-default-retired',
+      surface: 'view.form.sections[].fields[].options[].default — the per-option pre-selection on a '
+        + 'form view\'s own option list',
+      replacement: 'The object field\'s own option list, where `default` is enforced: `default: true` '
+        + 'on that field\'s options entry, or the field-level `defaultValue`.',
+      reason: 'The D2 conversion `form-view-option-default-removed` deletes `default` from every option '
+        + 'of every form-view field it reaches, and the delete is lossless: nothing on the form path '
+        + 'ever read it — the insert-path default falls back to the OBJECT definition\'s options, and '
+        + 'no form renderer seeds a value from a form view\'s. So a form that marked an option as '
+        + 'default never pre-selected it, and still does not. The judgment is in the replacement. The '
+        + 'form-view key was scoped to ONE form; the object field\'s `default` applies on EVERY insert '
+        + 'path — every form of that object, the API, imports. Moving the marker there makes the form '
+        + 'do what its author wanted and also changes what records created elsewhere receive when the '
+        + 'value is omitted. Only the author can say whether that wider default is correct, or whether '
+        + 'the pre-selection should be dropped.',
+      acceptanceCriteria: 'No form-view option carries `default`; the parse refuses it. For each form '
+        + 'field that had marked one: either the object field now declares the default and the author '
+        + 'has accepted it for every insert path — a record created through the form or the API with '
+        + 'the field left empty is stored with that value — or the author has decided the form needs '
+        + 'no pre-selection and the object field is unchanged.',
+    },
     {
       id: 'hook-register-undispatched-lifecycle-event-refused',
       surface:
@@ -9896,6 +10173,31 @@ const step18: MigrationStep = {
         + '"[ObjectQL] Hook \'...\' is an engine lifecycle event name the engine never dispatches" '
         + 'throw, and any list `total` or `groupBy` that was expected to be scoped is scoped by a '
         + 'middleware rather than by a hook.',
+    },
+    // #14478 (maintainer ruling B: a duration key carries its unit in its NAME) —
+    // the D3 entry of the `hook-timeout-to-timeout-ms` family (ruling B on #17152:
+    // one D3 entry per retirement family, even when D2 is lossless). The rename
+    // keeps the number, which is exactly the part the ruling was about: whether
+    // that number was ever in milliseconds is the author's to say.
+    {
+      id: 'hook-timeout-unit-in-key',
+      surface: 'hook.timeout — the per-invocation time limit of a data hook',
+      replacement: '`timeoutMs` — the same limit, in milliseconds, with the unit in the key name.',
+      reason: 'The D2 conversion `hook-timeout-to-timeout-ms` renames `timeout` to `timeoutMs` in author '
+        + 'sources and on stored hook rows, keeping the value, and the rename is lossless: the key '
+        + 'always meant milliseconds, and the conversion leaves an already-canonical `timeoutMs` alone '
+        + 'and refuses a pair that disagrees. The judgment is the one the rename exists for. The unit '
+        + 'used to live only in the key\'s description, beside body-level keys that spelled theirs, so '
+        + 'an author who wrote a seconds value — `timeout: 30` meaning thirty seconds — got a limit of '
+        + 'thirty milliseconds and no error, and the rename carries that 30 over unchanged. Only the '
+        + 'author knows which unit they meant, so each value needs reading once. A pair left '
+        + 'unconverted because the two spellings disagree needs the author to choose, and code that '
+        + 'builds or reads a hook definition in TypeScript is outside the chain\'s reach.',
+      acceptanceCriteria: 'No hook carries `timeout`; the parse refuses it with the rename. Every '
+        + '`timeoutMs` value is the limit the author intends expressed in milliseconds — a hook meant '
+        + 'to be allowed thirty seconds reads `timeoutMs: 30000`. A hook that runs longer than its '
+        + '`timeoutMs` fails with a timeout at that limit, and one that finishes inside it completes as '
+        + 'it did before the upgrade. No code reads or writes `timeout` on a hook definition.',
     },
     {
       id: 'hot-reload-inert-state-strategies-retired',
@@ -10197,6 +10499,32 @@ const step18: MigrationStep = {
         + 'shards and the generated reference docs. ⚠️ Runtime behaviour is deliberately UNCHANGED '
         + 'and must be verified as such: nothing ever parsed or read these shapes, so removing '
         + 'them removes no behaviour.',
+    },
+    // #14478 (maintainer ruling B: a duration key carries its unit in its NAME) —
+    // the D3 entry of the `job-timeout-to-timeout-ms` family (ruling B on #17152:
+    // one D3 entry per retirement family, even when D2 is lossless). The job half
+    // of the hook rename, with its own audience: whoever schedules background work.
+    {
+      id: 'job-timeout-unit-in-key',
+      surface: 'job.timeout — the per-attempt time limit of a scheduled job',
+      replacement: '`timeoutMs` — the same per-attempt limit, in milliseconds, beside the sibling '
+        + '`retryPolicy.backoffMs` that already spelled its unit.',
+      reason: 'The D2 conversion `job-timeout-to-timeout-ms` renames `timeout` to `timeoutMs` in author '
+        + 'sources and wherever the chain is replayed, keeping the value, and the rename is lossless: '
+        + 'the key always meant milliseconds. The judgment is whether the author knew that. The unit lived '
+        + 'only in the description while `retryPolicy.backoffMs` beside it spelled its own, so one '
+        + 'job definition carried two conventions; a seconds value copied in — `timeout: 300` for a '
+        + 'five-minute job — became a 300-millisecond limit with no error, and the rename carries the '
+        + '300 over unchanged. A limit that short fails every attempt and burns the retry budget, '
+        + 'which is easy to misread as a flaky job. Only the author can say which unit each value was '
+        + 'written in, and code that builds job definitions in TypeScript is outside the chain\'s '
+        + 'reach.',
+      acceptanceCriteria: 'No job carries `timeout`; the parse refuses it with the rename. Every '
+        + '`timeoutMs` value is the per-attempt limit the author intends in milliseconds — a job meant '
+        + 'to be allowed five minutes reads `timeoutMs: 300000`. An attempt that runs past its '
+        + '`timeoutMs` fails with a timeout and is retried under `retryPolicy`, and an attempt that '
+        + 'finishes inside it succeeds as before. No code reads or writes `timeout` on a job '
+        + 'definition.',
     },
     {
       id: 'kernel-compatibility-matrix-estimated-migration-time-unit-in-key',
@@ -10836,6 +11164,67 @@ const step18: MigrationStep = {
         + 'Prove the widening separately and cheaply: a prerelease version that used to be '
         + 'refused at build time now builds.',
     },
+    // #10329 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `mapping-lookup-params-removed` family (ruling B on #17152: one D3 entry per
+    // retirement family, even when D2 is lossless). The strip preserves observed
+    // import behaviour exactly; the judgment it leaves is whether the author's
+    // import was ever doing what the four keys said.
+    {
+      id: 'mapping-lookup-params-retired',
+      surface: 'mapping.fieldMapping[].params.object / .fromField / .toField / .autoCreate — the '
+        + 'per-entry reference-resolution keys of a lookup mapping',
+      replacement: 'Nothing on the mapping. A `lookup` entry copies the cell through, and reference '
+        + 'resolution runs afterwards off the TARGET field\'s own metadata: its `reference` names the '
+        + 'object searched, and the cell is matched as a display value (a name, an email or a record '
+        + 'id). Records a row points at must exist before the import runs.',
+      reason: 'The D2 conversion `mapping-lookup-params-removed` deletes the four keys from every '
+        + 'mapping entry\'s params, and the delete is lossless: the import path never read them, so '
+        + 'stripping them changes no imported row. The judgment is about what the author believed. '
+        + '`autoCreate` read as "create the referenced record when nothing matches", and nothing was '
+        + 'ever created — an unresolved cell fails its row with `import_reference_not_found`, with or '
+        + 'without the key. An import pipeline built on that belief has been losing those rows, and '
+        + 'now needs the referenced records seeded first. `object`, `fromField` and `toField` read as '
+        + 'the target and the matching columns, and were never consulted: where they named something '
+        + 'OTHER than the target field\'s own `reference` or a column the resolver matches on, the rows '
+        + 'were linked by the field\'s metadata, not by the mapping — and only the author knows which '
+        + 'one they meant.',
+      acceptanceCriteria: 'No mapping entry carries the four keys; the parse refuses them. For each '
+        + 'mapping that carried them: the target field\'s `reference` names the object the author meant '
+        + 'the rows to link to, and a dry run of a representative file resolves every reference cell '
+        + '(no `import_reference_not_found` row) — or the missing referenced records are created by a '
+        + 'step that runs before the import, since the import itself never creates them. Row counts '
+        + 'and links match the pre-upgrade import of the same file.',
+    },
+    // #15680 (stack card of #14478, maintainer ruling B: a duration key carries its
+    // unit in its NAME) — the D3 entry of the
+    // `memory-persistence-auto-save-interval-to-ms` family (ruling B on #17152: one
+    // D3 entry per retirement family, even when D2 is lossless). Registered keys:
+    // `data/FilePersistenceConfig:autoSaveInterval` and
+    // `data/AutoPersistenceConfig:autoSaveInterval` — both arms of the persistence
+    // union, because both forward the same value to the same file adapter.
+    {
+      id: 'memory-persistence-auto-save-interval-unit-in-key',
+      surface: 'datasource.config.persistence.autoSaveInterval on the memory driver — the file and '
+        + 'auto persistence arms',
+      replacement: '`autoSaveIntervalMs` — the same interval, in milliseconds, on both arms; the '
+        + 'minimum of 100 and the file arm\'s 2000 default are unchanged.',
+      reason: 'The D2 conversion `memory-persistence-auto-save-interval-to-ms` renames the key on both '
+        + 'persistence arms of every memory-driver datasource and on stored datasource rows, keeping the '
+        + 'value, and leaves a string persistence mode, a custom adapter and every other driver\'s '
+        + 'config alone; the rename is lossless because the key always meant milliseconds. The '
+        + 'judgment is whether each value was written in that unit. Nothing in the old name said so, '
+        + 'and the auto arm\'s description named no unit at all. A seconds value below 100 was already '
+        + 'refused by the bound, but one above it was not — `autoSaveInterval: 300` meant as five '
+        + 'minutes saved every 300 milliseconds, and the rename keeps 300. The interval also bounds how '
+        + 'much in-memory data a crash can lose, so the author is choosing a durability trade-off, not '
+        + 'only a number.',
+      acceptanceCriteria: 'No memory-driver datasource carries `autoSaveInterval` on either arm; the '
+        + 'parse refuses it with the rename. Every `autoSaveIntervalMs` value is the interval the author '
+        + 'intends in milliseconds — a store meant to save every five seconds reads '
+        + '`autoSaveIntervalMs: 5000`. With file persistence on, a write followed by waiting longer than '
+        + 'that interval leaves the change in the persisted file, and the author accepts losing at most '
+        + 'that interval of writes on a crash.',
+    },
     {
       id: 'memory-persistence-placeholder-refused',
       surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
@@ -11343,6 +11732,32 @@ const step18: MigrationStep = {
         + 'the whole migration; beside filter: [] the grid reads defaultFilters, so move those '
         + 'rules onto filter rather than deleting them.',
     },
+    // #11805 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `object-grid-default-sort-removed` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). The conversion follows
+    // the renderer's own precedence exactly, so it preserves what the grid did —
+    // including the case where what the grid did was not what the author wrote.
+    {
+      id: 'object-grid-default-sort-retired',
+      surface: 'page.component.object-grid.defaultSort — the legacy single-pair second spelling of '
+        + 'the grid sort',
+      replacement: '`sort: [{ field, order }]` — the array every read path honours; a single pair is a '
+        + 'one-entry array.',
+      reason: 'The D2 conversion `object-grid-default-sort-removed` follows the renderer\'s own '
+        + 'precedence: where `sort` was absent the `defaultSort` pair WAS the grid\'s sort, so it moves '
+        + 'to `sort` as a one-entry array; where `sort` was present the pair was never read, so it is '
+        + 'deleted. Both are behaviour-preserving, and the second is where the judgment sits. A grid '
+        + 'that authored both keys with DIFFERENT orders has always loaded in the `sort` order while '
+        + 'its author may believe `defaultSort` governed the initial load — the key\'s name says it '
+        + 'should have. The conversion keeps the order users have been seeing and discards the one the '
+        + 'author wrote; only the author can say which one they meant. Code that builds object-grid '
+        + 'props (a host, a generator) must also stop emitting the key, which no conversion reaches.',
+      acceptanceCriteria: 'No `object-grid` component carries `defaultSort`; the parse refuses it. '
+        + 'Each grid\'s `sort` array lists the fields and directions the author intends, and the grid '
+        + 'loads with its rows in that order and shows that column as sorted. For every grid that had '
+        + 'authored both keys, the author has compared the discarded `defaultSort` pair with the kept '
+        + '`sort` and confirmed the kept one.',
+    },
     {
       id: 'object-index-unknown-keys-refused',
       surface: 'object `indexes[]` entries (`IndexSchema`) — undeclared keys',
@@ -11367,6 +11782,33 @@ const step18: MigrationStep = {
         + 'byte-identically to before, at every ADR-0120 `unique` spelling. A stored body from the '
         + 'drift window carrying `indexes[].where` is rejected with the database-layer prescription '
         + 'rather than saved with the key silently dropped.',
+    },
+    // #17260 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `object-kanban-quick-add-removed` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). The strip changes nothing a
+    // user sees; the decision it leaves is whether the board needed the control
+    // the author asked for.
+    {
+      id: 'object-kanban-quick-add-retired',
+      surface: 'page.component.object-kanban.quickAdd — the per-column quick-add switch on the '
+        + 'metadata-driven board',
+      replacement: '(removed from the metadata board.) The quick-add control exists on the `kanban-ui` '
+        + 'block, where a React host supplies the `onQuickAdd` function the control calls. On a '
+        + 'metadata board, records are created through the object\'s ordinary create action.',
+      reason: 'The D2 conversion `object-kanban-quick-add-removed` deletes `quickAdd` from every '
+        + '`object-kanban` component, and the delete is lossless: the board forwarded the flag, but the '
+        + 'control also needs a host-supplied `onQuickAdd` function that JSON cannot carry and no '
+        + 'producer ever put on an object-kanban node, so the gate was permanently false and no board '
+        + 'ever showed the control. The residue is the requirement behind the flag. An author who set '
+        + '`quickAdd: true` wanted users to add a card inside a column; that never happened and still '
+        + 'does not. Whether the board can live without it, or needs a React host rendering the '
+        + '`kanban-ui` block with a real `onQuickAdd`, is a product decision about that board — not '
+        + 'something a key delete can make.',
+      acceptanceCriteria: 'No `object-kanban` component carries `quickAdd`; the parse refuses it. Each '
+        + 'board renders the same columns and cards as before the upgrade. For each board that had set '
+        + 'the flag, the author has either accepted creating records through the object\'s create '
+        + 'action, or moved that board to a host that renders the `kanban-ui` block with `onQuickAdd` '
+        + 'supplied — where clicking a column\'s add control creates a record in that column.',
     },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
@@ -11725,6 +12167,73 @@ const step18: MigrationStep = {
         + 'reads — verified against the running deployment, not against the metadata alone. A caller '
         + 'who was previously outside an `assignedProfiles` list and could nonetheless open the page '
         + 'is the pre-existing state, not a regression introduced by the removal.',
+    },
+    // #11027 (ADR-0049) — the D3 entry of the `page-component-responsive-removed`
+    // family (ruling B on #17152: one D3 entry per retirement family, even when D2
+    // is lossless). The family is the key plus the shape that leaves with it —
+    // `ui/ResponsiveConfig`, `ui/BreakpointColumnMap`, `ui/BreakpointName` and
+    // `ui/BreakpointOrderMap` in RETIRED_DEFS_BY_MAJOR[18]. The strip changes no
+    // pixel; translating an intended layout into CSS that IS applied is a design
+    // decision the conversion cannot make.
+    {
+      id: 'page-component-responsive-retired',
+      surface: 'page.components[].responsive — the per-breakpoint columns / order / hiddenOn block, '
+        + 'and the exported ResponsiveConfig shape with its breakpoint maps',
+      replacement: 'The sibling `responsiveStyles` (ADR-0065): per-breakpoint CSS maps compiled to '
+        + 'id-scoped CSS at render — for example `responsiveStyles: { xsmall: { display: \'none\' } }` '
+        + 'to hide a component on the narrowest screens.',
+      reason: 'The D2 conversion `page-component-responsive-removed` deletes `responsive` from every '
+        + 'page component wherever one can be authored, and the delete is lossless: no renderer ever '
+        + 'read the block, so the per-breakpoint columns, order and visibility it declared parsed, '
+        + 'validated and did nothing. This was also the block an earlier tombstone prescribed as the '
+        + 'live alternative for dashboard widgets, so an author who followed that advice moved an '
+        + 'inert key to an inert key and may still believe their page adapts to small screens. What '
+        + 'remains is theirs to decide: whether the layout they declared is one they still want, and '
+        + 'if so how to say it in CSS that is applied — `hiddenOn` maps to a `display` rule per '
+        + 'breakpoint, while column spans and order are layout choices with no one-to-one CSS '
+        + 'rewrite. Code that imported the retired shape (ResponsiveConfigSchema, BreakpointName, the '
+        + 'breakpoint maps) must drop the import; nothing replaces it.',
+      acceptanceCriteria: 'No page component carries `responsive`; the parse refuses it, and no code '
+        + 'imports the retired shape (each such import is a compile error). Each page renders exactly as '
+        + 'it did before the upgrade at every breakpoint. Where the author re-expressed an intended '
+        + 'adaptation through `responsiveStyles`, resizing the viewport across the named breakpoints '
+        + 'shows it — a component declared hidden on the narrowest breakpoint is absent there and '
+        + 'present above it.',
+    },
+    // #12497 (ADR-0049, maintainer ruling accepting #1883's recommendation B) — the
+    // D3 entry of the `permission-allow-restore-purge-removed` family (ruling B on
+    // #17152: one D3 entry per retirement family, even when D2 is lossless). The
+    // family is the four registered keys: `allowRestore` / `allowPurge` on
+    // `security/ObjectPermission` and on `security/EffectiveObjectPermission`.
+    // The strip changes no access decision; what it leaves is a governance
+    // question, because the bits sat on the two most destructive verbs.
+    {
+      id: 'permission-restore-purge-bits-retired',
+      surface: 'permission.objects.<object>.allowRestore / permission.objects.<object>.allowPurge — '
+        + 'the object-permission bits for undelete and hard delete',
+      replacement: '(removed — the `restore` and `purge` operations they claimed to gate do not '
+        + 'exist.) A dispatched `restore` or `purge` is denied fail-closed by the permission '
+        + 'evaluator\'s destructive-operation backstop for every principal. The bits return together '
+        + 'with the operations they gate. `allowTransfer`, the third lifecycle bit, is enforced and '
+        + 'stays.',
+      reason: 'The D2 conversion `permission-allow-restore-purge-removed` deletes both keys from every '
+        + 'object permission in author sources (both values, `true` included), and the delete is '
+        + 'lossless: no destructive lifecycle verb is in the engine\'s dispatch vocabulary, so a grant '
+        + 'delivered nothing and a denial locked nothing — every such request was, and stays, denied. '
+        + 'The judgment is about what people believed. An admin who wrote `allowPurge: false` believed '
+        + 'a lock existed; an admin who wrote `allowPurge: true` for a compliance role believed that '
+        + 'role could hard-delete a record on request — a GDPR erasure, for instance. Neither was ever '
+        + 'true. Any process, runbook or audit statement that relies on either belief needs another '
+        + 'path, and deciding that path is a governance decision no conversion can make. Separately, '
+        + 'an artifact built by the 17.x toolchain carries both keys materialized as the literal '
+        + '`false`; that one value is tolerated at load as inert residue and stripped, and every '
+        + 'other value — `true`, or a string or number spelling — is refused with the prescription.',
+      acceptanceCriteria: 'No authored object permission carries `allowRestore` or `allowPurge`; the '
+        + 'parse refuses any value but the tolerated `false` residue. Access decisions are unchanged: '
+        + 'a request for `restore` or `purge` is denied for every principal before and after the '
+        + 'upgrade, and `allowTransfer` behaves as before. Every documented process that assumed a '
+        + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
+        + 'names the mechanism it actually uses instead.',
     },
     {
       id: 'platform-timezone-columns-iana-domain-refused',
@@ -12310,6 +12819,31 @@ const step18: MigrationStep = {
         + "'bottom'. If a panel relied on the old schema default `collapsible: true`, author "
         + '`collapsible: true` explicitly — an unset key now defers to the renderer, which does '
         + 'not collapse.',
+    },
+    // #10054 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `record-highlights-field-icon-removed` family (ruling B on #17152: one D3
+    // entry per retirement family, even when D2 is lossless). The strip changes no
+    // pixel; what it leaves is the meaning the author put in an icon nobody drew.
+    {
+      id: 'record-highlights-field-icon-retired',
+      surface: 'page.component.record:highlights.fields[].icon — the per-chip icon on an object entry '
+        + 'of the highlights field list',
+      replacement: '(removed — the highlight chip has no icon slot.) Carry whatever the icon was meant '
+        + 'to signal in what the chip does render: its label, or the field\'s own value.',
+      reason: 'The D2 conversion `record-highlights-field-icon-removed` deletes `icon` from the object '
+        + 'entries of every `record:highlights` field list, and the delete is lossless: the chip '
+        + 'renders a label and a value and nothing else, the registration path carries field names '
+        + 'only, and the Studio designer publishes the list as plain strings, so an authored icon was '
+        + 'accepted and drawn by nothing. The residue is the author\'s intent. Six author-facing '
+        + 'surfaces advertised the key, so an author may have chosen an icon to carry meaning — a '
+        + 'warning glyph beside a risk score, a flag beside a region — and designed the page assuming a '
+        + 'reader would see it. That meaning was never shown and is not shown now; only the author can '
+        + 'say whether it matters and where it should live instead.',
+      acceptanceCriteria: 'No `record:highlights` field entry carries `icon`; the parse refuses it. The '
+        + 'highlights strip renders the same chips, in the same order, with the same labels and values '
+        + 'as before the upgrade. For each chip whose icon carried meaning, a reader who sees only the '
+        + 'label and value can still tell what the icon was meant to say. Any tooling that generated '
+        + 'highlight entries (a code generator, a template) no longer emits the key.',
     },
     {
       id: 'rest-api-endpoint-handler-status-retired',
@@ -13983,6 +14517,32 @@ const step18: MigrationStep = {
         + 'and must be verified as such: nothing ever parsed or read these shapes, so removing '
         + 'them removes no behaviour.',
     },
+    // #10926 — the D3 entry of the `translation-component-submit-label-removed`
+    // family (ruling B on #17152: one D3 entry per retirement family, even when D2
+    // is lossless). The strip deletes a string nothing has read since its carrier
+    // retired; where the translator's work should go instead is not something the
+    // conversion can decide.
+    {
+      id: 'translation-component-submit-label-retired',
+      surface: 'translation.pages.<page>.components.<id>.submitLabel — the component-copy key of the '
+        + 'retired element:form',
+      replacement: 'The live form surface\'s submit copy: `submitText` on the `object-form` component, '
+        + 'an I18nLabel localized at its own authoring site.',
+      reason: 'The D2 conversion `translation-component-submit-label-removed` deletes `submitLabel` from '
+        + 'every translation bundle and stored translation item, and the delete is lossless: the key\'s '
+        + 'only declarer, `element:form`, retired whole, so no resolver has overlaid the string since '
+        + 'and it was read by nothing. What the delete drops is translation WORK. A translator who '
+        + 'localized a submit button for each locale did so because a user was meant to read it; if '
+        + 'the page\'s form now lives on `object-form`, its submit copy is `submitText`, and that key '
+        + 'is not filled by moving the old strings mechanically — the component ids differ, and a '
+        + 'retired `element:form` may have no successor on the page at all. Only the author can say '
+        + 'which form each string belonged to and whether it still exists.',
+      acceptanceCriteria: 'No translation bundle or translation item carries a component '
+        + '`submitLabel`; the parse refuses it. For each form a user still submits, the `object-form` '
+        + 'component carries a `submitText` whose localized values cover the locales the dropped '
+        + 'strings covered, and switching the UI locale shows the submit button in that locale — or '
+        + 'the author has decided the default copy is acceptable.',
+    },
     // The judgment half of `translation-per-app-settings-removed`. The D2
     // conversion deletes the group mechanically; what it cannot say in a
     // `to: '(removed)'` notice is WHERE those strings were rendering and what
@@ -14084,6 +14644,33 @@ const step18: MigrationStep = {
         + 'is wrong or missing for your locale, correct it in the platform bundle '
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
+    },
+    // #15680 / #15682 (stack card of #14478, maintainer ruling B: a duration key
+    // carries its unit in its NAME) — the D3 entry of the
+    // `turso-config-timeout-to-timeout-ms` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). One conversion covers the
+    // authored surface of both declarations — the spec's turso contract and the
+    // driver package's own mirror schema, renamed in the same change.
+    {
+      id: 'turso-config-timeout-unit-in-key',
+      surface: 'datasource.config.timeout on the turso driver — the per-request time limit',
+      replacement: '`timeoutMs` — the same limit, in milliseconds, beside the sibling '
+        + '`sync.intervalSeconds` that already spelled its unit.',
+      reason: 'The D2 conversion `turso-config-timeout-to-timeout-ms` renames `config.timeout` to '
+        + '`config.timeoutMs` on every datasource whose driver resolves to turso (a stored `libsql` '
+        + 'spelling included) and leaves every other driver\'s `timeout` alone; the rename is lossless '
+        + 'because the key always meant milliseconds. The judgment is whether each value was written '
+        + 'in that unit. Two keys above it, `sync.intervalSeconds` spelled SECONDS, so one config '
+        + 'block carried both conventions, and the unit of `timeout` lived only in a description and '
+        + 'a title no parse reads: `timeout: 30` meant as thirty seconds became a thirty-millisecond '
+        + 'limit, short enough to fail a remote request, and the rename keeps 30. Only the author '
+        + 'can say which unit they meant. Code that builds a turso driver config in TypeScript is '
+        + 'outside the chain\'s reach.',
+      acceptanceCriteria: 'No turso datasource carries `config.timeout`; the spec contract refuses it '
+        + 'with the rename. Every `timeoutMs` value is the limit the author intends in milliseconds — '
+        + 'a datasource meant to allow thirty seconds '
+        + 'reads `timeoutMs: 30000` — and queries against the remote database complete as they did '
+        + 'before the upgrade. No code reads or writes `timeout` on a turso driver config.',
     },
     // The AUTHORING half of the turso driver's constructor refusals. The driver
     // refuses these configurations when it is built; this entry records that the
