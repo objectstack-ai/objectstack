@@ -8,8 +8,9 @@ import type { SemanticMigration } from '../../types.js';
 // `api/RestApiConfig:responseFormat` and `api/RestApiConfig:documentation.enabled`
 // — four ledger keys, since `responseFormat` retires whole with its three
 // members. No D2 conversion: a `RestServerConfig` is plugin TS configuration,
-// never a stack collection member or a stored row (the #14691 precedent on the
-// four sibling sub-objects), so this entry is where the prescription reaches
+// never a stack collection member or a stored row (the
+// `rest-server-config-dead-keys-retired` precedent on the four sibling
+// sub-objects), so this entry is where the prescription reaches
 // `os migrate meta`, the upgrade guide and `spec-changes.json`.
 export const entry: SemanticMigration = {
   id: 'rest-api-config-dead-keys-retired',

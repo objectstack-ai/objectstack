@@ -9,8 +9,9 @@
 // `retiredKey()` tombstone (a bare deletion would strip the key silently), the
 // ledger row stays `dead` with a REMOVED note, and there is no D2 conversion: a
 // `RestServerConfig` is plugin TS configuration, never a stack collection member
-// or a `sys_metadata` row — the `api/RestServerConfig:openApi31` and #14691
-// precedent. D3 semantic entry `rest-api-config-dead-keys-retired`. Registered
+// or a `sys_metadata` row — the `api/RestServerConfig:openApi31` precedent, and
+// the `rest-server-config-dead-keys-retired` one on the four sibling
+// sub-objects. D3 semantic entry `rest-api-config-dead-keys-retired`. Registered
 // under 18 for the launch-window reason its neighbours state.
 //
 // `responseFormat` is retired WHOLE — `envelope`, `includeMetadata` and
