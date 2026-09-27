@@ -157,8 +157,51 @@
  * live — but a switched-off policy that can never enforce is a policy that will
  * grant nothing on the day someone switches it on, and that is precisely the
  * moment nobody re-runs the linter.
+ *
+ * ## The engine's own admission of the read scope (#20158, #19995 ruling C)
+ *
+ * A predicate can pass every pass above and still be a filter the ENGINE
+ * refuses to run: a text operator aimed at a number field, a date field
+ * compared against a value its storage cannot read, a filter on a virtual
+ * (formula) field, a `{placeholder}` string. The lowering accepts all of them,
+ * because they are about what the object's fields ARE, which the CEL compiler
+ * does not know. ADR-0058 D2 makes each an authoring-time error.
+ *
+ * The verdict is the engine's, never a model of it: the caller hands this rule
+ * the engine's judge-only method (`IObjectQLEngine.judgeFilter`) as an INPUT,
+ * and the rule calls it on the lowered read scope. The runtime publish gate
+ * hands in the live engine's method; the CLI commands hand in the method of an
+ * engine built from the stack's own objects with no driver (the admission
+ * reads the `where`, the registry's field map and the context, nothing else).
+ * One rule, two doors, one function answering. Without the input the pass is
+ * skipped, and the rule answers exactly what it answered before the input
+ * existed.
+ *
+ * - **What is judged:** the `using` clause of a policy whose operation is part
+ *   of the object's READ SCOPE — `select` or `all`, the two
+ *   `getApplicablePolicies` matches for a read. A `check` is matched in memory
+ *   against a post-image and never reaches the engine's `where` admission, so
+ *   judging it here would model a consumer it does not have.
+ * - **With what values:** the reference pass's probe, except that a
+ *   `current_user.*` key the kernel does NOT resolve (an app-staged §7.3.1
+ *   membership set) is bound to `[]` for this pass only. The probe's string
+ *   stands for a kernel value faithfully (an id is never a date), but an
+ *   app-staged set holds app data this rule cannot know: measured,
+ *   `close_date in current_user.holidays` lowered with the probe string is
+ *   refused by the temporal door, while with `[]` it is admitted.
+ * - **With what context:** none. A `{placeholder}` string in a predicate
+ *   therefore answers `FILTER_TOKEN_UNRESOLVED` (known) or
+ *   `FILTER_TOKEN_UNKNOWN` (unknown) — the engine's own semantics for a filter
+ *   judged with no caller. An RLS predicate names the caller as `current_user.*`.
+ * - **When:** only when every pass above left this clause clean, so one
+ *   defect earns one finding.
+ *
+ * The finding keeps the id {@link RLS_PREDICATE_UNENFORCEABLE} and quotes the
+ * engine's message verbatim, with its code and status: at authoring time the
+ * text is the author's own, so nothing is withheld.
  */
 
+import type { EngineFilterJudgement, IObjectQLEngine } from '@objectstack/spec/contracts';
 import {
   compileCelToFilter,
   isPushdownableCel,
@@ -977,6 +1020,108 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
 }
 
 /**
+ * The engine's judge-only filter admission, as the caller hands it in
+ * (`IObjectQLEngine.judgeFilter`, bound to its engine).
+ */
+type FilterJudge = NonNullable<IObjectQLEngine['judgeFilter']>;
+
+/**
+ * The policy operations whose `using` is part of an object's READ SCOPE: the
+ * two `RLSCompiler.getApplicablePolicies` matches for a read (`find` / `count`
+ * / `aggregate` map to `select`, and `all` applies to every operation).
+ */
+const READ_SCOPE_OPERATIONS: ReadonlySet<string> = new Set(['select', 'all']);
+
+/**
+ * The probe the engine judges with: every kernel-resolved key keeps its
+ * type-faithful probe, and every other key (an app-staged §7.3.1 membership
+ * set, the only other thing `current_user.*` can hold) is bound to `[]`.
+ *
+ * `[]` because the set's MEMBERS are app data: the probe string is a faithful
+ * stand-in for a kernel value (a user id or an email is never a date), but not
+ * for a value an app stages, and the engine's temporal door judges members.
+ * Measured: `close_date in current_user.holidays` lowered with the probe
+ * string is refused (`INVALID_FILTER`), with `[]` it is admitted. A kernel key
+ * is left alone, so `close_date in current_user.org_user_ids` still reaches the
+ * door with a value of the type every request holds.
+ */
+function engineJudgeProbe(probe: UserProbe): { probe: UserProbe; rebound: boolean } {
+  const bound: UserProbe = {};
+  let rebound = false;
+  for (const [key, value] of Object.entries(probe)) {
+    if (PRERESOLVED_USER_KEYS.has(key)) {
+      bound[key] = value;
+    } else {
+      bound[key] = [];
+      rebound = true;
+    }
+  }
+  return { probe: bound, rebound };
+}
+
+/**
+ * The engine's verdict on this predicate's lowered read scope, or `null` when
+ * it admits it or the predicate has no lowering to judge.
+ *
+ * Asked of the ENGINE, through the method the caller handed in — the same
+ * function the engine runs before any driver is resolved (`judgeFilter`). No
+ * context is passed: at authoring time there is no caller.
+ */
+function engineRefusal(
+  judge: FilterJudge,
+  object: string,
+  bridged: string,
+  filter: Record<string, unknown>,
+  probe: UserProbe,
+): Extract<EngineFilterJudgement, { ok: false }> | null {
+  const { probe: judged, rebound } = engineJudgeProbe(probe);
+  // A kernel key the reference pass had to re-bind as a nested record (a
+  // `current_user.id.x` path) holds a value no request holds, so a verdict
+  // on it would be about the probe. Same guard as {@link sharedFaceRefusal}.
+  if (!Object.values(judged).every((v) => typeof v === 'string' || Array.isArray(v))) return null;
+  let where: Record<string, unknown> = filter;
+  if (rebound) {
+    const res = compileWithProbe(bridged, judged);
+    if (!res.ok) return null;
+    where = res.filter as Record<string, unknown>;
+  }
+  const verdict = judge(object, where, { operation: 'find' });
+  return verdict.ok ? null : verdict;
+}
+
+/**
+ * What an engine-refused read scope does at request time. The analytics face
+ * composes the read scope into the `where` it hands the engine, so the same
+ * admission that produced this verdict refuses the query there.
+ */
+const ENGINE_REFUSED_CONSEQUENCE =
+  'This clause is part of the object\'s row-level READ SCOPE, and the analytics face hands the read ' +
+  'scope to this same engine admission before it runs a query: every analytics query over the object ' +
+  'that this policy scopes is refused.';
+
+/** The prescription for an engine refusal, keyed by the engine's `code` (never by its prose). */
+function engineRefusalHint(code: string): string {
+  if (code === 'FILTER_TOKEN_UNKNOWN' || code === 'FILTER_TOKEN_UNRESOLVED') {
+    return (
+      'A `{…}` placeholder is saved-filter syntax, and an RLS predicate does not use it: the predicate ' +
+      `is CEL, and the caller's values are the \`current_user\` keys (${listNames(PRERESOLVED_USER_KEYS)}). ` +
+      'Write `owner == current_user.id`, not `owner == \'{current_user_id}\'`.'
+    );
+  }
+  if (code === 'INVALID_FIELD') {
+    return (
+      'A row filter reaches only the stored columns of its own object. Denormalise the value the engine ' +
+      'names onto this object (a stored field, written when the source changes) and test that column.'
+    );
+  }
+  return (
+    'Rewrite the comparison the engine names so it can run: a text operator (`startsWith` / `endsWith` / ' +
+    '`contains`) only on a field that holds a string, and a date or datetime field only against a value ' +
+    'its storage can read. ' + PUSHDOWN_SUBSET
+  );
+}
+
+/**
  * The reference pass: every finding a SHAPE-VALID predicate earns.
  *
  * Ordered fields-then-variables and deduplicated per name, so a predicate
@@ -990,6 +1135,12 @@ function referenceFindings(
   where: string,
   path: string,
   object: string,
+  /**
+   * [#20158] The engine's judge, when this clause is a read scope the caller
+   * can have judged — `undefined` otherwise (no judge handed in, a `check`, a
+   * policy outside the read scope, or no object named).
+   */
+  judge?: FilterJudge,
 ): RlsPredicateFinding[] {
   const findings: RlsPredicateFinding[] = [];
   const bridged = sqlPredicateToCel(source);
@@ -1085,6 +1236,26 @@ function referenceFindings(
     });
   }
 
+  // [#20158] The engine's own admission of the lowered read scope — run only
+  // on a clause every pass above left clean, so one defect earns one finding.
+  // The verdict and its sentence are the engine's; this rule adds the clause,
+  // the object and what the refusal costs.
+  const refused = judge && filter && findings.length === 0
+    ? engineRefusal(judge, object, bridged, filter, probe)
+    : null;
+  if (refused) {
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNENFORCEABLE,
+      where,
+      path,
+      message:
+        `RLS ${clause} \`${quote(source)}\` lowers, but the engine refuses to run the lowered filter on ` +
+        `"${object}" (${refused.code} / ${refused.status}): ${refused.message} ${ENGINE_REFUSED_CONSEQUENCE}`,
+      hint: engineRefusalHint(refused.code),
+    });
+  }
+
   return findings;
 }
 
@@ -1092,10 +1263,18 @@ function referenceFindings(
  * Gate every stack-declared RLS predicate on the ONE thing the runtime does
  * with it: lower it to a FilterCondition (ADR-0056 D4).
  *
- * Pure `(stack) => Finding[]`; tolerates the normalized and the parsed tier
- * (`using` / `check` are plain `z.string()`, identical in both).
+ * Pure `(stack, options) => Finding[]`; tolerates the normalized and the parsed
+ * tier (`using` / `check` are plain `z.string()`, identical in both).
+ *
+ * @param options.judgeFilter [#20158] The engine's judge-only filter admission
+ *   (`IObjectQLEngine.judgeFilter`, bound to its engine). Present, every
+ *   read-scope `using` that the passes above leave clean is judged by it — see
+ *   this file's header. Absent, that pass is skipped and nothing else changes.
  */
-export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicateFinding[] {
+export function validateRlsPredicateEnforceability(
+  stack: unknown,
+  options: { judgeFilter?: IObjectQLEngine['judgeFilter'] } = {},
+): RlsPredicateFinding[] {
   const findings: RlsPredicateFinding[] = [];
   const cfg = (stack ?? {}) as AnyRec;
 
@@ -1133,8 +1312,14 @@ export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicate
           // [#16119] The shape is fine, so the REFERENCE pass owns this predicate.
           // Disjoint from everything below by construction: the three shape ids
           // only ever run on predicates this branch has already returned from.
+          // [#20158] The engine judges the READ SCOPE only: a `using` on a
+          // `select` / `all` policy that names its object.
+          const judge =
+            clause === 'using' && objectEarly && READ_SCOPE_OPERATIONS.has(str(policy.operation))
+              ? options.judgeFilter
+              : undefined;
           findings.push(
-            ...referenceFindings(graph, source, clause, whereEarly, pathEarly, objectEarly),
+            ...referenceFindings(graph, source, clause, whereEarly, pathEarly, objectEarly, judge),
           );
           continue;
         }
