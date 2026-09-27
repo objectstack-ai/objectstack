@@ -1996,7 +1996,7 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **agentId** | `string` | optional | Filter by agent |
 | **limit** | `integer` | optional | Maximum conversations to return |
-| **cursor** | `string` | optional | Pagination cursor |
+| **cursor** | `string` | optional | The `id` of the last conversation on the previous page. The next page starts with the conversation created immediately before it, continuing newest first. Omit it to read the first page. An id that names no conversation of the caller is refused rather than read as the start of the list. |
 
 
 ---
@@ -2007,7 +2007,8 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **conversations** | `{ id: string; title?: string; agentId?: string; userId?: string; … }[]` | ✅ | Matching conversations |
+| **conversations** | `{ id: string; title?: string; agentId?: string; userId?: string; … }[]` | ✅ | The caller's conversations, newest first — ordered by creation time, then `id`, both descending |
+| **hasMore** | `boolean` | ✅ | Whether at least one more conversation follows this page. When `true`, send the `id` of the last conversation in `conversations` as `cursor` to read the next page. |
 
 ### Nested Shape: `ListAiConversationsResponse.conversations[number]`
 

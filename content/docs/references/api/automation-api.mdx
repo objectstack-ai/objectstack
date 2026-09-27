@@ -18,9 +18,14 @@ The wire paths the platform serves: the dispatcher mounts this door at its
 (`automation-api-contract-mounts.test.ts`) holds every `path` in
 `AutomationApiContracts` to that mount table.
 
+The flow LIST is not on this door. Flows are metadata (ADR-0106), and the
+governed read of them is `GET /api/v1/meta/flow` (`client.meta.getItems`);
+the former `GET /api/v1/automation` list route, its request/response schemas
+and `client.automation.list` were retired under #19543 (ADR-0087 semantic
+entry `automation-flow-list-route-retired`).
+
 **Endpoints**
 ```
-GET    /api/v1/automation                      — List flows
 GET    /api/v1/automation/:name                — Get flow
 POST   /api/v1/automation                      — Create flow
 PUT    /api/v1/automation/:name                — Update flow
@@ -38,8 +43,8 @@ GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
 ## TypeScript Usage
 
 ```typescript
-import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, FlowSummarySchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListFlowsRequestSchema, ListFlowsResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ResumeFailureDetailsSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
-import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, FlowSummary, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListFlowsRequest, ListFlowsResponse, ListRunsRequest, ListRunsResponse, ResumeFailureDetails, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
+import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ResumeFailureDetailsSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
+import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListRunsRequest, ListRunsResponse, ResumeFailureDetails, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AutomationApiErrorCode.parse(data);
@@ -299,24 +304,6 @@ const result = AutomationApiErrorCode.parse(data);
 
 ---
 
-## FlowSummary
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Flow machine name |
-| **label** | `string` | ✅ | Flow display label |
-| **type** | `string` | ✅ | Flow type |
-| **status** | `string` | ✅ | Flow deployment status |
-| **version** | `integer` | ✅ | Flow version number |
-| **enabled** | `boolean` | ✅ | Whether the flow is enabled for execution |
-| **nodeCount** | `integer` | optional | Number of nodes in the flow |
-| **lastRunAt** | `string` | optional | Last execution timestamp |
-
-
----
-
 ## GetFlowRequest
 
 ### Properties
@@ -457,66 +444,6 @@ const result = AutomationApiErrorCode.parse(data);
 | **durationMs** | `integer` | optional | Total execution duration in milliseconds |
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution context identity |
 | **tenantId** | `string` | optional | Tenant ID for multi-tenant isolation |
-
-
----
-
-## ListFlowsRequest
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional | Filter by flow status |
-| **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | optional | Filter by flow type |
-| **limit** | `integer` | optional (default: `50`) | Maximum number of flows to return |
-| **cursor** | `string` | optional | Cursor for pagination |
-
-
----
-
-## ListFlowsResponse
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
-| **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ flows: object[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
-
-### Nested Shape: `ListFlowsResponse.error`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
-| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
-| **message** | `string` | ✅ | Readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
-| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
-| **category** | `string` | optional | Error category (e.g. validation, authorization) |
-| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
-| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
-| **requestId** | `string` | optional | Request ID for tracking |
-
-### Nested Shape: `ListFlowsResponse.meta`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timestamp** | `string` | ✅ |  |
-| **duration** | `integer` | optional | Server-side processing duration in milliseconds |
-| **requestId** | `string` | optional |  |
-| **traceId** | `string` | optional |  |
-
-### Nested Shape: `ListFlowsResponse.data`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **flows** | `{ name: string; label: string; type: string; status: string; … }[]` | ✅ | Flow summaries |
-| **total** | `integer` | optional | Total matching flows |
-| **nextCursor** | `string` | optional | Cursor for the next page |
-| **hasMore** | `boolean` | ✅ | Whether more flows are available |
 
 
 ---

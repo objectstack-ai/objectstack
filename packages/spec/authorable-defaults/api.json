@@ -88,7 +88,6 @@
     "api/InitiateChunkedUploadRequest:chunkSize = 5242880",
     "api/InitiateChunkedUploadRequest:scope = \"user\"",
     "api/ListExportJobsRequest:limit = 20",
-    "api/ListFlowsRequest:limit = 50",
     "api/ListImportJobsRequest:limit = 50",
     "api/ListImportJobsRequest:offset = 0",
     "api/ListRunsRequest:limit = 20",
