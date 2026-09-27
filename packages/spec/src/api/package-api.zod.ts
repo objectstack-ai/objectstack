@@ -423,7 +423,8 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  *    - 1b. missing `type` — still OPEN, answered `201` (both door drives
  *      above);
  * 2. unknown keys on either form — refused by name on the bare branch and,
- *    since decision batch #227 item 3, on the wrapped one too, `201` either way;
+ *    since ruling record `5856869656` (decision batch #227 item 3), on the
+ *    wrapped one too, `201` either way;
  * 3. a string-typed `enableOnInstall` / `overwrite` — the door compares
  *    against `true`/`false` and `'true'`, so `'false'` installs ENABLED and a
  *    body-side `'true'` overwrite is treated as ABSENT;
