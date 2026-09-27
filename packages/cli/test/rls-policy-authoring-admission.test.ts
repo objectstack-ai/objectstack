@@ -13,9 +13,10 @@
  *   built from the stack's objects (`stackFilterJudge`, the helper every CLI
  *   call site uses).
  * - **Runtime** — `saveMetaItem` on a `permission` write, over a REAL `ObjectQL`
- *   host (in-memory driver, the real `sys_metadata` objects) holding the same
- *   objects: the protocol probes that engine's `judgeFilter` and hands it to the
- *   publish gate, which runs the same rule table.
+ *   host (a `:memory:` SQLite driver with real DDL, the real `sys_metadata`
+ *   objects) holding the same objects: the protocol probes that engine's
+ *   `judgeFilter` and hands it to the publish gate, which runs the same rule
+ *   table.
  *
  * Neither door holds a model of the engine's walks; both ask `judgeFilter`.
  *
@@ -31,13 +32,13 @@
  * nothing resolves, which the compiler refuses rather than lowering).
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 import { runAuthoringRules, type AuthoringFinding } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { createLogger } from '@objectstack/core';
 
 import { stackFilterJudge } from '../src/utils/authoring-filter-judge.js';
@@ -93,15 +94,28 @@ function cliDoor(using: string): AuthoringFinding[] {
   }).filter(RLS);
 }
 
-/** A live engine holding the same objects, as the protocol's host. */
+const liveEngines: ObjectQL[] = [];
+afterEach(async () => {
+  while (liveEngines.length) {
+    try {
+      await liveEngines.pop()?.destroy();
+    } catch {
+      /* already torn down */
+    }
+  }
+});
+
+/** A live engine holding the same objects, as the protocol's host — real tables, real DDL. */
 async function runtimeHost() {
   const engine = new ObjectQL({ logger: createLogger({ level: 'silent' }) });
+  liveEngines.push(engine);
   engine.registry.logLevel = 'silent';
-  engine.registerDriver(new InMemoryDriver(), true);
+  engine.registerDriver(new SqliteWasmDriver({ filename: ':memory:' }) as never, true);
   await engine.init();
   for (const obj of [SysMetadataObject, SysMetadataHistoryObject, SysMetadataCommitObject, deal, account]) {
-    engine.registry.registerObject(structuredClone(obj) as never);
+    engine.registry.registerObject(structuredClone(obj) as never, 'objectstack-test');
   }
+  await engine.syncSchemas();
   return { engine, protocol: new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') };
 }
 
