@@ -5,6 +5,8 @@
 
 fix(runtime): the dispatcher's `/meta` item reads ask the same per-caller read gate `RestServer` asks, and `@objectstack/rest` publishes it (#20193)
 
+Clause-②: yes
+
 `GET /meta/:type/:name` and `GET /meta/:type/:name/published` have two
 implementations: `RestServer`, and the runtime dispatcher's `/meta` domain. On a
 host that mounts only the `${prefix}/*` catch-all (`@objectstack/hono`'s
@@ -43,7 +45,26 @@ A gate input that cannot be read is answered as that fault, never as the
 document. This covers a books or doc-list read that throws, and a host whose
 protocol has no list read at all (fail closed, ADR-0049).
 
-`@objectstack/rest` adds these exports: `createMetaItemReadGate` and the types
-`MetaItemReadGateSources`, `MetaItemReadVerdict`, `MetaItemReadRefusal`,
-`MetaReadGateCaller` and `MetaReadGatePolicy`. Nothing is removed or renamed,
-and no authorable key moves.
+**`@objectstack/rest`'s published export surface widens**, and that is why this
+changeset declares `Clause-②: yes`. Its only export subpath (`.`) gains one value
+and five types:
+
+- `createMetaItemReadGate(sources, metaType, name, documents, policy)`: the gate
+  itself;
+- `MetaItemReadGateSources`: the I/O a caller supplies (the caller, a metadata
+  list read, the security service, a service probe, a prune-log set);
+- `MetaItemReadVerdict` and `MetaItemReadRefusal`: the data verdict (`serve`, or
+  `refuse` with `absent` / `app-permission` / `docs-audience`);
+- `MetaReadGateCaller`: the slice of the execution context the gate reads;
+- `MetaReadGatePolicy`: `arms` and `app`, how a door runs the gate.
+
+They are public because the runtime dispatcher's `/meta` domain in
+`@objectstack/runtime` consumes this one gate. `@objectstack/rest` cannot import
+the runtime, so the shared decision has to live here and travel as an export,
+the way `repeatedQueryParamMessage` does. A caller outside the platform does not
+need them.
+
+Nothing is removed or renamed, and no authorable key moves. The dispatcher's
+refusals are not the widening: they pull a second transport back to the gate
+the contract already declares (ADR-0046 §6.7, ADR-0045 §3, `apps.mdx`), which is
+why `@objectstack/runtime` stays a `patch`.
