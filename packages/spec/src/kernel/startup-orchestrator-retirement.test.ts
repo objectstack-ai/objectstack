@@ -41,7 +41,7 @@ import {
 // Route 3: with no authored document carrying the defs there is no seam for a
 // D2 conversion and no author to tombstone for — `RETIRED_DEFS_BY_MAJOR[18]`
 // plus the D3 semantic entry `startup-orchestrator-retired` ARE the
-// declaration. Form follows #11825 / #8715 / #4988: resolved symbol identity
+// declaration. Form follows #11825 / commit 2c86fe3ea / #4988: resolved symbol identity
 // over every public entry via the build-time `export-origins/` artifact.
 describe('[#16059] startup orchestrator retirement', () => {
   /** The 8 names the retired defs and the retired interface exported. */

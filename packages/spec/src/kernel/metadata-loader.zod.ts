@@ -181,7 +181,7 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
    *
    * Defaults to `true` so existing dev / Studio flows are unaffected.
    *
-   * `overlayWritable` was REMOVED in v17 (#13135, ADR-0049 enforce-or-remove):
+   * `overlayWritable` was REMOVED in v17 (commit 9e0ba21a1, ADR-0049 enforce-or-remove):
    * the only thing it ever gated was `MetadataManager.saveOverlay()` — a
    * method of the paper metadata-customization protocol, reachable only from
    * its own unit tests (no route or UI ever called it) and removed with that

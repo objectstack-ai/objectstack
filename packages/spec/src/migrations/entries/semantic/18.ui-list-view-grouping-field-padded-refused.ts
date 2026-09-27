@@ -13,7 +13,7 @@ export const entry: SemanticMigration = {
     + '`\'business_unit\'`. The refusal names the offending spelling verbatim, so the '
     + 'whitespace an author cannot see in an editor is visible in the message.',
   reason:
-    '#17360, ruling C on objectui#7347 (maintainer 「其他同意」, decision batch #110 item 5): '
+    'Ruled by the maintainer on 2026-09-10 (「其他同意」): '
     + 'refuse at the producer. `field` was a bare `z.string()`, so a padded grouping level '
     + 'was valid authored metadata all the way to the renderers. Measured on objectui '
     + '(M1-M11 with live controls): the projection harvester `collectGroupingFieldRefs` '
