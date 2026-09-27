@@ -837,10 +837,10 @@ describe('validateRlsPredicateEnforceability — the refusals the SHAPE check ca
    *    the policy: a `using` read returns zero rows (with only a per-request
    *    "DENY (fail closed)" WARN) and a `check` write is refused with 403.
    *  - NULL comparands — the shared filter faces refuse a `null` list member and
-   *    a `null` ordering bound by ruling. They compile, the RLS layer never runs
-   *    the faces on its own filter, and the backend answers: on driver-sql
-   *    `x in [null]`, `!(x in ['a', null])` and `x > null` read nothing, while
-   *    the `check` evaluator admits a write the negated read hides.
+   *    a `null` ordering bound by ruling. They compile, and `RLSCompiler` runs
+   *    the same faces on the compiled filter (#20212), so it drops the policy
+   *    exactly as it drops a TYPE fault: zero rows with the per-request WARN on
+   *    a `using` read, a 403 on a `check` write.
    */
   const TYPE_FAULTS: ReadonlyArray<readonly [string, string]> = [
     [
@@ -904,10 +904,14 @@ describe('validateRlsPredicateEnforceability — the refusals the SHAPE check ca
     expect(check.message).toMatch(/PermissionDeniedError/);
   });
 
-  it('a NULL comparand is NOT reported as a drop — the policy survives and the backend answers', () => {
-    const [f] = validateRlsPredicateEnforceability(siteWith('using', NULL_COMPARANDS[2][0]));
-    expect(f.message).toMatch(/the policy is NOT dropped/);
-    expect(f.message).not.toMatch(/DROPS the policy/);
+  it('a NULL comparand is reported as a DROP with the clause’s own consequence, as the runtime drops it', () => {
+    const [using] = validateRlsPredicateEnforceability(siteWith('using', NULL_COMPARANDS[2][0]));
+    expect(using.message).toMatch(/DROPS the policy on EVERY request/);
+    expect(using.message).toMatch(/RLS_DENY_FILTER/);
+
+    const [check] = validateRlsPredicateEnforceability(siteWith('check', NULL_COMPARANDS[2][0]));
+    expect(check.message).toMatch(/DROPS the policy on EVERY request/);
+    expect(check.message).toMatch(/PermissionDeniedError/);
   });
 
   it('rewrites EVERY site the fault lands in, in one finding', () => {

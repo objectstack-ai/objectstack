@@ -5192,6 +5192,36 @@ const INLINE_VIEW_KIND_REQUIRED =
   + '(`{ name, object, viewKind, config: { … } }`), or make it a container. '
   + VIEW_WRAP_REMEDY;
 
+/** The other flattened overlay family — the `viewKind` the given arm does NOT judge. */
+function otherViewKind(kind: 'list' | 'form'): 'list' | 'form' {
+  return kind === 'list' ? 'form' : 'list';
+}
+
+/**
+ * [#20186] The refusal one flattened overlay member gives a body that names the
+ * OTHER family's `viewKind`.
+ *
+ * Each member judges exactly one `viewKind`, so a body is judged by the arm its
+ * `viewKind` names and by no other. Before this, both members shared one
+ * `list | form` enum, and a `viewKind: 'list'` body the list member refused
+ * (it carried no `columns`) was ACCEPTED by the form member, which `.strip()`s
+ * every list key unread: its `sort`, `searchableFields` and `timeline` were
+ * never judged, and the write door stored them as sent.
+ *
+ * Seen only by a consumer that parses one member directly
+ * (`VIEW_METADATA_MEMBERS.formOverlay.safeParse(…)`): through the union, the
+ * member the body does not claim is muted in favour of the one it does
+ * ({@link focusClaimedBranch}), so the author reads the claimed arm's own
+ * diagnosis. So the text says where the diagnosis is, not how to "fix" a
+ * `viewKind` that is correct.
+ */
+function overlayViewKindArmMismatch(kind: 'list' | 'form'): string {
+  const other = otherViewKind(kind);
+  return `This is the flattened ${kind.toUpperCase()} overlay member, which judges \`viewKind: "${kind}"\` only. `
+    + `A \`viewKind: "${other}"\` body is judged by the ${other} overlay member `
+    + `(\`VIEW_METADATA_MEMBERS.${other}Overlay\`), and that member's issues are its diagnosis.`;
+}
+
 /**
  * Identity + structural-guard fields layered onto the two "flattened runtime
  * overlay" members. The `config`/`list`/`form`/`listViews`/`formViews` guards
@@ -5203,8 +5233,18 @@ const INLINE_VIEW_KIND_REQUIRED =
  * refusal constants above for the measured reason and the ruling. The rest of
  * the identity fields stay optional: they are display/round-trip state, not
  * what any read path filters on.
+ *
+ * [#20186] `viewKind` is PER ARM: the list member admits `'list'` only and the
+ * form member `'form'` only, so a flattened body is judged by the arm its
+ * `viewKind` names and by no other. The two arms used to share one
+ * `list | form` enum, and the form member — which requires no list key and
+ * `.strip()`s every one — then accepted any `viewKind: 'list'` body the list
+ * member refused, storing its `sort` / `searchableFields` / `timeline`
+ * unjudged; the list member likewise accepted a `viewKind: 'form'` body that
+ * carried list `columns`. The conversions walk (`mapViewPayloads`) already
+ * picked an overlay's family from `viewKind`; now the parse does too.
  */
-function flattenedViewOverlayFields() {
+function flattenedViewOverlayFields(kind: 'list' | 'form') {
   return {
     // No grammar, deliberately: the write path stamps this name rather than an
     // author writing it, so a flat overlay name is legal here while the SAME
@@ -5219,8 +5259,11 @@ function flattenedViewOverlayFields() {
         + 'row can never be served. Inherited from the shadowed entry on personalization PUTs.',
       ),
     viewKind: z
-      .enum(ViewKindSchema.options, {
-        error: (issue) => (issue.input === undefined ? INLINE_VIEW_KIND_REQUIRED : undefined),
+      .enum([kind], {
+        error: (issue) => {
+          if (issue.input === undefined) return INLINE_VIEW_KIND_REQUIRED;
+          return issue.input === otherViewKind(kind) ? overlayViewKindArmMismatch(kind) : undefined;
+        },
       })
       .describe(
         'View family — REQUIRED on an inline view config: half of the `object` + `viewKind` '
@@ -5583,6 +5626,129 @@ const FORM_OVERLAY_OPTIONS_REFUSED =
   'A form view carries no `options` bag: `options.kanban`, `options.timeline` and the other per-kind blocks '
   + 'belong to a list view. Remove `options`, or save this body as a list view (`viewKind: "list"` with its `columns`).';
 
+/** [#20186] The list type a flattened list overlay that names none parses to. */
+const LIST_OVERLAY_DEFAULT_TYPE = 'grid';
+
+/**
+ * [#20186] The refusal a column-less flattened list overlay gets when it names
+ * a `type`.
+ */
+const LIST_OVERLAY_TYPE_NEEDS_COLUMNS =
+  'This list view overlay sets `type` but lists no `columns`. A body that sets `type` is a full inline list '
+  + 'config, and a full config lists its columns: add `columns: ["field_a", "field_b"]`. A patch on the view '
+  + 'it shadows (`sort`, `hiddenFields`, `columnState`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
+  + 'remove `type` to save this body as a patch on the view it shadows.';
+
+/**
+ * [#20186] The refusal the flattened FORM overlay gives a field LIST under
+ * `columns`.
+ */
+const FORM_OVERLAY_COLUMNS_IS_A_COUNT =
+  'On a form view `columns` is the NUMBER of body columns (an integer, 1 or more), not a list of fields, '
+  + 'and this body says `viewKind: "form"`. A list of fields is a list view\'s `columns`: if this is a '
+  + 'list view, set `viewKind: "list"`; if it is a form, list its fields in `sections: [{ fields: [...] }]`.';
+
+/**
+ * [#20186] The two keys the flattened LIST overlay member declares differently
+ * from the authoring {@link ListViewSchema}: `columns` optional, and `type`
+ * without its default.
+ *
+ * `columns` — a flattened list overlay is either a full inline config or a
+ * PATCH on the view it shadows. The patch is the ruled storage shape of every
+ * console toolbar save: objectui's `persistViewPatch` stores the patch and
+ * nothing else (maintainer ruling on #7494, comment `5261754173`:
+ * 「`persistViewPatch` 只存 patch,不存 merged base」), so a `sort` click
+ * arrives as `{ sort, viewKind: 'list', object, name }` with no `columns`.
+ * Requiring `columns` here refused that write on this member, and the body was
+ * then ACCEPTED by the form member with every list key stripped unjudged. The
+ * authoring {@link ListViewSchema} keeps `columns` required: an authored list
+ * view is a full config, never a patch.
+ *
+ * `type` — declared WITHOUT the authoring shape's `.default('grid')`, so the
+ * member's checks see whether the body NAMED a type. That is the line between
+ * the two readings: a patch names no type, a full config does, and a full
+ * config without `columns` is refused ({@link checkListOverlayTypeNeedsColumns}).
+ * The default is re-applied after the checks ({@link applyListOverlayTypeDefault}),
+ * so the parse output still carries a list type. Both are CHECKS on the same
+ * object schema, not a pipe: a pipe would serve its input side to
+ * `/api/v1/meta/types/view`, which is `{}` for a transform — the degradation
+ * {@link assertViewIdentity} records for the union's own door.
+ */
+function listOverlayPatchFields() {
+  const shape = (ListViewShapeSchema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape;
+  const type = shape.type as unknown as z.ZodDefault<z.ZodTypeAny>;
+  return {
+    columns: shape.columns!.optional(),
+    // `.meta({ default })` keeps the served JSON Schema's `default: 'grid'`
+    // byte-identical: the default is real, applied by the overwrite below.
+    type: type.unwrap().optional().meta({ default: LIST_OVERLAY_DEFAULT_TYPE }),
+  };
+}
+
+/**
+ * [#20186] A column-less flattened list overlay that NAMES a `type` is a full
+ * inline config missing its columns — refused at `columns`. Reads the input
+ * side: `type` carries no default on this member (see
+ * {@link listOverlayPatchFields}), so `undefined` here means the body named none.
+ */
+function checkListOverlayTypeNeedsColumns(
+  view: { type?: unknown; columns?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (view.type !== undefined && view.columns === undefined) {
+    // `continue: false` — an ABORTING issue, like the field-level refusal
+    // (`columns` required) it replaces on this body. A non-aborting one would
+    // leave this member the union's only non-aborted branch, and zod then
+    // returns that branch's issues UNWRAPPED (`handleUnionResults`): the
+    // envelope's top-level code would move from `invalid_union` to `custom`
+    // on a body whose verdict did not move.
+    ctx.addIssue({ code: 'custom', path: ['columns'], message: LIST_OVERLAY_TYPE_NEEDS_COLUMNS, continue: false });
+  }
+}
+
+/**
+ * [#20186] Re-apply the list `type` default the member declares without, in
+ * the key position the default would have taken, so the parse output of a
+ * patch is a list (`type: 'grid'`) and every body that names its type parses
+ * byte-identically to before.
+ */
+function applyListOverlayTypeDefault<T extends { type?: unknown }>(view: T): T {
+  if (view.type !== undefined) return view;
+  const shape = (ListViewShapeSchema as unknown as { shape: Record<string, unknown> }).shape;
+  const out: Record<string, unknown> = {};
+  let placed = false;
+  for (const key of Object.keys(shape)) {
+    if (key === 'type') {
+      out.type = LIST_OVERLAY_DEFAULT_TYPE;
+      placed = true;
+    } else if (key in view) {
+      out[key] = (view as Record<string, unknown>)[key];
+    }
+  }
+  for (const key of Object.keys(view)) if (!(key in out)) out[key] = (view as Record<string, unknown>)[key];
+  if (!placed) out.type = LIST_OVERLAY_DEFAULT_TYPE;
+  return out as T;
+}
+
+/**
+ * [#20186] `columns` on the flattened FORM overlay: the form's own count,
+ * refused with {@link FORM_OVERLAY_COLUMNS_IS_A_COUNT} when a field list
+ * arrives there. A clone of {@link FormViewSchema}'s own `columns` schema with
+ * an error map added, so its constraints are that schema's and cannot drift.
+ */
+function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
+  const optional = (FormViewSchema as unknown as { shape: { columns: z.ZodOptional<z.ZodNumber> } }).shape.columns;
+  const count = optional.unwrap();
+  const withPrescription = count.clone({
+    ...count._zod.def,
+    // The def's issue type is `never` for a number's own map; the runtime hands
+    // it the raw issue, whose `input` is what this reads.
+    error: (issue: { input?: unknown }) => (Array.isArray(issue.input) ? FORM_OVERLAY_COLUMNS_IS_A_COUNT : undefined),
+  });
+  const description = optional.description;
+  return description ? withPrescription.optional().describe(description) : withPrescription.optional();
+}
+
 /**
  * [#6391] Member 3 of {@link ViewMetadataSchema} — a flattened runtime LIST
  * overlay: an inline `ListView` config at the top level plus the optional
@@ -5605,6 +5771,14 @@ const FORM_OVERLAY_OPTIONS_REFUSED =
  * [#20051] …and `options` is DECLARED here, judged by
  * {@link ListViewOverlayOptionsSchema}: `.strip()` re-opens the top level for
  * round-trip keys, and a bag the renderer reads is not one of those.
+ *
+ * [#20186] This member judges `viewKind: 'list'` only (the form sibling
+ * `'form'` only), and it judges a column-less PATCH as well as a full inline
+ * config — see {@link listOverlayPatchFields}. A column-less body that names a
+ * `type` is a full config missing its columns and is refused at `columns`
+ * ({@link checkListOverlayTypeNeedsColumns}). The three attached checks run in
+ * order: that refusal reads the input side, the calendar check is unchanged,
+ * and {@link applyListOverlayTypeDefault} restores the `grid` default last.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
@@ -5616,26 +5790,38 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // `viewDoorsCarryingObjectLevelChecks` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
   ListViewShapeSchema.extend({
-    ...flattenedViewOverlayFields(),
+    ...flattenedViewOverlayFields('list'),
     options: ListViewOverlayOptionsSchema.optional(),
+    ...listOverlayPatchFields(),
   }).strip()
-    .superRefine(checkListViewCalendarVisualization),
+    .superRefine(checkListOverlayTypeNeedsColumns)
+    .superRefine(checkListViewCalendarVisualization)
+    .overwrite(applyListOverlayTypeDefault),
 );
 
 /**
  * [#6391] Member 4 of {@link ViewMetadataSchema} — a flattened runtime FORM
  * overlay, published as `VIEW_METADATA_MEMBERS.formOverlay`. Same construction
- * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}; the
- * list member is tried first, and a flattened form (no required `columns`,
- * disjoint `type` enum) then matches here.
+ * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}.
  *
  * [#20051] `options` is pinned ABSENT here — see
  * {@link FORM_OVERLAY_OPTIONS_REFUSED} for the fall-through it closes.
+ *
+ * [#20186] It judges `viewKind: 'form'` only. Before, it was the union's
+ * fall-through for every flattened body the list member refused — a
+ * column-less `viewKind: 'list'` patch among them — and it accepted those with
+ * their list keys stripped unread. Its `columns` (the form's body-column
+ * COUNT) now answers a field list with {@link FORM_OVERLAY_COLUMNS_IS_A_COUNT}.
  */
 const FormViewOverlayWireSchema = lazySchema(() =>
-  FormViewSchema.extend({
-    ...flattenedViewOverlayFields(),
+  // `.safeExtend()`: this member now re-declares a key the form shape carries
+  // (`columns`, see {@link formOverlayColumnsField}), and {@link FormViewSchema}
+  // carries refinements, which `.extend()` refuses to combine with an overwrite.
+  // The two differ in that throw only — the refinements ride along either way.
+  FormViewSchema.safeExtend({
+    ...flattenedViewOverlayFields('form'),
     options: z.undefined({ error: () => FORM_OVERLAY_OPTIONS_REFUSED }).optional(),
+    columns: formOverlayColumnsField(),
   }).strip(),
 );
 
@@ -5672,7 +5858,8 @@ export const VIEW_METADATA_MEMBERS = {
   viewItem: ViewItemWireSchema,
   // 2. Non-empty defineView container.
   container: ViewContainerWireSchema,
-  // 3/4. Flattened runtime overlay — inline ListView / FormView config + identity.
+  // 3/4. Flattened runtime overlay — inline ListView / FormView config + identity,
+  //      each judging only the `viewKind` it names (#20186).
   listOverlay: ListViewOverlayWireSchema,
   formOverlay: FormViewOverlayWireSchema,
 } as const satisfies Record<ViewMetadataBranch, z.ZodTypeAny>;
@@ -5709,11 +5896,12 @@ function viewMetadataVocabulary(): Set<string> {
 /**
  * [#6391] The `type` values that tell the two flattened overlay branches apart.
  *
- * `ListViewSchema.type` and `FormViewSchema.type` are disjoint enums — the
- * property the union's own comment already relies on ("a flattened form (no
- * required `columns`, disjoint `type` enum) then matches the form member"). Read
- * off the schemas rather than re-listed, so a new view type cannot make the
- * dispatch disagree with the members.
+ * `ListViewSchema.type` and `FormViewSchema.type` are disjoint enums, so a
+ * body that names no `viewKind` (which both overlay members refuse) can still
+ * be told apart for diagnosis by its `type`; a body that names one is settled
+ * by it first, exactly as the members judge it (#20186). Read off the schemas
+ * rather than re-listed, so a new view type cannot make the dispatch disagree
+ * with the members.
  */
 function overlayTypeValues(schema: z.ZodTypeAny): ReadonlySet<string> {
   const shape = (schema as unknown as { _zod?: { def?: { shape?: Record<string, unknown> } } })

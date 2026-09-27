@@ -858,9 +858,9 @@ const HOLDING_RULE: Readonly<Record<RuntimeHolding, string>> = {
  * The verdict of the shared filter faces on this predicate's LOWERED filter —
  * `assertListComparandShapes` and `normalizeFilterComparandTypes`
  * (`@objectstack/spec/data`), the same pair the analytics read-scope compiler
- * runs on every RLS read scope (`assertReadScopeComparandsRunnable`) and the
- * engine runs on every caller-supplied filter. The RLS data path does not run
- * them on its own filter, which is why a refused comparand gets through there.
+ * runs on every RLS read scope (`assertReadScopeComparandsRunnable`), the
+ * engine runs on every caller-supplied filter and, since #20212, `RLSCompiler`
+ * runs on every compiled policy filter, which drops a policy they refuse.
  *
  * Graded by the refusal's `code` (`INVALID_FILTER`), never by its prose (#6223);
  * the returned message is quoted, never parsed.
@@ -934,16 +934,17 @@ function firstSentence(message: string): string {
 }
 
 /**
- * What a face-refused comparand does at request time. Not a drop: the compile
- * succeeds and the policy's filter reaches the backend unjudged.
+ * How a face-refused comparand is dropped at request time. [#20212]
+ * `RLSCompiler.compileFilter` runs the same two faces on every compiled policy
+ * filter, for `using` and `check` alike, so the policy joins the per-request
+ * denial route before any backend or the in-process `check` evaluator sees the
+ * comparand: the same drop, WARN and per-clause consequence as a TYPE fault.
  */
-const FACE_REFUSED_CONSEQUENCE =
-  'The RLS layer does not pass its own filter through that check, so the policy is NOT dropped: the refused ' +
-  'comparand reaches the backend, which answers it with semantics the platform has ruled undefined — backends ' +
-  'disagree, and on the SQL drivers a `null` member or bound matches no row, so a negated list holding `null` ' +
-  'or an ordering against `null` can admit NOTHING. One policy can even disagree with itself: a `using` read ' +
-  'on a SQL driver hides rows that its `check` evaluator admits on write. Every analytics query over the ' +
-  'object is refused outright, because its read-scope compiler runs the same check.';
+const DROPPED_FACE_REFUSED =
+  'so `RLSCompiler` DROPS the policy on EVERY request: it runs that same check on every compiled policy ' +
+  'filter, before any backend sees it. The shape check passes, so the "uncompilable predicate" WARN is never ' +
+  'logged; the only signal is a per-request "DENY (fail closed)" WARN, emitted only when nothing else ' +
+  'applicable compiles. ';
 
 /**
  * What a reference miss costs at request time, per clause. Measured, not inferred.
@@ -1226,7 +1227,7 @@ function referenceFindings(
       path,
       message:
         `RLS ${clause} \`${quote(source)}\` lowers, but to a comparand the platform's shared filter check ` +
-        `refuses (${firstSentence(faced)}). ${FACE_REFUSED_CONSEQUENCE}`,
+        `refuses (${firstSentence(faced)}), ${consequence(clause, DROPPED_FACE_REFUSED)}`,
       hint:
         rewrites.length > 0
           ? '`null` has no place inside a list or opposite an ordering operator — the platform refuses both in ' +

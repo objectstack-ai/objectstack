@@ -410,3 +410,100 @@ describe('[#20051] the save door judges a flat list overlay\'s `options` bag', (
         expect((ViewMetadataSchema as any).safeParse(body).success).toBe(true);
     });
 });
+
+/**
+ * #20186 — a flattened overlay is judged by the member its `viewKind` names,
+ * pinned at the WRITE DOOR (the spec-side pins: `view-overlay-viewkind-arm.test.ts`).
+ *
+ * Before: a column-less `viewKind: 'list'` body was refused by the list member
+ * (no `columns`) and ACCEPTED by the form member, which strips every list key —
+ * so a retired `sort` string answered `success: true` and the row held it as
+ * sent. Now the list member judges the column-less PATCH (the ruled storage
+ * shape of every console toolbar save, maintainer ruling on #7494), and its
+ * invalid list keys are refused, located, with nothing stored. Same double as
+ * the blocks above, so the save runs the real repository path.
+ */
+describe('#20186 the save door judges a flattened overlay by the member its viewKind names', () => {
+    const ID = { name: 'crm_lead.all', object: 'crm_lead' } as const;
+    const LIST = { ...ID, viewKind: 'list' } as const;
+    const FORM = { ...ID, viewKind: 'form' } as const;
+
+    /** The refusal, with its envelope asserted and NO row written. */
+    async function refused(item: Record<string, unknown>): Promise<Array<{ path: string; code?: string; message: string }>> {
+        const { protocol, rows } = makeProtocol();
+        let err: any;
+        try {
+            await (protocol as any).saveMetaItem({ type: 'view', name: item.name as string, item });
+        } catch (e) { err = e; }
+        expect(err?.code).toBe('INVALID_METADATA');
+        expect(err?.status).toBe(422);
+        expect(Array.from(rows.values()).filter((r) => r.type === 'view')).toHaveLength(0);
+        return err.issues;
+    }
+    const at = (issues: Array<{ path: string; code?: string; message: string }>, path: string) => {
+        const hit = issues.find((i) => i.path === path);
+        expect(hit, `no issue at \`${path}\` in ${JSON.stringify(issues)}`).toBeDefined();
+        return hit!;
+    };
+
+    it('the headline `{ name, object, viewKind: list, sort }` saves, and the row is the body as sent', async () => {
+        const body = { ...LIST, sort: [{ field: 'name', order: 'asc' }] };
+        expect(await storedViewBody(body.name, body)).toEqual(body);
+    });
+
+    it('the objectui sort toggle (`{ ...patch, viewKind }` + object / name / _isOverride) saves verbatim', async () => {
+        const body = { sort: [{ field: 'name', order: 'desc' }], viewKind: 'list', ...ID, _isOverride: true };
+        expect(await storedViewBody(body.name, body)).toEqual(body);
+    });
+
+    it('a retired bare-string `sort`: 422 at `sort`, with the 17.5.0 retirement prescription', async () => {
+        const issue = at(await refused({ ...LIST, sort: 'name desc' }), 'sort');
+        expect(issue.code).toBe('invalid_type');
+        expect(issue.message).toContain('The bare string `sort` clause was removed from `view.sort` in @objectstack/spec 17.5.0');
+    });
+
+    it('the `timeline.metaFields` twin: 422 at `timeline`, naming the key', async () => {
+        const issue = at(await refused({ ...LIST, timeline: { startDateField: 'created', titleField: 'name', metaFields: ['region'] } }), 'timeline');
+        expect(issue.code).toBe('unrecognized_keys');
+        expect(issue.message).toContain('Unrecognized key(s) on this timeline configuration: `metaFields`.');
+    });
+
+    it('a non-array `searchableFields`: 422 at `searchableFields`', async () => {
+        expect(at(await refused({ ...LIST, searchableFields: 'name' }), 'searchableFields').code).toBe('invalid_type');
+    });
+
+    it('a form-style `sharing` on a list body: 422 at `sharing`', async () => {
+        expect(at(await refused({ ...LIST, sharing: { enabled: true } }), 'sharing').code).toBe('unrecognized_keys');
+    });
+
+    it('a column-less list overlay that names a `type`: 422 at `columns`, with the prescription', async () => {
+        const issue = at(await refused({ ...LIST, type: 'kanban', groupByField: 'stage' }), 'columns');
+        expect(issue.code).toBe('custom');
+        expect(issue.message).toMatch(/^This list view overlay sets `type` but lists no `columns`\./);
+    });
+
+    it('the mirror — list `columns` on a `viewKind: form` body: 422 at `columns`, with the count prescription', async () => {
+        const issue = at(await refused({ ...FORM, columns: ['name'] }), 'columns');
+        expect(issue.code).toBe('invalid_type');
+        expect(issue.message).toMatch(/^On a form view `columns` is the NUMBER of body columns/);
+    });
+
+    // W2 — declared widening (`Clause-②: yes (narrowing)`): a list-legal value
+    // under a key both members declare with different schemas, refused before
+    // because the FORM member judged it.
+    it.each([
+        ['aria', { aria: { ariaLabel: 'Leads' } }],
+        ['an i18n description', { description: { en: 'All leads' } }],
+        ['list-style sharing', { sharing: { type: 'personal' } }],
+    ])('W2: %s now saves verbatim', async (_label, extra) => {
+        const body = { ...LIST, ...extra };
+        expect(await storedViewBody(body.name, body)).toEqual(body);
+    });
+
+    it('controls: a real form overlay and a list overlay with `columns` save verbatim', async () => {
+        const form = { ...FORM, type: 'simple', sections: [{ label: 'Main', fields: ['name'] }] };
+        expect(await storedViewBody(form.name, form)).toEqual(form);
+        const list = { ...LIST, columns: ['name'], sort: [{ field: 'name', order: 'asc' }] };
+        expect(await storedViewBody(list.name, list)).toEqual(list);
+    });
+});
