@@ -610,7 +610,6 @@
     "ui/InterfacePageConfig:sourceView",
     "ui/InterfacePageConfig:userActions",
     "ui/InterfacePageConfig:userFilters",
-    "ui/JoinedReportBlock:chart",
     "ui/JoinedReportBlock:columns",
     "ui/JoinedReportBlock:dataset",
     "ui/JoinedReportBlock:description",
