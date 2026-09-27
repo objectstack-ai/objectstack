@@ -2909,9 +2909,13 @@ export class RestServer {
     /**
      * A `getMetaItems` list read that REPORTS a thrown read as `{ fault }`
      * rather than swallowing it. The two docs-audience reads below go through
-     * here so each caller chooses what an unreadable store means for it — the
-     * docs reads keep answering as they always have, while the app-nav gate
-     * fails closed ({@link resolveNavDocAudience}).
+     * here so each caller chooses HOW an unreadable gate input fails closed —
+     * never whether: the doc reads hand the fault to the caller
+     * ({@link fetchAudienceBooks}, the `/meta/doc/:name` corpus read), and the
+     * app-nav gate prunes every `doc` entry of one response
+     * ({@link resolveNavDocAudience}). ⛔ No caller reads a fault as an empty
+     * list: an empty book list is "no gated book anywhere" and an empty corpus
+     * is "every doc unclaimed, so `org`" — both GRANT.
      */
     private static async readMetaList(
         p: RestProtocol,
@@ -2950,14 +2954,32 @@ export class RestServer {
     }
 
     /**
-     * Fetch every book of the environment, shaped for the audience resolver.
-     * A read that throws answers `[]` — the docs reads' long-standing
-     * degradation; the app-nav gate reads {@link readAudienceBooks} instead
-     * because it must not fail open.
+     * Fetch every book of the environment, shaped for the audience resolver,
+     * for the `/meta/doc` list and `/meta/doc/:name` reads. A read that throws
+     * THROWS its own fault (ADR-0046 §6.7, fail closed per ADR-0049).
+     *
+     * It used to answer `[]`, and `[]` is not "unknown" to the resolver — it
+     * is "no `{ permissionSet }` book anywhere", which puts an authenticated
+     * caller on the fast path where every doc is readable. So a store fault
+     * on this read served a set-gated doc, body and all, to a non-holder and
+     * listed it for them. The books are an input to the audience decision; a
+     * decision whose input could not be read is not made.
+     *
+     * Rethrown, not mapped to a deny: the fault reaches the route's
+     * `handleRouteError`, so these reads answer a book-read fault exactly as
+     * `GET /meta/book/:name/tree` — whose book read has always propagated —
+     * and as the `/meta/doc` list's own doc read do (`503
+     * SERVICE_UNAVAILABLE` for `metadata-protocol`'s store fault). One fault,
+     * one answer across the docs doors, and an outage never reads as an
+     * authorization verdict (a 403 would tell a holder they hold nothing) nor
+     * as an empty list (every doc pruned is "this environment has no docs").
+     * The app-nav gate reads {@link readAudienceBooks} directly because a nav
+     * response is a composite: it drops the `doc` entries and serves the rest.
      */
     private async fetchAudienceBooks(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
         const read = await this.readAudienceBooks(p, environmentId);
-        return 'fault' in read ? [] : read.items;
+        if ('fault' in read) throw read.fault;
+        return read.items;
     }
 
     /**
@@ -3920,13 +3942,15 @@ export class RestServer {
      * ## Fails CLOSED, and says so
      *
      * The arm this feeds treats an absent gate as "drop every `doc` entry", and
-     * so does this builder when a read it needs THROWS: the books read (the
-     * doc reads swallow that to `[]`, which reads as "no gated book anywhere")
-     * or the doc corpus read (swallowed to `[]` there too, which reads every
-     * doc as unclaimed, i.e. `org`). Either swallow would serve a
-     * `{ permissionSet }`-gated entry to every member, so here a thrown read
-     * drops the `doc` entries of this one response and logs the fault — the
-     * rest of the navigation is served. Unresolvable permission-set HOLDINGS
+     * so does this builder when a read it needs THROWS: the books read (an
+     * empty list there reads as "no gated book anywhere") or the doc corpus
+     * read (an empty corpus reads every doc as unclaimed, i.e. `org`). Either
+     * empty would serve a `{ permissionSet }`-gated entry to every member, so
+     * here a thrown read drops the `doc` entries of this one response and logs
+     * the fault — the rest of the navigation is served. The doc reads close
+     * the same two faults by handing them to their caller instead
+     * ({@link fetchAudienceBooks}): each serves one doc or one doc list, so
+     * there is no rest to serve. Unresolvable permission-set HOLDINGS
      * already deny inside {@link resolveAudienceCaller} (ADR-0049).
      *
      * ## Cost, per `/meta/app` request (measured by this card's tests)
@@ -6600,6 +6624,10 @@ export class RestServer {
                             const raw = visible as unknown;
                             const list = RestServer.metaItemsArray(raw);
                             if (list.length > 0) {
+                                // [#20129] A book-read fault THROWS here and the
+                                // list is not served — never filtered against an
+                                // empty book list, which clears every doc for an
+                                // authenticated caller ({@link fetchAudienceBooks}).
                                 const books = await this.fetchAudienceBooks(p, environmentId);
                                 const audience = await this.resolveDocsAudience(environmentId, req, books);
                                 let filtered: any[];
@@ -7558,6 +7586,16 @@ export class RestServer {
                                     caller = audience.caller;
                                     allowed = audience.admitsBook(target);
                                 } else {
+                                    // [#20129] Both gate inputs fail CLOSED by
+                                    // throwing: the body is never served on a
+                                    // verdict one of them could not supply. A
+                                    // book-read fault throws inside
+                                    // {@link fetchAudienceBooks}; a corpus-read
+                                    // fault throws below — read as `[]` it made
+                                    // this doc unclaimed, i.e. `org`, and served
+                                    // it to every member. Both reach
+                                    // `handleRouteError` with the fault the store
+                                    // raised, the answer the book-tree read gives.
                                     const books = await this.fetchAudienceBooks(p, environmentId);
                                     const audience = await this.resolveDocsAudience(environmentId, req, books);
                                     caller = audience.caller;
@@ -7565,8 +7603,8 @@ export class RestServer {
                                         allowed = true; // no gated book anywhere → org suffices
                                     } else {
                                         const read = await this.readDocCorpus(p, environmentId);
-                                        const corpus = 'fault' in read ? [] : read.items;
-                                        allowed = audience.docReader(corpus)(target?.name);
+                                        if ('fault' in read) throw read.fault;
+                                        allowed = audience.docReader(read.items)(target?.name);
                                     }
                                 }
                                 if (!allowed) {
