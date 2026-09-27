@@ -2525,45 +2525,52 @@ const step17: MigrationStep = {
         "read the related record with `expand` (`{ expand: { account: { object: '<target>', "
         + "fields: ['name'] } } }`), keeping the reference column itself in `fields` — the "
         + 'relation is carried by that column and projecting it away leaves expansion nothing '
-        + 'to resolve (#7537); or denormalise the value onto the queried object (a stored '
-        + 'field, written when the source changes) and name that — the same remedy the REST '
-        + 'ingress has prescribed since #7532, and the sort axis since #6924',
+        + 'to resolve, the same silent no-op a nested projection omitting the related `id` '
+        + 'produced before the engine began keeping that join key itself; or denormalise the '
+        + 'value onto the queried object (a stored field, written when the source changes) '
+        + 'and name that — the same remedy the REST ingress prescribes when it refuses a '
+        + 'dotted projection, and the sort axis when it refuses a dotted sort',
       reason:
-        "#7532 (PR #7588) closed the PROJECTION axis' dotted leg at the REST ingress "
+        "The REST ingress closed the PROJECTION axis' dotted leg first, refusing a dotted "
+        + 'entry instead of widening the response to every field '
         + '(`assertProjectionFieldsExist`, `400 INVALID_FIELD`), which covers everything '
         + 'reaching `findData`. A caller reaching `engine.find()` / `engine.findOne()` '
-        + 'DIRECTLY passed through none of it, and that caller set was measured, not assumed '
-        + "(#7589): a flow `get_record` node's authored `fields: ['name', 'account.name']` "
+        + 'DIRECTLY passed through none of it, and that caller set was measured, not assumed: '
+        + "a flow `get_record` node's authored `fields: ['name', 'account.name']` "
         + 'parses (`GetRecordConfigSchema` restricts nothing), travels verbatim into '
         + "`data.find(...)`, cleared the engine's head-only projection filter on its head "
         + 'segment (`account` IS a field), and reached the driver as a projection column — '
         + 'where SQL renders `"account"."name"` against a table that was never joined, the '
-        + "DB answers `no such column`, and the driver's #3821 recovery ladder retries "
+        + "DB answers `no such column`, and the driver's unknown-column recovery ladder — "
+        + 'there so an unknown column never reads as "no rows" — retries '
         + "`select('*')`. The caller asked to narrow and silently received EVERY field, "
         + 'byte-identical to no projection at all, pointing away from both FLS and data '
         + 'minimisation.\n\n'
-        + 'Ruled 2026-08-12 on #7589 (Option B): a dotted entry the engine cannot resolve is '
+        + 'Ruled by the maintainer on 2026-08-12: a dotted entry the engine cannot resolve is '
         + "refused loudly at the engine's own head-only projection filter, covering every "
         + 'caller that reaches the engine. The check it replaces was justified by a comment '
-        + 'claiming the engine resolves relationship paths "via populate"; #7601 measured '
-        + 'that NO populate step exists — after PR #7617 that comment was the last place in '
-        + 'the repo asserting dotted-path resolution does — so what was removed is not a '
+        + 'claiming the engine resolves relationship paths "via populate"; a measurement found '
+        + 'that NO populate step exists — once the spec and docs stopped prescribing a dotted '
+        + '`fields` path, that comment was the last place in the repo asserting dotted-path '
+        + 'resolution does — so what was removed is not a '
         + 'working feature but a path to widening, kept alive by a false premise. The '
         + 'unknown-PLAIN-column tolerance is explicitly KEPT by the same ruling (an unknown '
         + 'plain name still drops silently; an all-unknown projection still falls back to '
-        + '`*`), a registry-less host gets no verdict (the driver-side #3821 ladder remains '
+        + '`*`), a registry-less host gets no verdict (the driver-side recovery ladder remains '
         + 'its documented backstop, and a driver-side carve-out is measured-need only), and '
         + 'a dotted `fields` inside a nested `expand` degrades to an observable warning '
         + "rather than a refusal — `expandRelatedRecords`' pre-existing graceful-degradation "
-        + '`catch` swallows every expand failure, the same posture the sort axis (#7095) '
-        + 'records for the same catch.\n\n'
+        + '`catch` swallows every expand failure, the same posture the formula-sort refusal '
+        + '(`engine-find-formula-order-by-refused`) records for the same catch.\n\n'
         + 'This is a CODE-path API, not stored metadata, so — like '
         + '`engine-find-formula-order-by-refused` at this step — there is no `sys_metadata` '
         + 'row for the D2 chain to rewrite and the ledger entry is the notification channel. '
         + 'No mechanical rewrite exists: the platform cannot decide between `expand` and '
         + 'denormalisation for the caller, and it must not resolve the path itself — no '
         + 'driver ever did, and inventing a join here is a feature decision, not a '
-        + 'migration. #7589, #7532, #7601, #3821, #5918, ADR-0112.',
+        + 'migration — the line analytics already takes for a relation-traversing dotted '
+        + 'measure, refused with a 400 naming the caller\'s spelling rather than computed '
+        + 'against the wrong column. ADR-0112.',
       acceptanceCriteria:
         'No `engine.find` / `engine.findOne` call site passes a dotted `fields` entry, no '
         + "flow `get_record` config authors one, and no saved report's "
@@ -2584,13 +2591,14 @@ const step17: MigrationStep = {
       replacement:
         'denormalise the value onto the object (a stored field, written when the source '
         + 'changes) and filter that — deliberately the same remedy, in the same words, the '
-        + 'SORT axis prescribes (#6924 / #6994 / #7095) and the SEARCH axis has prescribed '
-        + 'since #6674; `summary` and `autonumber` fields need NO action, because both get '
+        + 'SORT axis prescribes when it refuses a formula sort, at the ingress and at the '
+        + 'engine, and the SEARCH axis prescribes when it refuses a formula search field; '
+        + '`summary` and `autonumber` fields need NO action, because both get '
         + 'real maintained columns and filter correctly',
       reason:
         '`formula` is the one field type no driver materialises a column for, and FILTER was '
-        + 'the last of the three query axes still fail-open on it: SORT refuses it (#6994 at '
-        + 'the ingress, #7095 at the engine) and SEARCH refuses it by name (#6674), while a '
+        + 'the last of the three query axes still fail-open on it: SORT refuses it (at the '
+        + 'REST ingress and at the engine) and SEARCH refuses it by name, while a '
         + '`where` on a `formula` field cleared every gate precisely BECAUSE the object '
         + 'declares the field, reached a driver with no column behind it, and answered 200 '
         + 'with zero rows. Measured on a real `ObjectQL` with `is_open` a `formula` over the '
@@ -2606,7 +2614,7 @@ const step17: MigrationStep = {
         + 'simultaneously unfilterable. That is strictly worse than the sort axis it mirrors: '
         + 'a refused sort returns the same rows in a different order, a refused filter changes '
         + 'which rows exist.\n\n'
-        + 'Both doors now refuse it with `400 INVALID_FIELD` (#8296 / PR #8369), naming the '
+        + 'Both doors now refuse it with `400 INVALID_FIELD`, naming the '
         + 'offending key path and carrying the remedy sentence — the ingress gate '
         + '(`assertFilterFieldsExist`, `@objectstack/metadata-protocol`) for everything '
         + 'reaching `findData`, and `assertFilterIsMaterializable` '
@@ -2634,10 +2642,11 @@ const step17: MigrationStep = {
         + 'filters are author-written the same way. A report or flow authored to filter on a '
         + 'formula field used to run and quietly return the wrong row set; it now fails '
         + 'loudly, with the remedy in the message.\n\n'
-        + 'Registered on the inherited ruling of #7095 ("register it anyway"), re-affirmed for '
-        + 'this axis at triage on 2026-08-13 (#8370): the shape is identical to the sort axis '
-        + 'and the consequence here is larger. #8296, #8370, #7095, #6994, #6924, #6674, '
-        + 'ADR-0112.',
+        + 'Registered on the ruling inherited from the SORT axis — its engine refusal was '
+        + 'registered in this ledger although no stored row needs rewriting, because the '
+        + 'ledger is the one channel that carries its rewrite instructions to the author — '
+        + 're-affirmed for this axis at triage on 2026-08-13: the shape is identical to the '
+        + 'sort axis and the consequence here is larger. ADR-0112.',
       acceptanceCriteria:
         'No filter names a `formula` field on any surface — grep your saved report definitions '
         + "(`sys_saved_report.query.filter`), flow node `config.filter`, dashboard widget "
@@ -2654,11 +2663,12 @@ const step17: MigrationStep = {
         + '`formula` field — the direct engine path, not the REST ingress',
       replacement:
         'denormalise the value onto the object (a stored field, written when the source '
-        + 'changes) and sort by that — the same remedy the REST ingress has prescribed since '
-        + '#6924 / #6994; a `summary` field is unaffected and still sorts, because it gets a '
-        + 'real maintained column',
+        + 'changes) and sort by that — the same remedy the REST ingress prescribes when it '
+        + 'refuses a dotted or formula sort; a `summary` field is unaffected and still sorts, '
+        + 'because it gets a real maintained column',
       reason:
-        '#4226 / #4256 / #6994 closed the SORT axis at the REST ingress '
+        'The SORT axis is closed at the REST ingress for an unknown field, a dotted path and '
+        + 'a `formula` field alike '
         + '(`assertSortFieldsExist`, `400 INVALID_SORT`), which covers everything reaching '
         + '`findData`: the list route, `POST /data/:object/query`, the export route and the '
         + 'RPC dispatcher. A caller reaching `engine.find()` / `engine.findOne()` DIRECTLY '
@@ -2668,12 +2678,13 @@ const step17: MigrationStep = {
         + 'be ordered by. No column exists to order by (a formula is computed on read, so no '
         + 'driver materialises one), so the ORDER BY reached the driver, found nothing, and '
         + 'the unknown-column backstop returned the rows unordered.\n\n'
-        + 'Ruled 2026-08-10 on #7095: an ORDER BY the engine cannot apply is a 4xx with '
-        + 'guidance prose at the public boundary, never a silent drop — the same direction as '
-        + 'the analytics dataset refusal envelope and the #6924 sort-hint prescription. The '
+        + 'Ruled by the maintainer on 2026-08-10: an ORDER BY the engine cannot apply is a 4xx '
+        + 'with guidance prose at the public boundary, never a silent drop — the same direction '
+        + "as the analytics dataset refusal envelope and the ingress sort hint's stored-field "
+        + 'prescription. The '
         + "engine's documented internal-caller tolerance (`assertProjectionFieldsExist`'s "
         + 'docblock) was to survive only behind a pinned internal path, and only if a MEASURED '
-        + 'internal call site relied on it. The #7095 sweep of every in-tree `orderBy` reaching '
+        + 'internal call site relied on it. The sweep of every in-tree `orderBy` reaching '
         + 'the engine directly — hooks, flows, reports, queue/job adapters, sharing, metadata '
         + 'loaders, expand sub-reads — found NONE: every hardcoded internal sort names a real '
         + 'stored column (`created_at`, `updated_at`, `version`, `priority`, `scheduled_for`, '
@@ -2698,7 +2709,7 @@ const step17: MigrationStep = {
         + 'swallows every expand failure and retains the raw foreign keys — so that path moves '
         + 'from silent to OBSERVABLE (a warning naming the field and the fix) rather than '
         + 'refusing. Reversing that backstop is a separate decision on all expand failure '
-        + 'modes. #7095, #6994, #6924, #4226, #4256, #3821, ADR-0112.',
+        + 'modes. ADR-0112.',
       acceptanceCriteria:
         'No `engine.find` / `engine.findOne` call site sorts by a `formula` field, and no saved '
         + "report's `query.orderBy` names one — grep your report definitions for an `orderBy` "
@@ -2721,12 +2732,12 @@ const step17: MigrationStep = {
         + 'driver pass-through key — `{ upsert: true }` was accepted and silently dropped and the '
         + 'update stayed a plain update (ADR-0049 declared-but-unenforced). There is no behaviour to '
         + 'preserve and nothing stored to rewrite (it only ever appeared in a call-time option bag). '
-        + "Any future first-class upsert must reconcile with #7867's not-found gate — a by-id update "
-        + 'whose id names no row throws RECORD_NOT_FOUND rather than inserting — which is why the '
+        + "Any future first-class upsert must reconcile with the engine's not-found gate — a by-id "
+        + 'update whose id names no row throws RECORD_NOT_FOUND rather than inserting — which is why the '
         + 'flag is removed rather than implemented here.',
       acceptanceCriteria:
         'No caller passes `options.upsert` to `engine.update()`; a call that includes it is refused '
-        + 'loudly (the engine gate and both schemas quote the #8057 prescription) instead of '
+        + 'loudly (the engine gate and both schemas quote one removal prescription) instead of '
         + 'succeeding with the option silently ignored.',
     },
     {
@@ -8256,20 +8267,21 @@ const step18: MigrationStep = {
         + '/ `update` / `delete`), which saved reports, flows and dashboard widgets reach directly',
       replacement:
         'denormalise the value onto the queried object (a stored field, written when the source '
-        + 'changes) and filter that — the same remedy, in the same words, the SORT axis has '
-        + 'prescribed for the dotted spelling since #4256/#6924. To read a related column, `$expand` '
+        + 'changes) and filter that — the same remedy, in the same words, the SORT axis '
+        + 'prescribes when it refuses the dotted spelling. To read a related column, `$expand` '
         + 'is unchanged; to CONDITION on one, the stored denormalised field is the supported shape. '
         + 'A dotted path into a structured/JSON field (`{"address.city": …}`) is NOT refused and '
         + 'keeps its current per-driver behaviour',
       reason:
         'FILTER was the last of the four query axes with no verdict for a dotted name: SORT refuses '
-        + 'it (#4256), PROJECTION refuses it at both doors (#7589), and the FILTER gates judged a '
+        + 'it, PROJECTION refuses it at both doors, and the FILTER gates judged a '
         + 'key on its HEAD SEGMENT only — so `where {"project_id.name": "Apollo"}` cleared the '
-        + '#7534 unknown check because `project_id` is a real field, reached a driver that cannot '
-        + 'serve the path, and answered 200 with zero rows. The #8296 virtual verdict deliberately '
+        + 'unknown-name check (which refuses a key naming no field of the object) because '
+        + '`project_id` is a real field, reached a driver that cannot '
+        + 'serve the path, and answered 200 with zero rows. The formula verdict deliberately '
         + 'skipped dotted keys, so the axis answered one unserviceable intent two ways by spelling: '
         + '`{is_open: true}` was refused while `{"is_open.x": true}` rode through.\n\n'
-        + 'Measured across all THREE drivers before ruling (#8371): relation-head, formula-head, '
+        + 'Measured across all THREE drivers before ruling: relation-head, formula-head, '
         + 'system-column-head and plain-scalar-head dotted filters return ZERO rows on '
         + '`driver-memory`, `driver-sql` AND `driver-mongodb`, each under an ordinary 200 '
         + 'indistinguishable from an empty table. There is no working capability for this refusal '
@@ -8277,13 +8289,16 @@ const step18: MigrationStep = {
         + 'column plus FK; Mongo: a single-key index on a scalar), while Mongo\'s dotted paths '
         + 'traverse EMBEDDED DOCUMENTS — so the spelling is well-formed Mongo that matches nothing. '
         + 'On driver-sql, knex reads the dot as a table qualifier and emits a column no dialect can '
-        + 'resolve; `find()` falls into the #3821 recovery ladder and returns `[]` silently (the '
-        + 'find/count divergence that fell out of that measurement is #8790, its own card).\n\n'
+        + 'resolve; `find()` falls into the unknown-column recovery ladder and returns `[]` '
+        + 'silently (the same measurement caught the list and count halves answering that query '
+        + 'two different ways, a divergence with its own entry, '
+        + '`driver-sql-unresolvable-where-column-refused`, that now refuses it on both).\n\n'
         + 'Both doors now refuse the three measured-dead head classes with `400 INVALID_FIELD`, '
         + 'naming the whole offending key exactly as the caller wrote it and carrying the remedy '
-        + 'sentence — no new mechanism, no new error class, per the #8371 maintainer ruling. Both '
+        + "sentence — no new mechanism, no new error class, per the maintainer's ruling. Both "
         + 'judge the head by the SAME `@objectstack/spec/data` classification '
-        + '(`classifyDottedFilterHead`), the one-source move #8296 made with `isVirtualSearchField`, '
+        + '(`classifyDottedFilterHead`), the one-source move the formula verdict made with '
+        + '`isVirtualSearchField`, '
         + 'so the doors cannot drift into answering one spelling two ways. Precedence mirrors the '
         + 'sort axis, verdict for verdict: `unknown` > `dotted` > unmaterializable.\n\n'
         + 'DELIBERATELY UNJUDGED, per the same ruling: a dotted path whose head is a '
@@ -8308,8 +8323,9 @@ const step18: MigrationStep = {
         + 'projection spellings and SQL joins — and it used to answer an empty list '
         + 'indistinguishable from "no matching records", often with the related value reading '
         + 'correctly in the very same response. It now fails loudly, with the remedy in the '
-        + 'message. Registered on the same inherited ruling as its siblings (#7095 "register it '
-        + 'anyway", re-affirmed 2026-08-13): #8371, #8296, #7589, #7534, #4256, ADR-0112.',
+        + 'message. Registered on the same inherited ruling as its siblings — the SORT-axis engine '
+        + 'refusal was registered in this ledger although no stored row needs rewriting, '
+        + 're-affirmed for the FILTER axis on 2026-08-13. ADR-0112.',
       acceptanceCriteria:
         'No filter key is a dotted path whose head is a relation (`lookup` / `master_detail` / '
         + '`user` / `tree`), a `formula`, or a plain scalar — grep your saved report definitions '
