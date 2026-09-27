@@ -5,8 +5,8 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'plugin-manifest-contributes-routes-retired',
   surface:
-    'manifest.contributes.routes (the one member #10724 deliberately excluded; '
-    + '`kinds` is now the block\'s sole surviving live member)',
+    'manifest.contributes.routes (the one member the nine-member retirement deliberately '
+    + 'left to its own fork; `kinds` is now the block\'s sole surviving live member)',
   replacement:
     'delete the key. A route that needs real handler CODE is mounted imperatively: '
     + 'resolve the `http.server` service from the plugin context and register the '
@@ -14,23 +14,27 @@ export const entry: SemanticMigration = {
     + '`examples/app-showcase` mounts POST /api/v1/showcase/recalc that way). A '
     + 'declarative endpoint over a pipeline the platform already runs — query/return '
     + 'records, trigger a flow — is `defineStack({ apis })` (live since protocol 17, '
-    + '#5040)',
+    + 'once the declarative endpoint executor was built and the loud refusal of a '
+    + 'non-empty `apis:` became execution)',
   reason:
-    'ADR-0049 enforce-or-remove; #10726, maintainer ruling 2026-08-22 (Option B of the '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-22 (Option B of the '
     + 'enforce/remove/enforce-later fork, accepted verbatim 「接受所有」 on the decision '
-    + 'batch carrying the four-axis analysis). #10627 measured zero readers of the key '
-    + 'monorepo-wide with control probes: the HttpDispatcher never registered a prefix '
+    + 'batch carrying the four-axis analysis): remove the key, and redirect every '
+    + 'author-facing recommendation of it to the imperative `http.server` mount. A '
+    + 'monorepo-wide census with control probes measured zero readers of the key: the '
+    + 'HttpDispatcher never registered a prefix '
     + 'from the declaration, so an entry parsed cleanly and served nothing — while FOUR '
     + 'published surfaces presented it as working machinery, one of them a '
     + 'customer-published skill (`skills/objectstack-api` told authors to choose it when '
     + '"the endpoint needs real handler CODE"). That is ADR-0049\'s silent no-op with a '
     + 'published recommendation attached. Per the ruling\'s own sequencing the '
-    + 'author-facing corrections landed FIRST (PR #11327: the skill\'s decision table, '
-    + 'the dispatcher protocol doc, ADR-0088:40, app.mdx), and the two remaining '
-    + 'teaching sites (#11328: the plugin-rest-api.zod.ts worked manifest example, the '
-    + 'metadata-plugin.zod.ts `router` delivered-form comments) are redirected in the '
-    + 'removal PR itself. The cloud precondition was discharged 2026-08-24 (#10812: '
-    + 'cloud @ 5b5925a, zero `manifest.contributes` reads, controls green). Enforce '
+    + 'author-facing corrections landed FIRST (the skill\'s decision table, the '
+    + 'dispatcher protocol doc, ADR-0088:40 and app.mdx, each redirected to the '
+    + 'imperative mount), and the two remaining teaching sites (the plugin-rest-api.zod.ts '
+    + 'worked manifest example, the metadata-plugin.zod.ts `router` delivered-form '
+    + 'comments) are redirected in the removal PR itself. The cloud precondition was '
+    + 'discharged first: a census of the cloud repository at 5b5925a found zero '
+    + '`manifest.contributes` reads, controls green. Enforce '
     + '(fork A) was weighed and rejected on all four facets: net-new execution surface '
     + 'plus a prefix-claim authority question (who may claim `/api/v1/…`) for a '
     + 'declarative spelling with zero measured authors, while the capability is already '

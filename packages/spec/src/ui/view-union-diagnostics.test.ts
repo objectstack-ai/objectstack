@@ -280,8 +280,11 @@ describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #
       { object: 'crm_lead', formViews: { my: { type: 'simple', sections: [SECTION] } } }],
     ['overlay.list.columns', { columns: ['name', 'stage'], ...BOUND_LIST },
       { type: 'grid', columns: ['name', 'stage'], ...BOUND_LIST }],
-    ['overlay.list.aux', { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false, ...BOUND_LIST },
-      { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false, ...BOUND_LIST }],
+    // [#20230] `hidden` left this row: the overlay's `owner` / `hidden` are
+    // retired (ADR-0049), so the aux keys that remain are the live ones, and the
+    // same row WITH `hidden` is now in REFUSED as `overlay.list.aux.retiredHidden`.
+    ['overlay.list.aux', { type: 'grid', columns: ['name'], isDefault: true, order: 2, ...BOUND_LIST },
+      { type: 'grid', columns: ['name'], isDefault: true, order: 2, ...BOUND_LIST }],
     ['overlay.form.min', { type: 'simple', ...BOUND_FORM }, { type: 'simple', ...BOUND_FORM }],
     ['overlay.form.sections', { sections: [{ label: 'Main', fields: ['name'] }], ...BOUND_FORM },
       { type: 'simple', sections: [SECTION], ...BOUND_FORM }],
@@ -299,7 +302,6 @@ describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #
     // it, with every list key stripped unread.
     ['put.isPinned', { isPinned: true, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
     ['put.sortOrder', { sortOrder: 3, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
-    ['put.hidden', { hidden: true, ...BOUND_FORM }, { type: 'simple', hidden: true, ...BOUND_FORM }],
     ['put.pinAndOrder', { isPinned: true, sortOrder: 3, ...BOUND_LIST }, { type: 'grid', ...BOUND_LIST }],
   ];
 
@@ -316,6 +318,12 @@ describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #
     ['overlay.badType', { type: 'sideways' }, ['invalid_union']],
     ['overlay.badColumns', { type: 'grid', columns: 'not-an-array' }, ['invalid_union']],
     ['overlay.emptyState.badKey', { type: 'grid', emptyState: { title: 'None', notAnEmptyStateKey: 1 } }, ['invalid_union']],
+    // [#20230] Formerly ACCEPTED (`overlay.list.aux` with `hidden: false`, and
+    // `put.hidden`): the overlay's `hidden` / `owner` are retired, and a bound
+    // overlay carrying either is refused at the key with the prescription.
+    ['overlay.list.aux.retiredHidden', { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false, ...BOUND_LIST }, ['invalid_union']],
+    ['put.hidden', { hidden: true, ...BOUND_FORM }, ['invalid_union']],
+    ['put.owner', { owner: 'usr_7', ...BOUND_LIST }, ['invalid_union']],
     // [#7741] The corpus's former unbound ACCEPTED entries, each re-measured:
     // an overlay that names no `object`/`viewKind` would be stored as a row no
     // object-bound read path can serve, so the members now refuse it with the
@@ -366,6 +374,25 @@ describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #
       expect([...new Set(r.error!.issues.map((i) => i.code))].sort()).toEqual(codes);
     });
   }
+
+  // [#20230] The three retired-key rows above are refused for the RETIREMENT,
+  // not for some other defect a codes-only pin would also read as a refusal:
+  // the claimed overlay member's message is the prescription, located at the key.
+  it('the retired-key overlay rows are refused BY the tombstone, with its prescription', () => {
+    const rows = REFUSED.filter(([label]) => ['overlay.list.aux.retiredHidden', 'put.hidden', 'put.owner'].includes(label));
+    expect(rows).toHaveLength(3);
+    for (const [label, body] of rows) {
+      const r = ViewMetadataSchema.safeParse(body);
+      expect(r.success, label).toBe(false);
+      if (r.success) continue;
+      const key = label === 'put.owner' ? 'owner' : 'hidden';
+      expect(r.error.issues[0]!.message, label).toMatch(new RegExp(`^\`view\\.${key}\` was removed in @objectstack/spec`));
+      const located = ((r.error.issues[0] as unknown as { errors?: { path: PropertyKey[]; code: string }[][] }).errors ?? [])
+        .flat()
+        .find((i) => i.path[0] === key);
+      expect(located?.code, label).toBe('invalid_type');
+    }
+  });
 
   // The JSON-Schema face the `/api/v1/meta/types/view` endpoint serves is
   // pinned in `view-metadata-schema.test.ts`; re-asserted here in the one

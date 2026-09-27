@@ -16,7 +16,8 @@ export const entry: SemanticMigration = {
     + 'Offline is a platform capability, and its vocabulary belongs on the sync engine that '
     + 'owns the queue, the conflict policy and the cache — none of which exists yet. Delete '
     + 'the import and the value. Whichever of these earns real product pull returns WITH its '
-    + 'own vocabulary and its executor, the #4910 way, not by un-retiring a declaration)',
+    + 'own vocabulary and its executor — the way inbound rate limiting came back, as a new '
+    + 'key carrying only what its executor consumes — not by un-retiring a declaration)',
   reason:
     'Five `@objectstack/spec/ui` modules declared a full interaction-configuration '
     + 'vocabulary — 22 `z.object` sites across touch/gesture, drag-and-drop, '
@@ -38,17 +39,26 @@ export const entry: SemanticMigration = {
     + 'carrier flipped all 21 — so unreachability was a fact about the graph, not a broken '
     + 'walker; (3) zero `.parse()` / `.safeParse()` in objectstack, objectui or cloud '
     + 'outside these modules\' own unit tests. objectui holds TYPE re-exports and parity '
-    + 'ratchets, never validators, and says so (#2561). The 2026-08-04 ruling weighed '
+    + 'ratchets, never validators, and says so (its types package deliberately dropped the '
+    + 'spec/ui zod-validator re-exports and keeps type-only ones). The 2026-08-04 ruling '
+    + 'retired the family — touch, drag-and-drop, keyboard and motion are renderer built-in '
+    + 'behaviour and offline belongs to a sync engine, none of it per-page metadata — and weighed '
     + 'wiring a carrier key (option B) and rejected it: that is a feature with a renderer '
     + 'behind it, not ledger clean-up. It also weighed tightening the shapes to '
     + '`strictObject` and rejected that explicitly — strictness is a property of a PARSE and '
     + 'there is no parse, so it would spend a breaking change to leave "a precisely '
-    + 'validated dead slot, the more convincing lie" (#4583). Because there was no carrier '
+    + 'validated dead slot, the more convincing lie" (the lesson of the datasource capability '
+    + 'flags: `readOnly` was precisely validated and read by nothing, while a shipped example '
+    + 'called a datasource a read replica and wrote through it). Because there was no carrier '
     + 'key there is nothing to tombstone and no `sys_metadata` row or source file for a D2 '
-    + 'conversion to rewrite: this entry is the D3 record, the same route 3 as #4834 (kernel '
-    + 'plugin-runtime family) and #4938 (`HttpServerConfig`). ⚠️ Not to be confused with '
-    + '#5021, which retired the THEME `animation` block — a different file, different defs, '
-    + 'and that one did have a carrier key and therefore a tombstone. ADR-0049, #4988.',
+    + 'conversion to rewrite: this entry is the D3 record, the same route 3 as '
+    + '`plugin-runtime-family-retired` (the kernel plugin-runtime family) and the '
+    + '`HttpServerConfig` retirement (seven keys no runtime read and no authoring door '
+    + 'reached, retired with their container). ⚠️ Not to be confused with the theme-token '
+    + 'retirement (theme-driven typography is not a near-term capability, so nine token '
+    + 'groups nothing consumed were retired), which retired the THEME `animation` block — a '
+    + 'different file, different defs, and that one did have a carrier key and therefore a '
+    + 'tombstone. ADR-0049.',
   acceptanceCriteria:
     'No code imports any of the 64 retired names from `@objectstack/spec` or '
     + '`@objectstack/spec/ui` — `TouchTargetConfig(Schema)`, `GestureType(Schema)`, '

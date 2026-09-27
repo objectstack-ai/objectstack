@@ -47,7 +47,7 @@
  * list, migrated to `data/object.zod.ts` (`z.input<typeof
  * ObjectSchemaBase>`), and left `getObject` returning an `unknown` that
  * three consumer packages were re-narrowing through private structural
- * re-declarations — repaired by #12248 (the #11833 ruling's fork 3): the
+ * re-declarations — repaired by commit 8425c17cc (the #11833 ruling's fork 3): the
  * member now returns the spec's own registered-object type.
  */
 
@@ -80,7 +80,7 @@ export interface EngineSchemaRegistryView {
     /**
      * The registered object schema, or `undefined`.
      *
-     * [#12248] Returns the spec's own registered-object type (the #11833
+     * [commit 8425c17cc] Returns the spec's own registered-object type (the #11833
      * ruling's fork 3, "anything but leave as is"): `SchemaRegistry.getObject`
      * has always answered `ServiceObject | undefined`, and while this view
      * said `unknown`, registry-view consumers (`plugin-pinyin-search`'s
@@ -232,7 +232,7 @@ export interface IObjectQLEngine extends IDataEngine {
      * guards' `managedBy` source.
      *
      * [#12481] Typed as the spec's registered-object type — the #11833
-     * ruling's fork 3 as executed by #12248, one member over, applied by
+     * ruling's fork 3 as executed by commit 8425c17cc, one member over, applied by
      * inheritance: `ObjectQL.getSchema` has always answered
      * `ServiceObject | undefined` ({@link getObject} is literally its
      * alias, `return this.getSchema(name)`), and `ServiceObject` lives in
@@ -252,7 +252,7 @@ export interface IObjectQLEngine extends IDataEngine {
      * Engine-level alias of {@link EngineSchemaRegistryView.getObject} (the
      * migration-flag reader's shape).
      *
-     * [#12248] Typed as the spec's registered-object type — the #11833
+     * [commit 8425c17cc] Typed as the spec's registered-object type — the #11833
      * ruling's fork 3. `ObjectQL.getObject` has always returned
      * `ServiceObject | undefined` (it aliases `getSchema`), and `ServiceObject`
      * lives in spec (`data/object.zod.ts`), so the header's "engine-local

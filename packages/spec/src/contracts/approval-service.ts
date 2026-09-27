@@ -16,7 +16,7 @@
  * authoring type, submit, or step machinery anymore.
  */
 
-// [#6523 / #6206 ruling default] Every method below ADJUDICATES access, so each
+// [Full-envelope default, commit aa4b90d9a] Every method below ADJUDICATES access, so each
 // takes the complete `resolveAuthzContext` envelope rather than the six-field
 // context shape this contract used to borrow from `sharing-service`
 // (`SharingExecutionContext`, retired in #7218 once every implementation had

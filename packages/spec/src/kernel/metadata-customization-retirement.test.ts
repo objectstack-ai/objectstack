@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { MetadataPluginConfigSchema } from './metadata-plugin.zod';
 import { MetadataManagerConfigSchema } from './metadata-loader.zod';
 
-// ─── [#13135] The paper metadata-customization protocol is REMOVED ────────────
+// ─── [commit 9e0ba21a1] The paper metadata-customization protocol is REMOVED ──
 //
 // ADR-0049 enforce-or-remove, executing the maintainer ruling of 2026-08-29 on
 // #12057 (「同意」 — retirement adopted; re-scope rejected). ADR-0126 §6 wall 4

@@ -29,7 +29,7 @@ export interface AutomationContext {
      * `true` exactly when the dispatcher's caller-scope load of the subject row
      * did NOT deliver it — so {@link record} is the stamped `{ id }` stub the
      * dispatcher puts in place of the row, not the row (#14244; the flow face of
-     * #14143's handler-face signal, `ctx.recordLoadDenied`). Absent — never
+     * the handler-face signal `ctx.recordLoadDenied` of commit f19475c0a). Absent — never
      * `false` — otherwise, including for a record-less start that attempted no
      * load, so a consumer reads `recordLoadDenied === true`.
      *

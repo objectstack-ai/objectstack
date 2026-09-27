@@ -24,9 +24,10 @@ export const entry: SemanticMigration = {
     + "plugin auto-discovery (an `oclif` section in the plugin's own `package.json`; see "
     + '`cli-extension.zod.ts`)',
   reason:
-    'ADR-0049 enforce-or-remove; #10724 (triage graded 2026-08-21, cloud precondition '
-    + 'discharged 2026-08-24). #10627 measured, monorepo-wide and non-test with control probes, '
-    + 'that the ENTIRE monorepo contains exactly one read of `manifest.contributes` — '
+    'ADR-0049 enforce-or-remove: the nine members retire together, once the cloud half of '
+    + 'the census below had come back clean. A census, monorepo-wide and non-test with '
+    + 'control probes, measured that the ENTIRE monorepo contains exactly one read of '
+    + '`manifest.contributes` — '
     + '`packages/objectql/src/engine.ts`, member `kinds` — so all nine members above parsed, '
     + 'entered the manifest, and changed nothing. The census stands on three repos: objectstack '
     + '(re-verified on current main at claim time), objectui (0 property reads; control: 63 '
@@ -46,8 +47,9 @@ export const entry: SemanticMigration = {
     + 'present: `os plugin build` runs `ManifestSchema.safeParse` and exits non-zero printing '
     + 'the per-key tombstone prescription; TypeScript authors fail earlier still (each key is '
     + 'typed `never`). `contributes.kinds` keeps parsing and registering '
-    + '(`registry.registerKind`), and `contributes.routes` is untouched pending its own fork '
-    + '(#10726). ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+    + '(`registry.registerKind`), and `contributes.routes` is left to its own enforce-or-remove '
+    + 'fork (since decided: retired, see `plugin-manifest-contributes-routes-retired`). '
+    + '⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
     + 'nothing ever read the nine members, so removing them removes no behaviour. A package '
     + 'ALREADY INSTALLED whose stored manifest carries one degrades to a single '
     + '`[metadata_spec_invalid]` log line at registration (the registry\'s `validate()` is a '

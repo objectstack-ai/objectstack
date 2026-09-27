@@ -24,9 +24,11 @@ export const entry: SemanticMigration = {
     + 'advertise diligence keeps the surviving securityContact and vulnerabilityDisclosure '
     + 'blocks, which are contact terms rather than a verdict.',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-07 on #15932 (director seat, decision batch #65, adopted verbatim 「同意」). '
-    + 'This is the second half of the scanner retirement — issue 14919, a number since '
-    + 'DELETED from the board, landed as PR #15930. That card retired PluginSecurityScanner — a '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-07 (adopted verbatim 「同意」): '
+    + 'retire the scan-result family and its securityScan sibling, because once the scanner '
+    + 'was gone nothing so much as imported their types. '
+    + 'This is the second half of the scanner retirement recorded as '
+    + 'plugin-security-scanner-retired. That retirement removed PluginSecurityScanner — a '
     + '@objectstack/core class that shipped as a SECURITY control and could not fail, whose '
     + 'verdict was status "passed" for every plugin it was ever handed. The SCHEMAS the '
     + 'scanner fed survived it, and the scanner had been their only importer of any kind (a '
@@ -59,10 +61,12 @@ export const entry: SemanticMigration = {
     + 'recorded as checked. Its two siblings were MEASURED rather than assumed, and the '
     + 'record is corrected here: both were ALREADY GONE when that ruling was written. The '
     + 'incident "malware" type was a member of system/IncidentCategory, and the whole '
-    + 'incident-response family was retired by #15513 (maintainer ruling 2026-09-05 — two '
-    + 'days BEFORE the 2026-09-07 ruling that made it conditional); see '
+    + 'incident-response family was retired whole, with the training and change-management '
+    + 'families (maintainer ruling 2026-09-05: not roadmapped, so retired rather than marked '
+    + 'experimental — two days BEFORE the 2026-09-07 ruling that made it conditional); see '
     + 'incident-response-family-retired. And marketplace-admin.zod.ts was deleted outright '
-    + 'with the cloud subpath (#16526); see cloud-subpath-retired. Verified on this tree by '
+    + 'with the cloud subpath (ruled 2026-09-07: cloud does not re-host the control-plane '
+    + 'files it never consumed); see cloud-subpath-retired. Verified on this tree by '
     + 'shape: both files return zero tree entries and no *.zod.ts names malware at all, '
     + 'against a lit control where "scanning" still returns a live declaration in '
     + 'marketplace.zod.ts. So the conditional question is ONE enum member wide, not three, '
@@ -70,8 +74,7 @@ export const entry: SemanticMigration = {
     + '⚠️ The out-of-repo consumer population is NOT MEASURED. @objectstack/spec is published, '
     + 'so this removal is breaking for consumers no download, dependent or source telemetry '
     + 'was consulted for — accepted as an input to the ruling, exactly as that retirement states '
-    + 'of its own three exports, and not a reason to soften the removal. #15932, PR #15930 '
-    + '(for the deleted issue 14919), ADR-0049, ADR-0087.',
+    + 'of its own three exports, and not a reason to soften the removal. ADR-0049, ADR-0087.',
   acceptanceCriteria:
     'No source imports KernelSecurityScanResult, KernelSecurityVulnerability or either '
     + 'Schema from @objectstack/spec/kernel: both defs are absent from the built kernel '

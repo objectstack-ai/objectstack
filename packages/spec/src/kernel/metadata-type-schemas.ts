@@ -203,13 +203,13 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
  * `success: true`. Enforced but undeclared — the mirror of declared-but-
  * unenforced, and the same hole, three more doors.
  *
- * [#10194, the same shape again] `theme` and `analytics_cube` sat in the very
+ * [commit 2306a765c, the same shape again] `theme` and `analytics_cube` sat in the very
  * position this docblock describes — declared, authorable stack collections
  * with `.strict()` schemas (`defineStack({ themes, analyticsCubes })`), named
  * by the URL-spelling contract as legal, addressable kinds — yet neither was
  * bound here, so `PUT /meta/theme/:name` stored ANY JSON with `success: true`
  * while the stack door strictly refused the same body. They were bound then,
- * the same SHAPE-check-only way. (#10485 later retired the `themes` carrier
+ * the same SHAPE-check-only way. (Commit 35ad101bc later retired the `themes` carrier
  * and `ThemeSchema` whole under ADR-0049, and `theme` left the URL-spelling
  * contract with it — see the entry-shaped comment below.) `rag_pipeline` is
  * deliberately NOT bound: it has
@@ -263,8 +263,8 @@ const UNREGISTERED_KIND_SCHEMAS: Record<string, z.ZodType> = {
   // never refuses one. Same treatment #5271/#5312 gave their strict surfaces.
   sharing_rule: SharingRuleSchema,
 
-  // [#10194 → #10485] `theme: ThemeSchema` was bound here when `themes` was a
-  // stack collection; #10485 retired that carrier and the schema whole
+  // [commit 2306a765c → 35ad101bc] `theme: ThemeSchema` was bound here when `themes` was a
+  // stack collection; commit 35ad101bc retired that carrier and the schema whole
   // (ADR-0049 — nothing downstream ever read a stored theme). The binding did
   // NOT regress to the store-anything branch this docblock describes: with the
   // `themes: 'theme'` fold gone from `PLURAL_TO_SINGULAR`, `theme` leaves the
@@ -272,11 +272,11 @@ const UNREGISTERED_KIND_SCHEMAS: Record<string, z.ZodType> = {
   // gets `unrecognisedMetaTypeRefusal`'s loud verdict (#8421) before any
   // schema would be consulted.
 
-  // [#10194] `stack.zod.ts`: `analyticsCubes: z.array(CubeSchema)`.
+  // [commit 2306a765c] `stack.zod.ts`: `analyticsCubes: z.array(CubeSchema)`.
   //
   // Same class, same treatment. Note what this binding does NOT say: whether
   // `analytics_cube` authoring is LIVE end-to-end is a separate measurement
-  // (#10238) — this entry only makes the already-open write door validate the
+  // — this entry only makes the already-open write door validate the
   // shape it already accepts, whatever that measurement concludes.
   analytics_cube: CubeSchema,
 };
@@ -352,7 +352,7 @@ export function listMetadataTypeSchemaTypes(): string[] {
 /**
  * Snapshot of the non-KIND stack collections bound in
  * `UNREGISTERED_KIND_SCHEMAS` — today `webhook` / `connector` / `sharing_rule`
- * / `theme` / `analytics_cube` (#6245 the first three, #10194 the last two).
+ * / `theme` / `analytics_cube` (#6245 the first three, commit 2306a765c the last two).
  *
  * [#6931] This exists so a check can ENUMERATE that map, and for nothing else.
  * The exclusion documented directly above is about {@link
@@ -363,7 +363,7 @@ export function listMetadataTypeSchemaTypes(): string[] {
  * `PUT /api/v1/meta/:type/:name` by #6245 — sat outside the one gate that exists
  * to catch "declares no envelope", and each had to be judged by hand instead
  * (`sharing_rule` by a 422, `connector` only after a silent strip and a separate
- * card, #6362 / PR #6900).
+ * card, commit b5404f496 / PR #6900).
  *
  * ⚠️ Being listed by this function grants NOTHING. It returns names, not
  * schemas, not descriptors: no `MetadataTypeSchema` enum membership, no

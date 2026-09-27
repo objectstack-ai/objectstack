@@ -112,7 +112,7 @@
  * and `update` carry the same declared answer shapes their `IDataEngine`
  * counterparts do — and nothing here claims to be the query schema.
  *
- * [#16786] `updateById` joins them. Ruling A on #16231 settled the RULE —
+ * [commit 6059b29c0] `updateById` joins them. Ruling A on #16231 settled the RULE —
  * #15823's `find()` narrowing extends to the sibling doors — and enumerated
  * `:148` / `:164`; this member is a door of that family the enumeration
  * missed, so the reason it narrows is the MEASUREMENT, not the enumeration:
