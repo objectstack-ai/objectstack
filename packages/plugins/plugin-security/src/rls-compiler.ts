@@ -14,6 +14,10 @@ import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 // no second copy for the `=` / `IN` bridge to drift against.
 import { compileCelToFilter, isSupportedRlsExpression, sqlPredicateToCel } from '@objectstack/formula';
 import type { CelFilterFailReason } from '@objectstack/formula';
+// [#20212] The platform's two shared comparand faces: the SAME functions the
+// engine's `where` seam and analytics' read-scope guard call. Called on every
+// compiled policy filter, never restated (see `judgeCompiledComparands`).
+import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
 
 /**
  * Why a policy's predicate produced no filter — the compiler's OWN answer,
@@ -24,9 +28,11 @@ import type { CelFilterFailReason } from '@objectstack/formula';
  * line before the only place that could surface it. The extra member is this
  * file's own drop, which the compiler reports as a SUCCESS (`ok: true`) and
  * {@link isEmptyMembershipFilter} then refuses — same silent denial, so it
- * joins the same vocabulary rather than staying unnamed.
+ * joins the same vocabulary rather than staying unnamed. `refused-comparand`
+ * is the shared comparand faces' refusal of a compiled filter
+ * ({@link judgeCompiledComparands}).
  */
-type RlsDropReason = CelFilterFailReason | 'empty-membership' | 'unknown-field';
+type RlsDropReason = CelFilterFailReason | 'empty-membership' | 'unknown-field' | 'refused-comparand';
 
 /** A dropped policy's cause: the compiler's reason plus its human `detail`. */
 interface RlsDropCause {
@@ -242,6 +248,55 @@ function judgeCompiledFields(
   };
 }
 
+/** {@link judgeCompiledComparands}' answer: the filter to enforce, or why there is none. */
+type RlsComparandVerdict =
+  | { ok: true; filter: Record<string, unknown> }
+  | { ok: false; detail: string };
+
+/**
+ * [#20212] Does this compiled policy filter pass the platform's two shared
+ * comparand faces, `assertListComparandShapes` and `normalizeFilterComparandTypes`
+ * (`@objectstack/spec/data`)?
+ *
+ * The faces ARE the rule; this function only routes their answer. The engine
+ * runs them on the caller's `where` inside `lowerWhereFilterArray`, BEFORE the
+ * middleware chain composes this compiler's output onto `opCtx.ast.where`, so a
+ * compiled policy filter reached the driver unjudged. A comparand the faces
+ * refuse (the ruled null list member and null ordering bound among them)
+ * therefore reached `driver-sql` as a three-valued `NOT IN (…, NULL)`, while
+ * the `check` clause of the same policy was evaluated in-process by
+ * `matchesFilterCondition`, which answers the same comparand another way: one
+ * policy, a read that hid a row its own write check admitted.
+ *
+ * Judged HERE because this is the one seam both clauses compile through (the
+ * read layer compiles `using`, the ADR-0058 D4 write gate compiles `check`,
+ * analytics' `getReadFilter` compiles `using`), and because a refusal here can
+ * take the existing per-request fail-closed route: the policy joins `deniedBy`
+ * exactly as an unresolved variable or a list under `==` does. A judgement at
+ * the engine's composed `where` could do neither: the write check never passes
+ * it, and there a refusal could only be a 400 the caller cannot act on.
+ *
+ * Returns the faces' own filter (the type face narrows an exact-range `bigint`
+ * copy-on-write and returns the same reference otherwise). A thrown value
+ * without the ADR-0112 envelope (a string `code` and a numeric `status`) is not
+ * a verdict about the filter, so it is re-thrown rather than dressed up as one.
+ */
+function judgeCompiledComparands(filter: Record<string, unknown>): RlsComparandVerdict {
+  try {
+    assertListComparandShapes(filter);
+    return { ok: true, filter: normalizeFilterComparandTypes(filter) };
+  } catch (thrown) {
+    const { code, status } = (thrown ?? {}) as { code?: unknown; status?: unknown };
+    if (!(thrown instanceof Error) || typeof code !== 'string' || typeof status !== 'number') throw thrown;
+    return {
+      ok: false,
+      detail:
+        `the compiled predicate carries a comparand the platform's shared filter faces refuse (${code}), ` +
+        `so it was not handed to a driver; the face says: ${thrown.message}`,
+    };
+  }
+}
+
 /**
  * Sentinel filter used when applicable RLS policies exist but none can
  * be compiled against the current execution context (typically because a
@@ -441,6 +496,12 @@ export class RLSCompiler {
    * the ADR-0058 D4 write gate compiles `check` here, so the two can no longer
    * disagree about what a phantom column means. Omit it and the compile behaves
    * exactly as it did before the guard existed.
+   *
+   * [#20212] Every compiled policy filter also passes the platform's two shared
+   * comparand faces ({@link judgeCompiledComparands}), with or without a
+   * `fieldGuard`. A policy they refuse is DROPPED onto the same fail-closed
+   * path, for the same one-seam reason: read and check cannot disagree about a
+   * comparand no backend agrees on.
    */
   compileFilter(
     policies: RowLevelSecurityPolicy[],
@@ -551,7 +612,17 @@ export class RLSCompiler {
         if (verdict && !verdict.ok) {
           deniedBy.push({ policy, cause: { reason: 'unknown-field', detail: verdict.detail } });
         } else {
-          filters.push(outcome.filter);
+          // [#20212] The shared comparand faces, on the same compiled tree and
+          // with no guard to opt out of: they read nothing but the filter. A
+          // refusal joins `deniedBy` like the rows above — the per-request
+          // fail-closed route a list under `==` already takes — so `using` and
+          // `check` refuse together and a granting sibling still grants.
+          const comparands = judgeCompiledComparands(outcome.filter);
+          if (comparands.ok) {
+            filters.push(comparands.filter);
+          } else {
+            deniedBy.push({ policy, cause: { reason: 'refused-comparand', detail: comparands.detail } });
+          }
         }
       } else if (!isSupportedRlsExpression(predicate)) {
         // ADR-0056 D4: an UNSUPPORTED-SHAPE predicate (e.g. arithmetic, functions,
