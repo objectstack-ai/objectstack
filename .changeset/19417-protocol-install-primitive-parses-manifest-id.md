@@ -42,8 +42,9 @@ offering it. Installing `id: 'com.example.my_erp'` now throws, with:
 ```text
 Invalid package id 'com.example.my_erp' on `manifest.id`. Expected
 reverse-domain notation ('com.steedos.crm', 'org.apache.superset') — lowercase
-dot-separated segments; hyphens allowed inside a segment, underscores are not.
-Did you mean 'com.example.my-erp'?
+dot-separated segments of letters, digits and inner hyphens; a segment may not
+open with a hyphen; underscores are not admitted. Did you mean
+'com.example.my-erp'?
 ```
 
 **The duplicate door refuses BEFORE it mints anything.** `duplicatePackage`

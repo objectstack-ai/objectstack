@@ -21,7 +21,7 @@
  *             -> tested against the local rule AND `explicit.includes('.')`.
  *
  * That extra dot condition is why a bare `crm` was already blocked on the
- * derive path while the explicit path let it through: five of the six shapes
+ * derive path while the explicit path let it through: four of the five shapes
  * below held on both paths, `crm` on only one. After the fix both paths ask the
  * same schema, and the dot condition is gone because the schema subsumes it
  * (its pattern needs at least two segments).
@@ -70,15 +70,19 @@ const PUBLISH_SRC = resolve(HERE, '../src/commands/package/publish.ts');
 const MANIFEST_ID = PackageSchema.shape.manifestId;
 
 /**
- * The six shapes the retired local rule admitted, with the pre-fix reading of
- * WHICH path admitted each — triage's correction to the card, kept here because
- * it is the reason every case below is asserted per path rather than once.
+ * The shapes the retired local rule admitted and the declaration refuses, with
+ * the pre-fix reading of WHICH path admitted each — triage's correction to the
+ * card, kept here because it is the reason every case below is asserted per
+ * path rather than once.
+ *
+ * `9foo.bar` (a digit-first segment) was a sixth row until the declaration let a
+ * segment open with a digit; the two now agree that it is an id, so it sits
+ * with the accepted cases below.
  */
 const RELAXATIONS: ReadonlyArray<{ id: string; why: string; admittedOnDerivePathBefore: boolean }> = [
   { id: 'crm',                  why: 'single segment',    admittedOnDerivePathBefore: false },
   { id: 'com.acme.repair_desk', why: 'underscore',        admittedOnDerivePathBefore: true },
   { id: 'COM.ACME.CRM',         why: 'upper case',        admittedOnDerivePathBefore: true },
-  { id: '9foo.bar',             why: 'digit-first segment', admittedOnDerivePathBefore: true },
   { id: 'com..acme',            why: 'empty segment',     admittedOnDerivePathBefore: true },
   { id: 'com.acme.',            why: 'trailing dot',      admittedOnDerivePathBefore: true },
 ];
@@ -166,6 +170,9 @@ describe('os package publish — the manifest-id rule is the spec manifest-id ru
       ['local.acme-crm', true],
       ['a.b', true],
       ['com.acme.crm-2', true],
+      ['9foo.bar', true],
+      ['com.163.crm', true],
+      ['local.2024-app', true],
       ...RELAXATIONS.map(({ id }) => [id, false] as const),
       ['', false],
       ['com.acme.crm ', false],
@@ -319,30 +326,42 @@ describe('os package publish — the manifest-id rule is the spec manifest-id ru
   });
 
   // -------------------------------------------------------------------------
-  // The producer half — the CLI also MAKES ids, and slugify has no
-  // letter-first rule (the filer's addendum).
+  // The producer half — the CLI also MAKES ids. `slugify` emits lowercase
+  // letters, digits and inner hyphens and never opens with a hyphen: exactly
+  // one legal segment, now that a segment may open with a digit. So a derived
+  // `local.<slug>` id parses, and it is published AS DERIVED.
   // -------------------------------------------------------------------------
 
-  describe('a derived id the schema rejects is refused, not published and not rewritten', () => {
-    it("refuses the digit-first id derived from a manifest named '2024 App'", async () => {
+  describe('a derived id is published as derived, never rewritten', () => {
+    it("publishes the digit-first id derived from a manifest named '2024 App'", async () => {
+      // Refused while every segment had to open with a letter; the same bytes
+      // now reach the wire unchanged.
       const derived = deriveManifestId({ manifest: { name: '2024 App' } }, '/nowhere/objectstack.json');
       expect(derived).toEqual({ id: 'local.2024-app', source: 'artifact-manifest-name' });
-      expect(isManifestId(derived.id)).toBe(false);
+      expect(isManifestId(derived.id)).toBe(true);
 
       const path = await artifactAt({ name: '2024 App', version: '1.2.0' });
       const calls = stubCloud();
       const { exitCode, output } = await runPublish([path]);
 
-      expect(exitCode).toBe(1);
-      expect(calls).toEqual([]);
-      expect(output).toContain("Invalid manifest-id 'local.2024-app'");
-      // The refusal says where the id came from and how to set one, because
-      // the user never typed this string.
-      expect(output).toContain('derived from the compiled artifact');
-      expect(output).toContain('--manifest-id');
+      expect(exitCode ?? 0).toBe(0);
+      expect(calls).toHaveLength(2);
+      expect(calls[0].url).toBe('http://cloud.test/api/v1/cloud/packages');
+      expect(calls[0].body.manifest_id).toBe('local.2024-app');
+      expect(output).not.toContain('Invalid manifest-id');
       // It is NOT normalised into some other permanent identifier: manifestId
       // is immutable once published.
       expect(output).not.toContain('local.a2024-app');
+    });
+
+    it('every slug the derivation can produce is a legal id, from the name or from the filename', () => {
+      const names = ['2024 App', '9', '--x--', 'ünïcödé', 'Acme CRM', `${'a'.repeat(63)} tail`];
+      for (const name of names) {
+        const fromName = deriveManifestId({ manifest: { name } }, '/nowhere/objectstack.json');
+        expect(isManifestId(fromName.id), `${JSON.stringify(name)} -> ${fromName.id}`).toBe(true);
+        const fromFile = deriveManifestId({ manifest: {} }, `/nowhere/${name}.json`);
+        expect(isManifestId(fromFile.id), `${JSON.stringify(name)}.json -> ${fromFile.id}`).toBe(true);
+      }
     });
 
     it('publishes when the same derivation lands on a legal id', async () => {

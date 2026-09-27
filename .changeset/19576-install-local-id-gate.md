@@ -31,9 +31,9 @@ now answers, in `error.message`:
 
 ```text
 Invalid package id 'late-app' on `manifest.id`. Expected reverse-domain notation
-('com.steedos.crm', 'org.apache.superset') — lowercase dot-separated segments;
-hyphens allowed inside a segment, underscores are not. Did you mean
-'com.example.late-app'?
+('com.steedos.crm', 'org.apache.superset') — lowercase dot-separated segments
+of letters, digits and inner hyphens; a segment may not open with a hyphen;
+underscores are not admitted. Did you mean 'com.example.late-app'?
 ```
 
 **`manifest.name` is no longer read as an id.** `ManifestSchema` declares `id`;
