@@ -1096,12 +1096,17 @@ export const SelectionConfigSchema = lazySchema(() => strictObject({
 
 /**
  * List View Pagination Configuration
+ *
+ * `pageSize` defaults to 50 — the platform's display page size, set by the
+ * maintainer's ruling on objectui#9853 (「9853 默认页大小改为50」). This
+ * declaration is the one place that number lives: a renderer reads the spec
+ * default, it never keeps a page size of its own.
  */
 export const PaginationConfigSchema = lazySchema(() => strictObject({
   surface: 'this pagination configuration',
   history: VIEW_HISTORY,
 }, {
-  pageSize: z.number().int().positive().default(25).describe(
+  pageSize: z.number().int().positive().default(50).describe(
     'Number of records per page. On a view with no pager (kanban, gallery, timeline) it is the fetch '
     + 'ceiling, and the renderer owes two things: bound its fetch at this number, and, when the filtered '
     + 'set is larger than it, show a visible truncation signal saying what is on screen is not the whole set',
