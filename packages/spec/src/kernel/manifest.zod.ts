@@ -255,12 +255,21 @@ export type PluginIntegrity = z.input<typeof PluginIntegritySchema>;
  * Both sites now reference this constant, which is what makes a future drift a
  * one-line edit rather than a silent divergence.
  *
- * Reads as: a lowercase segment, then one or more dot-separated lowercase
- * segments. Each segment starts with a letter and may carry digits and hyphens.
- * ⛔ Underscores are NOT admitted — `manifest.namespace` allows them and this
- * key does not, so a namespace is never a legal id by itself.
+ * Reads as: two or more lowercase dot-separated segments of letters, digits and
+ * inner hyphens. A segment may open with a letter or a digit (`com.163.crm`,
+ * `com.example.2app`), never with a hyphen. ⛔ Underscores are NOT admitted —
+ * `manifest.namespace` allows them and this key does not, so a namespace is
+ * never a legal id by itself.
+ *
+ * A digit may open a segment because nothing downstream needs it not to: the id
+ * is a registry key (`manifest_id`), a runtime package-map key and a
+ * grant-source key — never a table name, a JS identifier, a filesystem path or
+ * a hostname — and DNS labels themselves may open with a digit. The physical
+ * prefix is `manifest.namespace`, which keeps its own leading-letter rule for
+ * the SQL-identifier reason; `deriveNamespaceFromPackageId` strips a leading
+ * digit run when it derives one from an id.
  */
-export const MANIFEST_ID_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
+export const MANIFEST_ID_PATTERN = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/;
 
 /**
  * The example ids the refusal shows an author, and the same two the TSDoc on
@@ -294,8 +303,8 @@ export function manifestIdRefusal(key: string, input: unknown): string {
   const examples = MANIFEST_ID_EXAMPLES.map((e) => `'${e}'`).join(', ');
   const base =
     `Invalid package id '${received}' on \`${key}\`. Expected reverse-domain notation `
-    + `(${examples}) — lowercase dot-separated segments; hyphens allowed inside a segment, `
-    + 'underscores are not.';
+    + `(${examples}) — lowercase dot-separated segments of letters, digits and inner hyphens; `
+    + 'a segment may not open with a hyphen; underscores are not admitted.';
 
   // Two mechanical repairs, tried in order, and only ever OFFERED once the
   // candidate has been checked against the pattern itself:
@@ -338,7 +347,10 @@ export const ManifestSchema = strictObject({
    * is why the rule holds for a private app exactly as for a listed one.
    *
    * Enforced by {@link MANIFEST_ID_PATTERN}, the single declaration this key
-   * shares with `PackageSchema.manifestId` (`../marketplace/package.zod.ts`).
+   * shares with `PackageSchema.manifestId` (`../marketplace/package.zod.ts`):
+   * two or more lowercase dot-separated segments of letters, digits and inner
+   * hyphens. A segment may open with a letter or a digit (`com.163.crm`), never
+   * with a hyphen; underscores are not admitted.
    * ⛔ `manifest.namespace` is NOT an id: it admits underscores and carries no
    * dot, so it fails this rule by construction.
    *

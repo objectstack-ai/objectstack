@@ -41,8 +41,8 @@ import { readErrorMessage } from '../../utils/response-envelope.js';
  * The one rule for a manifest id is `PackageSchema.manifestId` — the schema for
  * the very column this command publishes into (`sys_package.manifest_id`).
  * Imported, never transcribed: a second, hand-copied rule here is what let this
- * preflight admit six shapes the control plane refuses (`com.acme.repair_desk`,
- * `COM.ACME.CRM`, `9foo.bar`, `com..acme`, `com.acme.` and — on the explicit
+ * preflight admit shapes the control plane refuses (`com.acme.repair_desk`,
+ * `COM.ACME.CRM`, `com..acme`, `com.acme.` and — on the explicit
  * `--manifest-id` path — a bare `crm`), while telling the user the contract was
  * `a-z0-9._-`. `CreatePackageRequestSchema` in `cloud/package.zod.ts` reaches
  * for the same declaration the same way.
@@ -144,11 +144,12 @@ export interface DerivedManifestId {
  *
  * ## Steps 2 and 3 are the CLI's own invention
  *
- * They are **not** guaranteed valid: `slugify` has no letter-first rule, so a
- * manifest named `2024 App` derives `local.2024-app`, which the schema rejects.
- * That is refused at the same gate with the source named, rather than
- * normalised — minting a different permanent identifier than the inputs imply
- * is worse than saying what is wrong.
+ * `slugify` emits lowercase letters, digits and inner hyphens and never opens
+ * with a hyphen — one legal segment under the declaration, which lets a segment
+ * open with a digit — so a manifest named `2024 App` derives `local.2024-app`
+ * and it parses. The derived id still passes through the same gate as every
+ * other source, and it is never normalised: minting a different permanent
+ * identifier than the inputs imply is worse than saying what is wrong.
  */
 export function deriveManifestId(artifact: any, artifactPath: string): DerivedManifestId {
   const explicit = artifact?.manifest?.id;

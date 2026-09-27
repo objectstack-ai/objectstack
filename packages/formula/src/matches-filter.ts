@@ -69,13 +69,13 @@
  * (`{ field: [...] }`, `{ field: { $eq: [...] } }`). It is the one position
  * where this face's answer was not merely silent but the WRONG way round for a
  * write gate: a strict comparison never equals an array, so `$ne` matched EVERY
- * record, and a negated equality (`$not` around `{ field: [...] }`, which is
- * what `!(record.f == [...])` lowers to) did too. On the ADR-0058 D4 `check`
- * that admitted every write the policy was written to refuse, measured through
- * the real `plugin-security` on three drivers. The query faces the read side
- * runs on — driver-sql's unbindable-comparand refusal and driver-memory's
- * array-comparand refusal — already refuse the shape with `INVALID_FILTER` /
- * 400; this face now gives the same envelope. See {@link arrayComparandError}.
+ * record, and a negated equality (`$not` around `{ field: [...] }`) did too. On
+ * the ADR-0058 D4 `check` that admitted every write the policy was written to
+ * refuse, measured through the real `plugin-security` on three drivers. The
+ * query faces the read side runs on — driver-sql's unbindable-comparand
+ * refusal and driver-memory's array-comparand refusal — already refuse the
+ * shape with `INVALID_FILTER` / 400; this face now gives the same envelope. See
+ * {@link arrayComparandError}.
  */
 
 import type { FilterCondition } from '@objectstack/spec/data';
@@ -93,7 +93,7 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
  * [#5240] `{ field: {} }` — a field constrained by ZERO operators — is REFUSED,
- * not evaluated, and this is the ONE place this fail-closed evaluator throws.
+ * not evaluated.
  *
  * The shape had three answers in the repo: `driver-sql` refused it at the top
  * level but dropped it inside `$and`/`$or`/`$not` (a predicate that emits
@@ -149,12 +149,9 @@ function emptyFieldConstraintError(field: string, path: string): Error {
  * | `{ f: [...] }` / `{ f: { $eq: [...] } }`| `false`                  |
  * | `{ $not: { f: [...] } }`                | `true`                   |
  *
- * An RLS `check` is authored as CEL, and `record.f != ['a', 'b']` (or `!=`
- * against a `current_user` membership array) lowers to the first row, so every
- * write the policy was written to refuse was admitted and stored. The positive
- * equality row only failed closed by accident, and inverted the moment it was
- * negated. There is no answer here that is right in every polarity — which is
- * the #5240 argument for refusing rather than choosing.
+ * The positive equality row only failed closed by accident, and inverted the
+ * moment it was negated. There is no answer here that is right in every
+ * polarity — which is the #5240 argument for refusing rather than choosing.
  *
  * # What stays exactly as it was
  *

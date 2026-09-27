@@ -122,7 +122,10 @@ describe('AnalyticsService.queryDataset', () => {
     expect(revenueField?.format).toBe('0,0');
   });
 
-  // ── ADR-0053 currency chain (measure → field currencyConfig → tenant ctx) ──
+  // ── currency chain (measure → the field's FIXED currency → tenant ctx) ──
+  // `sourceFieldMeta().defaultCurrency` is the field's fixed currency: the
+  // plugin relays `currencyConfig.defaultCurrency` only under
+  // `currencyMode: 'fixed'`, so a `dynamic` field reaches `ctx.currency`.
   function pricedSvc(rows: Array<Record<string, unknown>>, sourceFieldMeta?: (o: string, f: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined) {
     return new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),

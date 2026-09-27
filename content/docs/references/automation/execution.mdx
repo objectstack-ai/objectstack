@@ -20,8 +20,8 @@ AWS Step Functions execution logs.
 ## TypeScript Usage
 
 ```typescript
-import { CheckpointSchema, ConcurrencyPolicySchema, ExecutionErrorSchema, ExecutionErrorSeverity, ExecutionLogSchema, ExecutionStatus, ExecutionStepLogSchema, ExecutionStepMetricsSchema, ExecutionStepSkipReasonSchema, FlowRunGateSummarySchema, FlowRunNodeSummarySchema, FlowRunSummarySchema, ScheduleStateSchema } from '@objectstack/spec/automation';
-import type { Checkpoint, ConcurrencyPolicy, ExecutionError, ExecutionErrorSeverity, ExecutionLog, ExecutionStatus, ExecutionStepLog, ExecutionStepMetrics, ExecutionStepSkipReason, FlowRunGateSummary, FlowRunNodeSummary, FlowRunSummary, ScheduleState } from '@objectstack/spec/automation';
+import { CheckpointSchema, ConcurrencyPolicySchema, ExecutionErrorSchema, ExecutionErrorSeverity, ExecutionLogSchema, ExecutionStatus, ExecutionStepLogSchema, ExecutionStepMetricsSchema, ExecutionStepSkipReasonSchema, FlowRunGateSummarySchema, FlowRunNodeSummarySchema, FlowRunSummarySchema } from '@objectstack/spec/automation';
+import type { Checkpoint, ConcurrencyPolicy, ExecutionError, ExecutionErrorSeverity, ExecutionLog, ExecutionStatus, ExecutionStepLog, ExecutionStepMetrics, ExecutionStepSkipReason, FlowRunGateSummary, FlowRunNodeSummary, FlowRunSummary } from '@objectstack/spec/automation';
 
 // Validate data
 const result = CheckpointSchema.parse(data);
@@ -333,32 +333,6 @@ const result = CheckpointSchema.parse(data);
 | **edgeId** | `string` | optional | Edge whose condition evaluated false |
 | **label** | `string` | optional | Edge label, when the flow names its branches |
 | **skipped** | `integer` | ✅ | Times this gate evaluated false (once per loop iteration) |
-
-
----
-
-## ScheduleState
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **id** | `string` | ✅ | Schedule instance ID |
-| **flowName** | `string` | ✅ | Flow machine name |
-| **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone for cron evaluation |
-| **status** | `Enum<'active' \| 'paused' \| 'disabled' \| 'expired'>` | optional (default: `"active"`) | Current schedule status |
-| **nextRunAt** | `string` | optional | Next scheduled execution timestamp |
-| **lastRunAt** | `string` | optional | Last execution timestamp |
-| **lastExecutionId** | `string` | optional | Execution ID of the last run |
-| **lastRunStatus** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | optional | Status of the last run |
-| **totalRuns** | `integer` | optional (default: `0`) | Total number of executions |
-| **consecutiveFailures** | `integer` | optional (default: `0`) | Consecutive failed executions |
-| **startDate** | `string` | optional | Schedule effective start date |
-| **endDate** | `string` | optional | Schedule expiration date |
-| **maxRuns** | `integer` | optional | Maximum total executions before auto-disable |
-| **createdAt** | `string` | ✅ | Schedule creation timestamp |
-| **updatedAt** | `string` | optional | Last update timestamp |
-| **createdBy** | `string` | optional | User who created the schedule |
 
 
 ---

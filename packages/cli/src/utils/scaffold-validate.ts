@@ -84,10 +84,17 @@ export function runScaffoldAuthoringRules(config: unknown): ScaffoldRuleReport {
     };
   }
 
+  // [#20113] The resolver now says WHY it has no manifest. This door keeps its
+  // old reading — the manifest, or nothing — and neither notices nor refuses:
+  // it reads the INVOKER's directory, not the scaffold's (see the note on
+  // `validateScaffold` below), so a verdict about that file would be a verdict
+  // about somewhere else. The three authoring commands the scaffold meets next
+  // make that call through `resolveJsxGateManifest`, in the project itself.
+  const sdui = resolveSduiManifest();
   const findings = runAuthoringRules(SCAFFOLD_RULE_COMMAND, {
     normalized: normalized as Record<string, unknown>,
     parsed: result.data as Record<string, unknown>,
-    sduiManifest: resolveSduiManifest(),
+    sduiManifest: sdui.status === 'resolved' ? sdui.manifest : undefined,
     // [#16546] Same ref set the other three doors compute — keeps this
     // door's hook write-set findings at the same `path` as they are.
     loweredHookRefs: lowering.loweredHookRefs,

@@ -203,6 +203,99 @@ describe('validateActionNameRefs — page quick actions', () => {
   });
 });
 
+// The two page surfaces that name an action by id OUTSIDE `actionNames`. Both
+// renderers resolve the id against the object's declared actions and draw
+// nothing for an id that resolves nowhere — the alert keeps its banner and
+// loses its button, the header renders one button fewer — so a typo here is
+// the same dead reference as on the quick-actions bar, one key over.
+describe('validateActionNameRefs — record:alert call-to-action', () => {
+  const alertPage = (actionName: string) => ({
+    name: 'user_record',
+    kind: 'slotted',
+    object: 'sys_user',
+    slots: {
+      alerts: [
+        {
+          type: 'record:alert',
+          properties: { severity: 'warning', title: 'Email not verified', action: { actionName } },
+        },
+      ],
+    },
+  });
+  const withUserAction = () => ({
+    objects: [
+      {
+        name: 'sys_user',
+        fields: { email: { type: 'text' } },
+        actions: [{ name: 'resend_verification_email', label: 'Resend', type: 'script' }],
+      },
+    ],
+  });
+
+  it('errors on an action.actionName naming no defined action', () => {
+    const findings = validateActionNameRefs({
+      ...withUserAction(),
+      pages: [alertPage('resend_verifcation_email')],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(ACTION_NAME_UNDEFINED);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('pages[0].slots.alerts[0].properties.action.actionName');
+    expect(findings[0].message).toContain('"resend_verifcation_email"');
+  });
+
+  it('accepts an action.actionName that resolves to a declared action', () => {
+    expect(
+      validateActionNameRefs({ ...withUserAction(), pages: [alertPage('resend_verification_email')] }),
+    ).toEqual([]);
+  });
+});
+
+describe('validateActionNameRefs — page:header actions', () => {
+  const headerPage = (actions: unknown[]) => ({
+    name: 'lead_record',
+    object: 'crm_lead',
+    regions: [
+      {
+        name: 'header',
+        components: [{ type: 'page:header', properties: { title: 'Lead', actions } }],
+      },
+    ],
+  });
+
+  it('errors on an actions id naming no defined action, at its own index', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      pages: [headerPage(['crm_convert_lead', 'covert_lead'])],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(ACTION_NAME_UNDEFINED);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('pages[0].regions[0].components[0].properties.actions[1]');
+    expect(findings[0].message).toContain('"covert_lead"');
+  });
+
+  it('accepts actions ids that all resolve to declared actions', () => {
+    expect(
+      validateActionNameRefs({ ...withActions(), pages: [headerPage(['crm_convert_lead'])] }),
+    ).toEqual([]);
+  });
+
+  // The spec's contract is ids (`z.array(z.string())`), and it refuses an
+  // inline object element on its own; an object here is a definition, not a
+  // reference, so there is nothing for THIS rule to resolve — but the ids
+  // around it are still references, reported at their real index.
+  it('resolves only the id elements, reporting each at its authored index', () => {
+    const findings = validateActionNameRefs({
+      ...withActions(),
+      pages: [headerPage([{ name: 'inline_def', type: 'script' }, 'nope'])],
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.actions[1]',
+    ]);
+  });
+});
+
 describe('validateActionNameRefs — navigation action items', () => {
   it('errors on an undefined nav actionName', () => {
     const findings = validateActionNameRefs({

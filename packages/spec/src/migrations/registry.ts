@@ -5279,7 +5279,18 @@ const step18: MigrationStep = {
     + 'door persists the authored value and the stored-row rehydration seam is live for '
     + 'this type, both measured); and the withdrawn `ConnectorProviderContext` member, '
     + 'which is code and has no authored source to rewrite, leaves via the paired semantic '
-    + 'entry instead.',
+    + 'entry instead. '
+    + 'Finally it gives the one-filter-orthography convergence (objectui#6206) its '
+    + 'mechanical half at rest (#17321, ruling B): the D2 conversion '
+    + '`page-component-filter-record-to-rule-array` rewrites a record-form or single-level '
+    + 'AST `filter` at the converged rule-array doors — `dataSource.filter`, the '
+    + '`object-*` / `element:number` / `element:record_picker` `filter` props and '
+    + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
+    + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
+    + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
+    + 'a page selects — as it does every filter of a component whose rows are inline, which '
+    + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
+    + 'the door and taught the array; the stored-row seams and this chain replay it.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5315,6 +5326,7 @@ const step18: MigrationStep = {
     'dashboard-widget-chart-config-structure-removed',
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
+    'page-component-filter-record-to-rule-array',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5972,69 +5984,6 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
-      id: 'automation-flow-list-route-retired',
-      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-      // code span AND a table cell.
-      surface:
-        'GET /api/v1/automation — the flow-list route of the automation door, together with '
-        + 'its request and response schemas ListFlowsRequestSchema and ListFlowsResponseSchema '
-        + '(and their ListFlowsRequest, ListFlowsRequestParsed, ListFlowsResponse and '
-        + 'ListFlowsResponseParsed types), FlowSummarySchema and its FlowSummary type, the '
-        + 'listFlows entry of AutomationApiContracts, and the automation.list method of '
-        + '@objectstack/client. Every other automation route is unchanged, including '
-        + 'POST /api/v1/automation (create a flow) at the same path',
-      replacement:
-        'GET /api/v1/meta/flow — flows are metadata (ADR-0106), and this is the governed read of '
-        + 'them; from the SDK it is `client.meta.getItems` with the type `flow`. It answers the '
-        + 'full flow definitions rather than bare names, so a caller that only needs the names '
-        + 'maps each item to its `name`. The runtime enablement and trigger binding of every flow '
-        + '— the one piece of engine state a definition does not carry — is '
-        + '`GET /api/v1/automation/_status` (`client.automation.getRuntimeStatus`), which is '
-        + 'unchanged',
-      reason:
-        'Maintainer ruling on #19543 (door ④, verbatim 「退役，统一走 /meta/flow」, recorded in '
-        + 'that card\'s re-derivation comment of 2026-09-25), under ADR-0049 enforce-or-remove. The '
-        + 'route\'s contract described a capability nobody built: ListFlowsRequestSchema declared '
-        + '`status`, `type`, `limit` (default 50) and `cursor`, and the handler read none of them — '
-        + 'it asked the automation service for its flow names with no arguments at all. '
-        + 'ListFlowsResponseSchema declared a page of FlowSummary rows with `total`, `nextCursor` '
-        + 'and `hasMore`, and the handler answered a bare array of names beside a literal '
-        + '`hasMore: false`. So a caller filtering by status received every flow, a caller paging '
-        + 'with a cursor re-read the only page forever, and a caller reading FlowSummary fields read '
-        + 'undefined — each with a 200 and no error. '
-        + 'Measured before removal, on the main branch of this repository and cloud and on objectui at '
-        + 'both its pinned commit and main: zero callers of the route or of the SDK method outside '
-        + 'their own tests, while both real flow lists in the product — the Console flow-runs page '
-        + 'and the Setup packaged-automation page — already read GET /api/v1/meta/flow. '
-        + 'Implementing the declared contract instead would have built a second, weaker metadata list '
-        + 'beside the governed one; retiring it leaves one read. '
-        + 'There is no alias and no transition window: GET simply stops being mounted there. There is '
-        + 'no D2 conversion and no tombstone, because the shape is HTTP-only — nobody authors a '
-        + 'ListFlowsRequest and nothing persists one — so the three schemas are whole-def removals in '
-        + 'RETIRED_DEFS_BY_MAJOR and this entry carries the record. ADR-0049 / ADR-0087 / ADR-0106, '
-        + '#19543.',
-      acceptanceCriteria:
-        'On the composition `objectstack serve` builds, GET is no longer mounted at '
-        + '/api/v1/automation (nor at its environment-scoped twin), so the host gives its standard '
-        + 'unmatched answer with no residual refusal text of its own. Because POST still lives at '
-        + 'that path, on the Hono host that answer is 405 METHOD_NOT_ALLOWED with an Allow header '
-        + 'naming POST — the same answer any path where only another verb is registered gets, for '
-        + 'anonymous and signed-in callers alike. A transport that forwards every automation path '
-        + 'to the dispatcher is told the domain does not handle it and answers its own not-found '
-        + '404 (the @objectstack/hono catch-all does), and there the domain\'s anonymous floor still '
-        + 'answers an unidentified caller 401 first, as it does for every automation path. The '
-        + 'automation '
-        + 'service\'s flow-name enumeration is never called by any HTTP request. The route-ledger row '
-        + 'for the route is gone, AutomationApiContracts has eight entries and none of them is a GET '
-        + 'at the bare path, and a TypeScript import of any of the removed schemas or types is a '
-        + 'compile error (TS2305). @objectstack/client no longer declares automation.list, so a call '
-        + 'to it is a compile error rather than a request to a path that no longer answers. '
-        + 'POST /api/v1/automation still creates a flow, and every other automation route — the '
-        + 'single-flow reads and writes, trigger, toggle, clone, runs, resume, cancel, '
-        + 'restore-suspension, screen, _status and the actions and connectors catalogs — answers '
-        + 'exactly as before.',
-    },
-    {
       id: 'automation-runs-cursor-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -6309,6 +6258,100 @@ const step18: MigrationStep = {
         + '`ObjectSchema.create(...): field ... declares required: false on a master_detail '
         + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
+    },
+    // The CEL-lowering face of the list-comparand refusal: the pushdown compiler
+    // every row-level policy and declared sharing rule compiles through, plus the
+    // driver-mongodb face that answered the lowered shape. Recorded as its own entry
+    // because the surface an author rewrites is a CEL predicate string, and on
+    // MongoDB a stored query filter.
+    {
+      id: 'cel-predicate-list-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
+        + 'CEL predicate comparing a field with != or == against a list, either a list literal or a '
+        + 'current_user membership set the runtime resolves to an array (org_user_ids, positions, '
+        + 'accessible_org_ids, or a key staged into rlsMembership), and the negation of such a '
+        + 'comparison. On driver-mongodb, also a query filter carrying $ne with an array comparand, at '
+        + 'any depth under $and / $or / $not',
+      replacement:
+        'the list operator the comparison was standing in for. "One of these values" is in: '
+        + 'record.status in ["open", "pending"], or record.reviewer_id in current_user.org_user_ids. '
+        + '"None of these values" is the negated in: !(record.status in ["closed", "archived"]). In a '
+        + 'query filter, $in and $nin. Scalar != and ==, null, in, and field-to-field comparisons lower '
+        + 'exactly as before',
+      reason:
+        'The @objectstack/formula pushdown compiler lowered such a comparison to a $ne carrying the '
+        + 'array, to a bare-array equality, or to a $not around one. A row-level using clause is '
+        + 'composed into the query after the engine\'s comparand-shape check, and driver-mongodb passed '
+        + 'the shape to the server: measured through mingo, the named proxy for MongoDB query '
+        + 'semantics, $ne against an array and the $nor that a negated equality becomes selected every '
+        + 'row storing a scalar, so the read returned the rows the policy was written to hide. A check '
+        + 'written != against a membership set admitted and stored every write, on driver-sql as on '
+        + 'driver-mongodb. The compiler now refuses the comparison with reason unsupported, so the RLS '
+        + 'compiler drops the policy and fails closed when no other policy applies: reads under it '
+        + 'return no rows and check writes '
+        + 'are refused 403. A declared sharing rule with such a condition is skipped at bootstrap and '
+        + 'never seeded. The authoring lint reports a list literal as rls-predicate-unenforceable; a '
+        + 'membership set holds its value only per request, so that form is refused at request time. '
+        + 'driver-mongodb refuses $ne with an array comparand with INVALID_FILTER / 400, as driver-sql '
+        + 'and driver-memory already do. Metadata AT REST is not rewritten and this entry adds no D2 '
+        + 'conversion: the platform cannot tell which list operator a list comparison was standing in '
+        + 'for, and a policy rewritten on the author\'s behalf would change which rows it admits, which '
+        + 'is the policy author\'s decision. ADR-0058 D4 / ADR-0087.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity using and check predicates of your permission sets, and the '
+        + 'condition of your sharing rules, for != or == whose other side is a list literal or a '
+        + 'current_user membership set, and for the negation of such an ==, then rewrite each with in '
+        + 'or its negation. On driver-mongodb, '
+        + 'grep stored query filters for $ne with an array value and rewrite each with $nin.',
+    },
+    // The variable-ROOT sibling of cel-predicate-list-comparand-refused, one
+    // comparand kind over: the same pushdown compiler, the same consumers, the same
+    // fail-closed path. Recorded as its own entry because the surface an author
+    // rewrites is a different comparand, with a different replacement.
+    {
+      id: 'cel-predicate-variable-root-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
+        + 'CEL predicate comparing with != or == against the bare current_user root, the variable with '
+        + 'no key named after it, whether the other side is a field or a literal, and the negation of '
+        + 'such a comparison. For a caller of the published compiler that binds its own variables, also '
+        + 'a variable that resolves to an object',
+      replacement:
+        'the key of current_user the comparison means: record.owner_id == current_user.id, or '
+        + 'current_user.organization_id, or current_user.email. A membership test is in: '
+        + 'record.owner_id in current_user.org_user_ids. Scalar keys, membership sets under in, '
+        + 'literals, null and field-to-field comparisons lower exactly as before',
+      reason:
+        'The @objectstack/formula pushdown compiler resolved the bare root to the whole caller context '
+        + 'object, every kernel-resolved key at once with the membership arrays included, and lowered '
+        + 'the comparison to a $ne carrying that object, to a bare-object equality, or to a $not around '
+        + 'one; a constant comparison such as current_user != "guest" folded to no restriction. A '
+        + 'strict compare never equals an object, so through the real SecurityPlugin on driver-sql a '
+        + 'check written != against the root, or its negated ==, admitted and stored every insert and '
+        + 'by-id update it was written to refuse, a USING-only such policy admitted every insert on '
+        + 'the write pass, and explain reported the read as narrowed with the caller membership sets '
+        + 'echoed in its readFilter. ADR-0058 D2 declares the operand opposite a field as a literal, a '
+        + 'current_user scalar or a pre-resolved current_user set, and the published $eq / $ne '
+        + 'contract declares a literal or a { $field } reference; the root is none of them. The '
+        + 'compiler now refuses it with reason unsupported in both of its modes, so the authoring lint '
+        + 'reports it (rls-predicate-unenforceable on either clause, sharing-rule-unlowerable-condition '
+        + 'on a sharing condition), and the RLS compiler drops the policy and fails closed when no '
+        + 'other policy applies: reads under it return no rows, check writes are refused 403, and '
+        + 'explain answers denies. A declared sharing rule with such a condition is skipped at '
+        + 'bootstrap as it already was, now with reason unsupported instead of unresolved-variable. '
+        + 'Metadata AT REST is not rewritten and this entry adds no D2 conversion: the platform cannot '
+        + 'tell which key the author meant, and a policy rewritten on the author\'s behalf would change '
+        + 'which rows it admits. ADR-0058 D2 / ADR-0087.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity using and check predicates of your permission sets, and the '
+        + 'condition of your sharing rules, for != or == whose other side is current_user with no key '
+        + 'after it, then rewrite each against the key it means (current_user.id, '
+        + 'current_user.organization_id or current_user.email), or with in against a membership set.',
     },
     {
       id: 'change-management-duration-keys-retired',
@@ -7878,15 +7921,29 @@ const step18: MigrationStep = {
         + 'array on `object-grid`) and three lint fixtures — every one rewritten to the rule array '
         + 'in the same change, and zero outside those files; this entry carries the prescription '
         + 'for authors outside the repo. '
-        + '⚠️ Metadata AT REST is deliberately NOT rewritten, and this disposition adds no D2 '
-        + 'conversion — a SemanticMigration converts nothing by its own type, and '
-        + '`os migrate meta --stored` (the pass over a deployment\'s `sys_metadata` rows) replays '
-        + 'D2 conversions only, so it has nothing to rewrite for this shape. The read path '
-        + 'does not re-validate stored rows '
-        + '(`applyConversionsToStoredItem` replays the full chain without validating, by its own '
-        + 'contract), so a stored page or block carrying the record form keeps loading unchanged '
-        + 'and is still rendered by objectui at the pinned `.objectui-sha`; what changes is that '
-        + 'RE-SAVING it is refused at the `filter` door, on its next save and not before.',
+        + 'Metadata AT REST: the mappable part of the table above is a D2 conversion, '
+        + '`page-component-filter-record-to-rule-array` (#17321, ruling B), so '
+        + '`os migrate meta --stored` (the pass over a deployment\'s `sys_metadata` rows) rewrites '
+        + 'a stored page whose `filter` is a flat record, an operator object whose operators the '
+        + 'rule vocabulary spells, several such keys, or a single-level AST tuple array, and every '
+        + 'stored-row read replays the same rewrite until it does. It is retired from the load '
+        + 'path: an author writing the record form is still refused at the `filter` door. ⚠️ A '
+        + 'filter carrying `$and` / `$or` / `$not` is left exactly as stored — the rule array '
+        + 'only ANDs, and flattening a combinator changes which rows the page selects — and so is '
+        + 'any filter with a part that has no lossless rule spelling: a `null` value (the renderer '
+        + 'skips that key, so it constrains nothing today, where a rule would test IS NULL), an '
+        + 'operator such as `$null` / `$exists` or an AST `like`, an array or object comparand in '
+        + 'equality position, or an AST `and` / `or` group. So is every filter — the binding\'s '
+        + 'included — of a component whose rows are INLINE (`data: { provider: \'value\' }`, a '
+        + '`data` array, or `staticData`): at the pinned `.objectui-sha` the `object-map`, '
+        + '`object-tree`, `object-calendar` and `object-gantt` blocks match that filter against '
+        + 'their own rows in an in-memory data source that reads the record form and excludes '
+        + 'EVERY row for a rule array, so a rewrite there would empty the block. Such a row keeps loading unchanged '
+        + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
+        + 'contract) and is refused at the `filter` door on its next save — for a combinator '
+        + 'record, a refusal that names the combinator and says why no rule spells it. '
+        + '`os migrate meta --stored` does not list these rows yet: a row the conversion leaves '
+        + 'as stored reports there as already on protocol.',
       acceptanceCriteria:
         '`ElementDataSourceSchema.safeParse({ object, filter: [{ field: \'status\', operator: '
         + '\'equals\', value: \'active\' }] })` succeeds and the parsed `filter` is the same rule '
@@ -8431,6 +8488,78 @@ const step18: MigrationStep = {
         + 'writes `branch`.',
     },
     {
+      id: 'export-job-family-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the export-job API family, retired whole: the twelve defs api/ExportJobStatus, '
+        + 'api/CreateExportJobRequest, api/CreateExportJobResponse, api/ExportJobProgress, '
+        + 'api/ScheduledExport, api/GetExportJobDownloadRequest, api/GetExportJobDownloadResponse, '
+        + 'api/ListExportJobsRequest, api/ExportJobSummary, api/ListExportJobsResponse, '
+        + 'api/ScheduleExportRequest and api/ScheduleExportResponse with every name '
+        + 'api/export.zod.ts exported for them from @objectstack/spec/api (the Schema consts, '
+        + 'their z.input aliases and their Parsed aliases) and the ExportApiContracts route map; '
+        + 'the IExportService contract with its six types (CreateExportJobInput, '
+        + 'CreateExportJobResult, ExportJobDownload, ListExportJobsOptions, ExportJobListResult, '
+        + 'ScheduleExportInput) from @objectstack/spec/contracts; and automation/ScheduleState '
+        + '(ScheduleStateSchema, ScheduleState, ScheduleStateParsed) from @objectstack/spec/automation',
+      replacement:
+        'nothing to re-declare for the job family — no route ever served it, so no caller holds '
+        + 'a job id, a progress body or a download link to carry over. The export the platform '
+        + 'DOES serve is the synchronous streaming door GET /api/v1/data/:object/export '
+        + '(@objectstack/rest, the SDK method data.export): it answers the file itself as CSV, '
+        + 'JSON or XLSX. ExportFormat stays published (ExportImportTemplate still references it). '
+        + 'A recurring export is a Job (system/job.zod.ts) whose handler you write, with its '
+        + 'cadence on Job.schedule.expression — the one cron slot the platform evaluates. A '
+        + 'scheduled flow declares its cadence on its start node (config.schedule), and its run '
+        + 'history is ExecutionLog / FlowRunSummary; ScheduleState had no counterpart to point at '
+        + 'because no scheduler ever kept one. The import-job family in the same module '
+        + '(ImportJob…, ListImportJobs…, ImportJobApiContracts) is served and is NOT part of this '
+        + 'retirement',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling A on #17158 (decision batch #122 item 3, '
+        + '「同意」 2026-09-12: retire the family, IExportService and ScheduleExportInput; ScheduleState '
+        + 'retired with it unless a live consumer is measured), landing route A (decision batch #221 '
+        + 'item 2, 「同意」 2026-09-24: objectui retires its side first, in objectui#10247, then this '
+        + 'retirement), and a scope note (「同意」 2026-09-25) that absorbs #19543 door ② — the '
+        + 'declared limit / cursor of the export-job list — into it. The family declared an '
+        + 'asynchronous export API, create / progress / download / list / schedule / cancel under '
+        + '/api/v1/data/export and a POST on /api/v1/data/:object/export, that NOTHING served: '
+        + '@objectstack/rest mounts no /api/v1/data/export route and only the GET on '
+        + '/api/v1/data/:object/export, IExportService recorded no evidenced provider binding, and '
+        + 'the reader census over objectstack outside packages/spec, over objectui at the pinned '
+        + 'sha (which carries objectui#10247) and over cloud main returned zero code files naming '
+        + 'any of the forty-three exported names, each beside a lit control. An AI reading the '
+        + 'contract found a complete, well-typed export-job API and wrote calls that answer 404 — '
+        + 'and after #16320 deleted its cron positions, ScheduledExport / ScheduleExportRequest '
+        + 'kept a REQUIRED schedule block that could hold no schedule, so an author who filled in '
+        + 'its timezone believed they had scheduled something. ScheduleState described the '
+        + 'runtime state of a scheduled flow that no scheduler wrote or read. Why D3 semantic and '
+        + 'not a D2 conversion: the chain walks a normalized STACK and applyConversionsToStoredItem '
+        + 'maps a metadata type onto one of its collections; none of these shapes is either — they '
+        + 'are HTTP bodies, a route map, a service interface and an unpersisted runtime record — so '
+        + 'a conversion would be a transform with no seam that ever runs, and with no carrier key '
+        + 'there is no shape on which a tombstone could sit. The #16320 cron-position deletions '
+        + 'on three of these defs registered nothing and stay unregistered; the defs themselves are '
+        + 'now the RETIRED_DEFS_BY_MAJOR[18] entries.',
+      acceptanceCriteria:
+        'No code imports any of the twelve export-job Schema consts or their type aliases from '
+        + '@objectstack/spec or @objectstack/spec/api, reads ExportApiContracts, implements or '
+        + 'imports IExportService or its six types from @objectstack/spec/contracts, or imports '
+        + 'ScheduleStateSchema / ScheduleState / ScheduleStateParsed from '
+        + '@objectstack/spec/automation: every such import is TS2305 after upgrade, and there is no '
+        + 'working replacement to point at because nothing ever served them. The thirteen defs are '
+        + 'absent from json-schema.manifest/api.json and json-schema.manifest/automation.json, from '
+        + 'the api-surface / declaration-map / export-origins shards and from the generated '
+        + 'reference docs. ExportFormat, ExportImportTemplate, the import validation shapes and '
+        + 'the whole import-job family (including ImportJobApiContracts) are unaffected. ⚠️ Runtime '
+        + 'behaviour is deliberately UNCHANGED and must be verified as such: GET '
+        + '/api/v1/data/:object/export answers exactly as before, and every request to a retired '
+        + 'path answers exactly as it always did, because nothing ever mounted one. ⚠️ Readers '
+        + 'outside objectstack, objectui and cloud are NOT MEASURED — @objectstack/spec is '
+        + 'published.',
+    },
+    {
       id: 'field-currency-scale-refused',
       surface: 'object.fields.<name>.scale on a field whose `type` is `currency` — any declared value, '
         + '`scale: 0` included; the `Field.currency` helper passes it through unchanged. `scale` on '
@@ -8651,6 +8780,64 @@ const step18: MigrationStep = {
         + '`$contains` against it answers by member rather than the declared no-match. Fields '
         + 'already multi-valued by `isMultiValueField` need no change and must read back '
         + 'byte-identically.',
+    },
+    // The authoring half of ADR-0137 D2 for one shape: a field-level predicate that
+    // reads THROUGH a reference field. The runtime already refuses the writes such a
+    // predicate reaches (or, for an option, never enforces it); what moved is that
+    // `objectstack validate` now says so before deploy. No D2 conversion — see
+    // `reason`.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'field-predicate-reference-traversal-refused',
+      surface:
+        'the field-level predicates objects[].fields[].requiredWhen and objects[].fields[].readonlyWhen, '
+        + 'and a select option\'s objects[].fields[].options[].visibleWhen, whose CEL reads THROUGH a '
+        + 'reference field (a lookup, master_detail, user or tree field): record.account.tier where '
+        + 'account is such a field; likewise previous.account.tier, and parent.account.tier on a '
+        + 'master-detail line item whose master declares account. Refused wherever objects are '
+        + 'validated as authored: objectstack validate, build and lint over defineStack({ objects }) '
+        + 'sources and exported stacks',
+      replacement:
+        'the check as a `validations[]` rule of `type: \'script\'` — the one predicate the server reads one '
+        + 'hop through a reference (the related record is loaded before it runs) — whose `condition` states '
+        + 'the FAILURE. For `requiredWhen: P` on field F: P and F empty, e.g. '
+        + '`record.account.tier == \'enterprise\' && (record.po_number == null || record.po_number == \'\')`. '
+        + 'For `readonlyWhen: P` on F: P and F changed, on updates only (`events: [\'update\']`), e.g. '
+        + '`record.account.tier == \'gold\' && record.discount != previous.discount`. For an option gated by '
+        + 'P: that option picked while P does not hold — the option is then offered to everyone and refused '
+        + 'on save. Or read a column the object itself declares (denormalise the related value onto it). '
+        + 'A read through `previous` or `parent` has no hydrated seam at all, a validation rule included: '
+        + 'read a column the bound record declares instead',
+      reason:
+        'Card #20078, triage remedy A (5825661201). The field level is never hydrated: '
+        + '`rule-validator.ts` evaluates `requiredWhen` / `readonlyWhen` / an option\'s `visibleWhen` '
+        + 'against the record alone, so a reference there holds the related record\'s bare id and every '
+        + 'read through it faults, on every row. Measured on the engine before this change: a traversing '
+        + '`requiredWhen` refused every insert and every update that reached it, a traversing '
+        + '`readonlyWhen` refused every update that wrote its field (an insert is exempt), and an option '
+        + 'gated through a reference was admitted whatever the related record said (option visibility is '
+        + 'fail-open) — while `objectstack validate` passed a stack carrying all three, exit 0. ADR-0137 D2 '
+        + 'made the runtime fail closed; the defect was that authoring did not say so first (NORTH-STAR '
+        + 'priority rule 4). The same traversal inside a `validations[]` `script` rule is served (#18682) '
+        + 'and stays accepted. ⚠️ No D2 conversion, and the reason is the judgment this entry delegates: '
+        + 'moving a field predicate into a validation rule turns a condition into a FAILURE condition, '
+        + 'moves an option from hidden to offered-then-refused, and the right `events` scope depends on '
+        + 'what the author meant — none of it mechanical. Hydrating the field level instead is a '
+        + 'capability of its own and is not done here. ADR-0087, ADR-0137.',
+      acceptanceCriteria:
+        'Run `objectstack validate` over the stack. Each such predicate is refused as '
+        + '`expression-invalid`, located at `object \'O\' · field \'F\' requiredWhen` (or `readonlyWhen`, '
+        + 'or `option \'V\' visibleWhen`), and the message names the reference path read through '
+        + '(`through record.account`) and the repair — that is the TODO\'s locator. Rewrite each per the '
+        + '`replacement` note until validate is clean. Then prove the behaviour on a running stack: a '
+        + 'write meeting the condition is refused by the new rule (`rule_violation` carrying its '
+        + '`message`), and one that does not is accepted — where before, every write reaching the field '
+        + 'predicate was refused with `could not be evaluated … write rejected`, or the option was '
+        + 'admitted unchecked. ⚠️ An object already stored in `sys_metadata` is not re-validated by this '
+        + 'change: its writes keep being refused at run time exactly as before, and that refusal names '
+        + 'the reference for a `record` read — its own locator.',
     },
     {
       id: 'field-scale-precision-integer-refused',
@@ -10346,9 +10533,9 @@ const step18: MigrationStep = {
         + 'and the `id:` key of a package manifest — and its registry face '
         + '`PackageSchema.manifestId` (`marketplace/package.zod.ts`)',
       replacement: 'a reverse-domain identifier matching `MANIFEST_ID_PATTERN` '
-        + '(`kernel/manifest.zod.ts`): dot-separated lowercase segments, each opening with a '
-        + 'letter, digits and hyphens allowed inside a segment — `com.acme.crm`, '
-        + '`org.apache.superset`. ⛔ Underscores are not admitted, so `manifest.namespace` is '
+        + '(`kernel/manifest.zod.ts`): two or more lowercase dot-separated segments of letters, '
+        + 'digits and inner hyphens, each opening with a letter or a digit, never a hyphen — '
+        + '`com.acme.crm`, `org.apache.superset`. ⛔ Underscores are not admitted, so `manifest.namespace` is '
         + 'never a legal id and never a legal last segment of one: `com.acme.my_app` becomes '
         + '`com.acme.my-app`. A bare word gains a prefix: `blank` becomes `com.example.blank`. '
         + 'The refusal carries the repaired value it has already checked against the pattern, so '
@@ -10857,13 +11044,17 @@ const step18: MigrationStep = {
         + 'outright — the other arm the finding offered — removes an accepted shape and needs its '
         + 'own ruling; the deprecation already stated in the description is unchanged and still '
         + 'says to prefer filter. '
-        + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion, '
-        + 'for the reason its sibling gives at length: a SemanticMigration converts nothing by '
-        + 'its own type, the stored-row pass replays D2 conversions only, and the read path does '
-        + 'not re-validate stored rows — so a stored page carrying the record form keeps loading '
-        + 'and keeps rendering as it does today. What changes is that RE-SAVING it is refused at '
-        + 'the defaultFilters path, with the same conversion table the filter door gives, '
-        + 'computed from the author\'s own keys. ADR-0049 / ADR-0087.',
+        + 'Metadata AT REST: the record form and the AST tuple array at this key are rewritten to '
+        + 'the rule array by the same D2 conversion as its sibling filter, '
+        + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
+        + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
+        + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
+        + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
+        + 'string or number this key also took, and any filter on a grid whose rows are inline '
+        + '(data with provider value, or staticData), for the reason its sibling gives — and '
+        + 'RE-SAVING such a node is refused at the '
+        + 'defaultFilters path, with the same conversion table the filter door gives, computed '
+        + 'from the author\'s own keys. ADR-0049 / ADR-0087.',
       acceptanceCriteria:
         'Every object-grid node in your pages either omits defaultFilters or carries a '
         + 'ViewFilterRule array on it. The parse of an object-grid node whose defaultFilters is '
@@ -11887,6 +12078,59 @@ const step18: MigrationStep = {
         + 'of the ten keys ever reached it. No code imports `CrudEndpointPattern(Schema)` from '
         + '`@objectstack/spec/api` (TS2305 after upgrade).',
     },
+    // A row-level policy's `check` is refused where it can never run: on a policy
+    // whose `operation` is `select` or `delete`. Recorded as a semantic TODO, not a
+    // D2 conversion, because which rewrite is right depends on what the author meant
+    // the predicate to guard, and a rewrite made on their behalf would change which
+    // rows the policy admits.
+    {
+      id: 'rls-check-on-select-or-delete-policy-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].check (RowLevelSecurityPolicySchema) on a policy whose '
+        + 'operation is select or delete. A blank check (empty or whitespace only) declares nothing and is '
+        + 'not refused',
+      replacement:
+        'what the predicate was meant to guard, written where it runs. To limit which rows a select policy '
+        + 'lets a caller read, or which rows a delete policy lets a caller delete, write the predicate as '
+        + '`using` on that policy (remove `check`; if the policy already has a `using`, AND the two with &&). '
+        + 'To validate rows as they are written, declare the `check` on a policy whose `operation` is '
+        + '`insert`, `update` or `all` instead. The refusal lands at rowLevelSecurity[N].check, names the '
+        + 'operation, and states both rewrites',
+      reason:
+        'ADR-0049 enforce-or-remove and ADR-0058 D4. A `check` judges the post-image of a write: the new '
+        + 'row of an insert, the changed row of an update. A select or delete writes no row, and the '
+        + 'plugin-security write gate collects only the policies whose operation is the write\'s own or '
+        + '`all`, so a `check` on a select or delete policy was accepted, stored and never evaluated. '
+        + 'Measured on main before this change: a policy carrying only check record.status != '
+        + '\'archived\' on select or delete admitted every insert and update of an archived row, and beside '
+        + 'a USING-only `all` sibling it did not replace that sibling\'s `using` default the way a `check` '
+        + 'on an insert, update or all policy does. An author (an AI author above all) who wrote a check '
+        + 'on a delete policy believed deletes were guarded by it. The refusal is a non-transforming '
+        + 'refinement on the policy schema, so it reaches every door that parses a permission set: '
+        + 'defineStack, os validate, and the metadata save path, whose permission type validates '
+        + 'against PermissionSetSchema. Metadata AT REST is not '
+        + 'rewritten and this entry adds no D2 conversion: dropping the key would silently discard the '
+        + 'predicate the author wrote, and moving it to `using` would start filtering reads or deletes '
+        + 'the policy never filtered before — both change which rows the policy admits, which is the '
+        + 'policy author\'s decision. Ships at once, no transition window and no advisory lint phase.',
+      acceptanceCriteria:
+        'Search every authored and stored permission set for a rowLevelSecurity policy whose operation '
+        + 'is select or delete and whose check is non-blank — metadata files, sys_metadata permission '
+        + 'rows, and the row_level_security column of sys_permission_set. For authored metadata the sweep '
+        + 'is mechanical: PermissionSetSchema.safeParse answers one custom issue at '
+        + 'rowLevelSecurity[N].check whose message begins "`check` is never evaluated on a `select` '
+        + 'policy" (or `delete`). For each, decide what the predicate was meant to guard: reads or '
+        + 'deletes ⇒ express it in that policy\'s `using`; writes ⇒ move it to an insert, update or all '
+        + 'policy. Then re-check the policy set\'s behaviour rather than assuming it is unchanged: the '
+        + 'removed check never ran, so dropping it changes nothing, but a predicate moved into `using` '
+        + 'now filters rows it never filtered, and a `check` moved onto an insert, update or all policy '
+        + 'now replaces the `using` default of its USING-only siblings for that write. A policy with '
+        + '`using` only, and a `check` on an insert, update or all policy, parse exactly as before. The '
+        + 'repo, its example apps and the pinned console carried no such policy at the time of the '
+        + 'change; two test fixtures that used select incidentally were moved to all and insert.',
+    },
     // The row-level-security face of ruling A on #19886 (stage 2a): the formula
     // evaluator plugin-security runs a policy's check against. Recorded as its own
     // entry because the surface an author rewrites is the RLS predicate, a CEL
@@ -11896,10 +12140,10 @@ const step18: MigrationStep = {
       // No backticks in `surface` — build-upgrade-guide renders it inside a code
       // span already, and a nested backtick would close it.
       surface:
-        'security.PermissionSet rowLevelSecurity[].check (and .using, where the explain engine '
-        + 'attributes a record) — a CEL predicate comparing a field with != or == against a list, '
+        'security.PermissionSet rowLevelSecurity[].check — a CEL predicate comparing a field with != '
+        + 'or == against a list, '
         + 'a list literal or a current_user membership array, and the negation of such an ==. They '
-        + 'lower to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
+        + 'lowered to { field: { $ne: [...] } }, { field: [...] } and { $not: { field: [...] } }, which '
         + 'the @objectstack/formula evaluator matchesFilterCondition now refuses, together with '
         + '{ field: { $eq: [...] } }, at any depth under $and / $or / $not, the empty array included',
       replacement:
@@ -11916,12 +12160,9 @@ const step18: MigrationStep = {
         + 'membership array, matched EVERY post-image, and a check written '
         + '!(record.status == ["closed", "archived"]) did the same: every write such a policy was '
         + 'written to refuse was admitted and stored. The positive record.status == ["open", '
-        + '"pending"] refused every write (403). All of these shapes now fail the write with '
-        + 'INVALID_FILTER / 400 before any record is judged, the envelope driver-sql and '
-        + 'driver-memory already give the same shape on the read side, and the explain engine\'s '
-        + 'record attribution refuses too. The message withholds the field, the operator and the '
-        + 'value, because the filter is usually an access policy the caller did not write and the '
-        + 'comparand may be a resolved membership set. Metadata AT REST is not rewritten and this '
+        + '"pending"] refused every write (403). The evaluator now refuses all of these shapes '
+        + 'before any record is judged. The message withholds the field, the operator and the '
+        + 'value. Metadata AT REST is not rewritten and this '
         + 'entry adds no D2 conversion: the platform cannot tell which list operator a list '
         + 'comparison was standing in for, and a policy rewritten on the author\'s behalf would '
         + 'change which writes it admits (the negated forms would start refusing writes they '
@@ -11930,9 +12171,7 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Grep the rowLevelSecurity check and using predicates of your permission sets for != or == '
         + 'whose right-hand side is a list literal or a current_user membership array, and for the '
-        + 'negation of such an ==, then rewrite each with in or !(... in ...). A check that still '
-        + 'carries the shape refuses every write it governs with INVALID_FILTER / 400, allowed '
-        + 'values included, so one allowed write under each policy finds every such check left. '
+        + 'negation of such an ==, then rewrite each with in or !(... in ...). '
         + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
@@ -13418,6 +13657,60 @@ const step18: MigrationStep = {
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
     },
+    // The AUTHORING half of the turso driver's constructor refusals. The driver
+    // refuses these configurations when it is built; this entry records that the
+    // datasource contract now refuses them where they are written, together with
+    // the one combination the driver builds and then ignores. A structured TODO,
+    // not a D2 conversion: which way out an author wants — a remote database, an
+    // embedded replica on a local file, or a plain local file — is intent no
+    // artifact records.
+    {
+      id: 'turso-config-transport-mismatch-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.TursoConfig (a turso / libsql datasource.config) and the published TursoConfigSchema '
+        + 'mirror of @objectstack/driver-turso — combinations of url, syncUrl, mode and timeoutMs that '
+        + 'are now refused at parse: a remote url (libsql, https, http, wss, ws, any letter case) '
+        + 'beside syncUrl or under a forced local or replica mode; in a local or replica mode, a url '
+        + 'that is none of a file: url, :memory: or a remote url (a bare path, another scheme, '
+        + ':MEMORY:, a blank url); a replica on an in-memory url; timeoutMs beside a wss or ws url in '
+        + 'remote mode; and syncUrl under a forced remote mode. The driver mirror also refuses sync '
+        + 'with no syncUrl, as the spec contract already did',
+      replacement:
+        'the configuration the author meant, spelled the way the driver runs it. A remote database '
+        + 'is the remote url alone (drop syncUrl and sync, and drop a forced local or replica mode or '
+        + 'set it to remote). An embedded replica is a local file written as a file: url beside '
+        + 'syncUrl, for example url file:./data/replica.db with syncUrl naming the remote. A local '
+        + 'database is a file: url (file:./data/app.db, never the bare path ./data/app.db) or '
+        + ':memory: for a throwaway one. A remote database that needs timeoutMs spells its url libsql '
+        + 'or https, or drops timeoutMs. Each refusal names the key it sits on (url, syncUrl or '
+        + 'timeoutMs) and prints the spellings above',
+      reason:
+        '#19977. Each key parsed on its own, so the contract accepted configurations the turso driver '
+        + 'refuses when it is built (VALIDATION_ERROR / 400 from the constructor, since the #19893 '
+        + 'and #19976 changes) — a datasource published clean and then failed at boot or at test '
+        + 'connection. One more it builds and then ignores: syncUrl under a forced remote mode, where '
+        + 'the remote client is created without it, no sync ever runs and the sync call fails as not '
+        + 'supported while the driver reports sync as enabled (measured on the built driver). '
+        + 'Authoring now refuses exactly the constructor\'s refused set — the same predicates, a '
+        + 'scheme matched in any letter case, the url read trimmed as both datasource loaders hand it '
+        + 'over — plus that ignored key, which is the declared-but-not-enforced shape ADR-0049 does '
+        + 'not ship. Nothing the constructor accepts is refused, that key aside: a forced remote mode '
+        + 'keeps its url unjudged, as the constructor does. Stored datasource rows are not re-parsed '
+        + 'when they load, so a stored row keeps loading exactly as before (the constructor refuses '
+        + 'the first four shapes there already); what changes is that creating, testing or editing '
+        + 'its config through the datasource admin service, defineStack or os validate is refused at '
+        + 'the key. Measured on this tree at the change: no example, template, published skill or '
+        + 'hand-written doc authors a refused combination. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every turso datasource: os validate or defineStack, and a '
+        + 'save or test connection through the datasource admin service, report each refused '
+        + 'combination at config.url, config.syncUrl or config.timeoutMs with the ways out. Decide per '
+        + 'datasource whether it is a remote database, an embedded replica on a local file, or a '
+        + 'local file, and rewrite it to that spelling. Done when every turso datasource parses, the '
+        + 'driver builds from it, and a replica datasource reports a file: url beside its syncUrl.',
+    },
     {
       id: 'ui-action-undoable-unfulfillable-refused',
       surface: '`action` documents declaring `undoable: true` on a shape no runtime fulfils — '
@@ -14115,6 +14408,39 @@ const step18: MigrationStep = {
         + 'array is the case to read closest: its two corrected spellings — value: "won" on '
         + 'equals, and operator: "in" with value: ["won"] — select the same rows, so the result '
         + 'set cannot tell you which the metadata meant, and only the author knows.',
+    },
+    // The display page size a view gets when it declares none moved from 25 to 50
+    // (maintainer ruling on objectui#9853). A default move reaches every silent
+    // document with no parse error and nothing in the author's diff, so the
+    // upgrade path carries it as a TODO: only the deployment can say whether a
+    // view that never declared a page size was relying on 25.
+    {
+      id: 'view-pagination-page-size-default-50',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'ui.PaginationConfig.pageSize — an OMITTED page size on a view',
+      replacement: 'nothing, to take the platform display page size of 50. To keep the old 25 rows '
+        + 'per page on a view, write it: `pagination: { pageSize: 25 }`',
+      reason:
+        'A RULED behaviour change on a default, so there is nothing to rewrite and nothing to '
+        + 'refuse: the maintainer set the platform display page size to 50 (「9853 默认页大小改为50」, '
+        + 'objectui#9853), and the declared default of `PaginationConfigSchema.pageSize` moved '
+        + 'from 25 to 50. A `pagination` block that omits `pageSize` now parses to 50 — 50 rows '
+        + 'per page on a paged view, and a fetch ceiling of 50 on a view with no pager (kanban, '
+        + 'gallery, timeline). A view with no `pagination` block at all parses with none on either '
+        + 'side; its page size reaches it through the renderer, which is ruled to read the spec '
+        + 'default rather than keep its own number (objectui#9853 ruling C′ item 1). Not losslessly '
+        + 'convertible because the question is intent, not text: a mechanical pass that wrote '
+        + '`pageSize: 25` into every silent view would preserve the old number and defeat the '
+        + 'ruling, and one that wrote 50 would add nothing the default does not already do. Only '
+        + 'the deployment knows which silent views were relying on 25. The accept set is unchanged '
+        + '— a positive integer — and every authored `pageSize` parses exactly as before.',
+      acceptanceCriteria:
+        'An empty pagination configuration parses to a page size of 50, and a list view carrying '
+        + '`pagination: {}` parses to `pagination.pageSize` 50; an authored '
+        + '`pagination: { pageSize: 25 }` still parses to 25; `pageSize: 0`, a negative and a '
+        + 'fraction are still refused. A view that must keep 25 rows per page declares '
+        + '`pagination: { pageSize: 25 }` and shows 25 rows on its first page.',
     },
     {
       id: 'wait-node-event-config-required',
@@ -18175,6 +18501,27 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
+    // #17158 — `api/CreateExportJobRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the request body of `POST /api/v1/data/:object/export` as an asynchronous job.
+    // That method and path are served by nothing; the served export is the
+    // synchronous `GET` on the same path.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/CreateExportJobRequest',
+    // #17158 — `api/CreateExportJobResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the `{ jobId, status, estimatedRecords, createdAt }` answer of the unserved
+    // asynchronous export-job create.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/CreateExportJobResponse',
     // #14691 — `api/CrudEndpointPattern` (the `{ method, path, summary, description }`
     // value shape of `crud.patterns`) leaves with its carrier key: its ONLY consumer
     // was `CrudEndpointsConfigSchema.patterns`, tombstoned in the same change under
@@ -18183,16 +18530,55 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `GeneratedEndpointSchema.operation` still reads it. See
     // `retired-keys/18.api__CrudEndpointsConfig__patterns.ts` for the retirement record.
     'api/CrudEndpointPattern',
-    // #19543 (door ④) — `api/FlowSummary` left with its only reader,
-    // `api/ListFlowsResponse` (above). No producer ever built one: the retired
-    // list route answered bare names, so the summary's `label` / `type` /
-    // `status` / `version` / `enabled` / `nodeCount` / `lastRunAt` were a shape
-    // with no emitter, and an exported schema with no consumer reads as a
-    // capability (#3950, the `ui/ThemeMode` rule). Measured before removal: zero
-    // readers in objectstack, objectui (pinned sha and main) or cloud. A flow's
-    // runtime enablement is served by `GET /api/v1/automation/_status`; its
-    // definition by `GET /api/v1/meta/flow`.
-    'api/FlowSummary',
+    // #17158 — `api/ExportJobProgress`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the progress body of `GET /api/v1/data/export/:jobId`, a route no package
+    // mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ExportJobProgress',
+    // #17158 — `api/ExportJobStatus`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the job-status enum (`pending` … `expired`) of the export-job API family. No
+    // job store, worker or route ever set or read one.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ExportJobStatus',
+    // #17158 — `api/ExportJobSummary`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the row shape of the unserved export-job list.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ExportJobSummary',
+    // #17158 — `api/GetExportJobDownloadRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the request of `GET /api/v1/data/export/:jobId/download`, a route no package
+    // mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/GetExportJobDownloadRequest',
+    // #17158 — `api/GetExportJobDownloadResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the presigned-link answer of `GET /api/v1/data/export/:jobId/download`, a
+    // route no package mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/GetExportJobDownloadResponse',
     // #13823 — `api/HandlerStatus` (the `implemented` / `stub` / `planned` enum)
     // left with its two carriers: `RestApiEndpoint.handlerStatus` is tombstoned
     // in this same major (`RETIRED_KEYS_BY_MAJOR[18]`) and
@@ -18203,28 +18589,27 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // objectstack, objectui (pinned sha) or cloud. See
     // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
     'api/HandlerStatus',
-    // #19543 (door ④) — `api/ListFlowsRequest`, the query of the retired
-    // `GET /api/v1/automation` flow list (maintainer ruling on #19543:
-    // 「退役，统一走 /meta/flow」). It declared `status` / `type` / `limit`
-    // (default 50) / `cursor`, and the route read none of them: it called
-    // `listFlows()` with no arguments. Retired whole with the route and its
-    // `AutomationApiContracts.listFlows` entry; flows are metadata (ADR-0106) and
-    // the list is `GET /api/v1/meta/flow`. Zero readers measured before removal in
-    // objectstack, objectui (pinned sha and main) and cloud. No carrier key and no
-    // authored document, so no tombstone and no D2 conversion — this table plus
-    // the D3 semantic entry `automation-flow-list-route-retired` ARE the
-    // declaration — the whole-def route-3 shape, as the precedent entry
-    // `package-rollback-response-retired` (and its `api/PackageRollbackResponse`
-    // row) recorded it.
-    'api/ListFlowsRequest',
-    // #19543 (door ④) — `api/ListFlowsResponse`, the answer of the retired
-    // `GET /api/v1/automation` flow list. It declared `FlowSummary[]`, `total`,
-    // `nextCursor` and `hasMore`, while the route answered bare flow NAMES with a
-    // literal `hasMore: false` and never a `nextCursor` — a declaration no build
-    // ever served. Retired whole with the route; the list is `GET /api/v1/meta/flow`.
-    // See `18.api__ListFlowsRequest.ts` and the D3 semantic entry
-    // `automation-flow-list-route-retired` for the record.
-    'api/ListFlowsResponse',
+    // #17158 — `api/ListExportJobsRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the query of `GET /api/v1/data/export` (`object`, `status`, `limit` default
+    // 20, `cursor`), a route no package mounts; the `limit` / `cursor` pair (#19543
+    // door ②, absorbed into #17158) had no reader to spend it.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ListExportJobsRequest',
+    // #17158 — `api/ListExportJobsResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the `{ jobs, nextCursor, hasMore }` answer of `GET /api/v1/data/export`, a
+    // route no package mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ListExportJobsResponse',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of
@@ -18338,6 +18723,49 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (`packages/runtime/src/route-ledger.ts`). See
     // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
     'api/RouteCoverageReport',
+    // #17158 — `api/ScheduleExportRequest`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the request body of `POST /api/v1/data/export/schedules`, a route no package
+    // mounts; its `schedule` block held only `timezone` after #16320.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ScheduleExportRequest',
+    // #17158 — `api/ScheduleExportResponse`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the answer of `POST /api/v1/data/export/schedules`, a route no package mounts.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ScheduleExportResponse',
+    // #17158 — `api/ScheduledExport`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // a recurring export definition (`schedule`, `delivery`, `nextRunAt`). #16320
+    // had already deleted its `schedule.cronExpression`, leaving a required
+    // `schedule` block that could hold no schedule; no scheduler ever read it.
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'api/ScheduledExport',
+    // #17158 — `automation/ScheduleState`, retired whole with the export-job API family
+    // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
+    // retired its side first in objectui#10247). It declared
+    // the runtime state of a scheduled flow (`timezone`, `status`, `nextRunAt`, run
+    // counters). No scheduler ever wrote or read one, and after #16320 deleted its
+    // required cron it no longer declared a cadence. Retired with the family under
+    // ruling item 2 ("unless a live consumer is measured" — none was, in
+    // objectstack, objectui at the pin, or cloud).
+    // Zero readers in objectstack, in objectui at the pinned sha, and in cloud.
+    // No carrier key and no authored document, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `export-job-family-retired` are the declaration.
+    'automation/ScheduleState',
     // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
     // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the

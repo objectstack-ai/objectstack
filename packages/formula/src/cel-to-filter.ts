@@ -42,7 +42,9 @@
  *   `unresolved-variable` (the "no active org" fail-closed path) — and so does a
  *   null/undefined MEMBER of a resolved membership array, which is the same
  *   unresolved value one level in. See {@link lowerMembership} for why the member
- *   is refused rather than dropped.
+ *   is refused rather than dropped. The ROOT alone (`current_user`) is the whole
+ *   context object, never a value: `==` / `!=` refuse it (see
+ *   {@link variableObjectComparandRefusal}).
  */
 
 import type { ASTNode } from '@marcbachmann/cel-js';
@@ -345,14 +347,22 @@ function lowerComparison(op: string, lNode: ASTNode, rNode: ASTNode, ctx: Ctx): 
     // field-to-field comparison → `{ $field: otherPath }` reference.
     return emit((L as { path: string }).path, op, { $field: (R as { path: string }).path }, true);
   }
-  if (lField) return emit((L as { path: string }).path, op, resolveValue(R, ctx), false);
-  if (rField) return emit((R as { path: string }).path, FLIP[op] ?? op, resolveValue(L, ctx), false);
+  // [#19886] `==` / `!=` against a comparand that IS a list — a list literal, or
+  // a `current_user` variable that resolves to an array — is refused before it
+  // is emitted. See {@link arrayComparandRefusal}. [#19959] So is the variable
+  // root alone, and a variable that resolves to an object: see
+  // {@link variableObjectComparandRefusal}.
+  if (lField) return emit((L as { path: string }).path, op, comparandOf(op, R, ctx), false);
+  if (rField) return emit((R as { path: string }).path, FLIP[op] ?? op, comparandOf(op, L, ctx), false);
 
   // Neither side is a field: a constant comparison. Fold the always-true case
   // (`1 == 1`, the RLS allow-all) to "no restriction"; refuse the rest (a
-  // non-true constant must fail closed, never become allow-all).
-  const lv = resolveValue(L, ctx);
-  const rv = resolveValue(R, ctx);
+  // non-true constant must fail closed, never become allow-all). [#19959] A
+  // variable root or object operand is refused first: `current_user != 'guest'`
+  // folded to "no restriction" because an object is never strictly equal to a
+  // literal, which is the same whole-object comparison one branch over.
+  const lv = variableOperandOf(op, L, ctx);
+  const rv = variableOperandOf(op, R, ctx);
   if (ctx.mode === 'shape') return {}; // shape check: structurally fine
   const truth = constFold(op, lv, rv);
   if (truth === true) return {};
@@ -415,6 +425,155 @@ function lowerStringMethod(args: [string, ASTNode, ASTNode[]], ctx: Ctx): Filter
     throw new CompileError('unsupported', `"${method}()" argument must be a string literal`);
   }
   return { [(recv as { path: string }).path]: { [mapped]: arg } } as FilterCondition;
+}
+
+/**
+ * [#19886] `==` / `!=` compare ONE value, and a list is not one value.
+ *
+ * Until this refusal `record.status != ['closed', 'archived']` lowered to
+ * `{ status: { $ne: [...] } }` and `record.status == [...]` to the bare-array
+ * `{ status: [...] }`. The backends that received them disagreed, and two of
+ * the answers widened:
+ *
+ * | lowered shape                  | driver-sql / memory / turso | formula `matchesFilterCondition` (RLS `check`), before its own refusal | driver-mongodb (mingo proxy) |
+ * |:-------------------------------|:----------------------------|:----------------------|:-----------------------------|
+ * | `{ f: { $ne: [...] } }`        | 400                         | every row             | every scalar row             |
+ * | `{ $not: { f: [...] } }`       | 400                         | every row             | every row (`$nor`)           |
+ *
+ * The RLS `using` clause is AND-composed into the query AFTER the engine's
+ * comparand-shape seam, so no shared face stood between that lowering and a
+ * driver that answered it. Refusing HERE closes it at the one point every
+ * consumer compiles through — the RLS `using` / `check` compiler, the
+ * sharing-rule bootstrap, and the authoring lint — and it fails closed the way
+ * every other `unsupported` shape does: the RLS compiler drops the policy
+ * (`RLS_DENY_FILTER` when nothing else applies), and the sharing seeder skips
+ * the rule.
+ *
+ * ## Both kinds of list, one refusal
+ *
+ * A LIST LITERAL (`record.status != ['closed', 'archived']`) and a
+ * `current_user` variable that RESOLVES to an array
+ * (`record.reviewer_id != current_user.org_user_ids`) lower to the same shapes
+ * and are refused alike, with the same `unsupported` reason. They differ only
+ * in WHEN the refusal is visible:
+ *
+ *  - A literal is refused by the shape check too (`isPushdownableCel`, so
+ *    `isSupportedRlsExpression`): the authoring gate reports it before any
+ *    request, and the RLS compiler drops it as an uncompilable predicate.
+ *  - A variable's value exists only per request, so the shape check cannot see
+ *    it and passes the source. The refusal lands at request time instead, as
+ *    this compile's `unsupported` result: the RLS compiler collects the policy
+ *    as a denial and returns `RLS_DENY_FILTER` when nothing else applies —
+ *    zero rows on a read, `PermissionDeniedError` on a `check` write. The
+ *    sharing-rule bootstrap compiles with no variables at all, so a variable
+ *    never reaches this check there (it is `unresolved-variable` first).
+ *
+ * The authoring lint's reference pass compiles each predicate with every
+ * kernel-resolved `current_user` key bound to a probe of that key's RUNTIME
+ * type — a scalar for `id` / `email` / `organization_id`, an array for the
+ * membership sets — so `field == current_user.id` still lowers there and keeps
+ * its field and variable checks.
+ *
+ * "One of these values" is `in`; "none of these values" is `!(… in …)`. The
+ * refusal message names the variable PATH the author wrote and never a value:
+ * a resolved array is a membership set.
+ */
+function arrayComparandRefusal(op: string, leaf: Leaf): CompileError {
+  const list = leaf.kind === 'var' ? leaf.path.join('.') : '[...]';
+  const comparand =
+    leaf.kind === 'var' ? `its comparand \`${list}\` resolves to a list` : 'its comparand is a list literal';
+  return new CompileError(
+    'unsupported',
+    `\`${op}\` compares one value, but ${comparand} — spell "one of these" ` +
+      `as \`record.f in ${list}\` and ` +
+      `"none of these" as \`!(record.f in ${list})\``,
+  );
+}
+
+/**
+ * [#19959] `==` / `!=` compare ONE value, and a variable ROOT is not one value.
+ *
+ * `record.owner_id != current_user` names the root alone, and the root is the
+ * whole context object the caller supplies — for the RLS compiler every
+ * kernel-resolved key at once, the membership arrays included. Until this
+ * refusal it lowered to `{ owner_id: { $ne: <that object> } }` (and `==` to the
+ * bare object, with `$not` around it for `!(… == current_user)`). A strict
+ * compare never equals an object, so the RLS `check` evaluator admitted every
+ * write the policy was written to refuse, and explain reported the read as
+ * narrowed while echoing the caller's membership sets in its `readFilter`.
+ *
+ * ADR-0058 D2 declares the operand opposite a field as a literal, a
+ * `current_user.*` scalar or a pre-resolved `current_user.<key>` set, and the
+ * published `$eq` / `$ne` contract (`FieldOperatorsSchema`) as a literal or a
+ * `{ $field }` reference. The root is none of them, so the refusal pulls the
+ * lowering back to the declared operand set; it narrows nothing either names.
+ *
+ * Two guards, one per point at which the fault is knowable:
+ *
+ *  - The ROOT alone is known from the source (a path of one segment), so it is
+ *    refused BEFORE resolution, in both modes: the shape check
+ *    (`isPushdownableCel`, so `isSupportedRlsExpression` and the authoring lint)
+ *    reports it before any request, exactly as it reports a list literal, and
+ *    every compile — bound variables or none — gives the same `unsupported`.
+ *  - A `current_user.<key>` that RESOLVES to an object is knowable only per
+ *    request, like a resolved array, so it is refused after resolution. No
+ *    in-tree producer binds an object-valued key (the RLS context's keys are
+ *    scalars and membership arrays); the guard closes the class for any caller
+ *    of this published compiler. A `Date` is a literal comparand in the
+ *    `$eq` / `$ne` contract and passes.
+ *
+ * Both guards apply wherever `==` / `!=` resolves an operand: opposite a field,
+ * and on either side of a constant comparison, where `current_user != 'guest'`
+ * folded to "no restriction" because an object is never strictly equal to a
+ * literal. `{ $field }` references never reach here (the field-to-field branch
+ * emits them with `isRef`), and a CEL map literal is refused by
+ * {@link classify}, so a resolved variable is the only way an object ever became
+ * a comparand. Ordering operators keep their existing lowering: they are outside
+ * the `==` / `!=` letter this refusal carries. The message names the variable
+ * PATH the author wrote and never a value.
+ */
+function variableObjectComparandRefusal(op: string, path: string[]): CompileError {
+  const written = path.join('.');
+  const comparand =
+    path.length === 1
+      ? `its comparand \`${written}\` is the variable root itself, the whole context object`
+      : `its comparand \`${written}\` resolves to an object`;
+  return new CompileError(
+    'unsupported',
+    `\`${op}\` compares one value, but ${comparand} — compare one of its keys instead, ` +
+      `e.g. \`record.owner_id ${op} ${path[0]}.id\` rather than \`record.owner_id ${op} ${written}\``,
+  );
+}
+
+/** A resolved value that is an object rather than one comparable value. */
+function isObjectComparand(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date);
+}
+
+/**
+ * Resolve a comparison operand, refusing under `==` / `!=` a variable root
+ * before resolution and a variable resolving to an object after it
+ * ({@link variableObjectComparandRefusal}). In shape mode a variable resolves to
+ * the placeholder, so only the root is refused there.
+ */
+function variableOperandOf(op: string, leaf: Leaf, ctx: Ctx): unknown {
+  const equality = op === '==' || op === '!=';
+  if (equality && leaf.kind === 'var' && leaf.path.length === 1) throw variableObjectComparandRefusal(op, leaf.path);
+  const value = resolveValue(leaf, ctx);
+  if (equality && leaf.kind === 'var' && isObjectComparand(value)) throw variableObjectComparandRefusal(op, leaf.path);
+  return value;
+}
+
+/**
+ * Resolve the non-field side of a comparison, refusing under `==` / `!=` a list
+ * ({@link arrayComparandRefusal}) and a variable root or object
+ * ({@link variableOperandOf}). In shape mode a variable resolves to the
+ * placeholder, so only a literal list and a bare root are refused there.
+ */
+function comparandOf(op: string, leaf: Leaf, ctx: Ctx): unknown {
+  const value = variableOperandOf(op, leaf, ctx);
+  if ((op === '==' || op === '!=') && Array.isArray(value)) throw arrayComparandRefusal(op, leaf);
+  return value;
 }
 
 /** Build `{ field: <op> value }`. `isRef` true → value is a `{ $field }` reference. */

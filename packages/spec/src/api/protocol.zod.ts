@@ -274,11 +274,13 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
   name: z.string().describe('Item name (snake_case identifier)'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — so it decides which tenant\'s customization row '
-    + 'is served as the item. Absent = environment-wide read: only env-level '
-    + 'overlays apply and no org partition is consulted.',
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
+    + 'over env-wide overlay wins over packaged artifact — so it decides which '
+    + 'tenant\'s customization row is served as the item. Supplying a value '
+    + 'does not by itself guarantee an org partition is consulted; where none '
+    + 'applies, and whenever it is absent, the read is environment-wide and '
+    + 'only env-level overlays apply.',
   ),
   state: z.enum(['active', 'draft']).optional().describe(
     'Draft-visibility switch — which lifecycle row to read (strict mode): '
@@ -444,10 +446,13 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
     + 'resolves to the requested package\'s artifact (ADR-0048).',
   ),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order, so it decides which tenant\'s customization '
-    + 'row is reported as the `overlay` layer (and merged into `effective`). '
-    + 'Absent = environment-wide read: `overlay` reports the env-level row only.',
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order, so it decides which '
+    + 'tenant\'s customization row is reported as the `overlay` layer (and '
+    + 'merged into `effective`). Supplying a value does not by itself guarantee '
+    + 'an org partition is consulted; where none applies, and whenever it is '
+    + 'absent, the read is environment-wide: `overlay` reports the env-level '
+    + 'row only.',
   ),
 }));
 
@@ -1818,11 +1823,14 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
     + 'cache validator check (issue).',
   ),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — exactly as on the uncached read. Also '
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
+    + 'over env-wide overlay wins over packaged artifact — exactly as on the '
+    + 'uncached read. Also '
     + 'folded into the ETag, so a scope switch never returns a stale 304 from '
-    + 'another scope\'s cached representation. Absent = environment-wide read.',
+    + 'another scope\'s cached representation. Supplying a value does not by '
+    + 'itself guarantee an org partition is consulted; where none applies, and '
+    + 'whenever it is absent, the read is environment-wide.',
   ),
 }));
 

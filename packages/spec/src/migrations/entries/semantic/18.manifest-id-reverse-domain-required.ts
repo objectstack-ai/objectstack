@@ -15,9 +15,9 @@ export const entry: SemanticMigration = {
     + 'and the `id:` key of a package manifest — and its registry face '
     + '`PackageSchema.manifestId` (`marketplace/package.zod.ts`)',
   replacement: 'a reverse-domain identifier matching `MANIFEST_ID_PATTERN` '
-    + '(`kernel/manifest.zod.ts`): dot-separated lowercase segments, each opening with a '
-    + 'letter, digits and hyphens allowed inside a segment — `com.acme.crm`, '
-    + '`org.apache.superset`. ⛔ Underscores are not admitted, so `manifest.namespace` is '
+    + '(`kernel/manifest.zod.ts`): two or more lowercase dot-separated segments of letters, '
+    + 'digits and inner hyphens, each opening with a letter or a digit, never a hyphen — '
+    + '`com.acme.crm`, `org.apache.superset`. ⛔ Underscores are not admitted, so `manifest.namespace` is '
     + 'never a legal id and never a legal last segment of one: `com.acme.my_app` becomes '
     + '`com.acme.my-app`. A bare word gains a prefix: `blank` becomes `com.example.blank`. '
     + 'The refusal carries the repaired value it has already checked against the pattern, so '

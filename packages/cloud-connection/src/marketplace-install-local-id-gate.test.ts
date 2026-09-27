@@ -148,7 +148,7 @@ afterEach(() => {
 const REFUSED_STRINGS: ReadonlyArray<readonly [string, string]> = [
     ['a bare word (the card\'s probe)', 'late-app'],
     ['an underscore inside a segment', 'com.example.my_erp'],
-    ['a digit-initial segment', 'com.1acme.crm'],
+    ['a hyphen-initial segment', 'com.-acme.crm'],
     ['upper case', 'Com.Acme.Crm'],
     ['a whitespace-padded conforming id (the RAW value is parsed)', '  com.acme.crm  '],
     ['the empty string', ''],
@@ -222,7 +222,9 @@ describe('install-local parses the inline manifest\'s `id` through its declarati
         expectNothingWritten(h);
     });
 
-    for (const id of ['com.example.crm', 'com.example.my-erp', 'org.apache.superset']) {
+    // `com.1acme.crm` was a REFUSED row until the declaration let a segment
+    // open with a digit; it installs now, keyed and filed by the id as written.
+    for (const id of ['com.example.crm', 'com.example.my-erp', 'org.apache.superset', 'com.1acme.crm']) {
         it(`lit control — '${id}' still installs, keyed by the id as written`, async () => {
             const h = await mount(dir);
             const res = await h.routes.get(`POST ${ROUTE}`)!(
