@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { isSupportedRlsExpression, setCelPushdownLimitsModeForTests } from '@objectstack/formula';
+import { compileCelToFilter, isSupportedRlsExpression, setCelPushdownLimitsModeForTests } from '@objectstack/formula';
 
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 
@@ -698,6 +698,24 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
   });
 });
 
+/**
+ * What each kernel-resolved key holds on every request. Read off the resolver,
+ * not off any list: `compileFilter` builds its `current_user` context in
+ * `plugin-security/src/rls-compiler.ts` from `ExecutionContext` (`id` ←
+ * `userId`, `organization_id` ← `tenantId`, the rest by name), and
+ * `ExecutionContextSchema` declares `userId`, `tenantId` and `email` as strings
+ * and `positions`, `org_user_ids` and `accessible_org_ids` as string arrays;
+ * `resolveAuthzContext` produces the same types.
+ */
+const KERNEL_KEY_RUNTIME_TYPE: Record<string, 'scalar' | 'array'> = {
+  id: 'scalar',
+  organization_id: 'scalar',
+  email: 'scalar',
+  positions: 'array',
+  org_user_ids: 'array',
+  accessible_org_ids: 'array',
+};
+
 describe('validateRlsPredicateEnforceability — the `current_user` set is DERIVED, not transcribed', () => {
   /**
    * The known set is {@link RESERVED_RLS_MEMBERSHIP_KEYS} from
@@ -713,16 +731,24 @@ describe('validateRlsPredicateEnforceability — the `current_user` set is DERIV
    * different, stale shape (`tenantId`, `department`, `attributes`) the RLS
    * compiler never binds — neither is the authority.
    */
-  it('accepts every kernel-resolved key in BOTH positions', () => {
+  it('never reports a kernel-resolved key as UNKNOWN — in its own position it is clean, in the other it is a type fault', () => {
     expect(RESERVED_RLS_MEMBERSHIP_KEYS.length).toBeGreaterThan(0);
     for (const key of RESERVED_RLS_MEMBERSHIP_KEYS) {
-      // ⚠️ BOTH, asserted separately. An `a.length === 0 || b.length === 0`
-      // here would pass on whichever position happened to be silent, and this
-      // rule is silent in both — so the disjunction pinned nothing about
-      // position at all and would have survived a position-blind rewrite.
+      // ⚠️ BOTH positions, asserted separately and by the key's RUNTIME type.
+      // Until #19951 this pinned `[]` for both, which was the rule's blind spot
+      // written down: the position the key's type cannot fill (`== <a set>`,
+      // `in <one value>`) is dropped by the runtime on every request. That
+      // position is now `rls-predicate-unenforceable` — and still never
+      // `rls-predicate-unknown-user-variable`, which is what "derived, not
+      // transcribed" means for the kernel's own keys.
+      const type = KERNEL_KEY_RUNTIME_TYPE[key];
       const scalar = ids(siteWith('using', `owner_id == current_user.${key}`));
       const member = ids(siteWith('using', `owner_id in current_user.${key}`));
-      expect({ key, scalar, member }).toEqual({ key, scalar: [], member: [] });
+      expect({ key, scalar, member }).toEqual({
+        key,
+        scalar: type === 'scalar' ? [] : [RLS_PREDICATE_UNENFORCEABLE],
+        member: type === 'array' ? [] : [RLS_PREDICATE_UNENFORCEABLE],
+      });
     }
   });
 
@@ -742,24 +768,10 @@ describe('validateRlsPredicateEnforceability — each kernel key is probed with 
    * the wrong type silences the reference half: an array bound to `id` made
    * every `field == current_user.id` policy compile to nothing here, and its
    * field and variable checks never ran. Each key is therefore probed with the
-   * type `RLSCompiler.compileFilter` hands the compiler at runtime.
-   *
-   * Read off the resolver, not off any list: `compileFilter` builds its
-   * `current_user` context in `plugin-security/src/rls-compiler.ts` from
-   * `ExecutionContext` (`id` ← `userId`, `organization_id` ← `tenantId`, the
-   * rest by name), and `ExecutionContextSchema` declares `userId`, `tenantId`
-   * and `email` as strings and `positions`, `org_user_ids` and
-   * `accessible_org_ids` as string arrays; `resolveAuthzContext` produces the
-   * same types.
+   * type `RLSCompiler.compileFilter` hands the compiler at runtime — the table
+   * {@link KERNEL_KEY_RUNTIME_TYPE} says where that is read from.
    */
-  const RUNTIME_TYPE: Record<string, 'scalar' | 'array'> = {
-    id: 'scalar',
-    organization_id: 'scalar',
-    email: 'scalar',
-    positions: 'array',
-    org_user_ids: 'array',
-    accessible_org_ids: 'array',
-  };
+  const RUNTIME_TYPE = KERNEL_KEY_RUNTIME_TYPE;
 
   it('covers exactly the kernel-resolved keys the contract names', () => {
     expect(Object.keys(RUNTIME_TYPE).sort()).toEqual([...RESERVED_RLS_MEMBERSHIP_KEYS].sort());
@@ -811,6 +823,147 @@ describe('validateRlsPredicateEnforceability — the bare `current_user` root is
   it('CONTROL — a key of the root stays clean on both clauses', () => {
     expect(ids(siteWith('using', 'owner_id != current_user.id'))).toEqual([]);
     expect(ids(siteWith('check', 'owner_id == current_user.id'))).toEqual([]);
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the refusals the SHAPE check cannot see are reported (#19951)', () => {
+  /**
+   * Every source below passes `isSupportedRlsExpression`, `os validate` and this
+   * rule as they stood, and none of them enforces what it says. Measured through
+   * the real `SecurityPlugin` + ObjectQL + driver-sql:
+   *
+   *  - TYPE faults — a `current_user` value of the wrong type for its position.
+   *    The compiler refuses the position on every request, `RLSCompiler` drops
+   *    the policy: a `using` read returns zero rows (with only a per-request
+   *    "DENY (fail closed)" WARN) and a `check` write is refused with 403.
+   *  - NULL comparands — the shared filter faces refuse a `null` list member and
+   *    a `null` ordering bound by ruling. They compile, the RLS layer never runs
+   *    the faces on its own filter, and the backend answers: on driver-sql
+   *    `x in [null]`, `!(x in ['a', null])` and `x > null` read nothing, while
+   *    the `check` evaluator admits a write the negated read hides.
+   */
+  const TYPE_FAULTS: ReadonlyArray<readonly [string, string]> = [
+    [
+      'record.assigned_to_id != current_user.org_user_ids',
+      'replace `record.assigned_to_id != current_user.org_user_ids` with `!(record.assigned_to_id in current_user.org_user_ids)`',
+    ],
+    [
+      '!(record.assigned_to_id == current_user.org_user_ids)',
+      'replace `record.assigned_to_id == current_user.org_user_ids` with `record.assigned_to_id in current_user.org_user_ids`',
+    ],
+    [
+      'record.assigned_to_id in current_user.id',
+      'replace `record.assigned_to_id in current_user.id` with `record.assigned_to_id == current_user.id`',
+    ],
+    ['record.assigned_to_id in current_user', '`record.assigned_to_id in current_user.org_user_ids`'],
+    ['record.assigned_to_id.startsWith(current_user)', '`record.assigned_to_id.startsWith(current_user.id)`'],
+    ['record.assigned_to_id.contains(current_user)', '`record.assigned_to_id.contains(current_user.email)`'],
+    ['record.assigned_to_id.endsWith(current_user)', '`record.assigned_to_id.endsWith(current_user.organization_id)`'],
+    [
+      'record.assigned_to_id.startsWith(current_user.org_user_ids)',
+      'the membership test `record.assigned_to_id in current_user.org_user_ids`',
+    ],
+  ];
+
+  const NULL_COMPARANDS: ReadonlyArray<readonly [string, string]> = [
+    [
+      "record.status in ['open', null]",
+      'replace `record.status in ["open", null]` with `(record.status in ["open"] || record.status == null)`',
+    ],
+    ['record.status in [null]', 'replace `record.status in [null]` with `record.status == null`'],
+    [
+      "!(record.status in ['open', null])",
+      'replace `record.status in ["open", null]` with `(record.status in ["open"] || record.status == null)`',
+    ],
+    ['record.status > null', 'replace `record.status > null` with `record.status != null`'],
+    ['record.status >= null', 'replace `record.status >= null` with `record.status != null`'],
+    ['record.status < null', 'replace `record.status < null` with `record.status != null`'],
+    ['record.status <= null', 'replace `record.status <= null` with `record.status != null`'],
+  ];
+
+  it.each([...TYPE_FAULTS, ...NULL_COMPARANDS])('%s — one finding per clause, with the pasteable rewrite', (source, rewrite) => {
+    // Why it was silent: the shape verdict this rule reads says yes.
+    expect(isSupportedRlsExpression(source)).toBe(true);
+    for (const clause of ['using', 'check'] as const) {
+      const findings = validateRlsPredicateEnforceability(siteWith(clause, source));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([
+        [RLS_PREDICATE_UNENFORCEABLE, `permissions[0].rowLevelSecurity[0].${clause}`],
+      ]);
+      expect(findings[0].hint).toContain(rewrite);
+    }
+  });
+
+  it('a TYPE fault names the reference, what it holds, and a DROP with the clause’s own consequence', () => {
+    const [using] = validateRlsPredicateEnforceability(siteWith('using', TYPE_FAULTS[0][0]));
+    expect(using.message).toContain('`current_user.org_user_ids` is a membership set');
+    expect(using.message).toMatch(/DROPS the policy on EVERY request/);
+    expect(using.message).toMatch(/RLS_DENY_FILTER/);
+
+    const [check] = validateRlsPredicateEnforceability(siteWith('check', 'record.assigned_to_id in current_user.id'));
+    expect(check.message).toContain('`current_user.id` holds ONE value');
+    expect(check.message).toMatch(/PermissionDeniedError/);
+  });
+
+  it('a NULL comparand is NOT reported as a drop — the policy survives and the backend answers', () => {
+    const [f] = validateRlsPredicateEnforceability(siteWith('using', NULL_COMPARANDS[2][0]));
+    expect(f.message).toMatch(/the policy is NOT dropped/);
+    expect(f.message).not.toMatch(/DROPS the policy/);
+  });
+
+  it('rewrites EVERY site the fault lands in, in one finding', () => {
+    const findings = validateRlsPredicateEnforceability(
+      siteWith('using', 'record.assigned_to_id != current_user.org_user_ids && record.owner_id != current_user.org_user_ids'),
+    );
+    expect(findings.map((f) => f.rule)).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
+    expect(findings[0].hint).toContain('`!(record.assigned_to_id in current_user.org_user_ids)`');
+    expect(findings[0].hint).toContain('`!(record.owner_id in current_user.org_user_ids)`');
+  });
+
+  it('CONTROLS — the literal list keeps its one shape finding, and every spelling the hints point at is clean', () => {
+    expect(ids(siteWith('using', "record.status != ['closed', 'archived']"))).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
+    for (const source of [
+      'record.assigned_to_id == current_user.id',
+      '!(record.assigned_to_id in current_user.org_user_ids)',
+      'record.assigned_to_id in current_user.org_user_ids',
+      'record.assigned_to_id.startsWith(current_user.id)',
+      "(record.status in ['open'] || record.status == null)",
+      'record.status == null',
+      'record.status != null',
+    ]) {
+      for (const clause of ['using', 'check'] as const) {
+        expect({ source, clause, rules: ids(siteWith(clause, source)) }).toEqual({ source, clause, rules: [] });
+      }
+    }
+  });
+
+  it('CONTROL — a refusal that depends on WHICH caller asks is a probe artefact and stays silent', () => {
+    // Load-bearing: the compiler really does refuse this for the probe's value.
+    // The runtime answers it PER CALLER — no restriction for the one it names,
+    // a refusal for every other — so no probe value can stand for the request,
+    // and reporting "refused" would be reporting the lint's own probe.
+    const named = "current_user.email == 'ops@acme.com'";
+    expect(compileCelToFilter(named, { variables: { current_user: { email: 'ops@acme.com' } } })).toEqual({
+      ok: true,
+      filter: {},
+    });
+    expect(compileCelToFilter(named, { variables: { current_user: { email: 'rep@acme.com' } } })).toMatchObject({
+      ok: false,
+      reason: 'unsupported',
+    });
+    for (const source of [named, `${named} || record.owner_id == current_user.id`]) {
+      expect(isSupportedRlsExpression(source)).toBe(true);
+      for (const clause of ['using', 'check'] as const) {
+        expect({ source, clause, rules: ids(siteWith(clause, source)) }).toEqual({ source, clause, rules: [] });
+      }
+    }
+  });
+
+  it('reaches `os validate` through the real rule table', () => {
+    const stack = siteWith('using', TYPE_FAULTS[0][0]);
+    const rls = runAuthoringRules('validate', { normalized: stack, parsed: stack })
+      .filter((f) => f.rule.startsWith('rls-predicate'))
+      .map((f) => f.rule);
+    expect(rls).toEqual([RLS_PREDICATE_UNENFORCEABLE]);
   });
 });
 

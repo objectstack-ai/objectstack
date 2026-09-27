@@ -100,6 +100,17 @@
 // for the same comparison ({@link assertAggregationFilterReferencesAreDeclared}).
 // And on both positions a `Date` bound is compared as an instant
 // ({@link instantsOf}), as the same bound in a `where` is.
+//
+// [#20176] …and, where the column's CLASS is known, every temporal comparand is
+// compared by that column's storage rule — the rule the drivers apply to the
+// same comparand in a `where`, `@objectstack/core`'s `temporalStorageForm`,
+// with ADR-0053 D-D's whole-day reading of a bare-day upper bound on a
+// `datetime` column. The class comes from the object's declaration for the
+// per-aggregation `filter` (`declaredFieldClasses`) and from the query for
+// `having` (`aggregatedRowColumnClasses`, #20127's rule). See
+// {@link checkCondition}. Before, both positions compared a temporal comparand
+// as written, so an ISO instant against a `date` column counted 1 row where the
+// same condition in a `where` counted 3.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -132,6 +143,12 @@ import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
 // evaluator — the lift `@objectstack/formula` applies to the same pairing — so a
 // `Date` bound here compares the way the same bound in a `where` does.
 import { utcInstantMs } from '@objectstack/spec/data';
+// [#20176] The storage rule a temporal column puts a value in — ONE function,
+// shared with `driver-sql`'s and `driver-memory`'s `where` — and the whole-day
+// reading of a bare-day upper bound on a `datetime` column (ADR-0053 D-D), from
+// the spec, where that rule is declared.
+import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
+import { nextUtcCalendarDay } from '@objectstack/spec/data';
 // [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
 // `filter-comparand-shape.ts` rather than re-declared here — see the note on
 // {@link invalidFilterError} and on {@link unknownOperator} below.
@@ -685,6 +702,33 @@ export function aggregatedRowColumnClasses(
 }
 
 /**
+ * [#20176] Each declared field's class — what a per-aggregation `filter` reads
+ * a comparand against, since that filter narrows the object's RAW rows. The
+ * same classification {@link aggregatedRowColumnClasses} gives a groupBy
+ * projection of the field, and the same three temporal types the drivers index
+ * for their `where` (`driver-memory`'s `indexTemporalFields`,
+ * `SqlDriver.temporalFieldKind`), so this position and the driver's `where`
+ * read one field by one rule. No usable field map (a registry-less host) ⇒ an
+ * empty map, and every comparand is compared as written.
+ */
+export function declaredFieldClasses(fields: unknown): Map<string, AggregatedColumnClass | undefined> {
+  const classes = new Map<string, AggregatedColumnClass | undefined>();
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return classes;
+  const map = fields as Record<string, unknown>;
+  for (const name of Object.keys(map)) classes.set(name, declaredFieldClass(map, name));
+  return classes;
+}
+
+/**
+ * [#20176] The storage rule a column of `cls` takes, or `undefined` for a class
+ * that has none (numeric, text, boolean) and for a column whose class the
+ * declaration cannot tell.
+ */
+function temporalKindOf(cls: AggregatedColumnClass | undefined): TemporalComparandKind | undefined {
+  return cls === 'date' || cls === 'datetime' || cls === 'time' ? cls : undefined;
+}
+
+/**
  * [#20099] Refuse a `having` that is not a filter condition at all: anything but
  * `null` / `undefined` (no clause) and a plain object. See
  * {@link havingNotAConditionError} for what each shape used to answer.
@@ -1077,10 +1121,18 @@ function compareWithReference(
  * Filter aggregated rows by the query's `having` condition. An absent or empty
  * condition returns the rows unchanged (same vacuous-filter convention as
  * `where`).
+ *
+ * [#20176] `classes` is each aggregated column's class
+ * ({@link aggregatedRowColumnClasses}): a temporal column's comparands are
+ * compared by its storage rule. Absent ⇒ every comparand as written.
  */
-export function applyHaving(rows: any[], having: FilterCondition | null | undefined): any[] {
+export function applyHaving(
+  rows: any[],
+  having: FilterCondition | null | undefined,
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+): any[] {
   if (!having || typeof having !== 'object' || Object.keys(having).length === 0) return rows;
-  return rows.filter((row) => matchesHaving(row, having));
+  return rows.filter((row) => matchesHaving(row, having, 'having', HAVING_CLAUSE, classes));
 }
 
 /**
@@ -1090,28 +1142,35 @@ export function applyHaving(rows: any[], having: FilterCondition | null | undefi
  * `having`, `having.$and[0]`, `having.$not` — carried down so a comparand
  * refusal can NAME where the offending key sits. It defaults, so this stays the
  * two-argument function every existing caller (and `applyHaving` below) uses.
+ *
+ * [#20176] `classes` maps a column to its class — the aggregated row's for
+ * `having`, the object's declared fields for a per-aggregation `filter` — and a
+ * column whose class is temporal has its comparands compared by that column's
+ * storage rule ({@link checkCondition}). Absent, or a column it does not name ⇒
+ * compared as written.
  */
 export function matchesHaving(
   row: Record<string, any>,
   cond: any,
   path = 'having',
   clause: FilterClause = HAVING_CLAUSE,
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
 ): boolean {
   if (!cond || typeof cond !== 'object') return true;
   for (const [key, value] of Object.entries(cond)) {
     const here = `${path}.${key}`;
     if (key === '$and') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause))) return false;
+      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes))) return false;
       continue;
     }
     if (key === '$or') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause))) return false;
+      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes))) return false;
       continue;
     }
     if (key === '$not') {
-      if (matchesHaving(row, value, here, clause)) return false;
+      if (matchesHaving(row, value, here, clause, classes)) return false;
       continue;
     }
     if (key.startsWith('$')) throw unknownOperator(key, 'logical', [], clause);
@@ -1119,8 +1178,8 @@ export function matchesHaving(
     // no dotted-path resolution. [#10576] The per-aggregation filter walks the
     // same way on purpose: it reads `driver.find()` rows, which are flat too.
     // [#20099] The row itself goes down too: a `{ $field }` comparand resolves
-    // against it.
-    if (!checkCondition(row?.[key], value, key, here, clause, row)) return false;
+    // against it. [#20176] …and the column's storage rule, when it has one.
+    if (!checkCondition(row?.[key], value, key, here, clause, row, temporalKindOf(classes?.get(key)))) return false;
   }
   return true;
 }
@@ -1139,14 +1198,19 @@ export function matchesHaving(
  * unknown operator here is refused naming the aggregation position it sits in,
  * because ignoring it would silently answer the UNFILTERED aggregate — the
  * precise #10413 defect this key exists to close.
+ *
+ * [#20176] `classes` is the object's declared field classes
+ * ({@link declaredFieldClasses}), so a temporal comparand here is read by the
+ * column's storage rule, as the same comparand in a `where` is by the driver.
  */
 export function matchesAggregationFilter(
   row: Record<string, any>,
   filter: FilterCondition,
   index: number,
+  classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
 ): boolean {
   const clause = aggregationFilterClause(index);
-  return matchesHaving(row, filter, clause.root, clause);
+  return matchesHaving(row, filter, clause.root, clause, classes);
 }
 
 /**
@@ -1162,8 +1226,10 @@ export function matchesAggregationFilter(
  * per-aggregation `filter` (and kept no group in `having`), `$ne` / `$nin`
  * counted every row, and a `$between` of two `Date`s kept every row — while the
  * same bound in a `where` answered 4 of 6 on driver-memory and driver-sql
- * alike, each driver reading it by the column's storage rule. This walker is
- * TYPE-BLIND (it holds a flat row, no declaration), so it reads the pair the
+ * alike, each driver reading it by the column's storage rule. Where this walker
+ * is TYPE-BLIND — [#20176] a column whose class it is not handed, or whose class
+ * is not temporal; a temporal column's pair is put in its storage form first
+ * ({@link checkCondition}), and no `Date` is left in it — it reads the pair the
  * way the spec defines for a type-blind evaluator — {@link utcInstantMs}, the
  * lift `@objectstack/formula`'s evaluator applies to the same pairing: a
  * `Date`, epoch milliseconds, a bare `YYYY-MM-DD` (its UTC midnight) or an
@@ -1198,7 +1264,41 @@ function listHolds(list: readonly unknown[], value: unknown): boolean {
   });
 }
 
-/** One column's condition — implicit equality or an operator object. */
+/**
+ * [#20176] ADR-0053 D-D: a bare `YYYY-MM-DD` as the UPPER bound of a
+ * `datetime` column (`$lte`, a `$between` max) means that WHOLE day — the
+ * exclusive bound at the next day's midnight, in the column's storage form.
+ * `undefined` when the rule does not apply: another class, or a bound that is
+ * not a bare calendar day (a full timestamp and a `Date` keep instant
+ * semantics). The same decision both drivers' `where` emitters take
+ * (`SqlDriver.calendarDayUpperBoundRewrite`, `driver-memory`'s `$lte` arm),
+ * read from the spec's `nextUtcCalendarDay`.
+ */
+function wholeDayUpperBound(bound: unknown, kind: TemporalComparandKind | undefined): unknown {
+  if (kind !== 'datetime') return undefined;
+  const next = nextUtcCalendarDay(bound);
+  return next === null ? undefined : temporalStorageForm(next, 'datetime');
+}
+
+/**
+ * One column's condition — implicit equality or an operator object.
+ *
+ * [#20176] `kind` is the column's temporal storage rule, when the caller knows
+ * its class and the class is `date`, `datetime` or `time`. Then the row's value
+ * AND every comparand of `$eq` / `$ne` / the four orderings / `$between` /
+ * `$in` / `$nin` / implicit equality are put in that rule's storage form
+ * (`temporalStorageForm`) before they are compared, and a bare-day upper bound
+ * on a `datetime` column reads as the whole day ({@link wholeDayUpperBound}) —
+ * the reading the drivers give the same comparand in a `where`. So
+ * `'2026-02-01T00:00:00.000Z'` against a `date` column is the day
+ * `'2026-02-01'`, `'2026-02-01'` as a `datetime` `$lte` includes that day's
+ * rows, epoch milliseconds are an instant, and a `Date` against a `date` or
+ * `time` column is its UTC day or time of day. The value takes the form too
+ * because that is the pairing the drivers compare (`driver-sql` wraps a legacy
+ * SQLite column in the same canon); rows a driver returns are in it already.
+ * Presence (`$exists`, `$null`), the text operators and a `{ $field }`
+ * reference are not comparands of a value, and are read as before.
+ */
 function checkCondition(
   value: any,
   condition: any,
@@ -1206,17 +1306,20 @@ function checkCondition(
   path: string,
   clause: FilterClause = HAVING_CLAUSE,
   row: Record<string, any> = {},
+  kind?: TemporalComparandKind,
 ): boolean {
+  const form = (operand: unknown): unknown => (kind === undefined ? operand : temporalStorageForm(operand, kind));
   // Implicit equality (primitives, null, Date, array exact-match) — loose `==`
   // to mirror the Filter Protocol's memory evaluation. [#20148] A `Date` bound
-  // is compared as an instant ({@link instantsOf}).
+  // is compared as an instant ({@link instantsOf}). [#20176] On a temporal
+  // column, both sides in the column's storage form first.
   if (
     typeof condition !== 'object'
     || condition === null
     || condition instanceof Date
     || Array.isArray(condition)
   ) {
-    return comparandEquals(value, condition);
+    return comparandEquals(form(value), form(condition));
   }
 
   const keys = Object.keys(condition);
@@ -1255,20 +1358,34 @@ function checkCondition(
     }
     // [#20148] The comparison and list arms read a `Date` bound — or a `Date`
     // value — as an instant ({@link instantsOf}); every other pair compares
-    // exactly as before.
+    // exactly as before. [#20176] On a temporal column both sides are in its
+    // storage form first (`form`), and a bare-day upper bound on a `datetime`
+    // column is the whole day ({@link wholeDayUpperBound}).
+    const stored = form(value);
     switch (op) {
-      case '$eq': if (!comparandEquals(value, target)) return false; break;
-      case '$ne': if (comparandEquals(value, target)) return false; break;
-      case '$gt': if (!ordered(value, target, (a, b) => a > b)) return false; break;
-      case '$gte': if (!ordered(value, target, (a, b) => a >= b)) return false; break;
-      case '$lt': if (!ordered(value, target, (a, b) => a < b)) return false; break;
-      case '$lte': if (!ordered(value, target, (a, b) => a <= b)) return false; break;
-      case '$between':
-        if (Array.isArray(target)
-          && (ordered(value, target[0], (a, b) => a < b) || ordered(value, target[1], (a, b) => a > b))) return false;
+      case '$eq': if (!comparandEquals(stored, form(target))) return false; break;
+      case '$ne': if (comparandEquals(stored, form(target))) return false; break;
+      case '$gt': if (!ordered(stored, form(target), (a, b) => a > b)) return false; break;
+      case '$gte': if (!ordered(stored, form(target), (a, b) => a >= b)) return false; break;
+      case '$lt': if (!ordered(stored, form(target), (a, b) => a < b)) return false; break;
+      case '$lte': {
+        const dayAfter = wholeDayUpperBound(target, kind);
+        if (dayAfter !== undefined
+          ? !ordered(stored, dayAfter, (a, b) => a < b)
+          : !ordered(stored, form(target), (a, b) => a <= b)) return false;
         break;
-      case '$in': if (!Array.isArray(target) || !listHolds(target, value)) return false; break;
-      case '$nin': if (Array.isArray(target) && listHolds(target, value)) return false; break;
+      }
+      case '$between': {
+        if (!Array.isArray(target)) break;
+        const dayAfter = wholeDayUpperBound(target[1], kind);
+        if (ordered(stored, form(target[0]), (a, b) => a < b)
+          || (dayAfter !== undefined
+            ? ordered(stored, dayAfter, (a, b) => a >= b)
+            : ordered(stored, form(target[1]), (a, b) => a > b))) return false;
+        break;
+      }
+      case '$in': if (!Array.isArray(target) || !listHolds(target.map(form), stored)) return false; break;
+      case '$nin': if (Array.isArray(target) && listHolds(target.map(form), stored)) return false; break;
       case '$exists': {
         const exists = value !== undefined && value !== null;
         if (exists !== !!target) return false;

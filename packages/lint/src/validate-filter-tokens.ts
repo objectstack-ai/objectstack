@@ -1,8 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { classifyFilterToken, CONTEXT_TOKENS } from '@objectstack/spec/data';
+import {
+  classifyFilterToken,
+  CONTEXT_TOKENS,
+  isRecordContextToken,
+  type RecordContextToken,
+} from '@objectstack/spec/data';
 
-import { walkAuthoredFilters, type FilterSurface } from './filter-walk.js';
+import { scanForFilters, walkAuthoredFilters, type AuthoredFilter, type FilterSurface } from './filter-walk.js';
+import { recordsOf } from './object-graph.js';
 
 /**
  * Build-time filter-placeholder diagnostics (issue #3574).
@@ -60,8 +66,38 @@ import { walkAuthoredFilters, type FilterSurface } from './filter-walk.js';
  *
  * Only whole-string placeholders are considered (`'{token}'` / `'${token}'`,
  * anchored). A value that merely contains braces is left alone.
+ *
+ * ## `{record_id}` — valid on a record page, refused by name everywhere else
+ *
+ * The record-context token (`RECORD_CONTEXT_TOKENS`) is the id of the record a
+ * `type: 'record'` page is showing. Only that page's renderer can resolve it,
+ * so the verdict depends on the SURFACE: accepted in any filter on a record
+ * page, and refused on every other surface this rule walks (list views and the
+ * rest of an object definition, dashboard widgets, reports, datasets, apps, and
+ * `home` / `app` / `utility` / `list` pages). The refusal says why, "no record
+ * in context on this surface". The unknown-token message would send the author
+ * hunting for a spelling mistake that is not there.
+ *
+ * Which pages are record pages is read from the page's own `type`, and this
+ * rule runs on the PARSED stack (`input: 'parsed'` in `authoring-rules.ts`),
+ * where `PageSchema` has already applied its `'record'` default. That is why
+ * the `pages` collection is walked page by page here, through the walk's
+ * exported single-item entry {@link scanForFilters}, rather than through
+ * {@link walkAuthoredFilters}: the walk reports a filter's value, path and
+ * label, and deliberately holds no judgement about the item it came from.
+ * The page loop spells the path and label exactly as the walk does, and a test
+ * holds the two equal.
  */
 
+/**
+ * Diagnostic rule id: a filter placeholder this surface cannot resolve.
+ *
+ * Two causes share it: a placeholder outside every vocabulary (`{current_user}`,
+ * `{TODAY()}`), and the record-context token `{record_id}` on a surface with
+ * no record in context. The message and hint say which, so the finding stays
+ * actionable. A consumer keyed on the id acts the same either way: this
+ * filter cannot run where it is written.
+ */
 export const FILTER_TOKEN_UNKNOWN = 'filter-token-unknown';
 
 export type FilterTokenSeverity = 'error' | 'warning';
@@ -85,20 +121,85 @@ type AnyRec = Record<string, unknown>;
 
 const KNOWN_LIST = CONTEXT_TOKENS.join('}, {');
 
+/** A walked collection, plus how a `{record_id}` refusal names it. */
+interface TokenFilterSurface extends FilterSurface {
+  readonly noun: string;
+}
+
 /**
  * The presentation collections this rule has scanned since #3574. Declared
  * here, handed to the shared walk — see the scope note above for why it is not
  * a constant in `filter-walk.ts`.
  */
-const TOKEN_FILTER_SURFACES: readonly FilterSurface[] = [
-  { key: 'dashboards', kind: 'dashboard' },
-  { key: 'objects', kind: 'object' },
-  { key: 'views', kind: 'view' },
-  { key: 'reports', kind: 'report' },
-  { key: 'datasets', kind: 'dataset' },
-  { key: 'pages', kind: 'page' },
-  { key: 'apps', kind: 'app' },
+const TOKEN_FILTER_SURFACES: readonly TokenFilterSurface[] = [
+  { key: 'dashboards', kind: 'dashboard', noun: 'a dashboard' },
+  { key: 'objects', kind: 'object', noun: 'an object definition (its list views and field filters)' },
+  { key: 'views', kind: 'view', noun: 'a view' },
+  { key: 'reports', kind: 'report', noun: 'a report' },
+  { key: 'datasets', kind: 'dataset', noun: 'a dataset' },
+  // Judged page by page — see `pageRecordScope`.
+  { key: 'pages', kind: 'page', noun: 'a page' },
+  { key: 'apps', kind: 'app', noun: 'an app' },
 ];
+
+/**
+ * Whether the filters being judged have a record in context, and, when they
+ * do not, how to name the surface in the refusal.
+ */
+interface RecordScope {
+  readonly recordInContext: boolean;
+  /** e.g. `a dashboard`, `a page of type "list"`. Unused when a record is in context. */
+  readonly surface: string;
+}
+
+/** `PageSchema.type`'s default: a record page. */
+const PAGE_TYPE_DEFAULT = 'record';
+
+/**
+ * The record scope of one page: a record is in context on a `type: 'record'`
+ * page and on no other.
+ *
+ * On the parsed stack this rule is registered for, `type` is always present.
+ * An absent `type` is the same page, before `PageSchema`'s `'record'` default
+ * was applied, so it is judged as that default. That is the schema's declared
+ * default, not a tolerated spelling; a test holds it equal to the schema.
+ */
+function pageRecordScope(page: AnyRec): RecordScope {
+  const type = page.type === undefined ? PAGE_TYPE_DEFAULT : page.type;
+  return type === PAGE_TYPE_DEFAULT
+    ? { recordInContext: true, surface: 'a record page' }
+    : { recordInContext: false, surface: `a page of type ${JSON.stringify(type)}` };
+}
+
+/** Same `where` label as the shared walk: the item's `name`, else `id`, else `#i`. */
+function itemLabel(item: AnyRec, i: number): string {
+  const v = item.name ?? item.id;
+  return typeof v === 'string' && v.length > 0 ? v : `#${i}`;
+}
+
+function recordContextFinding(
+  node: string,
+  token: RecordContextToken,
+  path: string,
+  where: string,
+  scope: RecordScope,
+): FilterTokenFinding {
+  return {
+    severity: 'error',
+    rule: FILTER_TOKEN_UNKNOWN,
+    where,
+    path,
+    message:
+      `Filter value "${node}" stands for the record in context, and there is no record ` +
+      `in context on this surface (${scope.surface}). {${token}} resolves only in a filter ` +
+      `on a component of a \`type: 'record'\` page, where the renderer knows which record ` +
+      `is in view. Anywhere else the server refuses the query rather than counting every ` +
+      `record or none.`,
+    hint:
+      `Move this filter onto a component of a record page (\`type: 'record'\`), or filter on ` +
+      `a concrete id. To scope to the signed-in user instead, use {current_user_id}.`,
+  };
+}
 
 /**
  * Classify every string inside an already-identified filter subtree.
@@ -114,6 +215,7 @@ function walkFilterValues(
   node: unknown,
   path: string,
   where: string,
+  scope: RecordScope,
   out: FilterTokenFinding[],
   seen: Set<unknown>,
 ): void {
@@ -121,7 +223,9 @@ function walkFilterValues(
 
   if (typeof node === 'string') {
     const cls = classifyFilterToken(node);
-    if (cls?.kind === 'unknown') {
+    if (cls?.kind === 'record-context' && !scope.recordInContext) {
+      out.push(recordContextFinding(node, cls.token, path, where, scope));
+    } else if (cls?.kind === 'unknown') {
       const suggestion = cls.suggestion;
       out.push({
         severity: 'error',
@@ -131,7 +235,10 @@ function walkFilterValues(
         message:
           `Filter value "${node}" is not a resolvable placeholder. It is sent to the ` +
           `data engine as a literal string, matches no record, and the surface renders empty.`,
-        hint: suggestion
+        hint: suggestion && isRecordContextToken(suggestion)
+          ? `Did you mean "{${suggestion}}"? It resolves only in a filter on a component of a ` +
+            `\`type: 'record'\` page, to the id of the record in view.`
+          : suggestion
           ? `Did you mean "{${suggestion}}"? Context tokens are {${KNOWN_LIST}}; ` +
             `time-based values use date macros such as {today} or {30_days_ago}.`
           : `Resolvable placeholders are the context tokens {${KNOWN_LIST}} and the ` +
@@ -149,12 +256,12 @@ function walkFilterValues(
   seen.add(node);
 
   if (Array.isArray(node)) {
-    node.forEach((v, i) => walkFilterValues(v, `${path}[${i}]`, where, out, seen));
+    node.forEach((v, i) => walkFilterValues(v, `${path}[${i}]`, where, scope, out, seen));
     return;
   }
 
   for (const [k, v] of Object.entries(node as AnyRec)) {
-    walkFilterValues(v, `${path}.${k}`, where, out, seen);
+    walkFilterValues(v, `${path}.${k}`, where, scope, out, seen);
   }
 }
 
@@ -169,9 +276,30 @@ export function validateFilterTokens(stack: Record<string, unknown> | undefined 
   if (!stack || typeof stack !== 'object') return [];
   const out: FilterTokenFinding[] = [];
 
-  walkAuthoredFilters(stack, TOKEN_FILTER_SURFACES, ({ value, path, where }) => {
-    walkFilterValues(value, path, where, out, new Set());
-  });
+  const judge = (scope: RecordScope) => ({ value, path, where }: AuthoredFilter): void => {
+    walkFilterValues(value, path, where, scope, out, new Set());
+  };
+
+  // One surface at a time, in the declared order, so findings keep the order
+  // one call over the whole list produced.
+  for (const surface of TOKEN_FILTER_SURFACES) {
+    if (surface.kind === 'page') {
+      recordsOf(stack[surface.key]).forEach((page, i) => {
+        scanForFilters(
+          page,
+          `${surface.key}[${i}]`,
+          `${surface.kind} "${itemLabel(page, i)}"`,
+          judge(pageRecordScope(page)),
+        );
+      });
+      continue;
+    }
+    walkAuthoredFilters(
+      stack,
+      [surface],
+      judge({ recordInContext: false, surface: surface.noun }),
+    );
+  }
 
   return out;
 }

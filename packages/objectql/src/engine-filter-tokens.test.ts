@@ -352,6 +352,86 @@ describe('engine filter placeholders (framework#3582)', () => {
     });
   });
 
+  /**
+   * `{record_id}` — the record-context token. Only a record page's renderer
+   * knows which record is in view, so on the server it refuses by name on every
+   * verb, even with a full context, before the driver is reached. The envelope
+   * is the "known token, no value in this context" one (`FILTER_TOKEN_UNRESOLVED`
+   * / 400) — never `IS NULL` ("about nobody") and never a dropped condition
+   * ("about everybody").
+   */
+  describe('the record-context token {record_id} refuses by name (read and write paths)', () => {
+    async function refusalOf(run: (ql: ObjectQL) => Promise<unknown>) {
+      const { driver } = makeDriver();
+      const ql = await makeEngine(driver);
+      let err: any;
+      try {
+        await run(ql);
+      } catch (e) {
+        err = e;
+      }
+      expect(err?.name).toBe('UnresolvedFilterTokenError');
+      expect(err?.code).toBe('FILTER_TOKEN_UNRESOLVED');
+      expect(err?.status).toBe(400);
+      expect(err?.token).toBe('record_id');
+      return driver;
+    }
+
+    it('find(): refused before the driver', async () => {
+      const driver = await refusalOf((ql) => ql.find('deal', { where: { owner: '{record_id}' }, context: CTX }));
+      expect(driver.find).not.toHaveBeenCalled();
+    });
+
+    it('count(): refused before the driver', async () => {
+      const driver = await refusalOf((ql) => ql.count('deal', { where: { owner: '{record_id}' }, context: CTX }));
+      expect(driver.count).not.toHaveBeenCalled();
+    });
+
+    it('aggregate(): refused in `where` before the driver', async () => {
+      const driver = await refusalOf((ql) =>
+        ql.aggregate('deal', {
+          where: { owner: '{record_id}' },
+          groupBy: ['owner'],
+          aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+          context: CTX,
+        }),
+      );
+      expect(driver.aggregate).not.toHaveBeenCalled();
+    });
+
+    it('update(multi): the write path refuses before anything is written', async () => {
+      const driver = await refusalOf((ql) =>
+        ql.update('deal', { title: 'x' }, { where: { owner: '{record_id}' }, multi: true, context: CTX } as any),
+      );
+      expect(driver.updateMany).not.toHaveBeenCalled();
+      expect(driver.update).not.toHaveBeenCalled();
+    });
+
+    it('delete(multi): the write path refuses before anything is deleted', async () => {
+      const driver = await refusalOf((ql) =>
+        ql.delete('deal', { where: { owner: '{record_id}' }, multi: true, context: CTX } as any),
+      );
+      expect(driver.deleteMany).not.toHaveBeenCalled();
+      expect(driver.delete).not.toHaveBeenCalled();
+    });
+
+    it('update by where.id: refused before the by-id fast path binds it as a primary key', async () => {
+      const driver = await refusalOf((ql) =>
+        ql.update('deal', { title: 'x' }, { where: { id: '{record_id}' }, context: CTX } as any),
+      );
+      expect(driver.update).not.toHaveBeenCalled();
+    });
+
+    it('lit control — {current_user_id} on the same verbs still resolves', async () => {
+      const { driver, seen } = makeDriver();
+      const ql = await makeEngine(driver);
+      await ql.find('deal', { where: { owner: '{current_user_id}' }, context: CTX });
+      await ql.update('deal', { title: 'x' }, { where: { owner: '{current_user_id}' }, multi: true, context: CTX } as any);
+      expect(seen.findAst?.where).toEqual({ owner: 'usr_1' });
+      expect(seen.updateManyAst?.where).toEqual({ owner: 'usr_1' });
+    });
+  });
+
   it('does not mutate the caller filter — view metadata is shared across requests', async () => {
     const { driver } = makeDriver();
     const ql = await makeEngine(driver);

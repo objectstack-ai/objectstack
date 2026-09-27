@@ -86,7 +86,7 @@
 
 import { bucketDateKey } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
-import { matchesAggregationFilter } from './having-filter.js';
+import { declaredFieldClasses, matchesAggregationFilter } from './having-filter.js';
 
 /**
  * Group + aggregate raw rows according to the AST's `groupBy` /
@@ -96,19 +96,30 @@ import { matchesAggregationFilter } from './having-filter.js';
  * so a row near a tz day-boundary lands in the right day/week/month/quarter.
  * It is only consulted by `groupBy` items carrying a `dateGranularity`; an
  * unset or `'UTC'` value keeps the historical UTC bucketing.
+ *
+ * [#20176] `fields` is the object's declared field map. A per-aggregation
+ * `filter` reads a temporal comparand by the column's storage rule when it is
+ * handed one — the rule the driver applies to the same comparand in a `where`
+ * (having-filter.ts `checkCondition`). Absent (a registry-less caller) ⇒ every
+ * comparand is compared as written, as before.
  */
 export function applyInMemoryAggregation(
   rows: any[],
   ast: Pick<QueryAST, 'groupBy' | 'aggregations'>,
   timezone?: string,
+  fields?: Record<string, unknown>,
 ): any[] {
   const groupBy = (ast.groupBy ?? []) as GroupByNode[];
   const aggregations = (ast.aggregations ?? []) as AggregationNode[];
   if (groupBy.length === 0 && aggregations.length === 0) return rows;
+  // [#20176] Read once per call, and only when some aggregation carries a filter.
+  const filterClasses = fields && aggregations.some((a) => a?.filter && Object.keys(a.filter).length > 0)
+    ? declaredFieldClasses(fields)
+    : undefined;
 
   if (groupBy.length === 0) {
     // Pure aggregation — single result row.
-    return [aggregateBucket(rows, aggregations)];
+    return [aggregateBucket(rows, aggregations, filterClasses)];
   }
 
   const buckets = new Map<string, { key: Record<string, any>; rows: any[] }>();
@@ -136,7 +147,7 @@ export function applyInMemoryAggregation(
 
   const out: any[] = [];
   for (const { key, rows: bucketRows } of buckets.values()) {
-    const aggValues = aggregateBucket(bucketRows, aggregations);
+    const aggValues = aggregateBucket(bucketRows, aggregations, filterClasses);
     out.push({ ...key, ...aggValues });
   }
   return out;
@@ -167,7 +178,11 @@ function projectGroupValue(row: any, g: GroupByNode, timezone?: string): unknown
   return v ?? null;
 }
 
-function aggregateBucket(allRows: any[], aggregations: AggregationNode[]): Record<string, any> {
+function aggregateBucket(
+  allRows: any[],
+  aggregations: AggregationNode[],
+  filterClasses?: ReturnType<typeof declaredFieldClasses>,
+): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [index, agg] of aggregations.entries()) {
     const alias = agg.alias;
@@ -183,7 +198,7 @@ function aggregateBucket(allRows: any[], aggregations: AggregationNode[]): Recor
     // still lists, objectui#3136).
     const aggFilter = agg.filter;
     const rows = aggFilter && Object.keys(aggFilter).length > 0
-      ? allRows.filter((row) => matchesAggregationFilter(row, aggFilter, index))
+      ? allRows.filter((row) => matchesAggregationFilter(row, aggFilter, index, filterClasses))
       : allRows;
     if (fn === 'count') {
       // `*` is the count-all sentinel: the Cube `count` measure and a dataset
