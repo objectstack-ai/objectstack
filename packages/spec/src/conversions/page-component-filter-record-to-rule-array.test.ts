@@ -23,7 +23,12 @@
  *      re-saves cleanly;
  *  §6  the reach is the family, derived from the schema rather than recalled;
  *  §7  the jurisdiction: retired from the authoring funnel (Clause-② no — an
- *      author is still refused), replayed at rest and by the migration chain.
+ *      author is still refused), replayed at rest and by the migration chain;
+ *  §8  the other half of ruling item 2: every legacy filter left as stored is
+ *      REPORTED as a structured TODO (`onTodo`) naming its path, its block and
+ *      what blocks the rewrite — the combinator by name — one per decline
+ *      branch; a filter that converts, and a value that is no legacy form at
+ *      all, reports none; and reporting writes nothing.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -207,52 +212,71 @@ describe('§1 the ruled subset converts to the exact rule array', () => {
 });
 
 describe('§2 what has no lossless rule spelling is left byte-identical', () => {
-  // The ruled boundary first: a combinator is never flattened.
-  const COMBINATOR_ROWS: ReadonlyArray<readonly [string, unknown]> = [
-    ['$or', { $or: [{ stage: 'open' }, { stage: 'won' }] }],
-    ['$and', { $and: [{ stage: 'open' }, { amount: { $gt: 1 } }] }],
-    ['$not', { $not: { stage: 'lost' } }],
-    ['$or beside a field key', { owner_id: 'u1', $or: [{ stage: 'open' }, { stage: 'won' }] }],
-    ['an AST `and` group', ['and', ['stage', '=', 'open'], ['amount', '>', 1]]],
-    ['an AST `or` group', ['or', ['stage', '=', 'open'], ['stage', '=', 'won']]],
-    ['a flat list nesting an `or` group', [['owner_id', '=', 'u1'], ['or', ['a', '=', 1], ['b', '=', 2]]]],
+  // The ruled boundary first: a combinator is never flattened. The third
+  // column is what the site's TODO must name (ruling item 2: "naming the
+  // page/block and the combinator").
+  const COMBINATOR_ROWS: ReadonlyArray<readonly [string, unknown, string]> = [
+    ['$or', { $or: [{ stage: 'open' }, { stage: 'won' }] }, 'the combinator `$or`'],
+    ['$and', { $and: [{ stage: 'open' }, { amount: { $gt: 1 } }] }, 'the combinator `$and`'],
+    ['$not', { $not: { stage: 'lost' } }, 'the combinator `$not`'],
+    ['$or beside a field key', { owner_id: 'u1', $or: [{ stage: 'open' }, { stage: 'won' }] }, 'the combinator `$or`'],
+    ['an AST `and` group', ['and', ['stage', '=', 'open'], ['amount', '>', 1]], 'an `and` group'],
+    ['an AST `or` group', ['or', ['stage', '=', 'open'], ['stage', '=', 'won']], 'an `or` group'],
+    ['a flat list nesting an `or` group', [['owner_id', '=', 'u1'], ['or', ['a', '=', 1], ['b', '=', 2]]], 'an `or` group'],
   ];
 
-  it.each(COMBINATOR_ROWS)('%s', (_name, filter) => {
+  it.each(COMBINATOR_ROWS)('%s', (_name, filter, named) => {
     const before = pageWith({ type: 'object-kanban', properties: { objectName: 'deal', filter } });
-    const { stack, notices } = convert(before);
+    const { stack, notices, todos } = convert(before);
     expect((componentOf(stack).properties as Dict).filter).toEqual(filter);
     expect(notices).toEqual([]);
+    // Left as stored, and SAID so: one TODO, at this door, naming the combinator.
+    expect(todos).toHaveLength(1);
+    expect(todos[0]!.path).toBe('pages[0].regions[0].components[0].properties.filter');
+    expect(todos[0]!.reason).toContain(named);
+    expect(todos[0]!.reason).toContain('the `object-kanban` block');
     // Copy-on-write: nothing on the way was rebuilt either.
     const frozen = structuredClone(before);
     expect(collectConversionNotices(frozen, { includeRetired: true }).stack).toBe(frozen);
   });
 
-  const DECLINED_ROWS: ReadonlyArray<readonly [string, unknown]> = [
+  // The third column is what the site's TODO must say, or `null` for the one
+  // row that is not a legacy form at all (see the last row).
+  const DECLINED_ROWS: ReadonlyArray<readonly [string, unknown, string | null]> = [
     // The renderer at the pin skips a null key (constrains nothing); a rule would test IS NULL.
-    ['a null value', { owner_id: null }],
-    ['a null value beside a mappable key', { stage: 'open', owner_id: null }],
+    ['a null value', { owner_id: null }, 'has the key `owner_id` set to null'],
+    ['a null value beside a mappable key', { stage: 'open', owner_id: null }, 'has the key `owner_id` set to null'],
     // Direction lives in the VALUE — not in the one operator table.
-    ['`$null`', { deleted_at: { $null: true } }],
-    ['`$exists`', { deleted_at: { $exists: false } }],
-    ['an operator that is not a FilterCondition operator', { name: { $regex: 'a.c' } }],
-    ['a mis-cased operator', { amount: { $Gt: 1 } }],
-    ['an empty operator object', { amount: {} }],
-    ['a nested non-operator object', { owner: { id: 'u1' } }],
-    ['an array in equality position', { tags: ['a', 'b'] }],
-    ['a top-level `$` key that is not a combinator', { $text: 'acme' }],
-    ['a field-reference comparand', { amount: { $gt: { $field: 'budget' } } }],
-    ['a comparand the door refuses (`in` needs a list)', { stage: { $in: 'open' } }],
-    ['an empty `icontains` comparand', { name: { $icontains: '' } }],
-    ['an AST operator with no rule word (`like`)', [['name', 'like', '%acme%']]],
-    ['an AST scalar comparison with no value', [['amount', '>']]],
-    ['a mixed list of a rule object and an AST tuple', [{ field: 'a', operator: 'equals', value: 1 }, ['b', '=', 2]]],
+    ['`$null`', { deleted_at: { $null: true } }, 'compares `deleted_at` with `$null`'],
+    ['`$exists`', { deleted_at: { $exists: false } }, 'compares `deleted_at` with `$exists`'],
+    ['an operator that is not a FilterCondition operator', { name: { $regex: 'a.c' } }, 'compares `name` with `$regex`'],
+    ['a mis-cased operator', { amount: { $Gt: 1 } }, 'compares `amount` with `$Gt`'],
+    ['an empty operator object', { amount: {} }, 'has the key `amount` set to an empty operator object'],
+    ['a nested non-operator object', { owner: { id: 'u1' } }, 'a nested object whose key `id` is not a filter operator'],
+    ['an array in equality position', { tags: ['a', 'b'] }, 'has the key `tags` set to an array'],
+    ['a top-level `$` key that is not a combinator', { $text: 'acme' }, 'carries the top-level key `$text`, which is not a field'],
+    ['a field-reference comparand', { amount: { $gt: { $field: 'budget' } } }, 'which this door refuses itself'],
+    ['a comparand the door refuses (`in` needs a list)', { stage: { $in: 'open' } }, 'which this door refuses itself'],
+    ['an empty `icontains` comparand', { name: { $icontains: '' } }, 'which this door refuses itself'],
+    ['an AST operator with no rule word (`like`)', [['name', 'like', '%acme%']], 'compares `name` with the AST operator `like`'],
+    ['an AST scalar comparison with no value', [['amount', '>']], 'which the AST itself does not lower'],
+    // Neither a record nor an AST (`isFilterAST` refuses the rule object in it),
+    // so not this conversion's form: no TODO. The door's own element-level
+    // refusal (`filter.1`) is what names it.
+    ['a mixed list of a rule object and an AST tuple', [{ field: 'a', operator: 'equals', value: 1 }, ['b', '=', 2]], null],
   ];
 
-  it.each(DECLINED_ROWS)('%s', (_name, filter) => {
-    const { value, notices } = gridFilter(filter);
+  it.each(DECLINED_ROWS)('%s', (_name, filter, said) => {
+    const { value, notices, todos } = gridFilter(filter);
     expect(value).toEqual(filter);
     expect(notices).toEqual([]);
+    if (said === null) {
+      expect(todos).toEqual([]);
+      return;
+    }
+    expect(todos).toHaveLength(1);
+    expect(todos[0]!.reason).toContain(said);
+    expect(todos[0]!.from).toBe(JSON.stringify(filter));
   });
 
   it('all-or-nothing: a declined key keeps the mappable keys beside it from converting', () => {
@@ -263,9 +287,11 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
 
   it('the `filter` of a component outside the family is not this entry\'s surface', () => {
     const before = pageWith({ type: 'record:related_list', properties: { objectName: 'deal', filter: { a: 1 } } });
-    const { stack, notices } = convert(before);
+    const { stack, notices, todos } = convert(before);
     expect((componentOf(stack).properties as Dict).filter).toEqual({ a: 1 });
     expect(notices).toEqual([]);
+    // Not this entry's door, so not this entry's TODO either.
+    expect(todos).toEqual([]);
   });
 
   describe('a component whose rows are INLINE keeps every filter as stored', () => {
@@ -274,45 +300,56 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
     // rows are inline, and ValueDataSource matches the record form but excludes
     // EVERY row for a rule array. So there the rewrite is not lossless — and the
     // binding is composed into that same `filter`, so it stays as stored too.
-    const INLINE: ReadonlyArray<readonly [string, string, Dict]> = [
-      ['object-map', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
-      ['object-tree', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
-      ['object-gantt', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }],
-      ['object-calendar', '`staticData`', { staticData: [{ stage: 'open' }] }],
-      ['object-map', 'an EMPTY `staticData` (still the value rung)', { staticData: [] }],
-      ['object-kanban', 'a bare `data` array', { data: [{ stage: 'open' }] }],
+    const INLINE: ReadonlyArray<readonly [string, string, Dict, string]> = [
+      ['object-map', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }, "(`data: { provider: 'value' }`)"],
+      ['object-tree', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }, "(`data: { provider: 'value' }`)"],
+      ['object-gantt', '`data: { provider: value }`', { data: { provider: 'value', items: [{ stage: 'open' }] } }, "(`data: { provider: 'value' }`)"],
+      ['object-calendar', '`staticData`', { staticData: [{ stage: 'open' }] }, '(`staticData`)'],
+      ['object-map', 'an EMPTY `staticData` (still the value rung)', { staticData: [] }, '(`staticData`)'],
+      ['object-kanban', 'a bare `data` array', { data: [{ stage: 'open' }] }, '(a `data` array)'],
     ];
 
-    it.each(INLINE)('%s with %s', (type, _shape, inline) => {
+    it.each(INLINE)('%s with %s', (type, _shape, inline, named) => {
       const before = pageWith({
         type,
         dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
         properties: { objectName: 'deal', ...inline, filter: { stage: 'open' } },
       });
-      const { stack, notices } = convert(before);
+      const { stack, notices, todos } = convert(before);
       const component = componentOf(stack);
       expect((component.properties as Dict).filter).toEqual({ stage: 'open' });
       expect((component.dataSource as Dict).filter).toEqual({ owner_id: 'u1' });
       expect(notices).toEqual([]);
+      // Both filters would have converted on an object-bound block; here each
+      // is left as stored and reported, naming the inline shape.
+      expect(todos.map((t) => t.path)).toEqual([
+        'pages[0].regions[0].components[0].dataSource.filter',
+        'pages[0].regions[0].components[0].properties.filter',
+      ]);
+      for (const todo of todos) {
+        expect(todo.reason).toContain(`sits on a block whose rows are inline ${named}`);
+        expect(todo.reason).toContain(`the \`${type}\` block`);
+      }
       const frozen = structuredClone(before);
       expect(collectConversionNotices(frozen, { includeRetired: true }).stack).toBe(frozen);
     });
 
     it('`defaultFilters` on an inline-row grid stays as stored too', () => {
-      const { value, notices } = (() => {
-        const { stack, notices: n } = convert(pageWith({
+      const { value, notices, todos } = (() => {
+        const { stack, notices: n, todos: t } = convert(pageWith({
           type: 'object-grid',
           properties: { data: { provider: 'value', items: [] }, defaultFilters: { stage: 'open' } },
         }));
-        return { value: (componentOf(stack).properties as Dict).defaultFilters, notices: n };
+        return { value: (componentOf(stack).properties as Dict).defaultFilters, notices: n, todos: t };
       })();
       expect(value).toEqual({ stage: 'open' });
       expect(notices).toEqual([]);
+      expect(todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[0].properties.defaultFilters']);
     });
 
     it('control: the same filter on an object-bound block of the same type converts', () => {
       for (const data of [undefined, { provider: 'object', object: 'deal' }]) {
-        const { stack, notices } = convert(
+        const { stack, notices, todos } = convert(
           pageWith({
             type: 'object-map',
             dataSource: { object: 'deal', filter: { owner_id: 'u1' } },
@@ -327,16 +364,18 @@ describe('§2 what has no lossless rule spelling is left byte-identical', () => 
           { field: 'owner_id', operator: 'equals', value: 'u1' },
         ]);
         expect(notices).toHaveLength(2);
+        expect(todos).toEqual([]);
       }
     });
   });
 
   it('`defaultFilters` is converted on the grid only', () => {
-    const { stack, notices } = convert(
+    const { stack, notices, todos } = convert(
       pageWith({ type: 'object-kanban', properties: { objectName: 'deal', defaultFilters: { a: 1 } } }),
     );
     expect((componentOf(stack).properties as Dict).defaultFilters).toEqual({ a: 1 });
     expect(notices).toEqual([]);
+    expect(todos).toEqual([]);
   });
 });
 
@@ -358,6 +397,11 @@ describe('§3 identity and idempotence', () => {
     const twice = collectConversionNotices(once.stack, { includeRetired: true });
     expect(twice.stack).toBe(once.stack);
     expect(twice.notices).toEqual([]);
+  });
+
+  it('a rule array reports nothing either — it is not a legacy form', () => {
+    const { todos } = gridFilter([{ field: 'stage', operator: 'equals', value: 'open' }]);
+    expect(todos).toEqual([]);
   });
 });
 
@@ -506,5 +550,144 @@ describe('§7 jurisdiction — retired from authoring, replayed at rest and by t
       { field: 'stage', operator: 'equals', value: 'open' },
     ]);
     expect(result.applied.filter((a) => a.conversionId === ID)).toHaveLength(1);
+  });
+});
+
+describe('§8 the TODO channel — every site left as stored is reported (ruling item 2)', () => {
+  // One row per DECLINE BRANCH of the entry, named for the branch in
+  // `registry.ts` it exercises. §2 pins the same property over the rows the
+  // first half of this card measured; this table is the branch census the
+  // report enumerates, so a branch added without a TODO shows up here.
+  const BRANCHES: ReadonlyArray<readonly [string, unknown, string]> = [
+    ['record: a combinator key', { $or: [{ a: 1 }, { b: 2 }] }, 'carries the combinator `$or`'],
+    ['record: a combinator beside a non-combinator `$` key', { $and: [{ a: 1 }], $text: 'x' }, 'carries the combinator `$and` (its top-level `$text` is not a field either)'],
+    ['record: two combinators', { $or: [{ a: 1 }], $not: { b: 2 } }, 'carries the combinators `$or` and `$not`'],
+    ['record: a non-combinator `$` key', { $where: 'x' }, 'carries the top-level key `$where`, which is not a field'],
+    ['record: a combinator is named even when a field key would decline first', { owner_id: null, $or: [{ a: 1 }] }, 'carries the combinator `$or`'],
+    ['record: a null value', { a: null }, 'has the key `a` set to null'],
+    ['record: an array value', { a: [1, 2] }, 'has the key `a` set to an array'],
+    ['record: a non-plain object value', { a: new Date(0) }, 'set to a value that is neither a scalar nor an operator object'],
+    ['record: an empty operator object', { a: {} }, 'set to an empty operator object'],
+    ['record: an operator outside the one table', { a: { $exists: true } }, 'compares `a` with `$exists`'],
+    ['record: a nested object that is not an operator object', { a: { b: 1 } }, 'nested object whose key `b` is not a filter operator'],
+    ['AST: an `and` / `or` group', ['or', ['a', '=', 1], ['b', '=', 2]], 'is a nested ObjectQL AST holding an `or` group'],
+    ['AST: neither one comparison nor a flat list', ['a', '=', 1, 2], 'neither one comparison `[field, operator, value]` nor a flat list'],
+    ['AST: a comparison the AST refuses to lower', [['a', '>']], 'holds the AST comparison `["a",">"]`, which the AST itself does not lower'],
+    ['AST: an operator with no rule word', [['a', 'ilike', '%x%']], 'compares `a` with the AST operator `ilike`'],
+    ['door: a mapped rule the door refuses', { a: { $in: 'x' } }, 'would become the rule `{"field":"a","operator":"in","value":"x"}`, which this door refuses itself ('],
+  ];
+
+  it.each(BRANCHES)('%s', (_branch, filter, said) => {
+    const { value, notices, todos } = gridFilter(filter);
+    expect(value).toEqual(filter);
+    expect(notices).toEqual([]);
+    expect(todos).toHaveLength(1);
+    const [todo] = todos;
+    expect(todo!.code).toBe(CONVERSION_TODO_CODE);
+    expect(todo!.conversionId).toBe(ID);
+    expect(todo!.surface).toBe(ALL_CONVERSIONS.find((c) => c.id === ID)!.surface);
+    expect(todo!.path).toBe('pages[0].regions[0].components[0].properties.filter');
+    expect(todo!.from).toBe(JSON.stringify(filter));
+    expect(todo!.reason).toContain(said);
+    // The tail every TODO of this entry carries: what happens to the row next.
+    expect(todo!.reason).toMatch(/Left as stored, it keeps loading unchanged and is refused at this door on its next save\.$/);
+    expect(todo!.message).toContain(`at ${todo!.path} as stored`);
+    expect(todo!.message).toContain(todo!.reason);
+  });
+
+  it('the inline-row branch: a filter that WOULD convert, left as stored because of the node', () => {
+    const { value, todos } = (() => {
+      const r = convert(pageWith({ type: 'object-map', properties: { staticData: [], filter: { a: 1 } } }));
+      return { value: (componentOf(r.stack).properties as Dict).filter, todos: r.todos };
+    })();
+    expect(value).toEqual({ a: 1 });
+    expect(todos).toHaveLength(1);
+    expect(todos[0]!.reason).toContain('sits on a block whose rows are inline (`staticData`)');
+  });
+
+  it('on an inline-row node the filter\'s own blocker wins — a combinator is still named', () => {
+    const { todos } = convert(
+      pageWith({ type: 'object-map', properties: { staticData: [], filter: { $or: [{ a: 1 }] } } }),
+    );
+    expect(todos).toHaveLength(1);
+    expect(todos[0]!.reason).toContain('carries the combinator `$or`');
+  });
+
+  it('names the block by its type, and by its `id` when it has one', () => {
+    const { todos } = convert(
+      pageWith({ type: 'object-kanban', id: 'pipeline_board', properties: { objectName: 'deal', filter: { $or: [] } } }),
+    );
+    expect(todos[0]!.reason).toMatch(/^On the `object-kanban` block `pipeline_board`, this filter carries/);
+    const anonymous = convert(pageWith({ type: 'object-kanban', properties: { objectName: 'deal', filter: { $or: [] } } }));
+    expect(anonymous.todos[0]!.reason).toMatch(/^On the `object-kanban` block, this filter carries/);
+  });
+
+  it('control: every shape that converts losslessly reports NO TODO', () => {
+    for (const filter of [
+      { stage: 'open', score: 3 },
+      { amount: { $gt: 100, $lte: 5000 } },
+      [['owner_id', '=', '{current_user_id}'], ['deleted_at', 'is_null']],
+      ['status', '!=', 'done'],
+      {},
+    ]) {
+      const { value, notices, todos } = gridFilter(filter);
+      expect(Array.isArray(value), JSON.stringify(filter)).toBe(true);
+      expect(notices, JSON.stringify(filter)).toHaveLength(1);
+      expect(todos, JSON.stringify(filter)).toEqual([]);
+    }
+  });
+
+  it('control: a value that is not a legacy form is neither converted nor reported', () => {
+    for (const filter of [[], [{ field: 'a', operator: 'equals', value: 1 }], 'status = open', 42]) {
+      const { value, notices, todos } = gridFilter(filter);
+      expect(value, JSON.stringify(filter)).toEqual(filter);
+      expect(notices, JSON.stringify(filter)).toEqual([]);
+      expect(todos, JSON.stringify(filter)).toEqual([]);
+    }
+  });
+
+  it('one page, two blocks: the lossless filter converts, the combinator one is a TODO', () => {
+    const { stack, notices, todos } = convert({
+      pages: [
+        {
+          name: 'pipeline',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'object-grid', properties: { objectName: 'deal', filter: { stage: 'open' } } },
+                { type: 'object-kanban', properties: { objectName: 'deal', filter: { $or: [{ stage: 'open' }, { stage: 'won' }] } } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const components = ((stack.pages as Dict[])[0]!.regions as Dict[])[0]!.components as Dict[];
+    expect((components[0]!.properties as Dict).filter).toEqual([{ field: 'stage', operator: 'equals', value: 'open' }]);
+    expect((components[1]!.properties as Dict).filter).toEqual({ $or: [{ stage: 'open' }, { stage: 'won' }] });
+    expect(notices.map((n) => n.path)).toEqual(['pages[0].regions[0].components[0].properties.filter']);
+    expect(todos.map((t) => t.path)).toEqual(['pages[0].regions[0].components[1].properties.filter']);
+  });
+
+  it('the fixture: its two stored-as-is sites are its two TODOs', () => {
+    const entry = ALL_CONVERSIONS.find((c) => c.id === ID)!;
+    const { todos } = convert(entry.fixture.before);
+    expect(todos.map((t) => [t.path, t.reason.slice(0, 40)])).toEqual([
+      ['pages[0].regions[0].components[1].properties.filter', 'On the `object-kanban` block, this filte'],
+      ['pages[0].regions[0].components[2].properties.filter', 'On the `object-map` block, this filter s'],
+    ]);
+  });
+
+  it('reporting writes nothing: every decline yields the same stack with or without a sink', () => {
+    for (const [, filter] of BRANCHES) {
+      const before = pageWith({ type: 'object-grid', properties: { objectName: 'deal', filter } });
+      const withSink = convert(before).stack;
+      const frozen = structuredClone(before);
+      // No sink at all — the authoring funnel's and every other seam's posture.
+      const without = applyConversions(frozen, { includeRetired: true });
+      expect(without).toBe(frozen);
+      expect(JSON.stringify(withSink)).toBe(JSON.stringify(before));
+    }
   });
 });

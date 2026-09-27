@@ -10368,6 +10368,12 @@ function ruleOperatorForFilterOperator(op: string): ViewFilterOperator | undefin
  */
 type FilterMapping = { rules: MappedFilterRule[] } | { declined: string };
 
+/** A refusal's first sentence, without its full stop — a TODO reason quotes only that much. */
+function firstSentence(message: string): string {
+  const end = message.search(/\.(\s|$)/);
+  return (end === -1 ? message : message.slice(0, end)).trim();
+}
+
 /** `` `a` `` / `` `a` and `b` `` — key names as a TODO reason quotes them. */
 function quoteKeys(keys: readonly string[]): string {
   return keys.map((key) => `\`${key}\``).join(' and ');
@@ -10507,7 +10513,8 @@ function astFilterToRules(ast: readonly unknown[]): FilterMapping | undefined {
     visit(ast);
     return {
       declined: groups.size > 0
-        ? `is a nested ObjectQL AST holding ${quoteKeys([...groups])} group${groups.size === 1 ? '' : 's'}, `
+        ? `is a nested ObjectQL AST holding ${groups.size === 1 ? 'an ' : ''}${quoteKeys([...groups])} `
+          + `group${groups.size === 1 ? '' : 's'}, `
           + 'and only a single-level AST (one comparison, or a flat list of them) has a lossless rule '
           + 'spelling: a combinator is never flattened — that would change which rows the filter '
           + 'selects. Decide which rows it should select, and write the rules that select exactly those'
@@ -10531,8 +10538,11 @@ function astFilterToRules(ast: readonly unknown[]): FilterMapping | undefined {
       let lowered: Record<string, unknown> | undefined;
       try {
         lowered = parseFilterAST([...node]) as Record<string, unknown> | undefined;
-      } catch {
-        return unspellable;
+      } catch (error) {
+        return {
+          declined: `holds the AST comparison \`${JSON.stringify(node)}\`, which the AST itself does not `
+            + `lower (${firstSentence(error instanceof Error ? error.message : String(error))})`,
+        };
       }
       if (!lowered || Object.keys(lowered).length !== 1 || !(field in lowered)) return unspellable;
       const condition = lowered[field];
@@ -10572,7 +10582,7 @@ function legacyFilterToRuleArray(value: unknown): FilterMapping | undefined {
     const first = parsed.error.issues[0]?.message;
     return {
       declined: `would become the rule \`${JSON.stringify(rule)}\`, which this door refuses itself`
-        + (first ? ` (${first})` : ''),
+        + (first ? ` (${first.trim().replace(/\.$/, '')})` : ''),
     };
   }
   return mapping;
