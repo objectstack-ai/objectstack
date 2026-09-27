@@ -80,7 +80,12 @@ const PKG_ADMIN = () => ({
     },
 }) as any;
 
-const manifest = (id: string, namespace: string) => ({ id, name: id, namespace, version: '1.0.0' });
+// [#19328] `type` added to a fixture that never carried one. The subject here
+// is the namespace refusal's code, ⛔ not manifest completeness — but
+// `ManifestSchema` has always declared `type` required, and the install door now
+// parses the whole body, so without it every install below would be refused on
+// `type` before the namespace gate is reached.
+const manifest = (id: string, namespace: string) => ({ id, name: id, namespace, version: '1.0.0', type: 'app' });
 
 /**
  * The door over a REAL registry. `collisionPolicy: 'error'` is the default

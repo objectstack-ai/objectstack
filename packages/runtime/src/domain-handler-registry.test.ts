@@ -597,7 +597,12 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
         // keeps it, asserting the refusal this fixture used to assert the
         // acceptance of. `com.example.pkg-a` is the same name made publishable,
         // which is the repair `manifestIdRefusal` itself prescribes for it.
-        const manifest = { id: 'com.example.pkg-a', name: 'A', version: '1.0.0' };
+        //
+        // [#19328] And `type`, the third key the door's whole-body parse reads:
+        // `ManifestSchema` declares it required, so the `forced` limb's `201`
+        // was unreachable without it — and the `dup` limb would answer `400`,
+        // which is ordered ahead of the `409` this case is about.
+        const manifest = { id: 'com.example.pkg-a', name: 'A', version: '1.0.0', type: 'app' };
         const dup = await dispatcher.dispatch('POST', '/packages', manifest, {}, {} as any);
         expect(dup.response?.status).toBe(409);
         const forced = await dispatcher.dispatch('POST', '/packages', manifest, { overwrite: 'true' }, {} as any);

@@ -1815,7 +1815,9 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handlePackages(
                 '',
                 'POST',
-                { manifest: { id: 'com.acme.crm', name: 'Clobber', version: '9.9.9' } },
+                // [#19328] `type` present: without it the whole-body parse
+                // answers 400, which is ordered ahead of the 409 under test.
+                { manifest: { id: 'com.acme.crm', name: 'Clobber', version: '9.9.9', type: 'app' } },
                 {},
                 PKG_ADMIN(),
             );
@@ -1841,7 +1843,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handlePackages(
                 '',
                 'POST',
-                { manifest: { id: 'com.acme.crm', name: 'Upgraded', version: '2.0.0' } },
+                { manifest: { id: 'com.acme.crm', name: 'Upgraded', version: '2.0.0', type: 'app' } },
                 { overwrite: 'true' },
                 PKG_ADMIN(),
             );
@@ -2347,7 +2349,9 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const manifest = { id: 'app.demo', name: 'Demo', version: '1.0.0', type: 'application' };
+            // [#19328] `type: 'app'` — `'application'` is no member of the
+            // declared `type` enum, and the door now parses the whole body.
+            const manifest = { id: 'app.demo', name: 'Demo', version: '1.0.0', type: 'app' };
             const result = await dispatcher.handlePackages('', 'POST', { manifest, settings: { a: 1 } }, {}, PKG_ADMIN());
 
             expect(result.handled).toBe(true);
@@ -2369,7 +2373,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const manifest = { id: 'app.fb', name: 'FB', version: '1.0.0', type: 'application' };
+            const manifest = { id: 'app.fb', name: 'FB', version: '1.0.0', type: 'app' };
             const result = await dispatcher.handlePackages('', 'POST', { manifest }, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(201);

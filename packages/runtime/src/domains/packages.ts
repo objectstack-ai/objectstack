@@ -113,6 +113,14 @@ import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#19328] The install door's DECLARED body contract, asked whole at
+// `POST /api/v1/packages` — the union of the wrapped request and a bare
+// manifest — plus the wrapped branch by name, which the refusal re-reads to
+// locate a failure on the form the caller wrote. Both are the declarations
+// `@objectstack/spec` publishes for this door; nothing here restates them.
+// Its own line on purpose: the `@objectstack/spec/kernel` import above carries
+// the id/version legs' names and is not this import's to share.
+import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectstack/spec/api';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -658,6 +666,87 @@ function readRequestedVersion(raw: unknown): RequestedVersion {
     return { kind: 'exact', value: raw };
 }
 
+/** One zod issue, as far as {@link installBodyRefusal} reads it. */
+interface InstallBodyIssue {
+    readonly code: string;
+    readonly path: ReadonlyArray<PropertyKey>;
+    readonly message: string;
+    readonly keys?: ReadonlyArray<string>;
+}
+
+/**
+ * [#19328] The sentence `POST /api/v1/packages` answers when the body parses
+ * through NEITHER declared form of `PackageInstallBodySchema`.
+ *
+ * ## Which form the caller wrote — the declaration's own discriminator
+ *
+ * The union's two branches are disjoint BY CONSTRUCTION, and the spec
+ * docblock says why: `ManifestSchema` is a strict close with no `manifest`
+ * key, and the wrapped request REQUIRES one. So "does the body carry a
+ * `manifest` key" is not a heuristic this door invented — it is the fact that
+ * makes the union unambiguous. A body with the key can only ever pass the
+ * wrapped branch; a body without it, only the bare one.
+ *
+ * The verdict is the UNION's, taken by the caller before this runs. What this
+ * adds is WHERE: zod reports a failed union as one `invalid_union` carrying
+ * both branches' complaints, and the branch the caller did not write explains
+ * nothing — a wrapped body read as a bare manifest "lacks `id`" and has an
+ * "unrecognised key `manifest`". So the form the caller wrote is re-parsed
+ * alone and ITS issues are the ones located. ⛔ The shared union-branch
+ * ranking (`zodIssuesToFields`) is not used for this: measured, it picks the
+ * bare branch for `{ manifest: null, … }` and reports both branches for a bare
+ * body missing `type`, because it ranks by issue shape and cannot know that
+ * one key decides the form.
+ *
+ * ## The one prescription it adds — install options spelled on the bare form
+ *
+ * `settings`, `enableOnInstall`, `overwrite` and the wrapped request's other
+ * option keys are not manifest keys, and `ManifestSchema`'s strict close
+ * refuses them by name. The declaration states the remedy in as many words —
+ * «a caller that needs an option sends the wrapped form» — so the refusal
+ * says so, naming the keys it found. The option set is read OFF the wrapped
+ * declaration (`PackageInstallRequestSchema.shape`), ⛔ never listed here: a
+ * key the declaration gains is prescribed for with no edit to this file.
+ * `overwrite` alone also rides the query string, which a bare body may use.
+ *
+ * Each issue's own `message` is surfaced verbatim, as the id leg surfaces
+ * `manifestIdRefusal`: the strict close's unknown-key sentence is the
+ * declaration's, and rewording it here would be a second sentence for one
+ * rule.
+ */
+function installBodyRefusal(body: unknown, unionIssues: ReadonlyArray<InstallBodyIssue>): string {
+    const wrapped = body !== null && typeof body === 'object' && 'manifest' in body;
+    const branch = (wrapped ? PackageInstallRequestSchema : ManifestSchema).safeParse(body);
+    // By the disjointness above the branch cannot pass where the union failed;
+    // if a future union ever made it, the union's own issues still say what
+    // was refused rather than an empty sentence.
+    const issues: ReadonlyArray<InstallBodyIssue> = branch.success ? unionIssues : branch.error.issues;
+    const located = issues
+        .map((issue) => `${issue.path.map(String).join('.') || '(body)'}: ${issue.message}`)
+        .join('; ');
+    const form = wrapped
+        ? 'the WRAPPED form, { manifest, …install options }'
+        : 'the BARE form, a manifest as the whole body';
+    let text = `Invalid package install body (read as ${form}) — ${located}`;
+    if (!wrapped) {
+        const optionKeys = new Set(
+            Object.keys(PackageInstallRequestSchema.shape).filter((key) => key !== 'manifest'),
+        );
+        const misplaced = issues
+            .filter((issue) => issue.code === 'unrecognized_keys' && issue.path.length === 0)
+            .flatMap((issue) => issue.keys ?? [])
+            .filter((key) => optionKeys.has(key));
+        if (misplaced.length > 0) {
+            const named = misplaced.map((key) => `\`${key}\``).join(', ');
+            const fields = misplaced.map((key) => `"${key}": …`).join(', ');
+            text += ` — ${named} ${misplaced.length === 1 ? 'is an install option' : 'are install options'}, `
+                + `never a manifest key: send the wrapped form { "manifest": { … }, ${fields} }`
+                + (misplaced.includes('overwrite') ? ', or `?overwrite=true` on the query string' : '');
+        }
+    }
+    return text;
+}
+
 /**
  * The version the registry's row for a package IS (#17416).
  *
@@ -885,6 +974,46 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // registry write only when the protocol service/method is unavailable.
         if (parts.length === 0 && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            // [#19328] ⭐ THE DOOR PARSES THE WHOLE BODY — once, here, through
+            // the union `@objectstack/spec` declares for it
+            // (`PackageInstallBodySchema`: the wrapped request, or a bare
+            // manifest as the whole body).
+            //
+            // Until this line the door parsed two legs of the manifest (`id`,
+            // `version`) and read everything else positionally off the raw
+            // body, so four classes the declaration refuses still answered
+            // `201`: a manifest with no `type`; an unknown key inside the
+            // manifest or on a bare body (stored with the package); a
+            // string-typed `enableOnInstall` / `overwrite` (`'false'` matched
+            // neither `=== true` nor `=== false` and installed a fresh id
+            // ENABLED — the caller's intent inverted, not merely dropped); and
+            // install options spelled on the bare form, which the handler
+            // honoured or ignored key by key (`overwrite` and `settings`
+            // honoured, `enableOnInstall` ignored, all three stored as
+            // manifest keys). The two legs' own comments named the one call
+            // that closes all four; this is it.
+            //
+            // The ruling is 基本裁决原则 —「声明而未兑现是实现缺口,补实现或退役,
+            // ⛔ 不在消费端收窄」— and making a door parse what its schema
+            // ALREADY declares is 拉回已声明契约, ⛔ not 扩大接受集. ⛔ Nothing in
+            // `packages/spec` moves, and neither branch is relaxed: the
+            // declaration's own docblock forbids it («a caller that needs an
+            // option sends the wrapped form»).
+            //
+            // ⚠️ What the union does NOT refuse, deliberately: an unknown key at
+            // the TOP LEVEL of the wrapped form. `PackageInstallRequestSchema`
+            // is a plain `z.object` (strip mode) and its docblock forbids
+            // closing it, so `{ manifest, bogus }` parses green with `bogus`
+            // dropped — and this door, reading only parsed keys, now does
+            // exactly what the declaration says. Refusing it here without the
+            // declaration would make the published contract admit a body the
+            // door refuses; that is the declaration's decision to make.
+            //
+            // The verdict is answered after the `id` and `version` legs below,
+            // which keep their own published sentences; every later read (the
+            // form, `overwrite`, `settings`, `enableOnInstall`) goes through
+            // the parsed value, never the raw body.
+            const declaredBody = PackageInstallBodySchema.safeParse(body);
             const manifest = body.manifest || body;
             const pkgId = typeof manifest?.id === 'string' ? manifest.id.trim() : '';
             // A package id is mandatory — without one the install cannot be keyed.
@@ -921,14 +1050,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // have produced a fourth sentence for one rule and dropped the
             // repair.
             //
-            // ⛔ SCOPE — THE `id` LEG ALONE. The declaration's residual docblock
-            // records the classes this door still answers `201` to; a missing
-            // `type`, unknown keys on either body form, a string-typed
-            // `enableOnInstall`/`overwrite` and install options spelled on the
-            // bare form are each their own narrowing of a published wire
-            // contract and are deliberately LEFT STANDING. Closing them is the
-            // ONE call this code still pointedly does not make,
-            // `PackageInstallBodySchema.safeParse(body)`.
+            // SCOPE — THE `id` LEG, with its own sentence. The rest of the body
+            // (a missing `type`, unknown keys, a string-typed
+            // `enableOnInstall`/`overwrite`, install options spelled on the
+            // bare form) is judged by the whole-body parse below, which runs
+            // after this leg and the `version` one so that neither published
+            // sentence is displaced by a less specific one (#19328).
             //
             // ⭐ ORDERED AFTER THE `!pkgId` GATE, DELIBERATELY — and that is a
             // decision, because `''` fails the pattern too. Left of this gate,
@@ -989,18 +1116,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // ALREADY declares is 拉回已声明契约, ⛔ not 扩大接受集. Nothing in
             // `packages/spec` moves for this; the declaration was already right.
             //
-            // ⛔ SCOPE — THE `version` LEG ALONE. The declaration's own residual
-            // docblock records FIVE classes this door answers `201` to. The
-            // other four — a missing `type`, unknown keys on either body form,
-            // a string-typed `enableOnInstall`/`overwrite`, install options
-            // spelled on the bare form — are each their own reading and are
-            // deliberately LEFT STANDING. They are separable, not entangled:
-            // closing them is the ONE call this code pointedly does not make,
-            // `PackageInstallBodySchema.safeParse(body)`. The five are produced
-            // at three different levels — a per-key field schema (this leg), the
-            // union arms' `.strict()` close (unknown keys, bare-form options),
-            // and this handler's own `=== true` / `=== 'true'` comparisons
-            // (the string-typed options) — and only the first is asked here.
+            // SCOPE — THE `version` LEG, with its own sentence. It keeps its
+            // prescription («add it to the manifest for '<id>'») ahead of the
+            // whole-body parse below, which judges everything else (#19328).
             //
             // ⛔ HTTP-DOOR-ONLY BY CONSTRUCTION. Boot-time and in-process
             // installs reach `SchemaRegistry.installPackage` / `registerApp`
@@ -1025,27 +1143,54 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     ),
                 };
             }
+            // [#19328] The whole-body verdict, parsed at the top of this branch,
+            // answered here: after the two legs whose sentences it must not
+            // displace, and — like them — ahead of the 409, so a request-shape
+            // refusal never depends on whether the id happens to be installed.
+            // Same envelope as those two legs: `400`, whose standard member is
+            // `VALIDATION_ERROR`; ⛔ no code is minted for it.
+            if (!declaredBody.success) {
+                return {
+                    handled: true,
+                    response: deps.error(installBodyRefusal(body, declaredBody.error.issues), 400),
+                };
+            }
+            // Every option below is read off the PARSED request, and only when
+            // the body arrived in the wrapped form — the one form that declares
+            // options. The bare branch has none to read: it refused them above.
+            const request = 'manifest' in declaredBody.data ? declaredBody.data : undefined;
             // Duplicate-detection: POST /packages CREATES a package. If one with
             // this id already exists, silently overwriting it destroys the existing
             // manifest (name/version/…) with no warning — a data-loss footgun
             // surfaced in Studio package-create dogfooding. Reject with 409 Conflict
             // instead. Intentional upgrade / re-install flows opt back in with
-            // `overwrite: true` (body) or `?overwrite=true`.
+            // `overwrite: true` (wrapped body) or `?overwrite=true` (either form).
             const overwrite =
-                body?.overwrite === true || query?.overwrite === 'true' || query?.overwrite === true;
+                request?.overwrite === true || query?.overwrite === 'true' || query?.overwrite === true;
             if (!overwrite && registry.getPackage(pkgId)) {
                 return {
                     handled: true,
                     response: deps.error(`Package '${pkgId}' already exists`, 409),
                 };
             }
+            // ⚠️ The MANIFEST handed on is the one the caller sent, ⛔ not the
+            // parsed copy. `ManifestSchema` applies defaults at parse time
+            // (`scope`, `defaultDatasource`), and this door has always stored
+            // what it was sent — a key-by-key copy, no defaults, which is what
+            // `withWritableVerdict`'s header records about a Studio-created
+            // base. The parse is a GATE here, not a normaliser: once it passed,
+            // the sent manifest carries no top-level key the manifest's strict
+            // close refuses. (A nested shape the declaration leaves in strip
+            // mode is stored as sent — unchanged by this gate, and not a class
+            // this door answers for.)
+            const settings = request?.settings;
             let pkg: any;
             const protocolSvc = await resolveProtocol(deps, _context).catch(() => null);
             if (protocolSvc && typeof protocolSvc.installPackage === 'function') {
-                const out = await protocolSvc.installPackage({ manifest, settings: body.settings });
+                const out = await protocolSvc.installPackage({ manifest, settings });
                 pkg = out?.package ?? out;
             } else {
-                pkg = registry.installPackage(manifest, body.settings);
+                pkg = registry.installPackage(manifest, settings);
             }
             // [#18058 → #18877] HONOUR `enableOnInstall`, which this door declared
             // and ignored. `PackageInstallRequestSchema` has carried
@@ -1077,22 +1222,26 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the path an upgrade takes — the same «declared ≠ enforced» defect
             // #18058 closed, pointing the other way.
             //
-            // ⚠️ Read from the WRAPPED body alone. `manifest !== body` is this
-            // handler's own test for which of the two declared body forms
-            // arrived (`PackageInstallBodySchema`); in the BARE form the key
-            // would be a manifest key, which `ManifestSchema`'s strict close
-            // refuses by name — honouring it there would enforce something no
-            // schema declares. So a bare body is always 「缺省」: it preserves.
+            // ⚠️ Read from the PARSED WRAPPED request alone (#19328). In the
+            // BARE form the key would be a manifest key, which `ManifestSchema`'s
+            // strict close refuses by name — so a bare body carrying the key
+            // never reaches this line, and every bare body that does reach it
+            // is 「缺省」: it preserves.
+            //
+            // ⭐ The parse is what makes the three states exact. Read off the
+            // raw body, `enableOnInstall: 'false'` was a string that matched
+            // neither arm below and fell through to 「缺省」 — a fresh id
+            // installed ENABLED against the caller's spelled intent. The
+            // declaration types the key `z.boolean().optional()`, so that body
+            // is refused above and every value that reaches here is `true`,
+            // `false`, or absent.
             //
             // ⚠️ `=== true` / `=== false`, never a truthiness test and never a
             // `??` default: the THREE states of this key are the contract, and
-            // collapsing absent into either one is the defect this card fixed.
-            // The declaration's own `.default(true)` never reaches here — this
-            // handler reads the raw body and nothing parses the install request
-            // through `PackageInstallRequestSchema` on the serving path — so
-            // absence arrives intact and is read as absence.
-            const wrapped = manifest !== body;
-            const requestedEnabled = wrapped ? body?.enableOnInstall : undefined;
+            // collapsing absent into either one is the defect #18877 fixed. The
+            // declaration carries no `.default()` for the key, so absence
+            // survives the parse and is read as absence.
+            const requestedEnabled = request?.enableOnInstall;
             if (requestedEnabled === true) {
                 const enabled = registry.enablePackage(pkgId);
                 if (enabled) pkg = enabled;
