@@ -16,7 +16,7 @@
  * the round-trip was pinned against **no shipped implementation at all**: the
  * suite asserted that a `Map` behaves like a `Map`.
  *
- * That is not a hypothetical hole. It is the exact hole #6725 fell through:
+ * That is not a hypothetical hole. It is the exact hole commit 1507ba356 closed:
  * `MetadataFacade.register('object', …)` wrote into a map none of its own reads
  * consulted, every read answered `undefined`, and the full `packages/objectql`
  * suite (167 files, 2917 tests) plus all 64 `lint.yml` gates stayed green while
@@ -40,7 +40,7 @@
  * `packages/objectql` hosts the shipped-implementation driver because it is the
  * only package that can see all three at once — it depends on
  * `@objectstack/metadata` and `@objectstack/core` and owns `MetadataFacade` —
- * the same argument `metadata-service-getobject-equivalence.test.ts` (#6745)
+ * the same argument `metadata-service-getobject-equivalence.test.ts` (commit 7a5ef0008)
  * already makes for living there.
  *
  * ## What `expected` means, precisely
@@ -81,7 +81,7 @@
  * service slot has to answer. Where the answers currently differ, the case
  * still belongs — that divergence is the finding.
  *
- * Refs #7223, #6725, PR #7211, #6745, #6505 / PR #6723.
+ * Refs #7223, #6505; commits 1507ba356 (the facade split fix, PR #7211), 7a5ef0008 (the getObject pin), 8ad609c69 (getObject's declared answer).
  */
 
 /** One `register(type, name, data)` call in a case's setup. */

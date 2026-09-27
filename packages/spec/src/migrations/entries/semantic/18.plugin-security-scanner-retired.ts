@@ -20,8 +20,8 @@ export const entry: SemanticMigration = {
     + 'the GitHub Advisory Database, OSV — and treat an unaudited third-party plugin as '
     + 'untrusted code.',
   reason:
-    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #14919 (director summon #14, '
-    + 'decision batch #42, ruled A: retire in three surfaces). The class shipped on '
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05: retire the class and its two '
+    + 'companion types with no replacement export, rather than repair it. The class shipped on '
     + '`@objectstack/core`\'s public barrel as a SECURITY control and could not fail. `scan()` '
     + 'composed five private scanners: four of them (`scanCode`, `scanMalware`, `scanLicenses`, '
     + '`scanConfiguration`) allocated an empty issue array, logged and returned it with no code '
@@ -41,8 +41,10 @@ export const entry: SemanticMigration = {
     + 'per-instance Map discarded with the object), and hence no seam `applyConversionsToStored'
     + 'Item` would ever reach. The enforced channel is tsc, at the consumer\'s own import site; '
     + 'for anyone it does not reach, this ledger entry and the generated upgrade guide are the '
-    + 'only channel there is. That is the `contracts.IDataDriver.findStream` (#4484) and '
-    + '`actor-user-roles-to-positions` (#6011) disposition — a TS/API contract, no stored '
+    + 'only channel there is. That is the disposition of `contracts.IDataDriver.findStream` '
+    + '(removed with no tombstone, because nothing parses a driver object) and of '
+    + '`actor-user-roles-to-positions` (the `ctx.user` `roles` alias, closed at once on the '
+    + 'maintainer\'s word rather than given a window) — a TS/API contract, no stored '
     + 'source, no tombstone, tsc at the call site — applied to a surface one layer further out '
     + 'than either: those are declared in `packages/spec`, this one only in `packages/core`. '
     + '⚠️ The out-of-repo consumer population is NOT MEASURED. Zero constructors were found in '

@@ -9,14 +9,16 @@ export const entry: SemanticMigration = {
     + 'non-integer or negative values (`scale: 2.5`, `precision: -1`)',
   replacement: 'a non-negative integer digit count, or no declaration at all. The row-level '
     + 'key is a per-form override of the referenced object field\'s own declaration (that '
-    + 'surface tightened first: #8321) — a malformed row value is deleted, and a count '
+    + 'surface tightened first, to a non-negative integer) — a malformed row value is '
+    + 'deleted, and a count '
     + 'that was actually wanted is re-declared as a non-negative integer (`scale: 2.5` was '
     + 'probably `2` or `3`)',
   reason:
-    '#12174: the form-field row carried the pre-#8321 shape — bare `z.number()` — after '
-    + 'the object-field surface converged on `z.number().int().min(0)` for both digit '
+    'The form-field row still carried the object field\'s old shape — bare `z.number()` — '
+    + 'after that surface converged on `z.number().int().min(0)` for both digit '
     + 'counts. The row keys are LIVE, measured in objectui: the spec bridge '
-    + '(`form-view.ts` mapField, objectui#5898) and plugin-form (`sectionFields.ts`) copy '
+    + '(`form-view.ts` mapField, which maps every spec key or explains why it does not) and '
+    + 'plugin-form (`sectionFields.ts`) copy '
     + 'them onto the runtime field, `ObjectForm` derives the number input\'s step from '
     + '`precision`, and the `NumberField` widget reads `scale` — so a malformed count '
     + 'flowed into rendering arithmetic (`Math.pow(10, -precision)`) with no defined '

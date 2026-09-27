@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16559] The machine-readable half of a resume failure is declared ONCE in
+ * [commit c7aca0dce] The machine-readable half of a resume failure is declared ONCE in
  * `packages/spec` and reused by the approval carriers — the contract half of
  * the #16472 family ruling (maintainer 2026-09-07, decision batch #76).
  *

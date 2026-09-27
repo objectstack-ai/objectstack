@@ -190,7 +190,7 @@ describe('the declaration shape door (artifact / publish route — see the heade
   });
 
   it('a headless body parses at the shape door and is refused by the GATE, naming the missing half (#10338)', () => {
-    // Until #10338 the VOCABULARY refused this body for its missing `target`.
+    // Until commit d2619fd0c the VOCABULARY refused this body for its missing `target`.
     // That requirement was a dead letter for `object_operation` — nothing
     // reads `target` for that type — so the key is optional now, and "no
     // execution target at all, nothing could ever run it" is judged where the

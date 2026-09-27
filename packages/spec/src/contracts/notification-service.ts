@@ -67,7 +67,7 @@ export interface NotificationResult {
  * It used to mirror it "minus `cursor`": #4127 dropped the key from this
  * internal contract because no implementation paginates by cursor, while the
  * wire schema kept declaring it to callers for another nine majors. That split
- * is what #6361 closed — the wire half was removed in protocol 17 (maintainer
+ * is what commit 90bbf2510 closed — the wire half was removed in protocol 17 (maintainer
  * ruling 2026-08-07, Option A), so the two faces of one query finally agree and
  * this interface no longer has to explain a subtraction. The `declared ≠
  * enforced` gap this file exists to close (#4127) is closed on both faces.
@@ -109,7 +109,7 @@ export interface InboxNotification {
 /**
  * Result of {@link INotificationService.listInbox}.
  *
- * Its two members carry deliberately DIFFERENT bounds (#6363): `notifications`
+ * Its two members carry deliberately DIFFERENT bounds (commit 17d095413): `notifications`
  * is the requested page, `unreadCount` is the whole matching inbox.
  */
 export interface InboxListResult {
@@ -121,14 +121,14 @@ export interface InboxListResult {
     notifications: InboxNotification[];
     /**
      * Total unread across the user's whole matching inbox — NOT the window
-     * above (#6363). The same quantity the wire contract publishes as
+     * above (commit 17d095413). The same quantity the wire contract publishes as
      * `ListNotificationsResponseSchema.unreadCount` ("Total number of unread
      * notifications", `api/protocol.zod.ts`).
      *
      * This is the number a bell badge shows, so it must not saturate at the
      * page size: do not re-derive it by counting `notifications`, and do not
      * clamp it to `notifications.length`. Counting over the window is exactly
-     * the defect #6363 fixed — a user with 60 unread was told 50, and
+     * the defect commit 17d095413 fixed — a user with 60 unread was told 50, and
      * `?limit=10` told them 10.
      *
      * {@link InboxQuery.read} does not zero it either: asking for the READ half

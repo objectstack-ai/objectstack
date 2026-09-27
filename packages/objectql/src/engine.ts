@@ -43,7 +43,10 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 // stores and the engine-held projection the dispatch doors consult.
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
 import { assertListComparandShapes, assertFilterIsMaterializable, invalidFilterError } from './filter-comparand-shape.js';
-import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
+import {
+  assertHavingTemporalComparandsInterpretable,
+  assertTemporalComparandsInterpretable,
+} from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
@@ -16408,6 +16411,19 @@ export class ObjectQL implements IObjectQLEngine {
               aggregatedRowColumns(query.groupBy, query.aggregations),
               havingColumnClasses,
           );
+          // [#20263] …and last, the TEMPORAL-comparand door `where` (#8690) and
+          // the per-aggregation `filter` (#20148) take: the same walk and the
+          // same `@objectstack/core` predicate, with each column's kind read
+          // from the class #20127 derived above (`min` / `max` of a temporal
+          // field keeps its kind, a `day` bucket is a date, `count` / `sum` /
+          // `avg` are not temporal). A comparand the column's storage rule
+          // cannot read (`'not-a-date'`, a `date` year outside 0..9999) was
+          // compared as written and kept no group or every group, on both
+          // `applyHaving` doors, while its `where` twin answered 400. After
+          // every other `having` door, so a clause one of them refuses keeps
+          // that refusal's words; on the caller's own clause, before the
+          // bigint narrowing, which is what `where`'s object form judges.
+          assertHavingTemporalComparandsInterpretable(object, query.having, havingColumnClasses, query);
           if (having !== query.having) query = { ...query, having };
       }
       const driver = this.getDriver(object);

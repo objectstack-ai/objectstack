@@ -19,7 +19,11 @@
 //     shrink the sweep while the file count stayed comfortably non-zero, and the
 //     test would report a clean audit over source it never opened — the exact
 //     shape the rule itself is about, turned on the rule (#4930). So the root is
-//     resolved up front and the walk carries no `catch`.
+//     resolved up front, and the walk tolerates exactly one error: an entry its
+//     own listing named that is gone when it is read, judged at the stat
+//     (`statListedEntry`), at a listed directory's `readdirSync`
+//     (`readListedDirectory`) and at the sweep's `readFileSync`
+//     (`readCollectedFile`). Every other error is rethrown.
 //  2. **A rule that matches nothing.** A ratchet that has only ever been green
 //     cannot be told apart from a dead one (#4690), and this one has been green
 //     from its first commit. `the sweep can still fire` therefore pushes a
@@ -37,7 +41,7 @@
 //     gets (2)'s treatment rather than a comment: it is a pure function, and
 //     `the staleness comparison can still fire` pushes a known pair through the
 //     SAME function the real case calls.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, statSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -66,20 +70,129 @@ const packagesDir = join(repoRoot, 'packages');
  */
 const LEDGER: Readonly<Record<string, string>> = {};
 
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'coverage', '.cache', '.next']);
+/**
+ * Directory names the walk never enters. `tmp` is gitignored scratch (the root
+ * `.gitignore` ignores `tmp/`, and no tracked path under `packages/` sits below
+ * one): `packages/cli` tests create and delete `.ts` fixtures under
+ * `packages/cli/tmp/`, which are not source and must not be audited as if they
+ * were.
+ */
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'coverage', '.cache', '.next', 'tmp']);
 
 /**
- * Every auditable `.ts` under `dir`.
+ * Whether `err`, thrown by a read of `path`, means the entry was ABSENT at that
+ * read after the walk's own listing named it: the read answered `ENOENT`, and an
+ * `lstat` of `path` does not find a symlink there. The rule is the one the
+ * error-status walker pins (`statListedEntry` in `check-error-status-conformance.mjs`
+ * under `scripts/`), carried from the stat to the two reads that follow it.
  *
- * No `catch`: an error during the walk means the corpus was only partly read,
- * which must not be reported as a clean audit.
+ * Why it exists: this suite runs inside the same turbo run as package builds and
+ * other packages' tests, and both leave transient entries under `packages/`.
+ * tsup (through bundle-require) writes `tsup.config.bundled_ID.mjs` beside a
+ * package's config, imports it and unlinks it. Any entry a listing names can be
+ * gone by the stat, by its own `readdirSync` or by the sweep's `readFileSync`,
+ * and a bare read then threw `ENOENT` and failed the whole corpus.
+ *
+ * `true` when the `lstat` answers `ENOENT` (the entry vanished), and also when
+ * it finds a non-symlink back under the same name: the read still found nothing,
+ * and reading again would be a retry. `false` for everything else, which the
+ * caller rethrows:
+ *   - any code but `ENOENT`, `ENOTDIR` and `EACCES` included;
+ *   - a dangling symlink (the read answers `ENOENT`, `lstat` finds the link):
+ *     the entry exists, and skipping it would shrink the corpus.
+ * A missing ROOT never reaches here: no listing named it, and the root's own
+ * `readdirSync` is bare. Nothing is matched by name. ⛔ Never a retry.
  */
-function collectSourceFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
+function absentAtRead(err: unknown, path: string): boolean {
+  if ((err as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') return false;
+  try {
+    return !lstatSync(path).isSymbolicLink();
+  } catch (again) {
+    if ((again as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return true;
+    throw again;
+  }
+}
+
+/**
+ * `statSync(path)` for an entry the walk's own listing just named, or `null`
+ * when that entry VANISHED since. It applies `absentAtRead`'s rule inline,
+ * because this leg alone keeps the `lstat` result: an entry absent at the stat
+ * and back under the same name by the `lstat` is audited as present, since for
+ * a non-symlink `lstat` IS its `stat`. A dangling symlink still throws the
+ * stat's own error.
+ */
+function statListedEntry(path: string): Stats | null {
+  try {
+    return statSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw err;
+    let entry: Stats;
+    try {
+      entry = lstatSync(path);
+    } catch (again) {
+      if ((again as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return null; // vanished
+      throw again;
+    }
+    // Present after all. A symlink here is dangling: throw the original error.
+    if (entry.isSymbolicLink()) throw err;
+    // Absent at the stat, back under the same name: for a non-symlink, `lstat`
+    // IS its `stat`, so it is audited as present.
+    return entry;
+  }
+}
+
+/**
+ * `readdirSync(dir)` for a directory the walk's own listing named, or `null`
+ * when it was ABSENT at this read (`absentAtRead`). A listed directory
+ * replaced by a file answers `ENOTDIR`, which throws.
+ */
+function readListedDirectory(dir: string): string[] | null {
+  try {
+    return readdirSync(dir);
+  } catch (err) {
+    if (absentAtRead(err, dir)) return null;
+    throw err;
+  }
+}
+
+/**
+ * `readFileSync(file)` for a file the walk collected, or `null` when it was
+ * ABSENT at the sweep's read (`absentAtRead`).
+ */
+function readCollectedFile(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch (err) {
+    if (absentAtRead(err, file)) return null;
+    throw err;
+  }
+}
+
+/**
+ * Every auditable `.ts` under `root`.
+ *
+ * No `catch` of its own: an error during the walk means the corpus was only
+ * partly read, which must not be reported as a clean audit. The one tolerated
+ * error, an entry a listing named that is gone when it is read, is decided by
+ * `statListedEntry` and `absentAtRead` above. The ROOT's own listing is bare,
+ * so a missing root throws.
+ */
+function collectSourceFiles(root: string): string[] {
+  const out: string[] = [];
+  collectListedEntries(root, readdirSync(root), out);
+  return out;
+}
+
+function collectListedEntries(dir: string, entries: readonly string[], out: string[]): void {
+  for (const entry of entries) {
     if (SKIP_DIRS.has(entry)) continue;
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) collectSourceFiles(full, out);
-    else if (
+    const stats = statListedEntry(full);
+    if (stats === null) continue;
+    if (stats.isDirectory()) {
+      const children = readListedDirectory(full);
+      if (children !== null) collectListedEntries(full, children, out);
+    } else if (
       entry.endsWith('.ts') &&
       !entry.endsWith('.d.ts') &&
       !entry.includes('.test.') &&
@@ -89,7 +202,6 @@ function collectSourceFiles(dir: string, out: string[] = []): string[] {
       out.push(full);
     }
   }
-  return out;
 }
 
 /** The sweep, as one function, so the corpus and the non-vacuity case share it. */
@@ -207,9 +319,11 @@ describe('startup open-vocabulary verdicts across packages/ (#4776)', () => {
   let sweepResult: readonly StartupRegistryVerdictFinding[] | undefined;
 
   beforeAll(() => {
-    const findings = sweep(
-      files.map((file) => ({ file: relative(repoRoot, file), source: readFileSync(file, 'utf8') })),
-    ).map((finding) => Object.freeze(finding));
+    const sources = files.flatMap((file) => {
+      const source = readCollectedFile(file);
+      return source === null ? [] : [{ file: relative(repoRoot, file), source }];
+    });
+    const findings = sweep(sources).map((finding) => Object.freeze(finding));
     sweepResult = Object.freeze(findings);
   }, CORPUS_SWEEP_BUDGET_MS);
 

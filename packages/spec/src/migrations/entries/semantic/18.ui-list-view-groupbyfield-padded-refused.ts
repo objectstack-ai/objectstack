@@ -17,7 +17,9 @@ export const entry: SemanticMigration = {
     + 'the offending spelling verbatim, so the whitespace an author cannot see in an editor is '
     + 'visible in the message, next to the name to write instead.',
   reason:
-    '#17499. All three keys were a bare `z.string()`, so a padded group-by name was valid '
+    'The same padded-name defect the grouping-level narrowing '
+    + '(`ui-list-view-grouping-field-padded-refused`) refused, on the axis that one scoped out '
+    + 'by name, and given the same refusal. All three keys were a bare `z.string()`, so a padded group-by name was valid '
     + 'authored metadata all the way to the renderers. The name is a LOOKUP KEY on every row, '
     + 'measured in objectui at `dda8f3815`: the kanban board resolves its lane as '
     + '`laneField = groupByField || groupField || detectStatusField(objectDef)` and buckets cards '
