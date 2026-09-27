@@ -48,7 +48,8 @@ excludes every row for a rule array, so a rewrite there would empty the block. T
 on a block that queries an object converts. Such a page keeps loading and rendering unchanged,
 and its `filter` door refuses the form: at `dataSource.filter` on the page's next save; at a
 block's `properties.filter` / `properties.defaultFilters` only as the component-props gate's
-advisory finding (`os validate`) — a re-save through the metadata API is not refused there,
-measured — and for a combinator record that refusal no longer renders the combinator as a field
-(`{ field: '$or', … }`); it names the combinator and says why no rule spells it.
-`os migrate meta --stored` lists each filter left as stored as a TODO under its row.
+advisory finding (`os validate`, `os build`, `os lint`) — a re-save through the metadata API is
+not refused there, measured — and for a combinator record that refusal no longer renders the
+combinator as a field (`{ field: '$or', … }`); it names the combinator and says why no rule
+spells it.
+`os migrate meta --stored` lists each such filter left as stored as a TODO under its row.

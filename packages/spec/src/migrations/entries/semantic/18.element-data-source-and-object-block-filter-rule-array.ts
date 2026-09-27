@@ -79,11 +79,14 @@ export const entry: SemanticMigration = {
     + 'contract), and its `filter` door refuses the form: at `dataSource.filter` on the page\'s '
     + 'next save; at a block\'s `properties.filter` — like `properties.defaultFilters`, a key of '
     + 'the open `properties` bag — only as the component-props gate\'s advisory finding '
-    + '(`os validate`), since a re-save through the metadata API is not refused there. For a '
-    + 'combinator record that refusal names the combinator and says why no rule spells it. '
-    + '`os migrate meta --stored` lists each filter left as stored as a TODO under its row, '
-    + 'naming the block and what blocks the rewrite; a row whose only finding is such a TODO is '
-    + 'reported `skipped`, and the run\'s exit code does not change for it.',
+    + '(os validate, os build, os lint), since a re-save through the metadata API is not '
+    + 'refused there. For a combinator record that refusal names the combinator and says why no '
+    + 'rule spells it. `os migrate meta --stored` lists each such filter as a TODO under its '
+    + 'row, naming the block and what blocks the rewrite (a value that is not a record or AST '
+    + 'form at all — a bare string or number one of the former `z.unknown()` doors took — is '
+    + 'neither converted nor reported, and a row carrying nothing else reads as already on '
+    + 'protocol); a row whose only finding is such a TODO is reported `skipped`, and the run\'s '
+    + 'exit code does not change for it.',
   acceptanceCriteria:
     '`ElementDataSourceSchema.safeParse({ object, filter: [{ field: \'status\', operator: '
     + '\'equals\', value: \'active\' }] })` succeeds and the parsed `filter` is the same rule '
