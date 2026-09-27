@@ -15,6 +15,7 @@
  *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
  *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
+ *   node scripts/pm/dispatch-gates.mjs --tier --repo <sister> <path> ...  # a GOVERNED sister repo's tier verdict, from the path globs ALONE
  *   node scripts/pm/dispatch-gates.mjs --self-test
  *
  * A path NAMED on argv that is not in this tree has two readings — a surface of
@@ -463,7 +464,7 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 // The human-merge line threshold is declared ONCE, in the landing gate; this
 // tool prints the same reading at dispatch time and never carries a second copy.
-import { HUMAN_MERGE_LINE_THRESHOLD, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
+import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD, SELF_REPO_ID, parseNumstat, sizeVerdict } from './check-governed-merges.mjs';
 // The test-file predicate the clause-② suspect table EXCEPTS by, read from the
 // gate whose whole question is which files under a package's `src/` are
 // published source and which are its tests — never respelled here (#19936). See
@@ -12287,6 +12288,16 @@ export function residueLines(
 export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 
 /**
+ * The constant's NAME — the one token a GitHub artefact (a claim's `model:`
+ * value, a record's `Served-tier:` line) may carry for the ceiling, because
+ * AGENTS.md lets no model identifier land in a comment. Declared beside the
+ * constant it names so the two cannot drift apart: `record-recognisers.mjs`
+ * re-exports it for the `Served-tier:` reading, and `readContainerModelLine`
+ * below compares a claim's declared tier against it.
+ */
+export const CONTRACT_REVIEW_TIER_NAME = 'CONTRACT_REVIEW_TIER';
+
+/**
  * The globs that MANDATE a model tier for any card whose file surface touches
  * them, as DATA. This is the one list in this file besides CHANGE_KIND_GATES,
  * and it is here for the same reason: it is enumerable, so a guard can hold it.
@@ -12716,6 +12727,172 @@ export function changedLineLines(size) {
       ' review requested from GOVERNED_APPROVERS. The landing pre-check `check-governed-merges.mjs --pr <n>` reads the' +
       ' PR\'s own number.',
   ];
+}
+
+// ---------------------------------------------------------------------------
+// The claim's `Container & model:` line — read against the ladder this file
+// derives, so the tier a seat DECLARES is compared to something
+// ---------------------------------------------------------------------------
+
+/**
+ * The spellings a claim may use for the CEILING tier, derived — never listed:
+ * the constant's NAME (what a GitHub artefact may carry), its VALUE (which a
+ * claim must not carry, and which a reader must still recognise as the ceiling
+ * rather than wave through as an unknown word), and the ladder's family word —
+ * that last one only while the ceiling is a tier of its own: the day it retires
+ * onto the default (see TIER_CEILING) the default's word names no ceiling.
+ */
+export function ceilingTierSpellings() {
+  const words = [CONTRACT_REVIEW_TIER_NAME, CONTRACT_REVIEW_TIER];
+  if (TIER_CEILING !== TIER_DEFAULT && TIER_CEILING !== TIER_FLOOR) words.push(TIER_CEILING);
+  return words;
+}
+
+/**
+ * The `Container & model:` key line of a claim, at the START of a line — the
+ * decoration the record readers tolerate (a leading blockquote, a bullet, bold
+ * or backticks round the key) tolerated here for the same reason.
+ */
+export const CONTAINER_MODEL_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Container & model`?(?:\*\*)?[ \t]*:(.*)$/m;
+
+/**
+ * What a claim's `Container & model:` line declares about the tier, and what
+ * it cites for it.
+ *
+ * ## Why this reader exists (the measured incident)
+ *
+ * The claim template asks for `model: <tier, quoting this run's --tier
+ * output>`, and until this reader nothing compared the line to anything. A
+ * sister-repo seat — for whom `--tier` refused to answer at all — hand-wrote
+ * the ceiling tier into every claim of a whole shift after a quota wall, and
+ * every dev and every reviewer on that lane ran at the scarcest tier on cards
+ * with no mandatory-clause hit. The seat's own error is its own; this reader
+ * is why nothing caught it.
+ *
+ * ## What is read, and what is deliberately not
+ *
+ * The declared tier is the FIRST token after `model:` (decoration stripped),
+ * exactly as `Served-tier:` is read: prose in front is the value and compares
+ * unequal, and the ladder line a seat pastes further along (`floor … · default
+ * … · ceiling …`) names every tier without declaring any. A ceiling token owes
+ * a citation ON THE SAME LINE: the word `MANDATORY` — which `--tier` prints,
+ * and prints only for a mandated surface — or a `reason:` naming the per-card
+ * ruling. The default and floor tiers owe nothing here: their exits are
+ * recorded on the line by the skill's rule, and a reader that demanded them
+ * would refuse every ordinary claim over a formatting preference.
+ *
+ * ⛔ Absence is nobody's refusal: a claim that carries no `Container & model:`
+ * line, or one whose `model:` slot reads no token, declares no ceiling — the
+ * older claims never carried the line, and this reader judges a ceiling, not
+ * an omission.
+ *
+ * @returns {{ present: false } | { present: true, line: string, tier: string|null, ceiling: boolean,
+ *            mandateCited: boolean, reasonCited: boolean }}
+ */
+export function readContainerModelLine(body) {
+  const m = CONTAINER_MODEL_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return { present: false };
+  const value = String(m[1] ?? '');
+  const model = /\bmodel[ \t]*:[ \t]*(?:\*\*|`|[ \t])*([A-Za-z0-9][A-Za-z0-9_.-]*)?/i.exec(value);
+  const tier = model?.[1] ?? null;
+  const ceiling = tier !== null && ceilingTierSpellings().some((word) => word.toLowerCase() === tier.toLowerCase());
+  return {
+    present: true,
+    line: m[0].trim(),
+    tier,
+    ceiling,
+    mandateCited: /\bMANDATORY\b/.test(value),
+    reasonCited: /\breason[ \t]*:/i.test(value),
+  };
+}
+
+/**
+ * The refusal a ceiling-tier claim earns when it derives its tier from nothing
+ * — `null` when the line reads, or when there is no ceiling to judge. The row
+ * shape is `post-stamped.mjs`'s keyed-line row (`key`, `why`), so that tool
+ * files it beside the `Seat:`, `Thread-read:` and `Clause-②:` refusals it
+ * already imports; the `why` names the ceiling by the constant's NAME and
+ * quotes no model identifier back.
+ */
+export function containerModelRefusal(body) {
+  const read = readContainerModelLine(body);
+  if (!read.present || !read.ceiling || read.mandateCited || read.reasonCited) return null;
+  return {
+    key: 'Container & model',
+    line: read.line,
+    why:
+      `the \`model:\` value names the ceiling tier (${CONTRACT_REVIEW_TIER_NAME}) and the line cites neither the MANDATORY hit` +
+      ' `--tier` printed for the card\'s paths nor a `reason:` naming the per-card ruling — a ceiling nobody derived is the' +
+      ' hand-written default that ran a whole shift at the scarcest tier.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// A GOVERNED sister repo's tier verdict — from the path globs alone
+// ---------------------------------------------------------------------------
+
+/**
+ * The governed register's entry for a sister slug — `null` for this repo's
+ * own slug, an unknown slug, or a value that is no slug at all. Read from the
+ * register `check-governed-merges.mjs` declares, never from a list here.
+ */
+export function governedSisterRepo(slug, { repos = GOVERNED_REPOS, selfId = SELF_REPO_ID } = {}) {
+  const wanted = String(slug ?? '').trim().toLowerCase();
+  return repos.find((r) => r.id !== selfId && String(r.slug).toLowerCase() === wanted) ?? null;
+}
+
+/**
+ * `--tier --repo <sister> <path> ...` — the tier verdict for a governed sister
+ * repo, from MANDATORY_TIER_GLOBS and SUSPECT_TIER_GLOBS ALONE.
+ *
+ * ## Why the tier half needs no tree
+ *
+ * The cross-repo guard refuses a sister slug because the GATE FAMILIES are a
+ * property of the repo's own workflows and check scripts, which this checkout
+ * does not hold. The tier verdict is not: `deriveTier` is a pure predicate over
+ * the paths and the two glob tables, reads no workflow and no check script, and
+ * the refusal it inherited was the gate half's. Measured cost of inheriting it:
+ * every sister-repo claim hand-wrote its `model:` line, and one shift wrote the
+ * ceiling into all of them (see `readContainerModelLine`). So this mode answers
+ * the tier question for a slug the governed register knows, and says on stderr
+ * exactly what it derived from and what it did not read.
+ *
+ * ⛔ Explicit paths only. No diff of another repo is readable from here, so a
+ * sister run with no paths refuses rather than deriving THIS tree's change set
+ * and printing it under that repo's name. ⛔ The gate half is untouched: every
+ * other mode keeps the wrong-repo refusal, which now points at this one.
+ *
+ * @returns `null` when `asserted` is not a governed sister slug — this repo, an
+ *          unknown repo, a malformed value — so the ordinary assertion path
+ *          answers those exactly as before; otherwise `{ ok, stderr, stdout }`.
+ */
+export function sisterRepoTierRun({ asserted, paths = [], identity = null, repos = GOVERNED_REPOS, selfId = SELF_REPO_ID }) {
+  const sister = governedSisterRepo(asserted, { repos, selfId });
+  if (sister === null) return null;
+  const at = identity?.head ? ` at commit ${identity.head}` : '';
+  const stderr = [
+    `dispatch-gates: tier verdict for '${sister.slug}' derived from the path globs ALONE — MANDATORY_TIER_GLOBS and` +
+      ` SUSPECT_TIER_GLOBS as this checkout${at} declares them, over the ${paths.length} path(s) named on argv.`,
+    `  That repo's tree was NOT read: the tier question is a path predicate and needs none. The gate FAMILIES are a property` +
+      ` of '${sister.slug}' and still derive only from a checkout OF it (its own package manifest and workflow files).`,
+  ];
+  if (paths.length === 0) {
+    stderr.push(
+      `dispatch-gates: REFUSING — a sister-repo tier verdict takes explicit paths: no diff of '${sister.slug}' is readable` +
+        " from this checkout, so there is nothing to derive them from. Name the card's file surface.",
+    );
+    return { ok: false, sister, stderr, stdout: [] };
+  }
+  return {
+    ok: true,
+    sister,
+    stderr,
+    stdout: [
+      ...tierLines(deriveTier(paths)),
+      `Changed lines — NOT MEASURED: no diff of '${sister.slug}' is readable from this checkout. The human-merge threshold` +
+        ` (${HUMAN_MERGE_LINE_THRESHOLD}, additions + deletions, generated files INCLUDED) is read off that repo's PR at landing.`,
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -16072,6 +16249,12 @@ export function repoAssertionVerdict({ asserted, identity }) {
         `  Gate families are derived from the workflows and check scripts of the tree this process runs in, so an answer from here is about '${here}' whatever paths you pass.`,
         `  Repo-relative paths cannot tell the two apart: the same manifest and lockfile names exist in both, which is why a run like this used to return a confident wrong answer instead of this message.`,
         `  Derive '${wanted}' from a checkout OF '${wanted}' — this script exists only in '${here}', so a sister repo's list is hand-derived from its own package manifest and its own workflow files.`,
+        // The TIER half is the one question a sister slug CAN be answered from
+        // here (`sisterRepoTierRun`), so the refusal says so instead of sending
+        // a claim-time caller away to hand-write the line.
+        ...(governedSisterRepo(wanted) === null
+          ? []
+          : [`  The TIER half alone needs no tree: \`--tier ${REPO_FLAG} ${wanted} <path> ...\` answers a governed sister repo from the path globs, and says so.`]),
         `  Tree: ${identity.root}`,
       ],
     };
@@ -25498,6 +25681,48 @@ function selfTest() {
     ambiguityRefused = true;
   }
   t('two globs mandating DIFFERENT tiers for one surface are REFUSED, not guessed between', ambiguityRefused);
+
+  // ── The claim's `Container & model:` line, read against the ladder ───────
+  //
+  // The measured incident: a sister-repo seat hand-wrote the ceiling tier into
+  // every claim of a whole shift after a quota wall, and nothing compared the
+  // line to anything. `post-stamped.mjs` imports the reader below to refuse
+  // that claim before the write: a ceiling cites the MANDATORY hit `--tier`
+  // printed, or a per-card `reason:`, on the SAME line — or it is refused.
+  const CM = (rest) => `Claim: PM loop round 1\nSession: \`session_x\`\nContainer & model: \`M\`, \`mode:subagent\`, ${rest}`;
+  const ceilingIsItsOwnTier = TIER_CEILING !== TIER_DEFAULT && TIER_CEILING !== TIER_FLOOR;
+  t('the constant NAME and its VALUE are ceiling spellings; the ladder word joins them only while the ceiling is a tier of its own', ceilingTierSpellings().includes(CONTRACT_REVIEW_TIER_NAME) && ceilingTierSpellings().includes(CONTRACT_REVIEW_TIER) && ceilingTierSpellings().includes(TIER_CEILING) === ceilingIsItsOwnTier);
+  t('⭐ a ceiling claim quoting the MANDATORY line reads as the ceiling, with its mandate cited, and earns no refusal', (() => { const r = readContainerModelLine(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (\`--tier\` at \`abc1234\`: MANDATORY — SKILL.md ⇢ '.claude/skills/pm-dispatch/SKILL.md')`)); return r.present && r.ceiling && r.mandateCited && containerModelRefusal(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (--tier: MANDATORY)`)) === null; })());
+  t('⭐ a ceiling claim carrying a per-card `reason:` reads too', containerModelRefusal(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (reason: the maintainer ruled it on the card)`)) === null);
+  t('⛔ THE INCIDENT SHAPE — the ceiling by its ladder word, with nothing behind it — is REFUSED', !ceilingIsItsOwnTier || containerModelRefusal(CM(`model: ${TIER_CEILING} (the ceiling)`))?.key === 'Container & model');
+  t('⛔ the ceiling by its constant NAME with nothing behind it is refused the same way', containerModelRefusal(CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\``))?.key === 'Container & model');
+  t('⛔ and by its VALUE — a claim must not carry the id at all, and the reader still recognises it as the ceiling', containerModelRefusal(CM(`model: ${CONTRACT_REVIEW_TIER}`))?.key === 'Container & model');
+  t('the refusal names the ceiling by the constant\'s NAME and quotes no model identifier back', (() => { const r = containerModelRefusal(CM(`model: ${CONTRACT_REVIEW_TIER}`)); return r.why.includes(CONTRACT_REVIEW_TIER_NAME) && !r.why.includes(CONTRACT_REVIEW_TIER) && r.why.includes('MANDATORY') && r.why.includes('reason:'); })());
+  t('the default and floor tiers cite nothing and pass — the reader judges the ceiling only', containerModelRefusal(CM(`\`model: ${TIER_DEFAULT}\` (no path-derived mandate)`)) === null && containerModelRefusal(CM(`model: ${TIER_FLOOR}`)) === null);
+  t('the declared tier is the FIRST token after `model:` — the pasted ladder naming the ceiling further along declares nothing', containerModelRefusal(CM(`model: ${TIER_DEFAULT} — --tier: no path-derived mandate (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING})`)) === null && readContainerModelLine(CM(`model: ${TIER_DEFAULT} — ceiling ${TIER_CEILING}`)).tier === TIER_DEFAULT);
+  t('the tier compares case-insensitively, as the ladder is quoted by hand', !ceilingIsItsOwnTier || readContainerModelLine(CM(`model: ${TIER_CEILING.toUpperCase()}`)).ceiling === true);
+  t('the key is read at the START of a line, decoration tolerated — and off the line start it is prose, not a declaration', readContainerModelLine('Claim: x\n- **Container & model:** `M`, `mode:cloud`, `model: opus`').tier === 'opus' && readContainerModelLine(`Claim: x\nas said, Container & model: model: ${TIER_CEILING} earlier`).present === false);
+  t('⛔ ABSENCE is nobody\'s refusal: no `Container & model:` line, or a `model:` slot reading no token, declares no ceiling', readContainerModelLine('Claim: x\nSeat: domain:skills#1').present === false && containerModelRefusal('Claim: x') === null && readContainerModelLine(CM('model:')).tier === null && containerModelRefusal(CM('model:')) === null);
+  t('⛔ NOT a claim reader\'s business what a claim is — the reader reads any body; scoping to `Claim:` comments is post-stamped\'s', readContainerModelLine(`Round report\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``).ceiling === true);
+
+  // ── A governed sister repo's tier verdict, from the path globs alone ─────
+  //
+  // The gate half's cross-repo refusal was inherited by the tier half, which
+  // reads no tree; measured cost: every sister-repo claim hand-wrote its
+  // `model:` line. `sisterRepoTierRun` answers a slug the governed register
+  // knows, from the two glob tables, and says so.
+  const SISTER = GOVERNED_REPOS.find((r) => r.id !== SELF_REPO_ID);
+  t('CONTROL: the governed register names a sister repo, so the cases below are not vacuous', SISTER !== undefined && String(SISTER.slug).includes('/') && governedSisterRepo(SISTER.slug)?.id === SISTER.id);
+  const sisterHit = sisterRepoTierRun({ asserted: SISTER.slug, paths: ['skills/x/SKILL.md'], identity: { head: 'abc1234' } });
+  t('⭐ a governed sister slug with paths ANSWERS from the globs — MANDATORY for its published catalog, and the provenance names the globs and the commit', sisterHit?.ok === true && sisterHit.stdout.join('\n').includes('MANDATORY') && sisterHit.stdout.join('\n').includes("'skills/**'") && sisterHit.stderr.join('\n').includes('path globs ALONE') && sisterHit.stderr.join('\n').includes('abc1234'));
+  t('…the stderr says the sister tree was NOT read and that its gate families still need a checkout OF it', sisterHit.stderr.join('\n').includes('NOT read') && sisterHit.stderr.join('\n').includes('checkout OF'));
+  t('…and the changed-lines line is NOT MEASURED, naming the sister — no diff of another repo is readable here', sisterHit.stdout.join('\n').includes('Changed lines — NOT MEASURED') && sisterHit.stdout.join('\n').includes(SISTER.slug));
+  t('an ordinary sister path answers the no-mandate floor line this repo prints, glob count included', sisterRepoTierRun({ asserted: SISTER.slug, paths: ['src/components/button.tsx'] }).stdout.join('\n').includes(`no path-derived mandate: the surface hits none of the ${MANDATORY_TIER_GLOBS.length} declared glob`));
+  t('the slug compares case-insensitively, as repo slugs do', sisterRepoTierRun({ asserted: SISTER.slug.toUpperCase(), paths: ['src/x.ts'] })?.ok === true);
+  t('⛔ a governed sister with NO paths is refused — nothing here can read that repo\'s diff', (() => { const r = sisterRepoTierRun({ asserted: SISTER.slug, paths: [] }); return r !== null && r.ok === false && r.stdout.length === 0 && r.stderr.join('\n').includes('explicit paths'); })());
+  t('⛔ this repo\'s own slug is not a sister — null, so the ordinary assertion path answers it', sisterRepoTierRun({ asserted: GOVERNED_REPOS.find((r) => r.id === SELF_REPO_ID).slug, paths: ['x'] }) === null && governedSisterRepo(GOVERNED_REPOS.find((r) => r.id === SELF_REPO_ID).slug) === null);
+  t('⛔ an unknown slug or a checkout path is not a sister either — the wrong-repo refusal keeps its exit and its text', sisterRepoTierRun({ asserted: 'not-an-owner/not-a-repo', paths: ['x'] }) === null && sisterRepoTierRun({ asserted: '../a-sister-checkout', paths: ['x'] }) === null && sisterRepoTierRun({ asserted: null, paths: ['x'] }) === null);
+  t('the register is INJECTED, never restated: a register naming no sister answers null for every slug', sisterRepoTierRun({ asserted: SISTER.slug, paths: ['x'], repos: [{ id: 'self', slug: SISTER.slug }], selfId: 'self' }) === null);
   // Live guards. A glob naming a path this tree does not have is dead data that
   // mandates nothing while reading as protection — the incident class itself.
   t('the mandatory table is not empty (the guard below is not vacuous)', MANDATORY_TIER_GLOBS.length > 0);
@@ -26160,6 +26385,9 @@ function selfTest() {
   const retargetAttempt = repoAssertionVerdict({ asserted: '../a-sister-checkout', identity: hereIdentity });
   t('a value shaped like a checkout PATH is refused, so the retarget misreading fails loudly', !retargetAttempt.ok && retargetAttempt.lines.join('\n').includes('does not point the derivation at another checkout'));
   t('and so is a three-segment value', !repoAssertionVerdict({ asserted: 'a/b/c', identity: hereIdentity }).ok);
+  const sisterMismatch = repoAssertionVerdict({ asserted: GOVERNED_REPOS.find((r) => r.id !== SELF_REPO_ID).slug, identity: hereIdentity });
+  t('a governed SISTER\'s refusal points at the tier route — the one question a sister slug can be answered from here', !sisterMismatch.ok && sisterMismatch.lines.join('\n').includes(`--tier ${REPO_FLAG}`) && sisterMismatch.lines.join('\n').includes('hand-derived'));
+  t('…and an UNKNOWN repo\'s refusal does not — it is not a sister the register knows', !mismatchText.includes('TIER half'));
 
   const bannerHit = bannerLines({ identity: hereIdentity, paths: [] });
   t('the banner names the repo and the commit the answer came from', bannerHit[0].includes('an-owner/a-repo') && bannerHit[0].includes('abc1234'));
@@ -26552,6 +26780,24 @@ function selfTest() {
   t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
   const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
   t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+
+  // ── A governed sister repo's tier verdict on the real CLI ────────────────
+  //
+  // Measured on the CLI and not on `sisterRepoTierRun` alone, because what
+  // was wrong was the process: `--tier` over a sister slug exited 2 with the
+  // gate half's refusal, and every sister-repo claim hand-wrote its line.
+  const SISTER_SLUG = GOVERNED_REPOS.find((r) => r.id !== SELF_REPO_ID).slug;
+  const sisterCatalog = runCli(['--tier', 'skills/objectui/SKILL.md', REPO_FLAG, SISTER_SLUG]);
+  t('⭐ `--tier <path> --repo <sister>` ANSWERS at exit 0 — the tier half no longer inherits the gate half\'s refusal', sisterCatalog.status === 0 && (sisterCatalog.stdout ?? '').includes('MANDATORY') && (sisterCatalog.stdout ?? '').includes("'skills/**'"), `status ${sisterCatalog.status}: ${(sisterCatalog.stderr ?? '').split('\n')[0]}`);
+  t('…its stderr says the answer is the globs\' ALONE, and that the gate families still need a checkout OF that repo', (sisterCatalog.stderr ?? '').includes('path globs ALONE') && (sisterCatalog.stderr ?? '').includes('checkout OF'));
+  t('…and it prints NO gate-list banner: no gate list was derived, so none is claimed', !(sisterCatalog.stderr ?? '').includes('gate list derived from the tree of'));
+  t('…and stdout stays paste-clean — the provenance is on stderr, as every other provenance is', !(sisterCatalog.stdout ?? '').includes('dispatch-gates:'));
+  const sisterPlain = runCli(['--tier', 'src/components/button.tsx', REPO_FLAG, SISTER_SLUG]);
+  t('an ordinary sister-repo path answers the no-mandate floor line and the NOT MEASURED changed-lines line', sisterPlain.status === 0 && (sisterPlain.stdout ?? '').includes('no path-derived mandate') && (sisterPlain.stdout ?? '').includes('Changed lines — NOT MEASURED'));
+  const sisterNoPaths = runCli(['--tier', REPO_FLAG, SISTER_SLUG]);
+  t('⛔ a sister slug with no paths refuses at exit 2 with nothing on stdout — there is no diff of that repo to derive them from', sisterNoPaths.status === 2 && (sisterNoPaths.stdout ?? '').trim() === '' && (sisterNoPaths.stderr ?? '').includes('explicit paths'));
+  const sisterCommands = runCli(['--commands', 'skills/objectui/SKILL.md', REPO_FLAG, SISTER_SLUG]);
+  t('⛔ the GATE half still refuses a sister repo with the wrong-repo text, now pointing at the tier route — only the tier question was freed from the tree', sisterCommands.status === 2 && (sisterCommands.stdout ?? '').trim() === '' && (sisterCommands.stderr ?? '').includes('REFUSING — asked for') && (sisterCommands.stderr ?? '').includes(`--tier ${REPO_FLAG}`));
 
   // ── The three shapes an absent path can arrive in, end to end ─────────────
   //
@@ -29132,6 +29378,20 @@ if (invokedDirectly) {
           ? 'ran'
           : 'human';
     const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+    // A GOVERNED sister repo's tier verdict, answered BEFORE the banner: the
+    // banner names the tree that produced a gate list, and this run derives
+    // none — its provenance is the two glob tables, and the run prints that
+    // itself. `null` for every other assertion (this repo, an unknown one, a
+    // malformed one), which the assertion verdict below answers as before.
+    const sisterTier = process.argv.includes('--tier') && argv.assertion !== null
+      ? sisterRepoTierRun({ asserted: argv.assertion, paths: declaredPaths, identity })
+      : null;
+    if (sisterTier !== null) {
+      for (const line of sisterTier.stderr) console.error(line);
+      if (!sisterTier.ok) process.exit(2);
+      for (const line of sisterTier.stdout) console.log(line);
+      process.exit(0);
+    }
     for (const line of bannerLines({ identity, paths: declaredPaths, drift: baseDrift() })) console.error(line);
     if (argv.assertion !== null) {
       // An assertion the tree contradicts is the measured failure, caught. It

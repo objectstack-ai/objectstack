@@ -458,10 +458,12 @@
  *
  * ## A claim's keyed lines are refused BEFORE the write (#19152)
  *
- * A claim's three exact-value fields — `Seat:`, `Thread-read:`, `Clause-②:` — are read HERE through the functions that
- * own them, so a line those functions cannot read is `EXIT_REFUSED` before any request instead of a half-state row on
- * someone else's board hours later (five such rows off three keys in one seat's shift, the measurement behind this
- * rule). `claimKeyedLineRefusals` carries the four decisions that keep it a mirror and not a fourth dialect.
+ * A claim's four exact-value fields — `Seat:`, `Thread-read:`, `Clause-②:`, and the `model:` value of its
+ * `Container & model:` line — are read HERE through the functions that own them, so a line those functions cannot
+ * read is `EXIT_REFUSED` before any request instead of a half-state row on someone else's board hours later (five such
+ * rows off three keys in one seat's shift, the measurement behind this rule; a whole shift of claims naming the
+ * ceiling tier with nothing behind it, the measurement behind the fourth). `claimKeyedLineRefusals` carries the four
+ * decisions that keep it a mirror and not a fifth dialect.
  *
  * ## ⚖️ Why this ACTS by default, where `sweep-closed-cards.mjs` dry-runs
  *
@@ -866,6 +868,10 @@ import {
   threadReadField,
 } from './check-half-states.mjs';
 import { readClause2Line } from './clause2-line.mjs';
+// The fourth owner: the `model:` value of a claim's `Container & model:` line
+// is judged against the tier ladder `dispatch-gates.mjs` derives — the
+// ceiling's spellings live there, beside the constant, and are never restated.
+import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, ceilingTierSpellings, containerModelRefusal } from './dispatch-gates.mjs';
 import { EXIT_UNCONFIRMED, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { MAX_BODY_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
@@ -1878,6 +1884,7 @@ export const CLAIM_KEY_SPELLINGS = Object.freeze({
   Seat: '`Seat: domain:LANE#N` at the START of a line, lane and number both — e.g. `Seat: domain:skills#2`',
   'Thread-read': '`Thread-read: ID` at the START of a line — ONE comment id, or `none`, and nothing after it',
   'Clause-②': '`Clause-②: yes` or `Clause-②: no` at the START of a line — reasoning after the value is fine, a quotation around it is not',
+  'Container & model': '`Container & model: …, model: TIER (…)` at the START of a line — the ceiling tier (`CONTRACT_REVIEW_TIER`) carries, on the SAME line, the `MANDATORY` line `dispatch-gates --tier` printed for the card\'s paths (`--tier --repo owner/name PATH…` for a sister repo) or `reason: …` naming the per-card ruling; the default and floor tiers cite nothing',
 });
 
 /** PRESENCE only, `CLAIM_SEAT_DECLARATION_ANYWHERE`'s calibration one key along: case-SENSITIVE and demanding the whole
@@ -1925,6 +1932,10 @@ export function claimKeyedLineRefusals(body) {
   const clause = readClause2Line(text);
   if (clause !== null && clause.kind !== 'declared')
     rows.push({ key: 'Clause-②', line: clause.line, why: clause.kind === 'malformed' ? 'the value slot holds something `readClause2Line` cannot grade — the two spellings are the closed set.' : `\`readClause2Line\` reads this as a NEAR MISS (${clause.reason}), ⛔ not a declaration — the changeset and ADR-0087 gates read it as absent.` });
+  // The fourth owner answers with the row itself (`key`, `why`, `line`): a
+  // ceiling tier with neither a MANDATORY hit nor a `reason:` on its line.
+  const model = containerModelRefusal(text);
+  if (model !== null) rows.push({ key: model.key, line: offendingSpan(model.line, 160), why: model.why });
   return rows;
 }
 
@@ -1933,9 +1944,10 @@ export function keyedLineRefusalText(rows) {
   return (
     `post-stamped: REFUSED — ${rows.length} keyed line(s) in this \`Claim:\` cannot be read by the checker that owns them. Nothing was written.\n` +
     rows.map((r, i) => `  ${i + 1}. [${r.key}] ${r.why}\n      line:  ${r.line}\n      write: ${CLAIM_KEY_SPELLINGS[r.key]}`).join('\n') +
-    '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`) and `readClause2Line` (`clause2-line.mjs`)\n' +
-    '  are imported HERE, so this IS the row they would file — hours earlier, and on your own claim rather than on someone\n' +
-    '  else\'s post. ⛔ No flag turns it off: a line those readers cannot read is a half-state, not a formatting preference.'
+    '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`), `readClause2Line` (`clause2-line.mjs`) and\n' +
+    '  `containerModelRefusal` (`dispatch-gates.mjs`) are imported HERE, so this IS the row they would file — hours earlier,\n' +
+    '  and on your own claim rather than on someone else\'s post. ⛔ No flag turns it off: a line those readers cannot read\n' +
+    '  is a half-state, not a formatting preference.'
   );
 }
 
@@ -3066,8 +3078,9 @@ const USAGE = [
   '  no token at all is unchanged.',
   '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
   '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
-  '  A `Claim:` comment\'s `Seat:`, `Thread-read:` and `Clause-②:` lines are read here by the checkers that OWN them,',
-  '  and the comment is REFUSED when one cannot be read — the refusal prints the spelling that can.',
+  '  A `Claim:` comment\'s `Seat:`, `Thread-read:`, `Clause-②:` and `Container & model:` lines are read here by the',
+  '  checkers that OWN them, and the comment is REFUSED when one cannot be read — a ceiling tier citing neither the',
+  '  MANDATORY hit `--tier` printed nor a `reason:` included — and the refusal prints the spelling that can.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -3313,7 +3326,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
-  'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 20,
+  'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
@@ -4377,8 +4390,25 @@ export function selfTest() {
     t('⭐ QUOTE-BLIND: backticks round a mid-sentence declaration buy no exemption, while a line-initial one inside a FENCE still reads as the declaration the owner reads there — masking either way would store the row', keys('Claim: x, `Seat: domain:skills#2`, R1.') === 'Seat' && keys(CLAIM('```', 'Seat: domain:skills#2', '```')) === '');
     t('FIRST MATCH: a readable declaration followed by a malformed duplicate passes, exactly as the owner reads it', keys(CLAIM('Seat: `domain:skills#2`', 'Thread-read: 5747819898', 'Seat: domain:skills')) === '');
     t('↔ owner coupling: the id pattern and the `none` are `check-half-states.mjs`\'s own spellings, read off its source', ownerSource.includes('/^[1-9]\\d*$/') && ownerSource.includes("'none'") && THREAD_READ_VALUE.source.includes('[1-9]\\d*') && THREAD_READ_VALUE.test('none'));
-    t('structural: the CLI runs this on `--comment` only, ⛔ never on a card body, and every reader is imported, ⛔ none restated', /const keyed = options\.mode === 'comment' \? claimKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && new RegExp('function\\s+(claimSeatNumber|threadReadField|readClause2Line)\\b').test(stampSource) === false);
-    t('the refusal names all three readers, and that no flag turns it off', ['claimSeatNumber', 'h50ThreadReadMismatch', 'readClause2Line', 'No flag turns it off'].every((s) => keyedLineRefusalText(claimKeyedLineRefusals(MISLAID_SEAT)).includes(s)));
+    t('structural: the CLI runs this on `--comment` only, ⛔ never on a card body, and every reader is imported, ⛔ none restated', /const keyed = options\.mode === 'comment' \? claimKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && new RegExp('function\\s+(claimSeatNumber|threadReadField|readClause2Line|containerModelRefusal)\\b').test(stampSource) === false);
+    t('the refusal names all four readers, and that no flag turns it off', ['claimSeatNumber', 'h50ThreadReadMismatch', 'readClause2Line', 'containerModelRefusal', 'No flag turns it off'].every((s) => keyedLineRefusalText(claimKeyedLineRefusals(MISLAID_SEAT)).includes(s)));
+    // ── the fourth key: the `model:` value of `Container & model:` ──────────
+    // The measured incident: after a quota wall a sister-repo seat wrote the
+    // ceiling tier into every claim of a shift, and nothing compared the line
+    // to anything. The owner is the tier ladder's own file; what is pinned
+    // here is that its refusal lands in THIS act, on the claim, before the write.
+    const CEILING = (rest) => CLAIM('Seat: `domain:ui#2`', 'Thread-read: none', 'Clause-②: no', `Container & model: \`M\`, \`mode:subagent\`, ${rest}`);
+    const CEILING_WORD = ceilingTierSpellings().find((w) => w !== CONTRACT_REVIEW_TIER_NAME && w !== CONTRACT_REVIEW_TIER) ?? null;
+    t('⭐ a ceiling claim quoting the MANDATORY line the tool printed passes — every key reads', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (\`dispatch-gates --tier\` at \`abc1234\`: MANDATORY — SKILL.md, clause ①)`)) === '');
+    t('⭐ a ceiling claim carrying a per-card `reason:` passes too', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (reason: the maintainer ruled it on the card)`)) === '');
+    t('⛔ THE MEASURED SHAPE — the ceiling tier with nothing behind it — is REFUSED, on the owner\'s verdict and ⛔ no rule spelled here', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (no exit taken)`)) === 'Container & model');
+    t('⛔ …and by the ladder word the incident actually wrote, while the ceiling is a tier of its own', CEILING_WORD === null || keys(CEILING(`model: ${CEILING_WORD} (the ceiling)`)) === 'Container & model');
+    t('the default tier with nothing behind it passes — only a ceiling owes a citation', keys(CEILING(`\`model: ${TIER_DEFAULT}\` (\`--tier\`: no path-derived mandate)`)) === '' && keys(CEILING(`model: ${TIER_FLOOR}`)) === '');
+    t('the refusal prints the spelling that reads, and names the ceiling by the constant\'s NAME — no model identifier in it', (() => { const text = keyedLineRefusalText(claimKeyedLineRefusals(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\``))); return text.includes(CLAIM_KEY_SPELLINGS['Container & model']) && text.includes(CONTRACT_REVIEW_TIER_NAME) && !text.includes(CONTRACT_REVIEW_TIER); })());
+    t('⛔ ABSENCE is nobody\'s row here either: a claim with no `Container & model:` line is untouched — older claims never carried it', keys(CLAIM('Seat: `domain:skills#2`', 'Thread-read: none', 'Clause-②: no')) === '');
+    t('⛔ NOT a claim: a seat post or a report carrying the same ceiling line is untouched — the reader runs on `Claim:` comments only', keys(`os-dev-report\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``) === '' && keys(`Seat post.\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``) === '');
+    t('FIRST MATCH holds for the fourth key too: a readable ceiling line followed by a bare duplicate passes, as the owner reads it', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (MANDATORY)`) + `\nContainer & model: model: ${CONTRACT_REVIEW_TIER_NAME}`) === '');
+    t('structural: the fourth reader is IMPORTED from the ladder\'s own file, ⛔ never restated here', /import \{[^}]*\bcontainerModelRefusal\b[^}]*\} from '\.\/dispatch-gates\.mjs';/u.test(stampSource) && new RegExp('function\\s+(containerModelRefusal|readContainerModelLine|ceilingTierSpellings)\\b').test(stampSource) === false);
   }
 
   // ── the relay transport ──────────────────────────────────────────────────
