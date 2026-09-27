@@ -72,10 +72,22 @@
  * natural-language spellings are exactly what an author migrating from another
  * system's macro syntax reaches for first. See `FILTER_TOKEN_WRAPPED_RE` in
  * `@objectstack/spec`.
+ *
+ * # A record-context token always refuses here
+ *
+ * `{record_id}` (`RECORD_CONTEXT_TOKENS` in `@objectstack/spec`) is the id of
+ * the record a `type: 'record'` page is showing. Only the page renderer knows
+ * that record; no server path has one in context. So a filter that arrives
+ * here still carrying `{record_id}` throws {@link UnresolvedFilterTokenError}
+ * naming it, on every path, whatever the request carries. It never resolves
+ * to `null`, `undefined` or the literal: a count written as "about this
+ * record" would otherwise come back as "about nobody", or, with the condition
+ * gone, "about everybody".
  */
 
 import {
   classifyFilterToken,
+  isRecordContextToken,
   parseDateMacroParam,
   type DateMacroUnit,
 } from '@objectstack/spec/data';
@@ -143,10 +155,15 @@ export class UnknownFilterTokenError extends Error {
 
 /**
  * Raised when a token IS in the vocabulary but the request carries no value
- * for it — an unauthenticated caller filtering on `{current_user_id}`.
+ * for it — an unauthenticated caller filtering on `{current_user_id}`, or any
+ * filter carrying the record-context token `{record_id}`, which no server
+ * path has a value for (see the module doc).
  *
  * Distinct from {@link UnknownFilterTokenError} because the fix is different:
- * the metadata is correct, the context is not. Never silently resolves to
+ * the spelling is correct, the context is not. For `{record_id}` the fix is
+ * WHERE the filter is authored or resolved: a component on a `type: 'record'`
+ * page, whose renderer resolves the token before the query leaves the
+ * browser. `token` names which context is missing. Never silently resolves to
  * `null`/`undefined`, which on most drivers degrades to `IS NULL` and would
  * quietly hand back rows the filter was written to exclude.
  */
@@ -318,6 +335,23 @@ export function resolveFilterToken(
       );
     }
     return ctx.orgId;
+  }
+
+  // ── Record-context tokens ─────────────────────────────────────────────
+  // Never resolvable here, whatever the request carries: the server does not
+  // know which record a page is showing. See the module doc.
+  if (isRecordContextToken(token)) {
+    throw new UnresolvedFilterTokenError(
+      token,
+      'no record in context on the server. {record_id} is the id of the record a ' +
+      "`type: 'record'` page is showing, and only that page's renderer knows it: it " +
+      'resolves the token before the query leaves the browser. A filter still carrying ' +
+      'it here was authored on a surface with no record in context (a list view, a ' +
+      'dashboard widget, a report, a dataset, a page that is not a record page), or sent ' +
+      'by a client that did not resolve it. Move the filter onto a component of a record ' +
+      'page, or filter on a concrete id. Resolving it to null would count no records, and ' +
+      'dropping the condition would count them all.',
+    );
   }
 
   // ── Date macros ───────────────────────────────────────────────────────

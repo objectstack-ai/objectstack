@@ -6,7 +6,18 @@ description: Context Tokens protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Context Tokens — the declarative placeholders that resolve against the
-**caller's session** (who am I, which org am I in) rather than the clock.
+**caller's session** (who am I, which org am I in) rather than the clock,
+plus one sibling that resolves against the **surface**: `{record_id}`, the
+record a `type: 'record'` page is showing.
+
+The two resolve against different things, so they are two lists, never one:
+
+| | `CONTEXT_TOKENS` | `RECORD_CONTEXT_TOKENS` |
+|---|---|---|
+| Tokens | `{current_user_id}`, `{current_org_id}` | `{record_id}` |
+| Resolves against | the caller's session | the record the page is bound to |
+| Known on the server | yes — `ExecutionContext` | never — only the page renderer knows which record is in view |
+| Valid on | every filter surface | a component on a `type: 'record'` page, and nowhere else |
 
 ## Why this lives in `spec`
 
@@ -38,11 +49,24 @@ neither is an ERROR, not a null comparand: resolving to `null`
 degrades to `IS NULL` on most drivers and would hand back the rows
 the filter was written to exclude.
 
+`{record_id}` is resolved on ONE side of the wire only: by the page
+renderer, which substitutes the id of the record a `type: 'record'` page
+is showing before the filter leaves the browser. The server never knows
+which record a page is showing, so a filter that reaches
+`resolveFilterTokens()` still carrying `{record_id}` is refused by name
+(`FILTER_TOKEN_UNRESOLVED` / 400) — which is also what an author sees
+from a renderer that does not resolve the token yet. It never becomes
+`null`, `undefined` or the literal string: a number written as "about
+this record" must neither silently become "about everybody" (the
+condition dropped) nor "about nobody" (the token compared as text).
+
 ## Presentation scope, NOT a security boundary
 
 This is the single most important thing to understand about these
 tokens. `{current_user_id}` scopes what a surface *shows*; it does not
-decide what a caller is *allowed* to read. Enforcement is RLS, which
+decide what a caller is *allowed* to read. `{record_id}` is the same: it
+narrows a record-page component to the record in view, and which of those
+rows the caller may read is still not its decision. Enforcement is RLS, which
 uses a different and genuinely server-side vocabulary rooted at
 `current_user` (`owner_id = current_user.id`, compiled by
 `@objectstack/plugin-security`'s RLS compiler).
@@ -62,12 +86,38 @@ a `{current_user_id}` filter widens a *view*; it must never widen
 
 ## Where the tokens are honoured
 
-Filter values on every surface that resolves placeholders — object list
-views, dashboard widgets, reports, SDUI page components. Navigation
-(`recordId` / `params`) additionally resolves `AppContextSelector` ids
-such as `{active_package}`; those are nav-only and are NOT valid inside
-filter values, because filters are not evaluated with the sidebar's
-selector state.
+`{current_user_id}` and `{current_org_id}`: filter values on every surface
+that resolves placeholders — object list views, dashboard widgets,
+reports, datasets, SDUI page components — and on the server's ObjectQL
+read and write paths and analytics doors.
+
+`{record_id}`: filter values on a component of a `type: 'record'` page,
+and nowhere else. `@objectstack/lint`'s `validate-filter-tokens` refuses it
+by name ("no record in context on this surface") on list views, dashboard
+widgets, reports, datasets, apps, object definitions and every page that is
+not `type: 'record'`. The server refuses it on every path, because no
+server path has a record in context.
+
+Navigation (`recordId` / `params`) additionally resolves
+`AppContextSelector` ids such as `{active_package}`; those are nav-only and
+are NOT valid inside filter values, because filters are not evaluated with
+the sidebar's selector state.
+
+## `{record_id}` is not `{recordId}`, and not the `'record_id'` variable type
+
+Three spellings look alike and are three different mechanisms:
+
+- `{record_id}` — this filter token. A whole filter VALUE, resolved to the
+  id of the record the page shows.
+- `{recordId}` — a URL / flow-template placeholder: an action's
+  `newTabUrl` (`action.zod.ts`) and the flow template dialect
+  (`@objectstack/lint`'s `flow-template-grammar.ts`). It is interpolated by
+  those surfaces' own template engines and is NOT a filter token. Written
+  inside a filter it is refused, with `{record_id}` suggested.
+- `'record_id'` — a page-variable TYPE (`PageVariableSchema.type` in
+  `page.zod.ts`), naming what a page variable holds, e.g. the selection of
+  an `element:record_picker`. It is read in expressions as `page.<name>`,
+  never written as a placeholder.
 
 ## Out of scope
 
@@ -75,6 +125,9 @@ selector state.
 - `{date-macros}` — the clock-based sibling; see `./date-macros.zod.ts`.
 - `titleFormat` field interpolation (`{user_id}` etc.) — that substitutes
   *record fields*, an unrelated mechanism that happens to share braces.
+- Tokens for a record OTHER than the one in view (a related record, a
+  parent of the record). Each is its own contract with its own resolver,
+  not an extension of `{record_id}`.
 
 <Callout type="info">
 **Source:** `packages/spec/src/data/context-tokens.zod.ts`
