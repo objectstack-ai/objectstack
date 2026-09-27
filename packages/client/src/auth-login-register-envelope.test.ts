@@ -48,8 +48,61 @@
 //   instrument's negative control, criterion 3(a)).
 // - `⑥ the raw keys survive the lift` — callers were pushed onto `.user` /
 //   `.token` by the very misdeclaration this card fixes.
+// - `⑦ the cold start stays outside every clocked window` — pins WHERE the
+//   first scenario's one-time cost is paid (next section).
+//
+// ## [#20242] Why one throwaway scenario runs at MODULE SCOPE
+//
+// The first scenario in a worker pays a one-time cost no later one sees.
+// Measured on `fdb26698f`, idle, 4 vCPU, successive scenarios in one worker,
+// first → later:
+//   `getAuthInstance()`   510 → 10-11 ms   better-auth's lazily imported
+//                                          module graph (the dominant term)
+//   `engine.init()`        85 → 1-2 ms     sql.js compiles its WASM once
+//   `syncSchemas()`       182 → 81-100 ms
+//   the sign-up           261 → 117-127 ms
+// That cost used to land INSIDE whichever `it()` ran first: 855-964 ms idle,
+// against 222-249 ms for the two other cases doing the same single sign-up.
+// On a loaded `Test Core` shard (head `3d14f9e75`) it crossed vitest's
+// 5000 ms `testTimeout` while the fourteen other cases passed. That run's
+// client-package totals against this tree idle (`--maxWorkers=2`) are
+// `tests` 38.71 s vs 23.39 s and `import` 202 s vs 103 s: the test bodies
+// ran about 1.5x slower, and the first case more than 5x. So the term that
+// crossed the budget was cold LOADING, not the behaviour the case asserts.
+//
+// The fix changes WHERE that cost is paid, not how long anything may take.
+// `@vitest/runner@4.1.11` wraps hooks and test bodies in `withTimeout(...)`,
+// while `collectTests()` awaits `runner.importFile(filepath, 'collect')`
+// bare. So a module-scope `await` is paid during COLLECTION, which no clock
+// covers. This is the repo's convention: "clocked windows measure behaviour,
+// never loading" (AGENTS.md, Build & Test; `check:test-source-alias`). A
+// hook with its own timeout would only move the cliff to a budget a heavier
+// shard can exhaust.
+//
+// Why a WHOLE throwaway scenario (`registered()`) rather than only the loads
+// above: warming just the engine and `getAuthInstance()` left the next
+// scenario at 344-409 ms against 212-269 ms, because the sign-up path has
+// first-use costs of its own. Running the arrangement every case runs pays
+// them all, without a list of specifiers that could drift.
+//
+// ⛔ It shares nothing a case asserts on. Its engine and manager are its own
+// and are closed before any case starts. Every case still builds a fresh
+// engine, a fresh `AuthManager` and a fresh first sign-up (`scenario`). What
+// it leaves warm is process-level: the module registry, sql.js's compiled
+// WASM and the JIT. The first case used to leave exactly that to every later
+// case.
+//
+// ⛔ Do not move it into a hook, and do not answer a recurrence by raising a
+// timeout. A case's window now holds only its own work: a fresh-engine sync
+// and real scrypt sign-ups and logins. That is 222-574 ms idle, and 525-1708
+// ms under eight CPU-bound busy loops on this box. Twenty-four busy loops
+// reproduced CI's `Test timed out in 5000ms` on the cold case (2 runs of 2),
+// and there the heaviest cases (two sign-ups plus a login) took 3.7-4.5 s.
+// That residual is behaviour, which is what a clock is for.
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuthManager } from '@objectstack/plugin-auth';
@@ -261,12 +314,21 @@ const principalFor = async (manager: AuthManager, token: string | undefined) => 
   return session?.user?.id ?? null;
 };
 
-afterEach(async () => {
+/** Close every engine a scenario opened: after each case, and after the warm-up. */
+const closeEngines = async (): Promise<void> => {
   while (engines.length) {
     const engine = engines.pop();
     await (engine as unknown as { close?: () => Promise<void> })?.close?.().catch(() => {});
   }
-});
+};
+
+// [#20242] The first scenario's one-time cost, paid during COLLECTION, which
+// no vitest clock covers (header, last section). ⛔ It stays at module scope,
+// and `⑦` below pins that.
+await registered();
+await closeEngines();
+
+afterEach(closeEngines);
 
 describe('[#17234] auth.login / auth.register deliver the SessionResponse envelope they declare', () => {
   describe('① the declared envelope is delivered', () => {
@@ -485,6 +547,23 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
       expect(raw.user?.id).toBe(res.data.user?.id);
       expect(raw.token).toBe(res.data.token);
       expect(raw.redirect).toBe(false);
+    });
+  });
+
+  describe('⑦ the cold start stays outside every clocked window', () => {
+    it('pays the first scenario at module scope, and no hook carries it', () => {
+      // [#20242] Read off this file's own text, so "do not move it into a
+      // hook" is an assertion rather than a sentence nobody reads.
+      const code = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+
+      // Exactly one warm-up call, and it opens its own line at column 0. So it
+      // sits in no function body, which is what "paid during collection"
+      // reduces to. Comment lines start with `//` and cannot match.
+      expect(code.match(/^await registered\(\);$/gm) ?? []).toHaveLength(1);
+
+      // ⛔ No `before*` hook may come back to carry it: vitest clocks a hook
+      // with `hookTimeout` exactly as it clocks a test body with `testTimeout`.
+      expect(code).not.toMatch(/^\s*before(All|Each)\s*\(/m);
     });
   });
 });

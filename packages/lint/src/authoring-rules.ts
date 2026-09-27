@@ -145,6 +145,8 @@ import {
   lintLegacyOrganizationComposites,
 } from './data-model-rules.js';
 
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+
 type AnyRec = Record<string, unknown>;
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -317,6 +319,21 @@ export interface AuthoringRuleContext {
    * is author-written", and both validators keep reporting `body.source`.
    */
   loweredHookRefs?: ReadonlySet<string>;
+  /**
+   * [#20158] The engine's judge-only filter admission
+   * (`IObjectQLEngine.judgeFilter`, #19995 ruling C), BOUND to its engine —
+   * the one function that answers "would the engine run this `where`?".
+   *
+   * Supplied by the door that holds an engine: the runtime publish gate hands
+   * in the live engine's method, and the CLI commands hand in the method of an
+   * engine built from the stack's own objects with no driver. Read by
+   * `validateRlsPredicateEnforceability` only, which judges each read-scope
+   * RLS `using` with it (ADR-0058 D2). Absent, that judgement is skipped and
+   * every rule answers what it answered without it. ⛔ No rule models the
+   * engine's walks in its place: a rule that needs the engine's verdict reads
+   * this input or does not judge.
+   */
+  judgeFilter?: IObjectQLEngine['judgeFilter'];
 }
 
 export interface AuthoringRule {
@@ -1827,19 +1844,25 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // as an authorization and behaves as a blanket refusal. Same construction as
   // the sharing-rule entry: the verdict is the runtime's own function, reached
   // through `@objectstack/formula` (where #4983 hoisted it), never a model of it.
+  //
+  // [#20158] Across the runtime publish gate, for `permission` writes. The
+  // per-write snapshot has carried `permissions` and `objects` since #8309, so
+  // the only gap was this declaration (#8310 closed with no ruling that kept
+  // the rule CLI-only). A Studio, REST `/meta` or MCP author who writes an RLS
+  // policy has no other door, and until this entry crossed that door accepted
+  // every predicate this rule refuses. `ctx.judgeFilter` is the engine's
+  // judge-only admission, handed in by the door (ADR-0058 D2, #19995 ruling C):
+  // the live engine's at the publish gate, a driverless engine built from the
+  // stack's objects at the CLI.
   {
     name: 'validateRlsPredicateEnforceability',
     tier: 'gating',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-rls-predicate-enforceability.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'The rule reads `stack.permissions[]`, which the per-write snapshot DOES carry since #8309 — '
-      + 'the remaining gap is only the declaration: no `runtimeTypes` names `permission` here, and that '
-      + 'flip is a rollout decision on #8310\'s axis, not a wiring fix. Recorded as pending rather than '
-      + 'done, because a rule that has never run at a door should not claim it.',
-    run: (stack) => validateRlsPredicateEnforceability(stack),
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['permission'],
+    run: (stack, ctx) => validateRlsPredicateEnforceability(stack, { judgeFilter: ctx.judgeFilter }),
   },
   // #4762 — the same "declared but enforces nothing" question, for the two
   // STATIC artifacts an object validation rule carries. A `format` rule's
@@ -1929,7 +1952,11 @@ export function authoringRulesFor(command: AuthoringCommand): readonly Authoring
  */
 export function runAuthoringRules(command: AuthoringCommand, run: AuthoringRuleRun): AuthoringFinding[] {
   const findings: AuthoringFinding[] = [];
-  const ctx: AuthoringRuleContext = { sduiManifest: run.sduiManifest, loweredHookRefs: run.loweredHookRefs };
+  const ctx: AuthoringRuleContext = {
+    sduiManifest: run.sduiManifest,
+    loweredHookRefs: run.loweredHookRefs,
+    judgeFilter: run.judgeFilter,
+  };
   for (const rule of authoringRulesFor(command)) {
     const stack = rule.input === 'normalized' ? run.normalized : (run.parsed ?? run.normalized);
     findings.push(...rule.run(stack, ctx));

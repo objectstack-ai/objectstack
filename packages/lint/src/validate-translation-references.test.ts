@@ -528,6 +528,36 @@ describe('validateTranslationReferences — cross-package objects (§4 ladder)',
   });
 });
 
+describe('validateTranslationReferences — a PRESENT non-array `packages` (#20206, ruling A on #15293 `5634034754`)', () => {
+  // `packages` is declared array-or-absent (ADR-0130 D4), never map-or-array.
+  // This rule reads it through the three internal carriers `object-graph.ts`'s
+  // `packagesOf` now serves (contributed nav, object extensions, and every
+  // artifact-provided collection) — all three now refuse instead of silently
+  // reading the malformed value as "no packages". `artifactProvidedRecords`
+  // ('objects') runs first inside `buildUniverse`, so that is the carrier this
+  // pin observes throwing; the read itself is pinned exhaustively, once, in
+  // `object-graph.test.ts` (the shared function all three now call).
+  // A bundle is required — `validateTranslationReferences` returns before ever
+  // calling `buildUniverse` (and therefore before reading `packages` at all)
+  // when `stack.translations` is empty, exactly like the exemptions below.
+  const oneBundle = [{ 'zh-CN': { objects: {} } }];
+
+  it('refuses instead of silently treating it as absent', () => {
+    for (const packages of [{}, 0, 'x', { a: { manifest: {} } }, null]) {
+      expect(() => validateTranslationReferences({ objects: [], translations: oneBundle, packages })).toThrow(
+        expect.objectContaining({ code: 'INVALID_ARTIFACT_PACKAGES', status: 422 }),
+      );
+    }
+  });
+
+  // [ruling A on #19926, `5805260775`] `null` moved from the control above
+  // into the refusal set in rework round 1: it is present, not absent.
+  it('CONTROL — only an absent (`undefined`) `packages` stays silent', () => {
+    expect(validateTranslationReferences({ objects: [], translations: oneBundle })).toEqual([]);
+    expect(validateTranslationReferences({ objects: [], translations: oneBundle, packages: undefined })).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — apps, dashboards, global actions', () => {
   const stack = {
     objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],

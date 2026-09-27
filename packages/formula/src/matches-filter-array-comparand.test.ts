@@ -20,6 +20,20 @@
  *
  * The first two rows are the bypass. The third failed closed only by accident
  * of polarity, which is why the equality position is refused with it.
+ *
+ * [#19886 stage 2d] The same fault one position over, each measured admitting
+ * and storing the writes a `check` was written to refuse:
+ *
+ * | shape                                               | before                                  | after       |
+ * |---|---|---|
+ * | `{ s: { $gt: ['m'] } }` (and `$gte` / `$lt` / `$lte`) | the array compared as the string `'m'`  | throws → 400 |
+ * | `{ $not: { s: { $in: [['a','b']] } } }`, `$nin`       | `true` → every write **ALLOWED**         | throws → 400 |
+ * | `{ s: { $ne: { $field: 'tags' } } }`, `tags` a list   | `true` → every write **ALLOWED**         | throws → 400 |
+ *
+ * The first two are authored shapes, refused before any record is judged like
+ * the rows above. The third is a `{ $field }` comparison whose column holds a
+ * list: the shape is legal, so it is judged on the record — refused when either
+ * compared column holds a list (or an object) on the record being judged.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -48,6 +62,13 @@ const SHAPES: Array<[string, (list: unknown[]) => Record<string, unknown>]> = [
   ['$ne with an array', (list) => ({ status: { $ne: list } })],
   ['a bare-array field spec (implicit equality)', (list) => ({ status: list })],
   ['$eq with an array', (list) => ({ status: { $eq: list } })],
+  // [#19886 stage 2d] the ordering operators, and a list member that is a list
+  ['$gt with an array', (list) => ({ status: { $gt: list } })],
+  ['$gte with an array', (list) => ({ status: { $gte: list } })],
+  ['$lt with an array', (list) => ({ status: { $lt: list } })],
+  ['$lte with an array', (list) => ({ status: { $lte: list } })],
+  ['$in with an array member', (list) => ({ status: { $in: ['open', list] } })],
+  ['$nin with an array member', (list) => ({ status: { $nin: [list] } })],
 ];
 
 /** Every depth the refusal must reach — and the ones where the old answer was absorbed or inverted. */
@@ -147,15 +168,70 @@ describe('[#19886] every neighbouring shape answers exactly as before', () => {
     expect(m({ at: new Date(d.getTime()) }, { at: { $ne: d } })).toBe(false);
   });
 
-  it('a { $field } reference is judged by what was AUTHORED, not by what it resolves to', () => {
-    // `tags` holds an array on this record; the reference itself is not one.
-    expect(m(RECORD, { tags: { $eq: { $field: 'tags' } } })).toBe(true);
+  it('a { $field } reference between two scalar columns compares them', () => {
     expect(m(RECORD, { other: { $ne: { $field: 'status' } } })).toBe(true);
     expect(m(RECORD, { status: { $ne: { $field: 'status' } } })).toBe(false);
+    expect(m(RECORD, { status: { $eq: { $field: 'status' } } })).toBe(true);
+  });
+
+  it('[#19886 stage 2d] a { $field } reference to a list-holding column is refused, even against itself', () => {
+    // Pinned `true` before stage 2d: a column holding a list compared with
+    // itself matched by reference identity. It is a list compared with a list,
+    // and it is refused like every other list in a one-value comparison.
+    const err = refusalOf({ tags: { $eq: { $field: 'tags' } } });
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
   });
 
   it('a scalar comparand against a STORED array is untouched — the refusal is about the comparand', () => {
     expect(m(RECORD, { tags: { $ne: 'a' } })).toBe(true);
     expect(m(RECORD, { tags: 'a' })).toBe(false);
+  });
+
+  it('[#19886 stage 2d] ordering against one bound, and flat lists under $in / $nin', () => {
+    expect(m({ status: 'open' }, { status: { $gt: 'm' } })).toBe(true);
+    expect(m({ status: 'archived' }, { status: { $gt: 'm' } })).toBe(false);
+    expect(m({ n: 5 }, { n: { $lte: 5 } })).toBe(true);
+    expect(m({ status: 'open' }, { status: { $in: [] } })).toBe(false);
+    expect(m({ status: 'open' }, { status: { $nin: [] } })).toBe(true);
+  });
+});
+
+describe('[#19886 stage 2d] a { $field } comparison whose column holds a list is refused on that record', () => {
+  const m = matchesFilterCondition;
+  const POST_IMAGE = { status: 'closed', reviewer: 'closed', tags: ['closed', 'archived'], meta: { k: 'v' } };
+
+  const REFUSED: Array<[string, Record<string, unknown>]> = [
+    ['$ne against a list-holding column (`record.status != record.tags`)', { status: { $ne: { $field: 'tags' } } }],
+    ['a negated $eq (`!(record.status == record.tags)`)', { $not: { status: { $eq: { $field: 'tags' } } } }],
+    ['the mirror — the list on the constrained side (`record.tags != record.status`)', { tags: { $ne: { $field: 'status' } } }],
+    ['an ordering operator against a list-holding column', { status: { $gt: { $field: 'tags' } } }],
+    ['a column holding an object', { status: { $ne: { $field: 'meta' } } }],
+    ['the offset form, judged on its base column', { $not: { status: { $eq: { $field: 'tags', addDays: 1 } } } }],
+    ['under $or beside an unsatisfied branch', { $or: [{ reviewer: 'nobody' }, { status: { $ne: { $field: 'tags' } } }] }],
+  ];
+
+  for (const [name, filter] of REFUSED) {
+    it(`${name}: INVALID_FILTER / 400`, () => {
+      const err = refusalOf(filter, POST_IMAGE);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+    });
+  }
+
+  it('the same filter over a record whose columns hold one value each is compared, not refused', () => {
+    expect(m({ status: 'closed', tags: 'closed' }, { status: { $ne: { $field: 'tags' } } })).toBe(false);
+    expect(m({ status: 'open', tags: 'closed' }, { status: { $ne: { $field: 'tags' } } })).toBe(true);
+    expect(m({ status: 'open', tags: 'closed' }, { $not: { status: { $eq: { $field: 'tags' } } } })).toBe(true);
+  });
+
+  it('the message withholds the columns and their values', () => {
+    const err = refusalOf({ secret_scope_column: { $ne: { $field: 'secret_list' } } }, {
+      secret_scope_column: 'x',
+      secret_list: ['usr_member_one', 'usr_member_two'],
+    });
+    for (const secret of ['secret_scope_column', 'secret_list', 'usr_member_one', 'usr_member_two']) {
+      expect(err.message).not.toContain(secret);
+    }
   });
 });

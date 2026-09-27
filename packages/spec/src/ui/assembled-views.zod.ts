@@ -63,6 +63,7 @@ import {
   VIEW_METADATA_MEMBERS,
   expandViewContainer,
   isAggregatedViewContainer,
+  type ViewMetadataBranch,
 } from './view.zod';
 
 /**
@@ -98,10 +99,27 @@ export const AssembledViewArtifactSchema = lazySchema(() => {
     );
 });
 
-/** One assembled `viewItems:` entry (input shape). */
-export type AssembledViewArtifact = z.input<typeof AssembledViewArtifactSchema>;
-/** Post-parse shape of {@link AssembledViewArtifact} — defaults applied, transforms run (ADR-0122). */
-export type AssembledViewArtifactParsed = z.infer<typeof AssembledViewArtifactSchema>;
+/**
+ * One assembled `viewItems:` entry (input shape): the union of the INPUT types of the
+ * non-container members of {@link VIEW_METADATA_MEMBERS} — the same members
+ * {@link AssembledViewArtifactSchema}'s union is mapped from, so the two cannot drift.
+ *
+ * [#19920] Deliberately NOT `z.input<typeof AssembledViewArtifactSchema>`: the union's members are
+ * cast to `z.ZodTypeAny` where it is built, so every type derived from the schema itself is
+ * `unknown`, and this name used to type-check any value — a container included.
+ * `assembled-view-artifact-type.test.ts` pins that `unknown` and a container are refused here and
+ * that a body of each member type-checks.
+ *
+ * A static type, not the schema's verdict: the members' refinements are not types, and TypeScript
+ * checks an object literal's keys against the union as a whole. `AssembledViewArtifactSchema`
+ * remains the only judge.
+ */
+export type AssembledViewArtifact = z.input<(typeof VIEW_METADATA_MEMBERS)[Exclude<ViewMetadataBranch, 'container'>]>;
+/**
+ * Post-parse shape of {@link AssembledViewArtifact} — defaults applied, transforms run (ADR-0122):
+ * the union of the same members' OUTPUT types, for the same reason.
+ */
+export type AssembledViewArtifactParsed = z.infer<(typeof VIEW_METADATA_MEMBERS)[Exclude<ViewMetadataBranch, 'container'>]>;
 
 /** Result of {@link partitionAssembledViewArtifacts}. */
 export interface AssembledViewPartition {

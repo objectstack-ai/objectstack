@@ -1920,9 +1920,11 @@ const appAreaFailOpenGatesRemoved: MetadataConversion = {
  * RLS-policy `priority` removed (protocol 17, #3896 security audit).
  *
  * A pure DELETE with no rename target, because the promised semantics never
- * existed: applicable policies OR-combine (any match allows access — most
- * permissive wins), so there is no conflict for a priority to resolve and
- * evaluation order cannot change an outcome. The 2026-07-30 security-subset
+ * existed: no outcome depends on an order. Applicable policies OR-combine on
+ * reads (any match allows access), and a write's check is chosen once per
+ * operation across the applicable policies, then OR-combined
+ * (`RowLevelSecurityPolicySchema.check`), so there is no conflict for a
+ * priority to resolve and evaluation order cannot change an outcome. The 2026-07-30 security-subset
  * liveness re-verification closed the call graph — collection site, projection
  * round-trip, compiler — and found NO reader, ever. Dropping the key is
  * therefore strictly lossless: outcomes are identical with or without it.
