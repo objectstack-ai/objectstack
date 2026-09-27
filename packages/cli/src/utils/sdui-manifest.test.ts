@@ -194,7 +194,7 @@ describe('resolveJsxGateManifest — one decision, three commands', () => {
     expect(isReportedError(e)).toBe(true);
     // ⛔ No ADR-0112 code through the back door.
     expect(errorCodeFields(e)).toEqual({});
-    const stderr = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    const stderr = errSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
     expect(stderr).toContain(e.message);
   });
 });
