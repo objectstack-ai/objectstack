@@ -360,6 +360,7 @@
     "ImportFieldMapping": "src/data/mapping.zod.ts#ImportFieldMapping (type)",
     "ImportFieldMappingParsed": "src/data/mapping.zod.ts#ImportFieldMappingParsed (type)",
     "ImportFieldMappingSchema": "src/data/mapping.zod.ts#ImportFieldMappingSchema (const)",
+    "ImportMappingTargetHead": "src/data/import-mapping-target.ts#ImportMappingTargetHead (interface)",
     "ImportMappingTargetIndex": "src/data/import-mapping-target.ts#ImportMappingTargetIndex (interface)",
     "ImportMappingTargetVerdict": "src/data/import-mapping-target.ts#ImportMappingTargetVerdict (type)",
     "IndexSchema": "src/data/object.zod.ts#IndexSchema (const)",

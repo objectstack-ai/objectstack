@@ -370,6 +370,7 @@
     "ImportFieldMapping (type)",
     "ImportFieldMappingParsed (type)",
     "ImportFieldMappingSchema (const)",
+    "ImportMappingTargetHead (interface)",
     "ImportMappingTargetIndex (interface)",
     "ImportMappingTargetVerdict (type)",
     "IndexSchema (const)",
