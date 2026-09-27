@@ -37,7 +37,7 @@
  * ruling of 2026-08-12 on #7728.
  */
 
-import type { ServiceObject } from '@objectstack/spec/data';
+import { isMaskedOnReadFieldType, type ServiceObject } from '@objectstack/spec/data';
 
 /**
  * Prefix marking a persisted field value as a `sys_secret` handle ref rather
@@ -160,6 +160,16 @@ export class EmptyCredentialWriteError extends Error {
  * generic read path: every `secret` field, plus every `password` field — the
  * latter only when the object is **not** `managedBy: 'better-auth'`.
  *
+ * [#20141] That sentence DESCRIBES the answer; it does not decide it. Which
+ * types are masked, and which `managedBy` buckets exempt which type, is declared
+ * once in `@objectstack/spec/data` (`MASKED_ON_READ_FIELD_TYPES`, read through
+ * `isMaskedOnReadFieldType`), and this collector asks that predicate per field.
+ * objectui's renderer derives from the same declaration, so the server's mask
+ * and the client's cannot drift apart. ⛔ Do not add a `def.type === …` arm
+ * here: a type masked here and not in the declaration is drawn in clear by the
+ * renderer. Change the declaration instead; the table test in
+ * `secret-fields.test.ts` pins every `FieldType × managedBy` answer.
+ *
  * The better-auth exemption is deliberate: the auth subsystem reads its identity
  * rows through the engine's find/findOne, and masking a credential column there
  * would break login. Today no identity object even declares a `password`-typed
@@ -172,12 +182,10 @@ export class EmptyCredentialWriteError extends Error {
 export function collectMaskedReadFields(schema: ServiceObject | undefined | null): string[] {
   const fields = (schema as any)?.fields as Record<string, { type?: string }> | undefined;
   if (!fields) return [];
-  const isBetterAuth = (schema as any)?.managedBy === 'better-auth';
+  const managedBy: unknown = (schema as any)?.managedBy;
   const out: string[] = [];
   for (const [name, def] of Object.entries(fields)) {
-    if (!def) continue;
-    if (def.type === 'secret') out.push(name);
-    else if (def.type === 'password' && !isBetterAuth) out.push(name);
+    if (def && isMaskedOnReadFieldType(def.type, managedBy)) out.push(name);
   }
   return out;
 }
@@ -186,6 +194,10 @@ export function collectMaskedReadFields(schema: ServiceObject | undefined | null
  * [#8559] Collect the names of `password`-typed fields on a **generic**
  * (non-`better-auth`) object — exactly the `password` half of
  * {@link collectMaskedReadFields}, kept beside it so the two cannot drift.
+ * [#20141] It asks the same spec predicate (`isMaskedOnReadFieldType`) for the
+ * exemption rather than restating it, so "the password fields that are masked"
+ * has one answer; the `'password'` arm is this collector's own scope, not a
+ * copy of the masked set.
  *
  * This is the scope of the empty-string refusal's `password` arm
  * ({@link EmptyCredentialWriteError}): the ruling covers the fields that share
@@ -202,10 +214,10 @@ export function collectMaskedReadFields(schema: ServiceObject | undefined | null
 export function collectMaskedPasswordFields(schema: ServiceObject | undefined | null): string[] {
   const fields = (schema as any)?.fields as Record<string, { type?: string }> | undefined;
   if (!fields) return [];
-  if ((schema as any)?.managedBy === 'better-auth') return [];
+  const managedBy: unknown = (schema as any)?.managedBy;
   const out: string[] = [];
   for (const [name, def] of Object.entries(fields)) {
-    if (def && def.type === 'password') out.push(name);
+    if (def && def.type === 'password' && isMaskedOnReadFieldType(def.type, managedBy)) out.push(name);
   }
   return out;
 }

@@ -136,6 +136,11 @@ export * from './field.zod';
 // the encrypted-FIELD path cannot desynchronise from the mask it sees on the
 // settings REST path.
 export * from './secret-mask';
+// Which field types are masked on read (ADR-0100) — one per-type rule table,
+// `managedBy` exemption included, read through one predicate. objectql's
+// `collectMaskedReadFields` and objectui's renderer derive from it instead of
+// each owning a hand-written copy (#20141).
+export * from './masked-field-types';
 // The unknown-authoring-key lint's CORE — comparator, finding shape, curated
 // guidance tables (#3786). Kept frontend-safe: the stack WALKER that imports
 // every schema lives in kernel/metadata-authoring-lint.ts, so this subpath's
