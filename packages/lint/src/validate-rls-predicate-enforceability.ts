@@ -199,6 +199,32 @@
  * The finding keeps the id {@link RLS_PREDICATE_UNENFORCEABLE} and quotes the
  * engine's message verbatim, with its code and status: at authoring time the
  * text is the author's own, so nothing is withheld.
+ *
+ * ## A field compared with a field that holds a list or an object (#19886)
+ *
+ * `record.status != record.tags`, with `tags` a `json` field or a `multiple`
+ * lookup, lowers to `{ status: { $ne: { $field: 'tags' } } }` — a legal shape,
+ * because the lowering knows the predicate's text and not the object's field
+ * types. The engine's admission does not judge a `{ $field }` reference against
+ * the referenced column's type either. Measured before this arm: every cell of
+ * `==` / `!=` / `!(==)` / `>` / `<=`, against a `json`, `address`,
+ * `multiselect`, `multiple` lookup and `multiple` user field, in both operand
+ * orders, on every clause and operation, was clean at `os validate` and at the
+ * save door. The runtime refuses every one of them: the write check refuses the
+ * comparison per record when the compared column holds a list or an object
+ * (`INVALID_FILTER` / 400, nothing stored), and driver-sql refuses a
+ * cross-field comparison against such a column by its DECLARED type, so a read
+ * the `using` scopes answers 400 and a by-id update or delete it scopes 403.
+ *
+ * This rule holds what neither of those holds: the declared field map
+ * ({@link ObjectGraph}). So it judges by declared type, as driver-sql does, and
+ * reads the spec's own value-shape classes rather than a list of its own —
+ * {@link STRUCTURED_JSON_TYPES} (a structured JSON payload) and
+ * {@link isMultiValueField} (an inherently-multi option type, or a
+ * multi-capable type flagged `multiple: true`), the two driver-sql builds its
+ * JSON-column set and its multi-valued test from. It runs on every clause, and
+ * before the engine's pass, so the engine never judges a clause this arm
+ * already refused: one defect, one finding.
  */
 
 import type { EngineFilterJudgement, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -211,7 +237,12 @@ import {
 } from '@objectstack/formula';
 import type { CelBoundsOverrun } from '@objectstack/formula';
 import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
-import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+import {
+  STRUCTURED_JSON_TYPES,
+  assertListComparandShapes,
+  isMultiValueField,
+  normalizeFilterComparandTypes,
+} from '@objectstack/spec/data';
 import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import {
   describeFieldPathVerdict,
@@ -221,6 +252,7 @@ import {
   recordsOf,
   resolveFieldPath,
   suggestName,
+  type GraphField,
   type ObjectGraph,
 } from './object-graph.js';
 
@@ -947,6 +979,89 @@ const DROPPED_FACE_REFUSED =
   'applicable compiles. ';
 
 /**
+ * The lowered field-to-field operators, back to the CEL operator an author
+ * writes. They are the six `cel-to-filter.ts` emits with a `{ $field }`
+ * comparand, and the six the write check and driver-sql refuse against a
+ * list-holding column.
+ */
+const FIELD_COMPARISON_SYMBOL: ReadonlyMap<string, string> = new Map([
+  ['$eq', '=='],
+  ['$ne', '!='],
+  ...ORDERING_SYMBOL,
+]);
+
+/**
+ * What a declared field holds when it holds a list or an object, or `null`
+ * when it holds one value (see this file's header for the two spec classes).
+ */
+function listHoldingDeclaration(meta: GraphField | undefined): string | null {
+  const type = meta?.type;
+  if (!type) return null;
+  if (STRUCTURED_JSON_TYPES.has(type)) return `a \`${type}\` field`;
+  if (!isMultiValueField({ type, multiple: meta.multiple === true })) return null;
+  return meta.multiple === true ? `a \`multiple\` \`${type}\` field` : `a \`${type}\` field`;
+}
+
+/** One lowered comparison between two columns, at least one of which holds a list or an object. */
+interface ListHoldingComparison {
+  /** The comparison as the author wrote it, back in CEL. */
+  written: string;
+  /** Each list-holding column, with what it is declared as. */
+  columns: string[];
+}
+
+/**
+ * Every lowered `{ $field }` comparison in which either column is declared to
+ * hold a list or an object, read off the COMPILER'S OUTPUT and resolved against
+ * the object graph. A column the graph cannot answer for (an object outside the
+ * stack, no field map, a name it does not declare) is not judged here; the
+ * reference pass above owns an unknown name.
+ */
+function listHoldingComparisons(
+  graph: ObjectGraph,
+  object: string,
+  filter: Record<string, unknown>,
+): ListHoldingComparison[] {
+  const found = new Map<string, ListHoldingComparison>();
+  const sites = loweredSites(filter, (op, operand) =>
+    FIELD_COMPARISON_SYMBOL.has(op) &&
+    !!operand && typeof operand === 'object' && !Array.isArray(operand) &&
+    typeof (operand as Record<string, unknown>).$field === 'string');
+  for (const site of sites) {
+    const referenced = (site.operand as { $field: string }).$field;
+    const columns: string[] = [];
+    for (const name of new Set([site.field, referenced])) {
+      const verdict = resolveFieldPath(graph, object, name);
+      const held = verdict?.kind === 'ok' ? listHoldingDeclaration(verdict.meta) : null;
+      if (held) columns.push(`\`${name}\` is ${held}`);
+    }
+    if (columns.length === 0) continue;
+    const written = `record.${site.field} ${FIELD_COMPARISON_SYMBOL.get(site.op)} record.${referenced}`;
+    found.set(written, { written, columns });
+  }
+  return [...found.values()];
+}
+
+/**
+ * What a comparison against a list-holding column does at request time, per
+ * clause. Measured through the real plugin-security on driver-sql, every
+ * clause and operation: see this file's header.
+ */
+function listHoldingConsequence(clause: 'using' | 'check'): string {
+  const write =
+    'every single-record insert and by-id update whose record holds a list or an object in that column is ' +
+    'refused (`INVALID_FILTER` / 400) and stores nothing, because the write check compares one value with ' +
+    'one value and will not guess what a list means';
+  return clause === 'using'
+    ? 'every read this policy scopes is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql ' +
+        'refuses a cross-field comparison against such a column by its declared type), and every by-id ' +
+        'update or delete it scopes fails closed (`PERMISSION_DENIED` / 403). On an `insert`, `update` or ' +
+        '`all` policy the same `using` is also the write check whenever no applicable policy for that ' +
+        `operation declares a \`check\` (ADR-0058 D4): then ${write}.`
+    : `${write}. The policy reads as a write rule and behaves as a refusal of every write it was meant to judge.`;
+}
+
+/**
  * What a reference miss costs at request time, per clause. Measured, not inferred.
  *
  * ⚠️ This text was rewritten once, and the reason it was wrong is worth keeping:
@@ -1234,6 +1349,31 @@ function referenceFindings(
             'every filter it is sent, because no two backends agree on what they match. Test for no value with ' +
             `\`== null\` and for a value with \`!= null\`: ${rewrites.join('; ')}.`
           : 'Rewrite the comparand the check names inside the lowerable subset. ' + PUSHDOWN_SUBSET,
+    });
+  }
+
+  // [#19886] A field compared with a field that holds a list or an object,
+  // judged by DECLARED type (this file's header). Every clause, and ahead of
+  // the engine's pass below, which then does not judge this clause at all.
+  const listComparisons = filter ? listHoldingComparisons(graph, object, filter) : [];
+  if (listComparisons.length > 0) {
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNENFORCEABLE,
+      where,
+      path,
+      message:
+        `RLS ${clause} \`${quote(source)}\` lowers, but compares a field with a field that holds a list or an ` +
+        `object: ${listComparisons.map((c) => `\`${c.written}\`, where ${c.columns.join(' and ')}`).join('; ')}. ` +
+        'A column that holds a list or an object is not one comparable value, on either side of a ' +
+        'field-to-field comparison, so the platform refuses the comparison instead of evaluating it: ' +
+        listHoldingConsequence(clause),
+      hint:
+        'A field compared with a `json` or `multiple` field has no row-filter form: a row filter compares ' +
+        'one value with one value, and cannot test membership in a list another column holds. Compare ' +
+        'with a single-valued column, or with a literal or a `current_user` value — "one of these ' +
+        "values\" is `record.status in ['open', 'pending']` or `record.owner in current_user.org_user_ids` " +
+        '— or move the condition into a validation rule or a hook.',
     });
   }
 
