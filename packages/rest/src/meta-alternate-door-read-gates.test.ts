@@ -19,14 +19,21 @@
  *    read serves: it answers exactly what the plain read answers — the same
  *    refusal, or the same pruned or masked document.
  *  - **`/layers`, `?layers=true` and `/diff` serve STORED versions** — the
- *    layers side by side, or two versions compared. They carry only the
- *    per-caller gates, and where the plain read would serve this caller a
- *    PART of an app (entries withheld) they refuse it `403 PERMISSION_DENIED`
- *    rather than hand back a pruned stored version: Studio's designer loads the
- *    layered view and saves what it loaded, so a pruned version saved back is
- *    the withheld entries silently deleted. The object mask is the one per-caller
- *    arm they still APPLY, because ADR-0106 D4 exempts every caller who may
- *    write a schema from it — the masked view never reaches a writer.
+ *    layers side by side, or two versions compared. They carry the per-caller
+ *    gates: the docs audience refuses what the plain read refuses, and the
+ *    object mask projects as the plain read does (ADR-0106 D4 exempts every
+ *    caller who may write a schema, so a masked version never reaches a
+ *    writer).
+ *
+ *    ⚠️ **Their `app` row is a DECLARED PENDING-DECISION EXEMPTION** (decision
+ *    anchor #20156, `PENDING_DECISION` below). Both ways of pulling it to the
+ *    plain read's answer draw a new permission boundary, which is the
+ *    maintainer's to rule: a PRUNED stored app is deleted entries once Studio's
+ *    designer saves back what it loaded, and a REFUSED one locks out an author
+ *    — a platform admin included — who lacks one entry's permission. So those
+ *    cells answer what they answered before this card (the stored app, to every
+ *    signed-in caller), and this file pins exactly that, under the anchor, so
+ *    the exemption stays loud and cannot widen until it is ruled.
  *  - **`/history` and `/audit` serve events, never a body**: they refuse where
  *    the plain read refuses the item whole, and otherwise serve the events.
  *  - **`/references`** is declared exempt: it serves the identities of OTHER
@@ -286,6 +293,28 @@ const DOORS: Record<string, Door> = {
     },
 };
 
+/**
+ * ⚠️ THE DECLARED PENDING-DECISION EXEMPTION — decision anchor #20156.
+ *
+ * The `app` row of the stored-version doors. Pulling it to the plain read's
+ * answer draws a NEW permission boundary either way (a pruned stored app is
+ * deleted entries once the designer saves back; a refused one locks out an
+ * author, a platform admin included, who lacks one entry's permission), and a
+ * new boundary is the maintainer's to rule. Until it is, these cells answer
+ * exactly what they answered before the gate existed — the stored app, to
+ * every signed-in caller — and the census pins THAT, under this anchor: when
+ * the ruling lands, these cells go red and are rewritten deliberately, never
+ * drifted into. The row may not widen: a test below holds it to exactly the
+ * `app` type on exactly the three stored-version doors.
+ */
+const PENDING_DECISION = Object.freeze({
+    anchor: '#20156',
+    type: 'app',
+    doors: Object.freeze(['?layers=true', '/layers', '/diff']),
+});
+const isPendingDecision = (type: string, doorName: string): boolean =>
+    type === PENDING_DECISION.type && PENDING_DECISION.doors.includes(doorName);
+
 // ── The subjects, and what the plain read answers each caller ────────────────
 
 /**
@@ -405,18 +434,49 @@ describe('[#20156] the plain read answers what the census declares', () => {
     }
 });
 
-describe('[#20156] every alternate door answers what the plain read answers, or refuses', () => {
+describe('[#20156] the pending-decision exemption is declared, anchored, and no wider than the app row of the stored-version doors', () => {
+    it(`exactly the \`app\` type on exactly the stored-version doors, anchored to ${PENDING_DECISION.anchor}`, () => {
+        const storedDoors = Object.entries(DOORS).filter(([, d]) => d.kind === 'stored').map(([n]) => n).sort();
+        expect([...PENDING_DECISION.doors].sort()).toEqual(storedDoors);
+        expect(PENDING_DECISION.type).toBe('app');
+        expect(PENDING_DECISION.anchor).toBe('#20156');
+    });
+});
+
+describe('[#20156] every alternate door answers what the plain read answers, or refuses — save the declared pending-decision row', () => {
     for (const [doorName, door] of Object.entries(DOORS)) {
         if (door.kind === 'exempt') continue;
         describe(doorName, () => {
             for (const subject of SUBJECTS) {
                 for (const callerName of Object.keys(CALLERS) as CallerName[]) {
                     const want = subject.plain[callerName];
-                    it(`${subject.type}/${subject.name} × ${callerName}`, async () => {
-                        const { rest } = setup(callerName);
+                    const pending = isPendingDecision(subject.type, doorName) && CALLERS[callerName].ctx !== undefined;
+                    const title = `${subject.type}/${subject.name} × ${callerName}`
+                        + (pending ? ` — PENDING-DECISION ${PENDING_DECISION.anchor}: the stored app, as before the gate` : '');
+                    it(title, async () => {
+                        const { rest, protocol } = setup(callerName);
                         const plain = await drive(rest, '', subject.type, subject.name);
+                        protocol.getMetaItem.mockClear();
                         const res = await drive(rest, door.suffix, subject.type, subject.name, door.query);
                         const stored = find(subject.type, subject.name);
+
+                        if (pending) {
+                            // The pre-gate answer, pinned under the anchor. LOUD by
+                            // construction: the entries the plain read withholds from
+                            // a non-reader ARE in this body — the exposure the
+                            // decision waits on — and no gate input is read.
+                            expect(res.statusCode).toBe(200);
+                            for (const s of subject.secrets) expect(text(res)).toContain(s);
+                            if (door.suffix === '/diff') {
+                                expect(res.body).toEqual(await protocol.diffMetaItem.mock.results.at(-1)?.value);
+                                expect(protocol.getMetaItem).not.toHaveBeenCalled();
+                            } else {
+                                for (const layer of ['code', 'overlay', 'effective']) {
+                                    expect(res.body?.[layer]).toEqual(stored);
+                                }
+                            }
+                            return;
+                        }
 
                         // A refusal of the item WHOLE is the plain read's refusal
                         // on every door: same status, same code, nothing withheld.
@@ -444,14 +504,9 @@ describe('[#20156] every alternate door answers what the plain read answers, or 
                             return;
                         }
 
-                        // door.kind === 'stored'
-                        if (want.kind === 'pruned') {
-                            // A part of the app is withheld from this caller, and a
-                            // stored version is served whole or not at all.
-                            expect(envelope(res)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
-                            for (const s of subject.secrets) expect(text(res)).not.toContain(s);
-                            return;
-                        }
+                        // door.kind === 'stored' — the `pruned` answer belongs to
+                        // the `app` row alone, which is pending above.
+                        expect(want.kind).not.toBe('pruned');
                         expect(res.statusCode).toBe(200);
                         if (want.kind === 'masked') {
                             for (const s of subject.secrets) expect(text(res)).not.toContain(s);
@@ -497,10 +552,11 @@ describe('[#20156] edges', () => {
         expect(text(res)).not.toContain(BOOK_SECRET);
     });
 
-    it('a gate-input FAULT on a stored-version door is the fault, never a 403 and never the body', async () => {
-        // The app's docs-audience entry arm reads the books; that read fails.
-        // Pruning every `doc` entry would read here as "part of this app is
-        // withheld from you" — a 403 telling a holder they hold nothing.
+    it('a gate-input FAULT is the fault on every door — never a 403, never the body [#20129 carried to the doors]', async () => {
+        // The docs audience reads the books; that read fails. Read as `[]` it
+        // would grant (no gated book anywhere), so every door hands the fault
+        // to the route instead — the plain read's own answer since #20129,
+        // and a holder is not told they hold nothing.
         const { rest, protocol } = setup('reader');
         const listRead = protocol.getMetaItems.getMockImplementation();
         protocol.getMetaItems.mockImplementation(async (request: any) => {
@@ -509,17 +565,21 @@ describe('[#20156] edges', () => {
             }
             return listRead(request);
         });
-        for (const suffix of ['/layers', '/diff']) {
-            const res = await drive(rest, suffix, 'app', 'crm');
-            expect(envelope(res), suffix).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
-            expect(text(res), suffix).not.toContain('nav_finance_ledger');
+        const plainDoc = await drive(rest, '', 'doc', 'crm_admin_runbook');
+        expect(envelope(plainDoc)).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        for (const [doorName, door] of Object.entries(DOORS)) {
+            if (door.kind === 'exempt') continue;
+            const res = await drive(rest, door.suffix, 'doc', 'crm_admin_runbook', door.query);
+            expect(envelope(res), doorName).toEqual(envelope(plainDoc));
+            expect(text(res), doorName).not.toContain(DOC_SECRET);
         }
-        // The single-document doors keep the plain read's answer to that fault:
-        // the `doc` entries left out, the rest of the navigation served.
-        const plain = await drive(rest, '', 'app', 'crm');
+        // An app's docs-audience entry arm takes the plain read's composite
+        // answer on the single-document door: the `doc` entries left out, the
+        // rest of the navigation served.
+        const plainApp = await drive(rest, '', 'app', 'crm');
         const published = await drive(rest, '/published', 'app', 'crm');
-        expect(plain.statusCode).toBe(200);
-        expect(navIds(published.body)).toEqual(navIds(plainItem(plain)));
+        expect(plainApp.statusCode).toBe(200);
+        expect(navIds(published.body)).toEqual(navIds(plainItem(plainApp)));
         expect(navIds(published.body)).not.toContain('nav_admin_runbook');
     });
 

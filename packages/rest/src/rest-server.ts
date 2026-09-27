@@ -1703,8 +1703,8 @@ function sendMetaItemAbsent(res: any): void {
  * ONE document — see {@link RestServer.metaItemReadGate}, the one place it is
  * decided.
  *
- *  - `serve` — send `document`: the input unchanged, or (under
- *    `partial: 'prune'`) the input minus what this caller may not read.
+ *  - `serve` — send `document`: the input, or the input minus what this
+ *    caller may not read (the app nav filter, the dashboard widget gate).
  *  - `refuse` — send nothing of the document; `send` writes the refusal the
  *    plain read gives this caller (its status, its code, its emitter).
  */
@@ -1713,8 +1713,7 @@ type MetaReadVerdict =
     | { kind: 'refuse'; send: (res: any) => void };
 
 /**
- * [#20156] How a door runs {@link RestServer.metaItemReadGate}. Two questions,
- * because the doors serve two different kinds of body.
+ * [#20156] How a door runs {@link RestServer.metaItemReadGate}.
  */
 interface MetaReadGatePolicy {
     /**
@@ -1724,30 +1723,34 @@ interface MetaReadGatePolicy {
      * doors that serve the document a client RENDERS: the plain read and
      * `/published`.
      *
-     * `per-caller` — only the gates whose verdict depends on who asks: the
-     * ADR-0046 §6.7 docs audience, and the app's unpublished gate,
-     * `requiredPermissions` and docs-audience entry arm. The doors that serve
-     * STORED versions — the layered view, `/diff`, `/history`, `/audit`. A
-     * per-deployment gate withholds nothing from the caller, and applied to a
-     * stored version it reports the store wrongly (a widget whose service is
-     * merely off here reads as never authored).
+     * `per-caller` — only the gates whose verdict depends on who asks. The
+     * doors that serve STORED versions — the layered view, `/diff`,
+     * `/history`, `/audit`. A per-deployment gate withholds nothing from the
+     * caller, and applied to a stored version it reports the store wrongly (a
+     * widget whose service is merely off here reads as never authored — and
+     * Studio's designer, which loads the layered view and saves what it
+     * loaded, would delete it).
      */
     arms: 'all' | 'per-caller';
     /**
-     * What a document the caller may read only PART of gets.
+     * The `app` arm (the unpublished gate, `requiredPermissions`, the
+     * docs-audience entry arm).
      *
-     * `prune` — the document minus what is withheld: the plain read's answer.
+     * `gate` — the plain read's app answer: its refusal, or the pruned app.
      *
-     * `refuse` — `403 PERMISSION_DENIED`, the plain read's code for a denied
-     * app. For the doors that serve STORED versions whole: Studio's designer
-     * loads the layered view and saves what it loaded, so a pruned version
-     * handed to it is the withheld entries deleted on the next save, with
-     * nothing in the exchange saying so. A version is served whole or not at
-     * all. (The ADR-0106 object mask stays a projection on those doors — its
-     * D4 exempts every caller who may write a schema, so a masked version
-     * never reaches a writer.)
+     * `pending-decision` — the app is served as STORED, exactly as before this
+     * gate existed. ⚠️ A DECLARED EXEMPTION, not a verdict: what the layered
+     * view (`/layers`, `?layers=`) and `/diff` owe an app is a new permission
+     * boundary, and the maintainer's to decide (decision anchor #20156). Both
+     * ways of pulling them to the plain read's answer draw one: pruning a stored
+     * version the designer saves back deletes the withheld entries, and
+     * refusing it locks out an author — a platform admin included, whose
+     * capability list carries no wildcard and meets no admin exemption in
+     * {@link filterAppForUserWithReason} — who lacks one entry's permission.
+     * The census in `meta-alternate-door-read-gates.test.ts` pins these cells
+     * to the pre-gate answer under that anchor, so they stay loud until ruled.
      */
-    partial: 'prune' | 'refuse';
+    app: 'gate' | 'pending-decision';
 }
 
 /**
@@ -3612,19 +3615,7 @@ export class RestServer {
         serviceGate?: (name: string) => boolean,
         servabilityGate?: NavServabilityGate,
         docAudienceGate?: NavDocAudienceGate,
-    ): {
-        app: any | null;
-        withheld?: 'unpublished' | 'permission' | 'service';
-        /**
-         * [#20156] Set when a PER-CALLER entry arm — `requiredPermissions` or
-         * the docs audience — left an entry out of the served app. Never set
-         * for the per-deployment arms (`requiresService`, servability) or the
-         * empty-`group` collapse, which withhold nothing from THIS caller.
-         * {@link metaItemReadGate} reads it to refuse, rather than prune, a
-         * stored version the caller may see only part of.
-         */
-        entriesWithheld?: true;
-    } {
+    ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
         if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
         // UNPUBLISHED app is externally unobservable, not merely unlisted: only
@@ -3658,13 +3649,12 @@ export class RestServer {
         const areas = Array.isArray(item.areas) ? item.areas : null;
         if (!nav && !areas) return { app: item };
 
-        let entriesWithheld = false;
         const filterNav = (entries: any[]): any[] => {
             const out: any[] = [];
             for (const e of entries) {
                 if (!e || typeof e !== 'object') continue;
                 const req = Array.isArray(e.requiredPermissions) ? e.requiredPermissions : [];
-                if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) { entriesWithheld = true; continue; }
+                if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) continue;
                 if (typeof e.requiresService === 'string' && serviceGate && serviceGate(e.requiresService) === false) continue;
                 // [#19790] DOCS AUDIENCE — the rule `DocNavItemSchema` declares
                 // and, until this arm, only a renderer honoured: a `doc` entry
@@ -3682,7 +3672,7 @@ export class RestServer {
                 // `continue` with no reason attached; `withheld` reports only
                 // why a whole APP was withheld, and an app this arm empties is
                 // still served, exactly as one emptied by `requiredPermissions`.
-                if (e.type === 'doc' && (!docAudienceGate || !docAudienceGate(e))) { entriesWithheld = true; continue; }
+                if (e.type === 'doc' && (!docAudienceGate || !docAudienceGate(e))) continue;
                 // [#7912] SERVABILITY — the gate this filter had no vocabulary
                 // for. A `type: 'object'` entry names its destination in
                 // `objectName`; the object's own `enable` block decides whether
@@ -3798,12 +3788,13 @@ export class RestServer {
             return out;
         };
 
-        const app = {
-            ...item,
-            ...(nav ? { navigation: filterNav(nav) } : {}),
-            ...(areas ? { areas: filterAreas(areas) } : {}),
+        return {
+            app: {
+                ...item,
+                ...(nav ? { navigation: filterNav(nav) } : {}),
+                ...(areas ? { areas: filterAreas(areas) } : {}),
+            },
         };
-        return entriesWithheld ? { app, entriesWithheld: true } : { app };
     }
 
     /**
@@ -3845,8 +3836,10 @@ export class RestServer {
      * through `?layers=true`, and an app's `requiredPermissions` entries reached
      * every member. The by-name app route's own rule — it "must not serve a nav
      * entry the list route prunes, or reading the single-app JSON defeats the
-     * filter" — held for one door out of seven. Each door now asks THIS
-     * function, so a gate added here reaches all of them, and the census in
+     * filter" — held for one door out of seven (the app row of the layered view
+     * and `/diff` still waits on a decision: `MetaReadGatePolicy.app`). Each
+     * door now asks THIS function, so a gate added here reaches all of them,
+     * and the census in
      * `meta-alternate-door-read-gates.test.ts` — its door list read off the
      * route table — fails a door that does not ask.
      *
@@ -3858,6 +3851,9 @@ export class RestServer {
      *    `service` → the absence answer ({@link sendMetaItemAbsent}, ADR-0045
      *    §3: an unpublished app is externally unobservable). [#7912] The
      *    servability gate and [#19790] the docs-audience entry arm ride along.
+     *    ⚠️ Under `app: 'pending-decision'` — the layered view and `/diff` —
+     *    the arm does not run and the stored app is served as before: see
+     *    `MetaReadGatePolicy.app` for the decision it waits on.
      *  - `dashboard` — ADR-0057 D10 {@link filterDashboardForUser}. A
      *    per-DEPLOYMENT gate (which optional services are registered), never
      *    per-caller, so `arms: 'per-caller'` skips it.
@@ -3904,6 +3900,10 @@ export class RestServer {
         };
 
         if (metaType === 'app') {
+            // A DECLARED EXEMPTION, pending the maintainer's decision (anchor
+            // #20156) — see `MetaReadGatePolicy.app`. No input is resolved and
+            // nothing is judged: the stored app, exactly as before this gate.
+            if (policy.app === 'pending-decision') return async (document) => serve(document);
             type AppGateInputs = {
                 sysPerms: Set<string>;
                 serviceGate?: (n: string) => boolean;
@@ -3930,8 +3930,7 @@ export class RestServer {
                 }
                 // [#19790] And the same docs-audience gate, for the same reason:
                 // a `doc` entry the list route prunes must not come back here.
-                const docAudienceGate = await this.resolveNavDocAudience(
-                    p, environmentId, req, documents, policy.partial === 'refuse' ? 'throw' : 'prune');
+                const docAudienceGate = await this.resolveNavDocAudience(p, environmentId, req, documents);
                 return { sysPerms, serviceGate, servabilityGate, docAudienceGate };
             })());
             return async (document) => {
@@ -3963,19 +3962,6 @@ export class RestServer {
                     // nothing-behind-the-name arm are byte-identical by
                     // construction (ADR-0045 §3).
                     return refuse(sendMetaItemAbsent);
-                }
-                if (policy.partial === 'refuse') {
-                    // A stored version is served whole or not at all — see
-                    // `MetaReadGatePolicy.partial` for the designer save that
-                    // makes a pruned one a silent deletion. Same code and
-                    // emitter as the app-level denial above.
-                    if (gated.entriesWithheld) {
-                        return refuse((res) => sendEnvelopeError(
-                            res, 403, 'PERMISSION_DENIED',
-                            `Part of the '${name}' app is withheld from you, and this view serves stored versions whole, so it is not served to you. Read the app itself for the navigation you may open.`,
-                        ));
-                    }
-                    return serve(document);
                 }
                 return serve(gated.app);
             };
@@ -4048,7 +4034,8 @@ export class RestServer {
     ): Promise<any | undefined> {
         const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
         const organizationId = organizationIdForMetaRead(
-            // [#10340] FOLDED, not raw — see the PUT door's org-scope comment.
+            // [folded-type commit 26f3588fb] (the original card no longer
+            // resolves) FOLDED, not raw — see the PUT door's org-scope comment.
             canonicalMetaUrlType(req.params.type), ctx?.tenantId,
         );
         const currentRequest: GetMetaItemRequest = {
@@ -4077,12 +4064,12 @@ export class RestServer {
         p: RestProtocol,
     ): Promise<((res: any) => void) | undefined> {
         const metaType = RestServer.metaTypeSingular(req.params.type);
-        if (!RestServer.META_READ_GATED_TYPES.has(metaType)) return undefined;
+        const policy: MetaReadGatePolicy = { arms: 'per-caller', app: 'gate' };
+        if (!RestServer.gatesPerCaller(metaType, policy)) return undefined;
         const current = await this.fetchCurrentMetaDocument(environmentId, req, p);
         if (current == null) return undefined;
         const verdict = await this.metaItemReadGate(
-            environmentId, req, p, metaType, req.params.name, [current],
-            { arms: 'per-caller', partial: 'prune' },
+            environmentId, req, p, metaType, req.params.name, [current], policy,
         )(current);
         return verdict.kind === 'refuse' ? verdict.send : undefined;
     }
@@ -4114,11 +4101,27 @@ export class RestServer {
     }
 
     /**
-     * [#20156] The types {@link metaItemReadGate} judges per caller — the ones a
-     * door serving no document of its own must fetch the current one for.
-     * `dashboard` is not here: its gate answers per deployment, not per caller.
+     * [#20156] Does {@link metaItemReadGate} judge this type per caller under
+     * `policy`? The question a door serving no document of its own asks before
+     * it fetches the current one — a type the answer is no for costs that door
+     * no extra read and no new failure mode. `dashboard` is never judged per
+     * caller (its gate answers per deployment), and `app` only where its arm is
+     * not `pending-decision`.
      */
-    private static readonly META_READ_GATED_TYPES: ReadonlySet<string> = new Set(['app', 'book', 'doc']);
+    private static gatesPerCaller(metaType: string, policy: MetaReadGatePolicy): boolean {
+        if (metaType === 'book' || metaType === 'doc') return true;
+        return metaType === 'app' && policy.app === 'gate';
+    }
+
+    /**
+     * [#20156] The policy of the doors that serve STORED versions for authoring
+     * — the layered view (`/layers`, `?layers=`) and `/diff`. One constant, so
+     * the two cannot come to disagree about the pending `app` row.
+     */
+    private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = Object.freeze({
+        arms: 'per-caller',
+        app: 'pending-decision',
+    });
 
     /**
      * Probe which `requiresService` capability gates referenced anywhere in
@@ -4332,23 +4335,12 @@ export class RestServer {
      * `resolveBookClaimedDocs` of that book over the corpus (one
      * `resolveBookTree`: every doc visited once per group rule) plus one
      * lookup per claimed page. ⛔ No cache — nothing outlives the request.
-     *
-     * ## `onFault: 'throw'` — the stored-version doors [#20156]
-     *
-     * A door that REFUSES an app whose entries are partly withheld
-     * ({@link metaItemReadGate} under `partial: 'refuse'`) cannot take the
-     * drop-every-`doc`-entry answer: every entry dropped reads there as "part
-     * of this app is withheld from you", a `403` telling a holder they hold
-     * nothing because a store read failed. Those doors hand the fault to the
-     * route instead, the way {@link fetchAudienceBooks} does for the doc reads —
-     * the same resolution, failing closed by the other of its two spellings.
      */
     private async resolveNavDocAudience(
         p: RestProtocol,
         environmentId: string | undefined,
         req: any,
         apps: readonly any[],
-        onFault: 'prune' | 'throw' = 'prune',
     ): Promise<NavDocAudienceGate | undefined> {
         const entries = RestServer.docNavEntries(apps);
         // Nothing to judge — and the arm drops a `doc` entry this walk missed,
@@ -4356,7 +4348,6 @@ export class RestServer {
         if (entries.length === 0) return undefined;
 
         const failClosed = (what: string, fault: unknown): NavDocAudienceGate => {
-            if (onFault === 'throw') throw fault;
             logWarn(
                 `[REST] app-nav docs-audience gate: the ${what} read failed — failing CLOSED: every ` +
                     "`type: 'doc'` navigation entry is left out of this response, because whether the " +
@@ -4757,9 +4748,9 @@ export class RestServer {
         // the publicly-reachable book/doc route. Each present layer is judged,
         // `effective` first (it is what the plain read serves, so its refusal is
         // the plain read's own), then `code` and `overlay`: a layer the caller
-        // may not read is not served beside one they may. `per-caller` /
-        // `refuse` because these are STORED versions, loaded by Studio's
-        // designer and saved back — see `MetaReadGatePolicy`.
+        // may not read is not served beside one they may. `per-caller` because
+        // these are STORED versions, loaded by Studio's designer and saved
+        // back; the `app` row is `pending-decision` — see `MetaReadGatePolicy`.
         {
             const metaType = RestServer.metaTypeSingular(req.params.type);
             const present = (['effective', 'code', 'overlay'] as const)
@@ -4767,7 +4758,7 @@ export class RestServer {
                 .filter((document) => document != null);
             const judge = this.metaItemReadGate(
                 environmentId, req, p, metaType, req.params.name, present,
-                { arms: 'per-caller', partial: 'refuse' },
+                RestServer.STORED_VERSION_DOOR_POLICY,
             );
             for (const document of present) {
                 const verdict = await judge(document);
@@ -7879,14 +7870,16 @@ export class RestServer {
                             // read applies. This read runs every arm and serves a
                             // partly-withheld app PRUNED — the answer the census
                             // in `meta-alternate-door-read-gates.test.ts` holds
-                            // each door to.
+                            // each door to, less the one row it declares pending
+                            // a decision (see `MetaReadGatePolicy.app`).
                             //
-                            // [#6241] Judged on the NORMALIZED `metaType`, like
-                            // every gate here: `/meta/books/:name` is the
-                            // canonical plural spelling (Prime Directive #3).
+                            // [plural-spelling commit 83a3b1f2e] (the original
+                            // card no longer resolves) Judged on the NORMALIZED
+                            // `metaType`, like every gate here: `/meta/books/:name`
+                            // is the canonical plural spelling (Prime Directive #3).
                             const verdict = await this.metaItemReadGate(
                                 environmentId, req, p, metaType, req.params.name, [visible],
-                                { arms: 'all', partial: 'prune' },
+                                { arms: 'all', app: 'gate' },
                             )(visible);
                             if (verdict.kind === 'refuse') {
                                 verdict.send(res);
@@ -9066,9 +9059,11 @@ export class RestServer {
                     // object its `fields` — so it owes the plain read's
                     // per-caller answer for each side. Resolved in the plain
                     // read's order: the ADR-0106 mask posture BEFORE any fetch
-                    // (D2/D3), then the current document, which a gated type
-                    // must have — the plain read answers its absence, and there
-                    // is no gate input to judge the versions against.
+                    // (D2/D3), then the current document, which a type the gate
+                    // judges here must have — the plain read answers its
+                    // absence, and there is no gate input to judge the versions
+                    // against. (`app` is not judged here: its row on this door
+                    // is `pending-decision`, see `MetaReadGatePolicy.app`.)
                     const diffMetaType = RestServer.metaTypeSingular(req.params.type);
                     let diffMaskPosture: ObjectSchemaMaskPosture;
                     try {
@@ -9080,7 +9075,7 @@ export class RestServer {
                         }
                         throw maskError;
                     }
-                    const diffGated = RestServer.META_READ_GATED_TYPES.has(diffMetaType);
+                    const diffGated = RestServer.gatesPerCaller(diffMetaType, RestServer.STORED_VERSION_DOOR_POLICY);
                     const diffCurrent = diffGated
                         ? await this.fetchCurrentMetaDocument(environmentId, req, p)
                         : undefined;
@@ -9131,14 +9126,15 @@ export class RestServer {
                         ...(toVersion !== undefined ? { toVersion } : {}),
                     });
                     // [#20156] Judge the current document and both sides, with
-                    // ONE judge (one books read, one holdings resolution). A
-                    // comparison of STORED versions is served whole or not at
-                    // all — `per-caller` / `refuse`, see `MetaReadGatePolicy`.
+                    // ONE judge (one books read, one holdings resolution): a
+                    // side the caller may not read is not served beside one
+                    // they may. `per-caller`, the stored-version doors' policy —
+                    // see `MetaReadGatePolicy`.
                     if (diffGated) {
                         const { from, to } = RestServer.diffSides(diffCurrent, result);
                         const judge = this.metaItemReadGate(
                             environmentId, req, p, diffMetaType, req.params.name, [diffCurrent, from, to],
-                            { arms: 'per-caller', partial: 'refuse' },
+                            RestServer.STORED_VERSION_DOOR_POLICY,
                         );
                         for (const side of [diffCurrent, from, to]) {
                             const verdict = await judge(side);
@@ -9477,7 +9473,7 @@ export class RestServer {
                                 ?? await this.resolveProtocol(environmentId, req);
                             const verdict = await this.metaItemReadGate(
                                 environmentId, req, gateProtocol, publishedMetaType, name, [document],
-                                { arms: 'all', partial: 'prune' },
+                                { arms: 'all', app: 'gate' },
                             )(document);
                             if (verdict.kind === 'refuse') {
                                 verdict.send(res);
