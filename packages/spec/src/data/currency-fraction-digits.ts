@@ -3,9 +3,10 @@
 /**
  * ISO 4217 / CLDR currency fraction digits — the static digit table behind the
  * #7918 publish-time rule (maintainer ruling 2026-08-12, Option A): a currency
- * field whose AUTHORED `precision` contradicts its statically-known currency's
- * fraction digits is rejected at parse/publish time, with a message naming
- * both numbers.
+ * field whose AUTHORED `currencyConfig.precision` contradicts its
+ * statically-known currency's fraction digits is rejected at parse/publish
+ * time, with a message naming both numbers. The FIELD-level `precision` key is
+ * not judged here: it is "Total digits", not decimal places (#20011).
  *
  * ## Provenance — CLDR `currencyData`, checked in, not probed at runtime
  *
@@ -84,12 +85,16 @@ export function currencyFractionDigits(code: string): number | undefined {
 }
 
 /**
- * The #7918 verdict, shared by BOTH anchors of the rule — the field-level
- * `precision` key (checked in `FieldSchema`'s `superRefine`) and
- * `CurrencyConfigSchema.precision` (checked pre-default inside that schema) —
- * so the two doors cannot drift apart in wording. Returns the issue message
- * when `precision` contradicts `currency`'s fraction digits, `undefined` when
- * they agree or the currency is unknown (fail-open).
+ * The #7918 verdict for `CurrencyConfigSchema.precision`, checked pre-default
+ * inside that schema (its `.superRefine`, and the `.overwrite` that decides
+ * whether the default 2 may be materialized). Returns the issue message when
+ * `precision` contradicts `currency`'s fraction digits, `undefined` when they
+ * agree or the currency is unknown (fail-open).
+ *
+ * ⛔ Not for the FIELD-level `precision` key. That key is "Total digits" — a
+ * DECIMAL(18,2) amount declares `precision: 18` — so comparing it with a
+ * fraction-digit count refuses correct metadata and prescribes a total-digit
+ * count of 2. `FieldSchema` ran this verdict on it until #20011.
  *
  * The message's first clause names both numbers, verbatim per the ruling:
  * "currency JPY has 0 fraction digits; `precision: 2` contradicts it".

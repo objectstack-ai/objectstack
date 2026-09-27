@@ -79,13 +79,9 @@ import {
  * C and was REJECTED by name: a union AT THE KEY makes neither stage checkable,
  * which is the tolerate-at-the-consumer shape Prime Directive #12 refuses. So
  * `ManifestSchema` is untouched here — still `strictObject`, still globs — and
- * the assembled stage gets its own name, built from `AssembledPackageBodySchema`
- * (#14242's own declaration) rather than a second transcription of it.
- *
- * The body half is deliberately typed `Record<string, unknown>`; the reason is
- * recorded at `AssembledPackageBodySchema` and is not repeated here. The RUNTIME
- * schema still carries the manifest's every field plus every collection's full
- * declaration, so a wrong-shaped body is refused exactly as it is there.
+ * the assembled stage gets its own name, built from the same body shape as
+ * `AssembledPackageBodySchema` (#14242's own declaration) rather than a second
+ * transcription of it, at the record stage the next section describes.
  *
  * ## The row's manifest is the RECORD stage, not the assembled one
  *
@@ -124,6 +120,24 @@ import {
  * members that need the treatment is MEASURED, never hand-picked — pinned
  * key-by-key in `./package-api.test.ts`, so a new collection with no JSON form
  * reddens there, naming itself.
+ *
+ * ## `manifest`'s published type is deliberately an index signature
+ *
+ * `RecordStagePackageBodySchema` is declared `z.ZodType<Record<string,
+ * unknown>, Record<string, unknown>>`, so this row's `manifest` publishes as an
+ * index signature: an authoring-stage `InstalledPackage` assigns to
+ * `AssembledInstalledPackage`, and at the type level this arm absorbs the
+ * authoring arm of {@link InstalledPackageAtEitherStageSchema}. That is the
+ * accepted static contract — the maintainer ruling on #19324 (letter 丙) — not
+ * a gap to tighten in passing. The RUNTIME schema is the enforced contract: it
+ * still carries the manifest's every field plus every collection's full
+ * declaration, so `.parse()` refuses a wrong-shaped body — tell the two stages
+ * apart by parsing, never by the static type. It is not inferred because `tsc`
+ * refuses to print the whole metadata vocabulary into the declarations that
+ * embed it (TS7056; #14513 measured it on the assembled body, and on this
+ * stage it fires at `PackageApiContracts` below). The precise form, if the
+ * schema depth ever allows it, is A2 — the reasons and A2's measured cost are
+ * recorded once, at `RecordStagePackageBodySchema` in `../stack.zod`.
  */
 export const AssembledInstalledPackageSchema = lazySchema(() => InstalledPackageSchema.extend({
   manifest: RecordStagePackageBodySchema.describe('The ASSEMBLED package body this row carries, at the stage the registry records it'),

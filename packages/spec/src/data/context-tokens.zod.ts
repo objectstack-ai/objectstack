@@ -5,7 +5,18 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
 
 /**
  * Context Tokens — the declarative placeholders that resolve against the
- * **caller's session** (who am I, which org am I in) rather than the clock.
+ * **caller's session** (who am I, which org am I in) rather than the clock,
+ * plus one sibling that resolves against the **surface**: `{record_id}`, the
+ * record a `type: 'record'` page is showing.
+ *
+ * The two resolve against different things, so they are two lists, never one:
+ *
+ * | | `CONTEXT_TOKENS` | `RECORD_CONTEXT_TOKENS` |
+ * |---|---|---|
+ * | Tokens | `{current_user_id}`, `{current_org_id}` | `{record_id}` |
+ * | Resolves against | the caller's session | the record the page is bound to |
+ * | Known on the server | yes — `ExecutionContext` | never — only the page renderer knows which record is in view |
+ * | Valid on | every filter surface | a component on a `type: 'record'` page, and nowhere else |
  *
  * # Why this lives in `spec`
  *
@@ -35,11 +46,24 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
  * degrades to `IS NULL` on most drivers and would hand back the rows
  * the filter was written to exclude.
  *
+ * `{record_id}` is resolved on ONE side of the wire only: by the page
+ * renderer, which substitutes the id of the record a `type: 'record'` page
+ * is showing before the filter leaves the browser. The server never knows
+ * which record a page is showing, so a filter that reaches
+ * `resolveFilterTokens()` still carrying `{record_id}` is refused by name
+ * (`FILTER_TOKEN_UNRESOLVED` / 400) — which is also what an author sees
+ * from a renderer that does not resolve the token yet. It never becomes
+ * `null`, `undefined` or the literal string: a number written as "about
+ * this record" must neither silently become "about everybody" (the
+ * condition dropped) nor "about nobody" (the token compared as text).
+ *
  * # Presentation scope, NOT a security boundary
  *
  * This is the single most important thing to understand about these
  * tokens. `{current_user_id}` scopes what a surface *shows*; it does not
- * decide what a caller is *allowed* to read. Enforcement is RLS, which
+ * decide what a caller is *allowed* to read. `{record_id}` is the same: it
+ * narrows a record-page component to the record in view, and which of those
+ * rows the caller may read is still not its decision. Enforcement is RLS, which
  * uses a different and genuinely server-side vocabulary rooted at
  * `current_user` (`owner_id = current_user.id`, compiled by
  * `@objectstack/plugin-security`'s RLS compiler).
@@ -59,12 +83,38 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
  *
  * # Where the tokens are honoured
  *
- * Filter values on every surface that resolves placeholders — object list
- * views, dashboard widgets, reports, SDUI page components. Navigation
- * (`recordId` / `params`) additionally resolves `AppContextSelector` ids
- * such as `{active_package}`; those are nav-only and are NOT valid inside
- * filter values, because filters are not evaluated with the sidebar's
- * selector state.
+ * `{current_user_id}` and `{current_org_id}`: filter values on every surface
+ * that resolves placeholders — object list views, dashboard widgets,
+ * reports, datasets, SDUI page components — and on the server's ObjectQL
+ * read and write paths and analytics doors.
+ *
+ * `{record_id}`: filter values on a component of a `type: 'record'` page,
+ * and nowhere else. `@objectstack/lint`'s `validate-filter-tokens` refuses it
+ * by name ("no record in context on this surface") on list views, dashboard
+ * widgets, reports, datasets, apps, object definitions and every page that is
+ * not `type: 'record'`. The server refuses it on every path, because no
+ * server path has a record in context.
+ *
+ * Navigation (`recordId` / `params`) additionally resolves
+ * `AppContextSelector` ids such as `{active_package}`; those are nav-only and
+ * are NOT valid inside filter values, because filters are not evaluated with
+ * the sidebar's selector state.
+ *
+ * # `{record_id}` is not `{recordId}`, and not the `'record_id'` variable type
+ *
+ * Three spellings look alike and are three different mechanisms:
+ *
+ * - `{record_id}` — this filter token. A whole filter VALUE, resolved to the
+ *   id of the record the page shows.
+ * - `{recordId}` — a URL / flow-template placeholder: an action's
+ *   `newTabUrl` (`action.zod.ts`) and the flow template dialect
+ *   (`@objectstack/lint`'s `flow-template-grammar.ts`). It is interpolated by
+ *   those surfaces' own template engines and is NOT a filter token. Written
+ *   inside a filter it is refused, with `{record_id}` suggested.
+ * - `'record_id'` — a page-variable TYPE (`PageVariableSchema.type` in
+ *   `page.zod.ts`), naming what a page variable holds, e.g. the selection of
+ *   an `element:record_picker`. It is read in expressions as `page.<name>`,
+ *   never written as a placeholder.
  *
  * # Out of scope
  *
@@ -72,6 +122,9 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
  * - `{date-macros}` — the clock-based sibling; see `./date-macros.zod.ts`.
  * - `titleFormat` field interpolation (`{user_id}` etc.) — that substitutes
  *   *record fields*, an unrelated mechanism that happens to share braces.
+ * - Tokens for a record OTHER than the one in view (a related record, a
+ *   parent of the record). Each is its own contract with its own resolver,
+ *   not an extension of `{record_id}`.
  */
 
 /**
@@ -94,6 +147,42 @@ export type ContextToken = (typeof CONTEXT_TOKENS)[number];
  */
 export function isContextToken(token: string): boolean {
   return (CONTEXT_TOKENS as readonly string[]).includes(token);
+}
+
+/**
+ * The complete set of RECORD-scoped filter tokens: resolved against the
+ * SURFACE, meaning the record a `type: 'record'` page is showing, never
+ * against the caller's session.
+ *
+ * `record_id` is the id of that record. On a person's record page,
+ * `{ assignee: '{record_id}' }` counts that person's tasks. Without it, the
+ * only filter an author can write counts the whole organisation's, under
+ * that person's name.
+ *
+ * A sibling of {@link CONTEXT_TOKENS}, not a member, because every consumer
+ * of that list resolves it from the session: the client resolver fills it
+ * from the signed-in user and org, and the server from `ExecutionContext`.
+ * Neither knows which record a page is showing. So a record-context token
+ * resolves only in the page renderer. `resolveFilterTokens()` refuses it by
+ * name on every server path, and lint refuses it on every surface that is not
+ * a record page.
+ *
+ * Deliberately tiny, for the reason `CONTEXT_TOKENS` is. A token for any
+ * record other than the one in view (a related record, a parent) is its own
+ * contract, not an entry here.
+ */
+export const RECORD_CONTEXT_TOKENS = [
+  'record_id',
+] as const;
+
+export type RecordContextToken = (typeof RECORD_CONTEXT_TOKENS)[number];
+
+/**
+ * Is `token` (without braces) a record-context token, one that resolves only
+ * where a record is in context? See {@link RECORD_CONTEXT_TOKENS}.
+ */
+export function isRecordContextToken(token: string): boolean {
+  return (RECORD_CONTEXT_TOKENS as readonly string[]).includes(token);
 }
 
 /**
@@ -191,8 +280,15 @@ export const CONTEXT_TOKEN_DESCRIPTIONS: Record<ContextToken, string> = {
  * `{user_id}` is valid `titleFormat` field interpolation. Lint quotes the
  * suggestion so the author is corrected at authoring time, where an AI can
  * still see and act on it.
+ *
+ * The `record_id` rows follow the same rule. `recordid` is `{recordId}`
+ * lower-cased, and `{recordId}` is the URL / flow-template placeholder
+ * (`newTabUrl`, the flow template dialect), which is a correct spelling
+ * somewhere else. `record.id` is the flow template dialect's path to its
+ * triggering record. `record-id` is the kebab shape #5586 recognised, and
+ * `current_record_id` is the `current_*` shape the session tokens teach.
  */
-export const CONTEXT_TOKEN_SUGGESTIONS: Readonly<Record<string, ContextToken>> = {
+export const CONTEXT_TOKEN_SUGGESTIONS: Readonly<Record<string, ContextToken | RecordContextToken>> = {
   current_user:            'current_user_id',
   current_user_email:      'current_user_id',
   user_id:                 'current_user_id',
@@ -202,6 +298,10 @@ export const CONTEXT_TOKEN_SUGGESTIONS: Readonly<Record<string, ContextToken>> =
   org_id:                  'current_org_id',
   organization_id:         'current_org_id',
   current_tenant_id:       'current_org_id',
+  recordid:                'record_id',
+  'record.id':             'record_id',
+  'record-id':             'record_id',
+  current_record_id:       'record_id',
 };
 
 /**
@@ -215,6 +315,16 @@ export const CONTEXT_TOKEN_SUGGESTIONS: Readonly<Record<string, ContextToken>> =
  * Note this is deliberately narrower than what navigation accepts:
  * `recordId` / `params` also resolve `AppContextSelector` ids, which are
  * meaningless in a filter.
+ *
+ * It is deliberately narrower than {@link classifyFilterToken} too. The
+ * record-context tokens ({@link RECORD_CONTEXT_TOKENS}) are NOT members,
+ * because this predicate answers "can the server resolve it?", and no server
+ * position has a record in context. Its one consumer is such a position: the
+ * flow template engine's filter hand-off (`interpolateFilter` in
+ * `@objectstack/service-automation`) passes a token it cannot resolve on to
+ * ObjectQL only when this predicate says ObjectQL can. A flow addresses its
+ * own record as `{record.id}`, so an unset `{record_id}` there stays the flow's
+ * own unresolved-variable refusal.
  */
 export function isKnownFilterToken(token: string): boolean {
   return isContextToken(token) || isDateMacroToken(token);
@@ -235,25 +345,33 @@ export function isKnownFilterToken(token: string): boolean {
  * literal string, which is the silent-wrong-rows outcome this classification
  * exists to prevent. The token reported is the raw text between the braces, so
  * the caller's error names exactly what the author wrote.
+ *
+ * `record-context` is its own kind rather than a `context` token because the
+ * verdict on it depends on WHERE it is written: it resolves on a record page
+ * and nowhere else (see {@link RECORD_CONTEXT_TOKENS}). A caller that has no
+ * record in context refuses it by name, never as `unknown`, because the
+ * spelling is right and the surface is not.
  */
 export function classifyFilterToken(
   value: unknown,
 ):
   | { kind: 'context'; token: ContextToken }
+  | { kind: 'record-context'; token: RecordContextToken }
   | { kind: 'date-macro'; token: string }
-  | { kind: 'unknown'; token: string; suggestion?: ContextToken }
+  | { kind: 'unknown'; token: string; suggestion?: ContextToken | RecordContextToken }
   | null {
   if (typeof value !== 'string') return null;
   const m = value.match(FILTER_TOKEN_WRAPPED_RE);
   if (!m) return null;
   const token = m[1];
   if (isContextToken(token)) return { kind: 'context', token: token as ContextToken };
+  if (isRecordContextToken(token)) return { kind: 'record-context', token: token as RecordContextToken };
   if (isDateMacroToken(token)) return { kind: 'date-macro', token };
   // Own-property guard: the table is a plain object literal, so a bare index
   // resolves `Object.prototype`'s members for an off-vocabulary token —
   // `{constructor}` put the `Object` FUNCTION and `{__proto__}`
-  // `Object.prototype` itself into `suggestion`, whose declared type is
-  // `ContextToken`. A TypeScript consumer holds a compile-time guarantee that
+  // `Object.prototype` itself into `suggestion`, whose declared type is a
+  // token-name union. A TypeScript consumer holds a compile-time guarantee that
   // is false at runtime, and nothing in the type system will ever flag it.
   //
   // The reach is not bounded by the identifier shapes: `FILTER_TOKEN_WRAPPED_RE`

@@ -219,6 +219,21 @@ describe('direct analytics door — unresolvable placeholders refuse loudly (#12
     expect(captured).toHaveLength(0);
   });
 
+  it('the record-context token {record_id} refuses by name — no record is in context on this door', async () => {
+    // Even for an authenticated caller with a full context: only a record
+    // page's renderer knows which record is in view.
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const err = await sqlCaptureService(captured)
+      .query(directQuery({ owner: '{record_id}' }), CTX_A)
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { code?: string }).code).toBe('FILTER_TOKEN_UNRESOLVED');
+    expect((err as { status?: number }).status).toBe(400);
+    expect((err as { token?: string }).token).toBe('record_id');
+    expect(captured).toHaveLength(0);
+  });
+
   it('generateSql refuses identically — the dry run answers what the real run would', async () => {
     const err = await sqlCaptureService([])
       .generateSql(directQuery({ owner: '{current_user}' }), CTX_A)

@@ -470,7 +470,7 @@ export const ChartDrillDownSchema = lazySchema(() => strictObject(
       // Keys of objectui's wider renderer-side drill config. Each is real —
       // on another widget — so a rename suggestion would be actively wrong.
       mode:
-        '`mode` (`\'filter\'` | `\'record\'`) is a TABLE / PIVOT / METRIC drill key, not a chart one: it chooses whether a click drills through an aggregate to a filtered list or straight to one record. A chart segment is always an aggregate, so a chart drill is always the filtered-list kind and there is nothing to discriminate. Delete the key.',
+        '`mode` (`\'filter\'` | `\'record\'`) is objectui\'s `object-data-table` drill key, not a chart one: it chooses whether a click drills through an aggregate to a filtered list or straight to one record. A chart segment is always an aggregate, so a chart drill is always the filtered-list kind and there is nothing to discriminate. Delete the key.',
       report:
         '`report` (drill into an analytical report instead of the record list) is a METRIC / PIVOT widget capability in the objectui renderer; `<ObjectChart>` does not read it and renders the record list regardless. Delete the key, or drill from a metric widget instead.',
       view:
