@@ -91,7 +91,12 @@ import { strictObject } from '../shared/strict-object';
  * ## Security Considerations
  * 
  * 1. **Defense in Depth**: RLS is one layer; use with object permissions
- * 2. **Default Deny**: If no policy matches, access is denied
+ * 2. **Default Deny, among the policies that apply**: once a policy applies to
+ *    the caller and the operation, a row that none of them admits is denied,
+ *    and a policy that cannot be evaluated fails closed. When no policy applies,
+ *    the policies restrict nothing (the tenant wall, a separate layer, still
+ *    applies): object permissions, not RLS policies, stop an un-permissioned
+ *    user
  * 3. **Context Variables**: Ensure current_user context is always set
  * 
  * @see https://www.postgresql.org/docs/current/ddl-rowsecurity.html
@@ -117,8 +122,10 @@ export type RLSOperation = z.input<typeof RLSOperation>;
  * Row-Level Security Policy Schema
  * 
  * Defines a single RLS policy that filters records based on conditions.
- * Multiple policies can be defined for the same object, and they are
- * combined with OR logic (union of results).
+ * Multiple policies can be defined for the same object. On a read, their
+ * `using` clauses are combined with OR logic (union of results); on an insert
+ * or an update, which predicates judge the written rows is decided per
+ * operation across the applicable policies (see `check`).
  * 
  * @example Multi-Tenant Isolation
  * ```typescript
@@ -292,14 +299,34 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
     .describe('Database operation this policy applies to'),
 
   /**
-   * USING clause - Filter condition for SELECT/UPDATE/DELETE.
+   * USING clause - The existing rows the policy admits, and the stand-in
+   * write check when no applicable policy declares `check`.
    *
    * A constrained CEL predicate (ADR-0058 D1) compiled into an ObjectQL
    * filter (see the supported grammar below). Only rows the compiled filter
    * matches are accessible.
    *
-   * **Note**: For INSERT-only policies, USING is not required (only CHECK is needed).
-   * For SELECT/UPDATE/DELETE operations, USING is required.
+   * **What it does, per `operation`**:
+   * - `select`: the rows a read returns. `delete`: the rows a delete may
+   *   remove. `using` is the only predicate such a policy can carry (a
+   *   non-blank `check` there is refused), so it needs one.
+   * - `update`: the existing rows an update may change, by id or
+   *   `multi: true`. It is not required: a policy that declares only `check`
+   *   is accepted and enforced. Its `check` judges the rows the update writes,
+   *   and the rows the caller may change then come from the other applicable
+   *   `update` / `all` policies' `using`, or, when none carries one, from the
+   *   caller's `select` policies.
+   * - `insert`: an insert has no existing row, so `using` filters nothing.
+   *   It is not required either (a `check` alone is enough), but it is not
+   *   inert: it is the insert's check whenever no applicable policy for that
+   *   insert declares `check`.
+   * - `all`: each of the above for its operation.
+   *
+   * **The stand-in check**: on an insert or an update, when no applicable
+   * policy for that operation declares `check`, each applicable policy's
+   * `using` is its check, OR-combined, on every row written. When
+   * any applicable policy declares `check`, only the declared checks decide
+   * and a USING-only sibling adds nothing (see `check`).
    *
    * **Security Note**: the compiler lowers each predicate to a structured
    * filter and binds context values as parameters at the driver layer —
@@ -390,13 +417,27 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    */
   using: z.string()
     .optional()
-    .describe('Filter condition for SELECT/UPDATE/DELETE, authored in canonical CEL (ADR-0058 D1). It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in [\'draft\', \'pending\']); these combined with `&&` / `||`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Optional for INSERT-only policies.'),
+    .describe('Row predicate, authored in canonical CEL (ADR-0058 D1): the rows a `select` policy lets a caller read, and the existing rows an `update` or `delete` policy lets a caller change or remove. On an insert or an update, when no applicable policy for that operation declares `check`, each applicable policy\'s `using` also stands in as its check on every row written (see `check`); on an `insert` policy that is its only effect. It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in [\'draft\', \'pending\']); these combined with `&&` / `||`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Needed on a `select` or `delete` policy (a `check` there is refused); optional on an `insert`, `update` or `all` policy that declares `check`.'),
 
   /**
-   * CHECK clause - Validation of the new row of a single-record INSERT or a
-   * by-id UPDATE. An array insert and a `multi: true` update are not
-   * post-image checked (#19964, #19950).
-   * 
+   * CHECK clause - Validation of every row an insert or an update writes,
+   * enforced at application level through the engine's
+   * `OperationContext.postHookWriteImageCheck` seam (introduced for inserts
+   * by commit a016f08b8a, whose original card no longer resolves; extended by
+   * #19950, #19964 and #19989):
+   * - an insert, an array insert included: each row as its `beforeInsert`
+   *   hooks leave it. Values the engine fills in after that point (an
+   *   autonumber, a `secret` field's stored reference, an absent tenant
+   *   column) are not on the judged image;
+   * - an update, by id or `multi: true`: each row it changes, as the prior
+   *   row merged with the final payload once its `beforeUpdate` hooks have
+   *   run.
+   *
+   * One failing row refuses the whole write. A by-id update is judged a
+   * second time, before its hooks, on the prior row merged with the change
+   * set as sent, so a change set the check refuses is refused even when a
+   * hook would have overwritten the refused value.
+   *
    * **Default Behavior**: the `using` → `check` default is decided per write
    * operation across the applicable policies, not policy by policy. A policy
    * is applicable to a write when it is not `enabled: false`, its `object` is
@@ -409,8 +450,8 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    *   not part of the check.
    * - When none declares `check`, each applicable policy's `using` stands in as
    *   its check, OR-combined. The platform's own ownership floor
-   *   (`owner_only_writes`) takes part only where the by-id pre-image gate
-   *   kept it.
+   *   (`owner_only_writes`) takes part only where the write's own row gate
+   *   kept it (plugin-security `writeCheckPolicies`).
    *
    * So declaring `check` on one policy replaces, for the callers that policy
    * applies to, the `using` its USING-only siblings would otherwise have
@@ -439,7 +480,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    */
   check: z.string()
     .optional()
-    .describe('Validation condition matched against the new row of a single-record INSERT or a by-id UPDATE (enforced at application level); an array insert and a `multi: true` update are not post-image checked. The default to `using` is decided per operation across the applicable policies, not per policy: when any applicable policy for that operation declares `check`, only the declared checks decide (OR-combined) and a USING-only sibling adds nothing; only when none declares `check` does each applicable policy\'s `using` stand in as its check (OR-combined). Applicable = not `enabled: false`, `object` matches or is \'*\', `operation` matches or is \'all\', and the caller holds one of its `positions` when it lists any. Refused on a policy whose `operation` is `select` or `delete`, which write no new row to check: limit the rows such a policy admits with `using`, and declare the `check` on an `insert`, `update` or `all` policy.'),
+    .describe('Validation condition judged on every row an insert or an update writes (enforced at application level): each row of an insert, an array insert included, as its `beforeInsert` hooks leave it, and each row an update changes, by id or `multi: true`, as the prior row merged with the final payload after its `beforeUpdate` hooks. One failing row refuses the whole write. A by-id update is also judged, before its hooks, on the prior row merged with the change set as sent. The default to `using` is decided per operation across the applicable policies, not per policy: when any applicable policy for that operation declares `check`, only the declared checks decide (OR-combined) and a USING-only sibling adds nothing; only when none declares `check` does each applicable policy\'s `using` stand in as its check (OR-combined). Applicable = not `enabled: false`, `object` matches or is \'*\', `operation` matches or is \'all\', and the caller holds one of its `positions` when it lists any. Refused on a policy whose `operation` is `select` or `delete`, which write no new row to check: limit the rows such a policy admits with `using`, and declare the `check` on an `insert`, `update` or `all` policy.'),
 
   /**
    * Restrict this policy to specific positions (ADR-0090 D3; formerly
@@ -470,10 +511,13 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   /**
    * REMOVED — `priority` promised "conflict resolution" that cannot exist.
    *
-   * Applicable policies OR-combine (any match allows access — the doc above
-   * `RLSCompiler.compileFilter` and this schema's own former describe both say
-   * most-permissive-wins), so there is never a conflict to order and evaluation
-   * order cannot change an outcome. Nothing ever read the key: the 2026-07-30
+   * No outcome depends on an order. On a read, the applicable policies' `using`
+   * clauses OR-combine (any match allows access). On an insert or an update,
+   * which predicates judge the written rows is decided once per operation
+   * across the applicable policies (the declared `check`s when any exists,
+   * otherwise each `using`; see `check`), and the chosen ones OR-combine. So
+   * there is never a conflict to order and evaluation order cannot change an
+   * outcome. Nothing ever read the key: the 2026-07-30
    * security-subset liveness re-verification (#3896 follow-up) closed the call
    * graph across the collection site, the projection round-trip and the
    * compiler, and found no consumer. A semantically-void knob on a SECURITY
@@ -504,7 +548,12 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   if (!data.using && !data.check) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'At least one of "using" or "check" must be specified. For SELECT/UPDATE/DELETE operations, provide "using". For INSERT operations, provide "check".',
+      message:
+        'At least one of "using" or "check" must be specified. A `select` or `delete` policy takes "using": ' +
+        'the rows it lets a caller read or delete. An `insert` policy takes "check", which judges each row ' +
+        'an insert writes; a "using" alone is that check when no applicable insert policy declares one. ' +
+        'An `update` or `all` policy takes either or both: "using" limits the existing rows it admits, and ' +
+        '"check" judges each row written.',
     });
   }
 
@@ -536,9 +585,10 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
     });
   }
 
-  // For non-insert operations, USING should typically be present
-  // This is a soft warning through documentation, not enforced here
-  // since 'all' and mixed operation types are valid
+  // With both rules above, a non-blank `using` is the only predicate a
+  // `select` or `delete` policy can carry. An `insert`, `update` or `all`
+  // policy may carry either clause or both; what each does per operation is
+  // on the `using` and `check` docs.
 }));
 
 // RLSAuditEventSchema / RLSAuditConfigSchema / RLSConfigSchema were REMOVED

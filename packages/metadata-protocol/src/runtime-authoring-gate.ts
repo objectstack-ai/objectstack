@@ -63,6 +63,7 @@ import {
 // wiring guard's third invariant), and `walkFlowNodes` is not on it.
 import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 
 /**
  * The structured issue shape a 422 carries — D3's "reuse the Zod envelope".
@@ -659,6 +660,19 @@ export function evaluateRuntimeAuthoringGate(args: {
      * every call site that can know the answer states it.
      */
     orgWallEnforced?: boolean;
+    /**
+     * [#20158] The host engine's judge-only filter admission
+     * (`IObjectQLEngine.judgeFilter`, #19995 ruling C), BOUND to that engine.
+     *
+     * The third input of the #6285 kind: a fact only the host holds (its live
+     * engine), gathered by the impure caller — `assertRuntimeAuthoringRules`,
+     * which probes `typeof engine.judgeFilter === 'function'` — and passed in
+     * so this function stays pure. Handed to the shared rules unchanged, where
+     * `validateRlsPredicateEnforceability` judges each read-scope RLS `using`
+     * with it (ADR-0058 D2). Absent (a host without the member, a test
+     * double), that judgement is skipped and every rule answers as before.
+     */
+    judgeFilter?: IObjectQLEngine['judgeFilter'];
 }): RuntimeAuthoringVerdict {
     // D1 — drafts are never gated. Publishing one runs this same function.
     // No rules ran, so there is nothing to report on either half.
@@ -681,6 +695,7 @@ export function evaluateRuntimeAuthoringGate(args: {
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
+        ...(args.judgeFilter !== undefined ? { judgeFilter: args.judgeFilter } : {}),
     });
 
     // [#6285] The gate-local refusal, folded into the SAME verdict set as the

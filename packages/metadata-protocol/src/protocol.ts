@@ -105,7 +105,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IPubSub } from '@objectstack/spec/contracts';
+import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [#11350] Emitted-specifier pin. This module's inferred public declarations
@@ -5115,6 +5115,24 @@ export class ObjectStackProtocolImplementation implements
         // an argument, the same shape `orgWallEnforced` uses below.
         const packageScope = this.resolveWritePackageScope(evt.packageId);
 
+        // [#20158] The live engine's judge-only filter admission — the third
+        // host fact of the #6285 kind, probed here and passed in so the gate
+        // stays pure. OPTIONAL on `IObjectQLEngine` by ruling (#19995 C): a host
+        // whose engine lacks it (a metadata-only store, a test double) passes
+        // nothing and the rules skip the engine's judgement. Bound, because
+        // `judgeFilter` reads the engine's own registry through `this`.
+        //
+        // ⚠️ It reads the LIVE registry, not the snapshot the rules resolve
+        // names against. An object that exists only in this write's pending
+        // batch or in an organization overlay row is one the engine does not
+        // know, and the engine's answer for that is its own: the field-map
+        // doors answer nothing and the schema-free doors still judge. The
+        // runtime read-scope withhold (#5367) stays the backstop there.
+        const engineJudge: IObjectQLEngine['judgeFilter'] =
+            typeof this.engine.judgeFilter === 'function'
+                ? (objectName, where, options) => this.engine.judgeFilter(objectName, where, options)
+                : undefined;
+
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
             name: evt.name,
@@ -5130,6 +5148,7 @@ export class ObjectStackProtocolImplementation implements
             ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
+            ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
         });
         if (verdict.error) throw verdict.error;
         return verdict.advisories;
