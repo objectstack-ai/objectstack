@@ -81,6 +81,8 @@
     "EmailAttachment (interface)",
     "EmailDeliveryStatus (type)",
     "EngineDatasourceDef (interface)",
+    "EngineFilterJudgement (type)",
+    "EngineFilterJudgementOptions (interface)",
     "EngineSchemaRegistryView (interface)",
     "EngineTransactionInfo (interface)",
     "EngineTransactionOptions (interface)",
