@@ -45,6 +45,9 @@ This also changes the `$ne` note of the equality-slot change earlier in this rel
 | `{ amount: { $gt: null } }` | `{ amount: { $eq: null } }` ("has no value") or `{ amount: { $ne: null } }` ("has a value") |
 | `{ stage: { $in: "won" } }` | `{ stage: { $in: ["won"] } }` or `{ stage: "won" }` |
 | `{ stage: { $in: ["won", null] } }` | `{ $or: [{ stage: { $in: ["won"] } }, { stage: { $null: true } }] }` |
+| `{ stage: { $nin: ["lost", null] } }`, meaning "has a value and is not `lost`" | `{ stage: { $nin: ["lost"], $null: false } }` |
+| `{ stage: { $in: [null, ""] } }`, a filter builder's "is empty" | `{ $or: [{ stage: { $null: true } }, { stage: "" }] }` |
+| `{ stage: { $nin: [null, ""] } }`, a filter builder's "is not empty" | `{ stage: { $null: false, $ne: "" } }` |
 | `{ amount: { $between: [null, 5] } }`, `{ amount: { $between: ["", 5] } }` | `{ amount: { $lte: 5 } }`, or the bound you meant |
 | `{ amount: { $between: [{ $field: "floor" }, 5] } }` | `{ amount: { $gte: { $field: "floor" }, $lte: 5 } }` |
 | `{ amount: { $between: 5 } }`, `{ amount: { $between: [1] } }` | `{ amount: { $between: [1, 5] } }` |
