@@ -59,7 +59,7 @@ describe('ExecutionContextSchema', () => {
 //
 // The field was written onto the envelope by REST's `computeExecCtx` and read
 // by its `enforceAuth` while being declared nowhere, which put it outside the
-// closed entry field set (#6216) by construction: a union derived from
+// closed entry field set (commit f586f1a89) by construction: a union derived from
 // `keyof ExecutionContext` cannot name a key the schema does not have.
 //
 // Both inner keys are REQUIRED on purpose. The sole producer
@@ -153,7 +153,7 @@ describe('ExecutionContextSchema.authGate — the ADR-0069 gate posture (#7280)'
 // description cell while the sibling `DriverOptions.preserveAudit`
 // (`data/driver.zod.ts`) rendered fine.
 //
-// The wording is held to the post-#6640 NARROWED contract, whose two already
+// The wording is held to the NARROWED contract of commit 2ab1257c9, whose two already
 // landed statements this description is aligned with (PR #6823):
 //   - `packages/spec/src/data/field.zod.ts` — `FieldSchema.readonly`
 //   - `content/docs/protocol/objectql/security.mdx` — the UPDATE-only callout

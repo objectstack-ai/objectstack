@@ -163,7 +163,7 @@ describe('#14192 — the refusal reaches every door the measurement listed', () 
   });
 
   it('through `devPlugins[]` — the nested shape is NOT keyless: the author reads the key, the surface and the rename', () => {
-    // #14722 proposed reshaping the union above, on the premise that
+    // A card proposed reshaping the union above (refuted and pinned by commit 23c72be3c), on the premise that
     // `formatZodError` flattens the nested refusal away and leaves the author a
     // bare `Invalid input` at this one door. Measured on `origin/main`
     // `3386493f`: it does not. `formatZodIssue` descends `invalid_union` and
@@ -363,7 +363,7 @@ describe('#16328 — the `permissions` union door names the surface and the rena
   // The card measured `{ services: ['object'], hoooks: ['x'] }` refused with a
   // keyless `invalid_union` at `['permissions']` and attributed it to
   // `formatZodError` flattening the union's nested refusal away — the same
-  // premise #14722 was filed on.
+  // premise the earlier `devPlugins[]` card was filed on (refuted in commit 23c72be3c).
   //
   // Re-measured on `origin/main` `f89812e4d`: that premise is FALSE, and the
   // strictness ledger's `state-machine.zod.ts` row already says so in as many
