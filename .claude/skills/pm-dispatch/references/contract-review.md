@@ -14,10 +14,14 @@
 - 同形 = `## Contract review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写常量名 `CONTRACT_REVIEW_TIER`;无此行不成裁决,
   模板见 `node scripts/pm/record-recognisers.mjs --template`。
+- 同形另带 `Local-runs:` 行:`none`,或 `probe — REASON` 具名唯一本地探针;
+  有行必校,缺行旧记录不改判。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级与 changeset 声明一致;③ 边界旗:dev 挂旗与 `open_questions` 逐旗答复或升级。
 - 复核形状:只读 diff 与卡片,check 结论取 head 的 check-runs,⛔ 永不本地重跑派生门禁族。
 - 只喂卡片、既有裁决与 PR 本体,⛔ 不喂派发令与派发席自己的结论;简报写成对抗性。
+- 简报从 `node scripts/pm/record-recognisers.mjs --brief-template` 起稿:
+  只读条款与输入集内建,⛔ 不删 ⛔ 行。
 - 隔离复核子代理暂存全写按所审 PR 命名的 `<scratchpad>/pr-<n>/`,⛔ 不读非本轮自写的暂存。
 - 独立性对:`Implemented-by:`/`Reviewed-by:` 取值见
   `node scripts/pm/record-recognisers.mjs --template`;子代理记采纳它的席位。

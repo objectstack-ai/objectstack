@@ -852,6 +852,7 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
   COMMENT_BODY_LIMIT,
+  CONTRACT_REVIEW_HEADING_MARKER,
   EXIT_PREREQUISITE_NOT_MET,
   H56_STAMP_TOLERANCE_MIN,
   ISSUE_BODY_LIMIT,
@@ -872,6 +873,9 @@ import { readClause2Line } from './clause2-line.mjs';
 // is judged against the tier ladder `dispatch-gates.mjs` derives — the
 // ceiling's spellings live there, beside the constant, and are never restated.
 import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, ceilingTierSpellings, containerModelRefusal } from './dispatch-gates.mjs';
+// The record's `Local-runs:` line is read by the file that owns the record's
+// every other line — judged when present, an absent line not re-judged.
+import { localRunsStand, readLocalRuns } from './record-recognisers.mjs';
 import { EXIT_UNCONFIRMED, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { MAX_BODY_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
@@ -1948,6 +1952,42 @@ export function keyedLineRefusalText(rows) {
     '  `containerModelRefusal` (`dispatch-gates.mjs`) are imported HERE, so this IS the row they would file — hours earlier,\n' +
     '  and on your own claim rather than on someone else\'s post. ⛔ No flag turns it off: a line those readers cannot read\n' +
     '  is a half-state, not a formatting preference.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The record's keyed line — a `## Contract review` comment, refused before the write
+// ---------------------------------------------------------------------------
+
+/** What the record's owner accepts, printed BY the refusal so the fix is one line away. */
+export const RECORD_KEY_SPELLINGS = Object.freeze({
+  'Local-runs': '`Local-runs: none` at the START of a line, or `Local-runs: probe — REASON` naming the ONE local run the read-only rule was broken for and why; a record written before the line existed may omit it',
+});
+
+/**
+ * The keyed-line problems in a `## Contract review` record about to be written, judged by the reader that OWNS the
+ * line — ⛔ never by a rule spelled here. One key today, `Local-runs:`, and ONE direction: a line that is PRESENT and
+ * cannot be graded is refused; an absent line is not re-judged, because the landed records carry none and this act
+ * must not re-open a verdict over a line nobody had been asked to write. Scoped by the record's own heading marker,
+ * on `--comment` alone — a record IS a comment.
+ * @returns {{ key: string, why: string, line: string }[]} — empty when the body is not a record, or when the line reads.
+ */
+export function recordKeyedLineRefusals(body) {
+  const text = String(body ?? '');
+  if (!CONTRACT_REVIEW_HEADING_MARKER.test(text)) return [];
+  const runs = readLocalRuns(text);
+  if (localRunsStand(runs)) return [];
+  return [{ key: 'Local-runs', line: runs.line, why: '`readLocalRuns` reads the line and cannot grade its value — `none` and `probe — REASON` are the closed set, and a probe with no reason names no deviation.' }];
+}
+
+/** The refusal a caller reads, from `recordKeyedLineRefusals`' rows. */
+export function recordLineRefusalText(rows) {
+  return (
+    `post-stamped: REFUSED — ${rows.length} keyed line(s) in this \`## Contract review\` record cannot be read by the checker that owns them. Nothing was written.\n` +
+    rows.map((r, i) => `  ${i + 1}. [${r.key}] ${r.why}\n      line:  ${r.line}\n      write: ${RECORD_KEY_SPELLINGS[r.key]}`).join('\n') +
+    '\n\n  `readLocalRuns` (`record-recognisers.mjs`) is imported HERE, so this IS the reading the record would get later —\n' +
+    '  on your own record, before the write. A record without the line is not re-judged; only a line that is present and\n' +
+    '  unreadable is refused. ⛔ No flag turns it off.'
   );
 }
 
@@ -3081,6 +3121,8 @@ const USAGE = [
   '  A `Claim:` comment\'s `Seat:`, `Thread-read:`, `Clause-②:` and `Container & model:` lines are read here by the',
   '  checkers that OWN them, and the comment is REFUSED when one cannot be read — a ceiling tier citing neither the',
   '  MANDATORY hit `--tier` printed nor a `reason:` included — and the refusal prints the spelling that can.',
+  '  A `## Contract review` comment\'s `Local-runs:` line is read the same way when it is present (`none`, or',
+  '  `probe — REASON`); a record without the line is not re-judged.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -3130,6 +3172,12 @@ async function main(argv) {
   const keyed = options.mode === 'comment' ? claimKeyedLineRefusals(rendered.body) : [];
   if (keyed.length > 0) {
     console.error(keyedLineRefusalText(keyed));
+    return EXIT_REFUSED;
+  }
+  // The record's line, on the same act and with the same scope: a record IS a comment.
+  const record = options.mode === 'comment' ? recordKeyedLineRefusals(rendered.body) : [];
+  if (record.length > 0) {
+    console.error(recordLineRefusalText(record));
     return EXIT_REFUSED;
   }
 
@@ -3327,10 +3375,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
+  'the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged': 9,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 12,
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -4409,6 +4458,22 @@ export function selfTest() {
     t('⛔ NOT a claim: a seat post or a report carrying the same ceiling line is untouched — the reader runs on `Claim:` comments only', keys(`os-dev-report\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``) === '' && keys(`Seat post.\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``) === '');
     t('FIRST MATCH holds for the fourth key too: a readable ceiling line followed by a bare duplicate passes, as the owner reads it', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (MANDATORY)`) + `\nContainer & model: model: ${CONTRACT_REVIEW_TIER_NAME}`) === '');
     t('structural: the fourth reader is IMPORTED from the ladder\'s own file, ⛔ never restated here', /import \{[^}]*\bcontainerModelRefusal\b[^}]*\} from '\.\/dispatch-gates\.mjs';/u.test(stampSource) && new RegExp('function\\s+(containerModelRefusal|readContainerModelLine|ceilingTierSpellings)\\b').test(stampSource) === false);
+  }
+
+  // ── the record line ──────────────────────────────────────────────────────
+  battery('the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged');
+  {
+    const RECORD = (...lines) => ['## Contract review', '', `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``, 'Head-sha: `0123456789abcdef0123456789abcdef01234567`', ...lines, '', '**VERDICT: PASS**'].join('\n');
+    const rkeys = (body) => recordKeyedLineRefusals(body).map((r) => r.key).join();
+    t('⭐ a record carrying `Local-runs: none` passes', rkeys(RECORD('Local-runs: none')) === '');
+    t('⭐ a record carrying a named probe passes', rkeys(RECORD('Local-runs: probe — re-ran the one pin the check-run log truncated')) === '');
+    t('⛔ ABSENT is NOT re-judged: a record with no line — the landed shape — passes untouched', rkeys(RECORD()) === '');
+    t('⛔ a probe with no reason is refused, on the owner\'s verdict', rkeys(RECORD('Local-runs: probe')) === 'Local-runs');
+    t('⛔ a value outside the closed set is refused', rkeys(RECORD('Local-runs: yes, a full local run')) === 'Local-runs');
+    t('the refusal prints the spelling that reads, names the owner, and says absence is not re-judged', (() => { const text = recordLineRefusalText(recordKeyedLineRefusals(RECORD('Local-runs: probe'))); return text.includes(RECORD_KEY_SPELLINGS['Local-runs']) && text.includes('readLocalRuns') && text.includes('not re-judged') && text.includes('Nothing was written'); })());
+    t('⛔ NOT a record: a claim or a report carrying a `Local-runs:` line is untouched — the reader runs on the record\'s heading only', rkeys('Claim: x\nLocal-runs: probe') === '' && rkeys('os-dev-report\n\nLocal-runs: probe') === '');
+    t('⛔ a `###` sub-heading is not the record marker, exactly as the locator reads it', rkeys('### Contract review\nLocal-runs: probe') === '');
+    t('structural: the CLI runs this on `--comment` only, and the reader is imported from the record\'s own file, ⛔ never restated', /const record = options\.mode === 'comment' \? recordKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && /import \{[^}]*\breadLocalRuns\b[^}]*\} from '\.\/record-recognisers\.mjs';/u.test(stampSource) && new RegExp('function\\s+(readLocalRuns|localRunsStand)\\b').test(stampSource) === false);
   }
 
   // ── the relay transport ──────────────────────────────────────────────────
