@@ -245,6 +245,21 @@ describe('configSchema ↔ expression-ledger reconciliation (#4027)', () => {
     expect(ROLE_BY_MARKER.value).toBe('value');
   });
 
+  it.each(['create_record', 'update_record'])(
+    '%s.fields.* is covered — the #19938 value slot, declared where the descriptor cannot carry it',
+    (nodeType) => {
+      const slot = FLOW_NODE_EXPRESSION_PATHS.find((e) => e.nodeType === nodeType && e.path === 'fields.*');
+      expect(slot, 'the ruled slot: a field value may be a CEL envelope (#11182 ruling D)').toBeDefined();
+      expect(slot!.role).toBe('value');
+      // Same channel as `assignments.*`: the descriptor's `fields` is
+      // `additionalProperties: true` (the Studio keyValue map), so the marker
+      // rides the spec Zod's map value and arrives through the JSON map —
+      // never through the descriptor, which would double-declare it.
+      expect(declaredFromSchemalessConfigs().map(key)).toContain(key(slot!));
+      expect(declaredFromDescriptors().map(key)).not.toContain(key(slot!));
+    },
+  );
+
   it('screen.fields[].visibleWhen is covered — the #3528 regression', () => {
     const screen = FLOW_NODE_EXPRESSION_PATHS.find(
       (e) => e.nodeType === 'screen' && e.path === 'fields[].visibleWhen',

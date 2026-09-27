@@ -86,6 +86,8 @@
     "FlowRunSummary": "automation/FlowRunSummary",
     "FlowRunSummarySchema": "automation/FlowRunSummary",
     "FlowSchema": "automation/Flow",
+    "FlowValueSlot": "automation/FlowValueSlot",
+    "FlowValueSlotSchema": "automation/FlowValueSlot",
     "FlowVariableSchema": "automation/FlowVariable",
     "FlowVersionHistory": "automation/FlowVersionHistory",
     "FlowVersionHistorySchema": "automation/FlowVersionHistory",

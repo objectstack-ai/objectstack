@@ -46,6 +46,7 @@
     "automation/FlowRunGateSummary",
     "automation/FlowRunNodeSummary",
     "automation/FlowRunSummary",
+    "automation/FlowValueSlot",
     "automation/FlowVariable",
     "automation/FlowVersionHistory",
     "automation/GetRecordConfig",
