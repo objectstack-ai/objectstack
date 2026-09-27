@@ -368,8 +368,7 @@ export default class Test extends Command {
       default: false,
     }),
     // A custom flag so a malformed list is refused while the invocation is
-    // parsed — the same channel, and exit status, as any other bad argument —
-    // before a suite is loaded or the server is contacted.
+    // parsed, before a suite is loaded or the server is contacted.
     tags: Flags.custom<string[]>({
       description:
         'Run only scenarios carrying at least one of these comma-separated tags (e.g. "smoke,critical"); the rest are deselected',
