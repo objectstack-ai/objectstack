@@ -31,7 +31,9 @@
  * The exit status is what a CI step reads, and it only exists once Node has
  * exited — the same reason `src/commands/validate-json-strict-exit.e2e.test.ts`
  * gives. Spawned through `bin/run-dev.js` + tsx, so the suite does not depend on
- * `packages/cli/dist`; it lands in the INTEGRATION tier (`vitest-tiers.ts`).
+ * `packages/cli/dist`; it lands in the INTEGRATION project (`vitest-tiers.ts`).
+ * ⛔ Deliberately NOT named `*.e2e.test.ts`: that name selects the NIGHTLY run,
+ * and this pin belongs to the queue's.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
