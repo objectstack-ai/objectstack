@@ -89,6 +89,7 @@
     "automation/DecisionCondition:expression",
     "automation/DecisionCondition:label",
     "automation/DecisionConfig:conditions",
+    "automation/DecisionConfig:mode",
     "automation/DecisionOutputDef:key",
     "automation/DecisionOutputDef:label",
     "automation/DecisionOutputDef:multiple",

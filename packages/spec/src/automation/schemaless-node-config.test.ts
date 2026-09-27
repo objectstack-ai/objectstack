@@ -6,8 +6,10 @@
  * `script` and `subflow` run through `service-automation`'s `parseNodeConfig()`
  * before their executors do anything, so what this file pins is not decoration:
  * a shape accepted here runs, and a shape rejected here refuses the node as a
- * guard. `decision` is deliberately absent — it stays export-only (its one key
- * is optional, so a parse would have nothing to check).
+ * guard. `decision` is the exception — it stays export-only (nothing parses it
+ * at run time), so its pins below bind the authoring doors only: `tsc`, the
+ * published JSON Schema and a direct parse. Its `mode` key is declared ahead of
+ * the engine change that reads it (#15429).
  *
  * The structural assertions at the bottom guard the downstream walkers that a
  * union-shaped contract would have broken, which is why #4343 converged the
@@ -16,15 +18,18 @@
  * `properties` / `.shape`.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import { objectStackErrorMap } from '../shared/error-map.zod.js';
 import {
   DecisionConditionSchema,
   DecisionConfigSchema,
   ScriptConfigSchema,
   SubflowConfigSchema,
   getSchemalessNodeConfigJsonSchemas,
+  type DecisionConfig,
+  type DecisionConfigParsed,
 } from './schemaless-node-config.zod.js';
 
 interface Parseable { safeParse(v: unknown): { success: boolean; error?: { issues: ReadonlyArray<{ code: string; message: string }> } } }
@@ -229,6 +234,75 @@ describe('unknown keys — closed at #4001 批 9, and this class had no other ga
   });
 });
 
+describe('DecisionConfigSchema.mode (#15429 item 2 — the contract half, declared ahead of the engine)', () => {
+  it('accepts an omitted mode and both members, and injects nothing', () => {
+    // No `.default('exclusive')`: "omitted means exclusive" is the contract's
+    // prose and the future reader's job, so the parsed output stays exactly the
+    // authored shape for every consumer of this schema.
+    const omitted = DecisionConfigSchema.parse({});
+    expect(omitted).toEqual({});
+    expect('mode' in omitted, 'an omitted mode must not come back as a parsed default').toBe(false);
+    expect(DecisionConfigSchema.parse({ mode: 'exclusive' })).toEqual({ mode: 'exclusive' });
+    expect(DecisionConfigSchema.parse({ mode: 'inclusive' })).toEqual({ mode: 'inclusive' });
+    // …and alongside a branch list, which the key does not forbid.
+    expect(DecisionConfigSchema.parse({
+      mode: 'exclusive',
+      conditions: [{ label: 'big', expression: 'amount > 100000' }],
+    })).toEqual({ mode: 'exclusive', conditions: [{ label: 'big', expression: 'amount > 100000' }] });
+  });
+
+  it('types the key as the closed pair at the tsc door', () => {
+    expectTypeOf<DecisionConfig['mode']>().toEqualTypeOf<'exclusive' | 'inclusive' | undefined>();
+    expectTypeOf<DecisionConfigParsed['mode']>().toEqualTypeOf<'exclusive' | 'inclusive' | undefined>();
+  });
+
+  // The values an author reaching for this concept under another engine's
+  // spelling writes — plus a case slip and the n8n-style boolean. Each is
+  // refused with the SAME prescription, which names both members' meanings
+  // and what an omitted key means.
+  const REFUSED: ReadonlyArray<[unknown, string]> = [
+    ['all', "`mode: 'all'`"],
+    ['first', "`mode: 'first'`"],
+    ['parallel', "`mode: 'parallel'`"],
+    ['Inclusive', "`mode: 'Inclusive'`"],
+    [true, '`mode: true`'],
+    [null, '`mode: null`'],
+  ];
+
+  it.each(REFUSED)('refuses mode %j with the prescription at path [mode]', (value, echoed) => {
+    const result = DecisionConfigSchema.safeParse({ mode: value });
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('invalid_value');
+    expect(issues[0]!.path).toEqual(['mode']);
+    const message = issues[0]!.message;
+    expect(message).toContain(`${echoed} is not a decision mode`);
+    expect(message).toContain("the closed pair 'exclusive' | 'inclusive'");
+    expect(message).toContain('what an omitted `mode` means');
+    expect(message, 'a prescription an author is shown carries no tracker number').not.toMatch(/#\d{3,5}/);
+  });
+
+  it('keeps its prescription under the ObjectStack error map a validator may pass per parse', () => {
+    // A schema-level `error` outranks a per-parse map in zod 4, so the generic
+    // "Invalid value … Expected one of" text must not replace the prescription.
+    const result = DecisionConfigSchema.safeParse({ mode: 'all' }, { error: objectStackErrorMap });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain("`mode: 'all'` is not a decision mode");
+  });
+
+  it('publishes mode as an optional closed enum with no default in the JSON Schema', () => {
+    const json = getSchemalessNodeConfigJsonSchemas().decision as Record<string, unknown>;
+    const mode = (json.properties as Record<string, Record<string, unknown>>).mode;
+    expect(mode.enum).toEqual(['exclusive', 'inclusive']);
+    expect(mode.default, 'a JSON-Schema default would read as an enforced one').toBeUndefined();
+    expect(json.required ?? [], 'mode is optional').not.toContain('mode');
+    for (const combinator of ['anyOf', 'oneOf', 'allOf']) {
+      expect(json[combinator], `top-level ${combinator} would blind the authorable-surface walk`).toBeUndefined();
+    }
+  });
+});
+
 describe('structural contract — what the downstream walkers require', () => {
   it('keeps the tombstoned keys IN the shape, so the ratchet can see them retired', () => {
     // A `retiredKey()` is still a property. Deleting it outright would read as
@@ -265,7 +339,12 @@ describe('structural contract — what the downstream walkers require', () => {
     // lands where the edit is made.
     expect(Object.keys(SubflowConfigSchema.shape).sort())
       .toEqual(['flowName', 'input', 'outputVariable']);
-    expect(Object.keys(DecisionConfigSchema.shape).sort()).toEqual(['conditions']);
+    // `decision` gained `mode` (#15429, item 2) — a deliberate key-set change,
+    // not drift. objectui's reconciliation reads `.shape` in both directions,
+    // so its `decision` panel reds on the objectui spec bump that carries this
+    // key until its hand-written form offers `mode` too; that is the cross-repo
+    // half this pin exists to make visible here.
+    expect(Object.keys(DecisionConfigSchema.shape).sort()).toEqual(['conditions', 'mode']);
     expect(Object.keys(DecisionConditionSchema.shape).sort()).toEqual(['expression', 'label']);
   });
 
