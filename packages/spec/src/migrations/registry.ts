@@ -5279,7 +5279,17 @@ const step18: MigrationStep = {
     + 'door persists the authored value and the stored-row rehydration seam is live for '
     + 'this type, both measured); and the withdrawn `ConnectorProviderContext` member, '
     + 'which is code and has no authored source to rewrite, leaves via the paired semantic '
-    + 'entry instead.',
+    + 'entry instead. '
+    + 'Finally it gives the one-filter-orthography convergence (objectui#6206) its '
+    + 'mechanical half at rest (#17321, ruling B): the D2 conversion '
+    + '`page-component-filter-record-to-rule-array` rewrites a record-form or single-level '
+    + 'AST `filter` at the converged rule-array doors — `dataSource.filter`, the '
+    + '`object-*` / `element:number` / `element:record_picker` `filter` props and '
+    + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
+    + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
+    + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
+    + 'a page selects. It is retired from the load path, so authors are still refused at '
+    + 'the door and taught the array; the stored-row seams and this chain replay it.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5315,6 +5325,7 @@ const step18: MigrationStep = {
     'dashboard-widget-chart-config-structure-removed',
     'translation-per-app-settings-removed',
     'object-tenancy-organization-field-removed',
+    'page-component-filter-record-to-rule-array',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

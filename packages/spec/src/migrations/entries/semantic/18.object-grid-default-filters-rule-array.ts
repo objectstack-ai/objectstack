@@ -48,13 +48,15 @@ export const entry: SemanticMigration = {
     + 'outright — the other arm the finding offered — removes an accepted shape and needs its '
     + 'own ruling; the deprecation already stated in the description is unchanged and still '
     + 'says to prefer filter. '
-    + 'Metadata AT REST is deliberately NOT rewritten and this entry adds no D2 conversion, '
-    + 'for the reason its sibling gives at length: a SemanticMigration converts nothing by '
-    + 'its own type, the stored-row pass replays D2 conversions only, and the read path does '
-    + 'not re-validate stored rows — so a stored page carrying the record form keeps loading '
-    + 'and keeps rendering as it does today. What changes is that RE-SAVING it is refused at '
-    + 'the defaultFilters path, with the same conversion table the filter door gives, '
-    + 'computed from the author\'s own keys. ADR-0049 / ADR-0087.',
+    + 'Metadata AT REST: the record form and the AST tuple array at this key are rewritten to '
+    + 'the rule array by the same D2 conversion as its sibling filter, '
+    + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
+    + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
+    + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
+    + 'combinator, a null value, an operator the rule vocabulary does not spell, and the bare '
+    + 'string or number this key also took — and RE-SAVING such a node is refused at the '
+    + 'defaultFilters path, with the same conversion table the filter door gives, computed '
+    + 'from the author\'s own keys. ADR-0049 / ADR-0087.',
   acceptanceCriteria:
     'Every object-grid node in your pages either omits defaultFilters or carries a '
     + 'ViewFilterRule array on it. The parse of an object-grid node whose defaultFilters is '
