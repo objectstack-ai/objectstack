@@ -514,7 +514,7 @@ describe("walled posture, two organizations — the predicate reads the WRITER's
       expect([nowhere.code, nowhere.status], position).toEqual(['PERMISSION_DENIED', 403]);
       expect(resolveThrownHttpError(foreignErr).message, position).toBe(resolveThrownHttpError(nowhereErr).message);
     }
-    const [row] = await h.engine.find('sys_user_position', { where: { id: 'upb_foreign' }, context: SYS } as any);
+    const [row] = await h.engine.find('sys_user_position', { where: { id: 'upb_foreign' }, context: SYS });
     expect(row?.position).toBe('qa_b_only');
   });
 
