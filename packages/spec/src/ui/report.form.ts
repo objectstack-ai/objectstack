@@ -79,7 +79,9 @@ export const reportForm = defineForm({
             { field: 'label', label: 'Label' },
             { field: 'description', label: 'Description' },
             { field: 'type', label: 'Block Type' },
-            { field: 'chart', label: 'Chart' },
+            // A `chart` input sat here until #20161: the key was removed from
+            // `JoinedReportBlockSchema` because no renderer ever drew a block
+            // chart, so this control offered a setting that plotted nothing.
             { field: 'dataset', label: 'Dataset' },
             { field: 'rows', label: 'Rows' },
             { field: 'columns', label: 'Columns' },
@@ -97,7 +99,9 @@ export const reportForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'runtimeFilter', widget: 'json', helpText: 'Render-time scope filter, ANDed at query time' },
-        { field: 'chart', type: 'composite', helpText: 'Chart config (type, legend, colors)' },
+        // #20161 — a `joined` report draws its blocks as tables and refuses a
+        // container `chart`, so the control is offered only where it draws.
+        { field: 'chart', type: 'composite', visibleWhen: "data.type != 'joined'", helpText: 'Chart config (type, legend, colors)' },
       ],
     },
     // An "Advanced" section offering `aria` + `performance` used to sit here.

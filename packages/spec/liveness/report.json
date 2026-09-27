@@ -50,11 +50,13 @@
     },
     "chart": {
       "status": "live",
-      "note": "objectui: DatasetReportRenderer.tsx:776 + DatasetReportChart plots `chart.xAxis` (dataset dimension) × `chart.yAxis` (measure) via useDatasetRows, honoring `type`/`title` (framework#1890/#3441). Supersedes the 2026-06 audit's DEAD finding. Sub-key `groupBy` stays experimental (its own describe marker) — the dataset renderer plots a single series and never reads it."
+      "verifiedAt": "2026-09-27",
+      "note": "objectui: DatasetReportChart plots `chart.xAxis` (dataset dimension) × `chart.yAxis` (measure) via useDatasetRows, honoring `type`/`title` (framework#1890/#3441). Supersedes the 2026-06 audit's DEAD finding. Sub-key `groupBy` stays experimental (its own describe marker) — the dataset renderer plots a single series and never reads it. Live on NON-joined reports only (#20161, re-read at the `.objectui-sha` pin f8a9d0fb): the one `report.chart` read (DatasetReportRenderer.tsx:1557) sits after the joined branch's return (:1462-1524), so on a `type: 'joined'` report the schema's refinement REFUSES `chart` rather than accepting a key nothing reads."
     },
     "blocks": {
       "status": "live",
-      "note": "objectui: joined-report sub-reports, each dataset-bound (dataset/rows/columns/values/runtimeFilter/chart) — DatasetReportRenderer joined branch."
+      "verifiedAt": "2026-09-27",
+      "note": "objectui: joined-report sub-reports, each dataset-bound — DatasetReportRenderer joined branch (:1462-1524 at the `.objectui-sha` pin f8a9d0fb) reads a block's dataset/rows/columns/values/runtimeFilter/order/type/label/description/name and draws it as a table. A block has NO chart: `chart` was removed from JoinedReportBlockSchema in #20161 because no renderer ever read it (`block.chart`: zero hits over objectui packages/ at the pin, against a lit `block.runtimeFilter` control)."
     }
   }
 }

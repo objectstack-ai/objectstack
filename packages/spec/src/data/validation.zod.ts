@@ -97,7 +97,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * {
  *   type: 'script',
  *   name: 'discount_cannot_exceed_40_percent',
- *   condition: 'discount_percent > 0.40',
+ *   condition: 'record.discount_percent > 0.40',
  *   message: 'Discount cannot exceed 40%',
  *   severity: 'error'
  * }
@@ -237,7 +237,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
  * {
  *   type: 'cross_field',
  *   name: 'close_date_future',
- *   condition: 'MONTH(close_date) >= MONTH(TODAY()) AND YEAR(close_date) >= YEAR(TODAY())',
+ *   condition: 'date(record.close_date) < addDays(today(), 1 - today().getDate())',
  *   fields: ['close_date'],
  *   message: 'Close Date must be in the current or a future month'
  * }
@@ -254,7 +254,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
  * {
  *   type: 'cross_field',
  *   name: 'discount_limit',
- *   condition: 'discount > (amount * 0.40)',
+ *   condition: 'record.discount > (record.amount * 0.40)',
  *   fields: ['discount', 'amount'],
  *   message: 'Discount cannot exceed 40% of the amount'
  * }
@@ -271,7 +271,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
  * {
  *   type: 'cross_field',
  *   name: 'products_required_for_won',
- *   condition: 'products = null AND stage = "closed_won"',
+ *   condition: 'isBlank(record.products) && record.stage == "closed_won"',
  *   fields: ['products', 'stage'],
  *   message: 'Opportunity must have products to be marked as Closed Won'
  * }
@@ -291,7 +291,7 @@ export const CrossFieldValidationSchema = lazySchema(() => strictObject({
 }, {
   ...BASE_VALIDATION_SHAPE,
   type: z.literal('cross_field'),
-  condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL) comparing fields. e.g. P`record.end_date > record.start_date`'),
+  condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL) comparing fields. If TRUE, validation fails — the condition describes the violation. e.g. P`record.end_date < record.start_date` refuses an end date before the start date.'),
   fields: z.array(z.string()).describe('Fields involved. Only fields[0] is read (labels which field the violation attaches to); the rest are advisory. Shares script’s evaluation path.'),
 }));
 
