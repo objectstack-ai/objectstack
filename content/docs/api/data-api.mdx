@@ -464,8 +464,16 @@ The **cube's metric/dimension definition** (`MetricSchema.label` / `MetricSchema
 ([#6442](https://github.com/objectstack-ai/objectstack/issues/6442)). So a client that
 renders table headers or formats amounts takes `label` / `format` / `currency` /
 `percentScale` off the query result's `fields[]`: those are resolved server-side (the
-ADR-0053 currency chain, the percent-scale chain), and `format` is not reachable through
+currency chain below, the percent-scale chain), and `format` is not reachable through
 the metadata endpoint at all.
+
+The currency chain runs on the dataset query (`POST /analytics/dataset/query`). A
+monetary measure column takes the measure's own `currency`; then, only when the source
+field is `currencyMode: 'fixed'`, that field's `currencyConfig.defaultCurrency`; then the
+tenant default currency (the `localization.currency` setting), if one is set. A
+`dynamic` field (the default mode) never lends its `defaultCurrency` — only `fixed` does —
+so its column shows the tenant default. The cube query on this page carries no column
+`currency`.
 </Callout>
 
 ### `GET /analytics/meta`

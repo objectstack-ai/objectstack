@@ -160,6 +160,46 @@ describe('§1 the record form is refused WITH the new spelling', () => {
     );
   });
 
+  // A combinator-carrying record is exactly what the D2 conversion
+  // `page-component-filter-record-to-rule-array` leaves at rest, so it is what
+  // still meets this door on its next save. The worked rewrite used to render
+  // the combinator as a field — `{ field: '$or', operator: …, value: … }` — a
+  // "fix" that is no fix.
+  it('a lone combinator is not rendered as a field, and the refusal says why no rule spells it', () => {
+    const issue = filterIssue(
+      ElementDataSourceSchema.safeParse({
+        object: 'task',
+        filter: { $or: [{ status: 'open' }, { status: 'blocked' }] },
+      }),
+    );
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).not.toContain("field: '$or'");
+    expect(issue.message).toContain('`$or` is a combinator, not a field, and the rule array has no spelling for it');
+    expect(issue.message).toContain('flattening one changes which rows the filter selects');
+    expect(issue.message).toContain('decide which rows this filter should select');
+    expect(issue.message).toContain('migration `element-data-source-and-object-block-filter-rule-array`');
+    // No worked rewrite at all: "this filter becomes `[]`" would read as "no filter".
+    expect(issue.message).not.toContain('becomes `[]`');
+    expect(issue.message).not.toContain('Write one rule per record key');
+  });
+
+  it('beside field keys, the rewrite covers only the field keys and every combinator is named', () => {
+    const issue = filterIssue(
+      ElementDataSourceSchema.safeParse({
+        object: 'task',
+        filter: { owner: 'me', $and: [{ a: 1 }], $not: { b: 2 } },
+      }),
+    );
+    expect(issue.code).toBe('invalid_type');
+    expect(issue.message).toContain(
+      "Write one rule per field key — they AND — so its field keys become "
+      + "`[{ field: 'owner', operator: 'equals', value: 'me' }]`.",
+    );
+    expect(issue.message).toContain('`$and` and `$not` are combinators, not fields');
+    expect(issue.message).not.toContain("field: '$and'");
+    expect(issue.message).not.toContain("field: '$not'");
+  });
+
   it('an operator-object value is not mis-prescribed as an `equals` scalar', () => {
     const issue = filterIssue(
       ElementDataSourceSchema.safeParse({ object: 'task', filter: { amount: { $gt: 100 } } }),
