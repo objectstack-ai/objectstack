@@ -60,7 +60,6 @@
     "automation/ParallelConfig",
     "automation/RetryPolicy",
     "automation/ScheduleOrganization",
-    "automation/ScheduleState",
     "automation/ScreenConfig",
     "automation/ScreenFieldConfig",
     "automation/ScriptConfig",
