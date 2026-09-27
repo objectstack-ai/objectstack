@@ -15,6 +15,10 @@ import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack
 // lowering in {@link compileScopedFilterToSql}.
 import { filterTokenContextFrom, resolveFilterTokens, type ExecutionContextLike } from '@objectstack/core';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
+// [#19995, ruling C] The engine's judge-only admission verdict, asked through
+// the host by {@link assertReadScopeAdmittedByEngine}.
+import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
+import type { ReadScopeFilterJudge } from './strategies/types.js';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
 import { textOperatorPolarity } from './non-text-column.js';
@@ -499,13 +503,8 @@ import {
  * two merge sites. A placeholder the engine resolves is resolved there too, so
  * the scope is served as before.
  *
- * Still the engine's to answer on that path, with a 400 that names the policy:
- * the doors that read the object's SCHEMA — a text operator over a field that
- * never holds a string, a temporal comparand the field's storage rule cannot
- * read, a filter over a virtual field or through a dotted path. Their walks
- * live in `@objectstack/objectql`, are not exported from its package entries,
- * and this package does not depend on the engine at runtime; judging them here
- * would take a copy of each.
+ * That left the doors that read the object's SCHEMA to the engine, answering a
+ * 400 that names the policy. The section after next closes them.
  *
  * ## …and THIS compiler resolves the placeholder before it lowers (#20075)
  *
@@ -546,6 +545,45 @@ import {
  * With no context the resolution is the engine's for a context-less
  * operation: a date macro resolves against UTC now, and a context token is
  * refused. A placeholder is never bound as its literal text.
+ *
+ * ## …and the engine's own admission judges the rest, where the host can ask (#19995, ruling C)
+ *
+ * Four scope classes still reached the engine unjudged on the ObjectQL face,
+ * because their doors read the object's declared field map: a text operator
+ * over a field that never holds a string, a temporal comparand the field's
+ * storage rule cannot read, a filter on a virtual (formula) field, and a
+ * dotted path through a lookup. Each came back as the engine's
+ * `INVALID_FILTER` or `INVALID_FIELD` / 400, whose message names the policy's
+ * field and comparand, on both analytics HTTP doors. The walks live in
+ * `@objectstack/objectql`, which this package does not depend on at runtime,
+ * and a copy of each would drift from the engine.
+ *
+ * Ruling C gave the engine a judge-only admission member,
+ * `IObjectQLEngine.judgeFilter` (#20157). It runs the engine's own `where`
+ * admission, the same stage functions in the same order every verb runs, and
+ * stops before any driver. {@link assertReadScopeAdmittedByEngine} asks it about
+ * the scope ALONE, at every engine-bound merge: `ObjectQLStrategy.withReadScope`
+ * and `resolveFkAttr`, and the plugin's record-label fetch (the #14329 door).
+ * A refusal is raised in this module's one envelope. The engine's sentence
+ * goes to the operator's log only.
+ *
+ * Why a scope the engine serves is still served:
+ *
+ *   - **Same judge.** The host answers the hook from the engine that executes
+ *     the aggregate (`AnalyticsServicePlugin` wires it only to its own
+ *     `executeAggregate` auto-bridge), under the verb the strategy runs
+ *     (`'aggregate'`) and the context it forwards.
+ *   - **Same verdict alone as composed.** Every object-form door judges a node
+ *     against the field map and the context, never against its siblings. So
+ *     the scope alone is admitted exactly when the scope inside
+ *     `{ $and: [userFilter, scope] }` is.
+ *
+ * It runs after this module's own guards (vacancy, comparand faces,
+ * placeholders), so a scope they already refuse keeps the sentence they give
+ * it. Those guards stay: a host that cannot answer the hook still relies on
+ * them. Such a host keeps today's behaviour for the four classes, and says so
+ * once in its log: `AnalyticsService` when it was given no judge at all,
+ * `AnalyticsServicePlugin` when its data engine lacks the member.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -857,10 +895,11 @@ export function assertReadScopeCannotVacate(scope: unknown, objectName: string):
  * SCHEMA or the request's CONTEXT (text operators on non-text fields, temporal
  * comparands, filter placeholders), and `driver-sql` refuses more at compile
  * time. Judging those here would mean a second copy of rules this package
- * cannot see; their envelope is the engine's and the driver's to give. The
- * CONTEXT one is the exception, because its rule IS reachable from here: the
- * placeholder resolver lives in `@objectstack/core`, and the sibling
- * {@link assertReadScopePlaceholdersResolvable} runs it.
+ * cannot see. The CONTEXT one is reachable from here: the placeholder
+ * resolver lives in `@objectstack/core`, and the sibling
+ * {@link assertReadScopePlaceholdersResolvable} runs it. The SCHEMA ones are
+ * the engine's own to judge, and {@link assertReadScopeAdmittedByEngine} asks
+ * the engine (#19995, ruling C).
  *
  * Anything the two walks throw is attributable to the scope — they read
  * nothing else — so every throw is re-raised in the one envelope, the walk's
@@ -991,6 +1030,68 @@ function resolveReadScopePlaceholders<T>(
         `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
     );
   }
+}
+
+/**
+ * [#19995, ruling C] Refuse, in this module's envelope, a read scope the
+ * ENGINE's own `where` admission refuses. The engine is asked through the
+ * host's judge (`IObjectQLEngine.judgeFilter`, #20157), about the scope ALONE,
+ * at an engine-bound merge, before the scope is composed with anything.
+ *
+ * This is what closes the scope classes whose doors read the object's field
+ * map (see the module header's ruling-C section). It also re-judges every
+ * class the sibling guards above refuse, since the engine runs those faces
+ * too; they run first, so their sentences are the ones logged.
+ *
+ * `'aggregate'` is the verb every engine-bound merge runs (`executeAggregate`).
+ * The verb changes only the prefix of the engine's message, never its verdict.
+ *
+ * A host that cannot answer (no judge, or an `undefined` answer) is not judged
+ * here: "cannot answer, do not block". That host keeps the sibling guards and
+ * the behaviour it had, and says so once in its own log.
+ *
+ * The verdict's `message` is the refusing door's own text, unredacted by the
+ * contract, so it names the policy's fields and comparands. It stays in the
+ * thrown message for the operator's log, and the `READ_SCOPE_COMPILE_FAILED` /
+ * 500 declaration withholds it from every response. The verdict's `code` and
+ * `status` describe a caller's mistake, and the scope is not the caller's, so
+ * neither travels either.
+ *
+ * A throw from the judge itself is a fault, not a verdict (the engine re-throws
+ * anything that is not a door diagnostic). It is raised in the same envelope:
+ * it read the scope and nothing the caller sent.
+ *
+ * ⛔ Not a catch around `executeAggregate`: the caller's own `where` is never
+ * asked here, and its refusals remain the caller's to read.
+ *
+ * @param scope the read scope, exactly as the provider returned it
+ * @param objectName the object the merge hands `executeAggregate`
+ * @param context the request context the merge forwards to `executeAggregate`
+ * @param host whatever carries the judge, called as its method: the
+ *   strategy context (`DatasetScopedStrategyContext.judgeFilter`) at the
+ *   strategy's merges, the plugin's bridge at the record-label fetch
+ */
+export function assertReadScopeAdmittedByEngine(
+  scope: unknown,
+  objectName: string,
+  context: EngineFilterJudgementOptions['context'],
+  host: { judgeFilter?: ReadScopeFilterJudge },
+): void {
+  if (typeof host.judgeFilter !== 'function') return;
+  let verdict: EngineFilterJudgement | undefined;
+  try {
+    verdict = host.judgeFilter(objectName, scope as Record<string, unknown>, { operation: 'aggregate', context });
+  } catch (e) {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" could not be judged by the engine's filter admission — ` +
+        `${e instanceof Error ? e.message : String(e)} (fail-closed).`,
+    );
+  }
+  if (verdict === undefined || verdict.ok) return;
+  throw readScopeCompileError(
+    `[read-scope-sql] read scope for "${objectName}" is refused by the engine's own filter admission ` +
+      `(${verdict.code} / ${verdict.status}) — ${verdict.message} (fail-closed).`,
+  );
 }
 
 /**
