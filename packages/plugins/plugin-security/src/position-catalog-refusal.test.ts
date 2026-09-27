@@ -374,14 +374,15 @@ describe('every non-system write that stores a new position name is judged', () 
 });
 
 // ---------------------------------------------------------------------------
-// A position that is not a string is judged by the text it is stored as
+// A position that is not a string is judged by its string form
 // ---------------------------------------------------------------------------
 
-describe('a non-string position is judged by the text it would be stored as', () => {
+describe('a non-string position is judged by its string form', () => {
   // The engine's `text` validation refuses none of these, and the write stores
-  // each one as text with 201, so they are this refusal's to judge.
+  // each one with 201, so they are this refusal's to judge. The string form is
+  // String(value) for a scalar and the JSON text for an object or array.
 
-  it('insert: a number, a boolean, an object and an array are refused 400, reference_not_found at their stored text', async () => {
+  it('insert: a number, a boolean, an object and an array are refused 400, reference_not_found at their string form', async () => {
     const h = await boot();
     for (const [position, text] of [
       [123, '123'],

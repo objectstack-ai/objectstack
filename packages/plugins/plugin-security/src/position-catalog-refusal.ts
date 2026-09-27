@@ -63,12 +63,12 @@
  * ## Which writes it judges
  *
  * - a non-system INSERT, one row or a batch — every row's `position`,
- *   whatever its JSON type (see the stand-downs below for the text it is
- *   judged as);
+ *   whatever its JSON type (see the stand-downs below for the string form it
+ *   is judged by);
  * - a non-system UPDATE whose payload carries `position`: by id, only when the
- *   value's text differs from the one the row already stores (a form that
- *   echoes an unchanged value back — `123` over a stored `'123'` included — is
- *   not writing a new name); by predicate
+ *   value's string form differs from the string form of the value the row
+ *   already stores (a form that echoes an unchanged value back — `123` over a
+ *   stored `'123'` included — is not writing a new name); by predicate
  *   (`multi: true`), always, because the value lands on every matched row.
  *
  * It stands down, deliberately, on:
@@ -84,10 +84,13 @@
  *   or one whose `String()` form is longer than the column (`max_length`).
  *   Nothing else is the engine's: its `text` validation reads `String(value)`
  *   and refuses no number, boolean, object or array, and the write stores it
- *   as text with `201` (measured over SQLite: `123`, `true`, `{}` and `['x']`
- *   all stored). So those are judged by the text they are stored as — a
- *   scalar by `String(value)`, an object or array by its JSON — and refused
- *   like any name no catalog row carries;
+ *   with `201` (measured over SQLite: `123`, `true`, `{}` and `['x']` all
+ *   stored). So those are judged by their string form — a scalar by
+ *   `String(value)`, an object or array by its JSON text — and refused like
+ *   any name no catalog row carries. The stored text is the driver's, not
+ *   that string form (SQLite stores `123` as `'123.0'`), so a non-string whose
+ *   string form happens to equal a catalog name is accepted and resolves
+ *   nothing: the engine's `text` leniency, outside this refusal;
  * - an update the engine refuses on its own dispatch predicate.
  *
  * ## Where it runs
@@ -196,12 +199,12 @@ function rowsOf(data: unknown): any[] {
 }
 
 /**
- * The text a `position` value is stored as, and so the name it is judged by: a
- * string as itself, a number, bigint or boolean as `String(value)`, an object
- * or array as its JSON text — the form a `text` column stores it in (`{}`,
- * `["x"]`), never `String(['x'])`, which reads `'x'` and would accept an array
- * naming a real position that then resolves nothing. `undefined` for a value
- * that is no JSON value at all.
+ * The string form a `position` value is judged by: a string as itself, a
+ * number, bigint or boolean as `String(value)`, an object or array as its JSON
+ * text (`{}`, `["x"]`) — never `String(['x'])`, which reads `'x'` and would
+ * accept an array naming a real position that then resolves nothing. It is not
+ * the stored text, which is the driver's (SQLite stores `123` as `'123.0'`).
+ * `undefined` for a value that is no JSON value at all.
  */
 function stringForm(value: unknown): string | undefined {
   switch (typeof value) {
@@ -296,7 +299,7 @@ export async function writtenPositionNames(ql: any, opCtx: any): Promise<string[
     prev = null;
   }
   if (!prev) return out;
-  // Compared as stored text, so `123` echoed over a stored `'123'` is unchanged.
+  // Compared by string form, so `123` echoed over a stored `'123'` is unchanged.
   if (stringForm(prev[POSITION_FIELD]) === nextName) return out;
   add(next);
   return out;
