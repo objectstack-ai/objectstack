@@ -577,3 +577,286 @@ describe('[#20122] per-aggregation filter — the shape gate `where` takes: a fi
     });
   }
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20148] The doors `where` has and the per-aggregation filter lacked
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * An order ledger with every temporal class and a numeric pair, so each door
+ * has a declared field to judge. `id` and `created_at` ride on every row, as a
+ * driver's rows carry them, for the system-column reference controls.
+ */
+const ORDERS: ReadonlyArray<Record<string, unknown>> = [
+  { id: 'o1', customer_id: 'c1', amount: 100, cap: 50, placed_on: '2026-01-10', due_on: '2026-01-05', grace: 3, opened_at: '2026-01-01T10:00:00.000Z', closed_at: '2026-01-03T10:00:00.000Z', slot: '09:00:00', created_at: '2026-09-01T00:00:00.000Z' },
+  { id: 'o2', customer_id: 'c1', amount: 400, cap: 10, placed_on: '2026-01-02', due_on: '2026-01-20', grace: 10, opened_at: '2026-01-02T10:00:00.000Z', closed_at: '2026-01-02T12:00:00.000Z', slot: '10:30:00', created_at: '2026-09-01T00:00:00.000Z' },
+  { id: 'o3', customer_id: 'c2', amount: 900, cap: 5000, placed_on: '2026-03-01', due_on: '2026-01-01', grace: 1, opened_at: '2026-02-01T10:00:00.000Z', closed_at: '2026-02-10T10:00:00.000Z', slot: '11:00:00', created_at: '2026-09-01T00:00:00.000Z' },
+  { id: 'o4', customer_id: 'c2', amount: 300, cap: 1, placed_on: '2026-02-01', due_on: '2026-02-01', grace: 1, opened_at: '2026-02-05T10:00:00.000Z', closed_at: '2026-02-05T11:00:00.000Z', slot: '12:00:00', created_at: '2026-09-01T00:00:00.000Z' },
+  { id: 'o5', customer_id: 'c2', amount: 50, cap: 2, placed_on: '2026-01-15', due_on: '2026-03-01', grace: 1, opened_at: '2026-02-06T10:00:00.000Z', closed_at: '2026-02-06T10:00:00.000Z', slot: '13:00:00', created_at: '2026-09-01T00:00:00.000Z' },
+  { id: 'o6', customer_id: 'c3', amount: 20, cap: 20, placed_on: '2026-02-01', due_on: '2026-01-31', grace: 0, opened_at: '2026-03-01T10:00:00.000Z', closed_at: '2026-03-01T10:00:00.000Z', slot: '14:00:00', created_at: '2026-09-01T00:00:00.000Z' },
+];
+
+async function makeOrderEngine(driver: any) {
+  const engine = new ObjectQL();
+  engine.registerDriver(driver, true);
+  await engine.init();
+  (engine.registry as any).registerObject({
+    name: 'crm_order',
+    fields: {
+      customer_id: { type: 'text' },
+      amount: { type: 'number' },
+      cap: { type: 'number' },
+      placed_on: { type: 'date' },
+      due_on: { type: 'date' },
+      grace: { type: 'number' },
+      opened_at: { type: 'datetime' },
+      closed_at: { type: 'datetime' },
+      slot: { type: 'time' },
+    },
+  });
+  return engine;
+}
+
+/**
+ * Refused on both driver kinds, on an EMPTY and a populated table, grouped and
+ * ungrouped, with one message and no driver read — and the same filter as a
+ * `where` on the same engine (the twin), with its own answer. Returns the
+ * message and every `warn` line the engine logged while refusing.
+ */
+async function expectOrderFilterRefusal(filter: () => unknown): Promise<{ message: string; warnings: string[] }> {
+  let message: string | undefined;
+  const warnings: string[] = [];
+  for (const native of [true, false]) {
+    for (const [population, rows] of [['empty', []], ['populated', ORDERS]] as const) {
+      for (const groupBy of [undefined, ['customer_id']]) {
+        const cell = `${native ? 'native-capable' : 'raw'} driver, ${population}, ${groupBy ? 'grouped' : 'ungrouped'}`;
+        const { driver, calls } = makeCountingDriver(rows, native);
+        const engine = await makeOrderEngine(driver);
+        const logger = (engine as any).logger;
+        const warn = logger.warn;
+        logger.warn = (line: unknown) => { warnings.push(String(line)); };
+        try {
+          const err = await refusalOf(() => engine.aggregate('crm_order', withFilter(filter(), groupBy)));
+          expect(err, cell).toBeInstanceOf(Error);
+          expect(err.code, cell).toBe('INVALID_FILTER');
+          expect(err.status, cell).toBe(400);
+          expect(calls, cell).toEqual({ aggregate: 0, find: 0 });
+          message ??= err.message;
+          expect(err.message, cell).toBe(message);
+        } finally {
+          logger.warn = warn;
+        }
+      }
+    }
+  }
+  return { message: message!, warnings };
+}
+
+/** The same condition as the call's `where` (the twin), on a populated table. */
+async function whereTwinOf(filter: unknown, native: boolean): Promise<{ answer?: unknown; err?: Refusal; calls: { aggregate: number; find: number } }> {
+  const { driver, calls } = makeCountingDriver(ORDERS, native);
+  const engine = await makeOrderEngine(driver);
+  try {
+    const answer = await engine.aggregate('crm_order', {
+      where: filter,
+      aggregations: [{ function: 'count', alias: 'n' }],
+    } as unknown as EngineAggregateOptions);
+    return { answer, calls };
+  } catch (e) {
+    return { err: e as Refusal, calls };
+  }
+}
+
+describe('[#20148] per-aggregation filter — the temporal-comparand door `where` takes', () => {
+  // Before, measured through `engine.aggregate` and `POST /data/:object/query`
+  // on driver-memory and driver-sql: each counted NO row on a populated table
+  // (the `$between` and the `$or` / `$not` rows counted EVERY row), and the
+  // same condition as a `where` was refused 400 by this door.
+  const TEMPORAL_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, string, string]> = [
+    ['a bad date under $gt (the card\'s row 1)', () => ({ placed_on: { $gt: 'not-a-date' } }), 'placed_on', '"not-a-date"'],
+    ['a bad date as an $in member', () => ({ placed_on: { $in: ['2026-01-10', 'not-a-date'] } }), 'placed_on', '"not-a-date"'],
+    ['a bad date as a $between endpoint', () => ({ placed_on: { $between: ['2026-01-01', 'not-a-date'] } }), 'placed_on', '"not-a-date"'],
+    ['a bad date in the implicit-equality slot', () => ({ placed_on: 'not-a-date' }), 'placed_on', '"not-a-date"'],
+    ['a preset name on a datetime', () => ({ opened_at: { $gte: 'last_30_days' } }), 'opened_at', '"last_30_days"'],
+    ['a bad wall clock on a time', () => ({ slot: { $gt: 'noon' } }), 'slot', '"noon"'],
+    ['a bad date behind a $or branch that holds', () => ({ $or: [{ amount: { $gt: 0 } }, { placed_on: { $gt: 'not-a-date' } }] }), 'placed_on', '"not-a-date"'],
+    ['a bad date under $not', () => ({ $not: { placed_on: { $gt: 'not-a-date' } } }), 'placed_on', '"not-a-date"'],
+  ];
+
+  for (const [name, filter, field, shown] of TEMPORAL_REFUSED) {
+    it(`${name}: refused before any read, whatever the rows — as the where twin is`, async () => {
+      await expectFilterRefusalNamed(filter, field, shown);
+      for (const native of [true, false]) {
+        const twin = await whereTwinOf(filter(), native);
+        expect(twin.err?.code).toBe('INVALID_FILTER');
+        expect(twin.err?.status).toBe(400);
+        expect(twin.calls).toEqual({ aggregate: 0, find: 0 });
+        // One door, one verdict: the twin's refusal names the same field and value.
+        expect(twin.err?.message).toContain(`filter on '${field}'`);
+        expect(twin.err?.message).toContain(shown);
+      }
+    });
+  }
+
+  it('a {placeholder} is stepped around, as in where: `{ $lte: "{today}" }` counts every row', async () => {
+    for (const native of [true, false]) {
+      const { driver } = makeCountingDriver(ORDERS, native);
+      const engine = await makeOrderEngine(driver);
+      expect(await engine.aggregate('crm_order', withFilter({ placed_on: { $lte: '{today}' } })))
+        .toEqual([{ opp_count: 6, picked: 6 }]);
+    }
+  });
+});
+
+async function expectFilterRefusalNamed(filter: () => unknown, field: string, shown: string) {
+  const out = await expectOrderFilterRefusal(filter);
+  expect(out.message).toContain(`filter on '${field}'`);
+  expect(out.message).toContain(shown);
+  return out;
+}
+
+describe('[#20148] per-aggregation filter — a { $field } names a declared field, and addDays pairs two temporal fields of one class', () => {
+  // Before, measured through `engine.aggregate` and `POST /data/:object/query`
+  // on driver-memory and driver-sql: each counted NO row on a populated table
+  // (every row under `$ne`, `$not`, or a `$or` branch that held; the
+  // date / datetime pair counted 4 of 6 by coercion), while the same condition
+  // as a `where` was refused 400 on driver-sql (its cross-field compiler) and
+  // counted no row on driver-memory. The rule set is driver-sql's; the words
+  // are its words for that refusal — the fields, the operator and the reason
+  // withheld, the diagnostic in the server log.
+  const REFERENCE_REFUSED: ReadonlyArray<readonly [string, () => Record<string, unknown>, string]> = [
+    ['a referent the object does not declare (the card\'s row 3)', () => ({ amount: { $gt: { $field: 'nope' } } }), '"nope" is not a declared field of "crm_order"'],
+    ['an undeclared referent under $ne', () => ({ amount: { $ne: { $field: 'nope' } } }), '"nope" is not a declared field'],
+    ['an undeclared referent behind a $or branch that holds', () => ({ $or: [{ amount: { $gt: 0 } }, { amount: { $gt: { $field: 'nope' } } }] }), '"nope" is not a declared field'],
+    ['an undeclared referent under $not', () => ({ $not: { amount: { $gt: { $field: 'nope' } } } }), '"nope" is not a declared field'],
+    ['a dotted referent', () => ({ amount: { $gt: { $field: 'customer_id.name' } } }), '"customer_id.name" is not a declared field'],
+    ['an addDays offset column the object does not declare', () => ({ placed_on: { $lte: { $field: 'due_on', addDays: { $field: 'nope' } } } }), 'the addDays offset "nope" is not a declared field'],
+    ['addDays between two numeric fields (the card\'s row 2)', () => ({ amount: { $gt: { $field: 'cap', addDays: 1 } } }), 'addDays adds whole days to a date or datetime column, and "cap" is numeric'],
+    ['addDays behind a $or branch that holds', () => ({ $or: [{ amount: { $gt: 0 } }, { amount: { $gt: { $field: 'cap', addDays: 1 } } }] }), 'and "cap" is numeric'],
+    ['addDays from a date to a numeric field', () => ({ placed_on: { $lte: { $field: 'grace', addDays: 1 } } }), '"placed_on" is date but "grace" is numeric'],
+    ['addDays between a date and a datetime', () => ({ placed_on: { $lte: { $field: 'closed_at', addDays: 1 } } }), '"placed_on" is date but "closed_at" is datetime'],
+    ['addDays from a text to a date', () => ({ customer_id: { $lte: { $field: 'due_on', addDays: 1 } } }), '"customer_id" is text but "due_on" is date'],
+    ['addDays between two time fields', () => ({ slot: { $gte: { $field: 'slot', addDays: 1 } } }), 'and "slot" is time'],
+    ['an addDays offset read from a text field', () => ({ placed_on: { $lte: { $field: 'due_on', addDays: { $field: 'customer_id' } } } }), 'the addDays offset "customer_id" (text) is not a numeric column'],
+    ['an addDays offset read from a date field', () => ({ placed_on: { $lte: { $field: 'due_on', addDays: { $field: 'placed_on' } } } }), 'the addDays offset "placed_on" (date) is not a numeric column'],
+  ];
+
+  for (const [name, filter, diagnostic] of REFERENCE_REFUSED) {
+    it(`${name}: refused before any read, whatever the rows, the names withheld and logged`, async () => {
+      const { message, warnings } = await expectOrderFilterRefusal(filter);
+      expect(message).toContain(`\`${AT}\``);
+      expect(message).toContain('withheld from the message');
+      // The withheld half: no field this filter names reaches the message…
+      for (const name of ['nope', 'cap', 'grace', 'closed_at', 'due_on', 'customer_id', 'placed_on', 'amount', 'slot']) {
+        expect(message).not.toContain(`"${name}"`);
+      }
+      // …and every refusal put it in the server log, once per refusal.
+      expect(warnings).toHaveLength(8);
+      for (const line of warnings) expect(line).toContain(diagnostic);
+    });
+  }
+
+  it('the where twin of the undeclared referent is not refused by the engine — it is driver-sql\'s compiler that refuses it', async () => {
+    // The control that places the door: the engine judges `where`'s
+    // references nowhere, so a mock driver answers the twin (a count of 0 here,
+    // the reference never resolving) — the refusal `where` gets lives one layer
+    // down, in the driver the REST pin runs (`aggregation-filter-where-doors`).
+    for (const native of [true, false]) {
+      const twin = await whereTwinOf({ amount: { $gt: { $field: 'nope' } } }, native);
+      expect(twin.err).toBeUndefined();
+    }
+  });
+
+  // Measured identical at base and head through `engine.aggregate` on
+  // driver-memory and driver-sql: what the rules leave alone counts as before.
+  const REFERENCE_PASSING: ReadonlyArray<readonly [string, () => Record<string, unknown>, number]> = [
+    ['a numeric pair with no addDays', () => ({ amount: { $gt: { $field: 'cap' } } }), 4],
+    ['addDays between two date fields', () => ({ placed_on: { $lte: { $field: 'due_on', addDays: 7 } } }), 5],
+    ['addDays read from a numeric column', () => ({ placed_on: { $lte: { $field: 'due_on', addDays: { $field: 'grace' } } } }), 3],
+    ['addDays between two datetime fields', () => ({ closed_at: { $gte: { $field: 'opened_at', addDays: 1 } } }), 2],
+    ['a reference to created_at, a column every row carries', () => ({ opened_at: { $lte: { $field: 'created_at' } } }), 6],
+    ['a reference to id, the primary key', () => ({ customer_id: { $ne: { $field: 'id' } } }), 6],
+  ];
+
+  for (const [name, filter, populatedCount] of REFERENCE_PASSING) {
+    it(`${name} counts ${populatedCount} of 6, and 0 on an empty table`, async () => {
+      for (const native of [true, false]) {
+        const { driver } = makeCountingDriver(ORDERS, native);
+        const populated = await makeOrderEngine(driver);
+        expect(await populated.aggregate('crm_order', withFilter(filter()))).toEqual([{ opp_count: 6, picked: populatedCount }]);
+        const { driver: emptyDriver } = makeCountingDriver([], native);
+        const empty = await makeOrderEngine(emptyDriver);
+        expect(await empty.aggregate('crm_order', withFilter(filter()))).toEqual([{ opp_count: 0, picked: 0 }]);
+      }
+    });
+  }
+
+  it('the walker\'s own refusals come first: an unknown operator beside an undeclared referent is the operator\'s refusal', async () => {
+    const { message, warnings } = await expectOrderFilterRefusal(
+      () => ({ $or: [{ amount: { $gt: { $field: 'nope' } } }, { amount: { $median: 1 } }] }),
+    );
+    expect(message).toContain("Unsupported operator '$median'");
+    expect(warnings).toEqual([]);
+  });
+});
+
+describe('[#20148] a Date bound is compared as an instant — as the same bound in a where is', () => {
+  // Before, measured through `engine.aggregate` on driver-memory and
+  // driver-sql: every Date row below counted NO row (`$ne` / `$nin` / the
+  // `$between` counted every row), while the same bound in a `where` counted
+  // what the ISO-text spelling counts here — each driver reads a Date by the
+  // column's storage rule. The ISO spelling is the in-engine control: it
+  // answered correctly before and is unchanged.
+  const D = (s: string) => new Date(s);
+  const DATE_ROWS: ReadonlyArray<readonly [string, () => Record<string, unknown>, () => Record<string, unknown>, number]> = [
+    ['$gt (the card\'s row 5)', () => ({ opened_at: { $gt: D('2026-02-01T00:00:00.000Z') } }), () => ({ opened_at: { $gt: '2026-02-01T00:00:00.000Z' } }), 4],
+    ['$gte, an equal instant stored', () => ({ opened_at: { $gte: D('2026-02-01T10:00:00.000Z') } }), () => ({ opened_at: { $gte: '2026-02-01T10:00:00.000Z' } }), 4],
+    ['$lt', () => ({ opened_at: { $lt: D('2026-02-01T00:00:00.000Z') } }), () => ({ opened_at: { $lt: '2026-02-01T00:00:00.000Z' } }), 2],
+    ['$lte', () => ({ opened_at: { $lte: D('2026-02-01T10:00:00.000Z') } }), () => ({ opened_at: { $lte: '2026-02-01T10:00:00.000Z' } }), 3],
+    ['$eq', () => ({ opened_at: { $eq: D('2026-02-01T10:00:00.000Z') } }), () => ({ opened_at: { $eq: '2026-02-01T10:00:00.000Z' } }), 1],
+    ['$ne', () => ({ opened_at: { $ne: D('2026-02-01T10:00:00.000Z') } }), () => ({ opened_at: { $ne: '2026-02-01T10:00:00.000Z' } }), 5],
+    ['implicit equality', () => ({ opened_at: D('2026-02-01T10:00:00.000Z') }), () => ({ opened_at: '2026-02-01T10:00:00.000Z' }), 1],
+    ['an $in member', () => ({ opened_at: { $in: [D('2026-02-01T10:00:00.000Z')] } }), () => ({ opened_at: { $in: ['2026-02-01T10:00:00.000Z'] } }), 1],
+    ['a $nin member', () => ({ opened_at: { $nin: [D('2026-02-01T10:00:00.000Z')] } }), () => ({ opened_at: { $nin: ['2026-02-01T10:00:00.000Z'] } }), 5],
+    ['$between two Dates', () => ({ opened_at: { $between: [D('2026-02-01T00:00:00.000Z'), D('2026-02-06T00:00:00.000Z')] } }), () => ({ opened_at: { $between: ['2026-02-01T00:00:00.000Z', '2026-02-06T00:00:00.000Z'] } }), 2],
+    ['a UTC-midnight Date on a date field', () => ({ placed_on: { $gte: D('2026-02-01T00:00:00.000Z') } }), () => ({ placed_on: { $gte: '2026-02-01' } }), 3],
+  ];
+
+  for (const [name, dateFilter, isoFilter, populatedCount] of DATE_ROWS) {
+    it(`${name}: counts ${populatedCount} of 6, as the ISO spelling does`, async () => {
+      for (const native of [true, false]) {
+        const { driver } = makeCountingDriver(ORDERS, native);
+        const engine = await makeOrderEngine(driver);
+        expect(await engine.aggregate('crm_order', withFilter(isoFilter()))).toEqual([{ opp_count: 6, picked: populatedCount }]);
+        expect(await engine.aggregate('crm_order', withFilter(dateFilter()))).toEqual([{ opp_count: 6, picked: populatedCount }]);
+      }
+    });
+  }
+
+  it('having reads a Date bound the same way — the groups the ISO spelling keeps', async () => {
+    const { driver } = makeCountingDriver(ORDERS, false);
+    const engine = await makeOrderEngine(driver);
+    const run = (having: Record<string, unknown>) => engine.aggregate('crm_order', {
+      groupBy: ['customer_id'],
+      aggregations: [{ function: 'min', field: 'opened_at', alias: 'first_opened' }],
+      having,
+    } as unknown as EngineAggregateOptions);
+    const groups = (rows: any[]) => rows.map((r) => r.customer_id).sort();
+    for (const [dateHaving, isoHaving, kept] of [
+      [{ first_opened: { $gt: D('2026-02-01T00:00:00.000Z') } }, { first_opened: { $gt: '2026-02-01T00:00:00.000Z' } }, ['c2', 'c3']],
+      [{ first_opened: { $eq: D('2026-02-01T10:00:00.000Z') } }, { first_opened: { $eq: '2026-02-01T10:00:00.000Z' } }, ['c2']],
+      [{ first_opened: { $ne: D('2026-02-01T10:00:00.000Z') } }, { first_opened: { $ne: '2026-02-01T10:00:00.000Z' } }, ['c1', 'c3']],
+    ] as const) {
+      expect(groups(await run(isoHaving))).toEqual(kept);
+      expect(groups(await run(dateHaving))).toEqual(kept);
+    }
+  });
+
+  it('the walker compares every other pair exactly as before (the lift needs a Date on one side)', () => {
+    // A wall clock is no instant, so a Date against one is left to `>` and
+    // answers as it always did; two numbers and two strings never lift.
+    expect(matchesAggregationFilter({ slot: '14:00:00' }, { slot: { $gt: D('2026-02-01T11:00:00.000Z') } } as never, 0)).toBe(false);
+    expect(matchesAggregationFilter({ amount: 5 }, { amount: { $in: [5] } } as never, 0)).toBe(true);
+    expect(matchesAggregationFilter({ note: '2026-02-01' }, { note: { $gte: '2026-02-01T00:00:00.000Z' } } as never, 0)).toBe(false);
+  });
+});

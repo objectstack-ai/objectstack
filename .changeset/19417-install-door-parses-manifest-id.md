@@ -34,9 +34,9 @@ verifies its candidate against the pattern before offering it. Posting
 
 ```text
 Invalid package id 'pkg-a' on `manifest.id`. Expected reverse-domain notation
-('com.steedos.crm', 'org.apache.superset') — lowercase dot-separated segments;
-hyphens allowed inside a segment, underscores are not. Did you mean
-'com.example.pkg-a'?
+('com.steedos.crm', 'org.apache.superset') — lowercase dot-separated segments
+of letters, digits and inner hyphens; a segment may not open with a hyphen;
+underscores are not admitted. Did you mean 'com.example.pkg-a'?
 ```
 
 **What is not affected.** Boot-time and in-process installs reach

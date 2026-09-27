@@ -114,6 +114,14 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // ledger row that outlives its finding is how a closed gap reads as an open
   // one.
   'runPerPackageAuthoringRules',
+  // [#20113] The SDUI manifest the JSX gate is armed with, decided once per run
+  // over the stack that gate judges. It JUDGES AN INPUT, which is why it is a
+  // row here and no longer a `resolveSduiManifest` row in NOT_A_GATE: a
+  // project `sdui.manifest.json` that exists but cannot be read, parsed or
+  // carries no `components` map is refused (exit 1) when there is a
+  // `kind:'html'` page to check. Not a registry rule: the manifest is a file
+  // in the working directory, not part of the stack a rule is handed.
+  'resolveJsxGateManifest',
 ];
 
 /**
@@ -163,7 +171,6 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       'splitBySeverity',
       'authoringRuleUnionStack',
       'normalizeStackInput',
-      'resolveSduiManifest',
       'loadConfig',
       'ObjectStackDefinitionSchema',
     ],
@@ -200,6 +207,10 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       'printWarning',
       'printBulletList',
       'printAuthoringAdvisories',
+      // [#20113] Renders the parse-level notice `resolveJsxGateManifest` (a
+      // gate above) already produced; the same record rides `--json` whether
+      // this runs or not.
+      'printJsxGateNotices',
       // [#18780] `compile.ts`' local once-guard around the line above it. It
       // decides WHEN that printer is called — after the per-package pass has
       // appended its survivors, so the closing `N author-time warning(s) — see
