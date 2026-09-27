@@ -74,7 +74,7 @@ function makeStubDriver() {
       rows.set(row.id as string, row);
       return row;
     },
-    async bulkCreate(o: string, list: Record<string, unknown>[]) {
+    async bulkCreate(_o: string, list: Record<string, unknown>[]) {
       calls.push({ fn: 'bulkCreate', data: { rows: list.map((r) => ({ ...r })) } });
       const out: Record<string, unknown>[] = [];
       for (const r of list) {
@@ -156,7 +156,7 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
   const last = (fn: string) => [...stub.calls].reverse().find((c) => c.fn === fn)!.data;
 
   it.each([[''], ['  ']])('insert, one row: %j → null; the string-stored controls keep their blank', async (blank) => {
-    const payload = { id: 'a', ...blankTyped(blank), ...STR_BLANK };
+    const payload: Record<string, unknown> = { id: 'a', ...blankTyped(blank), ...STR_BLANK };
     await engine.insert('blank_door', payload);
     const sent = last('create');
     expectTypedNull(sent);
