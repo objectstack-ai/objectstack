@@ -1113,8 +1113,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // #19814: the view form's new `pagination` section, its label authored
       // in all three locales. 609 since #19955: the 25 row labels of the view
       // form's `columns` / `sort` / `tabs` repeaters, authored in all three
-      // locales.
-      expect(translated.length, `${locale} positive control`).toBe(609);
+      // locales. 608 since #20161: the report form's joined-block `chart` row
+      // left with its key (nothing ever drew a block chart), taking its label
+      // — authored in all three locales — out of the catalog.
+      expect(translated.length, `${locale} positive control`).toBe(608);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

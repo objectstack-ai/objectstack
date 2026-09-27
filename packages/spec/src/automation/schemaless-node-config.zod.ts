@@ -210,6 +210,32 @@ function decisionModePrescription(input: unknown): string {
     + 'the key for exclusive.';
 }
 
+/**
+ * The refusal for a legal `mode` on a `decision` that also declares a
+ * NON-EMPTY `conditions` list (ruling 5856786357 on #20168, letter A).
+ *
+ * The two keys speak about different mechanisms. `mode` declares how many
+ * OUT-EDGES an edge-branched decision takes; a `conditions` list is ordered
+ * first-match on its own — the executor returns the first entry whose
+ * expression holds and traversal narrows to the out-edge carrying its label —
+ * so nothing would ever read a `mode` written beside one. Accepting it would
+ * be the declared-not-enforced shape AGENTS.md Prime Directive #10 forbids,
+ * and `mode: 'inclusive'` there reads as "take every branch that holds" while
+ * the run takes one. So the pair is refused, with the two ruled ways out, and
+ * the value is echoed the way {@link decisionModePrescription} echoes one:
+ * both members are refused alike, because the key is what has no reader here,
+ * not the value.
+ */
+function decisionModeWithConditionsRefusal(mode: unknown): string {
+  const received = typeof mode === 'string' ? `'${mode}'` : String(JSON.stringify(mode) ?? mode);
+  return `\`mode: ${received}\` is not valid on a decision that declares a \`conditions\` list — \`mode\` `
+    + 'belongs to the edge-branched decision alone. A `conditions` list is first-match on its own: the FIRST '
+    + 'entry whose `expression` holds wins and the run follows the out-edge carrying its `label`, so a `mode` '
+    + 'beside it would be accepted and never read. Either delete `mode` and keep the list, or move the branches '
+    + 'onto the out-edges (a `condition` on each branch edge, `isDefault: true` on the fallback), delete '
+    + '`conditions`, and keep `mode`.';
+}
+
 // ─── script ──────────────────────────────────────────────────────────
 
 /**
@@ -452,6 +478,28 @@ export type DecisionCondition = z.input<typeof DecisionConditionSchema>;
  * shape the ruling addresses. A `conditions` list is ordered first-match on
  * its own, and the ruling leaves it so.
  *
+ * ## `mode` beside a `conditions` list — refused (ruling 5856786357 on #20168)
+ *
+ * `mode` belongs to the edge-branched decision alone. A decision that declares
+ * a NON-EMPTY `conditions` list and `mode` together is refused at `mode`,
+ * whichever member it names, with the two ruled ways out: delete `mode` (the
+ * list is first-match on its own), or move the branches onto the out-edges,
+ * delete `conditions`, and keep `mode`. Accepted and ignored, `mode:
+ * 'inclusive'` there would promise every matching branch while the run takes
+ * one — the BPMN reading the ruling rests on keeps exclusive and inclusive as
+ * two different gateways, never one gateway carrying a list and a mode.
+ *
+ * Reach, deliberately: `mode` on an EMPTY list or with `conditions` absent is
+ * untouched, because an empty list declares no branch and the executor then
+ * routes on the out-edges exactly as it does with no list at all. The rule is
+ * a refinement, so the published JSON Schema cannot state it — no arm of the
+ * closed projection list (`shared/refinement-projection.ts`) fits "this key
+ * forbids that one when the list is non-empty" — and the site is declared in
+ * `dropped-refinements.baseline.json` and on the artifact as
+ * `x-dropped-refinements`. Like the rest of this contract it binds wherever
+ * `DecisionConfigSchema` is parsed: a direct parse, and the registration-time
+ * reader #15429 adds.
+ *
  * ⚠️ **Declared ahead of its enforcement, and the status quo does NOT match
  * the default above.** The ruling's split order lands this key first, then
  * the engine semantics together with the `os migrate meta` conversion in one
@@ -481,7 +529,9 @@ export const DecisionConfigSchema = lazySchema(() => strictObject({
    * condition holds — `'exclusive'` (the first; what an omitted key means) or
    * `'inclusive'` (every one). Not read by the engine yet: see the
    * "Declared ahead of its enforcement" note above. Any other value is refused
-   * with {@link decisionModePrescription}.
+   * with {@link decisionModePrescription}; either member beside a non-empty
+   * `conditions` list is refused by the `.superRefine` below, with
+   * {@link decisionModeWithConditionsRefusal}.
    */
   mode: z.enum(['exclusive', 'inclusive'], {
     error: (issue) => (issue.code === 'invalid_value' ? decisionModePrescription(issue.input) : undefined),
@@ -490,9 +540,24 @@ export const DecisionConfigSchema = lazySchema(() => strictObject({
       'Declares how many out-edges an edge-branched decision takes when more than one out-edge condition holds: '
       + "'exclusive' = only the first, in the order the edges are declared (what an omitted mode means); "
       + "'inclusive' = every one that holds. Declared ahead of the engine change that reads it: until that lands, "
-      + 'an edge-branched decision takes every out-edge whose condition holds, whatever this says. A conditions '
-      + 'list is first-match on its own.',
+      + 'an edge-branched decision takes every out-edge whose condition holds, whatever this says. Refused beside a '
+      + 'non-empty conditions list, which is first-match on its own: delete mode there, or move the branches onto '
+      + 'the out-edges, delete conditions, and keep mode.',
     ),
+}).superRefine((config, ctx) => {
+  // Ruling 5856786357 on #20168 (letter A): `mode` belongs to the
+  // edge-branched decision alone. A NON-EMPTY `conditions` list is first-match
+  // on its own and nothing reads `mode` beside it, so the pair is refused at
+  // `mode` — either member, since the key has no reader here. An empty list
+  // declares no branch (the executor then routes on the out-edges), so it is
+  // left alone, as is an absent one. `mode` has no `.default()`, so
+  // `undefined` here always means "not authored" and `parse(parse(x))` stays
+  // stable. ⛔ No alias and no conversion: `mode` reached no release before
+  // this refusal (npm `@objectstack/spec` 17.4.0 publishes no `mode`), so no
+  // published flow carries the pair.
+  if (config.mode !== undefined && Array.isArray(config.conditions) && config.conditions.length > 0) {
+    ctx.addIssue({ code: 'custom', path: ['mode'], message: decisionModeWithConditionsRefusal(config.mode) });
+  }
 }));
 
 export type DecisionConfig = z.input<typeof DecisionConfigSchema>;

@@ -220,6 +220,112 @@ describe('Joined reports refuse top-level selection keys', () => {
 });
 
 /**
+ * #20161 — a `joined` report draws no chart. Its renderer draws each block as
+ * a table and returns before the one container `chart` read, and nothing ever
+ * read a block's `chart` — so both parsed and plotted nothing. The block key is
+ * REMOVED from the closed block shape (answered by its `guidance` entry); the
+ * container key stays declared for every non-joined report and is refused by
+ * the joined arm of the refinement.
+ *
+ * Each refusal asserts what a schema door owes: the issue `code`, its `path`,
+ * and the first sentence of the prescription.
+ */
+describe('A joined report draws no chart — block `chart` removed, container `chart` refused (#20161)', () => {
+  const BLOCK = { name: 'open_block', type: 'summary', dataset: 'tasks', rows: ['status'], values: ['task_count'] } as const;
+  const JOINED = { name: 'overview', label: 'Overview', type: 'joined', blocks: [BLOCK] } as const;
+  const CHART = { type: 'bar', xAxis: 'status', yAxis: 'task_count' } as const;
+  const BLOCK_FIRST_SENTENCE = '`report.blocks[].chart` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove)';
+  const CONTAINER_FIRST_SENTENCE = 'a `joined` report draws no chart — it draws each block as a table and never reads `chart`, on the container or on a block.';
+  const MIGRATE = 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+  const issuesOf = (r: { success: boolean; error?: { issues: ReadonlyArray<{ code: string; path: PropertyKey[]; message: string }> } }) =>
+    (r.error?.issues ?? []).map((i) => ({ code: i.code, path: i.path, message: i.message }));
+
+  it('a block `chart` is refused as a removed key, carrying the prescription — not a silent strip', () => {
+    const r = JoinedReportBlockSchema.safeParse({ ...BLOCK, chart: CHART });
+    expect(r.success, 'a block `chart` parsed green — it would plot nothing').toBe(false);
+    const issues = issuesOf(r);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('unrecognized_keys');
+    expect(issues[0]!.path).toEqual([]);
+    expect(issues[0]!.message).toContain(BLOCK_FIRST_SENTENCE);
+    expect(issues[0]!.message).toContain('Delete the key.');
+    expect(issues[0]!.message).toContain(MIGRATE);
+  });
+
+  it('…and the same refusal is located under the report, at the block that carries it', () => {
+    const r = ReportSchema.safeParse({ ...JOINED, blocks: [BLOCK, { ...BLOCK, name: 'done_block', chart: CHART }] });
+    expect(r.success).toBe(false);
+    const issues = issuesOf(r);
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['unrecognized_keys', ['blocks', 1]]]);
+    expect(issues[0]!.message).toContain(BLOCK_FIRST_SENTENCE);
+  });
+
+  it('a container `chart` on a joined report is refused at its own path, with no pointer onto `blocks[]`', () => {
+    const r = ReportSchema.safeParse({ ...JOINED, chart: CHART });
+    expect(r.success, 'a joined report carrying `chart` parsed green — it would plot nothing').toBe(false);
+    const issues = issuesOf(r);
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['chart']]]);
+    expect(issues[0]!.message.startsWith(CONTAINER_FIRST_SENTENCE), issues[0]!.message).toBe(true);
+    expect(issues[0]!.message).toContain('Delete `chart`');
+    expect(issues[0]!.message).not.toContain('onto `blocks[]`');
+    expect(issues[0]!.message).toContain(MIGRATE);
+  });
+
+  it('it joins the selection refusals rather than replacing them — one issue per key, `chart` last', () => {
+    const r = ReportSchema.safeParse({ ...JOINED, dataset: 'tasks', order: [{ by: 'task_count' }], chart: CHART });
+    expect(issuesOf(r).map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['dataset']],
+      ['custom', ['order']],
+      ['custom', ['chart']],
+    ]);
+  });
+
+  it('the authoring factory refuses both — `defineReport` throws each prescription', () => {
+    expect(() => defineReport({ ...JOINED, chart: CHART } as never)).toThrow(CONTAINER_FIRST_SENTENCE);
+    expect(() => defineReport({ ...JOINED, blocks: [{ ...BLOCK, chart: CHART }] } as never)).toThrow(BLOCK_FIRST_SENTENCE);
+  });
+
+  it('the metadata save door\'s schema refuses both — the registry\'s `report` schema is the same schema', () => {
+    const saveDoor = getMetadataTypeSchema('report');
+    expect(saveDoor, 'the `report` metadata type must resolve a schema').toBeDefined();
+    const container = saveDoor!.safeParse({ ...JOINED, chart: CHART });
+    expect(container.success).toBe(false);
+    expect(issuesOf(container as never).map((i) => [i.code, i.path])).toEqual([['custom', ['chart']]]);
+    const block = saveDoor!.safeParse({ ...JOINED, blocks: [{ ...BLOCK, chart: CHART }] });
+    expect(block.success).toBe(false);
+    expect(issuesOf(block as never).map((i) => [i.code, i.path])).toEqual([['unrecognized_keys', ['blocks', 0]]]);
+  });
+
+  it('a block on a NON-joined container is the same closed shape — its `chart` is refused there too', () => {
+    const r = ReportSchema.safeParse({
+      name: 'hours', label: 'Hours', type: 'summary', dataset: 'tasks', rows: ['status'], values: ['task_count'],
+      blocks: [{ ...BLOCK, chart: CHART }],
+    });
+    expect(issuesOf(r).map((i) => [i.code, i.path])).toEqual([['unrecognized_keys', ['blocks', 0]]]);
+  });
+
+  it('a non-joined report keeps its live `chart` — every non-joined type parses it and round-trips it', () => {
+    for (const type of ['tabular', 'summary', 'matrix'] as const) {
+      const r = ReportSchema.safeParse({
+        name: 'hours', label: 'Hours', type, dataset: 'tasks', rows: ['status'],
+        ...(type === 'matrix' ? { columns: ['priority'] } : {}),
+        values: ['task_count'], chart: CHART,
+      });
+      expect(r.success, `${type}: ${JSON.stringify(r.error?.issues ?? [])}`).toBe(true);
+      expect(r.data!.chart).toMatchObject(CHART);
+    }
+  });
+
+  it('a joined report without a chart parses exactly as before', () => {
+    const r = ReportSchema.safeParse({ ...JOINED, runtimeFilter: { done: false }, drilldown: false });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+    expect(r.data!.chart).toBeUndefined();
+    expect(r.data!.blocks![0]).not.toHaveProperty('chart');
+  });
+});
+
+/**
  * #3916 — reports can declare an ordering. Before this the report schema had no
  * sort field at all: `DatasetSelection.order` existed but was unreachable for
  * report authors (dashboard widgets had their own `options.sortBy` channel),
