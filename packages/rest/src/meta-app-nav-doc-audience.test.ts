@@ -24,6 +24,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 // Explicit `.js` extension: NodeNext resolution (see the sibling nav-gate tests).
 import { RestServer } from './rest-server.js';
+import { filterAppForUser } from './meta-item-read-gate.js';
 
 // This file spies on `console.warn` (the fail-closed diagnostic), so it
 // declares the level it observes under — the SHIPPED default.
@@ -300,8 +301,7 @@ describe('[#19790] fails CLOSED', () => {
     });
 
     it('no gate handed to the filter at all: `doc` entries are dropped, not served', () => {
-        const rest: any = new RestServer(createMockServer() as any, {} as any, {} as any);
-        const out = rest.filterAppForUser(clone(CRM_APP), new Set(['crm.reports']));
+        const out = filterAppForUser(clone(CRM_APP), new Set(['crm.reports']));
         expect(navIds(out)).toEqual(['nav_leads', 'nav_reports']);
     });
 });

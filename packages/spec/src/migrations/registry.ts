@@ -3554,7 +3554,8 @@ const step17: MigrationStep = {
         + 'ADR-0049 through a new ADR, with a vocabulary its executor actually honours)',
       reason:
         'Both `activationEvents` keys — and the `ActivationEventSchema` trigger vocabulary '
-        + 'they embedded (`onCommand` / `onRoute` / … / `onView` after the #4653 convergence) — '
+        + 'they embedded (`onCommand` / `onRoute` / … / `onView`, once the kernel and studio '
+        + 'copies had converged on the kernel\'s structured `{ type, pattern }` shape) — '
         + 'promised lazy plugin activation ("plugins remain dormant until an activation event '
         + 'fires") that no runtime in objectstack, cloud, cloud-v1 or objectui ever '
         + "implemented: nothing anywhere read the key, every plugin activates immediately, and "
@@ -3572,8 +3573,11 @@ const step17: MigrationStep = {
         + 'with a guidance prescription (as are its former VS Code-flavoured aliases '
         + '`activation` / `events` / `onActivate`), and the orphaned `ActivationEventSchema` / '
         + '`ActivationEvent` exports are removed from `./kernel` and `./studio` with the keys '
-        + '(#3950: an exported schema with no consumer is read as a capability). #4657. '
-        + 'SUPERSEDED ON THE KERNEL SIDE by #4834 (same unreleased major): the whole '
+        + '(the lesson of the unwired plugin sandboxing / integrity / approval config removed '
+        + 'before this: an exported schema with no consumer is read as a capability). Both keys '
+        + 'took ADR-0049\'s REMOVE answer, not ENFORCE, while protocol 17 was still unreleased. '
+        + 'SUPERSEDED ON THE KERNEL SIDE by the maintainer\'s REMOVE '
+        + 'ruling on the rest of the plugin-runtime family (same unreleased major): the whole '
         + '`DynamicLoadRequest` shape — and the rest of the plugin-runtime family with it — '
         + 'was removed, which took this key\'s `retiredKey()` tombstone with it. That is '
         + 'strictly stronger than the tombstone, not weaker: there is no longer a '
@@ -3584,7 +3588,8 @@ const step17: MigrationStep = {
       acceptanceCriteria:
         'No `defineStudioPlugin` input authors `activationEvents` — authoring it is an '
         + 'unknown key on the strict studio manifest and a parse error carrying the '
-        + 'prescription. On the kernel side the stronger #4834 criterion applies instead: '
+        + 'prescription. On the kernel side the stronger criterion of the plugin-runtime '
+        + 'family\'s removal applies instead: '
         + 'there is no `DynamicLoadRequest` type or schema left to author it into at all. No '
         + 'code imports `ActivationEventSchema` / `ActivationEvent` from '
         + '`@objectstack/spec/kernel` or `@objectstack/spec/studio` (TS2305 after upgrade). '
@@ -3610,15 +3615,16 @@ const step17: MigrationStep = {
         + 'and queried by nothing, so it refuses no operation. Neither surface confines a '
         + 'plugin today — do not author either one expecting isolation',
       reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-04 on #4914. The block declared a '
+        'ADR-0049 enforce-or-remove; the maintainer ruled REMOVE on 2026-08-04, on condition '
+        + 'that a bare-name sweep of cloud and objectui came back clean first. The block declared a '
         + 'complete plugin loading policy and NOTHING read it. A bare-name scan of all three '
         + 'repos — objectstack, cloud (measured 2026-08-09) and objectui (measured at pickup), '
         + 'each with a control probe proving the scan saw the tree — put every hit inside '
         + '`packages/spec` itself: this module\'s own declaration, its own unit tests, the '
         + '`Manifest.loading` embed and the generated artifacts. `manifest.loading.*` had zero '
         + 'readers in `packages/core`, `packages/runtime` and `packages/metadata`. So the key '
-        + 'parsed, entered the manifest, and changed nothing — #3950, at the scale of a whole '
-        + 'block. What made it outrank ordinary inert-key cleanup is `sandboxing`: it declared '
+        + 'parsed, entered the manifest, and changed nothing — an exported schema with no '
+        + 'consumer, read as a capability, at the scale of a whole block. What made it outrank ordinary inert-key cleanup is `sandboxing`: it declared '
         + 'process / vm / iframe / web-worker isolation, IPC transports and an `allowedServices` '
         + 'ACL, so an AI author (ADR-0033) reading that vocabulary concluded the platform '
         + 'isolates plugins, wrote the config, and received a clean parse and zero isolation. An '
@@ -3672,20 +3678,24 @@ const step17: MigrationStep = {
         + 'a `DynamicPluginResult`. That is the ADR-0049 false-compliance shape at its most '
         + 'inviting to an AI author (ADR-0033), who reads `DynamicLoadRequestSchema` in the '
         + 'published IDE bundle as proof the platform hot-loads plugins and constructs a '
-        + 'request that parses clean and is received by nobody (#3950: an exported schema '
-        + 'with no consumer is read as a capability). The #3896 follow-up removed this '
-        + "module's discovery/sandbox config island and left these five in place explicitly — "
+        + 'request that parses clean and is received by nobody (an exported schema with no '
+        + 'consumer is read as a capability). The earlier removal of this module\'s '
+        + 'discovery/sandbox config island — plugin sandboxing, integrity and approval settings '
+        + 'that nothing read — left these five in place explicitly: '
         + '"operation contracts, not security promises; the enforce-or-remove call on them is '
         + 'a design decision rather than a correction" — but that suspension lived only in a '
-        + 'changeset paragraph with no issue carrying it. #4834 is that decision, answered '
-        + 'REMOVE. `experimental` was considered and rejected: it is only `.describe()` prose '
+        + 'changeset paragraph with no issue carrying it. The maintainer\'s ruling of '
+        + '2026-08-03 is that decision, answered REMOVE: hot loading is a real future '
+        + 'capability, but nothing is being built and nothing pulls it, and when it is built '
+        + 'its vocabulary enters the schema with the implementation. `experimental` was '
+        + 'considered and rejected: it is only `.describe()` prose '
         + 'and cannot stop an import, the weakest of the three ADR-0049 channels. None of the '
         + 'five is stored metadata — they are root request/result payload shapes embedded in '
         + 'no parent schema and parsed against no metadata document — so no `sys_metadata` '
         + 'row can carry one and there is no source for the D2 chain to rewrite; this entry '
         + 'is the D3 record. The removal also subsumes the kernel half of '
-        + '`plugin-activation-events-retired` (#4657): that tombstone goes with the shape '
-        + 'that carried it. ADR-0049, #4834.',
+        + '`plugin-activation-events-retired`: that tombstone goes with the shape '
+        + 'that carried it. ADR-0049.',
       acceptanceCriteria:
         'No code imports `DynamicLoadRequestSchema`, `DynamicUnloadRequestSchema`, '
         + '`DynamicPluginResultSchema`, `PluginSourceSchema`, `DynamicPluginOperationSchema` '
@@ -4372,7 +4382,8 @@ const step17: MigrationStep = {
         + 'Offline is a platform capability, and its vocabulary belongs on the sync engine that '
         + 'owns the queue, the conflict policy and the cache — none of which exists yet. Delete '
         + 'the import and the value. Whichever of these earns real product pull returns WITH its '
-        + 'own vocabulary and its executor, the #4910 way, not by un-retiring a declaration)',
+        + 'own vocabulary and its executor — the way inbound rate limiting came back, as a new '
+        + 'key carrying only what its executor consumes — not by un-retiring a declaration)',
       reason:
         'Five `@objectstack/spec/ui` modules declared a full interaction-configuration '
         + 'vocabulary — 22 `z.object` sites across touch/gesture, drag-and-drop, '
@@ -4394,17 +4405,26 @@ const step17: MigrationStep = {
         + 'carrier flipped all 21 — so unreachability was a fact about the graph, not a broken '
         + 'walker; (3) zero `.parse()` / `.safeParse()` in objectstack, objectui or cloud '
         + 'outside these modules\' own unit tests. objectui holds TYPE re-exports and parity '
-        + 'ratchets, never validators, and says so (#2561). The 2026-08-04 ruling weighed '
+        + 'ratchets, never validators, and says so (its types package deliberately dropped the '
+        + 'spec/ui zod-validator re-exports and keeps type-only ones). The 2026-08-04 ruling '
+        + 'retired the family — touch, drag-and-drop, keyboard and motion are renderer built-in '
+        + 'behaviour and offline belongs to a sync engine, none of it per-page metadata — and weighed '
         + 'wiring a carrier key (option B) and rejected it: that is a feature with a renderer '
         + 'behind it, not ledger clean-up. It also weighed tightening the shapes to '
         + '`strictObject` and rejected that explicitly — strictness is a property of a PARSE and '
         + 'there is no parse, so it would spend a breaking change to leave "a precisely '
-        + 'validated dead slot, the more convincing lie" (#4583). Because there was no carrier '
+        + 'validated dead slot, the more convincing lie" (the lesson of the datasource capability '
+        + 'flags: `readOnly` was precisely validated and read by nothing, while a shipped example '
+        + 'called a datasource a read replica and wrote through it). Because there was no carrier '
         + 'key there is nothing to tombstone and no `sys_metadata` row or source file for a D2 '
-        + 'conversion to rewrite: this entry is the D3 record, the same route 3 as #4834 (kernel '
-        + 'plugin-runtime family) and #4938 (`HttpServerConfig`). ⚠️ Not to be confused with '
-        + '#5021, which retired the THEME `animation` block — a different file, different defs, '
-        + 'and that one did have a carrier key and therefore a tombstone. ADR-0049, #4988.',
+        + 'conversion to rewrite: this entry is the D3 record, the same route 3 as '
+        + '`plugin-runtime-family-retired` (the kernel plugin-runtime family) and the '
+        + '`HttpServerConfig` retirement (seven keys no runtime read and no authoring door '
+        + 'reached, retired with their container). ⚠️ Not to be confused with the theme-token '
+        + 'retirement (theme-driven typography is not a near-term capability, so nine token '
+        + 'groups nothing consumed were retired), which retired the THEME `animation` block — a '
+        + 'different file, different defs, and that one did have a carrier key and therefore a '
+        + 'tombstone. ADR-0049.',
       acceptanceCriteria:
         'No code imports any of the 64 retired names from `@objectstack/spec` or '
         + '`@objectstack/spec/ui` — `TouchTargetConfig(Schema)`, `GestureType(Schema)`, '
@@ -4441,7 +4461,9 @@ const step17: MigrationStep = {
         + 'through a new ADR — carrier key and renderer first, vocabulary second)',
       reason:
         'Both shapes were published `@objectstack/spec/ui` vocabulary with NO AUTHORING DOOR. '
-        + '#4001 批 14 measured them three ways on 2026-08-03 and this retirement re-ran all '
+        + 'The v17 unknown-key strictness sweep (its ui/ batch 14), which measured each ui/ '
+        + 'file for an authoring door before closing any shape, measured them three ways on '
+        + '2026-08-03 and this retirement re-ran all '
         + 'three against `origin/main` before removing anything, each with a positive control '
         + 'that passed in the same run: (1) CARRIER — no schema in `packages/spec/src` declared '
         + 'a key of either type (`ui/notification.zod`\'s only non-test importer was the '
@@ -4455,19 +4477,24 @@ const step17: MigrationStep = {
         + 'itself all resolved `root-graph` in the same run and an injected synthetic carrier '
         + 'flipped both; (3) PARSE — zero `.parse()` in objectstack, cloud or objectui outside '
         + 'their own unit tests. So nobody could author one and nothing ever validated one: '
-        + 'the #3950 shape, an exported schema with no consumer read as a capability, and the '
+        + 'the shape of the unwired plugin sandboxing config removed before it, an exported '
+        + 'schema with no consumer read as a capability, and the '
         + 'ADR-0033 trap where an AI author takes `EmbedConfigSchema` in the published bundle '
         + 'as proof the platform serves iframes. Neither is stored metadata and neither has a '
         + 'carrier, so no `sys_metadata` row can hold one and there is no source for the D2 '
-        + 'chain to rewrite; this entry is the D3 record. 批 14 deliberately did NOT close them '
-        + 'with `.strict()` — strictness is a property of a PARSE, and closing a shape nothing '
-        + 'parses buys only "a precisely-validated dead slot, the more convincing lie" (#4583) '
-        + '— and filed the disposition as #5015, ruled REMOVE on 2026-08-04. Each was orphaned '
-        + 'by an earlier retirement one level up: `NotificationAction` lost its wrappers at '
-        + '#4610 (`NotificationSchema` / `NotificationConfigSchema`, the #4535 C3 dual-source '
-        + 'cleanup — that retirement\'s published "zero consumers" evidence was later falsified '
-        + 'for objectui and is corrected on `ui/notification.zod`\'s tombstone; the removal '
-        + 'itself stands, #5781), and `EmbedConfig` lost its key at 17.0.0 when the 2026-06 '
+        + 'chain to rewrite; this entry is the D3 record. That batch deliberately did NOT close '
+        + 'them with `.strict()` — strictness is a property of a PARSE, and closing a shape nothing '
+        + 'parses buys only "a precisely-validated dead slot, the more convincing lie" (the lesson '
+        + 'of the datasource capability flags, whose `readOnly` was precisely validated and read '
+        + 'by nothing) — and left the disposition to ADR-0049\'s enforce-or-remove, which came '
+        + 'back REMOVE on 2026-08-04: a dead surface with no authoring door retires '
+        + 'implementation-first, as three same-shape rulings that week had already decided. Each '
+        + 'was orphaned by an earlier retirement one level up: `NotificationAction` lost its '
+        + 'wrappers when the dual-source cleanup removed the `./ui` copies of `NotificationSchema` '
+        + '/ `NotificationConfigSchema` (the same names declared differently on other entry '
+        + 'points) — that retirement\'s published "zero consumers" evidence was later '
+        + 'falsified for objectui, which re-exported both names, and is corrected on '
+        + '`ui/notification.zod`\'s tombstone; the removal itself stands — and `EmbedConfig` lost its key at 17.0.0 when the 2026-06 '
         + 'liveness audit retired `App.embed` (no iframe route ever read it) — that key still '
         + 'stands as a `retiredKey()` tombstone in `app.zod.ts`, so an author who wrote the KEY already '
         + 'meets a prescription; this removes the value shape that outlived it. ⚠️ The '
@@ -4477,7 +4504,7 @@ const step17: MigrationStep = {
         + 'enums. objectui consumed `NotificationActionSchema.shape.variant` as a VOCABULARY '
         + '(never a parse) to pin its own hand-written `NotificationActionButton` interface — '
         + 'which is exactly why "has a consumer" never meant "has an authoring door" here; that '
-        + 'pin is adapted objectui-side when it refreshes this dependency. ADR-0049, #5015.',
+        + 'pin is adapted objectui-side when it refreshes this dependency. ADR-0049.',
       acceptanceCriteria:
         'No code imports `NotificationActionSchema`, `NotificationAction`, `EmbedConfigSchema` '
         + 'or `EmbedConfig` from `@objectstack/spec` or `@objectstack/spec/ui` — both are '
@@ -4504,7 +4531,9 @@ const step17: MigrationStep = {
         + 'widget is still named the same way it always was: `field.widget` is a plain string '
         + 'naming a component the RENDERER has registered, and objectui\'s registry has always '
         + 'carried its own runtime manifest for that (`RuntimeWidgetManifest` / '
-        + '`RuntimeWidgetSource` in `@object-ui/types`, objectui#3161 / #4115), which models '
+        + '`RuntimeWidgetSource` in `@object-ui/types`, renamed off the spec\'s names under '
+        + 'objectui\'s rule that a symbol named like a spec export must import it or take a name '
+        + 'of its own), which models '
         + 'different keys and never derived from these. For localisation: write the '
         + 'default-language string on `label` / `description` — the framework generates the '
         + 'translation key at registration time from the naming convention — and put '
@@ -4530,22 +4559,27 @@ const step17: MigrationStep = {
         + 'own unit tests. `NumberFormat` / `DateFormat` DID have a carrier key '
         + '(`LocaleConfig.numberFormat` / `.dateFormat`) but the carrier was itself doorless, '
         + 'so the subtree was `no door` rather than `no gate` and goes whole — leaving the two '
-        + 'leaves behind would strand exported schemas with no consumer (#3950). '
+        + 'leaves behind would strand exported schemas with no consumer, which an author reads '
+        + 'as a capability. '
         + '`I18nObjectSchema` was additionally superseded by its own file-neighbour: '
         + '`I18nLabelSchema`\'s documentation already says translation keys are generated at '
         + 'registration time and translations live in translation files, and the live '
         + 'translation surface is `system/translation.zod.ts`, which uses none of these shapes. '
         + 'The 2026-08-06 ruling weighed giving them a carrier (option B) and rejected it: that '
         + 'is a feature with a registry and a renderer behind it, not ledger clean-up. '
-        + 'Tightening them to `strictObject` was rejected earlier and explicitly (#4001 批 16) '
-        + '— strictness is a property of a PARSE and there is no parse, so it would spend a '
+        + 'Tightening them to `strictObject` was rejected earlier and explicitly, by the batch of '
+        + 'the v17 unknown-key strictness sweep that measured this file as having no authoring '
+        + 'door — strictness is a property of a PARSE and there is no parse, so it would spend a '
         + 'breaking change to leave "a precisely validated dead slot, the more convincing lie" '
-        + '(#4583). With no carrier key there is nothing to tombstone and no `sys_metadata` row '
+        + '(the lesson of the datasource capability flags, whose `readOnly` was precisely '
+        + 'validated and read by nothing). With no carrier key there is nothing to tombstone and no `sys_metadata` row '
         + 'or source file for a D2 conversion to rewrite: this entry is the D3 record, route 3, '
-        + 'the same shape as #4988 (the ui/ interaction config family), #4834 (kernel '
-        + 'plugin-runtime family) and #4938 (`HttpServerConfig`). '
-        + '⚠️ `WidgetManifest.performance`\'s own `retiredKey()` tombstone (#3896 close-out) is '
-        + 'SUBSUMED here, the #4657/#4834 way: it goes with the shape that carried it, which is '
+        + 'the same shape as `ui-interaction-config-family-retired`, '
+        + '`plugin-runtime-family-retired` and the `HttpServerConfig` retirement. '
+        + '⚠️ `WidgetManifest.performance`\'s own `retiredKey()` tombstone (left by the '
+        + 'close-out sweep that removed the inert `performance` keys no renderer applied) is '
+        + 'SUBSUMED here, the way the kernel `activationEvents` tombstone went with the removed '
+        + 'plugin-runtime family: it goes with the shape that carried it, which is '
         + 'strictly stronger than the tombstone, because there is no longer a manifest to '
         + 'author the key INTO. '
         + '⚠️ One of the nine widget sites is deliberately NOT retired. '
@@ -4553,12 +4587,13 @@ const step17: MigrationStep = {
         + 'authorable metadata (it never appeared in `authorable-surface/` or '
         + '`json-schema.manifest/` — its `onChange` is a `z.function()`), so "zero parse" is its '
         + 'design and not its defect, and it acquired a live cross-repo compile-time consumer '
-        + 'one day before 批 16 measured: objectui PR #3289 (2026-08-03) renamed '
+        + 'one day before that sweep batch measured: an objectui fix of 2026-08-03, made to follow the '
+        + 'spec, renamed '
         + '`@object-ui/fields`\' validation slot onto the spec\'s `error` with no alias, the '
         + 'form renderer began producing it, and '
         + '`packages/fields/src/__tests__/spec-symbol-batch7.test.ts` pins the shape against '
         + '`import type { FieldWidgetProps } from \'@objectstack/spec/ui\'` as an intentional '
-        + 'tripwire. Re-verified on objectui `origin/main` 2026-08-07. ADR-0049, #5055.',
+        + 'tripwire. Re-verified on objectui `origin/main` 2026-08-07. ADR-0049.',
       acceptanceCriteria:
         'No code imports `WidgetManifest(Schema|Parsed)`, `WidgetLifecycle(Schema)`, '
         + '`WidgetEvent(Schema|Parsed)`, `WidgetProperty(Schema|Parsed)`, '
@@ -4574,8 +4609,9 @@ const step17: MigrationStep = {
         + 'resolve on `@objectstack/spec/ui` and are asserted to. ⚠️ objectui needs a companion '
         + 'PR in the same window: `packages/types/src/__tests__/page-nav-misc-spec-parity.test.ts` '
         + 'asserts the spec STILL owns `WidgetManifest` / `WidgetSource` (it is the '
-        + '"a workaround should not outlive its reason" half of the objectui#3169 tripwire, '
-        + 'designed to go red exactly here), and `packages/types/src/widget.ts`\'s '
+        + '"a workaround should not outlive its reason" half of the rename tripwire objectui '
+        + 'added when it stopped declaring symbols under names the spec owns, designed to go red '
+        + 'exactly here), and `packages/types/src/widget.ts`\'s '
         + '"Renamed off the spec\'s `WidgetManifest` name" comments now point at names that no '
         + 'longer exist. Both are prescribed responses to this removal, not collateral damage.',
     },
@@ -5324,8 +5360,7 @@ const step18: MigrationStep = {
     + 'as a lossless delete, in both collections a record travels in — `views` (stack sources '
     + 'and stored rows) and the assembled-manifest `viewItems` channel (package export, '
     + 'environment artifacts), whose registration parse would otherwise refuse an artifact '
-    + 'assembled before this release; a flattened overlay keeps its own `owner` / `hidden`, '
-    + 'which are declared on a different door this retirement does not touch. '
+    + 'assembled before this release. '
     + 'It also retires a `joined` report\'s `chart` at both coordinates (#20161, ADR-0049 '
     + 'enforce-or-remove): the joined renderer draws each block as a table and returns before '
     + 'the one container `chart` read, and no renderer reads a block\'s `chart` at all, so a '
@@ -5336,7 +5371,21 @@ const step18: MigrationStep = {
     + '`report-joined-chart-removed` strips both as a pure lossless delete — neither ever had '
     + 'an effect to lose — because a stored report row CAN carry them (the Studio report form '
     + 'offered a block `chart` input until this change); it is retired from the load path, so '
-    + 'authors are refused at parse rather than rewritten.',
+    + 'authors are refused at parse rather than rewritten. '
+    + 'It retires the view item\'s `owner` / `hidden` pair on the flattened overlay door too '
+    + '(#20230, ADR-0049; triage '
+    + 'direction 「follow #20085\'s disposition for the same key pair」): the lean personalization '
+    + 'PUT with no `config` declared its own `owner` / `hidden`, accepted and stored them, and '
+    + 'nothing read either. Both are `retiredKey()` tombstones on the two overlay members with '
+    + 'the view item\'s own prescription texts, and the D2 conversion '
+    + '`view-overlay-owner-hidden-removed` strips them from the flattened spelling (no `config`, '
+    + 'no container slot) in `views` and `viewItems`, so a stored overlay row is served without '
+    + 'them. A row that held other view keys is then valid again and re-saves; a row that held '
+    + 'nothing but its identity and the two keys is left identity-only, which the door refuses, '
+    + 'so it is badged invalid, refused on a whole-row re-save and reported `failed` by '
+    + '`os migrate meta --stored --apply` until it is deleted or given the setting its author '
+    + 'meant. Its D3 record is the semantic entry '
+    + '`view-overlay-owner-hidden-retired`.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5375,6 +5424,7 @@ const step18: MigrationStep = {
     'page-component-filter-record-to-rule-array',
     'view-item-owner-hidden-removed',
     'report-joined-chart-removed',
+    'view-overlay-owner-hidden-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -10222,6 +10272,71 @@ const step18: MigrationStep = {
         + 'answering the `FILTER_TEXT_CASES` stored-value row (objectstack#14079), so a '
         + 'driver-level test is not evidence about this migration in either direction.',
     },
+    // The absent half of the decision-branch predicate rule. A SEPARATE entry from
+    // `flow-predicate-slot-blank-string-refused` on purpose: that one keeps the
+    // run a blank predicate made (it evaluated `false`, so `'false'` runs the same
+    // route), while an absent predicate made no run to keep — the executor refused
+    // it at the branch — so the two carry different prescriptions, and only the
+    // decision branch is in this one (an absent screen `visibleWhen` stays legal).
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'flow-decision-branch-expression-absent-refused',
+      surface:
+        'a decision node branch — an element of config.conditions[] — written without its expression '
+        + 'key, or with expression: null, at any depth including an ADR-0031 region body. That includes '
+        + 'a branch whose predicate sits under another key (condition is the edge spelling). Reachable '
+        + 'wherever a flow is authored or stored: defineStack({ flows }) sources, defineFlow(), an '
+        + 'exported stack passed to objectstack validate, a flow saved from the Studio flow designer '
+        + 'with a branch row whose expression cell is empty, and a flow row already sitting in '
+        + 'sys_metadata',
+      replacement:
+        'the predicate the branch was meant to test, as non-blank bare CEL text under `expression` '
+        + '(`{ label: \'high\', expression: \'record.amount > 10000\' }`); a predicate written under '
+        + '`condition` moves to `expression`. To keep the branch and its label but never take it, '
+        + 'write `expression: \'false\'` — that is a CHANGE of behaviour, not a preserved one: a run '
+        + 'that reached the branch used to fail there (`condition evaluation error`), and now routes on '
+        + 'to the next branch or the declared fallback. ⚠️ Not by dropping a decision\'s only branch: '
+        + 'with no `conditions` the node routes by its out-edges alone, so the out-edge that branch '
+        + 'labelled is no longer held back',
+      reason:
+        'Card #19961. `DecisionConditionSchema` declares a branch `{ label, expression }` with '
+        + '`expression` a required `z.string()`, but nothing parses a decision node\'s open config '
+        + 'against it, and the expression-ledger resolver skipped an absent value as "not authored" — '
+        + 'so a branch with no predicate passed `FlowSchema.parse`, `AutomationEngine.registerFlow` and '
+        + '`objectstack validate`, and the decision executor then handed `evaluateCondition` an envelope '
+        + 'with no `source`, which it refuses: the build accepted what the run refused. The ledger now '
+        + 'marks the slot `required` (reconciled against that schema\'s own `required` list), the '
+        + 'resolver emits the absent value there, and all three doors refuse it through '
+        + '`predicateSlotRefusal`, leading with `PREDICATE_SLOT_STRING_REFUSAL` — the walk, function '
+        + 'and sentence that already refuse the blank string. '
+        + '⚠️ No D2 conversion: the platform cannot know the rule the author left out, and `\'false\'` '
+        + 'would change what the flow does rather than keep it. '
+        + '⚠️ Where such a branch already sits the whole flow is refused: registered from the metadata '
+        + 'registry or `sys_metadata` at boot it is skipped with a `warn` naming it, its trigger not '
+        + 'armed, while the flows beside it register; a `defineStack({ flows })` source throws '
+        + '`StackSchemaInvalidError` for the whole stack; an artifact file is refused whole at load. '
+        + 'ADR-0087, ADR-0032.',
+      acceptanceCriteria:
+        'Grep every flow node in `defineStack({ flows })` sources, exported stacks and every flow '
+        + 'row in `sys_metadata` — including nodes inside a `loop` / `parallel` / `try_catch` region '
+        + 'body — for a `decision` node whose `config.conditions[i]` has no `expression` key, or '
+        + '`expression: null`. Each refusal names the node and the branch: `FlowSchema.parse` anchors '
+        + 'a `custom` issue at `nodes.N.config.conditions.I.expression` (or the region path '
+        + '`nodes.N.config.body.nodes.M.config…`), and `objectstack validate` prints the same path; '
+        + '`validateStackExpressions` phrases it as '
+        + '`node \'check\' (decision) decision branch expression at config.conditions[0].expression`. '
+        + 'For each hit write the predicate the branch was meant to test, or `expression: \'false\'` '
+        + 'where the branch should keep its label and never be taken. Two proofs. (1) For a stack '
+        + 'authored in config files, `objectstack validate` is clean. (2) Boot the stack and confirm '
+        + 'each flow REGISTERS: no `failed to register flow` warn for it (the three boot paths spell '
+        + 'it `[Automation] failed to register flow`, `[Automation] flow re-sync: failed to register '
+        + 'flow` and `[Automation] cold-boot flow bind: failed to register flow`) — that warn line is '
+        + 'the locator for a row that exists only in `sys_metadata`. A branch carrying a non-blank '
+        + 'predicate parses and registers byte-identically to before, a decision with no `conditions` '
+        + 'still routes by its out-edges, and an absent screen field `visibleWhen` is still legal.',
+    },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
     {
@@ -12776,8 +12891,11 @@ const step18: MigrationStep = {
         + 'process — whichever level actually owns the plugin\'s lifetime. The '
         + 'monitor reports; it does not act.',
       reason:
-        'ADR-0049 enforce-or-remove, applied one class over from #12428 and '
-        + '#12340 in the same host-driven lifecycle library, and for a sharper '
+        'ADR-0049 enforce-or-remove, applied one class over from the two '
+        + 'hot-reload retirements in the same host-driven lifecycle library — the '
+        + 'file-watching placeholder whose `startWatching` logged success while '
+        + 'watching nothing, and the `\'disk\'` / `\'distributed\'` state strategies '
+        + 'that fell back to memory in silence — and for a sharper '
         + 'reason than either: this key HAD a reader that acted, and what it did '
         + 'was not what the key declared. `attemptRestart` called '
         + '`plugin.destroy()` and stopped there. The comment above the call read '
@@ -12791,7 +12909,8 @@ const step18: MigrationStep = {
         + 'plugin was therefore `healthy`, reproduced at ee3595cefd with '
         + '`successThreshold: 3` as failed -> recovering (destroyed=1, alive=false) '
         + '-> recovering -> recovering -> healthy (destroyed=1, alive=false). '
-        + '#11955 made that MORE convincing rather than less, because reaching '
+        + 'The fix that made `successThreshold` bind from every status that records '
+        + 'a failure made that MORE convincing rather than less, because reaching '
         + '`healthy` now costs `successThreshold` CONSECUTIVE passing rounds, so '
         + 'the plugin has to earn a declared number of passes to be misreported. '
         + 'Meanwhile `restartAttempts` was incremented as though a restart had '
@@ -12806,7 +12925,9 @@ const step18: MigrationStep = {
         + 'call (positive control: the same scan resolves five real non-test '
         + '`plugin.destroy()` call sites, so it sees lifecycle drivers). Building '
         + 'that API for a caller that does not exist — no runtime constructs '
-        + '`PluginHealthMonitor` (#11825) — is exactly the speculation ADR-0049\'s '
+        + '`PluginHealthMonitor`, which is why the maintainer retired its declarative '
+        + 'config container on 2026-08-25 and kept the classes as a host-driven '
+        + 'library — is exactly the speculation ADR-0049\'s '
         + 'staged decision names as the wrong default at this milestone, where the '
         + 'shippable liability is the false promise and not the missing feature. '
         + 'EXPERIMENTAL requires a roadmap, and a scan of the whole `docs/` '
@@ -12817,10 +12938,13 @@ const step18: MigrationStep = {
         + 'and "Backoff strategy for restart delays" have nothing left to be the '
         + 'vocabulary OF — the same test that took `distributedConfig` out with '
         + 'the `stateStrategy` value it was documented as being required for '
-        + '(#12340). All three are TOMBSTONED rather than deleted, for #12428\'s '
-        + 'reason: a key leaving a SURVIVING def has no route-3 exit, and '
+        + '(ruled 2026-08-26: a vocabulary of nothing is not a vocabulary). All '
+        + 'three are TOMBSTONED rather than deleted, for the reason the file-watching '
+        + 'retirement recorded: a key leaving a SURVIVING def has no route-3 exit, and '
         + '`PluginHealthCheckSchema` is not `.strict()`, so a bare deletion would '
-        + 'be a silent strip (#3733, ADR-0104) — a milder form of the very defect '
+        + 'be a silent strip (ADR-0104; an earlier field-key prune measured exactly '
+        + 'that — the parse succeeded and the removed key was dropped without a '
+        + 'word) — a milder form of the very defect '
         + 'being retired. There is no D2 conversion, because `PluginHealthCheck` '
         + 'is not an authorable surface: no metadata-type binding, stack '
         + 'collection or manifest embed ever carried it, so there is no authored '
@@ -12837,12 +12961,15 @@ const step18: MigrationStep = {
         + 'gone with the `restartAttempts` counter, and a plugin that crosses '
         + '`failureThreshold` is reported `degraded` / `unhealthy` / `failed` and '
         + 'left running. The rest of the monitor is UNCHANGED: registration, '
-        + 'periodic checks, the `timeout` race and its refd-timer guard (#4875), '
-        + 'the two failure routes sharing counters (#11852), and '
+        + 'periodic checks, the `timeout` race and its guard timer (kept ref\'d '
+        + 'while the race is undecided, cleared the moment it settles), the two '
+        + 'failure routes — a returned failure and a thrown or timed-out check — '
+        + 'sharing one failure counter and one threshold comparison, and '
         + '`successThreshold` binding from every status that records a failure '
-        + '(#11955) all behave exactly as before — `recovering` is now written '
+        + 'all behave exactly as before — `recovering` is now written '
         + 'only by the success branch, which is the one writer that ever meant it. '
-        + 'The #11825 keep still stands: `PluginHealthCheckSchema` still exports '
+        + 'The maintainer\'s 2026-08-25 keep of the host-driven library still '
+        + 'stands: `PluginHealthCheckSchema` still exports '
         + 'from `./kernel` and `PluginHealthMonitor` still exports from '
         + '`@objectstack/core` with its tests green.',
     },
@@ -12868,9 +12995,10 @@ const step18: MigrationStep = {
         + "plugin auto-discovery (an `oclif` section in the plugin's own `package.json`; see "
         + '`cli-extension.zod.ts`)',
       reason:
-        'ADR-0049 enforce-or-remove; #10724 (triage graded 2026-08-21, cloud precondition '
-        + 'discharged 2026-08-24). #10627 measured, monorepo-wide and non-test with control probes, '
-        + 'that the ENTIRE monorepo contains exactly one read of `manifest.contributes` — '
+        'ADR-0049 enforce-or-remove: the nine members retire together, once the cloud half of '
+        + 'the census below had come back clean. A census, monorepo-wide and non-test with '
+        + 'control probes, measured that the ENTIRE monorepo contains exactly one read of '
+        + '`manifest.contributes` — '
         + '`packages/objectql/src/engine.ts`, member `kinds` — so all nine members above parsed, '
         + 'entered the manifest, and changed nothing. The census stands on three repos: objectstack '
         + '(re-verified on current main at claim time), objectui (0 property reads; control: 63 '
@@ -12890,8 +13018,9 @@ const step18: MigrationStep = {
         + 'present: `os plugin build` runs `ManifestSchema.safeParse` and exits non-zero printing '
         + 'the per-key tombstone prescription; TypeScript authors fail earlier still (each key is '
         + 'typed `never`). `contributes.kinds` keeps parsing and registering '
-        + '(`registry.registerKind`), and `contributes.routes` is untouched pending its own fork '
-        + '(#10726). ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + '(`registry.registerKind`), and `contributes.routes` is left to its own enforce-or-remove '
+        + 'fork (since decided: retired, see `plugin-manifest-contributes-routes-retired`). '
+        + '⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
         + 'nothing ever read the nine members, so removing them removes no behaviour. A package '
         + 'ALREADY INSTALLED whose stored manifest carries one degrades to a single '
         + '`[metadata_spec_invalid]` log line at registration (the registry\'s `validate()` is a '
@@ -12901,8 +13030,8 @@ const step18: MigrationStep = {
     {
       id: 'plugin-manifest-contributes-routes-retired',
       surface:
-        'manifest.contributes.routes (the one member #10724 deliberately excluded; '
-        + '`kinds` is now the block\'s sole surviving live member)',
+        'manifest.contributes.routes (the one member the nine-member retirement deliberately '
+        + 'left to its own fork; `kinds` is now the block\'s sole surviving live member)',
       replacement:
         'delete the key. A route that needs real handler CODE is mounted imperatively: '
         + 'resolve the `http.server` service from the plugin context and register the '
@@ -12910,23 +13039,27 @@ const step18: MigrationStep = {
         + '`examples/app-showcase` mounts POST /api/v1/showcase/recalc that way). A '
         + 'declarative endpoint over a pipeline the platform already runs — query/return '
         + 'records, trigger a flow — is `defineStack({ apis })` (live since protocol 17, '
-        + '#5040)',
+        + 'once the declarative endpoint executor was built and the loud refusal of a '
+        + 'non-empty `apis:` became execution)',
       reason:
-        'ADR-0049 enforce-or-remove; #10726, maintainer ruling 2026-08-22 (Option B of the '
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-22 (Option B of the '
         + 'enforce/remove/enforce-later fork, accepted verbatim 「接受所有」 on the decision '
-        + 'batch carrying the four-axis analysis). #10627 measured zero readers of the key '
-        + 'monorepo-wide with control probes: the HttpDispatcher never registered a prefix '
+        + 'batch carrying the four-axis analysis): remove the key, and redirect every '
+        + 'author-facing recommendation of it to the imperative `http.server` mount. A '
+        + 'monorepo-wide census with control probes measured zero readers of the key: the '
+        + 'HttpDispatcher never registered a prefix '
         + 'from the declaration, so an entry parsed cleanly and served nothing — while FOUR '
         + 'published surfaces presented it as working machinery, one of them a '
         + 'customer-published skill (`skills/objectstack-api` told authors to choose it when '
         + '"the endpoint needs real handler CODE"). That is ADR-0049\'s silent no-op with a '
         + 'published recommendation attached. Per the ruling\'s own sequencing the '
-        + 'author-facing corrections landed FIRST (PR #11327: the skill\'s decision table, '
-        + 'the dispatcher protocol doc, ADR-0088:40, app.mdx), and the two remaining '
-        + 'teaching sites (#11328: the plugin-rest-api.zod.ts worked manifest example, the '
-        + 'metadata-plugin.zod.ts `router` delivered-form comments) are redirected in the '
-        + 'removal PR itself. The cloud precondition was discharged 2026-08-24 (#10812: '
-        + 'cloud @ 5b5925a, zero `manifest.contributes` reads, controls green). Enforce '
+        + 'author-facing corrections landed FIRST (the skill\'s decision table, the '
+        + 'dispatcher protocol doc, ADR-0088:40 and app.mdx, each redirected to the '
+        + 'imperative mount), and the two remaining teaching sites (the plugin-rest-api.zod.ts '
+        + 'worked manifest example, the metadata-plugin.zod.ts `router` delivered-form '
+        + 'comments) are redirected in the removal PR itself. The cloud precondition was '
+        + 'discharged first: a census of the cloud repository at 5b5925a found zero '
+        + '`manifest.contributes` reads, controls green. Enforce '
         + '(fork A) was weighed and rejected on all four facets: net-new execution surface '
         + 'plus a prefix-claim authority question (who may claim `/api/v1/…`) for a '
         + 'declarative spelling with zero measured authors, while the capability is already '
@@ -12968,9 +13101,9 @@ const step18: MigrationStep = {
         + '(ADR-0029 D7) injects navigation, and code-level extension lives in the plugin itself '
         + '(`init`/`start`)',
       reason:
-        'ADR-0049 enforce-or-remove; #11332 (triage graded 2026-08-23, cloud precondition '
-        + 'discharged 2026-08-29 on #12400). #11332 measured, monorepo-wide and non-test with '
-        + 'control probes, ZERO reads of each container itself, which settles all eight keys '
+        'ADR-0049 enforce-or-remove, dispatched once the cloud half of the census below came '
+        + 'back clean. A census, monorepo-wide and non-test with control probes, measured ZERO '
+        + 'reads of each container itself, which settles all eight keys '
         + 'beneath them — a key cannot be read if the object holding it never is. The census '
         + 'stands on three repos: objectstack (re-verified on current main at claim time; every '
         + 'bare `.capabilities` hit classifies to a different surface — driver loader contracts, '
@@ -13017,16 +13150,17 @@ const step18: MigrationStep = {
         + 'discovery is ever wanted, it gets designed against that registry, not revived '
         + 'here',
       reason:
-        'ADR-0049 enforce-or-remove; #11169, maintainer ruling 2026-08-24 (「接受你的建议。」) on '
-        + 'the aligned four-facet analysis. The sub-field was declared-but-unenforced on an '
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-24 (「接受你的建议。」) on '
+        + 'the aligned four-facet analysis: remove, through the full ADR-0049 ceremony. The sub-field was declared-but-unenforced on an '
         + 'authorable published surface: the schema promised that declaring `globs` "enables the '
         + 'system to parse and validate new file types" (its own example: a BI plugin handling '
         + '`*.report.ts`), and the platform accepted it, stored it, and served it back through '
         + '`GET /metadata/kind` — while the discovery the description promised never ran, because '
         + 'real glob-driven artifact discovery reads `filePatterns` off the metadata type registry '
         + 'and `metadata-plugin.zod.ts` records outright that `contributes.kinds` does not extend '
-        + 'it. Measured in PR #11168 and re-verified at claim time with the card\'s positive '
-        + 'control: zero value reads anywhere (the only non-test occurrences of the path are the '
+        + 'it. Measured by the engine-lane fix that made kind registration log its declared '
+        + '`id` (which also found the `kind` bucket itself reachable through `GET /metadata/:type`), '
+        + 'and re-verified at claim time with a positive control: zero value reads anywhere (the only non-test occurrences of the path are the '
         + 'schema declaration and two type positions), and no in-repo manifest authors the key '
         + 'outside test fixtures. Enforce was weighed and rejected on all four facets: it would '
         + 'build a SECOND discovery channel parallel to `filePatterns` for a spelling with zero '
@@ -13068,9 +13202,11 @@ const step18: MigrationStep = {
         + 'advertise diligence keeps the surviving securityContact and vulnerabilityDisclosure '
         + 'blocks, which are contact terms rather than a verdict.',
       reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-07 on #15932 (director seat, decision batch #65, adopted verbatim 「同意」). '
-        + 'This is the second half of the scanner retirement — issue 14919, a number since '
-        + 'DELETED from the board, landed as PR #15930. That card retired PluginSecurityScanner — a '
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-07 (adopted verbatim 「同意」): '
+        + 'retire the scan-result family and its securityScan sibling, because once the scanner '
+        + 'was gone nothing so much as imported their types. '
+        + 'This is the second half of the scanner retirement recorded as '
+        + 'plugin-security-scanner-retired. That retirement removed PluginSecurityScanner — a '
         + '@objectstack/core class that shipped as a SECURITY control and could not fail, whose '
         + 'verdict was status "passed" for every plugin it was ever handed. The SCHEMAS the '
         + 'scanner fed survived it, and the scanner had been their only importer of any kind (a '
@@ -13103,10 +13239,12 @@ const step18: MigrationStep = {
         + 'recorded as checked. Its two siblings were MEASURED rather than assumed, and the '
         + 'record is corrected here: both were ALREADY GONE when that ruling was written. The '
         + 'incident "malware" type was a member of system/IncidentCategory, and the whole '
-        + 'incident-response family was retired by #15513 (maintainer ruling 2026-09-05 — two '
-        + 'days BEFORE the 2026-09-07 ruling that made it conditional); see '
+        + 'incident-response family was retired whole, with the training and change-management '
+        + 'families (maintainer ruling 2026-09-05: not roadmapped, so retired rather than marked '
+        + 'experimental — two days BEFORE the 2026-09-07 ruling that made it conditional); see '
         + 'incident-response-family-retired. And marketplace-admin.zod.ts was deleted outright '
-        + 'with the cloud subpath (#16526); see cloud-subpath-retired. Verified on this tree by '
+        + 'with the cloud subpath (ruled 2026-09-07: cloud does not re-host the control-plane '
+        + 'files it never consumed); see cloud-subpath-retired. Verified on this tree by '
         + 'shape: both files return zero tree entries and no *.zod.ts names malware at all, '
         + 'against a lit control where "scanning" still returns a live declaration in '
         + 'marketplace.zod.ts. So the conditional question is ONE enum member wide, not three, '
@@ -13114,8 +13252,7 @@ const step18: MigrationStep = {
         + '⚠️ The out-of-repo consumer population is NOT MEASURED. @objectstack/spec is published, '
         + 'so this removal is breaking for consumers no download, dependent or source telemetry '
         + 'was consulted for — accepted as an input to the ruling, exactly as that retirement states '
-        + 'of its own three exports, and not a reason to soften the removal. #15932, PR #15930 '
-        + '(for the deleted issue 14919), ADR-0049, ADR-0087.',
+        + 'of its own three exports, and not a reason to soften the removal. ADR-0049, ADR-0087.',
       acceptanceCriteria:
         'No source imports KernelSecurityScanResult, KernelSecurityVulnerability or either '
         + 'Schema from @objectstack/spec/kernel: both defs are absent from the built kernel '
@@ -13155,8 +13292,8 @@ const step18: MigrationStep = {
         + 'the GitHub Advisory Database, OSV — and treat an unaudited third-party plugin as '
         + 'untrusted code.',
       reason:
-        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #14919 (director summon #14, '
-        + 'decision batch #42, ruled A: retire in three surfaces). The class shipped on '
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05: retire the class and its two '
+        + 'companion types with no replacement export, rather than repair it. The class shipped on '
         + '`@objectstack/core`\'s public barrel as a SECURITY control and could not fail. `scan()` '
         + 'composed five private scanners: four of them (`scanCode`, `scanMalware`, `scanLicenses`, '
         + '`scanConfiguration`) allocated an empty issue array, logged and returned it with no code '
@@ -13176,8 +13313,10 @@ const step18: MigrationStep = {
         + 'per-instance Map discarded with the object), and hence no seam `applyConversionsToStored'
         + 'Item` would ever reach. The enforced channel is tsc, at the consumer\'s own import site; '
         + 'for anyone it does not reach, this ledger entry and the generated upgrade guide are the '
-        + 'only channel there is. That is the `contracts.IDataDriver.findStream` (#4484) and '
-        + '`actor-user-roles-to-positions` (#6011) disposition — a TS/API contract, no stored '
+        + 'only channel there is. That is the disposition of `contracts.IDataDriver.findStream` '
+        + '(removed with no tombstone, because nothing parses a driver object) and of '
+        + '`actor-user-roles-to-positions` (the `ctx.user` `roles` alias, closed at once on the '
+        + 'maintainer\'s word rather than given a window) — a TS/API contract, no stored '
         + 'source, no tombstone, tsc at the call site — applied to a surface one layer further out '
         + 'than either: those are declared in `packages/spec`, this one only in `packages/core`. '
         + '⚠️ The out-of-repo consumer population is NOT MEASURED. Zero constructors were found in '
@@ -13544,8 +13683,8 @@ const step18: MigrationStep = {
       replacement:
         'the list operator the comparison was standing in for. "One of these values" is in: '
         + 'record.status in ["open", "pending"]. "None of these values" is the negated in: '
-        + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands and '
-        + '{ $field } references evaluate exactly as before',
+        + '!(record.status in ["closed", "archived"]). Scalar != and ==, null, Date comparands, and '
+        + '{ $field } references between single-valued columns evaluate exactly as before',
       reason:
         'Ruling A on #19886 refuses an array comparand under $ne, and the equality slot is ruling '
         + '乙 on #19757; stage 2a of #19886 lands both on the formula face, the evaluator '
@@ -13570,6 +13709,56 @@ const step18: MigrationStep = {
         + 'Then re-check what each policy is supposed to refuse rather than assuming the writes it '
         + 'admitted before were right: before this change a != or a negated == against a list '
         + 'admitted every write.',
+    },
+    // Stage 2e of #19886: the mirror of stage 2d's ordering refusal, with the list on
+    // the RECORD's side. The shape is legal, a field ordered against one bound; what
+    // the write-check evaluator now refuses is the VALUE the record holds there, a
+    // list or an object, the way driver-sql's read already refuses the same
+    // comparison on a column it stores as JSON text. Recorded as its own entry
+    // because the surface an author rewrites is a CEL predicate string.
+    {
+      id: 'rls-predicate-stored-list-ordering-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'security.PermissionSet rowLevelSecurity[].check, and .using where it stands in as the check — '
+        + 'a CEL predicate ordering a field against a bound (>, >=, <, <=) where the field holds a list '
+        + 'or an object on the record being written, as a json column or a multiple lookup does, or as '
+        + 'a list written into a text or number field does. In a filter passed to matchesFilterCondition, '
+        + '$gt / $gte / $lt / $lte and $between on a field whose value on the record is a list or a plain '
+        + 'object, whatever the comparand',
+      replacement:
+        'a comparison that names one value. Order a single-valued column (record.priority > 2), or test '
+        + 'membership in the list with in (record.status in ["open", "pending"]); a json or multiple '
+        + 'field has no ordering. A record whose json column holds one scalar is compared exactly as '
+        + 'before, and so are null and Date values, and every equality (==, !=, in) against a stored '
+        + 'list',
+      reason:
+        'Stage 2e of #19886, the mirror of stage 2d with the list on the record\'s side, measured '
+        + 'through the real plugin-security on driver-sql and driver-memory. record.tags > "a", with '
+        + 'tags a json column holding ["m"], lowered to { tags: { $gt: "a" } }, and the write-check '
+        + 'evaluator compared the list\'s JavaScript string form ("m" > "a"), so the check admitted and '
+        + 'stored the write; record.meta < "a" with meta holding { a: 1 } compared "[object Object]" and '
+        + 'did the same, and so did a multiple lookup. driver-sql\'s read refuses every ordering '
+        + 'comparison, and $between, on a column it stores as JSON text, by declared type (400), because '
+        + 'such a comparison can never mean what the caller wrote; the in-process write check now '
+        + 'follows it, per record: INVALID_FILTER / 400 and nothing stored, on an insert and on a by-id '
+        + 'update, including one that edits another field of a row whose stored column holds a list. '
+        + 'A list written into a text or number field under an ordering check, admitted before and '
+        + 'stored as the text "[500]" by driver-sql, is refused the same way. driver-memory, a test '
+        + 'driver, still compares a stored list element by element on a read, so there the write and '
+        + 'the read part. Shipped producers were counted before the change: no shipped row-level or '
+        + 'sharing-rule predicate orders a field at all. '
+        + 'Metadata AT REST is not rewritten and this entry adds no D2 conversion: the platform cannot '
+        + 'tell which comparison an ordering over a list was standing in for, and rewriting it on the '
+        + 'author\'s behalf would change which writes it admits, which is the policy author\'s decision. '
+        + 'ADR-0058 D4 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep the rowLevelSecurity check predicates of your permission sets, and the using predicates '
+        + 'of policies that declare no check, for >, >=, < or <= whose field is a json field or a '
+        + 'multiple lookup, and rewrite each as the replacement says. Then write a record through each '
+        + 'such policy: a write whose compared field holds a list now answers 400 rather than being '
+        + 'admitted by string comparison, so re-check what the policy is supposed to admit.',
     },
     // The saved-report stack and the `report` metadata kind shared a word and
     // nothing else; this retires the stack and leaves the kind untouched.
@@ -15317,10 +15506,15 @@ const step18: MigrationStep = {
         + 'not renamed. Node-level keys (`visibleWhen`, `id`, `style`, …) stay on the component '
         + 'node, where the page runtime reads them.',
       reason:
-        'These were two more instances of the #8691/#8744 class: console-registered widgets on '
+        'These were two more instances of the class already closed for `record:reference_rail` '
+        + 'and then for `record:alert` / `record:quick_actions` / `record:history`, each by '
+        + 'declaring a strict `ComponentPropsMap` row measured from the renderer\'s read points: '
+        + 'console-registered widgets on '
         + '`@objectstack/cloud-connection`\'s published Setup pages, reachable through the '
         + 'component type union\'s open string arm, with registered renderers but no '
-        + '`ComponentPropsMap` row — so the #5068 props gate\'s dispatch skipped them as '
+        + '`ComponentPropsMap` row — so the props gate\'s dispatch (it parses `properties` '
+        + 'against the type\'s row at publish and lint time, and skips a type with no row because '
+        + 'the type union is open) skipped them as '
         + 'unregistered and any authored key rode through every validator in silence. The new '
         + 'rows are strict and EMPTY, measured from the renderers\' actual read points at the '
         + 'objectui pin (not from the registrations\' declared-input lists): both registrations '
@@ -15344,18 +15538,22 @@ const step18: MigrationStep = {
       replacement: 'a positive-integer bound (>= 1), or no declaration at all ("no minimum" is '
         + 'expressed by OMITTING `minLength`, never by `minLength: 0`). The row-level key is a '
         + 'per-form override that can only NARROW what the referenced object field already '
-        + 'declares (the object field surface tightened first: #11566/#11949) — so a malformed '
+        + 'declares (the object field surface tightened first, to a positive integer, by '
+        + 'maintainer rulings) — so a malformed '
         + 'row value is deleted, and a bound that was actually wanted is re-declared as a '
         + 'positive integer, or dropped in favour of the object field\'s own authoritative '
         + 'declaration',
       reason:
-        '#12174: the form-field row carried the pre-#11566 shape — bare `z.number()` — after '
-        + 'the object-field surface converged (`maxLength` #11566, `minLength` #11949, both '
+        'The form-field row still carried the object field\'s old shape — bare `z.number()` — '
+        + 'after that surface converged (`maxLength` by the maintainer\'s 2026-08-24 ruling, '
+        + '`minLength` by the 2026-08-25 one, which refused zero too: both '
         + '`z.number().int().min(1)`). The row keys are LIVE, measured in objectui: the spec '
-        + 'bridge (`packages/react/src/spec-bridge/bridges/form-view.ts` mapField, '
-        + 'objectui#5898) and plugin-form (`sectionFields.ts` normalizeSectionField) both copy '
+        + 'bridge (`packages/react/src/spec-bridge/bridges/form-view.ts` mapField, which maps '
+        + 'every spec key or explains why it does not, so none is dropped in silence) and '
+        + 'plugin-form (`sectionFields.ts` normalizeSectionField) both copy '
         + 'them onto the runtime field, the console FormPage merges `override.maxLength ?? '
-        + 'def.maxLength` onto the rendered input (objectui#5595), and the fields package '
+        + 'def.maxLength` onto the rendered input (fixed so that a form\'s own bound wins over '
+        + 'the object\'s, as its docstring promised), and the fields package '
         + 'builds react-hook-form validation rules from `minLength`/`maxLength` — so '
         + '`maxLength: 0` on a form row reached the DOM as an input that accepts nothing, and '
         + 'the public-form resolve route (`GET /forms/:slug`) serves the rows verbatim to '
@@ -15381,14 +15579,16 @@ const step18: MigrationStep = {
         + 'non-integer or negative values (`scale: 2.5`, `precision: -1`)',
       replacement: 'a non-negative integer digit count, or no declaration at all. The row-level '
         + 'key is a per-form override of the referenced object field\'s own declaration (that '
-        + 'surface tightened first: #8321) — a malformed row value is deleted, and a count '
+        + 'surface tightened first, to a non-negative integer) — a malformed row value is '
+        + 'deleted, and a count '
         + 'that was actually wanted is re-declared as a non-negative integer (`scale: 2.5` was '
         + 'probably `2` or `3`)',
       reason:
-        '#12174: the form-field row carried the pre-#8321 shape — bare `z.number()` — after '
-        + 'the object-field surface converged on `z.number().int().min(0)` for both digit '
+        'The form-field row still carried the object field\'s old shape — bare `z.number()` — '
+        + 'after that surface converged on `z.number().int().min(0)` for both digit '
         + 'counts. The row keys are LIVE, measured in objectui: the spec bridge '
-        + '(`form-view.ts` mapField, objectui#5898) and plugin-form (`sectionFields.ts`) copy '
+        + '(`form-view.ts` mapField, which maps every spec key or explains why it does not) and '
+        + 'plugin-form (`sectionFields.ts`) copy '
         + 'them onto the runtime field, `ObjectForm` derives the number input\'s step from '
         + '`precision`, and the `NumberField` widget reads `scale` — so a malformed count '
         + 'flowed into rendering arithmetic (`Math.pow(10, -precision)`) with no defined '
@@ -15418,8 +15618,9 @@ const step18: MigrationStep = {
         + 'is mechanical: a feature-flag gate and a record-state gate answer different '
         + 'questions, so the author chooses which surface the gate belongs on.',
       reason:
-        'objectstack#12665, ruled 2026-08-27 on objectui#6262 (option B — vocabulary '
-        + 'narrowing): one authored form view is served on two kinds of route, and a '
+        'Ruled by the maintainer on 2026-08-27 (option B — vocabulary narrowing: a form view may '
+        + 'not name `features.*` in a predicate, and the authoring door refuses it loudly): one '
+        + 'authored form view is served on two kinds of route, and a '
         + '`features.*` predicate got two verdicts from the same text. Inside an app '
         + '(`/apps/:appName/*`) the root resolves against the real auth-config flags; on the '
         + 'standalone form routes (`/forms/:name`, public `/f/:slug`) no app context exists, '
@@ -15457,7 +15658,9 @@ const step18: MigrationStep = {
         + 'the offending spelling verbatim, so the whitespace an author cannot see in an editor is '
         + 'visible in the message, next to the name to write instead.',
       reason:
-        '#17499. All three keys were a bare `z.string()`, so a padded group-by name was valid '
+        'The same padded-name defect the grouping-level narrowing '
+        + '(`ui-list-view-grouping-field-padded-refused`) refused, on the axis that one scoped out '
+        + 'by name, and given the same refusal. All three keys were a bare `z.string()`, so a padded group-by name was valid '
         + 'authored metadata all the way to the renderers. The name is a LOOKUP KEY on every row, '
         + 'measured in objectui at `dda8f3815`: the kanban board resolves its lane as '
         + '`laneField = groupByField || groupField || detectStatusField(objectDef)` and buckets cards '
@@ -15509,7 +15712,7 @@ const step18: MigrationStep = {
         + '`\'business_unit\'`. The refusal names the offending spelling verbatim, so the '
         + 'whitespace an author cannot see in an editor is visible in the message.',
       reason:
-        '#17360, ruling C on objectui#7347 (maintainer 「其他同意」, decision batch #110 item 5): '
+        'Ruled by the maintainer on 2026-09-10 (「其他同意」): '
         + 'refuse at the producer. `field` was a bare `z.string()`, so a padded grouping level '
         + 'was valid authored metadata all the way to the renderers. Measured on objectui '
         + '(M1-M11 with live controls): the projection harvester `collectGroupingFieldRefs` '
@@ -15559,13 +15762,18 @@ const step18: MigrationStep = {
         + 'not renamed. Node-level keys (`visibleWhen`, `id`, `style`, …) stay on the component '
         + 'node, where the page runtime reads them.',
       reason:
-        'This was a third instance of the #8691/#8744 class (#11575 closed the previous two): a '
+        'This was a third instance of the class closed for the `record:*` blocks by declaring a '
+        + 'strict `ComponentPropsMap` row measured from the renderer\'s read points (the strict, '
+        + 'empty `cloud-connection:panel` / `marketplace:installed-list` rows closed the previous '
+        + 'two): a '
         + 'console-registered widget on `@objectstack/mcp`\'s plugin-shipped Setup page, '
         + 'reachable through the component type union\'s open string arm, with a registered '
-        + 'renderer but no `ComponentPropsMap` row — so the #5068 props gate\'s dispatch '
+        + 'renderer but no `ComponentPropsMap` row — so the props gate\'s dispatch (it parses '
+        + '`properties` against the type\'s row, and skips a type with no row because the type '
+        + 'union is open) '
         + 'skipped it as unregistered, any authored key rode through every validator in '
-        + 'silence, and door 3 of the mcp canonical-envelope gate (#12269) had to carry a '
-        + 'standing exemption for the type. The new row is strict and EMPTY, measured from the '
+        + 'silence, and door 3 of the canonical-envelope gate `@objectstack/mcp` was given for its '
+        + 'shipped page had to carry a standing exemption for the type. The new row is strict and EMPTY, measured from the '
         + 'renderer\'s actual read points at the objectui pin (not from the registration\'s '
         + 'declared-input list): the registration ignores the component node entirely, so the '
         + 'widget accepts no configuration at all, and an authored key is now a publish-time '
@@ -15591,18 +15799,20 @@ const step18: MigrationStep = {
         + 'authored to mean "no paging" is `showPagination: false` with no `pagination` bag, '
         + "since the bag's PRESENCE is what enables paging)",
       reason:
-        '#19046: this door carried the pre-#7751 read-point shape — `pagination: z.unknown()` '
+        'This door still carried the shape it was given when the `object-*` blocks first got '
+        + '`ComponentPropsMap` rows measured from their read points — `pagination: z.unknown()` '
         + 'and `pageSize: z.number()` — after the view arm converged on '
         + '`z.number().int().positive()`. So the SAME authored member carried two accept sets '
         + 'and renderers read the looser one: `PaginationConfigSchema` (`view.zod.ts`) refuses '
         + '`pageSize: 0` and pins that refusal by name, and every other `pageSize` the package '
         + 'declares is bounded with its own throwing pin (`kernel/metadata-plugin.zod.ts`, '
         + '`marketplace/marketplace.zod.ts`) — the component arm was the only one that '
-        + 'accepted `0`. The value is LIVE: measured at objectui#9853, an authored '
+        + 'accepted `0`. The value is LIVE: an objectui grid measurement found that an authored '
         + '`pagination.pageSize: 0` reached `ObjectGrid`, went out on the wire as `$top: 0` '
         + 'and rendered ZERO ROWS, with no grouping needed to trigger it, and it reached the '
-        + 'renderer through this arm. objectui#9896 repaired the consumer half (a resolver at '
-        + 'every read point, fail-soft, one loud diagnostic); this is the declaration half, '
+        + 'renderer through this arm. objectui\'s grid plugin repaired the consumer half — it '
+        + 'now refuses a non-positive page size at all three read points (one resolver, '
+        + 'fail-soft, one loud diagnostic); this is the declaration half, '
         + 'and it is not a prerequisite for that repair. '
         + '⚠️ The `pagination` bag itself stays OPEN (`z.looseObject`): only the two members '
         + 'whose value is a page size are bounded, and sibling keys parse and pass through '
@@ -15620,7 +15830,8 @@ const step18: MigrationStep = {
     {
       id: 'ui-react-list-view-binding-aliases-retired',
       surface: '`kind:\'react\'` page source — `<ListView objectName="…">` and `<ListView viewType="…">` '
-        + '(the react-tier overlay aliases #11284 had published as deprecated)',
+        + '(the react-tier overlay aliases published as deprecated when the react tier '
+        + 'converged on the metadata-tier vocabulary)',
       replacement: '`<ListView data={{ provider: \'object\', object: \'…\' }} type="…">` — ListViewSchema\'s own '
         + '`data` data source and `type` view kind, the same two keys a metadata list view authors. '
         + '`objectName="x"` → `data={{ provider: \'object\', object: \'x\' }}`; `viewType="kanban"` → '
@@ -15630,11 +15841,12 @@ const step18: MigrationStep = {
         'A react page\'s source is a JSX string, not a keyed document: `objectstack migrate meta` '
         + 'rewrites stored metadata by key and cannot rewrite props inside authored source, so the '
         + 'move is by hand. The contract deprecated both aliases in favour of the metadata-tier '
-        + 'spelling (#11284) while objectui\'s ListView still read only `objectName`, so the canonical '
+        + 'spelling (maintainer ruling 2026-08-23: the react tier converges on the metadata-tier '
+        + 'vocabulary, deprecating first) while objectui\'s ListView still read only `objectName`, so the canonical '
         + 'spelling validated green and rendered an empty list. The consumer fold has landed (objectui '
         + '`normalizeListViewSchema`, console pin a472b071: `data.provider === \'object\'` → '
         + '`objectName`, and the author\'s `type` read for the view kind), and the maintainer ruled the '
-        + 'aliases retired with no deprecation window (#14791, 2026-09-07). Writing either alias is now '
+        + 'aliases retired with no deprecation window (2026-09-07). Writing either alias is now '
         + 'a publish-time `react-prop-retired` error carrying this prescription — never a silent pass '
         + 'on a key the renderer happens to still read.',
       acceptanceCriteria:
@@ -15664,8 +15876,10 @@ const step18: MigrationStep = {
         + 'declared until the renderer reads the contract spelling; `visibleWhen` / `visibility` '
         + 'on the alert → `visible`; a locale map as history text → a literal string)',
       reason:
-        'These were the four `record:*` components the #4001/#5068 gate could not reach after '
-        + '#8691 closed the rail: each had a registered objectui renderer (and, bar '
+        'These were the four `record:*` components the component-props unknown-key gate (an '
+        + 'authorable surface refuses a key it does not declare; for a component\'s `properties`, '
+        + 'by parsing them against the type\'s `ComponentPropsMap` row) could not reach after '
+        + 'the rail was given its strict row: each had a registered objectui renderer (and, bar '
         + '`record:discussion`, a `PageComponentType` entry and a console palette slot) but no '
         + '`ComponentPropsMap` row, so the props gate\'s dispatch skipped them as unregistered and '
         + 'every authored key rode through. A typo\'d `severty` on the platform\'s own banner '
@@ -15699,7 +15913,9 @@ const step18: MigrationStep = {
         + '`related` → `entries`; `object` → `objectName`; `label` → `title`; a `title` locale map '
         + '→ a literal string, or omit it to keep the localized object label)',
       reason:
-        'The rail was the `record:*` component the #4001/#5068 gate could not reach: it had a '
+        'The rail was the `record:*` component the component-props unknown-key gate (an '
+        + 'authorable surface refuses a key it does not declare; for a component\'s `properties`, '
+        + 'by parsing them against the type\'s `ComponentPropsMap` row) could not reach: it had a '
         + 'registered renderer and a `PageComponentType` entry but no `ComponentPropsMap` row, so '
         + 'the props gate\'s dispatch skipped it as unregistered and every authored key rode '
         + 'through. Measured on 17.0.0 GA end to end: a planted entry `filter` passed tsc, '
@@ -15979,8 +16195,9 @@ const step18: MigrationStep = {
         + 'A view an author marked as one user\'s, or hid from the switcher, has always been listed to '
         + 'every user who can read the object — its name, its columns, its filters and its sort. '
         + 'Whether anything in such a view was meant to stay private, and whether it should now be '
-        + 'deleted rather than kept, is the author\'s call. A flattened view overlay keeps its own '
-        + '`owner` and `hidden`: those live on a different door that this retirement does not touch.',
+        + 'deleted rather than kept, is the author\'s call. A flattened view overlay\'s own `owner` and '
+        + '`hidden` are a separate family on a different door, with their own D2 conversion '
+        + '`view-overlay-owner-hidden-removed` and their own D3 entry `view-overlay-owner-hidden-retired`.',
       acceptanceCriteria: 'No view item record in `views` or in an assembled artifact carries `owner` or '
         + '`hidden`; the parse refuses both by name, and an artifact assembled before the upgrade '
         + 'registers without a refusal over them. For every view that had carried either key, the '
@@ -16069,6 +16286,61 @@ const step18: MigrationStep = {
         + 'read and nothing is refused on read: a row that fails is served exactly as stored until it is '
         + 'saved. Verify by re-saving each stored overlay that carries `options` (a GET then a PUT of the '
         + 'same body) and reading a `200`.',
+    },
+    // #20230 (ADR-0049 enforce-or-remove; triage direction 「follow #20085's
+    // disposition for the same key pair」) — the D3 entry of the
+    // `view-overlay-owner-hidden-removed` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). Registered keys: `owner` /
+    // `hidden` on `ui/ViewMetadata`, the door the two flattened overlay members are
+    // reached through. The same key pair on the view item RECORD is a separate
+    // family with its own conversion and its own D3 entry, disjoint from this one
+    // by `config`; the two share the prescription texts, not a conversion.
+    {
+      id: 'view-overlay-owner-hidden-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'view.owner / view.hidden on a flattened view overlay — the lean PUT /api/v1/meta/view/:name body '
+        + 'with no config that the console saves for a view it personalizes',
+      replacement:
+        '(removed — no per-user view scope and no switcher filter exists.) A view is listed to everyone '
+        + 'who can read its object. A view that must not be listed is deleted, or no longer shipped from '
+        + 'source; per-user view scoping is a parked direction (ADR-0017), not a shipped mechanism.',
+      reason:
+        'The D2 conversion `view-overlay-owner-hidden-removed` deletes both keys from every flattened '
+        + 'overlay (a view body with no `config` and no container slot) — in `views` (stack sources, and '
+        + 'every stored row, replayed on each read before it is served or badged) and in the '
+        + 'assembled-manifest view item channel — and the delete is lossless: both switcher read paths '
+        + 'filter on the view kind and object and sort on `order`, so an overlay saved with '
+        + '`hidden: true` hid nothing and no scope ever read `owner`. The judgment is about exposure, '
+        + 'the same one the view item record\'s retirement leaves. A view someone hid or marked as one '
+        + 'user\'s through its overlay has always been listed to every user who can read the object. '
+        + 'The delete is lossless but does not always close the row: an overlay row that held nothing '
+        + 'but its identity and these keys is left identity-only, a body the view door refuses, so '
+        + 'that row needs its author (see the acceptance criteria). '
+        + 'Measured writers in this repository and its sibling UI: zero (no source, example or skill, '
+        + 'and objectui at its pinned commit and at main writes neither key on an overlay; the HotCRM '
+        + 'app writes neither). NOT MEASURED: clients outside this repository, and production stored '
+        + 'rows — the write door accepted and stored both until this release, and no deployment store '
+        + 'is reachable from here.',
+      acceptanceCriteria:
+        'No flattened view overlay you save carries `owner` or `hidden`: the write door refuses either '
+        + 'with 422 INVALID_METADATA, the issue located at the key and the retirement prescription as '
+        + 'its message. A stored overlay row that held either is stripped of it on every read, and what '
+        + 'follows depends on what else the row holds. (1) A row with any other view key (a column '
+        + 'state, a sort, a default flag, an order) is served and badged valid without the keys, a GET '
+        + 'then a PUT of the whole row answers 200 (if it was otherwise valid), and '
+        + '`os migrate meta --stored --apply` rewrites it. (2) A hide-only row — nothing but its '
+        + 'identity (name, object, viewKind, label) and `owner` / `hidden`, such as '
+        + '`{ object, viewKind, hidden: true }` — is left with identity only, which the view door '
+        + 'refuses ("only identity fields"): it is served badged invalid (it was badged valid before '
+        + 'this release), a whole-row re-save or one that adds only identity answers 422 '
+        + 'INVALID_METADATA, and `--apply` reports it `failed` and leaves it as stored. A write that '
+        + 'adds a real view key, such as a toolbar toggle, saves. Resolve each such row: delete it (it '
+        + 'never changed what anyone saw), or add the personalization setting its author meant and '
+        + 'save that. For every view whose overlay had carried either key, its author has confirmed '
+        + 'that the view may be listed to all readers of its object, or has deleted it. No switcher '
+        + 'read path ever read either key, so which views the switcher lists does not change.',
     },
     // The display page size a view gets when it declares none moved from 25 to 50
     // (maintainer ruling on objectui#9853). A default move reaches every silent
@@ -19967,6 +20239,32 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `properties`, so no gate judges this row.
     // D2: `view-item-owner-hidden-removed`.
     'ui/ViewItemWire:owner',
+    // #20230 (ADR-0049 enforce-or-remove; triage direction 「follow #20085's
+    // disposition for the same key pair」). The flattened view overlay's `hidden` —
+    // the lean personalization PUT with no `config`, members 3 and 4 of the `view`
+    // union `saveMetaItem` validates — was declared by `flattenedViewOverlayFields()`
+    // separately from the view item's, accepted, stored verbatim, and read by
+    // nothing: both switcher read paths filter on `viewKind` + `object` only, so a
+    // `hidden: true` overlay hid no view. No writer in this framework, its examples,
+    // objectui at its pin and at `main`, or the HotCRM app (cloud not reachable).
+    // Tombstoned with `retiredKey()` on both overlay members, with the view item's
+    // own prescription text; `.strip()` members, so a bare deletion would have
+    // dropped the key in silence. Registered under `ui/ViewMetadata`, the exported
+    // door the overlay members are reached through (the members themselves are not
+    // exported). ⚠️ No gate below can JUDGE this row: `ui/ViewMetadata` is in
+    // `unemitted-schemas.baseline.json` (its `config: z.undefined()` guards have no
+    // JSON Schema form), so `authorable-surface/` carries no `ui/ViewMetadata:*`
+    // line and check (b) never sees the tombstone — the row is declared, not
+    // checked. D2: `view-overlay-owner-hidden-removed`.
+    'ui/ViewMetadata:hidden',
+    // #20230 — the overlay door's `owner`, the sibling of `ui/ViewMetadata:hidden`
+    // (see that row for the measurement and the registration's def key). It named
+    // a user nothing ever read: no per-user scope exists for a view (ADR-0017,
+    // parked), so an overlay marked as one user's changed nothing for anyone.
+    // Tombstoned with `retiredKey()` on both overlay members, with the view item's
+    // own prescription text. Same blind spot as its sibling: the def is unemitted,
+    // so no gate judges this row. D2: `view-overlay-owner-hidden-removed`.
+    'ui/ViewMetadata:owner',
     // </os-generated retired-key:18>
   ],
 };

@@ -310,7 +310,19 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('68 invocation sites, 92 mentions — the thread\'s two control numbers hold', () => {
+    it('66 invocation sites, 90 mentions — the thread\'s two control numbers hold', () => {
+        // [#20237] 68 → 66 sites / 92 → 90 mentions — a MOVE, not a lost
+        // consumer. `GET /meta/:type`'s app nav filter and dashboard widget
+        // gate each resolved the context inline (two same-line CAUGHT sites);
+        // both moved into `createMetaListReadGate` in `meta-item-read-gate.ts`,
+        // the one list gate the runtime dispatcher's `/meta` list branch now
+        // asks too, where they read the caller through the SAME port the item
+        // gate uses (`metaReadAudienceSources`'s `resolveCaller`, already
+        // counted, still same-line `.catch(rethrowAuthzStoreUnavailable)`). So
+        // no site replaced them: −2 sites, both from the CAUGHT half (23 → 21,
+        // 15 → 13 on the invocation line); the bare half (45) is untouched. No
+        // prose mention was added, so the two numbers move together (−2 / −2).
+        //
         // [#20193] 70 → 68 sites / 93 → 92 mentions — a MOVE, not a new
         // consumer. `metaItemReadGate`'s body and the docs-audience helpers it
         // calls moved into `meta-item-read-gate.ts`, the one gate the runtime
@@ -436,26 +448,27 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // naming the seam is the point of the sentence — and the sentence
         // moving only the mention count is this control working: a site was not
         // added, and the number that tracks sites did not move.
-        expect(SITES.length).toBe(68);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(92);
+        expect(SITES.length).toBe(66);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(90);
     });
 
-    it('the split is 23 locally caught / 45 bare — NOT 15 / 45, which does not add to 68', () => {
-        // 15 sites spell the catch on the invocation line; 8 more spell it on
-        // the continuation line. A single-line grep sees 15 and the arithmetic
-        // silently loses eight sites.
+    it('the split is 21 locally caught / 45 bare — NOT 13 / 45, which does not add to 66', () => {
+        // 13 sites spell the catch on the invocation line; 8 more spell it on
+        // the continuation line. A single-line grep sees 13 and the arithmetic
+        // silently loses eight sites. [#20237] 15 → 13 and 23 → 21: the list
+        // route's app and dashboard sites moved into the shared list gate (§2).
         //
         // [#13214] The new site is BARE, and that is a decision the next case
         // enforces: a locally-caught site sitting behind the shared floor would
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
-        expect(sameLine.length).toBe(15);
-        expect(CAUGHT.length).toBe(23);
+        expect(sameLine.length).toBe(13);
+        expect(CAUGHT.length).toBe(21);
         expect(BARE.length).toBe(45);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 23 caught ones is', () => {
+    it('⭐ every one of the 45 bare sites is guarded on the VERY NEXT LINE, and none of the 21 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the
@@ -727,7 +740,12 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
         // `meta-item-read-gate.ts` with the gate and one inline caller port
         // replaced them (§2 has the arithmetic) — the population shrank, the
         // reader did not go blind.
-        expect(args.filter((a) => a.layout === 'inline').length).toBeGreaterThanOrEqual(14);
+        //
+        // [#20237] 14 → 12, the same one site of slack: the inline population
+        // fell 15 → 13 when the list route's app and dashboard sites moved into
+        // `createMetaListReadGate`, and no port replaced them (§2) — again the
+        // population shrank, not the reader's sight.
+        expect(args.filter((a) => a.layout === 'inline').length).toBeGreaterThanOrEqual(12);
         expect(args.filter((a) => a.layout === 'continuation').length).toBeGreaterThanOrEqual(4);
         expect(args.length).toBe(CAUGHT.length);
     });

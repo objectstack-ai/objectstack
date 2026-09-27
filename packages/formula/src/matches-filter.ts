@@ -156,9 +156,12 @@ function emptyFieldConstraintError(field: string, path: string): Error {
  * # What stays exactly as it was
  *
  * `$in` / `$nin` (the list operators — this is what they are FOR), scalars,
- * `null`, `Date`, and `{ $field }` references. The refusal reads the AUTHORED
- * comparand, never a resolved one: a `{ $field }` reference whose column
- * happens to hold an array is untouched.
+ * `null`, `Date`, and `{ $field }` references between single-valued columns.
+ * The shape refusal reads the AUTHORED comparand, never a resolved one. The
+ * two record-side refusals that reuse this error are judged per record in
+ * {@link evalOp}: [stage 2d] a `{ $field }` column holding a list or an object
+ * ({@link assertComparableReference}), and [stage 2e] a list or an object stored
+ * under an ordering operator ({@link ORDERING_OPERATORS}).
  *
  * # Why the message names nothing from the filter
  *
@@ -175,8 +178,9 @@ function arrayComparandError(): Error {
     'A single-value comparison in this filter received an array as its comparand: an array ' +
       'under "$ne", or an array in the equality position ({ "field": [ ... ] } or "$eq"), or ' +
       'under an ordering operator ("$gt", "$gte", "$lt", "$lte"), or as a member of an "$in" / ' +
-      '"$nin" list, or a column on either side of a { "$field" } comparison that holds a list or ' +
-      'an object. A list is not one comparable value. For "one of these values" use "$in", and ' +
+      '"$nin" list, or a column that holds a list or an object on either side of a { "$field" } ' +
+      'comparison or on the compared side of an ordering operator or "$between". A list is not ' +
+      'one comparable value. For "one of these values" use "$in", and ' +
       'for "none of these values" use "$nin" — the list operators the filter protocol declares; ' +
       'an ordering comparison takes one bound. It is refused rather than evaluated, because this ' +
       'evaluator compares strictly and no stored value ever equals an array: "$ne" matched EVERY ' +
@@ -210,6 +214,39 @@ const ARRAY_REFUSED_OPERATORS = ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte'] as 
  * down.
  */
 const LIST_MEMBER_OPERATORS = ['$in', '$nin'] as const;
+
+/**
+ * [#19886 stage 2e] The ordering operators, whose STORED operand is judged on
+ * the record: a list or a plain object there is refused with
+ * {@link arrayComparandError}, per record, whatever the comparand — the mirror
+ * of stage 2d's array-comparand refusal with the list on the record's side.
+ *
+ * `record.tags > 'a'` on a `json` column or a `multiple` lookup lowers to
+ * `{ tags: { $gt: 'a' } }`, a legal shape; the list arrives on the post-image.
+ * `order` then compared the list's JavaScript string form: `['m'] > 'a'` is
+ * `'m' > 'a'`, and `{ a: 1 } < 'a'` is `'[object Object]' < 'a'` — both `true`.
+ * Measured through the real plugin-security write check on driver-sql and
+ * driver-memory, such a `check` admitted and stored the list-holding write.
+ * `$between` is `>=` and `<=` over the same `order`, and coerced the same way.
+ *
+ * The norm it follows is the production read driver's: driver-sql refuses every
+ * ordering comparison, and `$between`, against a column it stores as JSON text,
+ * by DECLARED type (#7398, `JSON_COLUMN_INCOMPATIBLE_OPERATORS`), because such a
+ * comparison "can never mean what the caller wrote". This evaluator has no
+ * schema, so it judges the VALUE: a record whose json column holds one scalar is
+ * compared as before. `null` (no value; `order` is never reached) and `Date` (a
+ * comparand, not an object map) are untouched, and so is equality — a scalar
+ * `$eq` / `$ne` / implicit equality against a stored list keeps the answer stage
+ * 2a pinned.
+ *
+ * What this does NOT align: driver-memory's read, a frozen test driver, compares
+ * a stored list element by element and keeps returning those rows, so its write
+ * check and its read part here (declared on #15104, as for stage 2d's `$field`
+ * half). And a list written into a scalar column (`amount: [500]` into a
+ * `number`) under an ordering check is refused here too, where it was admitted
+ * and stored stringified.
+ */
+const ORDERING_OPERATORS = ['$gt', '$gte', '$lt', '$lte', '$between'] as const;
 
 /** One comparable value: not a list, and not a plain object (a `Date` is a value). */
 function isNonScalarValue(value: unknown): boolean {
@@ -347,6 +384,12 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
   // [#19886 stage 2d] A `{ $field }` comparison whose column holds a list or an
   // object ON THIS RECORD — either side. See {@link assertComparableReference}.
   if (isFieldReference(raw)) assertComparableReference(actual, op, raw, record);
+  // [#19886 stage 2e] An ordering comparison whose STORED operand holds a list
+  // or an object on this record, whatever the comparand. See
+  // {@link ORDERING_OPERATORS}.
+  if ((ORDERING_OPERATORS as readonly string[]).includes(op) && isNonScalarValue(actual)) {
+    throw arrayComparandError();
+  }
   const v = resolveValue(raw, record);
   // [#14104] An offset reference whose base is NULL is FALSE for every
   // operator — see {@link NO_OFFSET_BASE}. Before the switch, so `$ne`'s

@@ -27,17 +27,14 @@
  *
  * ## Why an allowance table and not a flat zero
  *
- * Two files in this tree hold calls that are legitimately direct (two calls
- * in all), and each is a different reason rather than one exemption repeated:
+ * Beside the choke point itself, one file in this tree holds a call that is
+ * legitimately direct, for a reason of its own rather than an exemption:
  *
  *   - `union-branch-projection.ts`'s `projectsUnderStrictMode` asks zod whether
  *     a node is representable at all and DISCARDS the result — a yes/no
- *     question, not a projection;
- *   - `build-react-blocks-contract.ts` renders a markdown prop table into the
- *     governed `skills/**` catalog — a published artifact, but not a published
- *     JSON Schema, and rewriting it is a governed-surface decision of its own.
+ *     question, not a projection.
  *
- * Each is pinned at its exact count, so a SECOND call in any of those files
+ * Each row is pinned at its exact count, so a SECOND call in either file
  * fails too, and the reason travels with the row.
  *
  * ## Why the controls are not decoration
@@ -113,15 +110,16 @@ const DECLARED_DIRECT_CALLS: ReadonlyArray<{ file: string; count: number; why: s
     count: 1,
     why: 'projectsUnderStrictMode asks zod whether a node is representable and DISCARDS the result; nothing it produces is published',
   },
-  {
-    file: 'build-react-blocks-contract.ts',
-    count: 1,
-    why: 'writes a markdown prop table into the governed skills catalog, not a JSON Schema artifact — measured DIVERGENT from this projection for 1 of its 3 block schemas, filed separately; routing it rewrites a skills/** file and is its own decision',
-  },
 ];
 
-/** The producers whose output is published and must reach it through the helper. */
-const PUBLISHED_PRODUCERS = ['build-schemas.ts', 'build-openapi.ts'] as const;
+/**
+ * The producers whose output is published and must reach it through the helper.
+ * `build-react-blocks-contract.ts` renders its projection as markdown prop tables
+ * into the published skills catalog rather than as a JSON Schema file, and is
+ * held to the same projection so the two published descriptions of one schema
+ * cannot disagree.
+ */
+const PUBLISHED_PRODUCERS = ['build-schemas.ts', 'build-openapi.ts', 'build-react-blocks-contract.ts'] as const;
 
 describe('published projection choke point', () => {
   const sources = collectScriptSources();

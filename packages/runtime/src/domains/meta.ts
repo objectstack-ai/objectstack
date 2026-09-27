@@ -45,8 +45,10 @@ import type { MetadataProtocol } from '@objectstack/spec/api';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document — the one
 // `RestServer` asks, published by `@objectstack/rest` so this transport asks it
 // too instead of a second audience resolver (ruling `5793362670` item 1).
+// [#20237] …and its LIST twin, for `/meta/:type`, on the same ports.
 import {
     createMetaItemReadGate,
+    createMetaListReadGate,
     type MetaItemReadGateSources,
     type MetaReadGateCaller,
     type MetaReadGatePolicy,
@@ -304,7 +306,8 @@ const RENDERED_DOCUMENT_POLICY: MetaReadGatePolicy = Object.freeze({ arms: 'all'
 const NAV_PRUNE_LOGGED = new Set<string>();
 
 /**
- * [#20193] This transport's I/O, as the shared per-caller read gate takes it.
+ * [#20193] This transport's I/O, as the shared per-caller read gate takes it
+ * — and, [#20237], the list gate beside it, which takes the same ports.
  *
  * Only I/O — ⛔ no decision lives here; every verdict is
  * `createMetaItemReadGate`'s, the one `RestServer` asks:
@@ -387,6 +390,43 @@ async function gateMetaItemDocument(
     const { refusal } = verdict;
     if (refusal.reason === 'absent') return { ok: false, response: deps.error('Not found', 404) };
     return { ok: false, response: deps.error(refusal.message, refusal.status, { code: refusal.code }) };
+}
+
+/**
+ * [#20237] The per-caller steps of ONE list answer this transport is about to
+ * serve, in `RestServer`'s order: the shared per-caller LIST gate
+ * (`createMetaListReadGate`, the one `RestServer`'s `GET /meta/:type` calls —
+ * ⛔ no decision lives here), then the ADR-0106 object mask.
+ *
+ * `data` is either list shape this branch hands around (a bare array or a
+ * `{ type, items }` envelope), and the answer keeps that shape; `listType` is
+ * the folded singular type the gate is asked about, `typeOrName` the raw
+ * segment the mask folds for itself. A gate input that could not be read (a
+ * doc list's books read threw) is answered as that fault — its own status,
+ * `500` for a shapeless one — ⛔ never as the unfiltered list; so is a mask
+ * fault that is not the D6 tier-3 one, which keeps its `503`.
+ */
+async function gateMetaListAnswer(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: MetaDomainProtocol | undefined,
+    typeOrName: string,
+    listType: string,
+    data: any,
+): Promise<{ ok: true; data: any } | { ok: false; result: HttpDispatcherResult }> {
+    const list: any[] | null = Array.isArray(data) ? data : (data && Array.isArray(data.items) ? data.items : null);
+    try {
+        let gated = data;
+        if (list) {
+            const judged = await createMetaListReadGate(metaItemReadGateSources(deps, context, protocol), listType)(list);
+            if (judged !== list) gated = Array.isArray(data) ? judged : { ...data, items: judged };
+        }
+        const projected = await maskObjectSchemaList(deps, context, typeOrName, gated);
+        if (!projected.ok) return { ok: false, result: fieldVisibilityFault(deps, projected.object) };
+        return { ok: true, data: projected.data };
+    } catch (e: any) {
+        return { ok: false, result: { handled: true, response: deps.errorFromThrown(e, 500) } };
+    }
 }
 
 /**
@@ -1202,6 +1242,25 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         // Try protocol service first for any type
         const protocol = await resolveProtocol(deps, _context);
+
+        // [#20237] This branch serves a LIST, the same answer `RestServer`'s
+        // `GET /meta/:type` serves — so it prunes what that route prunes: the
+        // shared per-caller LIST gate (the ADR-0046 §6.7 doc and book audience,
+        // the app nav filter, the ADR-0057 D10 dashboard widget gate), then the
+        // ADR-0106 object mask. It ran only the mask, and only on the protocol
+        // exit, so a member `RestServer` prunes listed a `{ permissionSet }`-
+        // gated doc here with its body (`?include=content`), a set-gated book,
+        // and every app with its `requiredPermissions`-gated entries — the list
+        // twin of the item reads' defect. Every exit below that serves a list
+        // goes through `gateList`, OUTSIDE the lookups' own `try`s: those
+        // classify a type the store does not know, and a gate fault must be
+        // answered as itself — never fall through to the next store as though
+        // the first had not answered. Each exit keeps its own projection (the
+        // doc slim), exactly as before.
+        const listType = pluralToSingular(typeOrName);
+        const gateList = (data: any) => gateMetaListAnswer(deps, _context, protocol, typeOrName, listType, data);
+
+        let listed: any;
         if (protocol && typeof protocol.getMetaItems === 'function') {
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -1211,37 +1270,41 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 const previewDrafts = query?.preview === 'draft';
                 const data = await protocol.getMetaItems({ type: typeOrName, packageId, organizationId, previewDrafts });
                 // Return any valid response from protocol (including empty items arrays)
-                if (data && (data.items !== undefined || Array.isArray(data))) {
-                    // [ADR-0106 D5(2)] The dispatcher's list read is the same
-                    // outlet as REST's `GET /meta/object`, reached by a different
-                    // door.
-                    const projected = await maskObjectSchemaList(deps, _context, typeOrName, data);
-                    if (!projected.ok) return fieldVisibilityFault(deps, projected.object);
-                    return { handled: true, response: deps.success(slimDocList(typeOrName, projected.data, query)) };
-                }
+                if (data && (data.items !== undefined || Array.isArray(data))) listed = data;
             } catch {
                 // Protocol doesn't know this type, fall through
             }
+        }
+        if (listed !== undefined) {
+            // [ADR-0106 D5(2)] The dispatcher's list read is the same outlet as
+            // REST's `GET /meta/object`, reached by a different door.
+            const gated = await gateList(listed);
+            if (!gated.ok) return gated.result;
+            return { handled: true, response: deps.success(slimDocList(typeOrName, gated.data, query)) };
         }
 
         // Try MetadataService directly for runtime-registered metadata (agents, tools, etc.)
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).list === 'function') {
+            let items: any;
             try {
-                let items = await (metadataService as any).list(typeOrName);
+                items = await (metadataService as any).list(typeOrName);
                 // Respect package filter: MetadataService.list() returns ALL items,
                 // so filter by _packageId when a specific package is requested.
                 if (packageId && items && items.length > 0) {
                     items = items.filter((item: any) => item?._packageId === packageId);
                 }
-                if (items && items.length > 0) {
-                    return { handled: true, response: deps.success({ type: typeOrName, items: slimDocList(typeOrName, items, query) }) };
-                }
             } catch (e: any) {
+                items = undefined;
                 // MetadataService doesn't know this type or failed, continue to other fallbacks
                 // Sanitize typeOrName to prevent log injection (CodeQL warning)
                 const sanitizedType = String(typeOrName).replace(/[\r\n\t]/g, '');
                 console.debug(`[HttpDispatcher] MetadataService.list() failed for type:`, sanitizedType, 'error:', e.message);
+            }
+            if (items && items.length > 0) {
+                const gated = await gateList({ type: typeOrName, items });
+                if (!gated.ok) return gated.result;
+                return { handled: true, response: deps.success(slimDocList(typeOrName, gated.data, query)) };
             }
         }
 
@@ -1250,14 +1313,16 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (qlService?.registry) {
             if (typeOrName === 'objects') {
                 const objs = qlService.registry.getAllObjects(packageId);
-                const projected = await maskObjectSchemaList(deps, _context, 'object', { type: 'object', items: objs });
-                if (!projected.ok) return fieldVisibilityFault(deps, projected.object);
-                return { handled: true, response: deps.success(projected.data) };
+                const gated = await gateList({ type: 'object', items: objs });
+                if (!gated.ok) return gated.result;
+                return { handled: true, response: deps.success(gated.data) };
             }
             // Try listing items of the given type
             const items = qlService.registry.listItems?.(typeOrName, packageId);
             if (items && items.length > 0) {
-                return { handled: true, response: deps.success({ type: typeOrName, items }) };
+                const gated = await gateList({ type: typeOrName, items });
+                if (!gated.ok) return gated.result;
+                return { handled: true, response: deps.success(gated.data) };
             }
             // Legacy: treat as object name. [ADR-0106 D5(4)] A schema-bearing
             // exit reached by a one-segment path — masked like every other, so

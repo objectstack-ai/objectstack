@@ -15,6 +15,7 @@ import {
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   PREDICATE_SLOT_STRING_REFUSAL,
   STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+  predicateSlotRefusal,
 } from '@objectstack/spec/automation';
 
 import {
@@ -4395,6 +4396,75 @@ describe('a blank string in a ledger predicate slot (#17493)', () => {
     it("a `flow-template` slot's blank is untouched", () => {
       expect(errorsOf(flowStack({ id: 'sweep', type: 'loop', config: { collection: '   ' } }))).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * [#19961] A `decision` branch with no `expression`, at the THIRD door:
+ * `objectstack validate`'s expression pass.
+ *
+ * `DecisionConditionSchema` declares `expression` `z.string()`, not optional,
+ * but `conditions: [{ label: 'y' }]` reported NOTHING here: the resolver skipped
+ * the absent value as "not authored", and `checkDeclaredPredicate` returned
+ * early on `null` / absent besides. The run then failed at the branch. The
+ * ledger now marks the slot `required`, the resolver emits the absent value
+ * there, and this pass refuses it through `predicateSlotRefusal` — the same
+ * call, the same message, as `FlowSchema.parse` and `registerFlow`.
+ *
+ * The table is the one those two doors run (in `spec` and `service-automation`):
+ * nothing, a blank string, a real predicate — asserted by `where`, severity and
+ * the full message, read off the spec's own function.
+ *
+ * ⚠️ Through the CLI, `objectstack validate` meets the absent value first at
+ * its schema step (`FlowSchema.parse` refuses it there, with the same message).
+ * This pass is what answers for a stack handed to `validateStackExpressions`
+ * directly, and it is what these pins drive.
+ */
+describe('a decision branch with no `expression` (#19961)', () => {
+  const flowStack = (...branches: Record<string, unknown>[]) => ({
+    flows: [{
+      name: 'absent_flow',
+      nodes: [{ id: 'start', type: 'start' }, { id: 'check', type: 'decision', config: { conditions: branches } }],
+      edges: [],
+    }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+  const WHERE_0 = "flow 'absent_flow' · node 'check' (decision) decision branch expression at config.conditions[0].expression";
+
+  it.each([
+    { name: 'no `expression` key — the #19961 shape', branch: { label: 'y' }, refused: true, refusedWith: undefined },
+    { name: '`expression: null`', branch: { label: 'y', expression: null }, refused: true, refusedWith: null },
+    { name: 'the predicate under the edge\'s spelling `condition`', branch: { label: 'y', condition: 'true' }, refused: true, refusedWith: undefined },
+    { name: 'a blank string — the #17493 control', branch: { label: 'y', expression: '   ' }, refused: true, refusedWith: '   ' },
+    { name: 'a real predicate — the accept control', branch: { label: 'y', expression: 'true' }, refused: false, refusedWith: undefined },
+  ] as Array<{ name: string; branch: Record<string, unknown>; refused: boolean; refusedWith: unknown }>)('$name', ({ branch, refused, refusedWith }) => {
+    const found = errorsOf(flowStack(branch));
+    if (!refused) {
+      expect(found).toHaveLength(0);
+      return;
+    }
+    expect(found).toHaveLength(1);
+    expect(found[0].severity).toBe('error');
+    expect(found[0].where).toBe(WHERE_0);
+    expect(found[0].message).toBe(predicateSlotRefusal(refusedWith)!.message);
+    expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+  });
+
+  it('names WHICH branch: an absent second branch is located at index 1, the valid first one is not', () => {
+    const found = errorsOf(flowStack({ label: 'a', expression: 'amount > 1' }, { label: 'b' }));
+    expect(found.map((i) => i.where)).toEqual([
+      "flow 'absent_flow' · node 'check' (decision) decision branch expression at config.conditions[1].expression",
+    ]);
+    expect(found[0].source).toBe('');
+  });
+
+  it('CONTROL — a decision with no branch, and a screen field with no `visibleWhen`, report nothing', () => {
+    expect(errorsOf({ flows: [{ name: 'f', nodes: [{ id: 'check', type: 'decision', config: {} }], edges: [] }] })).toHaveLength(0);
+    expect(errorsOf(flowStack())).toHaveLength(0);
+    expect(errorsOf({
+      flows: [{ name: 'f', nodes: [{ id: 'form', type: 'screen', config: { fields: [{ name: 'amount', type: 'number' }] } }], edges: [] }],
+    })).toHaveLength(0);
   });
 });
 
