@@ -494,7 +494,7 @@ export type PredicateSlotRefusalCode = keyof PredicateSlotRefusalParams;
  * `params` — narrowing on `code` narrows `params`.
  */
 export type PredicateSlotRefusal = { message: string; source: string } & {
-  [C in PredicateSlotRefusalCode]: { readonly code: C; readonly params: PredicateSlotRefusalParams[C] };
+  [Code in PredicateSlotRefusalCode]: { readonly code: Code; readonly params: PredicateSlotRefusalParams[Code] };
 }[PredicateSlotRefusalCode];
 
 /**

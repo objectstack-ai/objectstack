@@ -139,11 +139,11 @@ export type ExpressionRefusalCode = keyof ExpressionRefusalParams;
 
 /**
  * One refusal's `code` and `params`, correlated: narrowing on `code` narrows
- * `params`. `C` restricts it to the codes one producer emits.
+ * `params`. `Codes` restricts it to the codes one producer emits.
  */
-export type ExpressionRefusal<C extends ExpressionRefusalCode = ExpressionRefusalCode> = {
-  [K in C]: { readonly code: K; readonly params: ExpressionRefusalParams[K] };
-}[C];
+export type ExpressionRefusal<Codes extends ExpressionRefusalCode = ExpressionRefusalCode> = {
+  [Code in Codes]: { readonly code: Code; readonly params: ExpressionRefusalParams[Code] };
+}[Codes];
 
 /** The codes `collectCelRootIdentifiers` emits. */
 export type CelRootsRefusalCode = 'empty-expression' | 'cel-parse-failed';

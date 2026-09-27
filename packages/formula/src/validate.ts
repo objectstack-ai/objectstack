@@ -192,9 +192,9 @@ export type ExprValidationError = {
  * between `code` and `params` is asserted; every call site is checked against
  * {@link ExpressionRefusalParams} for its own code.
  */
-function refusal<C extends ExprValidationCode>(
-  code: C,
-  params: ExpressionRefusalParams[C],
+function refusal<Code extends ExprValidationCode>(
+  code: Code,
+  params: ExpressionRefusalParams[Code],
   source: string,
   message: string,
 ): ExprValidationError {
