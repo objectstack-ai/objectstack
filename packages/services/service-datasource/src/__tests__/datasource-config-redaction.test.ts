@@ -283,13 +283,21 @@ describe('write path: the scrub must not turn "Save" into credential deletion', 
 });
 
 describe('#8337 — the query-parameter spelling, both halves at the service door', () => {
-  /** A legacy turso row written before #8337: the JWT rides the URL query string. */
+  /**
+   * A legacy turso row written before #8337: the JWT rides the URL query string,
+   * on BOTH url-bearing keys. An embedded replica, because that is the one
+   * coherent config carrying both: its `url` is a local `file:` url, and since
+   * #19977 the contract refuses `syncUrl` beside a remote one (the driver
+   * refuses it at construction). `@libsql/core` reads `?authToken=` off any
+   * url's query string, a `file:` one included, so the replica's token could
+   * be spelled on either key — which is why both are redacted.
+   */
   const LEGACY_TURSO: StoredDatasource = {
     name: 'legacy_turso',
     driver: 'turso',
     origin: 'runtime',
     config: {
-      url: 'libsql://app-org.turso.io?authToken=eyJhbGci.x.y',
+      url: 'file:./data/replica.db?authToken=eyJhbGci.x.y',
       syncUrl: 'libsql://app-org.turso.io?tls=1&authToken=eyJhbGci.x.y',
     },
   };
@@ -298,7 +306,7 @@ describe('#8337 — the query-parameter spelling, both halves at the service doo
     const { service } = makeService([LEGACY_TURSO]);
     const read = await service.getDatasource('legacy_turso');
     expect(read!.config).toEqual({
-      url: 'libsql://app-org.turso.io',
+      url: 'file:./data/replica.db',
       syncUrl: 'libsql://app-org.turso.io?tls=1',
     });
     expect(read!.redactedConfigKeys).toEqual(['syncUrl', 'url']);
@@ -310,7 +318,7 @@ describe('#8337 — the query-parameter spelling, both halves at the service doo
     await service.updateDatasource('legacy_turso', { config: read!.config, label: 'Renamed' });
     expect(records[0].label).toBe('Renamed');
     expect(records[0].config).toMatchObject({
-      url: 'libsql://app-org.turso.io?authToken=eyJhbGci.x.y',
+      url: 'file:./data/replica.db?authToken=eyJhbGci.x.y',
       syncUrl: 'libsql://app-org.turso.io?tls=1&authToken=eyJhbGci.x.y',
     });
   });
@@ -318,9 +326,9 @@ describe('#8337 — the query-parameter spelling, both halves at the service doo
   it('an author who rewrites the URL by hand WINS — the restore never overrides an edit', async () => {
     const { service, records } = makeService([LEGACY_TURSO]);
     await service.updateDatasource('legacy_turso', {
-      config: { url: 'libsql://elsewhere.turso.io', syncUrl: 'libsql://app-org.turso.io?tls=1' },
+      config: { url: 'file:./data/elsewhere.db', syncUrl: 'libsql://app-org.turso.io?tls=1' },
     });
-    expect(records[0].config!.url).toBe('libsql://elsewhere.turso.io');
+    expect(records[0].config!.url).toBe('file:./data/elsewhere.db');
     // The untouched syncUrl round-trips its token back, independently.
     expect(records[0].config!.syncUrl).toBe('libsql://app-org.turso.io?tls=1&authToken=eyJhbGci.x.y');
   });

@@ -591,8 +591,8 @@ export interface FlowRuntimeState {
  * One window of execution runs, plus the truncation fact the window alone
  * cannot carry (#19543).
  *
- * The sibling shape is `ExportJobListResult` (`contracts/export-service.ts`),
- * and the difference from it is deliberate: there is ⛔ NO `nextCursor` here.
+ * Unlike a cursor-paged list shape, and deliberately: there is ⛔ NO
+ * `nextCursor` here.
  * Nothing on this door has ever minted a continuation token, the request half
  * that would have spent one is a retired key, and a `nextCursor` no caller can
  * send back is the same declared-and-unusable shape #19543 exists to close.
